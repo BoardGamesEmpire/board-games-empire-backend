@@ -8,7 +8,7 @@ The server decides what each request may do, and this table is what it grants. A
 
 <!-- household-role-table:start -->
 
-| Action                                                                               | Household owner | Household admin | Member       | Household guest | Granted by     |
+| Action                                                                               | Household owner | Household admin | Member role  | Household guest | Granted by     |
 | ------------------------------------------------------------------------------------ | --------------- | --------------- | ------------ | --------------- | -------------- |
 | See the household                                                                    | Yes             | Yes             | Yes          | Yes             | Household role |
 | Edit the household and its settings                                                  | Yes             | Yes             | No           | No              | Household role |

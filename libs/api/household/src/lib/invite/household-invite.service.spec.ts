@@ -904,6 +904,10 @@ describe('HouseholdInviteService', () => {
       abilityService.assertCurrentActorCan.mockImplementation(() => {
         steps.push('check');
       });
+      db.invite.findFirst.mockImplementation((() => {
+        steps.push('offered role');
+        return Promise.resolve({ role: { name: SystemRole.HouseholdMember } });
+      }) as never);
       invites.revokeWithin.mockImplementation(() => {
         steps.push('revoke');
         return Promise.resolve(revocation);
@@ -912,7 +916,9 @@ describe('HouseholdInviteService', () => {
       await expect(service.revokeInvite('hh-1', 'invite-1')).resolves.toMatchObject(revocation.invite);
 
       // The household row, then the invite: the order a soft delete takes them in.
-      expect(steps).toEqual(['roster', 'check', 'lock', 'roster', 'check', 'revoke']);
+      // The role the invite offers is set when it is sent, so it is read once,
+      // before the lock, and both questions ask of it.
+      expect(steps).toEqual(['offered role', 'roster', 'check', 'lock', 'roster', 'check', 'revoke']);
       // Named by its id, so a key scoped to this one invite is asked about it,
       // and asked about `status`, the column a revoke changes, so the approve
       // permission does not pass for it.
@@ -1051,6 +1057,10 @@ describe('HouseholdInviteService', () => {
         steps.push('cap');
         return Promise.resolve(UNCONSTRAINED);
       });
+      db.invite.findFirst.mockImplementation((() => {
+        steps.push('offered role');
+        return Promise.resolve({ role: { name: SystemRole.HouseholdMember } });
+      }) as never);
       invites.approveWithin.mockImplementation(() => {
         steps.push('approve');
         return Promise.resolve(approval);
@@ -1058,7 +1068,7 @@ describe('HouseholdInviteService', () => {
 
       await expect(service.approveInvite('hh-1', 'invite-1')).resolves.toMatchObject(approval.invite);
 
-      expect(steps).toEqual(['roster', 'check', 'lock', 'roster', 'check', 'cap', 'approve']);
+      expect(steps).toEqual(['offered role', 'roster', 'check', 'lock', 'roster', 'check', 'cap', 'approve']);
       // Asked about `approvedById`, the column only an approval writes, so the
       // revoke permission does not pass for it.
       const instance = {

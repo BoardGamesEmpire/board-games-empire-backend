@@ -295,9 +295,13 @@ export class HouseholdInviteService {
     }>,
   ): Promise<InviteContextView | InviteAuthorityView> {
     const { invite, event, softOverages } = await this.db.$transaction(async (tx) => {
-      await this.assertInviteAuthority(tx, householdId, Action.update, { inviteId, field });
+      // Read once, before the lock: the role an invite offers is set when it
+      // is sent, so the question under the lock asks of the same one.
+      const named = { inviteId, field, ...(await this.offeredRoleOf(tx, householdId, inviteId)) };
+
+      await this.assertInviteAuthority(tx, householdId, Action.update, named);
       await lockExistingHousehold(tx, householdId);
-      const members = await this.assertInviteAuthority(tx, householdId, Action.update, { inviteId, field });
+      const members = await this.assertInviteAuthority(tx, householdId, Action.update, named);
 
       const moved = await transition(tx, { householdId });
 
@@ -505,7 +509,9 @@ export class HouseholdInviteService {
    * the column it changes (`field`), which is all that tells the revoke
    * permission from the approve permission. And it carries the role the
    * invite offers, which an admin's revoke reads: an admin revokes only an
-   * invite offering the member or guest role (#168).
+   * invite offering the member or guest role (#168). The approve permissions
+   * don't read it today, but the instance says what the invite is rather
+   * than what one permission reads of it.
    *
    * Hands back the roster it asked of, which says whether the acting user is
    * one of the household's owners or admins and so sees the address (#167).
@@ -514,13 +520,14 @@ export class HouseholdInviteService {
     client: DatabaseService | Prisma.TransactionClient,
     householdId: string,
     action: typeof Action.read | typeof Action.update,
-    existing?: { readonly inviteId: string; readonly field: Prisma.InviteScalarFieldEnum },
+    existing?: {
+      readonly inviteId: string;
+      readonly field: Prisma.InviteScalarFieldEnum;
+      readonly role: { readonly name: string };
+    },
   ): Promise<RosterRow[]> {
     const members = await this.rosterOf(client, householdId);
-    const named =
-      existing === undefined
-        ? {}
-        : { id: existing.inviteId, ...(await this.offeredRoleOf(client, householdId, existing.inviteId)) };
+    const named = existing === undefined ? {} : { id: existing.inviteId, role: existing.role };
 
     this.abilityService.assertCurrentActorCan(
       action,

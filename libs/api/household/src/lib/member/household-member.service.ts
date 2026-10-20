@@ -137,12 +137,24 @@ export interface AddMemberResult {
 }
 
 /**
+ * The roster as a role change reads it under the household lock: each row's
+ * user and household role, and its id, so the target is found by the row the
+ * scoped read returned. A user removed and admitted again while the change
+ * waited has a new row, which the change must not write to.
+ */
+const LOCKED_ROSTER_SELECT = { id: true, ...ROSTER_ROLE_SELECT } as const satisfies Prisma.HouseholdMemberSelect;
+
+/**
  * How a mutation path reports a scoped-resolution miss. Supplied per call site
  * so the denial names the attempted action rather than a generic one.
  */
 interface ScopedMemberDenials {
-  /** Rows exist but none are visible to this actor → 403 for the attempted action. */
-  onHidden: () => never;
+  /**
+   * Rows exist but none are visible to this actor → 403 for the attempted
+   * action. It may ask more before refusing, as the role change asks whose
+   * row it was.
+   */
+  onHidden: () => never | Promise<never>;
   /** No such row at all → the caller's 404. */
   onMissing: () => never;
 }
@@ -258,8 +270,9 @@ export class HouseholdMemberService {
    * member or guest role (#168).
    *
    * Guards:
-   * - The actor cannot change their own role (400), asked before the scoped
-   *   read so a household admin hears it too.
+   * - The actor cannot change their own role (400). Asked of the row the
+   *   scoped read returns, and of a row it misses, so a household admin,
+   *   whose own row is outside their manage, hears it too.
    * - A member holding `HouseholdOwner` cannot be changed here at all (400):
    *   every owner transition belongs to transfer-ownership (#158), so no
    *   owner-count reasoning is needed on this path.
@@ -291,21 +304,21 @@ export class HouseholdMemberService {
 
     try {
       const updated = await this.db.$transaction(async (tx) => {
-        // Asked of the actor's own membership before the scoped read, so the
-        // refusal says why whatever the actor's grants reach: a household
-        // admin's own row is outside their manage (#168), and the scoped read
-        // would answer it 403. A membership's user never changes, so no lock
-        // is needed for it.
-        if ((await tx.householdMember.count({ where: { id: memberId, householdId, userId: actorUserId } })) > 0) {
-          throw new BadRequestException(t('errors.household.member_role_self'));
-        }
-
         const member = await this.findScopedMemberOrThrow(
           tx,
           scopedWhere,
           { id: memberId, householdId },
           {
-            onHidden: () => {
+            // A household admin's own row is outside their manage (#168), so
+            // the scoped read misses it. Asked here, the refusal says why
+            // rather than answering 403, and only a miss pays for the
+            // question. A membership's user never changes, so no lock is
+            // needed for it.
+            onHidden: async () => {
+              if ((await tx.householdMember.count({ where: { id: memberId, householdId, userId: actorUserId } })) > 0) {
+                throw new BadRequestException(t('errors.household.member_role_self'));
+              }
+
               throw new ForbiddenException(t('common.forbidden.update'));
             },
             onMissing: () => {
@@ -314,14 +327,20 @@ export class HouseholdMemberService {
           },
         );
 
+        if (member.userId === actorUserId) {
+          throw new BadRequestException(t('errors.household.member_role_self'));
+        }
+
         // Taken AFTER the scoped read, so a 403 or 404 still costs no
         // household-wide lock, and BEFORE the owner check below, which is the
         // decision it protects (#239).
         await lockHouseholdForRoleTransition(tx, householdId);
 
         // Re-read the member AND its role under the lock rather than trusting
-        // the read above. Two things can have changed while this transaction
-        // waited, and both of them are writes this endpoint must not make:
+        // the read above, out of the roster the questions below are asked of,
+        // so one read under the lock serves both. Two things can have changed
+        // while this transaction waited, and both of them are writes this
+        // endpoint must not make:
         //
         //  - A concurrent `transferOwnership` promoted this very member. The
         //    pre-lock read saw a plain member, so the upsert below would
@@ -334,10 +353,8 @@ export class HouseholdMemberService {
         //    — which `rethrowMutationFailure` does not classify, so the caller
         //    gets a 500 where 404 is the honest answer. `transferOwnership`
         //    avoids the same hazard by reading its target after the lock.
-        const locked = await tx.householdMember.findUnique({
-          where: { id: member.id },
-          select: { role: { select: { role: { select: { name: true } } } } },
-        });
+        const members = await tx.householdMember.findMany({ where: { householdId }, select: LOCKED_ROSTER_SELECT });
+        const locked = members.find((row) => row.id === member.id);
 
         if (!locked) {
           throw new NotFoundException(t('errors.household.member_not_found', { memberId, householdId }));
@@ -354,7 +371,6 @@ export class HouseholdMemberService {
         // away, which a household owner's promotion that landed while this
         // waited would have made it. The scoped read asked only of the state
         // before the lock.
-        const members = await tx.householdMember.findMany({ where: { householdId }, select: ROSTER_ROLE_SELECT });
         const mayManageAs = (roleName: string | undefined) =>
           this.abilityService.currentActorCan(Action.manage, ResourceType.HouseholdMember, {
             id: member.id,
@@ -1024,7 +1040,7 @@ export class HouseholdMemberService {
         });
 
         if (!reachable) {
-          denials.onHidden();
+          await denials.onHidden();
         }
 
         if (ownerMemberIds.includes(member.id) && ownerMemberIds.length <= 1) {
@@ -1229,7 +1245,7 @@ export class HouseholdMemberService {
     }
 
     if ((await tx.householdMember.count({ where: unscopedWhere })) > 0) {
-      denials.onHidden();
+      await denials.onHidden();
     }
 
     denials.onMissing();

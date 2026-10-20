@@ -449,11 +449,20 @@ describe('HouseholdMemberService', () => {
   describe('updateMemberRole', () => {
     const DTO = { role: SystemRole.HouseholdAdmin } as const;
 
+    /**
+     * The roster read under the lock (#239), with the target `member-1` holding
+     * `targetRole`, or missing from it when `null`.
+     */
+    const lockedRoster = (targetRole: string | null) => [
+      { id: 'member-actor', userId: 'actor-1', role: { role: { name: SystemRole.HouseholdOwner } } },
+      ...(targetRole === null ? [] : [{ id: 'member-1', userId: 'user-1', role: { role: { name: targetRole } } }]),
+    ];
+
     beforeEach(() => {
       db.role.findUnique.mockResolvedValue({ id: 'role-admin' } as never);
-      // The locked re-read (#239): a plain member by default, so each case
-      // below overrides only the state it is actually about.
-      db.householdMember.findUnique.mockResolvedValue(resolves(makeMember() as never));
+      // A plain member by default, so each case below overrides only the
+      // state it is actually about.
+      db.householdMember.findMany.mockResolvedValue(lockedRoster(SystemRole.HouseholdMember) as never);
     });
 
     it('scopes the target by manage conditions, upserts the 1:1 role, and evicts the target cache', async () => {
@@ -498,10 +507,14 @@ describe('HouseholdMemberService', () => {
       });
       expect(permissions.invalidateUser).toHaveBeenCalledWith('user-1');
       expect(result.role?.role.name).toBe(SystemRole.HouseholdAdmin);
+      // Whose row it is comes off the scoped read, so a change the read finds
+      // asks nothing more of it.
+      expect(db.householdMember.count).not.toHaveBeenCalled();
     });
 
     it('upserts (create arm) for a member that has no role row yet', async () => {
       db.householdMember.findFirst.mockResolvedValue(resolves(makeMember({ role: null })));
+      db.householdMember.findMany.mockResolvedValue([{ id: 'member-1', userId: 'user-1', role: null }] as never);
       db.householdMember.findUniqueOrThrow.mockResolvedValue(resolves(makeMember()));
       db.role.findUnique.mockResolvedValue({ id: 'role-guest' } as never);
 
@@ -525,7 +538,25 @@ describe('HouseholdMemberService', () => {
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
     });
 
-    it('rejects changing your own role (400) without writing or invalidating', async () => {
+    it('rejects changing your own role (400), found by the scoped read, without locking or writing', async () => {
+      // A household owner's manage reaches their own row.
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner({ userId: 'actor-1' })));
+
+      await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toMatchObject({
+        status: Http.BadRequest,
+        response: expect.objectContaining({ key: 'errors.household.member_role_self' }),
+      });
+
+      expect(db.householdMember.count).not.toHaveBeenCalled();
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+      expect(db.householdRole.upsert).not.toHaveBeenCalled();
+      expect(permissions.invalidateUser).not.toHaveBeenCalled();
+    });
+
+    it('rejects changing your own role (400) when the scoped read misses it, as a household admin it does (#168)', async () => {
+      // A household admin's manage doesn't reach their own row, so the miss
+      // asks whose row it was, and they hear why rather than a 403.
+      db.householdMember.findFirst.mockResolvedValue(null);
       db.householdMember.count.mockResolvedValue(1);
 
       await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toMatchObject({
@@ -533,13 +564,10 @@ describe('HouseholdMemberService', () => {
         response: expect.objectContaining({ key: 'errors.household.member_role_self' }),
       });
 
-      // Asked of the actor's own membership before the scoped read, so a
-      // household admin, whose manage doesn't reach their own row, hears why
-      // rather than a 403 (#168).
       expect(db.householdMember.count).toHaveBeenCalledWith({
         where: { id: 'member-1', householdId: 'hh-1', userId: 'actor-1' },
       });
-      expect(db.householdMember.findFirst).not.toHaveBeenCalled();
+      expect(db.$queryRaw).not.toHaveBeenCalled();
       expect(db.householdRole.upsert).not.toHaveBeenCalled();
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
     });
@@ -550,7 +578,7 @@ describe('HouseholdMemberService', () => {
       // member is the case that matters, and the pre-lock read cannot see it
       // (#239). The scoped read still returns an owner here so the two agree.
       db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner()));
-      db.householdMember.findUnique.mockResolvedValue(resolves(makeOwner() as never));
+      db.householdMember.findMany.mockResolvedValue(lockedRoster(SystemRole.HouseholdOwner) as never);
 
       await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(BadRequestException);
 
@@ -564,7 +592,7 @@ describe('HouseholdMemberService', () => {
       // the locked re-read is what stops this upsert from overwriting the
       // household's only owner back down to a member.
       db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
-      db.householdMember.findUnique.mockResolvedValue(resolves(makeOwner() as never));
+      db.householdMember.findMany.mockResolvedValue(lockedRoster(SystemRole.HouseholdOwner) as never);
 
       await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(BadRequestException);
 
@@ -581,7 +609,7 @@ describe('HouseholdMemberService', () => {
       expect(db.$queryRaw.mock.calls.map((call: unknown[]) => call[0]).filter(isRoleTransitionLockSql)).toHaveLength(1);
 
       const lockOrder = db.$queryRaw.mock.invocationCallOrder[0];
-      expect(lockOrder).toBeLessThan(db.householdMember.findUnique.mock.invocationCallOrder[0]);
+      expect(lockOrder).toBeLessThan(db.householdMember.findMany.mock.invocationCallOrder[0]);
       expect(lockOrder).toBeLessThan(db.householdRole.upsert.mock.invocationCallOrder[0]);
     });
 
@@ -590,12 +618,26 @@ describe('HouseholdMemberService', () => {
       // INSERTs against a deleted member and the FK raises P2003 —
       // unclassified, and therefore a 500 describing nothing.
       db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
-      db.householdMember.findUnique.mockResolvedValue(null);
+      db.householdMember.findMany.mockResolvedValue(lockedRoster(null) as never);
 
       await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(NotFoundException);
 
       expect(db.householdRole.upsert).not.toHaveBeenCalled();
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 when the user was removed and admitted again while this waited, and writes nothing', async () => {
+      // The roster has a row for the same user under a new id. Writing the
+      // role of the row the scoped read returned would INSERT against a
+      // deleted member, so the target is found by its id, not its user.
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
+      db.householdMember.findMany.mockResolvedValue([
+        { id: 'member-1-again', userId: 'user-1', role: { role: { name: SystemRole.HouseholdMember } } },
+      ] as never);
+
+      await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(NotFoundException);
+
+      expect(db.householdRole.upsert).not.toHaveBeenCalled();
     });
 
     it('answers 404 when the household is soft-deleted before this transaction takes the lock (#386)', async () => {
@@ -627,8 +669,8 @@ describe('HouseholdMemberService', () => {
       // stand and as it leaves them: or a household admin could make another
       // one, or change one an owner made while this waited.
       const ROSTER = [
-        { userId: 'actor-1', role: { role: { name: SystemRole.HouseholdAdmin } } },
-        { userId: 'user-1', role: { role: { name: SystemRole.HouseholdMember } } },
+        { id: 'member-actor', userId: 'actor-1', role: { role: { name: SystemRole.HouseholdAdmin } } },
+        { id: 'member-1', userId: 'user-1', role: { role: { name: SystemRole.HouseholdMember } } },
       ];
       const asRole = (name: string) => ({
         id: 'member-1',
@@ -651,10 +693,13 @@ describe('HouseholdMemberService', () => {
           [Action.manage, ResourceType.HouseholdMember, asRole(SystemRole.HouseholdMember)],
           [Action.manage, ResourceType.HouseholdMember, asRole(SystemRole.HouseholdAdmin)],
         ]);
+        // One read under the lock, which says where the member stands as well.
+        expect(db.householdMember.findMany).toHaveBeenCalledTimes(1);
         expect(db.householdMember.findMany).toHaveBeenCalledWith({
           where: { householdId: 'hh-1' },
-          select: { userId: true, role: { select: { role: { select: { name: true } } } } },
+          select: { id: true, userId: true, role: { select: { role: { select: { name: true } } } } },
         });
+        expect(db.householdMember.findUnique).not.toHaveBeenCalled();
         expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
           db.householdMember.findMany.mock.invocationCallOrder[0],
         );
@@ -676,9 +721,11 @@ describe('HouseholdMemberService', () => {
         // A household owner's promotion landed between the scoped read and
         // the lock: the role the change takes away is now one the actor may
         // not manage.
-        db.householdMember.findUnique.mockResolvedValue(
-          resolves(makeMember({ role: { role: { id: 'role-admin', name: SystemRole.HouseholdAdmin } } }) as never),
-        );
+        const promoted = [
+          ROSTER[0],
+          { id: 'member-1', userId: 'user-1', role: { role: { name: SystemRole.HouseholdAdmin } } },
+        ];
+        db.householdMember.findMany.mockResolvedValue(promoted as never);
         abilityService.currentActorCan.mockImplementation(
           (_action, _type, instance) =>
             (instance as { role?: { role: { name: string } } }).role?.role.name !== SystemRole.HouseholdAdmin,
@@ -694,7 +741,7 @@ describe('HouseholdMemberService', () => {
 
       it('still answers an owner target 400 before asking about the role it gives', async () => {
         db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner()));
-        db.householdMember.findUnique.mockResolvedValue(resolves(makeOwner() as never));
+        db.householdMember.findMany.mockResolvedValue(lockedRoster(SystemRole.HouseholdOwner) as never);
         abilityService.currentActorCan.mockReturnValue(false);
 
         await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(BadRequestException);

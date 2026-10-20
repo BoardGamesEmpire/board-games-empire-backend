@@ -1,4 +1,4 @@
-import type { Permission, PermissionSeedDefinition, PermissionSlug, RoleScope } from '@bge/database';
+import type { Permission, PermissionSlug, RoleScope } from '@bge/database';
 import {
   Action,
   MemberInvitePolicy,
@@ -10,6 +10,7 @@ import {
   ROLE_PERMISSION_CATALOG,
   SystemRole,
 } from '@bge/database';
+import { catalogPermission } from '@bge/testing';
 import { subject } from '@casl/ability';
 import { accessibleBy } from '@casl/prisma';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -2414,32 +2415,6 @@ function makePermission(overrides: Partial<Permission> = {}): Permission {
     updatedAt: new Date(),
     ...overrides,
   };
-}
-
-/**
- * A `Permission` row built from the shipped catalog entry for `slug`, so a
- * spec exercises the condition template that actually seeds rather than a
- * copy of it. Conditions go through a JSON round-trip only to turn the
- * readonly `Prisma.InputJsonObject` the catalog carries into the plain
- * `JsonValue` a `Permission` row does; the factory never mutates what it
- * renders.
- */
-function catalogPermission(slug: PermissionSlug): Permission {
-  const catalog: readonly PermissionSeedDefinition[] = PERMISSION_CATALOG;
-  const entry = catalog.find((definition) => definition.slug === slug);
-  if (!entry) {
-    throw new Error(`PERMISSION_CATALOG has no entry for '${slug}'`);
-  }
-
-  return makePermission({
-    action: entry.action,
-    subject: entry.subject,
-    slug: entry.slug,
-    riskLevel: entry.riskLevel,
-    reason: entry.reason,
-    fields: [...(entry.fields ?? [])],
-    conditions: JSON.parse(JSON.stringify(entry.conditions ?? {})),
-  });
 }
 
 function makeRole(name: string, permissions: Permission[]): RoleWithPermissions {

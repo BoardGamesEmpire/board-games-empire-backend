@@ -1,15 +1,13 @@
-import type { Permission, PermissionSeedDefinition, PermissionSlug } from '@bge/database';
 import {
   Action,
   MemberInvitePolicy,
-  PERMISSION_CATALOG,
-  PermissionOwner,
   QuotaScope,
   ResourceType,
   ROLE_PERMISSION_CATALOG,
   SystemRole,
 } from '@bge/database';
 import { AbilityFactory, type AppAbility, type RoleWithPermissions } from '@bge/permissions';
+import { catalogPermission } from '@bge/testing';
 import { subject } from '@casl/ability';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -465,7 +463,14 @@ describe('the README table (#168)', () => {
 
     // The header says which column is which role, so a swapped column would
     // misstate every cell under it.
-    expect(header).toEqual(['Action', 'Household owner', 'Household admin', 'Member', 'Household guest', 'Granted by']);
+    expect(header).toEqual([
+      'Action',
+      'Household owner',
+      'Household admin',
+      'Member role',
+      'Household guest',
+      'Granted by',
+    ]);
     expect(separator.every((cell) => /^:?-+:?$/.test(cell))).toBe(true);
     expect(rows).toEqual(
       HOUSEHOLD_ROLE_TABLE.map((row) => [
@@ -487,35 +492,5 @@ function shippedRole(roleName: SystemRole): RoleWithPermissions {
       name: roleName,
       permissions: ROLE_PERMISSION_CATALOG[roleName].map((slug) => ({ permission: catalogPermission(slug) })),
     },
-  };
-}
-
-/**
- * A `Permission` row built from the shipped catalog entry for `slug`, so the
- * table exercises the condition that actually seeds. Copied from the ability
- * factory's spec rather than exported from it.
- */
-function catalogPermission(slug: PermissionSlug): Permission {
-  const catalog: readonly PermissionSeedDefinition[] = PERMISSION_CATALOG;
-  const entry = catalog.find((definition) => definition.slug === slug);
-
-  if (!entry) {
-    throw new Error(`PERMISSION_CATALOG has no entry for '${slug}'`);
-  }
-
-  return {
-    id: `perm-${slug}`,
-    action: entry.action,
-    subject: entry.subject,
-    fields: [...(entry.fields ?? [])],
-    conditions: JSON.parse(JSON.stringify(entry.conditions ?? {})),
-    inverted: false,
-    riskLevel: entry.riskLevel,
-    reason: entry.reason,
-    slug: entry.slug,
-    managedBy: PermissionOwner.System,
-    retiredAt: null,
-    createdAt: new Date(0),
-    updatedAt: new Date(0),
   };
 }
