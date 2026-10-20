@@ -55,14 +55,16 @@ import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
  * `resolveActingAttendeeId` refuses a non-attendee before CASL is consulted. An
  * Admin attending as `EventSpectator` or `EventModerator` loses a vote it
  * should not have had — neither of those roles votes. `create:household_role`
- * and `delete:event` went the same way for a sharper reason: both are scoped
- * `{{ user.id }}` and both are already held by the role their own condition
- * demands — `HouseholdOwner`/`HouseholdAdmin` for the first, `EventHost` (which
- * an event's creator is seeded as) for the second — so each rendered a clause
- * identical to one the actor already had. `Admin` now carries no conditioned
- * slug at all, which is the shape a global role should have: a global role has
- * no scope coordinate, so anything it holds that binds to one is either inert
- * or a duplicate.
+ * and `delete:event` went the same way for a sharper reason: both were then
+ * scoped `{{ user.id }}` and held by the role their own condition demanded —
+ * `HouseholdOwner`/`HouseholdAdmin` for the first, `EventHost` (which an
+ * event's creator is seeded as) for the second — so each rendered a clause
+ * identical to one the actor already had. Neither is scoped that way now:
+ * `delete:event` binds to the event its host attends (#567), and
+ * `create:household_role` is gone from the catalog (#168). `Admin` now carries
+ * no conditioned slug at all, which is the shape a global role should have: a
+ * global role has no scope coordinate, so anything it holds that binds to one
+ * is either inert or a duplicate.
  *
  * Because those lists are derived, every Owner-/Host-only slug has to be
  * named in the exclusion, or it is granted to the derived role silently, with
@@ -73,7 +75,9 @@ import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
  * Household roles hold the `:household` variant of every event sub-resource
  * grant, bound through the event's household; the event-bound original
  * belongs to the event roles alone, because the household pass never supplies
- * `{{ eventId }}` (#436, #432).
+ * `{{ eventId }}` (#436, #432). Household owners and admins edit and cancel the
+ * household's events, but delete neither an event nor its dates unless they
+ * host it, and then through the host's grant (#168).
  *
  * A household or event role holds nothing `User` holds. Every signed-in
  * user's ability is built in one pass that includes `User`, so a scoped role's
@@ -105,13 +109,10 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'create:event:household',
   'create:game_play_session:household',
   'create:household_invite',
-  'create:household_role',
   'create:play_record:household',
   'delete:event_game:household',
-  'delete:event_occurrence:household',
   'manage:quota:household_member',
   'delete:household_member:leave',
-  'delete:event',
   'read:quota:household',
   'delete:game_play_session:household',
   'delete:household',
@@ -252,9 +253,9 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'update:data_gateway',
     'delete:data_gateway',
 
-    // Events. Only the moderation variant: `delete:event` is scoped
-    // `createdById: '{{ user.id }}'` and an event's creator is seeded
-    // `EventHost` on it (`event.service.ts`), which carries that slug already.
+    // Events. Only the moderation variant: `delete:event` is bound to
+    // `{{ eventId }}`, which the global pass never supplies, and the host
+    // holds it through `EventHost` (#567).
     'read:event',
     'delete:event:moderate',
 

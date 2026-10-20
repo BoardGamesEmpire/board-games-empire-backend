@@ -1226,6 +1226,82 @@ describe('AbilityFactory', () => {
     });
   });
 
+  describe('event deletion (#567)', () => {
+    // Hosting decides who deletes an event, not authorship: the host deletes
+    // it whoever created it, and a creator who no longer hosts it does not. A
+    // household's owners and admins edit and cancel its events, and delete only
+    // the ones they host (#168).
+    const userRole = () => makeRole('User', [...ROLE_PERMISSION_CATALOG[SystemRole.User]].map(catalogPermission));
+    const shipped = (roleName: SystemRole) =>
+      makeRole(roleName, [...ROLE_PERMISSION_CATALOG[roleName]].map(catalogPermission));
+    const attendingAs = (roleName: SystemRole, eventId: string) =>
+      factory.createForUser(
+        makeUser({ id: 'user-1', roles: [userRole()], eventsAttended: [{ eventId, role: shipped(roleName) }] }),
+      );
+    const running = (roleName: SystemRole) =>
+      factory.createForUser(
+        makeUser({
+          id: 'user-1',
+          roles: [userRole()],
+          householdMember: [{ householdId: 'hh-1', role: shipped(roleName) }],
+        }),
+      );
+    /** An event and its attendees' roles, as the delete's write reads them. */
+    const event = (
+      id: string,
+      createdById: string,
+      { householdId = null, attendees = [] }: { householdId?: string | null; attendees?: [string, SystemRole][] } = {},
+    ) =>
+      subject(ResourceType.Event, {
+        id,
+        createdById,
+        householdId,
+        attendees: attendees.map(([userId, role]) => ({ userId, role: { role: { name: role } } })),
+      });
+
+    it("lets an event's host delete that event, whoever created it", () => {
+      const hosted = event('ev-1', 'user-2', { attendees: [['user-1', SystemRole.EventHost]] });
+
+      expect(attendingAs(SystemRole.EventHost, 'ev-1').can(Action.delete, hosted)).toBe(true);
+    });
+
+    it('refuses the host of one event another event they created', () => {
+      const created = event('ev-2', 'user-1', { attendees: [['user-1', SystemRole.EventParticipant]] });
+
+      expect(attendingAs(SystemRole.EventHost, 'ev-2').can(Action.delete, created)).toBe(false);
+      expect(attendingAs(SystemRole.EventHost, 'ev-1').can(Action.delete, created)).toBe(false);
+    });
+
+    it('refuses a host whose role the event no longer carries, as when they are removed mid-request (#547)', () => {
+      // The graph still holds the host role; the write reads the attendee rows.
+      const removed = event('ev-1', 'user-1', { attendees: [['user-2', SystemRole.EventHost]] });
+
+      expect(attendingAs(SystemRole.EventHost, 'ev-1').can(Action.delete, removed)).toBe(false);
+    });
+
+    it('refuses a co-host the event they co-host', () => {
+      const coHosted = event('ev-1', 'user-2', { attendees: [['user-1', SystemRole.EventCoHost]] });
+
+      expect(attendingAs(SystemRole.EventCoHost, 'ev-1').can(Action.delete, coHosted)).toBe(false);
+    });
+
+    it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin])(
+      "refuses a %s a household event they created but don't host (#168)",
+      (roleName) => {
+        expect(running(roleName).can(Action.delete, event('ev-1', 'user-1', { householdId: 'hh-1' }))).toBe(false);
+      },
+    );
+
+    it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin])(
+      "refuses a %s a date on a household event they don't host (#168)",
+      (roleName) => {
+        const date = subject(ResourceType.EventOccurrence, { eventId: 'ev-1', event: { householdId: 'hh-1' } });
+
+        expect(running(roleName).can(Action.delete, date)).toBe(false);
+      },
+    );
+  });
+
   describe('household invites (#162)', () => {
     // The whole shipped household role, as the household pass renders it. The
     // invite routes ask about an instance carrying the household's roster with

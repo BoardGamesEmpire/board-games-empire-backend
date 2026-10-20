@@ -564,14 +564,9 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: 'Remove an occurrence from an event',
   }),
-  permission({
-    action: Action.delete,
-    subject: ResourceType.EventOccurrence,
-    conditions: { event: { is: { householdId: '{{ householdId }}' } } },
-    slug: 'delete:event_occurrence:household',
-    riskLevel: RiskLevel.Medium,
-    reason: "Remove an occurrence from your household's events",
-  }),
+  // No household variant removes an occurrence. A household's owners and
+  // admins cancel one; removing it is for the event's own roles, and an owner
+  // or admin who doesn't host asks its host instead (#168, #681).
   permission({
     action: Action.update,
     subject: ResourceType.EventOccurrence,
@@ -1240,18 +1235,10 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Low,
     reason: 'Leave a household you belong to',
   }),
-  permission({
-    action: Action.create,
-    subject: ResourceType.HouseholdRole,
-    conditions: {
-      // HouseholdRole carries neither `householdId` nor `members` — the only
-      // path to the household is through its 1:1 member row.
-      householdMember: { is: { household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } } } },
-    },
-    slug: 'create:household_role',
-    riskLevel: RiskLevel.High,
-    reason: 'Create household roles',
-  }),
+  // No permission creates a HouseholdRole row. Adding a member writes its role
+  // row in the same transaction (`addMemberWithin`), and no route asks
+  // `create` on the type (#168).
+  //
   // The Owner-only gate for transfer-ownership (#158).
   //
   // Subject is HouseholdRole rather than Household on purpose. A transfer IS
@@ -1270,9 +1257,8 @@ export const PERMISSION_CATALOG = [
     action: Action.update,
     subject: ResourceType.HouseholdRole,
     conditions: {
-      // Same traversal as `create:household_role`: HouseholdRole carries
-      // neither `householdId` nor `members`, so the household is reachable
-      // only through the 1:1 member row.
+      // HouseholdRole carries neither `householdId` nor `members`, so the
+      // household is reachable only through the 1:1 member row.
       householdMember: {
         is: {
           household: {
@@ -1520,13 +1506,24 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: "Update your household's events",
   }),
+  // The host deletes the event. Hosting decides rather than authorship (#567):
+  // the host deletes it whoever created it, and a creator who no longer hosts
+  // it does not (#547). Bound to the event, so the grant reaches only the
+  // event whose attendance rendered it, and, as `update:event` does, to the
+  // host's role read at the write: removing an attendee deletes their role,
+  // so a host removed while a request of theirs is in flight is refused. A
+  // household's owners and admins edit and cancel its events, and delete
+  // only the ones they host (#168).
   permission({
     action: Action.delete,
     subject: ResourceType.Event,
-    conditions: { createdById: '{{ user.id }}' },
+    conditions: {
+      id: '{{ eventId }}',
+      attendees: { some: { userId: '{{ user.id }}', role: { is: { role: { is: { name: 'EventHost' } } } } } },
+    },
     slug: 'delete:event',
     riskLevel: RiskLevel.Low,
-    reason: 'Delete an event as creator',
+    reason: 'Delete an event you host',
   }),
 
   // TODO: this needs conditions to validate moderator role and scope

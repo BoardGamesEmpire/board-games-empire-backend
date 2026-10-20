@@ -1,4 +1,4 @@
-import { Reach, SystemRole } from '../client';
+import { Action, Reach, ResourceType, SystemRole } from '../client';
 import { parseTemplate } from './catalog-guards';
 import { PERMISSION_CATALOG } from './permission.catalog';
 import { ROLE_PERMISSION_CATALOG } from './role-permission.catalog';
@@ -147,8 +147,10 @@ describe('the shipped catalogs', () => {
       // event role already grants, because that role's condition renders
       // identically. Both were shipped and both are gone (#244) —
       // `create:household_role` duplicated `HouseholdOwner`/`HouseholdAdmin`,
-      // `delete:event` duplicated `EventHost`, which an event's creator always
-      // is.
+      // and `delete:event`, then scoped to the event's creator, duplicated
+      // `EventHost`, which an event's creator always is. Both have moved on
+      // since: the first is gone (#168), and the second binds to the event's
+      // host (#567).
       //
       // A STATIC condition is neither. It references no variable, so it
       // renders the same in every pass, and it narrows an otherwise
@@ -369,6 +371,31 @@ describe('the shipped catalogs', () => {
       const coHost = ROLE_PERMISSION_CATALOG[SystemRole.EventCoHost];
 
       expect(host.filter((slug) => !coHost.includes(slug))).toEqual(['delete:event']);
+    });
+
+    it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin])(
+      "give %s no delete on an event or its dates: it edits and cancels the household's events, and deletes only what it hosts (#168, #567)",
+      (roleName) => {
+        const held = ROLE_PERMISSION_CATALOG[roleName];
+        const eventDeletes = PERMISSION_CATALOG.filter(
+          ({ slug, action, subject }) =>
+            held.includes(slug) &&
+            action === Action.delete &&
+            (subject === ResourceType.Event || subject === ResourceType.EventOccurrence),
+        ).map(({ slug }) => slug);
+
+        expect(eventDeletes).toEqual([]);
+        expect(held).toContain('update:event:household');
+        expect(held).toContain('update:event_occurrence:cancel:household');
+      },
+    );
+
+    it('grant create on household roles to nobody: adding a member writes its role row itself (#168)', () => {
+      const creates = PERMISSION_CATALOG.filter(
+        ({ action, subject }) => subject === ResourceType.HouseholdRole && action === Action.create,
+      ).map(({ slug }) => slug);
+
+      expect(creates).toEqual([]);
     });
   });
 });

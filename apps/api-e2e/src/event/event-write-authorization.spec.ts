@@ -431,6 +431,91 @@ describe('event write authorization', () => {
       // Control: the same host removes their own event's occurrence.
       await removeOccurrence(host, ownId, ownOccurrence).expect(200);
     });
+
+    it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin])(
+      "refuses a %s who doesn't host the household's event the removal of its occurrence, and removes nothing (#168)",
+      async (roleName) => {
+        // A household's owners and admins edit and cancel its events, and
+        // delete an event or its occurrences only as the event's own roles
+        // allow. Removing an occurrence they don't host is a request to its
+        // host instead (#681).
+        const owner = await actors.user();
+        const admin = await actors.user();
+        const member = await actors.user();
+        const { household } = await actors.householdWithMembers({
+          owner,
+          members: [
+            { actor: admin, role: SystemRole.HouseholdAdmin },
+            { actor: member, role: SystemRole.HouseholdMember },
+          ],
+        });
+        const actor = roleName === SystemRole.HouseholdOwner ? owner : admin;
+        const eventId = await createdEventId(member, { householdId: household.id });
+        const occurrenceId = await addedOccurrenceId(member, eventId);
+
+        // Control: the same actor edits the household's event.
+        await updateEvent(actor, eventId, { title: 'Edited by the household' }).expect(200);
+
+        await removeOccurrence(actor, eventId, occurrenceId).expect(403);
+        expect(await db.client.eventOccurrence.count({ where: { id: occurrenceId } })).toBe(1);
+
+        // Control: the event's host removes it.
+        await removeOccurrence(member, eventId, occurrenceId).expect(200);
+      },
+    );
+  });
+
+  describe('deleting an event (#567)', () => {
+    // Hosting decides who deletes an event, not authorship: the host deletes
+    // it whoever created it, and a creator who no longer hosts it doesn't. A
+    // household's owners and admins delete only the household's events they
+    // host (#168).
+    const deleteEvent = (actor: AuthenticatedActor, eventId: string) =>
+      request(baseUrl).delete(`${EVENTS_PATH}/${eventId}`).set(actor.headers);
+
+    const deletedAt = async (eventId: string) =>
+      (await db.client.event.findUniqueOrThrow({ where: { id: eventId }, select: { deletedAt: true } })).deletedAt;
+
+    it("lets an event's host delete it, whoever created it", async () => {
+      const creator = await actors.user();
+      const host = await actors.user();
+      const eventId = await createdEventId(creator);
+      // A second host, written directly: no route makes one. Arranged before
+      // the host's first request, so their graph is built with it.
+      await db.client.eventAttendee.create({
+        data: {
+          event: { connect: { id: eventId } },
+          user: { connect: { id: host.user.id } },
+          status: EventParticipationStatus.Attending,
+          role: { create: { role: { connect: { name: SystemRole.EventHost } } } },
+        },
+      });
+
+      await deleteEvent(host, eventId).expect(200);
+
+      expect(await deletedAt(eventId)).toBeInstanceOf(Date);
+    });
+
+    it('refuses a household owner the deletion of a household event they created but no longer host, and deletes nothing', async () => {
+      // The creator hosts the event until a co-host removes them (#547); the
+      // removal evicts their cached graph, so the next request is judged
+      // without the host role.
+      const owner = await actors.user();
+      const coHost = await actors.user();
+      const { household } = await actors.householdWithMembers({
+        owner,
+        members: [{ actor: coHost, role: SystemRole.HouseholdMember }],
+      });
+      const eventId = await createdEventId(owner, { householdId: household.id });
+      await addAttendee(owner, eventId, { userId: coHost.user.id, role: SystemRole.EventCoHost }).expect(201);
+      await removeAttendee(coHost, eventId, await attendeeRowId(eventId, owner.user.id)).expect(200);
+
+      // Control: the owner still edits the household's event.
+      await updateEvent(owner, eventId, { title: 'Still the household owner' }).expect(200);
+
+      await deleteEvent(owner, eventId).expect(403);
+      expect(await deletedAt(eventId)).toBeNull();
+    });
   });
 
   describe("the actor's own attendee row (#458)", () => {
