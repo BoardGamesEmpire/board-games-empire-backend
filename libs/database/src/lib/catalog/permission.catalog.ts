@@ -328,6 +328,20 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: "View a friend's events that reach their friends",
   }),
+  // Public reach: every signed-in user on the server reads a `Public` event,
+  // its dates and its policy, capacity included. No attendee read comes with
+  // it, as none comes with the friends rules, so who attends stays with the
+  // attendees and the event's household. `User` holds these and an anonymous
+  // user doesn't: anyone can open an anonymous session (#489), so a grant there
+  // would be signed-out access, which is a server setting of its own (#813).
+  permission({
+    action: Action.read,
+    subject: ResourceType.Event,
+    conditions: { reach: 'Public' },
+    slug: 'read:event:public',
+    riskLevel: RiskLevel.Medium,
+    reason: 'View public events',
+  }),
   permission({
     action: Action.read,
     subject: ResourceType.Household,
@@ -523,6 +537,15 @@ export const PERMISSION_CATALOG = [
     slug: 'read:event_occurrence:friends',
     riskLevel: RiskLevel.Medium,
     reason: "View the occurrences of a friend's events that reach their friends",
+  }),
+  // Bound and rated as `read:event:public` is.
+  permission({
+    action: Action.read,
+    subject: ResourceType.EventOccurrence,
+    conditions: { event: { is: { reach: 'Public' } } },
+    slug: 'read:event_occurrence:public',
+    riskLevel: RiskLevel.Medium,
+    reason: 'View the occurrences of public events',
   }),
   permission({
     action: Action.create,
@@ -918,6 +941,15 @@ export const PERMISSION_CATALOG = [
     slug: 'read:event_policy:friends',
     riskLevel: RiskLevel.Medium,
     reason: "View the policy configuration of a friend's events that reach their friends",
+  }),
+  // Bound and rated as `read:event:public` is.
+  permission({
+    action: Action.read,
+    subject: ResourceType.EventPolicy,
+    conditions: { event: { is: { reach: 'Public' } } },
+    slug: 'read:event_policy:public',
+    riskLevel: RiskLevel.Medium,
+    reason: 'View the policy configuration of public events',
   }),
   permission({
     action: Action.update,

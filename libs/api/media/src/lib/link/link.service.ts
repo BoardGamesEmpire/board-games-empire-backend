@@ -139,12 +139,12 @@ export class MediaLinkService {
 
   /**
    * The caller must be able to *read* the target subject. Read is the bar for
-   * attaching media — a game is readable when it is public or the caller's
-   * own, an event by its attendees, so "can see it" cleanly means "can
-   * contribute media to it" (a spectator at a competitive event can post
-   * photos). The endpoint paths apply it, and so does every contribution when
-   * it is made, whether or not it will wait for review. Not applied in
-   * attachWithin: a reviewer's approval carries its own authority.
+   * attaching media: whoever the read rules let see a game or an event may
+   * contribute media to it (a spectator at a competitive event can post
+   * photos). For a `Public` game or event, that is every signed-in user. The
+   * endpoint paths apply it, and so does every contribution when it is made,
+   * whether or not it will wait for review. Not applied in attachWithin: a
+   * reviewer's approval carries its own authority.
    */
   async assertSubjectReadable(
     subjectType: ResourceType,

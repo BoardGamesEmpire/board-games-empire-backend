@@ -17,9 +17,13 @@ describe('UpdateEventDto', () => {
     await expect(propertiesWithErrors({ title: 'Renamed', reach: 'Private' })).resolves.toEqual([]);
   });
 
-  // The rungs an event read rule serves, and no others: an event saved with
-  // `Public` would claim readers it doesn't have until its rule lands (#809).
-  it.each([['Public'], ['FriendsOfFriends'], ['Household'], [null]])('rejects reach %p', async (reach) => {
+  // The rungs an event read rule serves, and no others. `FriendsOfFriends`
+  // waits on #496, which defines friends of friends.
+  it.each([['Public'], ['Friends'], ['Private']])('accepts reach %p', async (reach) => {
+    await expect(propertiesWithErrors({ reach })).resolves.toEqual([]);
+  });
+
+  it.each([['FriendsOfFriends'], ['Household'], [null]])('rejects reach %p', async (reach) => {
     await expect(propertiesWithErrors({ reach })).resolves.toEqual(['reach']);
   });
 

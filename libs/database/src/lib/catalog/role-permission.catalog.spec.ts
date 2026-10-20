@@ -1,4 +1,4 @@
-import { Reach, SystemRole } from '../client';
+import { Reach, RiskLevel, SystemRole } from '../client';
 import { parseTemplate } from './catalog-guards';
 import { PERMISSION_CATALOG } from './permission.catalog';
 import { ROLE_PERMISSION_CATALOG } from './role-permission.catalog';
@@ -308,6 +308,23 @@ describe('the shipped catalogs', () => {
 
       expect(entry?.conditions).toMatchObject(at({ in: rungsAdmittingFriends }));
       expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain(slug);
+    });
+
+    // A `Public` event is every signed-in user's to read, with its dates and
+    // its policy. An anonymous user is left out: anyone can open an anonymous
+    // session (#489), so a grant there would be signed-out access, which is a
+    // server setting of its own (#813).
+    it.each([
+      ['read:event:public', { reach: 'Public' }],
+      ['read:event_occurrence:public', { event: { is: { reach: 'Public' } } }],
+      ['read:event_policy:public', { event: { is: { reach: 'Public' } } }],
+    ])('let every signed-in user, and no anonymous user, read through %s', (slug, conditions) => {
+      const entry = PERMISSION_CATALOG.find((candidate) => candidate.slug === slug);
+
+      expect(entry?.conditions).toStrictEqual(conditions);
+      expect(entry?.riskLevel).toBe(RiskLevel.Medium);
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain(slug);
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain(slug);
     });
 
     // The ladder's order is written in the rules, not in the enum, which

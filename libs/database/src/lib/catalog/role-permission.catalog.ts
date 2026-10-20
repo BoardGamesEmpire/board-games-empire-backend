@@ -307,6 +307,9 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
   [SystemRole.User]: [
     // event
     'create:event',
+    'read:event:public',
+    'read:event_occurrence:public',
+    'read:event_policy:public',
 
     // feedback
     'create:feedback_report',
