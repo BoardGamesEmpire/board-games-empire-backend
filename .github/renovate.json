@@ -1,12 +1,17 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
-    "Keeps the Dockerfile's images and the workflows' action pins current (#599). Each action stays pinned to a commit SHA, with its full release as a trailing comment.",
-    "Only the dockerfile and github-actions managers are enabled, with one regex manager for the BuildKit image ci.yml pins (#600). npm comes under Renovate in #613. The postgres and redis tags in compose.yaml move by hand, together with the e2e harness's copies in apps/api-e2e.",
-    "branchPrefix restates Renovate's default because ci.yml matches it, as well as the app's account: CI on Renovate's PRs runs without Nx Cloud."
+    "Keeps the Dockerfile's images, the workflows' action pins and the npm dependencies current (#599, #613). Each action stays pinned to a commit SHA, with its full release as a trailing comment.",
+    "The dockerfile, github-actions and npm managers are enabled, with one regex manager for the BuildKit image ci.yml pins (#600). The postgres and redis tags in compose.yaml move by hand, together with the e2e harness's copies in apps/api-e2e.",
+    "branchPrefix restates Renovate's default because ci.yml matches it, as well as the app's account: CI on Renovate's PRs runs without Nx Cloud.",
+    "Nothing is automerged. master requires no status checks, and every merge is a billed Nx Cloud execution either way.",
+    "constraints holds Renovate to npm 11.10 or later, the first npm that reads min-release-age from .npmrc (#613). An older npm ignores the setting, and the rules below rely on it."
   ],
+  "constraints": {
+    "npm": ">=11.10.0"
+  },
   "extends": ["config:recommended", "helpers:pinGitHubActionDigestsToSemver"],
-  "enabledManagers": ["dockerfile", "github-actions", "custom.regex"],
+  "enabledManagers": ["dockerfile", "github-actions", "npm", "custom.regex"],
   "customManagers": [
     {
       "customType": "regex",
@@ -20,6 +25,10 @@
   ],
   "branchPrefix": "renovate/",
   "semanticCommits": "enabled",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["* * 1 * *"]
+  },
   "packageRules": [
     {
       "description": "Actions change only CI. A new release waits five days before Renovate proposes it, after min-release-age in .npmrc. The wait is weaker than npm's: it counts from a date the publisher writes (the commit's for a lightweight tag, the tag's own for an annotated one), not from when the tag reached GitHub, so a backdated release passes at once.",
@@ -55,17 +64,109 @@
       ]
     },
     {
-      "description": "A Node major moves the base image and the version CI runs (setup-workspace's node-version) in one PR, as the Dockerfile's comment on its node stage says they must. The PR opens only once both halves are found, so a lookup that fails on one side can't open it with the other alone; until then the Dependency Dashboard lists it. Neither half waits: a Node major is adopted at LTS, months after its first release, so a wait adds nothing.",
-      "matchManagers": ["dockerfile", "github-actions"],
-      "matchDepNames": ["node"],
+      "description": "A new npm release waits five days before Renovate proposes it (#613), as min-release-age in .npmrc makes an install wait. Renovate doesn't read that setting when it picks a version, so it is set here too. Because .npmrc sets it, Renovate passes npm no --before of its own when it updates the lockfile, and npm applies the setting to every version it resolves. Every npm update is typed build, as the images' are, rather than config:recommended's fix and chore. The root manifest pins exact versions (save-exact in .npmrc). The workspace manifests keep their ranges, which the published packages need: Renovate's default range strategy rewrites a range only for an update outside it.",
+      "matchManagers": ["npm"],
+      "semanticCommitType": "build",
+      "minimumReleaseAge": "5 days"
+    },
+    {
+      "description": "These update types carry no release date for Renovate to age, so its wait would hold them on the Dependency Dashboard, or leave a release-age check pending on their PR, for good. npm's min-release-age still applies to every version they bring in (#613). Lockfile maintenance regenerates package-lock.json on the 1st of the month, all day (UTC) for the reason the Monday window is, which moves the dependencies no manifest names.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["lockFileMaintenance", "replacement", "pin", "bump", "rollback"],
+      "minimumReleaseAge": null
+    },
+    {
+      "description": "Minor and patch npm updates share one PR a week, in the actions' window, so a month costs about four merges (#613). A package that breaks the group can be taken out of it with a later rule that sets its own groupName, as Nx and OpenTelemetry's do below.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "npm dependencies",
+      "schedule": ["* * * * 1"]
+    },
+    {
+      "description": "A replacement swaps a deprecated package for its successor. Renovate never groups one, so each is a PR of its own; the Monday window at least keeps them to the weekly review (#613). Pins, bumps and rollbacks don't arise here: the default range strategy neither pins nor bumps, and rollbacks are off.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["replacement"],
+      "schedule": ["* * * * 1"]
+    },
+    {
+      "description": "An npm major opens only once it is approved on the Dependency Dashboard, which lists every one pending (#613). Opened all at once, they would be dozens of PRs, each a merge to pay for. A group needs approval when any update in it does.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Packages released together take their majors together (#613). Since Nest 12, every @nestjs package shares Nest's major. Nest's integrations (nestjs-cls, nestjs-pino, @willsoto/nestjs-prometheus) peer-depend on that major and support a new one only from a major of their own, so they join the group: apart, npm refuses each PR, the new Nest against the old integrations and the reverse. An integration that adds support in a minor arrives in the weekly group, which then has to merge first. The better-auth adapter matches too, but its rule below moves it to better-auth's group.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["major"],
+      "matchPackageNames": ["@nestjs/**", "nestjs-*", "@*/nestjs-*"],
+      "groupName": "NestJS"
+    },
+    {
+      "description": "better-auth's plugins release with it, at its version, and the Nest adapter follows its majors (#613). The adapter's Nest support moves in its minors, through the weekly group.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["major"],
+      "matchPackageNames": ["better-auth", "@better-auth/**", "@thallesp/nestjs-better-auth"],
+      "groupName": "better-auth"
+    },
+    {
+      "description": "OpenTelemetry's stable packages and its experimental 0.x ones ship as one release, pinned to each other's exact versions. A stable major reaches the experimental half as a 0.x minor, so split by update type, it would send those to the weekly group alone. All of OpenTelemetry's updates share one PR instead, majors with the rest (#613); a stable major in it waits for approval, and holds the whole release with it. OpenTelemetry releases every two or three weeks, so the PR opens on the 1st of the month (all day, UTC), about one merge a month.",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["@opentelemetry/**"],
+      "groupName": "OpenTelemetry",
+      "separateMajorMinor": false,
+      "schedule": ["* * 1 * *"]
+    },
+    {
+      "description": "Prisma majors belong to #435, and that work lifts this rule. Disabled rather than left for approval, so nobody approves one by accident.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["major"],
+      "matchPackageNames": ["prisma", "@prisma/**"],
+      "enabled": false
+    },
+    {
+      "description": "TypeScript majors wait for #816, which picks the major and when to move. Disabled rather than left for approval, so nobody approves one by accident.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["major"],
+      "matchPackageNames": ["typescript"],
+      "enabled": false
+    },
+    {
+      "description": "Nx gets a PR of its own, in the Monday window, because its minors bring migrations as well as its majors (#613). A major still opens separately, once approved. The Mend-hosted app can't run nx migrate (arbitrary post-upgrade commands need a paid plan), so the PR says how, and a person runs it on the branch before merging. A migration can also move other packages, and writes them as ranges: Nx 23.1's moves TypeScript to 6, which #816 decides.",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["nx", "@nx/**"],
+      "groupName": "Nx",
+      "schedule": ["* * * * 1"],
+      "prBodyNotes": [
+        "**Nx migrations aren't applied yet.** On this branch, run `npm ci`, then `npm run nx -- migrate {{{newVersion}}} --from=nx@{{{currentVersion}}}`. If that moves `typescript` to a new major, stop here: TypeScript majors wait for #816. Otherwise run `npm install` and `npm run nx -- migrate --run-migrations`, then replace any `^` or `~` range the migration wrote into the root `package.json` with the exact version in `package-lock.json`, and run `npm install` again. Commit what changed, apart from `migrations.json`, before merging."
+      ]
+    },
+    {
+      "description": "prettier, its import-organizing plugin and the TypeScript language service it calls decide how every file is formatted, and CI checks the formatting of the whole tree (#613).",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["prettier", "prettier-plugin-organize-imports", "typescript"],
+      "prBodyNotes": [
+        "This PR updates the formatter. If CI's formatting check fails, run `npm run format:write -- --all` on this branch and commit the result."
+      ]
+    },
+    {
+      "description": "A Node major moves the base image, the version CI runs (setup-workspace's node-version) and @types/node in one PR (#599, #613). The Dockerfile's comment on its node stage says the first two must move together, and the types would otherwise run ahead of the runtime. The PR opens only once three updates are found, so a lookup that fails on one side can't open it with the others alone. minimumGroupSize counts updates, not packages, so that holds only while each of the three appears once: in the Dockerfile's node stage, setup-workspace and the root package.json. Naming Node's major in a fourth place means raising it. Until then the Dependency Dashboard lists the group. Unlike other npm majors it needs no approval there, which would hold back the group's third member.",
+      "matchManagers": ["dockerfile", "github-actions", "npm"],
+      "matchDepNames": ["node", "@types/node"],
       "matchUpdateTypes": ["major"],
       "groupName": "Node.js",
-      "minimumGroupSize": 2,
+      "minimumGroupSize": 3,
       "semanticCommitType": "build",
-      "minimumReleaseAge": null,
+      "dependencyDashboardApproval": false,
       "prBodyNotes": [
         "Before merging, update the Node major named in prose: the comment on the `node` stage in `Dockerfile`, the base-image line in `docs/DEPLOYMENT.md`, and the cache-key note in `.github/actions/setup-workspace/action.yml`."
       ]
+    },
+    {
+      "description": "Neither the image nor CI's Node waits: a Node major is adopted at LTS, months after its first release, so a wait adds nothing. @types/node keeps npm's five days, since npm, reading .npmrc, would refuse a younger version when Renovate updates the lockfile (#613).",
+      "matchManagers": ["dockerfile", "github-actions"],
+      "matchDepNames": ["node"],
+      "matchUpdateTypes": ["major"],
+      "minimumReleaseAge": null
     },
     {
       "description": "BuildKit, like an action, changes only CI, and it holds the token that writes the packages, so a release waits five days, as an action's does. Here the wait can work, unlike for the Dockerfile's images: moby/buildkit has a few hundred tags, under the 1,000 Docker Hub lists to an anonymous reader, and Docker Hub dates each from its last push, so a moved tag waits too.",
