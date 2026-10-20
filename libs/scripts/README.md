@@ -7,8 +7,10 @@ Nothing imports this library. Its entrypoints are invoked by path, from Nx targe
 | Entrypoint                          | Invoked by                                                       |
 | ----------------------------------- | ---------------------------------------------------------------- |
 | `src/bin/prisma-generate.js`        | `@bge/database:generate`                                         |
+| `src/bin/buf-export.js`             | `@boardgamesempire/proto-gateway:buf-export`                     |
 | `src/bin/generate-bge-version.js`   | `@board-games-empire/version:generate`                           |
 | `src/bin/check-spec-swcrc.js`       | the "Check spec swcrc source maps" step in `ci.yml`'s `main` job |
+| `src/bin/check-migrations.js`       | `npm run db:migrate:check`, which `ci.yml`'s `main` job runs     |
 | `src/bin/check-bundle-externals.js` | the root `Dockerfile`, after its production-only install         |
 | `src/bin/find-published-images.js`  | `ci.yml`'s `build-push` job, on `master`                         |
 | `src/bin/publish-images.js`         | `ci.yml`'s `publish` job, on `master`                            |
@@ -27,7 +29,8 @@ and the amd64 runner Node 22 (#600).
 
 There is deliberately **no `tsconfig`** here, so the `@nx/js/typescript` plugin
 infers neither `typecheck` nor `build`. The entrypoints sit ahead of
-`@bge/database:generate`, which the whole workspace waits on through `^generate`;
+`@bge/database:generate` and `proto-gateway:buf-export`, which the whole
+workspace waits on through `^generate`;
 compiling them would put a build step in front of that, once per Nx process, and
 six of those run under `npm start`. The sources are plain CommonJS `.js` for the
 same reason — they run before anything has been built.
@@ -41,6 +44,17 @@ release paths. The clock, process liveness, and the poll wait are injected, so
 the reclaim races are driven deterministically rather than chased with signals —
 see the header of `src/prisma-generate/lock.js` for which guarantees hold and
 which window is knowingly left open (#338).
+
+`src/proto-export/export.spec.js` runs the proto export against throwaway
+directories, with a stand-in for buf. It covers a first export, an export that
+already matches (left untouched, down to the directory's inode), one whose files
+changed, one holding a `.proto` the sources no longer have, and a buf that fails
+or can't be started. It checks that a run stages outside the package and leaves
+nothing staged. It also covers the ways another run can land first: while
+this one exports, while it waits for the lock it compares and moves under, and
+between its delete and its rename. buf runs outside that lock, and the lock is
+released when the move fails. The header of
+`src/proto-export/export.js` explains why `npm start` needs it (#313).
 
 `src/spec-swcrc/check.spec.js` runs the `.spec.swcrc` check against throwaway
 git repositories. It covers the values that pass and fail, a file that isn't
@@ -57,6 +71,16 @@ installed under one app's own `node_modules` (found for that app only), text
 that mentions `require` without being an external, and a bundle with no
 externals it can read, which it reports instead of passing. The header of
 `src/bundle-externals/check.js` explains why the image needs it (#593).
+
+`src/migration-check/shadow-database.spec.js` covers the check
+`db:migrate:check` makes before Prisma runs. It covers an unset shadow database,
+one of its own, and the main database's name on another host or port, and
+under another scheme, schema or database role. It covers a URL naming no
+database, read as Prisma, libpq and the app's driver read it, PGDATABASE and
+PGUSER included. It also covers a URL it can't read, which it
+refuses rather than guess at, and the schema the comparison runs in: the shadow
+URL's, whatever `DATABASE_URL` names. The header of
+`src/migration-check/shadow-database.js` explains why Prisma 7.8 needs it (#586).
 
 `src/eslint-rules/no-nested-ceiling.spec.js` tests a rule that lives in the
 root `eslint.config.mjs`, not in this library. Every project's lint target
