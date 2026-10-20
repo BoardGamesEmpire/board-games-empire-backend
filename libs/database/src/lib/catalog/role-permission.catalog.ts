@@ -412,8 +412,9 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     ...HOUSEHOLD_ADMIN_ONLY,
   ],
   [SystemRole.HouseholdMember]: [
-    // Members create household events as they create household sessions;
-    // guests do not. Revisiting who holds it is #168's matrix.
+    // Members create household events as they record household plays, and
+    // host the events they create; guests do neither (#168). What each
+    // household role can do is the table in `libs/api/household/README.md`.
     'create:event:household',
     'create:game_play_session:household',
     // Members invite under the household's member invite policy (#166);
@@ -436,7 +437,8 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
   ],
   [SystemRole.HouseholdGuest]: [
     // A guest reads the household's events with their dates and rules, but
-    // not who attends them. The rest of a guest's reach is #168's matrix.
+    // not who attends them, and leaves; the rest of a guest's reach comes from
+    // `User` (#168). See the table in `libs/api/household/README.md`.
     'delete:household_member:leave',
     'read:event:participant:household',
     'read:event_occurrence:household',

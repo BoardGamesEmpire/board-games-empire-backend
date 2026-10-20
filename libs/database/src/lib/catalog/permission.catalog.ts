@@ -1361,7 +1361,8 @@ export const PERMISSION_CATALOG = [
   // The instance carries the household's settings beside its roster, and the
   // role the invite offers.
   //
-  // Which household roles invite by default is #168's matrix.
+  // Which household role invites how, under each policy, is the table in
+  // `libs/api/household/README.md` (#168).
   permission({
     action: Action.create,
     subject: ResourceType.Invite,
