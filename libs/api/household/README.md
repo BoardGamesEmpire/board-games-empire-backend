@@ -21,7 +21,7 @@ The server decides what each request may do, and this table is what it grants. A
 | Remove another household owner, unless they are the last                             | Yes             | No              | No           | No              | Household role |
 | Transfer ownership                                                                   | Yes             | No              | No           | No              | Household role |
 | Leave the household                                                                  | Yes             | Yes             | Yes          | Yes             | Household role |
-| See the household's invites                                                          | Yes             | Yes             | No           | No              | Household role |
+| List the household's invites                                                         | Yes             | Yes             | No           | No              | Household role |
 | Invite with the member or guest role, when the member invite policy is Direct        | Yes             | Yes             | Yes          | No              | Household role |
 | Invite with the member or guest role, when the member invite policy is NeedsApproval | Yes             | Yes             | For approval | No              | Household role |
 | Invite with the member or guest role, when the member invite policy is Off           | Yes             | Yes             | No           | No              | Household role |
@@ -54,6 +54,7 @@ The server decides what each request may do, and this table is what it grants. A
 - **Only a household owner acts on the household admin role (#168).** A household admin changes the household role of, removes, invites and revokes the invites of people with the member or guest role. Nobody changes their own household role. A household admin who wants to step down asks an owner, or leaves.
 - **The member invite policy (#166)** decides how people with the member role invite: directly, for a household owner's or admin's approval, or not at all. Household owners and admins always invite directly, and household guests never invite.
 - **Withdrawing an invite you sent** needs no permission (#164). Revoking is cancelling an invite someone else sent.
+- **Pending invites come with the household.** Reading the household (`GET /api/households/:id`) shows everyone who can see it the household's pending invites: who is invited, as what, by whom and until when, but never the invitee's address or message (#297). Listing the household's invites, past ones included, is a household owner's or admin's, and their list adds each invitee's address (#167).
 - **The last owner** can't leave or be removed until they transfer ownership.
 - **Event roles** (host, co-host and the rest) are separate from household roles, and someone who creates a household event hosts it. Household owners and admins edit and cancel the household's events and their occurrences, but deleting an event is its host's (#567), and deleting an occurrence belongs to the event's own roles.
 - **Restoring a deleted household** is open to any of its owners during the restore window. The deletion grants it, one household at a time, rather than a household role (#175).

@@ -207,7 +207,7 @@ const HOUSEHOLD_ROLE_TABLE: readonly TableRow[] = [
     ask: (ability, actor) => yesNo(ability.can(Action.delete, memberRow(actor, actor, ACTOR))),
   },
   {
-    action: "See the household's invites",
+    action: "List the household's invites",
     grantedBy: 'Household role',
     cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },
     ask: (ability, actor) => yesNo(ability.can(Action.read, openInvite(actor, SystemRole.HouseholdMember))),
