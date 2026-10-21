@@ -30,6 +30,7 @@ import type { AuthStorage } from './auth-storage';
 import { AUTH_BASE_PATH, AUTH_CLIENT_IP_HEADER, AUTH_COOKIE_PREFIX } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
 import { createSettingGates, settingGateDeps } from './setting-gates';
+import { createSignOutHook } from './sign-out-hook';
 
 interface UserCreatedHookDeps {
   eventEmitter?: EventEmitter2;
@@ -133,7 +134,9 @@ export function authFactory(
     logger.log('Enabling Email & Password authentication');
   }
 
-  const settingGates = createSettingGates(settingGateDeps(prisma, i18n));
+  const gateDeps = settingGateDeps(prisma, i18n);
+  const settingGates = createSettingGates(gateDeps);
+  const signOutHook = createSignOutHook({ render: gateDeps.render });
 
   const usingSwagger = configService?.get<boolean>('swagger.enabled');
   if (usingSwagger) {
@@ -155,6 +158,8 @@ export function authFactory(
     // throttler still applies to every route. How keys should be limited is
     // #642.
     apiKey({ rateLimit: { enabled: false } }),
+    // Without requireSignature: the sign-out hook reads a bearer credential
+    // as the plugin does with it off (#487).
     bearer(),
     lastLoginMethod(),
     oneTap(),
@@ -213,7 +218,10 @@ export function authFactory(
       },
     },
     hooks: {
-      before: createAuthMiddleware(settingGates.beforeRoute),
+      before: createAuthMiddleware(async (context) => {
+        await settingGates.beforeRoute(context);
+        await signOutHook.beforeRoute(context);
+      }),
     },
     experimental: { joins: true },
     secret: options.secret,

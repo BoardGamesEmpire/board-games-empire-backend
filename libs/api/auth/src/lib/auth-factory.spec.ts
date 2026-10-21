@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import type { User } from 'better-auth/types';
 import Keyv from 'keyv';
+import { createHmac } from 'node:crypto';
 import { authFactory, createUserCreatedHook } from './auth-factory';
 import { createAuthStorage } from './auth-storage';
 import { AUTH_CLIENT_IP_HEADER } from './constants';
@@ -216,5 +217,105 @@ describe("authFactory's sign-in rate limit", () => {
     }
 
     expect(statuses).toEqual([401, 401, 401, 429]);
+  });
+});
+
+/**
+ * A sign-out the server could not revoke (#487). These go through a real
+ * instance's handler, so the hook runs where better-auth runs it: before the
+ * route, beside the settings gates.
+ */
+describe("authFactory's sign-out", () => {
+  /** A store whose connection drops on every delete, as Redis's does when it goes away. */
+  class DeletesFail extends Map<string, unknown> {
+    override delete(): boolean {
+      throw new Error('Connection is closed.');
+    }
+  }
+
+  function authOver(store: Keyv) {
+    store.on('error', () => undefined);
+    return authFactory({} as PrismaClient, config, createAuthStorage(store));
+  }
+
+  /** The cookie better-auth would have set for `token`: the token, signed with the instance's secret. */
+  async function sessionCookie(auth: ReturnType<typeof authFactory>, token: string): Promise<string> {
+    const name = (await auth.$context).authCookies.sessionToken.name;
+    const signature = createHmac('sha256', SECRET).update(token).digest('base64');
+    return `${name}=${encodeURIComponent(`${token}.${signature}`)}`;
+  }
+
+  const signOut = (auth: ReturnType<typeof authFactory>, headers: Record<string, string>) =>
+    auth.handler(
+      new Request('http://localhost:33333/api/auth/sign-out', {
+        method: 'POST',
+        headers: { origin: 'http://localhost:33333', ...headers },
+      }),
+    );
+
+  it('refuses with 503 and keeps the cookie when the session cannot be deleted (#487)', async () => {
+    const auth = authOver(new Keyv({ store: new DeletesFail(), throwOnErrors: true }));
+
+    const response = await signOut(auth, { cookie: await sessionCookie(auth, 'session-token') });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'SIGN_OUT_FAILED',
+      message: 'errors.auth.sign_out_failed',
+    });
+    expect(response.headers.get('set-cookie')).toBeNull();
+  });
+
+  it('refuses a bearer sign-out it could not revoke as well (#487)', async () => {
+    // The bearer plugin turns the credential into the cookie only after
+    // `hooks.before` has run, so the hook reads the credential itself.
+    const auth = authOver(new Keyv({ store: new DeletesFail(), throwOnErrors: true }));
+
+    const response = await signOut(auth, { authorization: 'Bearer session-token' });
+
+    expect(response.status).toBe(503);
+  });
+
+  it('reads a signed bearer credential as the bearer plugin does, so a forged signature names no session (#487)', async () => {
+    // The plugin ignores a credential whose signature does not match, so the
+    // route signs out no session for it, and the hook must not delete one.
+    const auth = authOver(new Keyv({ store: new DeletesFail(), throwOnErrors: true }));
+    const signed = decodeURIComponent((await sessionCookie(auth, 'session-token')).split('=').slice(1).join('='));
+
+    const forged = await signOut(auth, { authorization: 'Bearer session-token.forged-signature' });
+    const genuine = await signOut(auth, { authorization: `Bearer ${signed}` });
+
+    expect(forged.status).toBe(200);
+    expect(genuine.status).toBe(503);
+  });
+
+  it('signs out, deletes the session and clears the cookie when the store is up (#487)', async () => {
+    const store = new Keyv({ throwOnErrors: true });
+    const auth = authOver(store);
+    const expiresAt = new Date(Date.now() + 60_000);
+    await store.set(
+      'auth_session-token',
+      JSON.stringify({ session: { token: 'session-token', userId: 'u1', expiresAt }, user: { id: 'u1' } }),
+      60_000,
+    );
+    await store.set(
+      'auth_active-sessions-u1',
+      JSON.stringify([{ token: 'session-token', expiresAt: expiresAt.getTime() }]),
+      60_000,
+    );
+
+    const response = await signOut(auth, { cookie: await sessionCookie(auth, 'session-token') });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('set-cookie')).toMatch(/session_token=;.*Max-Age=0/i);
+    await expect(store.get('auth_session-token')).resolves.toBeUndefined();
+  });
+
+  it('lets a sign-out that names no session through, as before (#487)', async () => {
+    const auth = authOver(new Keyv({ store: new DeletesFail(), throwOnErrors: true }));
+
+    const response = await signOut(auth, {});
+
+    expect(response.status).toBe(200);
   });
 });
