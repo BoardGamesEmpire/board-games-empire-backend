@@ -200,12 +200,10 @@ export function authFactory(
         firstName: {
           type: 'string',
           required: false,
-          map: 'first_name',
         },
         lastName: {
           type: 'string',
           required: false,
-          map: 'last_name',
         },
       },
     },
@@ -213,7 +211,6 @@ export function authFactory(
       before: createAuthMiddleware(settingGates.beforeRoute),
     },
     experimental: { joins: true },
-    url: options.hostUrl,
     secret: options.secret,
     database: prismaAdapter(prisma, {
       debugLogs: configService?.get<boolean>('system.is_production') !== true,
