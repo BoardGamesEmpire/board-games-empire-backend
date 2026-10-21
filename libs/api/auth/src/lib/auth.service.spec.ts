@@ -1,7 +1,10 @@
+import { t } from '@bge/i18n';
+import { ServiceUnavailableException } from '@nestjs/common';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { betterAuth } from 'better-auth';
 import { memoryAdapter } from 'better-auth/adapters/memory';
 import { admin } from 'better-auth/plugins/admin';
+import { createHmac } from 'node:crypto';
 import type { IncomingHttpHeaders } from 'node:http';
 import type { authFactory } from './auth-factory';
 import { AuthService } from './auth.service';
@@ -46,6 +49,34 @@ describe('AuthService', () => {
       expect(headers.get('cookie')).toBe(SESSION_COOKIE);
       expect(headers.get('x-forwarded-for')).toBe('203.0.113.7, 10.0.0.1');
       expect(headers.has('x-absent')).toBe(false);
+    });
+
+    it('answers 503 in plain language when the session store cannot be read, rather than signing the caller out (#640)', async () => {
+      // A failed Redis read used to resolve as a miss, so a signed-in caller
+      // read as signed out. It now reaches better-auth, which answers with a
+      // bare 500.
+      const secret = 'a-test-secret-that-is-long-enough-for-better-auth';
+      const auth = betterAuth({
+        telemetry: { enabled: false },
+        logger: { disabled: true },
+        secret,
+        baseURL: 'http://localhost:3000',
+        secondaryStorage: {
+          get: () => Promise.reject(new Error('Connection is closed.')),
+          set: async () => undefined,
+          delete: async () => undefined,
+        },
+      });
+      const name = (await auth.$context).authCookies.sessionToken.name;
+      const signature = createHmac('sha256', secret).update('the-token').digest('base64');
+      const service = new AuthService(auth as unknown as ReturnType<typeof authFactory>);
+
+      const failure = await service
+        .getSessionFromHeaders({ cookie: `${name}=${encodeURIComponent(`the-token.${signature}`)}` })
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(ServiceUnavailableException);
+      expect((failure as ServiceUnavailableException).getResponse()).toEqual(t('errors.auth.session_unavailable'));
     });
   });
 

@@ -404,6 +404,14 @@ gateway registry — uses `maxRetriesPerRequest: 3` (fail-fast). If
 underlying Redis is intermittently reachable but slow enough that the
 health probe gives up. Investigate network or server health.
 
+### Signed-in requests answer 503
+
+Sessions live in the cache database, so while it is unreachable the api cannot
+check one. A request that carries a session answers 503 with a plain-language
+message, and `/api/auth/*` answers 503 with the code `AUTH_UNAVAILABLE`,
+rather than treating anyone as signed out (#640). Once the cache is reachable
+again, sessions work as before, unless Redis lost its data (see above).
+
 ### "No provider found for Symbol(CACHE_REDIS_CLIENT)" at startup
 
 The process is trying to use the cache connection but `RedisModule.forRootAsync`

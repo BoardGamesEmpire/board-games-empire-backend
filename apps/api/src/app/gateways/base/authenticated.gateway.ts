@@ -1,9 +1,9 @@
 import { AuthService } from '@bge/auth';
-import { type I18nMessage, type I18nPath, t } from '@bge/i18n';
+import { type I18nMessage, type I18nPath, isI18nMessage, t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import type { BaseClientData } from '@bge/shared';
 import { buildWsClientData, type WsRefusalReason } from '@bge/utils';
-import { Logger, UseFilters, UseGuards } from '@nestjs/common';
+import { HttpException, Logger, UseFilters, UseGuards } from '@nestjs/common';
 import { OnGatewayConnection, OnGatewayInit } from '@nestjs/websockets';
 import { Http } from '@status/codes';
 import type { Namespace, Socket } from 'socket.io';
@@ -173,17 +173,26 @@ export abstract class AuthenticatedGateway implements OnGatewayInit, OnGatewayCo
   }
 
   /**
-   * A refusal goes to the client rendered in the handshake's locale. Anything
-   * else means the session could not be checked at all (the database or Redis
-   * briefly down): it is logged, and the client is refused with a 500 that
-   * says nothing about why. Like Nest's own 500 over HTTP, that one stays
-   * English.
+   * A refusal goes to the client rendered in the handshake's locale, and so
+   * does an HTTP exception carrying a catalog key, such as the 503
+   * `AuthService` answers when the session store cannot be read (#640).
+   * Anything else means the session could not be checked at all: it is
+   * logged, and the client is refused with a 500 that says nothing about why.
+   * Like Nest's own 500 over HTTP, that one stays English.
    */
   private async refusalFor(client: Socket, error: unknown): Promise<WsConnectionRefusal> {
     if (error instanceof HandshakeRefusal) {
       const locale = await this.translator.localeOf(client);
 
       return new WsConnectionRefusal(error.statusCode, this.translator.translate(locale, error.marker));
+    }
+
+    const marker = error instanceof HttpException ? error.getResponse() : undefined;
+    if (error instanceof HttpException && isI18nMessage(marker)) {
+      this.logger.warn(`WS connection refused (${error.getStatus()}): socketId=${client.id}`);
+      const locale = await this.translator.localeOf(client);
+
+      return new WsConnectionRefusal(error.getStatus(), this.translator.translate(locale, marker));
     }
 
     this.logger.error(`WS connection failed: socketId=${client.id}`, error);

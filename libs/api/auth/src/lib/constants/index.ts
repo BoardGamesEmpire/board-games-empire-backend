@@ -1,6 +1,13 @@
 export const AUTH_INSTANCE = Symbol('AUTH_INSTANCE');
 
 /**
+ * better-auth's handler as the api serves it on `/api/auth/*`: its rate
+ * limiter's 429 and a request it could not answer get a stable code and a
+ * plain-language message (`createAuthRequestHandler`, #640).
+ */
+export const AUTH_REQUEST_HANDLER = Symbol('AUTH_REQUEST_HANDLER');
+
+/**
  * Hard app-wide request body cap (256 KB), enforced by the better-auth JSON /
  * URL-encoded parsers. better-auth requires Nest's built-in body parser to be
  * disabled (`bodyParser: false` in `main.ts`) and re-adds its own for every

@@ -9,13 +9,15 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthModule as BetterAuthModule } from '@thallesp/nestjs-better-auth';
 import { I18nService } from 'nestjs-i18n';
 import { authFactory } from './auth-factory';
+import { createAuthRequestHandler } from './auth-request-handler';
 import { createRedisAuthStorage } from './auth-storage';
 import { AuthService } from './auth.service';
 import authConfig from './configuration/auth.config';
-import { AUTH_INSTANCE, MAX_REQUEST_BODY_BYTES } from './constants';
+import { AUTH_INSTANCE, AUTH_REQUEST_HANDLER, MAX_REQUEST_BODY_BYTES } from './constants';
 import type { AuthType } from './interfaces';
 import { UserProvisioningListener } from './provisioning/user-provisioning.listener';
 import { UserProvisioningService } from './provisioning/user-provisioning.service';
+import { fallbackLocaleRenderer } from './setting-gates';
 
 @Module({
   imports: [
@@ -80,10 +82,16 @@ import { UserProvisioningService } from './provisioning/user-provisioning.servic
         I18nService,
       ],
     },
+    {
+      provide: AUTH_REQUEST_HANDLER,
+      useFactory: (auth: AuthType, i18n: I18nService<I18nTranslations>) =>
+        createAuthRequestHandler(auth.handler, { render: fallbackLocaleRenderer(i18n) }),
+      inject: [AUTH_INSTANCE, I18nService],
+    },
     AuthService,
     UserProvisioningService,
     UserProvisioningListener,
   ],
-  exports: [AuthService, AUTH_INSTANCE],
+  exports: [AuthService, AUTH_INSTANCE, AUTH_REQUEST_HANDLER],
 })
 export class AuthModule {}

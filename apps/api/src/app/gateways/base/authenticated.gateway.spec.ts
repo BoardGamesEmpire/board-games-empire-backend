@@ -1,6 +1,6 @@
 import { AuthService } from '@bge/auth';
-import type { I18nTranslations, LocaleResolutionService } from '@bge/i18n';
-import { Logger } from '@nestjs/common';
+import { t, type I18nTranslations, type LocaleResolutionService } from '@bge/i18n';
+import { Logger, ServiceUnavailableException } from '@nestjs/common';
 import type { I18nService } from 'nestjs-i18n';
 import type { Namespace, Socket } from 'socket.io';
 import { WsConnectionRefusal } from '../filters';
@@ -249,6 +249,19 @@ describe('AuthenticatedGateway', () => {
         authServiceFor({ user: { id: 'target-1' }, session: { impersonatedBy: 'admin-1' } }),
         403,
         'errors.auth.impersonated_session',
+      ],
+      [
+        // `AuthService` answers a session store it cannot read with a 503
+        // rather than a missing session (#640).
+        'a session store that cannot be read',
+        connection({ acceptLanguage: 'fr' }),
+        {
+          getSessionFromHeaders: jest
+            .fn()
+            .mockRejectedValue(new ServiceUnavailableException(t('errors.auth.session_unavailable'))),
+        } as unknown as AuthService,
+        503,
+        'errors.auth.session_unavailable',
       ],
     ])(
       "names why for %s, in the handshake's Accept-Language and no stored preference",

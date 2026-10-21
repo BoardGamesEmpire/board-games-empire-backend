@@ -8,7 +8,7 @@ Traps in this repo that the code doesn't announce. Each one has produced a wrong
 
 ## Auth routes
 
-- **`/api/auth/*` skips every Nest middleware.** better-auth is mounted on the raw Express server in `apps/api/src/main.ts` before Nest registers its middleware, so these requests have no CLS actor, correlation id, locale or ability context. The ordering is deliberate: better-auth needs the raw body. Leave it as it is, and put auth-route behavior in better-auth's own hooks. The one handler ahead of the mount, `createAuthClientIpHandler`, writes the client's IP for better-auth's rate limiter, which runs before every hook and never sees the socket (#640).
+- **`/api/auth/*` skips every Nest middleware.** better-auth is mounted on the raw Express server in `apps/api/src/main.ts` before Nest registers its middleware, so these requests have no CLS actor, correlation id, locale or ability context. The ordering is deliberate: better-auth needs the raw body. Leave it as it is, and put auth-route behavior in better-auth's own hooks. Two exceptions sit around the mount, because better-auth's rate limiter runs before every hook: `createAuthClientIpHandler`, ahead of it, writes the client's IP for the limiter, which never sees the socket; and `createAuthRequestHandler` wraps better-auth's handler to give the limiter's 429, and a request the limiter's store failure left unanswered, a stable code (#640).
 
 ## Prisma and permissions
 
