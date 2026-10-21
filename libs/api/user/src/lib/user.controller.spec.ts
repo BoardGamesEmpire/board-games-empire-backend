@@ -44,12 +44,20 @@ describe('UserController', () => {
     expect(controller).toBeTruthy();
   });
 
-  it("answers /me with the acting user's own row", async () => {
-    const me = { id: MOCK_ACTING_USER_ID, name: 'ada' } as AuthUser;
+  it("answers /me with the acting user's own row, without the sign-in provider's picture (#695)", async () => {
+    const me = { id: MOCK_ACTING_USER_ID, name: 'ada', image: 'https://provider.example/a.png' } as AuthUser;
     auth.findUserById.mockResolvedValue(me);
 
-    await expect(firstValueFrom(controller.me())).resolves.toEqual({ user: me });
+    await expect(firstValueFrom(controller.me())).resolves.toStrictEqual({
+      user: { id: MOCK_ACTING_USER_ID, name: 'ada' },
+    });
     expect(auth.findUserById).toHaveBeenCalledWith(MOCK_ACTING_USER_ID);
+  });
+
+  it('answers /me with no user when the row is gone', async () => {
+    auth.findUserById.mockResolvedValue(null);
+
+    await expect(firstValueFrom(controller.me())).resolves.toStrictEqual({ user: null });
   });
 
   it('searches as the acting user, never as a caller-supplied id', async () => {

@@ -113,6 +113,16 @@ describe('UserService', () => {
       );
     });
 
+    // One avatar, the profile's. The sign-in provider's picture only seeds it
+    // at provisioning, so a row serving both would offer two pictures (#695).
+    it("serves the profile's avatar and not the sign-in provider's picture", async () => {
+      await service.searchUsers('me', searchQuery());
+
+      const select = db.user.findMany.mock.calls[0][0]?.select;
+      expect(select).not.toHaveProperty('image');
+      expect(select?.profile).toEqual({ select: { displayName: true, avatarUrl: true } });
+    });
+
     // #372: the count is the same text match a second time, so it has to carry
     // the same predicates — a `total` counting banned or unsearchable users
     // would advertise pages the filtered read never returns.

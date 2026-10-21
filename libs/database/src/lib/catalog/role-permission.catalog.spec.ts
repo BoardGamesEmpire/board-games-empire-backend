@@ -286,7 +286,7 @@ describe('the shipped catalogs', () => {
       const entry = PERMISSION_CATALOG.find(({ slug }) => slug === 'read:user:searchable');
 
       expect(entry?.conditions).toStrictEqual({ banned: false, profile: { is: { isSearchable: true } } });
-      expect(entry?.fields).toStrictEqual(['id', 'username', 'firstName', 'lastName', 'image']);
+      expect(entry?.fields).toStrictEqual(['id', 'username', 'firstName', 'lastName']);
       expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain('read:user:searchable');
       expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain('read:user:searchable');
     });
