@@ -1,9 +1,11 @@
-import { t } from '@bge/i18n';
+import type { AuditContextService } from '@bge/actor-context';
+import { translateException, type I18nTranslations } from '@bge/i18n';
 import { ServiceUnavailableException } from '@nestjs/common';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { betterAuth } from 'better-auth';
 import { memoryAdapter } from 'better-auth/adapters/memory';
 import { admin } from 'better-auth/plugins/admin';
+import type { I18nService } from 'nestjs-i18n';
 import { createHmac } from 'node:crypto';
 import type { IncomingHttpHeaders } from 'node:http';
 import type { authFactory } from './auth-factory';
@@ -76,7 +78,22 @@ describe('AuthService', () => {
         .catch((error: unknown) => error);
 
       expect(failure).toBeInstanceOf(ServiceUnavailableException);
-      expect((failure as ServiceUnavailableException).getResponse()).toEqual(t('errors.auth.session_unavailable'));
+      // What a client receives over HTTP: the edge renders the message and
+      // keeps the code beside it.
+      const i18n = { translate: (key: string) => `rendered:${key}` } as unknown as I18nService<I18nTranslations>;
+      const auditContext = { getLocale: () => 'en' } as unknown as AuditContextService;
+      expect(translateException(failure as ServiceUnavailableException, i18n, auditContext).getResponse()).toEqual({
+        code: 'SESSION_UNAVAILABLE',
+        message: 'rendered:errors.auth.session_unavailable',
+      });
+    });
+
+    it('lets any other failure through as it was thrown (#640)', async () => {
+      const failure = new Error('not a store failure');
+      const auth = { api: { getSession: () => Promise.reject(failure) } };
+      const service = new AuthService(auth as unknown as ReturnType<typeof authFactory>);
+
+      await expect(service.getSessionFromHeaders({})).rejects.toBe(failure);
     });
   });
 

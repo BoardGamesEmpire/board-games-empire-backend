@@ -175,7 +175,9 @@ export abstract class AuthenticatedGateway implements OnGatewayInit, OnGatewayCo
   /**
    * A refusal goes to the client rendered in the handshake's locale, and so
    * does an HTTP exception carrying a catalog key, such as the 503
-   * `AuthService` answers when the session store cannot be read (#640).
+   * `AuthService` answers when the session store cannot be read (#640). A
+   * structured exception's other fields, its stable `code` among them, go
+   * with it, as they do over HTTP.
    * Anything else means the session could not be checked at all: it is
    * logged, and the client is refused with a 500 that says nothing about why.
    * Like Nest's own 500 over HTTP, that one stays English.
@@ -187,15 +189,39 @@ export abstract class AuthenticatedGateway implements OnGatewayInit, OnGatewayCo
       return new WsConnectionRefusal(error.statusCode, this.translator.translate(locale, error.marker));
     }
 
-    const marker = error instanceof HttpException ? error.getResponse() : undefined;
-    if (error instanceof HttpException && isI18nMessage(marker)) {
+    const marked = error instanceof HttpException ? markedBody(error.getResponse()) : undefined;
+    if (error instanceof HttpException && marked) {
       this.logger.warn(`WS connection refused (${error.getStatus()}): socketId=${client.id}`);
       const locale = await this.translator.localeOf(client);
 
-      return new WsConnectionRefusal(error.getStatus(), this.translator.translate(locale, marker));
+      return new WsConnectionRefusal(
+        error.getStatus(),
+        this.translator.translate(locale, marked.marker),
+        marked.fields,
+      );
     }
 
     this.logger.error(`WS connection failed: socketId=${client.id}`, error);
     return new WsConnectionRefusal(Http.InternalServerError, 'Internal server error');
   }
+}
+
+/**
+ * An exception body's catalog key and the fields beside it, in the two shapes
+ * `translateException` renders: the body is the marker, or an object whose
+ * `message` is one.
+ */
+function markedBody(body: unknown): { marker: I18nMessage; fields: Record<string, unknown> } | undefined {
+  if (isI18nMessage(body)) {
+    return { marker: body, fields: {} };
+  }
+
+  if (body !== null && typeof body === 'object') {
+    const { message, ...fields } = body as Record<string, unknown>;
+    if (isI18nMessage(message)) {
+      return { marker: message, fields };
+    }
+  }
+
+  return undefined;
 }

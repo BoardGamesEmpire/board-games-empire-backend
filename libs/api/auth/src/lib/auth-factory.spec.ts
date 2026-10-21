@@ -289,6 +289,20 @@ describe("authFactory's sign-out", () => {
     expect(genuine.status).toBe(503);
   });
 
+  it('reads a percent-encoded bearer credential as the plugin does, and a malformed one as written (#487)', async () => {
+    // A client may send the signed cookie's value as it was set, encoded. The
+    // plugin decodes it; one that cannot be decoded names no session.
+    const auth = authOver(new Keyv({ store: new DeletesFail(), throwOnErrors: true }));
+    const encoded = (await sessionCookie(auth, 'session-token')).split('=').slice(1).join('=');
+
+    const genuine = await signOut(auth, { authorization: `Bearer ${encoded}` });
+    const malformed = await signOut(auth, { authorization: 'Bearer session-token.%E0%A4%A' });
+
+    expect(encoded).toContain('%');
+    expect(genuine.status).toBe(503);
+    expect(malformed.status).toBe(200);
+  });
+
   it('signs out, deletes the session and clears the cookie when the store is up (#487)', async () => {
     const store = new Keyv({ throwOnErrors: true });
     const auth = authOver(store);

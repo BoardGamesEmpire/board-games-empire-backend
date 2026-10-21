@@ -27,6 +27,9 @@ export interface ResolvedApiKey {
  */
 export type AuthUser = ReturnType<typeof authFactory>['$Infer']['Session']['user'] & UserWithRole;
 
+/** The stable code a session read the store could not answer carries, so a client can announce or rephrase it. */
+const SESSION_UNAVAILABLE = 'SESSION_UNAVAILABLE';
+
 @Injectable()
 export class AuthService {
   constructor(@Inject(AUTH_INSTANCE) private readonly auth: ReturnType<typeof authFactory>) {}
@@ -38,8 +41,9 @@ export class AuthService {
    * When better-auth cannot read the session at all, as when Redis is
    * unreachable, it throws a bare 500. That is answered as a 503 with a
    * plain-language message instead (#640): the caller's session may be fine,
-   * so it is neither a server fault nor a reason to sign the caller out. Every
-   * session read, over HTTP and WebSocket, comes through here.
+   * so it is neither a server fault nor a reason to sign the caller out. The
+   * body carries the stable code `SESSION_UNAVAILABLE` beside the message.
+   * Every session read, over HTTP and WebSocket, comes through here.
    *
    * @param headers Inbound request headers
    * @returns Session if resolvable, otherwise `null`
@@ -51,7 +55,10 @@ export class AuthService {
       });
     } catch (error) {
       if (error instanceof APIError && error.status === 'INTERNAL_SERVER_ERROR') {
-        throw new ServiceUnavailableException(t('errors.auth.session_unavailable'), { cause: error });
+        throw new ServiceUnavailableException(
+          { code: SESSION_UNAVAILABLE, message: t('errors.auth.session_unavailable') },
+          { cause: error },
+        );
       }
 
       throw error;

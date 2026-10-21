@@ -96,4 +96,29 @@ describe('createAuthRequestHandler', () => {
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({ code: 'INVALID_EMAIL_OR_PASSWORD' });
   });
+
+  it.each([
+    ['a body that is not JSON', 'Too many requests'],
+    ['a JSON body with no code', JSON.stringify({ message: 'Too many requests' })],
+  ])('gives a 429 with %s the code too (#640)', async (_, body) => {
+    const handle = createAuthRequestHandler(async () => new Response(body, { status: 429 }), {
+      render: (key) => key,
+    });
+
+    const refused = await handle(new Request('http://localhost:33333/api/auth/sign-in/email'));
+
+    await expect(refused.json()).resolves.toEqual({ code: 'RATE_LIMITED', message: 'errors.auth.rate_limited' });
+  });
+
+  it('leaves a 429 that already carries a code as it is (#640)', async () => {
+    const coded = { code: 'TOO_MANY_ATTEMPTS', message: 'Wait a minute' };
+    const handle = createAuthRequestHandler(async () => Response.json(coded, { status: 429 }), {
+      render: (key) => key,
+    });
+
+    const refused = await handle(new Request('http://localhost:33333/api/auth/sign-in/email'));
+
+    expect(refused.status).toBe(429);
+    await expect(refused.json()).resolves.toEqual(coded);
+  });
 });
