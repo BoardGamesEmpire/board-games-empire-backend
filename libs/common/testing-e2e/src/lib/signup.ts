@@ -30,6 +30,8 @@ export interface SignupOptions {
   readonly password?: string;
   readonly firstName?: string;
   readonly lastName?: string;
+  /** better-auth's own sign-up field. Sent as given, so a test can prove it is dropped (#695). */
+  readonly image?: string;
 }
 
 /**
@@ -43,6 +45,7 @@ export interface SignupRequestBody {
   readonly password: string;
   readonly firstName?: string;
   readonly lastName?: string;
+  readonly image?: string;
 }
 
 export interface PreparedSignup {
@@ -71,6 +74,7 @@ export function prepareSignup(options: SignupOptions = {}): PreparedSignup {
     password,
     ...(options.firstName !== undefined ? { firstName: options.firstName } : {}),
     ...(options.lastName !== undefined ? { lastName: options.lastName } : {}),
+    ...(options.image !== undefined ? { image: options.image } : {}),
   };
 
   return { body, username, email, password };
