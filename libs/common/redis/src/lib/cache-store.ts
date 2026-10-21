@@ -22,12 +22,25 @@ import Keyv from 'keyv';
  * Nothing bounds a store but its entries' TTLs. Redis evicts nothing,
  * because the job queues share it and BullMQ needs `noeviction`.
  */
-export function createCacheStore(client: Redis, namespace: string): Keyv {
+export function createCacheStore(client: Redis, namespace: string, options: CacheStoreOptions = {}): Keyv {
   return new Keyv({
     store: new KeyvValkey(client, { useRedisSets: false }),
     namespace,
     useKeyPrefix: false,
+    throwOnErrors: options.throwOnErrors ?? false,
   });
+}
+
+export interface CacheStoreOptions {
+  /**
+   * Raise a failed Redis call to the caller. By default Keyv catches it: a
+   * failed read resolves as a miss, and a failed write or delete is emitted as
+   * an `error` event and resolves `false`. A cache can afford that, since the
+   * next read misses and loads again. A store that must not lose a write
+   * quietly, or pass an outage off as a miss, turns this on, as better-auth's
+   * does (#640).
+   */
+  readonly throwOnErrors?: boolean;
 }
 
 /**

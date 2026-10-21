@@ -5,7 +5,6 @@ import type { AuditContextService, SystemActorScope } from '@bge/actor-context';
 import type { PrismaClient } from '@bge/database';
 import { isTrue, splitTrimFilter } from '@bge/env';
 import type { I18nTranslations } from '@bge/i18n';
-import type { Cache } from '@nestjs/cache-manager';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
@@ -27,6 +26,7 @@ import type { User } from 'better-auth/types';
 import type { I18nService } from 'nestjs-i18n';
 import process from 'node:process';
 import { ADMIN_PLUGIN_OPTIONS } from './access/admin-roles';
+import type { AuthStorage } from './auth-storage';
 import { AUTH_BASE_PATH, AUTH_COOKIE_PREFIX } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
 import { createSettingGates, settingGateDeps } from './setting-gates';
@@ -105,7 +105,7 @@ export function createUserCreatedHook(deps: UserCreatedHookDeps): (user: User) =
 export function authFactory(
   prisma: PrismaClient,
   configService?: ConfigService,
-  cache?: Cache,
+  storage?: AuthStorage,
   eventEmitter?: EventEmitter2,
   auditContext?: AuditContextService,
   systemActorScope?: SystemActorScope,
@@ -233,19 +233,9 @@ export function authFactory(
         // here that runs `prisma.apikey.deleteMany({ where: { referenceId: user.id } })`.
       },
     },
-    secondaryStorage: cache
-      ? {
-          get(key: string) {
-            return cache.get(`auth_${key}`);
-          },
-          set(key: string, ...params: [value: unknown, ttl?: number]) {
-            return cache.set(`auth_${key}`, ...params);
-          },
-          async delete(key: string) {
-            await cache.del(`auth_${key}`);
-          },
-        }
-      : undefined,
+    // Without a storage, as when the better-auth CLI builds the instance,
+    // better-auth keeps sessions in the database.
+    secondaryStorage: storage,
     emailAndPassword: { enabled: options.useEmailPass },
     trustedOrigins,
     plugins,

@@ -40,6 +40,16 @@ function fakeClient() {
   return { client: client as unknown as Redis, commands };
 }
 
+/** Stands in for a shared client whose connection is gone: every command it is given fails. */
+function brokenClient() {
+  const lost = async () => {
+    throw new Error('Connection is closed.');
+  };
+  const client = { options: { family: 4 }, on: () => client, set: lost, get: lost, unlink: lost };
+
+  return client as unknown as Redis;
+}
+
 describe('createCacheStore (#449)', () => {
   it('writes an entry under its physical key with its TTL, and nothing else', async () => {
     const { client, commands } = fakeClient();
@@ -58,6 +68,26 @@ describe('createCacheStore (#449)', () => {
 
     await expect(store.get('bge:user:permissions:u1')).resolves.toEqual({ roles: [] });
     expect(commands.at(-1)).toEqual(['get', cacheStoreKey('api:cache', 'bge:user:permissions:u1')]);
+  });
+});
+
+describe('createCacheStore when Redis fails (#640)', () => {
+  it('by default reads a failure as a miss and reports a failed write or delete as false', async () => {
+    const store = createCacheStore(brokenClient(), 'api:cache');
+    store.on('error', () => undefined);
+
+    await expect(store.get('key')).resolves.toBeUndefined();
+    await expect(store.set('key', 'value', 60_000)).resolves.toBe(false);
+    await expect(store.delete('key')).resolves.toBe(false);
+  });
+
+  it('raises every failed call to the caller when asked to', async () => {
+    const store = createCacheStore(brokenClient(), 'api:cache', { throwOnErrors: true });
+    store.on('error', () => undefined);
+
+    await expect(store.get('key')).rejects.toThrow('Connection is closed.');
+    await expect(store.set('key', 'value', 60_000)).rejects.toThrow('Connection is closed.');
+    await expect(store.delete('key')).rejects.toThrow('Connection is closed.');
   });
 });
 
