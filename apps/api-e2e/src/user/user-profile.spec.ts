@@ -1,16 +1,18 @@
 import { FriendshipStatus, Reach } from '@bge/database';
 import { arrangeFriendship, befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { userProfile } from './user-wire';
+import { userProfile, userSearchPage } from './user-wire';
 
 /** Served to the profile's owner alone, staff included (#819). */
 const OWNER_ONLY = ['dietaryRestrictions', 'accessibilityNeeds', 'reach', 'isSearchable'];
 
 /**
  * Who reads a profile over `GET /api/users/:id/profile` and
- * `GET /api/users/me/profile` (#819).
+ * `GET /api/users/me/profile`, and how its owner edits it over
+ * `PATCH /api/users/me/profile` (#819).
  *
  * A profile is read under its reach: by its owner, by their accepted friends
  * when it reaches friends, and by every signed-in user when it is `Public`.
@@ -165,5 +167,115 @@ describe('user profile', () => {
 
     await readProfile(anonymous, profileOwner.user.id).expect(403);
     await readOwnProfile(anonymous).expect(403);
+  });
+
+  describe('the edit', () => {
+    const editOwnProfile = (caller: AuthenticatedActor, body: Record<string, unknown>) =>
+      request(baseUrl).patch('/api/users/me/profile').set(caller.headers).send(body);
+
+    const search = (caller: AuthenticatedActor, q: string) =>
+      request(baseUrl).get('/api/users/search').query({ q, limit: 20 }).set(caller.headers);
+
+    it("lets the profile's owner narrow reach and turn searchable off, and the stranger loses the profile and the search hit", async () => {
+      const term = `prof${randomUUID().replaceAll('-', '').slice(0, 8)}`;
+      const [profileOwner, stranger] = await Promise.all([
+        actors.user({ username: `${term}-profile` }),
+        actors.user({ username: `${term}-stranger` }),
+      ]);
+
+      // Control: before the edit, the stranger reads and finds the profile.
+      await readProfile(stranger, profileOwner.user.id).expect(200);
+      const before = userSearchPage(await search(stranger, term).expect(200), 'GET /api/users/search before');
+      expect(before.users.map((user) => user.id)).toContain(profileOwner.user.id);
+
+      const edited = userProfile(
+        await editOwnProfile(profileOwner, { reach: Reach.Private, isSearchable: false }).expect(200),
+        'PATCH /api/users/me/profile',
+      );
+      expect(edited).toMatchObject({ userId: profileOwner.user.id, reach: Reach.Private, isSearchable: false });
+
+      await readProfile(stranger, profileOwner.user.id).expect(404);
+      const after = userSearchPage(await search(stranger, term).expect(200), 'GET /api/users/search after');
+      expect(after.users.map((user) => user.id)).not.toContain(profileOwner.user.id);
+    });
+
+    it('lets a friend read the profile once its owner sets it to Friends', async () => {
+      const { profileOwner, friend, stranger } = await arrange(Reach.Private);
+      await readProfile(friend, profileOwner.user.id).expect(404);
+
+      await editOwnProfile(profileOwner, { reach: Reach.Friends }).expect(200);
+
+      await readProfile(friend, profileOwner.user.id).expect(200);
+      await readProfile(stranger, profileOwner.user.id).expect(404);
+    });
+
+    // `FriendsOfFriends` names readers no rule serves until #496.
+    it('refuses a reach no profile read rule serves', async () => {
+      const profileOwner = await actors.user();
+
+      await editOwnProfile(profileOwner, { reach: Reach.FriendsOfFriends }).expect(400);
+    });
+
+    it('refuses an avatar change for now', async () => {
+      const profileOwner = await actors.user();
+
+      await editOwnProfile(profileOwner, { avatarUrl: 'https://x.example/a.png' }).expect(400);
+    });
+
+    it('refuses an empty edit', async () => {
+      const profileOwner = await actors.user();
+
+      await editOwnProfile(profileOwner, {}).expect(400);
+    });
+
+    // The column keeps a value, so null is a 400 from validation and never
+    // reaches the database.
+    it('refuses null for a field whose column keeps a value', async () => {
+      const profileOwner = await actors.user();
+
+      await editOwnProfile(profileOwner, { isSearchable: null }).expect(400);
+    });
+
+    // The global pipe converts implicitly, and Boolean('false') is true (#819).
+    it('refuses searchable sent as the string "false" and leaves the profile searchable', async () => {
+      const profileOwner = await actors.user();
+
+      await editOwnProfile(profileOwner, { isSearchable: 'false' }).expect(400);
+
+      const read = userProfile(await readOwnProfile(profileOwner).expect(200), 'GET /api/users/me/profile');
+      expect(read.isSearchable).toBe(true);
+    });
+
+    it('clears a text field sent blank', async () => {
+      const profileOwner = await actors.user();
+      await editOwnProfile(profileOwner, { pronouns: 'they/them' }).expect(200);
+
+      const cleared = userProfile(
+        await editOwnProfile(profileOwner, { pronouns: '   ' }).expect(200),
+        'PATCH /api/users/me/profile with blank pronouns',
+      );
+      expect(cleared['pronouns']).toBeNull();
+    });
+
+    it('stores the bio sanitized and serves it back', async () => {
+      const profileOwner = await actors.user();
+
+      const edited = userProfile(
+        await editOwnProfile(profileOwner, { bio: '<script>alert(1)</script>\n\n**Engines** and games' }).expect(200),
+        'PATCH /api/users/me/profile with a bio',
+      );
+      expect(edited['bio']).toBe('**Engines** and games');
+
+      const read = userProfile(await readOwnProfile(profileOwner).expect(200), 'GET /api/users/me/profile');
+      expect(read['bio']).toBe('**Engines** and games');
+    });
+
+    // An anonymous user holds no profile update, so the type-level check
+    // refuses it.
+    it('refuses an anonymous user', async () => {
+      const anonymous = await actors.anonymous();
+
+      await editOwnProfile(anonymous, { location: 'London' }).expect(403);
+    });
   });
 });

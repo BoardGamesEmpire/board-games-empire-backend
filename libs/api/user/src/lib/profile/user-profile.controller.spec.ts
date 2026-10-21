@@ -2,6 +2,7 @@ import { Action, ResourceType } from '@bge/database';
 import { CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { firstValueFrom } from 'rxjs';
+import { UpdateUserProfileDto } from '../dto/update-user-profile.dto';
 import { makeProfileRow } from './profile-row.fixture';
 import { toProfileView } from './profile-view';
 import { UserProfileController } from './user-profile.controller';
@@ -22,7 +23,7 @@ const policyChecksOf = (method: object) => {
 
 describe('UserProfileController', () => {
   let controller: UserProfileController;
-  let service: jest.Mocked<Pick<UserProfileService, 'getProfile' | 'getOwnProfile'>>;
+  let service: jest.Mocked<Pick<UserProfileService, 'getProfile' | 'getOwnProfile' | 'updateOwnProfile'>>;
 
   const view = toProfileView(makeProfileRow(), false);
 
@@ -30,6 +31,7 @@ describe('UserProfileController', () => {
     service = {
       getProfile: jest.fn().mockResolvedValue(view),
       getOwnProfile: jest.fn().mockResolvedValue(view),
+      updateOwnProfile: jest.fn().mockResolvedValue(view),
     };
 
     const { module } = await createTestingModuleWithDb({
@@ -54,6 +56,20 @@ describe('UserProfileController', () => {
     await expect(firstValueFrom(controller.getProfile('u2'))).resolves.toEqual({ profile: view });
 
     expect(service.getProfile).toHaveBeenCalledWith('u2');
+  });
+
+  it("edits the acting user's own profile, never a caller-supplied id", async () => {
+    const dto = Object.assign(new UpdateUserProfileDto(), { location: 'London' });
+
+    await expect(firstValueFrom(controller.updateOwnProfile(dto))).resolves.toEqual({ profile: view });
+
+    expect(service.updateOwnProfile).toHaveBeenCalledWith(dto);
+  });
+
+  it('checks update UserProfile on the edit', () => {
+    expect(policyChecksOf(UserProfileController.prototype.updateOwnProfile)).toEqual([
+      [Action.update, ResourceType.UserProfile],
+    ]);
   });
 
   it('checks read UserProfile on both reads', () => {

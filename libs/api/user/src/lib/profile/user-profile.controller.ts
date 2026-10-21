@@ -1,10 +1,11 @@
 import { Action, ResourceType } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from, type Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { UpdateUserProfileDto } from '../dto/update-user-profile.dto';
 import { UserProfileEnvelopeDto } from '../dto/user-profile.response';
 import type { UserProfileView } from './profile-view';
 import { UserProfileService } from './user-profile.service';
@@ -32,6 +33,25 @@ export class UserProfileController {
   @Get('me/profile')
   getOwnProfile(): Observable<{ profile: UserProfileView }> {
     return from(this.userProfileService.getOwnProfile()).pipe(map((profile) => ({ profile })));
+  }
+
+  @ApiOperation({
+    summary: "Edit the caller's own profile",
+    description:
+      'Every field is optional, and one left out is left as it is. An empty body answers 400. Reach takes ' +
+      '`Public`, `Friends` or `Private`. The bio is Markdown, sanitized before it is stored. Blank or null clears ' +
+      'an optional text field. The avatar cannot be changed here yet (#829), and the game tastes wait on #831: ' +
+      'both are refused, as any unknown field is. Answers with the profile as its owner sees it. See #819.',
+  })
+  @ApiResponse({ status: Http.Ok, type: UserProfileEnvelopeDto })
+  @ApiResponse({ status: Http.BadRequest, description: 'An empty body, or a field that fails validation' })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({ status: Http.NotFound, description: 'The caller has no profile' })
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.UserProfile))
+  @Patch('me/profile')
+  updateOwnProfile(@Body() dto: UpdateUserProfileDto): Observable<{ profile: UserProfileView }> {
+    return from(this.userProfileService.updateOwnProfile(dto)).pipe(map((profile) => ({ profile })));
   }
 
   @ApiOperation({ summary: "Read a user's profile", description: READ_DESCRIPTION })

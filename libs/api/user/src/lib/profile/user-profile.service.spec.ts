@@ -1,4 +1,4 @@
-import { Action, ResourceType } from '@bge/database';
+import { Action, Prisma, Reach, ResourceType } from '@bge/database';
 import { AbilityService } from '@bge/permissions';
 import {
   createMockAbilityService,
@@ -7,7 +7,8 @@ import {
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { UpdateUserProfileDto } from '../dto/update-user-profile.dto';
 import { makeProfileRow } from './profile-row.fixture';
 import { PROFILE_SELECT } from './profile-view';
 import { UserProfileService } from './user-profile.service';
@@ -75,6 +76,91 @@ describe('UserProfileService', () => {
 
       expect(view).toHaveProperty('username', 'ada');
       expect(view).not.toHaveProperty('reach');
+    });
+  });
+
+  describe('updateOwnProfile', () => {
+    /** Stands in for the caller's `UserProfile` update conditions. */
+    const UPDATE_COND = { id: 'within-the-update-conditions' };
+
+    const edit = (fields: Partial<UpdateUserProfileDto>) => Object.assign(new UpdateUserProfileDto(), fields);
+
+    const recordToUpdateNotFound = () =>
+      new Prisma.PrismaClientKnownRequestError('Record to update not found', { code: 'P2025', clientVersion: 'test' });
+
+    beforeEach(() => {
+      abilityService.getCurrentResourceConditions.mockImplementation((_type, action) =>
+        action === Action.update ? [UPDATE_COND] : [READ_COND],
+      );
+      db.userProfile.update.mockResolvedValue(makeProfileRow({ userId: MOCK_ACTING_USER_ID }) as never);
+    });
+
+    // A write to another user's profile is refused: the write names the
+    // caller's own row and nothing else, under their update conditions.
+    it("binds the write to the caller's row and their update conditions", async () => {
+      await service.updateOwnProfile(edit({ pronouns: 'they/them', reach: Reach.Private, isSearchable: false }));
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.UserProfile, Action.update);
+      expect(db.userProfile.update).toHaveBeenCalledWith({
+        where: { userId: MOCK_ACTING_USER_ID, AND: [UPDATE_COND] },
+        data: { pronouns: 'they/them', reach: Reach.Private, isSearchable: false },
+        select: PROFILE_SELECT,
+      });
+    });
+
+    it('sanitizes the bio as Markdown', async () => {
+      await service.updateOwnProfile(edit({ bio: '<script>alert(1)</script>\n\n**Engines** and games' }));
+
+      const bio = db.userProfile.update.mock.calls[0][0].data.bio;
+      expect(bio).not.toContain('script');
+      expect(bio).toContain('**Engines** and games');
+    });
+
+    it('stores a bio that sanitizes to nothing as null', async () => {
+      await service.updateOwnProfile(edit({ bio: '<script>alert(1)</script>' }));
+
+      expect(db.userProfile.update.mock.calls[0][0].data).toEqual({ bio: null });
+    });
+
+    // Leading spaces can be Markdown: four of them start a code block (#819).
+    it('keeps a bio that opens with an indented code block, cutting only blank lines from its start', async () => {
+      await service.updateOwnProfile(edit({ bio: '\n\n    rolls 2d6\n\nThen moves.\n' }));
+
+      expect(db.userProfile.update.mock.calls[0][0].data.bio).toBe('    rolls 2d6\n\nThen moves.');
+    });
+
+    it('leaves the bio alone when the edit does not name it', async () => {
+      await service.updateOwnProfile(edit({ location: 'London' }));
+
+      expect(db.userProfile.update.mock.calls[0][0].data).not.toHaveProperty('bio');
+    });
+
+    it('refuses an empty edit with 400', async () => {
+      await expect(service.updateOwnProfile(edit({}))).rejects.toThrow(BadRequestException);
+      expect(db.userProfile.update).not.toHaveBeenCalled();
+    });
+
+    it('answers 403 when the update conditions exclude the row', async () => {
+      db.userProfile.update.mockRejectedValue(recordToUpdateNotFound());
+      db.userProfile.count.mockResolvedValue(1);
+
+      await expect(service.updateOwnProfile(edit({ location: 'London' }))).rejects.toThrow(ForbiddenException);
+    });
+
+    // Provisioning writes the profile after signup, detached from it, so a
+    // brand-new user can get here first.
+    it('answers 404 when the caller has no profile yet', async () => {
+      db.userProfile.update.mockRejectedValue(recordToUpdateNotFound());
+      db.userProfile.count.mockResolvedValue(0);
+
+      await expect(service.updateOwnProfile(edit({ location: 'London' }))).rejects.toThrow(NotFoundException);
+      expect(db.userProfile.count).toHaveBeenCalledWith({ where: { userId: MOCK_ACTING_USER_ID } });
+    });
+
+    it('answers with the profile as its owner sees it', async () => {
+      const view = await service.updateOwnProfile(edit({ location: 'London' }));
+
+      expect(view).toMatchObject({ userId: MOCK_ACTING_USER_ID, username: 'ada', dietaryRestrictions: 'No nuts' });
     });
   });
 
