@@ -24,3 +24,12 @@ export const AUTH_BASE_PATH = '/api/auth';
  * its match from the same value.
  */
 export const AUTH_COOKIE_PREFIX = 'bge_auth_';
+
+/**
+ * The request header better-auth reads a client's IP from
+ * (`advanced.ipAddress.ipAddressHeaders`). The api owns it: a handler ahead of
+ * better-auth's routes writes the address there, by the Nest throttler's rule,
+ * over any value the client sent (#640). better-auth keys its rate limits and
+ * a session's recorded address on it.
+ */
+export const AUTH_CLIENT_IP_HEADER = 'x-bge-client-ip';

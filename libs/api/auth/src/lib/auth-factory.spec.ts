@@ -3,9 +3,25 @@ import type { PrismaClient } from '@bge/database';
 import { ConfigService } from '@nestjs/config';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import type { User } from 'better-auth/types';
+import Keyv from 'keyv';
 import { authFactory, createUserCreatedHook } from './auth-factory';
+import { createAuthStorage } from './auth-storage';
+import { AUTH_CLIENT_IP_HEADER } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
 import { createSettingGates } from './setting-gates';
+
+/** The secret the instance signs cookies with. */
+const SECRET = 'a-unit-test-secret-of-at-least-32-characters';
+
+/** The configuration an instance needs to build, with email and password sign-in on. */
+const config = new ConfigService({
+  auth: {
+    url: 'http://localhost:33333',
+    secret: SECRET,
+    trustedOrigins: [],
+    useEmailPasswordAuth: true,
+  },
+});
 
 /** better-auth-shaped user, as the `user.create.after` hook receives it. */
 const makeAuthUser = (overrides: Partial<User & { isAnonymous?: boolean }> = {}): User =>
@@ -89,15 +105,6 @@ describe('createUserCreatedHook', () => {
  * which it is.
  */
 describe('the password routes authFactory serves', () => {
-  const config = new ConfigService({
-    auth: {
-      url: 'http://localhost:33333',
-      secret: 'a-unit-test-secret-of-at-least-32-characters',
-      trustedOrigins: [],
-      useEmailPasswordAuth: true,
-    },
-  });
-
   const resetsOff = createSettingGates({
     readSwitches: async () => ({ allowUserRegistration: true, allowPasswordResets: false, allowUsernameChange: true }),
     readUsername: async () => null,
@@ -131,5 +138,83 @@ describe('the password routes authFactory serves', () => {
       '/verify-password': 'allowed',
       '/reset-password/:token': 'allowed',
     });
+  });
+});
+
+/**
+ * better-auth's own rate limits run in its router, ahead of every hook, so
+ * these go through a real instance's handler (#640). Each sign-in is a wrong
+ * password against a database with no users, which better-auth answers with
+ * 401 after hashing the password, as it would for a registered user's wrong one.
+ */
+describe("authFactory's sign-in rate limit", () => {
+  /** Every lookup finds nothing. */
+  const noUsers = new Proxy(
+    {},
+    { get: () => new Proxy({}, { get: (_model, operation) => async () => (operation === 'findMany' ? [] : null) }) },
+  ) as PrismaClient;
+
+  /**
+   * An instance over an in-memory store, with the limiter on. better-auth
+   * turns it on only when NODE_ENV is production, which it reads once, at
+   * import. The instance reads the setting from its context on every request,
+   * so it is switched on there.
+   */
+  async function limitedAuth() {
+    const auth = authFactory(noUsers, config, createAuthStorage(new Keyv({ throwOnErrors: true })));
+    (await auth.$context).rateLimit.enabled = true;
+    return auth;
+  }
+
+  async function signIn(
+    auth: ReturnType<typeof authFactory>,
+    clientIp: string,
+    headers: Record<string, string> = {},
+  ): Promise<number> {
+    const response = await auth.handler(
+      new Request('http://localhost:33333/api/auth/sign-in/email', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', [AUTH_CLIENT_IP_HEADER]: clientIp, ...headers },
+        body: JSON.stringify({ email: 'nobody@example.com', password: 'not-the-password' }),
+      }),
+    );
+
+    return response.status;
+  }
+
+  it("refuses a client's fourth sign-in within ten seconds (#640)", async () => {
+    // Fails with the store's seconds-to-milliseconds conversion removed: each
+    // count would expire 10 milliseconds after it was written, before the
+    // next request finished hashing.
+    const auth = await limitedAuth();
+
+    const statuses = [];
+    for (let attempt = 0; attempt < 4; attempt++) {
+      statuses.push(await signIn(auth, '198.51.100.4'));
+    }
+
+    expect(statuses).toEqual([401, 401, 401, 429]);
+  });
+
+  it('counts each client on its own, by the address the api wrote (#640)', async () => {
+    const auth = await limitedAuth();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await signIn(auth, '198.51.100.4');
+    }
+
+    await expect(signIn(auth, '203.0.113.7')).resolves.toBe(401);
+  });
+
+  it('gives a client varying X-Forwarded-For no fresh count (#640)', async () => {
+    // better-auth reads X-Forwarded-For by default and believes a single
+    // entry, which a client reaching the api directly writes itself.
+    const auth = await limitedAuth();
+
+    const statuses = [];
+    for (let attempt = 0; attempt < 4; attempt++) {
+      statuses.push(await signIn(auth, '198.51.100.4', { 'x-forwarded-for': `192.0.2.${attempt + 1}` }));
+    }
+
+    expect(statuses).toEqual([401, 401, 401, 429]);
   });
 });

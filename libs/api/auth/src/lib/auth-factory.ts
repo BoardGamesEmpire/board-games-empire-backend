@@ -27,7 +27,7 @@ import type { I18nService } from 'nestjs-i18n';
 import process from 'node:process';
 import { ADMIN_PLUGIN_OPTIONS } from './access/admin-roles';
 import type { AuthStorage } from './auth-storage';
-import { AUTH_BASE_PATH, AUTH_COOKIE_PREFIX } from './constants';
+import { AUTH_BASE_PATH, AUTH_CLIENT_IP_HEADER, AUTH_COOKIE_PREFIX } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
 import { createSettingGates, settingGateDeps } from './setting-gates';
 
@@ -188,6 +188,11 @@ export function authFactory(
     advanced: {
       cookiePrefix: AUTH_COOKIE_PREFIX,
       disableOriginCheck: options.disableOriginCheck,
+      // Only the address the api wrote (#640). better-auth's default,
+      // X-Forwarded-For, is a header a client reaching the api directly can
+      // write, and without an address it believes every client shares one
+      // rate-limit bucket.
+      ipAddress: { ipAddressHeaders: [AUTH_CLIENT_IP_HEADER] },
     },
     basePath: AUTH_BASE_PATH,
     appName: 'BoardGamesEmpire',

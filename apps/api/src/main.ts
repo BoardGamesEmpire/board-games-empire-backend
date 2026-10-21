@@ -24,6 +24,7 @@ import { RedisIoAdapter } from './app/adapters/redis-io.adapter';
 import { AppModule } from './app/app.module';
 import { bootstrapCacheFlushPatterns } from './app/configuration/cache-flush';
 import redisConfig, { redisConfigValidationSchema } from './app/configuration/redis.config';
+import { createAuthClientIpHandler } from './app/lib/auth-client-ip';
 
 async function bootstrap() {
   const LOGGER_CONTEXT = 'Bootstrap';
@@ -187,7 +188,13 @@ async function bootstrap() {
   app.useWebSocketAdapter(redisAdapter);
 
   const server = app.getHttpAdapter().getInstance();
-  server.all(`/${globalPrefix}/auth/*any`, toNodeHandler(authInstance));
+  // better-auth reads a client's IP only from the header this handler writes,
+  // by the same rule and configuration as the Nest throttler (#640).
+  server.all(
+    `/${globalPrefix}/auth/*any`,
+    createAuthClientIpHandler(configService.getOrThrow<number>('throttle.trustedProxyHops')),
+    toNodeHandler(authInstance),
+  );
 
   registerShutdownHandlers(app, otel, bootstrapLogger);
 

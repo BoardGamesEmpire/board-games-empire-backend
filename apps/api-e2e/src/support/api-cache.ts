@@ -48,6 +48,23 @@ export async function apiCacheHas(logicalKey: string, env: NodeJS.ProcessEnv = p
 }
 
 /**
+ * How many milliseconds the key the api keeps `logicalKey` under has left to
+ * live, as Redis's PTTL reports it: `-2` when there is no such key, `-1` when
+ * it never expires. An exception to the black-box rule for the reason
+ * {@link apiCacheHas} is: no HTTP response says when a session will be
+ * dropped, and a session dropped early looks, until then, like one kept.
+ */
+export async function apiCacheTtlMs(logicalKey: string, env: NodeJS.ProcessEnv = process.env): Promise<number> {
+  const client = connectToHarnessRedis(env);
+
+  try {
+    return await client.pttl(apiCacheKey(logicalKey));
+  } finally {
+    await client.quit();
+  }
+}
+
+/**
  * The value the api's cache holds for `logicalKey`, exactly as stored, or
  * `null` when it holds none. {@link apiCacheWriteRaw} puts it back.
  */
