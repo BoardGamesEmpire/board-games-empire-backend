@@ -29,6 +29,7 @@ import process from 'node:process';
 import { ADMIN_PLUGIN_OPTIONS } from './access/admin-roles';
 import { AUTH_BASE_PATH, AUTH_COOKIE_PREFIX } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
+import { providerPictureOnly } from './provider-picture';
 import { createSettingGates, settingGateDeps } from './setting-gates';
 
 interface UserCreatedHookDeps {
@@ -223,7 +224,12 @@ export function authFactory(
     databaseHooks: {
       user: {
         create: {
-          before: settingGates.beforeUserCreate,
+          // The registration gate first: a refused sign-up writes nothing,
+          // so there is no picture to keep or drop.
+          before: async (user, context) => {
+            await settingGates.beforeUserCreate(user, context);
+            return providerPictureOnly(user, context);
+          },
           after: createUserCreatedHook({ eventEmitter, auditContext, systemActorScope }),
         },
         update: {
