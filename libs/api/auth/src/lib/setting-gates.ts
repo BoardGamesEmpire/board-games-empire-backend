@@ -203,19 +203,31 @@ export function settingGateDeps(prisma: PrismaClient, i18n?: I18nService<I18nTra
     readUsername: async (userId) =>
       (await prisma.user.findUnique({ where: { id: userId }, select: { username: true } }))?.username ?? null,
 
-    // Never throws: a catalog entry that cannot render would otherwise turn
-    // the refusal into a 500.
-    render: (key) => {
-      if (!i18n) {
-        return key;
-      }
+    render: fallbackLocaleRenderer(i18n, logger),
+  };
+}
 
-      try {
-        return i18n.translate(key, { lang: FALLBACK_LOCALE });
-      } catch (error) {
-        logger.error(`Could not render '${key}'`, error instanceof Error ? error.stack : error);
-        return key;
-      }
-    },
+/**
+ * Renders a catalog key in the fallback locale, for refusals on `/api/auth/*`,
+ * which runs ahead of Nest's i18n. Without an `I18nService`, as when the
+ * better-auth CLI builds the instance, it returns the key. Never throws: a
+ * catalog entry that cannot render would otherwise turn the refusal into a
+ * 500.
+ */
+export function fallbackLocaleRenderer(
+  i18n?: I18nService<I18nTranslations>,
+  logger = new Logger('AuthMessages'),
+): (key: I18nPath) => string {
+  return (key) => {
+    if (!i18n) {
+      return key;
+    }
+
+    try {
+      return i18n.translate(key, { lang: FALLBACK_LOCALE });
+    } catch (error) {
+      logger.error(`Could not render '${key}'`, error instanceof Error ? error.stack : error);
+      return key;
+    }
   };
 }

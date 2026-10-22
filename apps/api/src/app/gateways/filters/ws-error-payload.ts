@@ -69,14 +69,21 @@ function isMessage(message: unknown): message is string | string[] {
  * What a handshake middleware refuses a connection with. socket.io sends its
  * message, and the envelope as its `data`, to the client's `connect_error`,
  * and the client does not try to connect again on its own.
+ *
+ * `fields` are a structured exception's other body fields, such as its stable
+ * `code`, carried as {@link wsExceptionPayload} carries them on a frame. The
+ * envelope's own fields always come from the status and message.
  */
 export class WsConnectionRefusal extends Error {
-  readonly data: WsErrorPayload;
+  readonly data: WsStructuredErrorPayload;
 
-  constructor(statusCode: number, message: string) {
+  constructor(statusCode: number, message: string, fields: Readonly<Record<string, unknown>> = {}) {
     super(message);
     this.name = WsConnectionRefusal.name;
-    this.data = wsErrorPayload(statusCode, message);
+    this.data = {
+      ...Object.fromEntries(Object.entries(fields).filter(([field]) => !ENVELOPE_FIELDS.has(field))),
+      ...wsErrorPayload(statusCode, message),
+    };
   }
 }
 

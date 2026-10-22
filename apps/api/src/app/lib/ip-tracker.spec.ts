@@ -71,6 +71,25 @@ describe('createIpTracker', () => {
       expect(padded).toBe(honest);
     });
 
+    it('drops a port the proxy wrote after the address, so a client is one bucket across connections (#640)', async () => {
+      // Some proxies record `address:port`. Kept, each connection's source port
+      // was a bucket of its own here, and better-auth, which takes only a bare
+      // address, put every such client in one shared bucket.
+      const first = request({ peer: '10.0.0.9', forwardedFor: '198.51.100.4:51000' });
+      const second = request({ peer: '10.0.0.9', forwardedFor: '198.51.100.4:51001' });
+
+      expect(await track(first, context)).toBe('198.51.100.4');
+      expect(await track(second, context)).toBe('198.51.100.4');
+    });
+
+    it('drops the port from a bracketed IPv6 address, and leaves a bare one whole (#640)', async () => {
+      const bracketed = request({ peer: '10.0.0.9', forwardedFor: '[2001:db8::7]:51000' });
+      const bare = request({ peer: '10.0.0.9', forwardedFor: '2001:db8::7' });
+
+      expect(await track(bracketed, context)).toBe('2001:db8::7');
+      expect(await track(bare, context)).toBe('2001:db8::7');
+    });
+
     it('does NOT protect a request that skipped the proxy — the hop count is a topology claim', async () => {
       // Characterisation, not an endorsement. Right-anchored indexing defends
       // against a chain shorter than the hop count, not against one padded to

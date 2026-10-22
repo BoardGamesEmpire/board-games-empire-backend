@@ -3,6 +3,8 @@
  *
  * Used by:
  *   - `CacheModule` (via @keyv/valkey adapter)
+ *   - better-auth's storage (`createRedisAuthStorage` in `@bge/auth`), a
+ *     store of its own that raises failed calls (#640)
  *   - `RedisThrottlerStorage` (rate-limit counters, `bge:throttle:*`)
  *   - `GatewayConfigEventsModule` (pub/sub on the same logical database)
  *   - `HealthModule` (Redis health indicator)
