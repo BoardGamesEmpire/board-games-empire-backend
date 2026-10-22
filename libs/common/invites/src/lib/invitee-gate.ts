@@ -67,7 +67,11 @@ type GateSettings = (typeof GATE_SETTINGS)[GatedInviteType];
  *    It refuses in its own words. A blocked pair is never friends, nor friends
  *    of friends, so under either level the policy refuses them before the
  *    block is checked. Its words say no more than the pair's friendships
- *    already show both of them.
+ *    already show both of them. Under `FriendsOfFriends`, whether an invite
+ *    by id passes does tell the inviter whether the invitee shares a friend
+ *    with them, which the read rules show only where one of the two chose a
+ *    reach of `FriendsOfFriends`. A server that chooses the level accepts
+ *    that, and its setting says so (#496).
  * 2. A block between the two, whichever of them placed it, at every policy.
  * 3. The invitee's own preference, which can narrow the server's policy and
  *    never widen it, since both must pass.

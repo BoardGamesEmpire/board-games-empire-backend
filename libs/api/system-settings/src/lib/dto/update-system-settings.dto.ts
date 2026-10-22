@@ -139,7 +139,7 @@ export class UpdateSystemSettingsDto {
 
   @ApiPropertyOptional({
     description:
-      "Who may be invited to a household. Public: anyone. FriendsOfFriends: the inviter's friends and friends of friends, unless a block stands between them. Friends: only the inviter's friends. Under FriendsOfFriends and Friends, each is invited from their account, and every invite by email address is refused. A user's own preference can narrow this, never widen it.",
+      "Who may be invited to a household. Public: anyone. FriendsOfFriends: the inviter's friends and friends of friends, unless a block stands between them. Friends: only the inviter's friends. Under FriendsOfFriends and Friends, each is invited from their account, and every invite by email address is refused. Under FriendsOfFriends, whether an invite goes through shows the inviter whether that user shares a friend with them. A user's own preference can narrow this, never widen it.",
     enum: INVITEE_POLICIES,
   })
   @ValidateIf((_, value) => value !== undefined)
@@ -148,7 +148,7 @@ export class UpdateSystemSettingsDto {
 
   @ApiPropertyOptional({
     description:
-      "Who may be placed on an event by id, at its creation or later. Public: anyone. FriendsOfFriends: the inviter's friends and friends of friends, unless a block stands between them. Friends: only the inviter's friends. A user's own preference can narrow this, never widen it.",
+      "Who may be placed on an event by id, at its creation or later. Public: anyone. FriendsOfFriends: the inviter's friends and friends of friends, unless a block stands between them. Friends: only the inviter's friends. Under FriendsOfFriends, whether a placement goes through shows the inviter whether that user shares a friend with them. A user's own preference can narrow this, never widen it.",
     enum: INVITEE_POLICIES,
   })
   @ValidateIf((_, value) => value !== undefined)

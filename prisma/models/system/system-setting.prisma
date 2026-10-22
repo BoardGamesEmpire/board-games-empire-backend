@@ -31,8 +31,10 @@ model SystemSetting {
   /// Who may be invited to a household (#278). `Public`: anyone.
   /// `FriendsOfFriends`: the inviter's friends and friends of friends
   /// (#496), and `Friends`: the inviter's friends, each invited from their
-  /// account; under both, every invite by address is refused. The settings
-  /// PATCH accepts no other level.
+  /// account; under both, every invite by address is refused. Under
+  /// `FriendsOfFriends`, whether an invite by id passes shows the inviter
+  /// whether the invitee shares a friend with them. The settings PATCH
+  /// accepts no other level.
   householdInviteePolicy Reach @default(Public) @map("household_invitee_policy")
 
   /// Who may be invited to an event (#546), on the same terms as
