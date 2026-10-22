@@ -12,7 +12,8 @@ import type { GatewayLanguageEntry } from '@boardgamesempire/proto-gateway';
 import { status } from '@grpc/grpc-js';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
-import type { Observable } from 'rxjs';
+import { timeout, type Observable } from 'rxjs';
+import { SECTION_LIST_TIMEOUT_MS } from './constants/vocabulary-section.constants';
 import { VocabularySectionError } from './errors/vocabulary-section.error';
 import { firstAnswer } from './utils/first-answer';
 import { toStoredLanguageCodeFormat, toStoredPlatformType } from './utils/stored-enums';
@@ -48,7 +49,8 @@ export class VocabularySectionService {
 
   /**
    * Asks for the list `capability` names and links each entry. Throws a
-   * {@link VocabularySectionError} when the list call or the links fail.
+   * {@link VocabularySectionError} when the list call or the links fail,
+   * the call failing too when the DataGateway doesn't answer in time.
    * Once `signal` aborts, as when the DataGateway's connection is replaced,
    * it stops waiting and starts no further write, and throws the abort's
    * reason as it is: a closed connection isn't the section failing.
@@ -118,9 +120,10 @@ export class VocabularySectionService {
     return this.record(gatewayId, capability, { lastFailedAt: at, lastFailure: code });
   }
 
+  /** The list call's answer, dropping the call and failing it once {@link SECTION_LIST_TIMEOUT_MS} passes. */
   private async ask<T>(call: Observable<T>, signal: AbortSignal): Promise<T> {
     try {
-      return await firstAnswer(call, signal);
+      return await firstAnswer(call.pipe(timeout({ first: SECTION_LIST_TIMEOUT_MS })), signal);
     } catch (err) {
       signal.throwIfAborted();
       throw new VocabularySectionError(listFailure(err), err);

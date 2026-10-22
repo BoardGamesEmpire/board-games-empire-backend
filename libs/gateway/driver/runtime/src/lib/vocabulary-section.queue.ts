@@ -19,7 +19,7 @@ const errorMessage = (err: unknown): string => (err instanceof Error ? err.messa
 /**
  * Queues a DataGateway's list jobs after its interview stored its answers
  * (#718): one per list it declares and no admin switched off, the rule
- * routing applies, a minute apart, languages first.
+ * routing applies, queued to start a minute apart, languages first.
  *
  * A job's id is its DataGateway and list, so a job already waiting or
  * running isn't queued twice. The coordinator and the gateway worker both

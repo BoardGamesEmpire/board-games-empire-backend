@@ -18,11 +18,21 @@ export const SECTION_ORDER: readonly DataGatewayCapability[] = [
 ];
 
 /**
- * How far apart a DataGateway's list jobs run, so its upstream isn't asked
- * for every list at once. Only the jobs queued count: a list switched off
- * leaves no gap.
+ * How far apart a DataGateway's list jobs are queued to start, so its
+ * upstream isn't asked for every list at once. It sets the earliest start
+ * only: jobs that wait out their delays, as behind a backlog, may run back
+ * to back. Only the jobs queued count: a list switched off leaves no gap.
  */
 export const SECTION_SPACING_MS = 60 * 1000;
+
+/**
+ * How long a list job waits for the DataGateway to answer before the try
+ * fails. The gateway worker runs one list job at a time, so a DataGateway
+ * that never answers would otherwise hold up every other's lists. A
+ * placeholder until #722 sets the deadlines on DataGateway calls; a healthy
+ * DataGateway answers in seconds.
+ */
+export const SECTION_LIST_TIMEOUT_MS = 2 * 60 * 1000;
 
 /** Tries in all, before a section's failure is recorded. */
 export const SECTION_ATTEMPTS = 3;

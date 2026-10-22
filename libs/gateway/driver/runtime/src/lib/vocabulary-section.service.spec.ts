@@ -4,7 +4,8 @@ import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testin
 import { VocabularyLinkService } from '@bge/vocabulary';
 import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
 import * as proto from '@boardgamesempire/proto-gateway';
-import { NEVER } from 'rxjs';
+import { NEVER, Observable } from 'rxjs';
+import { SECTION_LIST_TIMEOUT_MS } from './constants/vocabulary-section.constants';
 import { VocabularySectionError } from './errors/vocabulary-section.error';
 import { VocabularySectionService } from './vocabulary-section.service';
 
@@ -155,6 +156,30 @@ describe('VocabularySectionService', () => {
         DataGatewaySectionFailure.ListFailed,
       );
       expect(languageLinks.interview).not.toHaveBeenCalled();
+    });
+
+    it('fails ListFailed, and drops the call, when the DataGateway doesn’t answer in time', async () => {
+      // A list job holds the queue's only slot, so a DataGateway that never
+      // answers would hold up every other's lists (#722 sets the real deadlines).
+      jest.useFakeTimers();
+      try {
+        let dropped = false;
+        const silent = new Observable<never>(() => () => {
+          dropped = true;
+        });
+        const driver = Object.assign(new InMemoryGatewayDriver(), { listCategories: () => silent });
+        const failure = failureOf(service.load(GW, ListCategories, driver, signal));
+
+        await jest.advanceTimersByTimeAsync(SECTION_LIST_TIMEOUT_MS - 1);
+        expect(dropped).toBe(false);
+
+        await jest.advanceTimersByTimeAsync(1);
+        await expect(failure).resolves.toBe(DataGatewaySectionFailure.ListFailed);
+        expect(dropped).toBe(true);
+        expect(vocabulary.load).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('fails LinkFailed when writing the links throws', async () => {
