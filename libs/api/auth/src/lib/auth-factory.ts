@@ -29,6 +29,7 @@ import { ADMIN_PLUGIN_OPTIONS } from './access/admin-roles';
 import type { AuthStorage } from './auth-storage';
 import { AUTH_BASE_PATH, AUTH_CLIENT_IP_HEADER, AUTH_COOKIE_PREFIX } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
+import { providerPictureOnly } from './provider-picture';
 import { createSettingGates, settingGateDeps } from './setting-gates';
 import { createSignOutHook } from './sign-out-hook';
 
@@ -233,7 +234,12 @@ export function authFactory(
     databaseHooks: {
       user: {
         create: {
-          before: settingGates.beforeUserCreate,
+          // The registration gate first: a refused sign-up writes nothing,
+          // so there is no picture to keep or drop.
+          before: async (user, context) => {
+            await settingGates.beforeUserCreate(user, context);
+            return providerPictureOnly(user, context);
+          },
           after: createUserCreatedHook({ eventEmitter, auditContext, systemActorScope }),
         },
         update: {

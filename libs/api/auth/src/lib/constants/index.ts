@@ -40,3 +40,10 @@ export const AUTH_COOKIE_PREFIX = 'bge_auth_';
  * a session's recorded address on it.
  */
 export const AUTH_CLIENT_IP_HEADER = 'x-bge-client-ip';
+
+/**
+ * The longest display name a profile holds, in characters. Provisioning cuts
+ * a starting name to it and the profile edit refuses a longer one, so a client
+ * can always send back the name it was served (#819).
+ */
+export const DISPLAY_NAME_MAX_LENGTH = 64;

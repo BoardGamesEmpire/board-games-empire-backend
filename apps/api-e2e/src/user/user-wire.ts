@@ -1,8 +1,8 @@
 import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription } from '../support/wire';
 
 /**
- * Fail-loud parser for `GET /api/users/search`, on the pattern
- * `household/household-wire.ts` sets.
+ * Fail-loud parsers for `GET /api/users/search` and the profile routes, on
+ * the pattern `household/household-wire.ts` sets.
  */
 
 export interface SearchedUserWire {
@@ -42,4 +42,24 @@ export function userSearchPage(response: HttpResponseLike, request: RequestDescr
   }
 
   return { users: rows, total: pagination['total'] };
+}
+
+/** A profile as the caller is served it. The tests check the keys beyond the identity themselves. */
+export interface UserProfileWire extends Readonly<Record<string, unknown>> {
+  readonly userId: string;
+  readonly username: string;
+}
+
+/** `{ profile: { userId, username, ... } }`, from the profile routes (#819). */
+export function userProfile(response: HttpResponseLike, request: RequestDescription): UserProfileWire {
+  if (!isRecord(response.body)) {
+    return fail('the body is not an object', request, response);
+  }
+
+  const { profile } = response.body;
+  if (!isRecord(profile) || typeof profile['userId'] !== 'string' || typeof profile['username'] !== 'string') {
+    return fail("it carried no 'profile' object with a string 'userId' and 'username'", request, response);
+  }
+
+  return profile as UserProfileWire;
 }
