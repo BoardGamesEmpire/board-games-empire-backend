@@ -1,8 +1,8 @@
-import { DatabaseService, PlatformType, VocabularyLinkOrigin, VocabularyLinkStatus } from '@bge/database';
+import { DatabaseService, PlatformType } from '@bge/database';
 import { LanguageLinkService } from '@bge/language';
+import { VocabularyLinkService } from '@bge/vocabulary';
 import type { GameData, GameReleaseData, LanguageData, PlatformData } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
-import { toSlug } from '../utils/slug';
 import { toEditionKey, toPlatformType, toReleaseDate, toReleaseRegion, toReleaseStatus } from './helpers';
 import { ReleaseGraphResolver } from './release-graph.resolver';
 
@@ -23,61 +23,21 @@ export class PlatformUpsertService {
     private readonly db: DatabaseService,
     private readonly languageLinks: LanguageLinkService,
     private readonly releaseGraphResolver: ReleaseGraphResolver,
+    private readonly vocabulary: VocabularyLinkService,
   ) {}
 
   /**
-   * Resolves a canonical Platform record for the given proto PlatformData,
-   * creating it alongside its gateway link if not already present.
-   * Deduplicates on gatewayId + externalId.
+   * The Platform record the DataGateway's platform resolves to, through the
+   * shared vocabulary resolver (#718): its link, else a platform of the same
+   * slug, else a new one, or null while its link is Pending or Ignored.
    */
-  async upsertPlatform(data: PlatformData, gatewayId: string): Promise<string> {
-    const existing = await this.db.platformGatewayLink.findUnique({
-      where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
-      select: { platformId: true },
-    });
-
-    if (existing?.platformId) {
-      return existing.platformId;
-    }
-
-    // An import's link is Resolved, and keeps what the DataGateway sent (#718).
-    const link = {
-      gatewayId,
+  resolvePlatform(data: PlatformData, gatewayId: string): Promise<string | null> {
+    return this.vocabulary.resolveForImport('platform', gatewayId, {
       externalId: data.externalId,
-      status: VocabularyLinkStatus.Resolved,
-      origin: VocabularyLinkOrigin.Import,
-      suppliedName: data.name,
-      suppliedAbbreviation: data.abbreviation ?? null,
-      suppliedPlatformType: toPlatformType(data.platformType),
-    };
-    const slug = toSlug(data.name);
-    this.logger.debug(`Upserting platform ${data.name} (${gatewayId}:${data.externalId})`);
-
-    // Platform may already exist under a different gateway link (e.g. Steam PC
-    // and IGDB PC are the same platform — first-importer-wins on slug).
-    const platform = await this.db.platform.upsert({
-      where: { slug },
-      create: {
-        name: data.name,
-        slug,
-        abbreviation: data.abbreviation,
-        platformType: toPlatformType(data.platformType),
-        gatewayLinks: {
-          create: link,
-        },
-      },
-      update: {
-        gatewayLinks: {
-          connectOrCreate: {
-            where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
-            create: link,
-          },
-        },
-      },
-      select: { id: true },
+      name: data.name,
+      abbreviation: data.abbreviation,
+      platformType: toPlatformType(data.platformType),
     });
-
-    return platform.id;
   }
 
   /**
@@ -101,7 +61,16 @@ export class PlatformUpsertService {
     const map: PlatformGameMap = new Map();
 
     for (const platformData of platforms) {
-      const platformId = await this.upsertPlatform(platformData, gatewayId);
+      const platformId = await this.resolvePlatform(platformData, gatewayId);
+      if (!platformId) {
+        // Its link waits for review or was ignored, so the game has no
+        // PlatformGame on it until a re-import after the link is settled.
+        this.logger.debug(
+          `Leaving out platform ${platformData.externalId} of DataGateway ${gatewayId}: its link isn't Resolved`,
+        );
+        continue;
+      }
+
       const platformType = toPlatformType(platformData.platformType);
       const capabilities = this.inferCapabilities(platformType, gameData);
 
@@ -224,7 +193,14 @@ export class PlatformUpsertService {
         continue;
       }
 
-      const platformId = await this.upsertPlatform(release.platform, gatewayId);
+      const platformId = await this.resolvePlatform(release.platform, gatewayId);
+      if (!platformId) {
+        this.logger.debug(
+          `Skipping release editionKey=${release.externalId}: the link to platform ${release.platform.externalId} isn't Resolved`,
+        );
+        continue;
+      }
+
       const platformGameId = platformGameMap.get(platformId);
 
       if (!platformGameId) {
