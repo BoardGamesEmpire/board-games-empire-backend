@@ -28,8 +28,8 @@ The web client's issues live in `BoardGamesEmpire/board-games-empire-client`. Re
 
 When set to `yes`, PRs run through the same labels and states as issues, using the `gh pr` equivalents:
 
-- **Read a PR**: `gh pr view <number> --comments` and `gh pr diff <number>` for the diff.
-- **List external PRs for triage**: `gh pr list` has no author-association field, so use the REST API: `gh api 'repos/{owner}/{repo}/pulls?state=open' --paginate --jq '.[] | select(.author_association | IN("OWNER","MEMBER","COLLABORATOR") | not) | {number, title, author: .user.login, author_association}'`. Excluding the three internal associations keeps every external one (`CONTRIBUTOR`, `FIRST_TIMER`, `FIRST_TIME_CONTRIBUTOR`, `NONE`, …). Read each candidate's body and comments with `gh pr view <number> --comments`.
+- **Read a PR**: `gh pr view <number> --json title,body,labels,comments --jq '{title, body, labels: [.labels[].name], comments: [.comments[] | {author: .author.login, createdAt, body}]}'`, and `gh pr diff <number>` for the diff. As with issues, `--comments` alone drops the body and labels outside a terminal.
+- **List external PRs for triage**: `gh pr list` has no author-association field, so use the REST API: `gh api 'repos/{owner}/{repo}/pulls?state=open' --paginate --jq '.[] | select(.author_association | IN("OWNER","MEMBER","COLLABORATOR") | not) | {number, title, author: .user.login, author_association}'`. Excluding the three internal associations keeps every external one (`CONTRIBUTOR`, `FIRST_TIMER`, `FIRST_TIME_CONTRIBUTOR`, `NONE`, …). Read each candidate with the **Read a PR** command.
 - **Comment / label / close**: `gh pr comment`, `gh pr edit --add-label`/`--remove-label`, `gh pr close`.
 
 GitHub shares one number space across issues and PRs, so a bare `#42` may be either: resolve with `gh pr view 42` and fall back to `gh issue view 42`.
