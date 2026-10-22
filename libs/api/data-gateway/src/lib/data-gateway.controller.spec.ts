@@ -1,5 +1,5 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { Action, AuthType, DataGateway, DataGatewayInterviewFailure } from '@bge/database';
+import { Action, AuthType, DataGatewayInterviewFailure } from '@bge/database';
 import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import { ListScopeNotComposedError } from '@bge/shared';
@@ -9,7 +9,7 @@ import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom, Observable, of, throwError } from 'rxjs';
 import { DataGatewayController } from './data-gateway.controller';
 import { DataGatewayService } from './data-gateway.service';
-import { toDataGatewayView } from './data-gateway.view';
+import { toDataGatewayView, type DataGatewayWithSections } from './data-gateway.view';
 import { CreateDataGatewayDto } from './dto';
 
 describe('DataGatewayController', () => {
@@ -409,7 +409,7 @@ describe('DataGatewayController', () => {
   });
 });
 
-function makeGateway(overrides: Partial<DataGateway> = {}): DataGateway {
+function makeGateway(overrides: Partial<DataGatewayWithSections> = {}): DataGatewayWithSections {
   return {
     id: 'gw-1',
     name: 'Test Gateway',
@@ -446,6 +446,7 @@ function makeGateway(overrides: Partial<DataGateway> = {}): DataGateway {
     deletedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
+    sections: [],
     ...overrides,
   };
 }

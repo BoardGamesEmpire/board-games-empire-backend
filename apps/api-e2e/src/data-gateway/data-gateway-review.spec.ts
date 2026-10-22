@@ -1,5 +1,7 @@
 import {
   AuthType,
+  DataGatewayCapability,
+  DataGatewaySectionFailure,
   LanguageCodeFormat,
   LanguageLinkOrigin,
   LanguageLinkStatus,
@@ -121,6 +123,37 @@ describe('DataGateway review', () => {
 
       const deleted = await request(baseUrl).delete(`${GATEWAYS}/${id}`).set(admin.headers).expect(200);
       expectRow(deleted.body.dataGateway);
+    });
+
+    // Each list job records its outcome on its own row, which the DataGateway's
+    // row carries beside its interview (#718).
+    it('reports each section’s last load and current failure', async () => {
+      const at = new Date('2026-10-21T12:00:00.000Z');
+      const gateway = await seedGateway({
+        capabilities: [DataGatewayCapability.ListLanguages, DataGatewayCapability.ListPlatforms],
+      });
+      await db.client.dataGatewaySection.createMany({
+        data: [
+          {
+            gatewayId: gateway.id,
+            capability: DataGatewayCapability.ListPlatforms,
+            lastFailedAt: at,
+            lastFailure: DataGatewaySectionFailure.ListFailed,
+          },
+          { gatewayId: gateway.id, capability: DataGatewayCapability.ListLanguages, lastLoadedAt: at },
+        ],
+      });
+
+      const { body } = await request(baseUrl).get(`${GATEWAYS}/${gateway.id}`).set(admin.headers).expect(200);
+
+      expect(body.dataGateway.sections).toEqual([
+        { capability: 'ListLanguages', lastLoadedAt: at.toISOString(), failure: null },
+        {
+          capability: 'ListPlatforms',
+          lastLoadedAt: null,
+          failure: { code: 'ListFailed', at: at.toISOString() },
+        },
+      ]);
     });
   });
 
