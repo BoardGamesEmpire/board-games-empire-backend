@@ -145,6 +145,50 @@ describe('game collection authorization', () => {
       expect(ofHiding.collections.map((entry) => entry.id)).toEqual([hiding.publicEntry.id]);
     });
 
+    // The collection's friends-of-friends rule keeps the owner's
+    // `showCollectionToFriends`, so a wider circle never sees what the narrower
+    // one can't (#496). Each owner's `Friends` entry is moved to
+    // `FriendsOfFriends` once the viewer has been shown it is left out.
+    it('serves a friend of a friend the FriendsOfFriends entry, and not when the owner’s preferences hide it from friends', async () => {
+      const [showingOwner, hidingOwner, sharedFriend, viewer] = await Promise.all(
+        Array.from({ length: 4 }, () => actors.user()),
+      );
+
+      await befriend(db.client, showingOwner, sharedFriend);
+      await befriend(db.client, hidingOwner, sharedFriend);
+      await befriend(db.client, viewer, sharedFriend);
+      await db.client.userPreferences.update({
+        where: { userId: hidingOwner.user.id },
+        data: { showCollectionToFriends: false },
+      });
+      const showing = await arrangeCollection(showingOwner.user.id);
+      const hiding = await arrangeCollection(hidingOwner.user.id);
+
+      const listedFor = async (ownerId: string, who: string) =>
+        listCollectionsEnvelope(
+          await listUserCollection(viewer, ownerId).expect(200),
+          `GET /api/users/:userId/game-collections as a friend of a friend, ${who}`,
+        ).collections.map((entry) => entry.id);
+
+      // A `Friends` entry is the owner's friends' alone.
+      expect(await listedFor(showingOwner.user.id, 'before')).toEqual([showing.publicEntry.id]);
+
+      for (const { friendsEntry } of [showing, hiding]) {
+        await db.client.gameCollection.update({
+          where: { id: friendsEntry.id },
+          data: { reach: Reach.FriendsOfFriends },
+        });
+      }
+
+      expect((await listedFor(showingOwner.user.id, 'owner showing it')).sort()).toEqual(
+        [showing.publicEntry.id, showing.friendsEntry.id].sort(),
+      );
+      await readEntry(viewer, showing.friendsEntry.id).expect(200);
+
+      expect(await listedFor(hidingOwner.user.id, 'owner hiding it from friends')).toEqual([hiding.publicEntry.id]);
+      await readEntry(viewer, hiding.friendsEntry.id).expect(404);
+    });
+
     it('refuses a request with no session, where it used to serve the Public entries', async () => {
       const owner = await actors.user();
       await arrangeCollection(owner.user.id);

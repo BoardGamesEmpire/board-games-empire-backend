@@ -18,7 +18,8 @@ export class UserProfileService {
    * A user's profile, as the caller may see it (#819).
    *
    * Read through the caller's `UserProfile` read conditions: their own
-   * profile, a friend's that reaches friends, and every `Public` one, or every
+   * profile, a friend's that reaches friends, a friend of a friend's that
+   * reaches friends of friends (#496), and every `Public` one, or every
    * profile for staff. A profile outside them answers 404, the same as a user
    * with no profile, as an event's read does, so the answer never tells the
    * caller that a profile exists and is shut to them.
