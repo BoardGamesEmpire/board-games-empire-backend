@@ -1,5 +1,6 @@
 import {
   Action,
+  friendOfFriendOf,
   FriendshipStatus,
   InviteStatus,
   InviteType,
@@ -521,6 +522,11 @@ describe('HouseholdInviteService', () => {
         db.userPreferences.findFirst.mockImplementation(((args: { where: { user: unknown } }) =>
           Promise.resolve(namesInvitee(args.where.user) ? { allowHouseholdInvitesFrom } : null)) as never);
 
+      /** Whether the invitee is a friend of a friend of the inviter, as the gate counts it (#496). */
+      const friendOfFriend = (yes: boolean) =>
+        db.user.count.mockImplementation(((args: { where: { AND: [unknown, unknown] } }) =>
+          Promise.resolve(yes && namesInvitee(args.where.AND[0]) ? 1 : 0)) as never);
+
       describe('the server policy', () => {
         it('refuses a non-friend by id under Friends with 403, and writes nothing', async () => {
           serverPolicy(Reach.Friends);
@@ -553,17 +559,100 @@ describe('HouseholdInviteService', () => {
           expect(createdWith()).toMatchObject({ inviteeId: 'user-2', withheld: false });
         });
 
-        it('refuses every invite by address under Friends, before reading anything about it', async () => {
-          serverPolicy(Reach.Friends);
+        // A friend's address passing where any other failed would let the
+        // inviter test which addresses belong to their friends, and under
+        // FriendsOfFriends to their friends of friends (#496).
+        it.each([Reach.Friends, Reach.FriendsOfFriends])(
+          'refuses every invite by address under %s, before reading anything about it',
+          async (level) => {
+            serverPolicy(level);
+            inviterAddress('owner@example.test');
+
+            await expect(service.createInvite('hh-1', byAddress())).rejects.toBeInstanceOf(ForbiddenException);
+
+            expect(db.user.findUnique.mock.calls).toEqual([[{ where: { id: 'owner-1' }, select: { email: true } }]]);
+            expect(db.friendship.findFirst).not.toHaveBeenCalled();
+            expect(db.userPreferences.findFirst).not.toHaveBeenCalled();
+            expect(db.user.count).not.toHaveBeenCalled();
+            expect(invites.createWithin).not.toHaveBeenCalled();
+          },
+        );
+
+        it('lets a friend of a friend be invited by id under FriendsOfFriends', async () => {
+          serverPolicy(Reach.FriendsOfFriends);
+          friendship(null);
+          friendOfFriend(true);
+          userById();
+
+          await service.createInvite('hh-1', byId());
+
+          expect(createdWith()).toMatchObject({ inviteeId: 'user-2', withheld: false });
+          // The same definition the read rules use, bound to the inviter.
+          expect(db.user.count).toHaveBeenCalledWith({
+            where: { AND: [{ id: 'user-2' }, friendOfFriendOf('owner-1')] },
+          });
+        });
+
+        // Told "only your friends", a refused inviter would be told wrong under
+        // FriendsOfFriends, which lets in their friends of friends too (#496).
+        it.each([
+          [Reach.Friends, 'errors.household.invitee_friends_only'],
+          [Reach.FriendsOfFriends, 'errors.household.invitee_friends_of_friends_only'],
+        ])('refuses under %s, by id and by address, in words that say who it lets in', async (level, key) => {
+          serverPolicy(level);
+          friendship(null);
+          friendOfFriend(false);
+          const refusalOf = (dto: CreateHouseholdInviteDto) =>
+            service.createInvite('hh-1', dto).catch((reason: unknown) => reason);
+
+          userById();
+          const byIdError = await refusalOf(byId());
           inviterAddress('owner@example.test');
+          const byAddressError = await refusalOf(byAddress());
 
-          await expect(service.createInvite('hh-1', byAddress())).rejects.toBeInstanceOf(ForbiddenException);
+          for (const error of [byIdError, byAddressError]) {
+            expect(error).toBeInstanceOf(ForbiddenException);
+            expect((error as ForbiddenException).message).toContain(key);
+          }
+        });
 
-          // A friend's address passing where any other failed would let the
-          // inviter test which addresses belong to their friends.
-          expect(db.user.findUnique.mock.calls).toEqual([[{ where: { id: 'owner-1' }, select: { email: true } }]]);
-          expect(db.friendship.findFirst).not.toHaveBeenCalled();
-          expect(db.userPreferences.findFirst).not.toHaveBeenCalled();
+        it('refuses someone no friend links by id under FriendsOfFriends, and writes nothing', async () => {
+          serverPolicy(Reach.FriendsOfFriends);
+          friendship(null);
+          friendOfFriend(false);
+          userById();
+
+          await expect(service.createInvite('hh-1', byId())).rejects.toBeInstanceOf(ForbiddenException);
+
+          expect(invites.createWithin).not.toHaveBeenCalled();
+        });
+
+        it('lets a direct friend in under FriendsOfFriends without asking about friends of friends', async () => {
+          serverPolicy(Reach.FriendsOfFriends);
+          friendship(FriendshipStatus.Accepted);
+          preference(Reach.Public);
+          userById();
+
+          await service.createInvite('hh-1', byId());
+
+          expect(invites.createWithin).toHaveBeenCalledTimes(1);
+          expect(db.user.count).not.toHaveBeenCalled();
+        });
+
+        // A friend they share links them, but the block between them stands
+        // (#496). A blocked pair is no friends of friends, so the policy refuses
+        // them in its own words, as `Friends` refuses a blocked pair. Both of
+        // the pair already see the block among their friendships.
+        it('refuses a blocked pair under FriendsOfFriends, whatever friends they share, in the policy’s words', async () => {
+          serverPolicy(Reach.FriendsOfFriends);
+          friendship(FriendshipStatus.Blocked);
+          friendOfFriend(true);
+          userById();
+
+          const error = await service.createInvite('hh-1', byId()).catch((reason: unknown) => reason);
+
+          expect(error).toBeInstanceOf(ForbiddenException);
+          expect((error as ForbiddenException).message).toContain('errors.household.invitee_friends_of_friends_only');
           expect(invites.createWithin).not.toHaveBeenCalled();
         });
 
@@ -590,21 +679,17 @@ describe('HouseholdInviteService', () => {
           expect(invites.createWithin).toHaveBeenCalledTimes(1);
         });
 
-        // FriendsOfFriends reads as Friends until #496 defines the second
-        // degree, and Private as nobody.
-        it.each([Reach.FriendsOfFriends, Reach.Private])(
-          'fails closed on %s, a level the PATCH refuses',
-          async (level) => {
-            serverPolicy(level);
-            friendship(null);
-            userById();
+        // Private lets nobody in, should a write that skips the PATCH store it.
+        it.each([Reach.Private])('fails closed on %s, a level the PATCH refuses', async (level) => {
+          serverPolicy(level);
+          friendship(null);
+          userById();
 
-            await expect(service.createInvite('hh-1', byId())).rejects.toBeInstanceOf(ForbiddenException);
+          await expect(service.createInvite('hh-1', byId())).rejects.toBeInstanceOf(ForbiddenException);
 
-            inviterAddress('owner@example.test');
-            await expect(service.createInvite('hh-1', byAddress())).rejects.toBeInstanceOf(ForbiddenException);
-          },
-        );
+          inviterAddress('owner@example.test');
+          await expect(service.createInvite('hh-1', byAddress())).rejects.toBeInstanceOf(ForbiddenException);
+        });
       });
 
       describe('by id, a block and the invitee’s preference', () => {
@@ -656,6 +741,40 @@ describe('HouseholdInviteService', () => {
           expect(invites.createWithin).toHaveBeenCalledTimes(2);
         });
 
+        it('honours a FriendsOfFriends preference: by id it admits a friend of a friend and refuses anyone else', async () => {
+          friendship(null);
+          preference(Reach.FriendsOfFriends);
+
+          friendOfFriend(true);
+          await service.createInvite('hh-1', byId());
+          expect(invites.createWithin).toHaveBeenCalledTimes(1);
+
+          friendOfFriend(false);
+          await refusal(byId());
+          expect(invites.createWithin).toHaveBeenCalledTimes(1);
+        });
+
+        it('asks about friends of friends by id only when a level names them', async () => {
+          friendship(null);
+          preference(Reach.Public);
+
+          await service.createInvite('hh-1', byId());
+
+          expect(db.user.count).not.toHaveBeenCalled();
+        });
+
+        it('asks about friends of friends by id once, when both the policy and the preference name them', async () => {
+          serverPolicy(Reach.FriendsOfFriends);
+          friendship(null);
+          preference(Reach.FriendsOfFriends);
+          friendOfFriend(true);
+
+          await service.createInvite('hh-1', byId());
+
+          expect(invites.createWithin).toHaveBeenCalledTimes(1);
+          expect(db.user.count).toHaveBeenCalledTimes(1);
+        });
+
         it('answers a block and a preference alike, so the inviter cannot tell which applied', async () => {
           friendship(FriendshipStatus.Blocked);
           const blocked = await refusal(byId());
@@ -698,6 +817,13 @@ describe('HouseholdInviteService', () => {
           ['a block between the pair', () => friendship(FriendshipStatus.Blocked)],
           ['a Friends preference, to a non-friend', () => preference(Reach.Friends)],
           ['a Private preference', () => preference(Reach.Private)],
+          [
+            'a FriendsOfFriends preference, to someone no friend links',
+            () => {
+              preference(Reach.FriendsOfFriends);
+              friendOfFriend(false);
+            },
+          ],
         ])('stores the invite withheld for %s, and answers as it answers any other', async (_label, arrange) => {
           arrange();
 
@@ -716,7 +842,12 @@ describe('HouseholdInviteService', () => {
           preference(Reach.Friends);
           await service.createInvite('hh-1', byAddress());
 
-          expect(invites.createWithin.mock.calls.map(([, params]) => params.withheld)).toEqual([false, false]);
+          friendship(null);
+          preference(Reach.FriendsOfFriends);
+          friendOfFriend(true);
+          await service.createInvite('hh-1', byAddress());
+
+          expect(invites.createWithin.mock.calls.map(([, params]) => params.withheld)).toEqual([false, false, false]);
         });
 
         // How long the create takes must say no more than its answer does.
@@ -724,6 +855,7 @@ describe('HouseholdInviteService', () => {
           ['no account holds the address', 'nobody@example.test', () => undefined],
           ['its holder lets the inviter in', 'sam@example.test', () => undefined],
           ['its holder blocks the inviter', 'sam@example.test', () => friendship(FriendshipStatus.Blocked)],
+          ['its holder admits friends of friends only', 'sam@example.test', () => preference(Reach.FriendsOfFriends)],
         ])('makes the same reads when %s', async (_label, inviteeEmail, arrange) => {
           arrange();
 
@@ -733,6 +865,9 @@ describe('HouseholdInviteService', () => {
           expect(db.user.findUnique).toHaveBeenCalledTimes(1);
           expect(db.friendship.findFirst).toHaveBeenCalledTimes(1);
           expect(db.userPreferences.findFirst).toHaveBeenCalledTimes(1);
+          // Asked whatever the preference, so a FriendsOfFriends one costs no
+          // read the others don't (#496).
+          expect(db.user.count).toHaveBeenCalledTimes(1);
         });
       });
     });

@@ -28,9 +28,11 @@ model SystemSetting {
   /// Pending links for admin review instead of being auto-added.
   reviewGatewayLanguages Boolean @default(false) @map("review_gateway_languages")
 
-  /// Who may be invited to a household (#278). `Public`: anyone. `Friends`:
-  /// the inviter's friends, invited from their account; every invite by
-  /// address is refused. The settings PATCH accepts no other level.
+  /// Who may be invited to a household (#278). `Public`: anyone.
+  /// `FriendsOfFriends`: the inviter's friends and friends of friends
+  /// (#496), and `Friends`: the inviter's friends, each invited from their
+  /// account; under both, every invite by address is refused. The settings
+  /// PATCH accepts no other level.
   householdInviteePolicy Reach @default(Public) @map("household_invitee_policy")
 
   /// Who may be invited to an event (#546), on the same terms as
