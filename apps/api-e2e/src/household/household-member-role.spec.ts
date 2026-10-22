@@ -11,12 +11,12 @@ import { createMemberClient, membersPath } from './household-request';
  * `PATCH …/members/:memberId/role` is the only path that moves an existing
  * member between the household admin, member and guest roles (#169; the
  * household README lists every path). What a household admin may do on it is
- * driven in `household-admin-role.spec.ts` (#168); staff in
- * `permissions/staff-grant-seeds.spec.ts`; races and deleted households in
- * `member-ownership-races.spec.ts`, `household-lifecycle.spec.ts` and
- * `role-transition-tombstone.spec.ts`. This suite adds the refusals and the
- * new role taking effect, which a unit spec with a mocked database can only
- * assert as calls.
+ * driven in `household-admin-role.spec.ts` (#168); staff changing a foreign
+ * member's role in `permissions/staff-grant-seeds.spec.ts`; races and deleted
+ * households in `member-ownership-races.spec.ts`, `household-lifecycle.spec.ts`
+ * and `role-transition-tombstone.spec.ts`. This suite adds the refusals and the
+ * new role taking effect, up and down, which a unit spec with a mocked
+ * database can only assert as calls.
  *
  * Each refusal is told apart by its message, since four of them answer 400
  * and two answer 403, and is checked against the database so a refusal that
@@ -112,16 +112,19 @@ describe('changing a household role (#760)', () => {
       await expect(roleOf(adminMemberId)).resolves.toBe(SystemRole.HouseholdAdmin);
     });
 
-    it("refuses a household owner another household owner's role, with 400, and leaves them household owner", async () => {
-      // Every owner change goes through transfer ownership (#158). A second
-      // owner can only come from the fixture: no route makes one.
-      const { householdId, owner, others } = await household(SystemRole.HouseholdOwner);
-      const [coOwner] = others;
+    it("refuses staff a household owner's role, with 400, and leaves them household owner", async () => {
+      // Every owner change goes through transfer ownership (#158). Only staff
+      // reach this check, since `manage:household_member:administer` carries
+      // no condition and their scoped read finds the household owner. A
+      // household owner asking about themselves is refused as a self change
+      // first, and a household admin's manage stops at the member and guest
+      // roles (#168).
+      const [{ householdId, ownerMemberId }, staff] = await Promise.all([household(), actors.admin()]);
 
-      const response = await changeRole(owner, householdId, coOwner.memberId, SystemRole.HouseholdMember).expect(400);
+      const response = await changeRole(staff, householdId, ownerMemberId, SystemRole.HouseholdMember).expect(400);
 
       expect(messageOf(response)).toBe(OWNER_REFUSAL);
-      await expect(roleOf(coOwner.memberId)).resolves.toBe(SystemRole.HouseholdOwner);
+      await expect(roleOf(ownerMemberId)).resolves.toBe(SystemRole.HouseholdOwner);
     });
 
     it('refuses the household owner role in the body, with 400 from validation, and leaves the role as it was', async () => {
@@ -152,13 +155,33 @@ describe('changing a household role (#760)', () => {
   });
 
   describe('taking effect', () => {
+    it('answers someone promoted to household admin by that role on their first request after the change', async () => {
+      // Their first request caches the member role's permissions, which hold
+      // no `manage` on memberships. The route evicts them after the change
+      // commits, so the next request builds them again from the household
+      // admin role, and removing a household guest goes through. Kept
+      // permissions would be refused by the route guard, so the status alone
+      // shows the eviction happened.
+      const { householdId, owner, others } = await household(SystemRole.HouseholdMember, SystemRole.HouseholdGuest);
+      const [promoted, guest] = others;
+
+      await readRoster(promoted.actor, householdId).expect(200);
+
+      await changeRole(owner, householdId, promoted.memberId, SystemRole.HouseholdAdmin).expect(200);
+      await expect(roleOf(promoted.memberId)).resolves.toBe(SystemRole.HouseholdAdmin);
+
+      await removeMember(promoted.actor, householdId, guest.memberId).expect(200);
+
+      await expect(db.client.householdMember.count({ where: { id: guest.memberId } })).resolves.toBe(0);
+    });
+
     it('answers a household admin by the member role on their first request after the change', async () => {
-      // The admin's first request caches their household admin permissions.
-      // The route evicts them after the change commits, so the next request
-      // builds them again from the member role, which holds no `manage` on
-      // memberships: the route guard refuses a removal the admin could have
-      // made a moment before. Kept permissions pass the guard and are refused
-      // by the service instead, which reads the roster afresh: still a 403, so
+      // The household admin's first request caches their permissions. The
+      // route evicts them after the change commits, so the next request builds
+      // them again from the member role, which holds no `manage` on
+      // memberships: the route guard refuses a removal they could have made a
+      // moment before. Kept permissions pass the guard and are refused by the
+      // service instead, which reads the roster afresh: still a 403, so here
       // only the message shows the eviction happened.
       const { householdId, owner, admin, adminMemberId, others } = await household(SystemRole.HouseholdGuest);
       const [guest] = others;
