@@ -8,7 +8,7 @@ Traps in this repo that the code doesn't announce. Each one has produced a wrong
 
 ## Auth routes
 
-- **`/api/auth/*` skips every Nest middleware.** better-auth is mounted on the raw Express server in `apps/api/src/main.ts` before Nest registers its middleware, so these requests have no CLS actor, correlation id, locale or ability context. The ordering is deliberate: better-auth needs the raw body. Leave it as it is, and put auth-route behavior in better-auth's own hooks.
+- **`/api/auth/*` skips every Nest middleware.** better-auth is mounted on the raw Express server in `apps/api/src/main.ts` before Nest registers its middleware, so these requests have no CLS actor, correlation id, locale or ability context. The ordering is deliberate: better-auth needs the raw body. Leave it as it is, and put auth-route behavior in better-auth's own hooks. Two exceptions sit around the mount, because better-auth's rate limiter runs before every hook: `createAuthClientIpHandler`, ahead of it, writes the client's IP for the limiter, which never sees the socket; and `createAuthRequestHandler` wraps better-auth's handler to give the limiter's 429, and a request the limiter's store failure left unanswered, a stable code (#640).
 
 ## Prisma and permissions
 
@@ -28,7 +28,7 @@ Traps in this repo that the code doesn't announce. Each one has produced a wrong
 ## Build, lint and test
 
 - **A warm tree can fake a green typecheck.** Leftover `dist` / `out-tsc` output can let a broken change pass locally. Before trusting a "does this break typecheck?" run, delete them: `find libs apps -type d \( -name dist -o -name out-tsc \) -prune -exec rm -rf {} +`.
-- **The proto gateway's `build` cache goes stale.** Its generated sources are gitignored, so a `.proto`-only change can restore an old `libs/proto/gateway/dist` (symptom: `UNIMPLEMENTED` or a missing method in a gateway spec or e2e). Delete `libs/proto/gateway/dist` and rerun with `--skip-nx-cache`. A fresh checkout or worktree also needs `npm run nx run @boardgamesempire/proto-gateway:buf-export` before the api boots.
+- **The proto gateway's `build` cache goes stale.** Its generated sources are gitignored, so a `.proto`-only change can restore an old `libs/proto/gateway/dist` (symptom: `UNIMPLEMENTED` or a missing method in a gateway spec or e2e). Delete `libs/proto/gateway/dist` and rerun with `--skip-nx-cache`.
 - **Worktrees need `NX_WORKSPACE_ROOT_PATH`.** If the shell exports it pointing at the main checkout, Nx in a worktree runs the main checkout's files. Prefix each Nx command with `NX_WORKSPACE_ROOT_PATH=<absolute worktree path>`.
 - **Jest filters by a relative path.** Pass spec paths relative to the repo root (`-- role-permission.catalog`). An absolute path matches nothing and exits 1 with "No tests found".
 - **`@OnEvent` listeners never throw into `emit()`.** Nest wraps and logs them. Only raw `emitter.on` / `onAny` listeners can throw, and the two in the repo catch their own errors.

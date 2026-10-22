@@ -1,10 +1,10 @@
-import type { GatewayServiceHost } from '@bge/gateway-host';
+import { GatewayServiceHost } from '@bge/gateway-host';
 import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import { from, of, type Observable } from 'rxjs';
-import { STUB_GAMES, STUB_LANGUAGES } from '../fixtures/catalog';
+import { STUB_CATEGORIES, STUB_GAMES, STUB_LANGUAGES, STUB_MECHANICS, STUB_PLATFORMS } from '../fixtures/catalog';
 
 /** How a search result describes a game: the fields a real gateway fills there. */
 function toSearchData(game: proto.GameData): proto.GameSearchData {
@@ -30,7 +30,7 @@ function toSearchData(game: proto.GameData): proto.GameSearchData {
  * error.
  */
 @Injectable()
-export class StubGatewayService implements GatewayServiceHost {
+export class StubGatewayService extends GatewayServiceHost {
   ping(request: proto.GatewayPingRequest): proto.GatewayPingResponse {
     return {
       correlationId: request.correlationId ?? crypto.randomUUID(),
@@ -53,6 +53,9 @@ export class StubGatewayService implements GatewayServiceHost {
         proto.Capability.CAPABILITY_FETCH,
         proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
         proto.Capability.CAPABILITY_LIST_LANGUAGES,
+        proto.Capability.CAPABILITY_LIST_PLATFORMS,
+        proto.Capability.CAPABILITY_LIST_CATEGORIES,
+        proto.Capability.CAPABILITY_LIST_MECHANICS,
       ],
       coverage: {
         platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
@@ -77,6 +80,19 @@ export class StubGatewayService implements GatewayServiceHost {
       correlationId: request.correlationId ?? crypto.randomUUID(),
       languages: STUB_LANGUAGES,
     };
+  }
+
+  /** Serves every list, so each list job runs against it in the e2e suites (#718). */
+  override listPlatforms(request: proto.ListPlatformsRequest): Observable<proto.ListPlatformsResponse> {
+    return of({ correlationId: request.correlationId ?? crypto.randomUUID(), platforms: STUB_PLATFORMS });
+  }
+
+  override listCategories(request: proto.ListCategoriesRequest): Observable<proto.ListCategoriesResponse> {
+    return of({ correlationId: request.correlationId ?? crypto.randomUUID(), categories: STUB_CATEGORIES });
+  }
+
+  override listMechanics(request: proto.ListMechanicsRequest): Observable<proto.ListMechanicsResponse> {
+    return of({ correlationId: request.correlationId ?? crypto.randomUUID(), mechanics: STUB_MECHANICS });
   }
 
   /**

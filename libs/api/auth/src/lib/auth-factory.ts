@@ -5,7 +5,6 @@ import type { AuditContextService, SystemActorScope } from '@bge/actor-context';
 import type { PrismaClient } from '@bge/database';
 import { isTrue, splitTrimFilter } from '@bge/env';
 import type { I18nTranslations } from '@bge/i18n';
-import type { Cache } from '@nestjs/cache-manager';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
@@ -27,10 +26,12 @@ import type { User } from 'better-auth/types';
 import type { I18nService } from 'nestjs-i18n';
 import process from 'node:process';
 import { ADMIN_PLUGIN_OPTIONS } from './access/admin-roles';
-import { AUTH_BASE_PATH, AUTH_COOKIE_PREFIX } from './constants';
+import type { AuthStorage } from './auth-storage';
+import { AUTH_BASE_PATH, AUTH_CLIENT_IP_HEADER, AUTH_COOKIE_PREFIX } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
 import { providerPictureOnly } from './provider-picture';
 import { createSettingGates, settingGateDeps } from './setting-gates';
+import { createSignOutHook } from './sign-out-hook';
 
 interface UserCreatedHookDeps {
   eventEmitter?: EventEmitter2;
@@ -106,7 +107,7 @@ export function createUserCreatedHook(deps: UserCreatedHookDeps): (user: User) =
 export function authFactory(
   prisma: PrismaClient,
   configService?: ConfigService,
-  cache?: Cache,
+  storage?: AuthStorage,
   eventEmitter?: EventEmitter2,
   auditContext?: AuditContextService,
   systemActorScope?: SystemActorScope,
@@ -134,7 +135,9 @@ export function authFactory(
     logger.log('Enabling Email & Password authentication');
   }
 
-  const settingGates = createSettingGates(settingGateDeps(prisma, i18n));
+  const gateDeps = settingGateDeps(prisma, i18n);
+  const settingGates = createSettingGates(gateDeps);
+  const signOutHook = createSignOutHook({ render: gateDeps.render });
 
   const usingSwagger = configService?.get<boolean>('swagger.enabled');
   if (usingSwagger) {
@@ -156,6 +159,8 @@ export function authFactory(
     // throttler still applies to every route. How keys should be limited is
     // #642.
     apiKey({ rateLimit: { enabled: false } }),
+    // Without requireSignature: the sign-out hook reads a bearer credential
+    // as the plugin does with it off (#487).
     bearer(),
     lastLoginMethod(),
     oneTap(),
@@ -189,6 +194,11 @@ export function authFactory(
     advanced: {
       cookiePrefix: AUTH_COOKIE_PREFIX,
       disableOriginCheck: options.disableOriginCheck,
+      // Only the address the api wrote (#640). better-auth's default,
+      // X-Forwarded-For, is a header a client reaching the api directly can
+      // write, and without an address it believes every client shares one
+      // rate-limit bucket.
+      ipAddress: { ipAddressHeaders: [AUTH_CLIENT_IP_HEADER] },
     },
     basePath: AUTH_BASE_PATH,
     appName: 'BoardGamesEmpire',
@@ -201,20 +211,20 @@ export function authFactory(
         firstName: {
           type: 'string',
           required: false,
-          map: 'first_name',
         },
         lastName: {
           type: 'string',
           required: false,
-          map: 'last_name',
         },
       },
     },
     hooks: {
-      before: createAuthMiddleware(settingGates.beforeRoute),
+      before: createAuthMiddleware(async (context) => {
+        await settingGates.beforeRoute(context);
+        await signOutHook.beforeRoute(context);
+      }),
     },
     experimental: { joins: true },
-    url: options.hostUrl,
     secret: options.secret,
     database: prismaAdapter(prisma, {
       debugLogs: configService?.get<boolean>('system.is_production') !== true,
@@ -242,19 +252,9 @@ export function authFactory(
         // here that runs `prisma.apikey.deleteMany({ where: { referenceId: user.id } })`.
       },
     },
-    secondaryStorage: cache
-      ? {
-          get(key: string) {
-            return cache.get(`auth_${key}`);
-          },
-          set(key: string, ...params: [value: unknown, ttl?: number]) {
-            return cache.set(`auth_${key}`, ...params);
-          },
-          async delete(key: string) {
-            await cache.del(`auth_${key}`);
-          },
-        }
-      : undefined,
+    // Without a storage, as when the better-auth CLI builds the instance,
+    // better-auth keeps sessions in the database.
+    secondaryStorage: storage,
     emailAndPassword: { enabled: options.useEmailPass },
     trustedOrigins,
     plugins,

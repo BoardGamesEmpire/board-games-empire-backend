@@ -249,6 +249,42 @@ export function runDataGatewayDriverContract(description: string, setup: Setup, 
       );
     });
 
+    describe('when it declares list platforms', () => {
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_LIST_PLATFORMS,
+        'listPlatforms resolves with a platform array',
+        async () => {
+          const response = await firstValueFrom(ctx.driver.listPlatforms({ correlationId: 'contract-platforms' }));
+
+          expect(Array.isArray(response.platforms)).toBe(true);
+        },
+      );
+    });
+
+    describe('when it declares list categories', () => {
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_LIST_CATEGORIES,
+        'listCategories resolves with a category array',
+        async () => {
+          const response = await firstValueFrom(ctx.driver.listCategories({ correlationId: 'contract-categories' }));
+
+          expect(Array.isArray(response.categories)).toBe(true);
+        },
+      );
+    });
+
+    describe('when it declares list mechanics', () => {
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_LIST_MECHANICS,
+        'listMechanics resolves with a mechanic array',
+        async () => {
+          const response = await firstValueFrom(ctx.driver.listMechanics({ correlationId: 'contract-mechanics' }));
+
+          expect(Array.isArray(response.mechanics)).toBe(true);
+        },
+      );
+    });
+
     it('dispose is safe to call twice', async () => {
       await ctx.driver.dispose();
 

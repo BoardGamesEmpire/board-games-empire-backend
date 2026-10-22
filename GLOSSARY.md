@@ -775,7 +775,7 @@ An item's id at a DataGateway, exactly as the DataGateway gave it.
 _Avoid_: external ID for the server's own id
 
 **Interview**:
-The server asking a DataGateway to describe itself: its capabilities, formats and vocabularies. It recurs over the DataGateway's life.
+The server asking a DataGateway to describe itself: its capabilities, formats and the vocabularies it can list. Its sections load after it. It recurs over the DataGateway's life.
 _Avoid_: handshake, registration, discovery, sync, language sync
 
 **DataGateway onboarding**:
@@ -788,6 +788,10 @@ _Avoid_: curation, curate; curating, for staff changing games (say editing)
 
 **Vocabulary**:
 A set of things the server and each DataGateway name in their own terms, such as languages, platforms or regions.
+
+**Section**:
+One vocabulary as a DataGateway lists it, such as its platforms. After each interview, every section the DataGateway declares and no admin has switched off loads as its own job, and the server records when it last loaded or failed.
+_Avoid_: list sync, vocabulary sync
 
 **Language code format**:
 The scheme a DataGateway uses to identify languages: a BCP 47 tag, a two- or three-letter ISO 639 code, or a language's name in English or in the language itself.

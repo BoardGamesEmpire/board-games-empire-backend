@@ -39,6 +39,9 @@ describe('system settings update', () => {
     contributionReclaimDays: true,
     auditLogRetentionDays: true,
     reviewGatewayLanguages: true,
+    reviewGatewayPlatforms: true,
+    reviewGatewayCategories: true,
+    reviewGatewayMechanics: true,
     householdInviteePolicy: true,
     eventInviteePolicy: true,
   } as const;
@@ -124,6 +127,9 @@ describe('system settings update', () => {
         contributionReclaimDays: differentFrom(original.contributionReclaimDays, 7, 8),
         auditLogRetentionDays: differentFrom(original.auditLogRetentionDays, 7, 8),
         reviewGatewayLanguages: !original.reviewGatewayLanguages,
+        reviewGatewayPlatforms: !original.reviewGatewayPlatforms,
+        reviewGatewayCategories: !original.reviewGatewayCategories,
+        reviewGatewayMechanics: !original.reviewGatewayMechanics,
         householdInviteePolicy: differentFrom(original.householdInviteePolicy, Reach.Friends, Reach.Public),
         eventInviteePolicy: differentFrom(original.eventInviteePolicy, Reach.Friends, Reach.Public),
       };

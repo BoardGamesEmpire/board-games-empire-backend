@@ -32,11 +32,11 @@ BGE uses **three logical databases**, each with its own purpose and isolation
 guarantees. They can live on the same Redis server (default), on three
 different servers, or any combination.
 
-| Database | Default `db:` | Purpose                                                                                                                           | Client library                |
-| -------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| Cache    | `0`           | App-level cache, pub/sub for DataGateway config, outbound HTTP policy and plugin config updates, health checks, **rate limiting** | `iovalkey` (via `@bge/redis`) |
-| Sockets  | `1`           | Socket.IO streams adapter for cross-instance WebSocket events                                                                     | `node-redis`                  |
-| Queue    | `2`           | BullMQ jobs (game imports, enrichment, fan-out)                                                                                   | `iovalkey`                    |
+| Database | Default `db:` | Purpose                                                                                                                                                 | Client library                |
+| -------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| Cache    | `0`           | App-level cache, **sign-in sessions**, pub/sub for DataGateway config, outbound HTTP policy and plugin config updates, health checks, **rate limiting** | `iovalkey` (via `@bge/redis`) |
+| Sockets  | `1`           | Socket.IO streams adapter for cross-instance WebSocket events                                                                                           | `node-redis`                  |
+| Queue    | `2`           | BullMQ jobs (game imports, enrichment, fan-out)                                                                                                         | `iovalkey`                    |
 
 Rate-limit counters share the cache connection rather than opening a fourth
 (#341). They are small, short-lived and namespaced under `bge:throttle:`, and a
@@ -44,7 +44,9 @@ dedicated connection would cost a socket per process to isolate keys a prefix
 already separates. One consequence worth knowing: **`FLUSHDB` on the cache
 database clears rate-limit buckets too.** Harmless in development, and a way to
 unstick a wrongly-blocked caller in production — but it is not a targeted
-operation, and it resets every other caller's budget with it.
+operation, and it resets every other caller's budget with it. **It also signs
+everyone out**: better-auth keeps sessions in the same database, under
+`namespace:api:cache:auth_*`, for their full seven days (#640).
 
 ### Why three databases?
 
@@ -52,7 +54,7 @@ operation, and it resets every other caller's budget with it.
 (`BRPOP`) on its connection. If cache and queue shared a connection, every
 worker waiting on a job would hold the cache connection captive. Separation
 also makes it possible to `FLUSHDB` the cache for a forced refresh without
-losing in-flight queue jobs.
+losing in-flight queue jobs, though it signs everyone out (see above).
 
 **Sockets are isolated** because the Socket.IO streams adapter uses blocking
 `XREAD BLOCK` calls — same reasoning as queue blocking commands. Additionally,
@@ -192,7 +194,11 @@ calls the coordinator. It needs **both** Redis connections:
   DataGateway after repeated failures.
 - **Queue** — it consumes fetch jobs from `{bge.gateway.fetch}`, whose
   results the worker's import jobs read, and enqueues webhook deliveries for
-  the import events it emits.
+  the import events it emits. It also consumes the list jobs on
+  `{bge.gateway.vocabulary}`: after each interview, each one loads a
+  DataGateway's languages, platforms, categories or mechanics. Both the
+  gateway worker and the coordinator enqueue them after an interview, but
+  only the gateway worker runs them.
 
 ### Coordinator
 
@@ -206,7 +212,9 @@ needs **both** Redis connections:
   DataGateway after repeated failed connections.
 - **Queue** — for BullMQ producer-side work. When the api starts an import,
   the coordinator enqueues the game-import flow via `FlowProducer`, which
-  uses the queue connection.
+  uses the queue connection. After an interview, it enqueues that
+  DataGateway's list jobs on `{bge.gateway.vocabulary}`, which the gateway
+  worker runs.
 
 The coordinator does NOT use the sockets connection — only the api serves
 WebSocket clients.
@@ -325,7 +333,8 @@ The shared `iovalkey` connections are owned by `@bge/redis`'s `RedisModule` and
 exposed via injection tokens. Both tokens are **independently optional** —
 configured per-process via `RedisModule.forRootAsync`:
 
-- `CACHE_REDIS_CLIENT` — used by `CacheModule`, `GatewayConfigEventsModule`,
+- `CACHE_REDIS_CLIENT` — used by `CacheModule`, better-auth's storage
+  (`createRedisAuthStorage` in `@bge/auth`), `GatewayConfigEventsModule`,
   and `HealthModule`. Registered when `cache` is passed to `forRootAsync`.
   Configured with `maxRetriesPerRequest: 3` for fail-fast cache semantics.
 - `QUEUE_REDIS_CLIENT` — used by BullMQ `Queue` and `FlowProducer` instances.
@@ -362,7 +371,9 @@ single config flag, rather than scattering conditionals across the codebase.
 
 Expected. `@keyv/valkey` writes are durable only if your Redis instance is
 configured for persistence (AOF or RDB). For BGE, cache is treated as
-recomputable — losing it on restart is fine.
+recomputable — losing it on restart is fine. Sessions are the exception: they
+live in the same database, so a Redis that loses its data signs everyone out.
+`compose.yaml` turns on append-only persistence for that reason.
 
 ### BullMQ workers hang on shutdown
 
@@ -398,6 +409,14 @@ gateway registry — uses `maxRetriesPerRequest: 3` (fail-fast). If
 `/health/ready` reports Redis down but other functionality still works, the
 underlying Redis is intermittently reachable but slow enough that the
 health probe gives up. Investigate network or server health.
+
+### Signed-in requests answer 503
+
+Sessions live in the cache database, so while it is unreachable the api cannot
+check one. A request that carries a session answers 503 with a plain-language
+message, and `/api/auth/*` answers 503 with the code `AUTH_UNAVAILABLE`,
+rather than treating anyone as signed out (#640). Once the cache is reachable
+again, sessions work as before, unless Redis lost its data (see above).
 
 ### "No provider found for Symbol(CACHE_REDIS_CLIENT)" at startup
 

@@ -27,6 +27,13 @@ const TABLETOP: proto.PlatformData = {
   platformType: proto.PlatformType.PLATFORM_TYPE_TABLETOP,
 };
 
+/** Every platform, category and mechanic its games carry: its lists name these (#718). */
+export const STUB_PLATFORMS: proto.PlatformData[] = [TABLETOP];
+
+export const STUB_CATEGORIES: proto.CategoryData[] = [{ externalId: 'stub-category-1', name: 'Exploration' }];
+
+export const STUB_MECHANICS: proto.MechanicData[] = [{ externalId: 'stub-mechanic-1', name: 'Tile Placement' }];
+
 /** One edition, the default one, as a source without edition data sends it. */
 const defaultRelease = (releaseDate: string): proto.GameReleaseData => ({
   externalId: 'default',
@@ -46,8 +53,8 @@ export const STUB_BASE_GAME: proto.GameData = {
   designers: [{ externalId: 'stub-person-1', name: 'Ada Stub' }],
   artists: [{ externalId: 'stub-person-2', name: 'Grace Fixture' }],
   publishers: [{ externalId: 'stub-publisher-1', name: 'Stub Games' }],
-  mechanics: [{ externalId: 'stub-mechanic-1', name: 'Tile Placement' }],
-  categories: [{ externalId: 'stub-category-1', name: 'Exploration' }],
+  mechanics: STUB_MECHANICS,
+  categories: STUB_CATEGORIES,
   families: [],
   averageRating: 7.5,
   ratingsCount: 42,
@@ -56,7 +63,7 @@ export const STUB_BASE_GAME: proto.GameData = {
   minPlaytime: 30,
   maxPlaytime: 60,
   minAge: 10,
-  platforms: [TABLETOP],
+  platforms: STUB_PLATFORMS,
   releases: [defaultRelease('2020-01-01')],
   themes: [],
   ageRatings: [],
@@ -74,8 +81,8 @@ export const STUB_EXPANSION: proto.GameData = {
   designers: [{ externalId: 'stub-person-1', name: 'Ada Stub' }],
   artists: [],
   publishers: [{ externalId: 'stub-publisher-1', name: 'Stub Games' }],
-  mechanics: [{ externalId: 'stub-mechanic-1', name: 'Tile Placement' }],
-  categories: [{ externalId: 'stub-category-1', name: 'Exploration' }],
+  mechanics: STUB_MECHANICS,
+  categories: STUB_CATEGORIES,
   families: [],
   minPlayers: 2,
   maxPlayers: 5,
@@ -83,7 +90,7 @@ export const STUB_EXPANSION: proto.GameData = {
   maxPlaytime: 75,
   minAge: 10,
   baseGameExternalId: 'stub-1001',
-  platforms: [TABLETOP],
+  platforms: STUB_PLATFORMS,
   releases: [defaultRelease('2021-01-01')],
   themes: [],
   ageRatings: [],

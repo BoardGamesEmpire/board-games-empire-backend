@@ -41,7 +41,13 @@
       "path": "../../libs/queue/feedback"
     },
     {
+      "path": "../../libs/common/redis"
+    },
+    {
       "path": "../../libs/common/bootstrap"
+    },
+    {
+      "path": "../../libs/api/auth"
     },
     {
       "path": "../../libs/common/permissions"
@@ -51,9 +57,6 @@
     },
     {
       "path": "../../libs/database"
-    },
-    {
-      "path": "../../libs/common/redis"
     }
   ]
 }

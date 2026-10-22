@@ -3,7 +3,13 @@ import { FALLBACK_LOCALE, type I18nTranslations } from '@bge/i18n';
 import { Logger } from '@nestjs/common';
 import { isAPIError } from 'better-auth/api';
 import type { I18nService } from 'nestjs-i18n';
-import { createSettingGates, settingGateDeps, type SettingGateDeps, type SettingSwitches } from './setting-gates';
+import {
+  createSettingGates,
+  fallbackLocaleRenderer,
+  settingGateDeps,
+  type SettingGateDeps,
+  type SettingSwitches,
+} from './setting-gates';
 
 const ALL_OPEN: SettingSwitches = {
   allowUserRegistration: true,
@@ -325,5 +331,23 @@ describe('settingGateDeps', () => {
         );
       },
     );
+  });
+});
+
+// AuthModule builds the renderer for the sign-out hook and the request handler
+// with no logger of its own (#640).
+describe('fallbackLocaleRenderer', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('logs under its own name when given no logger, and still renders the key', () => {
+    const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const i18n = {
+      translate: () => {
+        throw new Error('catalog unreadable');
+      },
+    } as unknown as I18nService<I18nTranslations>;
+
+    expect(fallbackLocaleRenderer(i18n)('errors.auth.sign_out_failed')).toBe('errors.auth.sign_out_failed');
+    expect(logged).toHaveBeenCalledWith("Could not render 'errors.auth.sign_out_failed'", expect.any(String));
   });
 });

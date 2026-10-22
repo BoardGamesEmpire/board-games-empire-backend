@@ -1,6 +1,7 @@
 import { ContentFormat, GameSource, Prisma, Reach } from '@bge/database';
 import { ServiceAccountService } from '@bge/services';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import { VocabularyLinkService } from '@bge/vocabulary';
 import type { GameData } from '@boardgamesempire/proto-gateway';
 import { ContentType, PlatformType as ProtoPlatformType } from '@boardgamesempire/proto-gateway';
 import { NotFoundException } from '@nestjs/common';
@@ -8,7 +9,6 @@ import { GameUpsertService } from './game.service';
 import { PersonUpsertService } from './person.service';
 import type { PlatformGameMap } from './platform.service';
 import { PlatformUpsertService } from './platform.service';
-import { TaxonomyUpsertService } from './taxonomy.service';
 
 const uniqueViolation = () =>
   new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: 'test' });
@@ -17,7 +17,7 @@ describe('GameUpsertService', () => {
   let service: GameUpsertService;
   let db: MockDatabaseService;
   let platformService: jest.Mocked<PlatformUpsertService>;
-  let taxonomyService: jest.Mocked<TaxonomyUpsertService>;
+  let vocabulary: { resolveForImport: jest.Mock };
   let personService: jest.Mocked<PersonUpsertService>;
   let serviceAccount: { resolveOrEnsure: jest.Mock };
 
@@ -28,16 +28,12 @@ describe('GameUpsertService', () => {
     platformService = {
       upsertPlatformGames: jest.fn(),
       upsertReleases: jest.fn(),
-      upsertPlatform: jest.fn(),
+      resolvePlatform: jest.fn(),
       upsertLanguage: jest.fn(),
       inferCapabilities: jest.fn(),
     } as unknown as jest.Mocked<PlatformUpsertService>;
 
-    taxonomyService = {
-      upsertMechanic: jest.fn(),
-      upsertCategory: jest.fn(),
-      upsertFamily: jest.fn(),
-    } as unknown as jest.Mocked<TaxonomyUpsertService>;
+    vocabulary = { resolveForImport: jest.fn() };
 
     personService = {
       upsertDesigner: jest.fn(),
@@ -51,7 +47,7 @@ describe('GameUpsertService', () => {
       providers: [
         GameUpsertService,
         { provide: PlatformUpsertService, useValue: platformService },
-        { provide: TaxonomyUpsertService, useValue: taxonomyService },
+        { provide: VocabularyLinkService, useValue: vocabulary },
         { provide: PersonUpsertService, useValue: personService },
         { provide: ServiceAccountService, useValue: serviceAccount },
       ],
@@ -285,7 +281,7 @@ describe('GameUpsertService', () => {
     it('bulk-links resolved taxonomy/person ids to the game via createMany', async () => {
       stubNewGameCreation('game-linked');
       stubPlatformGameMap(['platform-tabletop', 'pg-1']);
-      taxonomyService.upsertMechanic.mockResolvedValue('mech-1');
+      vocabulary.resolveForImport.mockResolvedValue('mech-1');
       personService.upsertDesigner.mockResolvedValue('designer-1');
       db.gameMechanic.createMany.mockResolvedValue({ count: 1 } as never);
       db.gameDesigner.createMany.mockResolvedValue({ count: 1 } as never);
@@ -299,7 +295,10 @@ describe('GameUpsertService', () => {
         ContentFormat.PlainText,
       );
 
-      expect(taxonomyService.upsertMechanic).toHaveBeenCalledWith({ externalId: 'm-1', name: 'Trading' }, GATEWAY_ID);
+      expect(vocabulary.resolveForImport).toHaveBeenCalledWith('mechanic', GATEWAY_ID, {
+        externalId: 'm-1',
+        name: 'Trading',
+      });
       expect(db.gameMechanic.createMany).toHaveBeenCalledWith({
         data: [{ gameId: 'game-linked', mechanicId: 'mech-1' }],
         skipDuplicates: true,
@@ -310,11 +309,51 @@ describe('GameUpsertService', () => {
       });
     });
 
+    // The shared resolver answers null for an entry whose link is Pending or
+    // Ignored, so the game is imported without it (#718).
+    it('links the mechanics, categories and families that resolve, and leaves out those that resolve to null', async () => {
+      stubNewGameCreation('game-partial');
+      stubPlatformGameMap(['platform-tabletop', 'pg-1']);
+      const resolved: Record<string, string | null> = {
+        'mechanic:m-1': 'mech-1',
+        'mechanic:m-2': null,
+        'category:c-1': null,
+        'family:f-1': 'fam-1',
+      };
+      vocabulary.resolveForImport.mockImplementation(
+        async (kind: string, _gatewayId: string, entry: { externalId: string }) =>
+          resolved[`${kind}:${entry.externalId}`],
+      );
+
+      await service.upsert(
+        bggGameData({
+          mechanics: [
+            { externalId: 'm-1', name: 'Trading' },
+            { externalId: 'm-2', name: 'Bartering' },
+          ],
+          categories: [{ externalId: 'c-1', name: 'Economic' }],
+          families: [{ externalId: 'f-1', name: 'Catan' }],
+        }),
+        GATEWAY_ID,
+        ContentFormat.PlainText,
+      );
+
+      expect(db.gameMechanic.createMany).toHaveBeenCalledWith({
+        data: [{ gameId: 'game-partial', mechanicId: 'mech-1' }],
+        skipDuplicates: true,
+      });
+      expect(db.gameCategory.createMany).not.toHaveBeenCalled();
+      expect(db.gameFamily.createMany).toHaveBeenCalledWith({
+        data: [{ gameId: 'game-partial', familyId: 'fam-1' }],
+        skipDuplicates: true,
+      });
+    });
+
     it('dedupes ids that resolve to the same canonical before the createMany batch', async () => {
       stubNewGameCreation('game-dedup');
       stubPlatformGameMap(['platform-tabletop', 'pg-1']);
       // Two distinct source aliases collapse to one canonical mechanic id.
-      taxonomyService.upsertMechanic.mockResolvedValue('mech-shared');
+      vocabulary.resolveForImport.mockResolvedValue('mech-shared');
       db.gameMechanic.createMany.mockResolvedValue({ count: 1 } as never);
 
       await service.upsert(
@@ -459,6 +498,30 @@ describe('GameUpsertService', () => {
       );
       expect(db.gameDlc.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ description: 'New **DLC**' }) }),
+      );
+    });
+
+    it('skips a DLC release on a platform whose link is not Resolved (#718)', async () => {
+      stubNewGameCreation('game-new');
+      db.gameDlc.create.mockResolvedValue({ id: 'dlc-new' } as never);
+      platformService.resolvePlatform.mockResolvedValueOnce(null).mockResolvedValueOnce('platform-pc');
+      const release = (externalId: string) => ({
+        externalId,
+        platform: { externalId, name: externalId, platformType: ProtoPlatformType.PLATFORM_TYPE_PC },
+        status: 'RELEASE_STATUS_RELEASED',
+        localizations: [],
+        languages: [],
+      });
+
+      await service.upsert(
+        bggGameData({ dlc: [{ ...dlc('new'), releases: [release('pending'), release('pc')] }] as GameData['dlc'] }),
+        GATEWAY_ID,
+        ContentFormat.PlainText,
+      );
+
+      expect(db.gameDlcRelease.upsert).toHaveBeenCalledTimes(1);
+      expect(db.gameDlcRelease.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ create: expect.objectContaining({ dlcId: 'dlc-new', platformId: 'platform-pc' }) }),
       );
     });
 

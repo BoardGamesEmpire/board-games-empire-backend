@@ -8,6 +8,11 @@
     "not_pending": "Only a Pending language link can be accepted.",
     "not_acceptable": "Language link {id} names no registered language, so it can't be accepted. Link it to a language tag instead."
   },
+  "vocabulary_link": {
+    "not_found": "Link with ID {id} not found.",
+    "record_not_found": "No record with ID {recordId} to link to.",
+    "not_pending": "Only a Pending link can be accepted."
+  },
   "game": {
     "not_found": "Game with ID {id} not found",
     "cannot_delete_in_collection": "Cannot delete game that is part of a collection",
@@ -147,7 +152,11 @@
     "unauthenticated": "Unauthorized",
     "registration_disabled": "This server is not accepting new accounts",
     "password_reset_disabled": "Password resets are turned off on this server",
-    "username_change_disabled": "Username changes are turned off on this server"
+    "username_change_disabled": "Username changes are turned off on this server",
+    "sign_out_failed": "Your session could not be ended, so you are still signed in. Try again in a moment",
+    "session_unavailable": "Your session could not be checked just now. Try again in a moment",
+    "unavailable": "Sign-in and accounts are unavailable just now. Try again in a moment",
+    "rate_limited": "Too many attempts in a short time. Wait a minute, then try again"
   },
   "household": {
     "not_found": "Household with ID {id} not found",

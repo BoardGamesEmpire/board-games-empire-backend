@@ -1,6 +1,6 @@
 import type { DataGateway } from '@bge/database';
 import { Action, DataGatewayCapability, Prisma, ResourceType } from '@bge/database';
-import { GatewayConfigEventsService, hashGatewayConfig } from '@bge/gateway-registry';
+import { GatewayConfigEventsService, hashGatewayConfig, VocabularySectionQueue } from '@bge/gateway-registry';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
@@ -13,9 +13,12 @@ import {
 } from '@bge/testing';
 import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { DataGatewayService } from './data-gateway.service';
+import { WITH_SECTIONS } from './data-gateway.view';
 import type { CreateDataGatewayDto, UpdateDataGatewayDto } from './dto';
 
 const COND = { id: 'sentinel-condition' };
+/** The live row update reads before it writes. */
+const LIVE = { disabledCapabilities: [] } as unknown as DataGateway;
 const COMPOSED_LIST_WHERE = { AND: [{ AND: [COND] }, { deletedAt: null }] };
 
 /** Prisma's answer when a statement's `where` matches no row. */
@@ -27,12 +30,14 @@ describe('DataGatewayService', () => {
   let db: MockDatabaseService;
   let abilityService: MockAbilityService;
   let configEvents: jest.Mocked<Pick<GatewayConfigEventsService, 'publish'>>;
+  let sectionQueue: jest.Mocked<Pick<VocabularySectionQueue, 'enqueue'>>;
   let compose: jest.SpyInstance;
 
   beforeEach(async () => {
     abilityService = createMockAbilityService();
     abilityService.getCurrentResourceConditions.mockReturnValue([COND]);
     configEvents = { publish: jest.fn().mockResolvedValue(undefined) };
+    sectionQueue = { enqueue: jest.fn().mockResolvedValue(undefined) };
 
     const ctx = await createTestingModuleWithDb({
       providers: [
@@ -41,6 +46,7 @@ describe('DataGatewayService', () => {
         // assertions below test the merge the list actually depends on.
         ScopeComposer,
         { provide: GatewayConfigEventsService, useValue: configEvents },
+        { provide: VocabularySectionQueue, useValue: sectionQueue },
         { provide: AbilityService, useValue: abilityService },
       ],
     });
@@ -89,6 +95,30 @@ describe('DataGatewayService', () => {
     expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   });
 
+  // Every admin route answers with the row's sections beside its interview (#718).
+  it('reads every row it returns with its sections', async () => {
+    db.dataGateway.findMany.mockResolvedValue([]);
+    db.dataGateway.count.mockResolvedValue(1);
+    db.dataGateway.findUniqueOrThrow.mockResolvedValue({ id: 'gw-1' } as DataGateway);
+    db.dataGateway.findFirst.mockResolvedValue(LIVE);
+    db.dataGateway.create.mockResolvedValue({ id: 'gw-1' } as DataGateway);
+    db.dataGateway.update.mockResolvedValue({ id: 'gw-1' } as DataGateway);
+
+    await service.getAll(paginationQuery({ limit: 20 }));
+    await service.getById('gw-1');
+    await service.create({ name: 'BGG' } as CreateDataGatewayDto);
+    await service.update('gw-1', { name: 'New' } as UpdateDataGatewayDto);
+    await service.delete('gw-1');
+
+    const include = expect.objectContaining({ include: WITH_SECTIONS });
+    expect(db.dataGateway.findMany).toHaveBeenCalledWith(include);
+    expect(db.dataGateway.findUniqueOrThrow).toHaveBeenCalledWith(include);
+    expect(db.dataGateway.create).toHaveBeenCalledWith(include);
+    expect(db.dataGateway.update).toHaveBeenCalledTimes(2);
+    expect(db.dataGateway.update).toHaveBeenNthCalledWith(1, include);
+    expect(db.dataGateway.update).toHaveBeenNthCalledWith(2, include);
+  });
+
   it('getById → read, ANDed with the deletedAt filter', async () => {
     db.dataGateway.findUniqueOrThrow.mockResolvedValue({ id: 'gw-1' } as DataGateway);
 
@@ -121,7 +151,7 @@ describe('DataGatewayService', () => {
   });
 
   it('update → update, on live rows only', async () => {
-    db.dataGateway.count.mockResolvedValue(1);
+    db.dataGateway.findFirst.mockResolvedValue(LIVE);
     db.dataGateway.update.mockResolvedValue({ id: 'gw-1' } as DataGateway);
 
     await service.update('gw-1', { name: 'New' } as UpdateDataGatewayDto);
@@ -135,11 +165,13 @@ describe('DataGatewayService', () => {
   // Every read already hides a tombstone, so a write that still found one would
   // re-enable, reconnect or re-delete a gateway the API says does not exist.
   it('update treats a soft-deleted gateway as not found', async () => {
-    db.dataGateway.count.mockResolvedValue(0);
+    db.dataGateway.findFirst.mockResolvedValue(null);
 
     await expect(service.update('gw-1', { enabled: true } as UpdateDataGatewayDto)).rejects.toThrow(NotFoundException);
 
-    expect(db.dataGateway.count).toHaveBeenCalledWith({ where: { id: 'gw-1', deletedAt: null } });
+    expect(db.dataGateway.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'gw-1', deletedAt: null } }),
+    );
     expect(db.dataGateway.update).not.toHaveBeenCalled();
     expect(configEvents.publish).not.toHaveBeenCalled();
   });
@@ -156,7 +188,7 @@ describe('DataGatewayService', () => {
     } as unknown as DataGateway;
 
     beforeEach(() => {
-      db.dataGateway.count.mockResolvedValue(1);
+      db.dataGateway.findFirst.mockResolvedValue(LIVE);
       db.dataGateway.update.mockResolvedValue(stored);
     });
 
@@ -204,6 +236,66 @@ describe('DataGatewayService', () => {
         expect.objectContaining({ changeType: 'updated', configHash: hashGatewayConfig(before) }),
       );
     });
+
+    // Its list would otherwise load only after the next interview, up to a
+    // day later (#718).
+    describe('a list switched back on', () => {
+      const { ListCategories, ListMechanics, ListPlatforms, Search } = DataGatewayCapability;
+
+      beforeEach(() => {
+        db.dataGateway.findFirst.mockResolvedValue({
+          disabledCapabilities: [ListPlatforms, ListCategories, Search],
+        } as unknown as DataGateway);
+      });
+
+      it('queues the list jobs of the declared lists switched back on', async () => {
+        db.dataGateway.update.mockResolvedValue({
+          ...stored,
+          capabilities: [ListPlatforms, ListMechanics, Search],
+          disabledCapabilities: [ListCategories],
+        } as DataGateway);
+
+        await service.update('gw-1', { disabledCapabilities: [ListCategories] });
+
+        expect(sectionQueue.enqueue).toHaveBeenCalledWith('gw-1', [ListPlatforms], [ListCategories]);
+      });
+
+      it('queues nothing when no declared list was switched back on', async () => {
+        db.dataGateway.update.mockResolvedValue({
+          ...stored,
+          capabilities: [ListMechanics, Search],
+          disabledCapabilities: [ListMechanics],
+        } as DataGateway);
+
+        await service.update('gw-1', { disabledCapabilities: [ListMechanics] });
+
+        expect(sectionQueue.enqueue).not.toHaveBeenCalled();
+      });
+
+      it('queues nothing when the patch does not name the switches', async () => {
+        db.dataGateway.update.mockResolvedValue({
+          ...stored,
+          capabilities: [ListPlatforms, ListCategories],
+          disabledCapabilities: [ListPlatforms, ListCategories, Search],
+        } as DataGateway);
+
+        await service.update('gw-1', { name: 'x' });
+
+        expect(sectionQueue.enqueue).not.toHaveBeenCalled();
+      });
+
+      // A queue whose Redis is unreachable hangs rather than rejects.
+      it('answers without waiting for the jobs to be queued', async () => {
+        sectionQueue.enqueue.mockReturnValue(new Promise(() => undefined));
+        db.dataGateway.update.mockResolvedValue({
+          ...stored,
+          capabilities: [ListPlatforms],
+          disabledCapabilities: [],
+        } as DataGateway);
+
+        await expect(service.update('gw-1', { disabledCapabilities: [] })).resolves.toBeDefined();
+      });
+    });
   });
 
   it('update rejects an empty patch', async () => {
@@ -246,7 +338,7 @@ describe('DataGatewayService', () => {
   // landed between the two statements. Either way it is a refusal naming the
   // action, and nothing is published.
   it('update refuses a live gateway its scoped write does not reach', async () => {
-    db.dataGateway.count.mockResolvedValue(1);
+    db.dataGateway.findFirst.mockResolvedValue(LIVE);
     db.dataGateway.update.mockRejectedValue(noRowMatched());
 
     const refusal = service.update('gw-1', { name: 'New' } as UpdateDataGatewayDto);
@@ -290,7 +382,7 @@ describe('DataGatewayService', () => {
     });
 
     it('update answers an unknown id with a 404 and no error log', async () => {
-      db.dataGateway.count.mockResolvedValue(0);
+      db.dataGateway.findFirst.mockResolvedValue(null);
 
       await expect(service.update('gw-1', { name: 'New' } as UpdateDataGatewayDto)).rejects.toThrow(NotFoundException);
       expect(errorLog).not.toHaveBeenCalled();

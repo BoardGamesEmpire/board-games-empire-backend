@@ -1,6 +1,7 @@
 import {
   AuthType,
-  DataGatewayInterviewFailure,
+  DataGatewayCapability,
+  DataGatewaySectionFailure,
   LanguageCodeFormat,
   LanguageLinkOrigin,
   LanguageLinkStatus,
@@ -124,25 +125,35 @@ describe('DataGateway review', () => {
       expectRow(deleted.body.dataGateway);
     });
 
-    // #712 writes a section failure with the interview it came with, so the
-    // two times are equal, and the failure is still current.
-    it('reports a failed section stamped with its interview', async () => {
-      const at = new Date('2026-10-01T12:00:00.000Z');
+    // Each list job records its outcome on its own row, which the DataGateway's
+    // row carries beside its interview (#718).
+    it('reports each section’s last load and current failure', async () => {
+      const at = new Date('2026-10-21T12:00:00.000Z');
       const gateway = await seedGateway({
-        firstInterviewedAt: at,
-        lastInterviewedAt: at,
-        lastInterviewFailedAt: at,
-        lastInterviewFailure: DataGatewayInterviewFailure.LanguageSectionFailed,
+        capabilities: [DataGatewayCapability.ListLanguages, DataGatewayCapability.ListPlatforms],
+      });
+      await db.client.dataGatewaySection.createMany({
+        data: [
+          {
+            gatewayId: gateway.id,
+            capability: DataGatewayCapability.ListPlatforms,
+            lastFailedAt: at,
+            lastFailure: DataGatewaySectionFailure.ListFailed,
+          },
+          { gatewayId: gateway.id, capability: DataGatewayCapability.ListLanguages, lastLoadedAt: at },
+        ],
       });
 
       const { body } = await request(baseUrl).get(`${GATEWAYS}/${gateway.id}`).set(admin.headers).expect(200);
 
-      expect(body.dataGateway.interview).toEqual({
-        interviewed: true,
-        firstInterviewedAt: at.toISOString(),
-        lastInterviewedAt: at.toISOString(),
-        failure: { code: DataGatewayInterviewFailure.LanguageSectionFailed, at: at.toISOString() },
-      });
+      expect(body.dataGateway.sections).toEqual([
+        { capability: 'ListLanguages', lastLoadedAt: at.toISOString(), failure: null },
+        {
+          capability: 'ListPlatforms',
+          lastLoadedAt: null,
+          failure: { code: 'ListFailed', at: at.toISOString() },
+        },
+      ]);
     });
   });
 

@@ -21,7 +21,7 @@ model Category {
   favorites            FavoriteCategory[]
   disliked             DislikedCategory[]
   eventCategories      EventPolicyCategory[]
-  gatewayAliases       CategoryGatewayAlias[]
+  gatewayLinks         CategoryGatewayLink[]
   occurrenceCategories OccurrencePolicyCategory[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -31,19 +31,32 @@ model Category {
   @@map("categories")
 }
 
-model CategoryGatewayAlias {
+// Maps a DataGateway's category to a Category record. A list job writes it
+// after an interview, and an import writes one for a category no list
+// covered (#718). A Pending or Ignored link has no category.
+model CategoryGatewayLink {
   id String @id @default(cuid(2))
 
-  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  categoryId String   @map("category_id")
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId String?   @map("category_id")
 
-  gatewayId    String @map("gateway_id")
-  externalId   String @map("external_id")
-  externalName String @map("external_name")
+  gatewayId  String @map("gateway_id")
+  externalId String @map("external_id")
+
+  status VocabularyLinkStatus
+  origin VocabularyLinkOrigin
+
+  // The name the DataGateway sent, before normalization. Accept rebuilds
+  // the record from it (#715, #718).
+  suppliedName String @map("supplied_name")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@unique([gatewayId, externalId])
   @@index([categoryId])
-  @@map("category_gateway_aliases")
+  @@index([status])
+  @@map("category_gateway_links")
 }
 
 model GameCategory {

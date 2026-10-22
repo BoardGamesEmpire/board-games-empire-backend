@@ -82,7 +82,7 @@ const IGDB_PLATFORM_TYPE_MAP: Readonly<Record<number, proto.PlatformType>> = {
   [PlatformType.Computer]: proto.PlatformType.PLATFORM_TYPE_PC,
 };
 
-function toPlatformData(platform: IgdbPlatform): proto.PlatformData {
+export function toPlatformData(platform: IgdbPlatform): proto.PlatformData {
   const pcTypes: number[] = [PlatformType.OperatingSystem, PlatformType.Computer];
   const mobile = ['iOS', 'Android'];
   const platformType =
@@ -378,7 +378,7 @@ function toThemeData(entity: IgdbNamedEntity): proto.ThemeData {
   } satisfies proto.ThemeData;
 }
 
-function toCategoryData(entity: IgdbNamedEntity): proto.CategoryData {
+export function toCategoryData(entity: IgdbNamedEntity): proto.CategoryData {
   return {
     externalId: String(entity.id),
     name: entity.name,

@@ -68,15 +68,21 @@ describe('DataGatewayService', () => {
       expect(service.describe({}).correlationId).toEqual(expect.any(String));
     });
 
-    it('declares search, fetch, fetch expansions and list languages', () => {
+    it('declares search, fetch, fetch expansions and the lists of languages and platforms', () => {
       expect(new Set(service.describe({}).capabilities)).toEqual(
         new Set([
           proto.Capability.CAPABILITY_SEARCH,
           proto.Capability.CAPABILITY_FETCH,
           proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
           proto.Capability.CAPABILITY_LIST_LANGUAGES,
+          proto.Capability.CAPABILITY_LIST_PLATFORMS,
         ]),
       );
+    });
+
+    // BGG's category and mechanic lists are #839.
+    it('declares list platforms', () => {
+      expect(service.describe({}).capabilities).toContain(proto.Capability.CAPABILITY_LIST_PLATFORMS);
     });
 
     it('covers tabletop base games and expansions', () => {
@@ -102,6 +108,24 @@ describe('DataGatewayService', () => {
 
     it('declares its free text as plain text', () => {
       expect(service.describe({}).contentFormat).toBe(proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT);
+    });
+  });
+
+  describe('listPlatforms (#718)', () => {
+    // Every game BGG sends is on its one platform, Tabletop.
+    it('lists its one platform, Tabletop', async () => {
+      await expect(firstValueFrom(service.listPlatforms({ correlationId: 'corr-platforms' }))).resolves.toEqual({
+        correlationId: 'corr-platforms',
+        platforms: [
+          {
+            externalId: 'bgg-tabletop',
+            name: 'Tabletop',
+            abbreviation: 'TT',
+            platformType: proto.PlatformType.PLATFORM_TYPE_TABLETOP,
+          },
+        ],
+      });
+      expect(bggService.call).not.toHaveBeenCalled();
     });
   });
 
