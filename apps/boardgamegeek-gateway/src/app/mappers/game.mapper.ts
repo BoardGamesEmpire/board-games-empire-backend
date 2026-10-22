@@ -39,7 +39,8 @@ export function toThingTypes(
 
 const COMPLEXITY_WEIGHT_SCALE = 1000;
 
-const TABLETOP_PLATFORM: proto.PlatformData = {
+/** BGG's one platform: every game it sends is on it, and its platform list names it alone (#718). */
+export const TABLETOP_PLATFORM: proto.PlatformData = {
   externalId: 'bgg-tabletop',
   name: 'Tabletop',
   abbreviation: 'TT',

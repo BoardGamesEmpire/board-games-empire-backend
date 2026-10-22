@@ -3,7 +3,7 @@ import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
-import { EMPTY, Observable, defer, from, of } from 'rxjs';
+import { defer, EMPTY, from, Observable, of } from 'rxjs';
 import { catchError, endWith, map, mergeMap, tap } from 'rxjs/operators';
 import {
   chunk,
@@ -17,6 +17,7 @@ import { BggThingType, DEFAULT_BGG_SEARCH_TYPES, MAX_THINGS_PER_BATCH } from '..
 import {
   getOutboundExpansionIds,
   searchItemToGameSearchData,
+  TABLETOP_PLATFORM,
   thingToGameData,
   thingToGameSearchData,
   toContentTypes,
@@ -53,6 +54,8 @@ export class DataGatewayService extends GatewayServiceHost {
         proto.Capability.CAPABILITY_FETCH,
         proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
         proto.Capability.CAPABILITY_LIST_LANGUAGES,
+        // Its category and mechanic lists are #839.
+        proto.Capability.CAPABILITY_LIST_PLATFORMS,
       ],
 
       /** The kinds of thing search and fetch ask BGG for, as the game mapper types them. */
@@ -87,6 +90,14 @@ export class DataGatewayService extends GatewayServiceHost {
       correlationId: request.correlationId ?? crypto.randomUUID(),
       languages: toGatewayLanguageEntries(),
     } satisfies proto.ListLanguagesResponse;
+  }
+
+  /** Its one platform, Tabletop, which every game it sends is on (#718). */
+  override listPlatforms(request: proto.ListPlatformsRequest): Observable<proto.ListPlatformsResponse> {
+    return of({
+      correlationId: request.correlationId ?? crypto.randomUUID(),
+      platforms: [TABLETOP_PLATFORM],
+    } satisfies proto.ListPlatformsResponse);
   }
 
   healthCheck(request: proto.HealthCheckRequest): proto.HealthCheckResponse {

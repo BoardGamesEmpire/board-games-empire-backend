@@ -67,6 +67,8 @@ describe('the IGDB gateway over gRPC', () => {
         'CAPABILITY_FETCH',
         'CAPABILITY_FETCH_EXPANSIONS',
         'CAPABILITY_LIST_LANGUAGES',
+        'CAPABILITY_LIST_PLATFORMS',
+        'CAPABILITY_LIST_CATEGORIES',
       ],
       filterableAxes: ['COVERAGE_AXIS_PLATFORM_TYPE', 'COVERAGE_AXIS_CONTENT_TYPE'],
       languageCodeFormats: {

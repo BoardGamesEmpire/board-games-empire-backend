@@ -66,15 +66,30 @@ describe('DataGatewayService', () => {
       expect(service.describe({}).correlationId).toEqual(expect.any(String));
     });
 
-    it('declares search, fetch, fetch expansions and list languages', () => {
+    it('declares search, fetch, fetch expansions and the lists of languages, platforms and categories', () => {
       expect(new Set(service.describe({}).capabilities)).toEqual(
         new Set([
           proto.Capability.CAPABILITY_SEARCH,
           proto.Capability.CAPABILITY_FETCH,
           proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
           proto.Capability.CAPABILITY_LIST_LANGUAGES,
+          proto.Capability.CAPABILITY_LIST_PLATFORMS,
+          proto.Capability.CAPABILITY_LIST_CATEGORIES,
         ]),
       );
+    });
+
+    // IGDB has no mechanics to list (#718).
+    it('declares list platforms and list categories, but not list mechanics', () => {
+      const { capabilities } = service.describe({});
+
+      expect(capabilities).toEqual(
+        expect.arrayContaining([
+          proto.Capability.CAPABILITY_LIST_PLATFORMS,
+          proto.Capability.CAPABILITY_LIST_CATEGORIES,
+        ]),
+      );
+      expect(capabilities).not.toContain(proto.Capability.CAPABILITY_LIST_MECHANICS);
     });
 
     it('covers every video platform type, never tabletop', () => {
@@ -127,6 +142,92 @@ describe('DataGatewayService', () => {
 
     it('declares its free text as plain text', () => {
       expect(service.describe({}).contentFormat).toBe(proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT);
+    });
+  });
+
+  describe('the lists (#718)', () => {
+    /** The offset a request asks IGDB from, read by running it against a recording client. */
+    const offsetOf = async (request: IgdbRequest<unknown>): Promise<number> => {
+      const offset = jest.fn();
+      const client = new Proxy(
+        {},
+        {
+          get: (_target, key) =>
+            key === 'request'
+              ? () => Promise.resolve({ data: [] })
+              : (...args: unknown[]) => {
+                  if (key === 'offset') {
+                    offset(...args);
+                  }
+                  return client;
+                },
+        },
+      );
+      await request(client as never);
+      return offset.mock.calls[0]?.[0];
+    };
+
+    const platform = (id: number) => ({ id, name: `Platform ${id}`, platform_type: 1 });
+
+    it('lists every platform, page by page, until a page comes back short (#718)', async () => {
+      const full = Array.from({ length: 500 }, (_, index) => platform(index + 1));
+      const short = [platform(501), platform(502), platform(503)];
+      igdbService.call.mockReturnValueOnce(of(full)).mockReturnValueOnce(of(short));
+
+      const response = await firstValueFrom(service.listPlatforms({ correlationId: 'corr-platforms' }));
+
+      expect(response.correlationId).toBe('corr-platforms');
+      expect(response.platforms).toHaveLength(503);
+      expect(response.platforms[502]).toMatchObject({ externalId: '503', name: 'Platform 503' });
+      expect(igdbService.call).toHaveBeenCalledTimes(2);
+      const [[first], [second]] = igdbService.call.mock.calls as [IgdbRequest<unknown>][];
+      await expect(offsetOf(first)).resolves.toBe(0);
+      await expect(offsetOf(second)).resolves.toBe(500);
+    });
+
+    it('asks once when the first page comes back short', async () => {
+      igdbService.call.mockReturnValueOnce(of([platform(1)]));
+
+      const response = await firstValueFrom(service.listPlatforms({}));
+
+      expect(response.platforms).toHaveLength(1);
+      expect(igdbService.call).toHaveBeenCalledTimes(1);
+    });
+
+    it('maps a listed platform as a game’s platform is mapped', async () => {
+      igdbService.call.mockReturnValueOnce(of([{ id: 39, name: 'iOS', abbreviation: 'iOS', platform_type: 4 }]));
+
+      const response = await firstValueFrom(service.listPlatforms({}));
+
+      expect(response.platforms).toEqual([
+        { externalId: '39', name: 'iOS', abbreviation: 'iOS', platformType: proto.PlatformType.PLATFORM_TYPE_MOBILE },
+      ]);
+    });
+
+    it('lists IGDB’s genres as its categories', async () => {
+      igdbService.call.mockReturnValueOnce(
+        of([
+          { id: 15, name: 'Strategy' },
+          { id: 16, name: 'Turn-based strategy (TBS)' },
+        ]),
+      );
+
+      const response = await firstValueFrom(service.listCategories({ correlationId: 'corr-categories' }));
+
+      expect(response).toEqual({
+        correlationId: 'corr-categories',
+        categories: [
+          { externalId: '15', name: 'Strategy' },
+          { externalId: '16', name: 'Turn-based strategy (TBS)' },
+        ],
+      });
+    });
+
+    it('fails the list when IGDB fails, rather than answering part of it', async () => {
+      const full = Array.from({ length: 500 }, (_, index) => platform(index + 1));
+      igdbService.call.mockReturnValueOnce(of(full)).mockReturnValueOnce(throwError(() => new Error('IGDB 503')));
+
+      await expect(firstValueFrom(service.listPlatforms({}))).rejects.toThrow('IGDB 503');
     });
   });
 
