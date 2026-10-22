@@ -91,6 +91,7 @@ export class VocabularyLinkService {
     const reviewing = await this.reviewRequired(adapter);
     const review = async () => reviewing;
     const summary: LoadSummary = { created: 0, matched: 0, pending: 0, kept: 0 };
+    let skipped = 0;
 
     for (const entry of entries) {
       signal?.throwIfAborted();
@@ -99,6 +100,7 @@ export class VocabularyLinkService {
           `DataGateway ${gatewayId} listed a ${adapter.label.toLowerCase()} it can't be linked by ` +
             `(externalId='${entry.externalId}', name='${entry.name}'); skipping it`,
         );
+        skipped++;
         continue;
       }
 
@@ -109,7 +111,7 @@ export class VocabularyLinkService {
     this.logger.log(
       `${adapter.label} section for DataGateway ${gatewayId}: ${entries.length} entries — ` +
         `${summary.created} created, ${summary.matched} matched, ${summary.pending} pending review, ` +
-        `${summary.kept} already linked`,
+        `${summary.kept} already linked, ${skipped} skipped`,
     );
 
     return summary;

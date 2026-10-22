@@ -25,9 +25,10 @@ const errorMessage = (err: unknown): string => (err instanceof Error ? err.messa
  *
  * `processJob` makes one attempt and throws on failure, so BullMQ owns the
  * retries; the failure is recorded after the last one. A list the
- * DataGateway doesn't implement is recorded at once instead. Neither path counts
- * toward auto-disable: a section, like the interview, says nothing about
- * whether the DataGateway is down (#712).
+ * DataGateway doesn't implement is recorded at once instead. A section's
+ * failure doesn't count toward auto-disable: a section, like the interview,
+ * says nothing about whether the DataGateway is down (#712). A connect the
+ * registry makes to route the job still counts, as every connect does.
  */
 @Processor(VOCABULARY_SECTION_QUEUE)
 export class VocabularySectionProcessor extends ActorAwareWorkerHost<VocabularySectionJob> {
