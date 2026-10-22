@@ -2,7 +2,7 @@ import { AuditContextModule } from '@bge/actor-context';
 import { AuditLogModule } from '@bge/audit-log';
 import { DatabaseModule } from '@bge/database';
 import { GameImportFetchModule } from '@bge/game-import';
-import { GatewayRegistryModule } from '@bge/gateway-registry';
+import { GatewayRegistryModule, VocabularySectionConsumerModule } from '@bge/gateway-registry';
 import { BullMQQueueDepthRecorderModule, createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
 import { WebhookQueueProducerModule } from '@bge/queue-webhooks';
 import { CACHE_REDIS_CLIENT, createCacheStore, QUEUE_REDIS_CLIENT, Redis, RedisModule } from '@bge/redis';
@@ -112,6 +112,10 @@ import { baseLogger } from './lib/logger';
     DbPoolMetricsRecorderModule,
 
     GatewayRegistryModule,
+
+    // Runs the list jobs that load each DataGateway's vocabulary after its
+    // interview (#718). The coordinator only queues them.
+    VocabularySectionConsumerModule,
 
     GameImportFetchModule,
   ],

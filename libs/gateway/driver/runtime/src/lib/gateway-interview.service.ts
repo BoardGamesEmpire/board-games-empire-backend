@@ -6,18 +6,18 @@ import {
   type DataGateway,
   type Prisma,
 } from '@bge/database';
-import { GatewayLanguageInput, LanguageLinkService } from '@bge/language';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
-import type { GatewayLanguageEntry, GatewayPingResponse } from '@boardgamesempire/proto-gateway';
+import type { GatewayPingResponse } from '@boardgamesempire/proto-gateway';
 import { status } from '@grpc/grpc-js';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'node:crypto';
-import { firstValueFrom, fromEvent, takeUntil, type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
 import { GatewayInterviewError } from './errors/gateway-interview.error';
 import { GatewayCapabilitiesChangedEvent } from './events/gateway-registry.events';
+import { firstAnswer } from './utils/first-answer';
 import { toInterviewAnswers } from './utils/interview-answers';
-import { toStoredLanguageCodeFormat } from './utils/stored-enums';
+import { VocabularySectionQueue } from './vocabulary-section.queue';
 
 /** How old a DataGateway's answers may grow before it's interviewed again. */
 export const INTERVIEW_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -34,20 +34,6 @@ const errorMessage = (err: unknown): string => (err instanceof Error ? err.messa
 
 const sameList = <T>(left: readonly T[], right: readonly T[]): boolean =>
   left.length === right.length && left.every((item, index) => item === right[index]);
-
-/**
- * The call's first answer, unless `signal` aborts first: the call is then
- * dropped, and the abort's reason thrown.
- */
-const firstAnswer = async <T>(call: Observable<T>, signal: AbortSignal): Promise<T> => {
-  signal.throwIfAborted();
-  try {
-    return await firstValueFrom(call.pipe(takeUntil(fromEvent(signal, 'abort'))));
-  } catch (err) {
-    signal.throwIfAborted();
-    throw err;
-  }
-};
 
 /** A Describe the DataGateway doesn't implement, or one that failed in some other way. */
 const describeFailure = (err: unknown): DataGatewayInterviewFailure =>
@@ -76,9 +62,9 @@ interface InterviewAttempt {
 }
 
 /**
- * A wait before an interview starts: a stale check's ping, or the first
- * interview's look at the row. The DataGateway and driver it would
- * interview through, and how to abandon it.
+ * A wait before an interview starts, a stale check's ping or the first
+ * interview's look at the row, or a section run after one. The DataGateway
+ * and driver it asks through, and how to abandon it.
  */
 interface PendingStart {
   readonly gatewayId: string;
@@ -90,14 +76,18 @@ interface PendingStart {
  * The interview: the server asking a DataGateway to describe itself, and
  * storing the answers on its row, where routing reads them (#712).
  *
- * An interview pings, for the DataGateway's version, then asks Describe, then
- * runs each vocabulary section, of which languages is the only one so far.
- * Describe decides whether the interview succeeds: a section that fails is
- * recorded with it and retried at the next one, without holding the
- * DataGateway back. A failed interview records a coarse code on the row,
- * keeps the last good answers in use, and throws. It never counts toward
- * auto-disable: a DataGateway that answers its ping isn't down, and
- * re-enabling it couldn't fix an interview.
+ * An interview pings, for the DataGateway's version, then asks Describe.
+ * Once it has stored the answers, it queues one list job for each list the
+ * DataGateway declares and no admin switched off, and each job loads that
+ * section of its vocabulary afterwards (#718). A section is best-effort: it
+ * records its own outcome and holds the DataGateway back from nothing. It
+ * runs through the driver its job resolves, abandoned with that driver's
+ * interviews ({@link runSection}).
+ *
+ * A failed interview records a coarse code on the row, keeps the last good
+ * answers in use, and throws. It never counts toward auto-disable: a
+ * DataGateway that answers its ping isn't down, and re-enabling it couldn't
+ * fix an interview.
  *
  * The first interview runs when the gateway registry connects a DataGateway,
  * before routing it. Later ones run in the background: on connect, and from
@@ -108,10 +98,9 @@ interface PendingStart {
  * abandoned ({@link abandon}). A DataGateway an admin disabled or deleted isn't
  * interviewed, though the gateway worker may still hold its driver (dropping
  * that is #701's). An interview under way when that happens leaves the row
- * as it is, though its language section may still link the languages the
- * DataGateway lists. The coordinator and the gateway worker both host the
- * gateway registry, so either may interview, and a repeated interview just
- * writes the same answers.
+ * as it is. The coordinator and the gateway worker both host the gateway
+ * registry, so either may interview, and a repeated interview just writes
+ * the same answers and queues list jobs that fold into those waiting.
  */
 @Injectable()
 export class GatewayInterviewService {
@@ -130,11 +119,15 @@ export class GatewayInterviewService {
   // its interview starts.
   private readonly lookups = new Set<PendingStart>();
 
+  // List jobs' sections under way, so abandon() can stop one writing links
+  // once its connection is closed or replaced (#718).
+  private readonly sections = new Set<PendingStart>();
+
   constructor(
     private readonly db: DatabaseService,
-    private readonly languageLinks: LanguageLinkService,
     private readonly eventEmitter: EventEmitter2,
     private readonly systemActorScope: SystemActorScope,
+    private readonly sectionQueue: VocabularySectionQueue,
   ) {}
 
   /**
@@ -172,9 +165,29 @@ export class GatewayInterviewService {
   }
 
   /**
-   * Abandons the DataGateway's interview and stale checks under way, and a
-   * first interview still reading its row, or only those asking through
-   * `driver`. The gateway registry calls this when it disposes a driver, and
+   * Runs one list job's section through `driver`, abandoned with the
+   * driver's interviews ({@link abandon}): `section`'s signal aborts once the
+   * gateway registry lets go of the driver, so it starts no further write
+   * through a connection that was closed or replaced (#718).
+   */
+  async runSection<T>(
+    gatewayId: string,
+    driver: DataGatewayDriver,
+    section: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    const run: PendingStart = { gatewayId, driver, abandonment: new AbortController() };
+    this.sections.add(run);
+    try {
+      return await section(run.abandonment.signal);
+    } finally {
+      this.sections.delete(run);
+    }
+  }
+
+  /**
+   * Abandons the DataGateway's interview, stale checks and section runs under
+   * way, and a first interview still reading its row, or only those asking
+   * through `driver`. The gateway registry calls this when it disposes a driver, and
    * when a config event invalidates the DataGateway. The interview stops
    * waiting on the DataGateway, starts no further write, and fails for its
    * callers, so it records no failure of a connection that was closed under
@@ -188,7 +201,7 @@ export class GatewayInterviewService {
       `The interview of DataGateway ${gatewayId} was abandoned: its connection was closed or replaced`,
     );
 
-    for (const pending of [...this.checks.values(), ...this.lookups]) {
+    for (const pending of [...this.checks.values(), ...this.lookups, ...this.sections]) {
       if (pending.gatewayId === gatewayId && (!driver || pending.driver === driver)) {
         pending.abandonment.abort(reason);
       }
@@ -345,15 +358,6 @@ export class GatewayInterviewService {
     );
     const answers = toInterviewAnswers(description, ping);
 
-    // The language section asks only a DataGateway that declares it, and
-    // only while no admin has it switched off: the rule routing applies.
-    const listsLanguages =
-      answers.capabilities.includes(DataGatewayCapability.ListLanguages) &&
-      !row.disabledCapabilities.includes(DataGatewayCapability.ListLanguages);
-    if (listsLanguages) {
-      await this.linkLanguages(gatewayId, driver, signal);
-    }
-
     const interviewedAt = new Date();
     await this.store(gatewayId, row, initiatedAt, interviewedAt, signal, {
       ...answers,
@@ -361,6 +365,12 @@ export class GatewayInterviewService {
     });
 
     this.logger.log(`Interviewed DataGateway ${gatewayId}`);
+
+    // Its sections load afterwards, each its own list job (#718). Not
+    // awaited: queueing is best-effort and never rejects, and a queue that
+    // hangs, as when its Redis is unreachable, mustn't hold back the
+    // interview, nor the first connect that waits on it.
+    void this.sectionQueue.enqueue(gatewayId, answers.capabilities, row.disabledCapabilities);
   }
 
   /**
@@ -397,49 +407,6 @@ export class GatewayInterviewService {
     } catch (err) {
       this.logger.warn(`Couldn't record DataGateway ${gatewayId}'s failed interview: ${errorMessage(err)}`);
     }
-  }
-
-  /**
-   * The language section: links each language the DataGateway lists, under
-   * the unknown-language policy. A failure is only logged, never thrown,
-   * since a section that fails is retried at the next interview rather than
-   * failing this one. It isn't recorded with the interview: an interview's
-   * failure is about the interview alone (#718).
-   */
-  private async linkLanguages(gatewayId: string, driver: DataGatewayDriver, signal: AbortSignal): Promise<void> {
-    try {
-      const response = await firstAnswer(driver.listLanguages({ correlationId: crypto.randomUUID() }), signal);
-      const entries = (response.languages ?? [])
-        .map((entry) => this.toLanguageInput(gatewayId, entry))
-        .filter((entry): entry is GatewayLanguageInput => entry !== null);
-
-      await this.languageLinks.interview(gatewayId, entries, signal);
-    } catch (err) {
-      // Abandoning the interview isn't the section failing.
-      signal.throwIfAborted();
-      this.logger.warn(`The language section of DataGateway ${gatewayId}'s interview failed: ${errorMessage(err)}`);
-    }
-  }
-
-  private toLanguageInput(gatewayId: string, entry: GatewayLanguageEntry): GatewayLanguageInput | null {
-    const format = toStoredLanguageCodeFormat(entry.format);
-    const value = entry.value?.trim();
-    if (!format || !value) {
-      this.logger.warn(
-        `DataGateway ${gatewayId} listed a language it can't be linked by (value='${entry.value}', format=${entry.format}); skipping it`,
-      );
-      return null;
-    }
-
-    return {
-      value,
-      format,
-      ietfTag: entry.ietfTag,
-      iso6393: entry.iso6393,
-      iso6391: entry.iso6391,
-      name: entry.name,
-      nativeName: entry.nativeName,
-    };
   }
 
   /**

@@ -1,7 +1,9 @@
 export * from './lib/constants/gateway-registry.constants';
+export * from './lib/constants/vocabulary-section.constants';
 export * from './lib/credentials/gateway-credentials.factory';
 export * from './lib/errors/gateway-interview.error';
 export * from './lib/errors/gateway-routing-refused.error';
+export * from './lib/errors/vocabulary-section.error';
 export * from './lib/events/gateway-registry.events';
 export * from './lib/gateway-config-events.module';
 export * from './lib/gateway-config-events.service';
@@ -14,3 +16,6 @@ export * from './lib/interfaces';
 export * from './lib/utils/coverage-filter';
 export * from './lib/utils/hash-config';
 export * from './lib/utils/stored-enums';
+export * from './lib/vocabulary-section-consumer.module';
+export * from './lib/vocabulary-section-queue.module';
+export * from './lib/vocabulary-section.queue';

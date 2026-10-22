@@ -192,7 +192,11 @@ calls the coordinator. It needs **both** Redis connections:
   DataGateway after repeated failures.
 - **Queue** — it consumes fetch jobs from `{bge.gateway.fetch}`, whose
   results the worker's import jobs read, and enqueues webhook deliveries for
-  the import events it emits.
+  the import events it emits. It also consumes the list jobs on
+  `{bge.gateway.vocabulary}`: after each interview, each one loads a
+  DataGateway's languages, platforms, categories or mechanics. Both the
+  gateway worker and the coordinator enqueue them after an interview, but
+  only the gateway worker runs them.
 
 ### Coordinator
 
@@ -206,7 +210,9 @@ needs **both** Redis connections:
   DataGateway after repeated failed connections.
 - **Queue** — for BullMQ producer-side work. When the api starts an import,
   the coordinator enqueues the game-import flow via `FlowProducer`, which
-  uses the queue connection.
+  uses the queue connection. After an interview, it enqueues that
+  DataGateway's list jobs on `{bge.gateway.vocabulary}`, which the gateway
+  worker runs.
 
 The coordinator does NOT use the sockets connection — only the api serves
 WebSocket clients.

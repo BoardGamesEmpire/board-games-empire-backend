@@ -9,7 +9,6 @@ import {
   PlatformType,
   ResourceType,
 } from '@bge/database';
-import { LanguageLinkService } from '@bge/language';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
 import * as proto from '@boardgamesempire/proto-gateway';
@@ -22,6 +21,7 @@ import { GatewayInterviewError } from './errors/gateway-interview.error';
 import { GatewayCapabilitiesChangedEvent } from './events/gateway-registry.events';
 import { GatewayInterviewService } from './gateway-interview.service';
 import { FakeDataGatewayTable } from './testing/fake-data-gateway-table';
+import { VocabularySectionQueue } from './vocabulary-section.queue';
 
 const GW = 'bgg';
 
@@ -83,24 +83,16 @@ const ENGLISH: proto.GatewayLanguageEntry = {
 /** Lets an interview under way go as far as it can without the DataGateway. */
 const settle = () => delay(0);
 
-/** STUB_DESCRIPTION without ListLanguages. */
-const WITHOUT_LANGUAGES: proto.DescribeResponse = {
-  ...STUB_DESCRIPTION,
-  capabilities: STUB_DESCRIPTION.capabilities.filter(
-    (capability) => capability !== proto.Capability.CAPABILITY_LIST_LANGUAGES,
-  ),
-};
-
 describe('GatewayInterviewService', () => {
   let table: FakeDataGatewayTable;
-  let languageLinks: { interview: jest.Mock };
+  let sectionQueue: { enqueue: jest.Mock };
   let systemActorScope: { run: jest.Mock };
   let emitted: GatewayCapabilitiesChangedEvent[];
   let service: GatewayInterviewService;
 
   beforeEach(async () => {
     table = new FakeDataGatewayTable();
-    languageLinks = { interview: jest.fn().mockResolvedValue({ resolved: 0, pending: 0, unresolved: 0, ignored: 0 }) };
+    sectionQueue = { enqueue: jest.fn().mockResolvedValue(undefined) };
     systemActorScope = { run: jest.fn((_reason: string, fn: () => unknown) => fn()) };
 
     const module = await Test.createTestingModule({
@@ -108,7 +100,7 @@ describe('GatewayInterviewService', () => {
         GatewayInterviewService,
         EventEmitter2,
         { provide: DatabaseService, useValue: { dataGateway: table.delegate } },
-        { provide: LanguageLinkService, useValue: languageLinks },
+        { provide: VocabularySectionQueue, useValue: sectionQueue },
         { provide: SystemActorScope, useValue: systemActorScope },
       ],
     }).compile();
@@ -239,81 +231,66 @@ describe('GatewayInterviewService', () => {
     });
   });
 
-  describe('the language section', () => {
-    it('links each language the DataGateway lists, in the server’s formats', async () => {
-      table.seed({ id: GW });
+  // An interview pings and describes; its sections run afterwards as list
+  // jobs, one per list it declares (#718).
+  describe('the list jobs', () => {
+    it('queues the list jobs once its answers are stored, with the switched-off capabilities', async () => {
+      table.seed({ id: GW, disabledCapabilities: [DataGatewayCapability.ListLanguages] });
+      sectionQueue.enqueue.mockImplementation(async () => {
+        expect(table.row(GW)?.lastInterviewedAt).toBeInstanceOf(Date);
+      });
 
-      await service.interview(GW, dataGateway({ languages: [ENGLISH] }));
+      await service.interview(GW, dataGateway());
 
-      expect(languageLinks.interview).toHaveBeenCalledWith(
+      expect(sectionQueue.enqueue).toHaveBeenCalledTimes(1);
+      expect(sectionQueue.enqueue).toHaveBeenCalledWith(
         GW,
         [
-          {
-            value: 'en-US',
-            format: LanguageCodeFormat.IetfBcp47,
-            ietfTag: 'en-US',
-            iso6393: 'eng',
-            iso6391: 'en',
-            name: 'English (US)',
-            nativeName: undefined,
-          },
+          DataGatewayCapability.Search,
+          DataGatewayCapability.Fetch,
+          DataGatewayCapability.FetchExpansions,
+          DataGatewayCapability.ListLanguages,
         ],
-        expect.any(AbortSignal),
+        [DataGatewayCapability.ListLanguages],
       );
     });
 
-    it('leaves out a listed language it can’t read, and links the rest', async () => {
+    // Queueing is best-effort, so a queue that hangs, as when its Redis is
+    // unreachable, holds back neither the interview nor the first connect
+    // that waits on it (#718).
+    it('resolves once its answers are stored, without waiting for the list jobs to be queued', async () => {
       table.seed({ id: GW });
-      const blank: proto.GatewayLanguageEntry = { ...ENGLISH, value: '  ' };
-      const unknownFormat: proto.GatewayLanguageEntry = {
-        ...ENGLISH,
-        value: 'xx',
-        format: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_UNSPECIFIED,
-      };
+      sectionQueue.enqueue.mockReturnValue(new Promise<void>(() => undefined));
 
-      await service.interview(GW, dataGateway({ languages: [blank, unknownFormat, ENGLISH] }));
+      const outcome = await Promise.race([
+        service.interview(GW, dataGateway()).then(() => 'interviewed'),
+        delay(100).then(() => 'still waiting'),
+      ]);
 
-      expect(languageLinks.interview).toHaveBeenCalledWith(
-        GW,
-        [expect.objectContaining({ value: 'en-US' })],
-        expect.any(AbortSignal),
-      );
+      expect(outcome).toBe('interviewed');
+      expect(sectionQueue.enqueue).toHaveBeenCalledTimes(1);
     });
 
-    it('never asks a DataGateway that doesn’t declare ListLanguages for its languages', async () => {
-      table.seed({ id: GW });
-      const driver = dataGateway({ description: WITHOUT_LANGUAGES, languages: [ENGLISH] });
-      const listLanguages = jest.spyOn(driver, 'listLanguages');
-
-      await service.interview(GW, driver);
-
-      expect(listLanguages).not.toHaveBeenCalled();
-      expect(languageLinks.interview).not.toHaveBeenCalled();
-    });
-
-    it('skips the section while an admin has ListLanguages switched off', async () => {
-      table.seed({ id: GW, disabledCapabilities: [DataGatewayCapability.ListLanguages] });
-      const driver = dataGateway({ languages: [ENGLISH] });
-      const listLanguages = jest.spyOn(driver, 'listLanguages');
-
-      await service.interview(GW, driver);
-
-      expect(listLanguages).not.toHaveBeenCalled();
-      expect(table.row(GW)?.capabilities).toContain(DataGatewayCapability.ListLanguages);
-    });
-
-    it('still succeeds when the section fails, and records no failure with the interview (#718)', async () => {
+    it('queues nothing when its answers are not stored', async () => {
       table.seed({ id: GW });
       const driver = dataGateway();
-      driver.listLanguages = () => throwError(() => new Error('upstream timeout'));
+      driver.describe = () => throwError(() => new Error('upstream timeout'));
+
+      await expect(service.interview(GW, driver)).rejects.toThrow(GatewayInterviewError);
+
+      expect(sectionQueue.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('never asks a DataGateway for a list itself', async () => {
+      table.seed({ id: GW });
+      const driver = dataGateway({ languages: [ENGLISH] });
+      const listLanguages = jest.spyOn(driver, 'listLanguages');
+      const listPlatforms = jest.spyOn(driver, 'listPlatforms');
 
       await service.interview(GW, driver);
 
-      const row = table.row(GW);
-      expect(row).toMatchObject({ capabilities: expect.arrayContaining([DataGatewayCapability.Search]) });
-      expect(row?.firstInterviewedAt).toBeInstanceOf(Date);
-      expect(row?.lastInterviewFailure ?? null).toBeNull();
-      expect(row?.lastInterviewFailedAt ?? null).toBeNull();
+      expect(listLanguages).not.toHaveBeenCalled();
+      expect(listPlatforms).not.toHaveBeenCalled();
     });
   });
 
@@ -450,15 +427,15 @@ describe('GatewayInterviewService', () => {
 
     it('emits nothing when another process stored the same change first, and still stores the answers', async () => {
       table.seed({ id: GW, capabilities: [DataGatewayCapability.Search, DataGatewayCapability.Fetch] });
-      // The other process's interview lands while this one is in its language section.
-      languageLinks.interview.mockImplementation(async () => {
+      const driver = declaring(proto.Capability.CAPABILITY_SEARCH, proto.Capability.CAPABILITY_LIST_LANGUAGES);
+      const describe = driver.describe.bind(driver);
+      driver.describe = () => {
+        // The other process's interview lands while this one waits on Describe.
         table.patch(GW, { capabilities: [DataGatewayCapability.Search, DataGatewayCapability.ListLanguages] });
-      });
+        return describe();
+      };
 
-      await service.interview(
-        GW,
-        declaring(proto.Capability.CAPABILITY_SEARCH, proto.Capability.CAPABILITY_LIST_LANGUAGES),
-      );
+      await service.interview(GW, driver);
 
       expect(emitted).toEqual([]);
       expect(table.row(GW)).toMatchObject({
@@ -472,15 +449,15 @@ describe('GatewayInterviewService', () => {
         id: GW,
         capabilities: [DataGatewayCapability.Search, DataGatewayCapability.Fetch, DataGatewayCapability.ListLanguages],
       });
-      // The other process's interview, which got a different answer, lands while this one is in its language section.
-      languageLinks.interview.mockImplementation(async () => {
+      const driver = declaring(proto.Capability.CAPABILITY_SEARCH, proto.Capability.CAPABILITY_LIST_LANGUAGES);
+      const describe = driver.describe.bind(driver);
+      driver.describe = () => {
+        // The other process's interview, which got a different answer, lands while this one waits on Describe.
         table.patch(GW, { capabilities: [DataGatewayCapability.ListLanguages] });
-      });
+        return describe();
+      };
 
-      await service.interview(
-        GW,
-        declaring(proto.Capability.CAPABILITY_SEARCH, proto.Capability.CAPABILITY_LIST_LANGUAGES),
-      );
+      await service.interview(GW, driver);
 
       expect(emitted).toHaveLength(1);
       expect(emitted[0]).toMatchObject({
@@ -850,24 +827,50 @@ describe('GatewayInterviewService', () => {
 
     it('stores nothing once abandoned, even with the answers in', async () => {
       table.seed({ id: GW });
-      languageLinks.interview.mockImplementation(async () => service.abandon(GW));
+      const driver = dataGateway();
+      const describe = driver.describe.bind(driver);
+      // Abandoned as Describe answers, before the answers are stored.
+      driver.describe = () => describe().pipe(tap(() => queueMicrotask(() => service.abandon(GW))));
 
-      await expect(service.interview(GW, dataGateway({ languages: [ENGLISH] }))).rejects.toThrow(/abandoned/);
+      await expect(service.interview(GW, driver)).rejects.toThrow(/abandoned/);
 
       expect(table.row(GW)).toMatchObject({ capabilities: [], firstInterviewedAt: null, lastInterviewFailure: null });
+      expect(sectionQueue.enqueue).not.toHaveBeenCalled();
     });
 
-    it('stops its language section from linking further languages', async () => {
-      table.seed({ id: GW });
+    it('aborts a section run when the gateway registry lets go of its driver', async () => {
+      const driver = dataGateway();
       let section: AbortSignal | undefined;
-      languageLinks.interview.mockImplementation(async (_gatewayId: string, _entries: unknown, signal: AbortSignal) => {
+      let finish!: () => void;
+      const running = service.runSection(GW, driver, (signal) => {
         section = signal;
-        service.abandon(GW);
+        return new Promise<void>((resolve) => (finish = resolve));
       });
 
-      await expect(service.interview(GW, dataGateway({ languages: [ENGLISH] }))).rejects.toThrow(/abandoned/);
+      service.abandon(GW, dataGateway());
+      expect(section?.aborted).toBe(false);
 
+      service.abandon(GW, driver);
       expect(section?.aborted).toBe(true);
+      expect(section?.reason).toEqual(expect.objectContaining({ message: expect.stringMatching(/abandoned/) }));
+
+      finish();
+      await running;
+    });
+
+    it('lets go of a section run once it ends', async () => {
+      const driver = dataGateway();
+      let section: AbortSignal | undefined;
+
+      await expect(
+        service.runSection(GW, driver, async (signal) => {
+          section = signal;
+          return 'loaded';
+        }),
+      ).resolves.toBe('loaded');
+
+      service.abandon(GW, driver);
+      expect(section?.aborted).toBe(false);
     });
 
     it('stops retrying a write that missed', async () => {

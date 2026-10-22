@@ -1,6 +1,5 @@
 import { AuditContextModule } from '@bge/actor-context';
 import { DatabaseModule } from '@bge/database';
-import { LanguageLinkModule } from '@bge/language';
 import { NotificationsServiceModule } from '@bge/notifications-service';
 import { Global, Module } from '@nestjs/common';
 import { GatewayCredentialsFactory } from './credentials/gateway-credentials.factory';
@@ -11,6 +10,7 @@ import { GatewayInterviewService } from './gateway-interview.service';
 import { GatewayRegistryBootstrapService } from './gateway-registry.bootstrap.service';
 import { GatewayRegistryService } from './gateway-registry.service';
 import { GatewayNotificationListener } from './listeners/gateway-notification.listener';
+import { VocabularySectionQueueModule } from './vocabulary-section-queue.module';
 
 /**
  * Full gateway driver management (#193). Apps that need to call gateways
@@ -24,9 +24,12 @@ import { GatewayNotificationListener } from './listeners/gateway-notification.li
  *   - `GatewayRegistryBootstrapService`: eager-connect at app startup
  *   - `GatewayNotificationListener`: tells the server admins of an
  *     auto-disable and of lost capabilities (#763)
+ *   - `VocabularySectionQueueModule`: queues the list jobs an interview
+ *     leaves (#718). Their consumer is `VocabularySectionConsumerModule`,
+ *     which only the gateway worker imports.
  *
- * Global — feature modules inject `GatewayRegistryService` without
- * re-importing.
+ * Global — feature modules inject `GatewayRegistryService` and
+ * `GatewayInterviewService` without re-importing.
  *
  * Depends on `CACHE_REDIS_CLIENT` being available in the DI container —
  * typically provided by `RedisModule.forRootAsync({ cache: ... })` from
@@ -42,8 +45,8 @@ import { GatewayNotificationListener } from './listeners/gateway-notification.li
     AuditContextModule,
     DatabaseModule,
     GatewayConfigEventsModule,
-    LanguageLinkModule,
     NotificationsServiceModule,
+    VocabularySectionQueueModule,
   ],
   providers: [
     GatewayCredentialsFactory,
@@ -54,6 +57,6 @@ import { GatewayNotificationListener } from './listeners/gateway-notification.li
     GatewayRegistryService,
     RemoteGatewayDriverFactory,
   ],
-  exports: [GatewayCredentialsFactory, GatewayRegistryService, RemoteGatewayDriverFactory],
+  exports: [GatewayCredentialsFactory, GatewayInterviewService, GatewayRegistryService, RemoteGatewayDriverFactory],
 })
 export class GatewayRegistryModule {}

@@ -9,7 +9,6 @@ import {
   DataGatewayInterviewFailure,
   PlatformType,
 } from '@bge/database';
-import { LanguageLinkService } from '@bge/language';
 import { CACHE_REDIS_CLIENT } from '@bge/redis';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { InMemoryGatewayDriver, type InMemoryGatewayFixtures } from '@boardgamesempire/gateway-driver-contract-testing';
@@ -30,6 +29,7 @@ import { GatewayInterviewService } from './gateway-interview.service';
 import { coverageOverlaps, GatewayRegistryService, type StoredCoverage } from './gateway-registry.service';
 import type { GatewayConfigEvent } from './interfaces';
 import { FakeDataGatewayTable } from './testing/fake-data-gateway-table';
+import { VocabularySectionQueue } from './vocabulary-section.queue';
 
 const { Search, Fetch, FetchExpansions, ListLanguages, ListPlatforms, ListCategories, ListMechanics } =
   DataGatewayCapability;
@@ -130,7 +130,7 @@ describe('GatewayRegistryService', () => {
         { provide: DatabaseService, useValue: { dataGateway: table.delegate } },
         { provide: CACHE_REDIS_CLIENT, useValue: redisMock },
         { provide: SystemActorScope, useValue: systemActorScope },
-        { provide: LanguageLinkService, useValue: { interview: jest.fn().mockResolvedValue(undefined) } },
+        { provide: VocabularySectionQueue, useValue: { enqueue: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 
