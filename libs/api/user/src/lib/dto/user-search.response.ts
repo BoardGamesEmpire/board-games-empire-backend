@@ -24,9 +24,11 @@ class UserSearchProfileDto implements UserSearchProfile {
  * without it a field added to the select would be served undocumented. The
  * pattern is the one #354 established for the plugin inventory rows.
  *
- * Deliberately narrow — id, username, name, image and the public profile. This
- * endpoint is readable by any authenticated user, so anything added here is
- * added to what one user learns about another.
+ * Deliberately narrow — id, username, name and the profile's display name and
+ * avatar. This endpoint is readable by any authenticated user, so anything
+ * added here is added to what one user learns about another. The sign-in
+ * provider's picture (`image`) is not served: the avatar is the profile's
+ * (#695).
  */
 export class UserSearchResultDto implements UserSearchResult {
   @ApiProperty({ description: 'User identifier' })
@@ -40,9 +42,6 @@ export class UserSearchResultDto implements UserSearchResult {
 
   @ApiProperty({ type: String, nullable: true })
   lastName!: string | null;
-
-  @ApiProperty({ type: String, nullable: true, description: 'Account image URL' })
-  image!: string | null;
 
   @ApiProperty({ type: UserSearchProfileDto, nullable: true })
   profile!: UserSearchProfile | null;

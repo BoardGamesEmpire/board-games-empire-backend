@@ -288,11 +288,13 @@ export const PERMISSION_CATALOG = [
   // takes the operator form the in-memory matcher accepts. `fields` is the
   // columns search serves: no route checks `read User` yet, and without them a
   // later one that served `email` would serve it to every user on this grant.
+  // `image`, the sign-in provider's picture, isn't among them: the avatar is
+  // the profile's (#695).
   permission({
     action: Action.read,
     subject: ResourceType.User,
     conditions: { banned: false, profile: { is: { isSearchable: true } } },
-    fields: ['id', 'username', 'firstName', 'lastName', 'image'],
+    fields: ['id', 'username', 'firstName', 'lastName'],
     slug: 'read:user:searchable',
     riskLevel: RiskLevel.Medium,
     reason: 'Find other users who have made their profile searchable',

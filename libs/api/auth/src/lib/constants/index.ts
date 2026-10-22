@@ -24,3 +24,10 @@ export const AUTH_BASE_PATH = '/api/auth';
  * its match from the same value.
  */
 export const AUTH_COOKIE_PREFIX = 'bge_auth_';
+
+/**
+ * The longest display name a profile holds, in characters. Provisioning cuts
+ * a starting name to it and the profile edit refuses a longer one, so a client
+ * can always send back the name it was served (#819).
+ */
+export const DISPLAY_NAME_MAX_LENGTH = 64;

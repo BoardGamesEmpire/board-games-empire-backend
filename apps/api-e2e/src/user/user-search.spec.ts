@@ -170,13 +170,14 @@ describe('user search', () => {
     });
   });
 
+  // No `image`, the sign-in provider's picture: the avatar is the profile's (#695).
   it('serves no column beyond the search columns and the profile name and avatar', async () => {
     const { term, caller } = await arrange();
 
     const response = await search(caller, term).expect(200);
 
     for (const user of response.body.users as Record<string, unknown>[]) {
-      expect(Object.keys(user).sort()).toEqual(['firstName', 'id', 'image', 'lastName', 'profile', 'username']);
+      expect(Object.keys(user).sort()).toEqual(['firstName', 'id', 'lastName', 'profile', 'username']);
       expect(Object.keys(user['profile'] as object).sort()).toEqual(['avatarUrl', 'displayName']);
     }
   });

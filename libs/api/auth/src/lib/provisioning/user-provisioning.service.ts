@@ -2,6 +2,7 @@ import { DatabaseService, Prisma, PROVISIONED_HUMAN_WHERE, SystemRole, Theme } f
 import { PermissionsService } from '@bge/permissions';
 import { ServiceAccountService } from '@bge/services';
 import { Injectable, Logger } from '@nestjs/common';
+import { DISPLAY_NAME_MAX_LENGTH } from '../constants';
 
 /**
  * The Owner election's advisory lock. Postgres derives the 64-bit key from the
@@ -9,6 +10,27 @@ import { Injectable, Logger } from '@nestjs/common';
  * unit-scope locks, so no caller computes the key itself.
  */
 const OWNER_ELECTION_LOCK_NAME = 'bge:owner-election';
+
+/**
+ * A new user's display name: their first and last name, each trimmed and
+ * joined by one space, or their username when neither holds anything but
+ * spaces. Each part is trimmed before it is tested, so a first name of only
+ * spaces no longer yields an empty display name (#818), and someone who gave
+ * only a last name is shown by it rather than by their username.
+ *
+ * Cut to {@link DISPLAY_NAME_MAX_LENGTH} characters, since nothing caps the
+ * names at sign-up and the profile edit refuses a longer one. Cut by code
+ * point, so no character is split in half.
+ */
+function displayNameOf(user: { firstName?: string | null; lastName?: string | null; username: string }): string {
+  const name =
+    [user.firstName, user.lastName]
+      .map((part) => part?.trim())
+      .filter(Boolean)
+      .join(' ') || user.username;
+
+  return Array.from(name).slice(0, DISPLAY_NAME_MAX_LENGTH).join('').trimEnd();
+}
 
 @Injectable()
 export class UserProvisioningService {
@@ -22,12 +44,15 @@ export class UserProvisioningService {
 
   async provisionNewUser(userId: string): Promise<void> {
     // Event payloads carry minimal snapshots (#57); load the full row for the
-    // fields provisioning needs (firstName/lastName drive the display name).
+    // fields provisioning needs (firstName/lastName drive the display name,
+    // image seeds the avatar).
     const user = await this.db.user.findUniqueOrThrow({ where: { id: userId } });
 
-    const displayName = user.firstName
-      ? `${user.firstName}${user.lastName ? ` ${user.lastName}` : ''}`.trim()
-      : user.username;
+    const displayName = displayNameOf(user);
+
+    // The sign-in provider's picture only seeds the avatar. The avatar is the
+    // profile's from then on, and `User.image` is never served as one (#695).
+    const avatarUrl = user.image?.trim() || null;
 
     // An anonymous user is a temporary, account-less guest (#484), and it must
     // never take the first-human seat. Guests are meant to arrive by
@@ -88,7 +113,7 @@ export class UserProvisioningService {
       await db.userPreferences.create({
         data: { userId: user.id, theme: Theme.System, emailNotifications: {}, pushNotifications: {} },
       });
-      await db.userProfile.create({ data: { userId: user.id, displayName } });
+      await db.userProfile.create({ data: { userId: user.id, displayName, avatarUrl } });
       await db.userRole.createMany({ data: elected ? firstHumanAssignments : baseAssignments });
 
       // First-human-ness, deliberately NOT `roleNames.includes(Owner)`. The

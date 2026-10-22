@@ -75,7 +75,9 @@ export class UserService {
             username: true,
             firstName: true,
             lastName: true,
-            image: true,
+            // No `image`: the sign-in provider's picture only seeds the
+            // avatar at provisioning, and the avatar served is the profile's
+            // (#695).
             profile: {
               select: {
                 displayName: true,
