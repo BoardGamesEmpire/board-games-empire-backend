@@ -5,9 +5,9 @@ model Role {
   description String?
 
   /// Provenance (#235). `System` for every catalog role. No default: a writer
-  /// of custom roles (#169) names another owner or fails the typecheck. The
-  /// reconciler leaves a role it does not own alone, but revokes `System`
-  /// grants the manifest does not list.
+  /// of custom roles (#772) names another owner or fails the typecheck;
+  /// households never write one (#169). The reconciler leaves a role it does
+  /// not own alone, but revokes `System` grants the manifest does not list.
   managedBy PermissionOwner @map("managed_by")
 
   permissions RolePermission[]

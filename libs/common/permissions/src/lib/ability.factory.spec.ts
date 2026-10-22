@@ -1539,9 +1539,9 @@ describe('AbilityFactory', () => {
         expect(ability.can(Action.update, awaiting(roleName), 'status')).toBe(false);
       });
 
-      // A role holding one permission and not the other, as a custom role
-      // could (#169): each is asked about its own column, so neither passes for
-      // the other.
+      // A role holding one permission and not the other, as a role a server
+      // admin edits (#772) or a household restricts (#845) could: each is
+      // asked about its own column, so neither passes for the other.
       it('keeps a holder of approve alone from revoking, and a holder of revoke alone from approving', () => {
         const approver = holding(SystemRole.HouseholdAdmin, ['update:household_invite:approve']);
         const revoker = holding(SystemRole.HouseholdAdmin, ['update:household_invite:revoke:as-admin']);

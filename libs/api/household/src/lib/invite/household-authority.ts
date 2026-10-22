@@ -26,9 +26,10 @@ export const HOUSEHOLD_AUTHORITY_ROLES: readonly SystemRole[] = [SystemRole.Hous
  * Whether the roster names `userId` one of the household's owners or admins.
  *
  * Decided by their role in this household's own roster, never by a grant:
- * staff read every invite through a wildcard grant, and a custom role (#169)
- * may hand a member a permission, but neither makes them the household's
- * owner or admin. An actor with no user, such as a plugin actor, is never one.
+ * staff read every invite through a wildcard grant, and a variant of a
+ * shipped household role (#844) may hand a member extra permissions, but
+ * neither makes them the household's owner or admin. An actor with no user,
+ * such as a plugin actor, is never one.
  */
 export function isHouseholdAuthority(members: readonly RosterRow[], userId: string | null): boolean {
   return (
