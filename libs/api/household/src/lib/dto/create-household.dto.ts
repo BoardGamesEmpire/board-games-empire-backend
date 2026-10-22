@@ -12,9 +12,10 @@ export type HouseholdReach = (typeof HOUSEHOLD_REACHES)[number];
 /**
  * A household's reach: Private or Friends only, the rungs a household read
  * rule serves. `Public` waits on #231, which decides what someone outside a
- * household sees of it (#495), and `FriendsOfFriends` on #496, which defines
- * friends of friends. Shared with `UpdateHouseholdDto`, which names no
- * default.
+ * household sees of it (#495). So does `FriendsOfFriends`, which widens a
+ * roster beyond friends and needs an answer to whose block vetoes in a
+ * household of many members (#496). Shared with `UpdateHouseholdDto`, which
+ * names no default.
  */
 export function HouseholdReachProperty(defaultReach?: HouseholdReach): PropertyDecorator {
   return ReachProperty({

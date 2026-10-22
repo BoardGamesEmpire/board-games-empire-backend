@@ -33,12 +33,13 @@ const CLEARABLE_TEXT = [
 ];
 
 describe('UpdateUserProfileDto', () => {
-  it('accepts Public, Friends and Private, and refuses FriendsOfFriends until #496', async () => {
-    for (const reach of [Reach.Public, Reach.Friends, Reach.Private]) {
+  it('accepts every reach a profile read rule serves, and no other', async () => {
+    for (const reach of [Reach.Public, Reach.FriendsOfFriends, Reach.Friends, Reach.Private]) {
       expect(await keysFor({ reach })).toEqual({});
     }
 
-    expect(await keysFor({ reach: Reach.FriendsOfFriends })).toEqual({ 'reach.isIn': 'validation.isIn' });
+    // No longer a reach (#808).
+    expect(await keysFor({ reach: 'Household' })).toEqual({ 'reach.isIn': 'validation.isIn' });
   });
 
   it.each(NON_NULLABLE)('refuses null for %s, whose column keeps a value', async (field) => {

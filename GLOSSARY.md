@@ -181,7 +181,7 @@ One user asking to become another's friend, which the other accepts or declines 
 _Avoid_: invite (for friends); sender and recipient (say requester and addressee)
 
 **Friends of friends**:
-Planned: users two friendship steps away from you, as a reach between friends and everyone.
+Users two friendship steps away from you, with no block between you, as a reach between friends and everyone.
 _Avoid_: second degree
 
 **Block**:

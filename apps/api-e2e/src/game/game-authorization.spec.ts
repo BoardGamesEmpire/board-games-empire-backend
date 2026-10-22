@@ -352,14 +352,17 @@ describe('game authorization', () => {
       expect(await reachOf(game.id)).toBe(Reach.Friends);
     });
 
-    it.each([Reach.FriendsOfFriends])(
-      'refuses %s with 400 — no game read rule honours it until #496',
-      async (reach) => {
-        const creator = await actors.user();
+    it('creates a FriendsOfFriends game (#496)', async () => {
+      const creator = await actors.user();
 
-        await createGame(creator, { title: 'Tiered prototype', reach }).expect(400);
-      },
-    );
+      const created = await createGame(creator, { title: 'Tiered prototype', reach: Reach.FriendsOfFriends }).expect(
+        201,
+      );
+      const { game } = gameEnvelope(created, 'POST /api/games with reach FriendsOfFriends');
+
+      expect(game.reach).toBe(Reach.FriendsOfFriends);
+      expect(await reachOf(game.id)).toBe(Reach.FriendsOfFriends);
+    });
 
     it('refuses Household with 400, which is no longer a reach (#808)', async () => {
       const creator = await actors.user();
