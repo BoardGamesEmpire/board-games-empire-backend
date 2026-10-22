@@ -4,7 +4,7 @@ import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { inviteEnvelope } from './household-invite-wire';
-import { membersPath } from './household-request';
+import { createMemberClient } from './household-request';
 
 /**
  * Only a household owner acts on the household admin role (#168): makes
@@ -33,11 +33,7 @@ describe('acting on the household admin role (#168)', () => {
     await db.close();
   });
 
-  const changeRole = (actor: SessionActor, householdId: string, memberId: string, role: SystemRole) =>
-    request(baseUrl)
-      .patch(`${membersPath(householdId)}/${memberId}/role`)
-      .set(actor.headers)
-      .send({ role });
+  const { changeRole } = createMemberClient(baseUrl);
 
   const invite = (actor: SessionActor, householdId: string, body: Record<string, unknown>) =>
     request(baseUrl).post(`/api/households/${householdId}/invites`).set(actor.headers).send(body);

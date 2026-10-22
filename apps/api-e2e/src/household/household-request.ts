@@ -1,3 +1,4 @@
+import type { SystemRole } from '@bge/database';
 import type { AuthenticatedActor } from '@bge/testing-e2e';
 import request from 'supertest';
 
@@ -8,9 +9,12 @@ import request from 'supertest';
  *
  * Seven suites built the remove, leave and transfer URLs themselves, four
  * through a local helper and three inline, and `household-member-removal.spec.ts`
- * would have added another (#273). Role changes and roster reads have no
- * helper yet; their suites build on {@link membersPath}. Each helper returns
- * the supertest chain, so callers keep `.expect()`.
+ * would have added another (#273). Five built the role change themselves,
+ * four inline and one through a local helper, and moved onto
+ * {@link MemberClient.changeRole} with the suite that drives it (#760).
+ * Roster reads have no helper yet; their suites build on
+ * {@link membersPath}. Each helper returns the supertest chain, so callers
+ * keep `.expect()`.
  */
 
 const HOUSEHOLDS_PATH = '/api/households';
@@ -26,6 +30,13 @@ export interface MemberClient {
 
   /** `POST …/members/:memberId/transfer-ownership` as `actor`. */
   transferOwnership(actor: AuthenticatedActor, householdId: string, memberId: string): request.Test;
+
+  /**
+   * `PATCH …/members/:memberId/role` as `actor`, asking for `role`. It takes
+   * any `SystemRole`, the household owner role included, so a test can send
+   * one the route refuses.
+   */
+  changeRole(actor: AuthenticatedActor, householdId: string, memberId: string, role: SystemRole): request.Test;
 }
 
 export function createMemberClient(baseUrl: string): MemberClient {
@@ -44,5 +55,11 @@ export function createMemberClient(baseUrl: string): MemberClient {
       request(baseUrl)
         .post(`${membersPath(householdId)}/${memberId}/transfer-ownership`)
         .set(actor.headers),
+
+    changeRole: (actor, householdId, memberId, role) =>
+      request(baseUrl)
+        .patch(`${membersPath(householdId)}/${memberId}/role`)
+        .set(actor.headers)
+        .send({ role }),
   };
 }
