@@ -1,4 +1,4 @@
-import type { GatewayServiceHost } from '@bge/gateway-host';
+import { GatewayServiceHost } from '@bge/gateway-host';
 import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
@@ -29,10 +29,12 @@ const FETCH_GAME_TYPES = [BggThingType.BoardGame, BggThingType.BoardGameExpansio
 const EXPANSION_BATCH_TYPES = [BggThingType.BoardGameExpansion] as const;
 
 @Injectable()
-export class DataGatewayService implements GatewayServiceHost {
+export class DataGatewayService extends GatewayServiceHost {
   private readonly logger = new Logger(DataGatewayService.name);
 
-  constructor(private readonly bggService: BggService) {}
+  constructor(private readonly bggService: BggService) {
+    super();
+  }
 
   ping(request: proto.GatewayPingRequest): proto.GatewayPingResponse {
     return {

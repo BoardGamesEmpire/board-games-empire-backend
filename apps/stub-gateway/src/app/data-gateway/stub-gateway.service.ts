@@ -1,4 +1,4 @@
-import type { GatewayServiceHost } from '@bge/gateway-host';
+import { GatewayServiceHost } from '@bge/gateway-host';
 import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable } from '@nestjs/common';
@@ -30,7 +30,7 @@ function toSearchData(game: proto.GameData): proto.GameSearchData {
  * error.
  */
 @Injectable()
-export class StubGatewayService implements GatewayServiceHost {
+export class StubGatewayService extends GatewayServiceHost {
   ping(request: proto.GatewayPingRequest): proto.GatewayPingResponse {
     return {
       correlationId: request.correlationId ?? crypto.randomUUID(),

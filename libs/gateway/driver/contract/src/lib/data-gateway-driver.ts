@@ -20,7 +20,8 @@ import type { GatewayInboundEvent } from './types.js';
  * suite in `@boardgamesempire/gateway-driver-contract-testing`):
  *
  *  - `describe` declares the operations the driver serves, any subset of
- *    search, fetch, fetch expansions and list languages, and a content format
+ *    search, fetch, fetch expansions and the lists (languages, platforms,
+ *    categories and mechanics), and a content format
  *    of plain text, HTML, BBCode or Markdown. The server calls only the
  *    operations declared, so one left out may answer UNIMPLEMENTED. Each run
  *    of the suite names the operations its driver serves: the suite checks

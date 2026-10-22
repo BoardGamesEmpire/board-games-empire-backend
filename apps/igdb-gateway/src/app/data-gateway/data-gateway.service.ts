@@ -1,4 +1,4 @@
-import type { GatewayServiceHost } from '@bge/gateway-host';
+import { GatewayServiceHost } from '@bge/gateway-host';
 import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
@@ -18,10 +18,12 @@ import { toGatewayLanguageEntries } from '../mappers/language.mapper';
 import { IgdbGame } from '../types';
 
 @Injectable()
-export class DataGatewayService implements GatewayServiceHost {
+export class DataGatewayService extends GatewayServiceHost {
   private readonly logger = new Logger(DataGatewayService.name);
 
-  constructor(private readonly igdbService: IGDBService) {}
+  constructor(private readonly igdbService: IGDBService) {
+    super();
+  }
 
   ping(request: proto.GatewayPingRequest): proto.GatewayPingResponse {
     return {

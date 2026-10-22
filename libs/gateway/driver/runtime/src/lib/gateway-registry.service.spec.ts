@@ -31,8 +31,9 @@ import { coverageOverlaps, GatewayRegistryService, type StoredCoverage } from '.
 import type { GatewayConfigEvent } from './interfaces';
 import { FakeDataGatewayTable } from './testing/fake-data-gateway-table';
 
-const { Search, Fetch, FetchExpansions, ListLanguages } = DataGatewayCapability;
-const EVERY_CAPABILITY = [Search, Fetch, FetchExpansions, ListLanguages];
+const { Search, Fetch, FetchExpansions, ListLanguages, ListPlatforms, ListCategories, ListMechanics } =
+  DataGatewayCapability;
+const EVERY_CAPABILITY = [Search, Fetch, FetchExpansions, ListLanguages, ListPlatforms, ListCategories, ListMechanics];
 const { Tabletop } = PlatformType;
 
 /** What a board-game DataGateway covers. */

@@ -1,6 +1,8 @@
 import * as proto from '@boardgamesempire/proto-gateway';
+import { status } from '@grpc/grpc-js';
+import { RpcException } from '@nestjs/microservices';
 import { Test, TestingModule } from '@nestjs/testing';
-import { firstValueFrom, of } from 'rxjs';
+import { firstValueFrom, Observable, of } from 'rxjs';
 import { toArray } from 'rxjs/operators';
 import { DataGatewayController } from './data-gateway.controller';
 import { GatewayServiceHost } from './gateway-service.host';
@@ -18,6 +20,9 @@ describe('DataGatewayController', () => {
       fetchGame: jest.fn(),
       fetchExpansions: jest.fn(),
       listLanguages: jest.fn(),
+      listPlatforms: jest.fn(),
+      listCategories: jest.fn(),
+      listMechanics: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -184,6 +189,45 @@ describe('DataGatewayController', () => {
       expect(frames[0].message).toBe('Gateway unreachable');
     });
   });
+  describe('the list calls (#718)', () => {
+    it('passes ListPlatforms, ListCategories and ListMechanics to the host', async () => {
+      const platforms: proto.ListPlatformsResponse = {
+        correlationId: 'p',
+        platforms: [{ externalId: '6', name: 'PC', platformType: proto.PlatformType.PLATFORM_TYPE_PC }],
+      };
+      const categories: proto.ListCategoriesResponse = {
+        correlationId: 'c',
+        categories: [{ externalId: '15', name: 'Strategy' }],
+      };
+      const mechanics: proto.ListMechanicsResponse = {
+        correlationId: 'm',
+        mechanics: [{ externalId: '2082', name: 'Worker Placement' }],
+      };
+      host.listPlatforms.mockReturnValue(of(platforms));
+      host.listCategories.mockReturnValue(of(categories));
+      host.listMechanics.mockReturnValue(of(mechanics));
+
+      await expect(firstValueFrom(controller.listPlatforms({ correlationId: 'p' }))).resolves.toBe(platforms);
+      await expect(firstValueFrom(controller.listCategories({ correlationId: 'c' }))).resolves.toBe(categories);
+      await expect(firstValueFrom(controller.listMechanics({ correlationId: 'm' }))).resolves.toBe(mechanics);
+      expect(host.listPlatforms).toHaveBeenCalledWith({ correlationId: 'p' });
+      expect(host.listCategories).toHaveBeenCalledWith({ correlationId: 'c' });
+      expect(host.listMechanics).toHaveBeenCalledWith({ correlationId: 'm' });
+    });
+
+    // A DataGateway declares only the lists it serves, so one that serves
+    // none needs no code for them (#711, #718).
+    it('answers UNIMPLEMENTED for a list the host does not override (#718)', async () => {
+      const bare = new DataGatewayController(new HostWithoutLists());
+
+      const refusal = await firstValueFrom(bare.listMechanics({ correlationId: 'm' })).catch((err: unknown) => err);
+
+      expect(refusal).toBeInstanceOf(RpcException);
+      expect((refusal as RpcException).getError()).toMatchObject({ code: status.UNIMPLEMENTED });
+      await expect(firstValueFrom(bare.listPlatforms({}))).rejects.toBeInstanceOf(RpcException);
+      await expect(firstValueFrom(bare.listCategories({}))).rejects.toBeInstanceOf(RpcException);
+    });
+  });
 });
 
 function minimalGameSearchData(): proto.GameSearchData {
@@ -215,4 +259,15 @@ function minimalGameData(): proto.GameData {
     metadataValues: [],
     dlc: [],
   };
+}
+
+/** A host that serves none of the list calls, as most DataGateways serve some of them. */
+class HostWithoutLists extends GatewayServiceHost {
+  ping = jest.fn();
+  healthCheck = jest.fn();
+  describe = jest.fn();
+  searchGames = jest.fn(() => new Observable<proto.GatewaySearchResult>());
+  fetchGame = jest.fn(() => new Observable<proto.FetchGameResponse>());
+  fetchExpansions = jest.fn(() => new Observable<proto.GatewaySearchResult>());
+  listLanguages = jest.fn();
 }
