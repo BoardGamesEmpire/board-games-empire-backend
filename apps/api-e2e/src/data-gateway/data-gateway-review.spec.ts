@@ -1,6 +1,5 @@
 import {
   AuthType,
-  DataGatewayInterviewFailure,
   LanguageCodeFormat,
   LanguageLinkOrigin,
   LanguageLinkStatus,
@@ -122,27 +121,6 @@ describe('DataGateway review', () => {
 
       const deleted = await request(baseUrl).delete(`${GATEWAYS}/${id}`).set(admin.headers).expect(200);
       expectRow(deleted.body.dataGateway);
-    });
-
-    // #712 writes a section failure with the interview it came with, so the
-    // two times are equal, and the failure is still current.
-    it('reports a failed section stamped with its interview', async () => {
-      const at = new Date('2026-10-01T12:00:00.000Z');
-      const gateway = await seedGateway({
-        firstInterviewedAt: at,
-        lastInterviewedAt: at,
-        lastInterviewFailedAt: at,
-        lastInterviewFailure: DataGatewayInterviewFailure.LanguageSectionFailed,
-      });
-
-      const { body } = await request(baseUrl).get(`${GATEWAYS}/${gateway.id}`).set(admin.headers).expect(200);
-
-      expect(body.dataGateway.interview).toEqual({
-        interviewed: true,
-        firstInterviewedAt: at.toISOString(),
-        lastInterviewedAt: at.toISOString(),
-        failure: { code: DataGatewayInterviewFailure.LanguageSectionFailed, at: at.toISOString() },
-      });
     });
   });
 

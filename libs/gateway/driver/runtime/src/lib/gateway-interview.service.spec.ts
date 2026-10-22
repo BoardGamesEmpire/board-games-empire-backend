@@ -302,7 +302,7 @@ describe('GatewayInterviewService', () => {
       expect(table.row(GW)?.capabilities).toContain(DataGatewayCapability.ListLanguages);
     });
 
-    it('still succeeds when the section fails, and records the failure beside the success', async () => {
+    it('still succeeds when the section fails, and records no failure with the interview (#718)', async () => {
       table.seed({ id: GW });
       const driver = dataGateway();
       driver.listLanguages = () => throwError(() => new Error('upstream timeout'));
@@ -310,12 +310,10 @@ describe('GatewayInterviewService', () => {
       await service.interview(GW, driver);
 
       const row = table.row(GW);
-      expect(row).toMatchObject({
-        capabilities: expect.arrayContaining([DataGatewayCapability.Search]),
-        lastInterviewFailure: DataGatewayInterviewFailure.LanguageSectionFailed,
-      });
+      expect(row).toMatchObject({ capabilities: expect.arrayContaining([DataGatewayCapability.Search]) });
       expect(row?.firstInterviewedAt).toBeInstanceOf(Date);
-      expect(row?.lastInterviewFailedAt).toEqual(row?.lastInterviewedAt);
+      expect(row?.lastInterviewFailure ?? null).toBeNull();
+      expect(row?.lastInterviewFailedAt ?? null).toBeNull();
     });
   });
 

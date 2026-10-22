@@ -1,7 +1,16 @@
-import { DatabaseService, isPrismaUniqueConstraintError, Prisma } from '@bge/database';
+import {
+  DatabaseService,
+  isPrismaUniqueConstraintError,
+  Prisma,
+  VocabularyLinkOrigin,
+  VocabularyLinkStatus,
+} from '@bge/database';
 import type { CategoryData, FamilyData, MechanicData } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import { toSlug } from '../utils/slug';
+
+/** An import's link is Resolved: it is written only with the record it points at (#718). */
+const IMPORTED = { status: VocabularyLinkStatus.Resolved, origin: VocabularyLinkOrigin.Import } as const;
 
 /**
  * Per-entity Prisma wiring for the shared dedup pipeline. Mechanic, Category,
@@ -44,12 +53,12 @@ export class TaxonomyUpsertService {
       label: 'Mechanic',
       table: Prisma.raw('mechanics'),
       findAlias: () =>
-        this.db.mechanicGatewayAlias
+        this.db.mechanicGatewayLink
           .findUnique({
             where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
             select: { mechanicId: true },
           })
-          .then((row) => row?.mechanicId),
+          .then((row) => row?.mechanicId ?? undefined),
       findBySlug: (slug) =>
         this.db.mechanic.findUnique({ where: { slug }, select: { id: true } }).then((row) => row?.id),
       createCanonical: (slug) =>
@@ -58,17 +67,17 @@ export class TaxonomyUpsertService {
             data: {
               name: data.name,
               slug,
-              gatewayAliases: {
-                create: { gatewayId, externalId: data.externalId, externalName: data.name },
+              gatewayLinks: {
+                create: { gatewayId, externalId: data.externalId, suppliedName: data.name, ...IMPORTED },
               },
             },
             select: { id: true },
           })
           .then((row) => row.id),
       upsertAlias: (mechanicId) =>
-        this.db.mechanicGatewayAlias.upsert({
+        this.db.mechanicGatewayLink.upsert({
           where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
-          create: { mechanicId, gatewayId, externalId: data.externalId, externalName: data.name },
+          create: { mechanicId, gatewayId, externalId: data.externalId, suppliedName: data.name, ...IMPORTED },
           update: {},
         }),
     });
@@ -79,12 +88,12 @@ export class TaxonomyUpsertService {
       label: 'Category',
       table: Prisma.raw('categories'),
       findAlias: () =>
-        this.db.categoryGatewayAlias
+        this.db.categoryGatewayLink
           .findUnique({
             where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
             select: { categoryId: true },
           })
-          .then((row) => row?.categoryId),
+          .then((row) => row?.categoryId ?? undefined),
       findBySlug: (slug) =>
         this.db.category.findUnique({ where: { slug }, select: { id: true } }).then((row) => row?.id),
       createCanonical: (slug) =>
@@ -93,17 +102,17 @@ export class TaxonomyUpsertService {
             data: {
               name: data.name,
               slug,
-              gatewayAliases: {
-                create: { gatewayId, externalId: data.externalId, externalName: data.name },
+              gatewayLinks: {
+                create: { gatewayId, externalId: data.externalId, suppliedName: data.name, ...IMPORTED },
               },
             },
             select: { id: true },
           })
           .then((row) => row.id),
       upsertAlias: (categoryId) =>
-        this.db.categoryGatewayAlias.upsert({
+        this.db.categoryGatewayLink.upsert({
           where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
-          create: { categoryId, gatewayId, externalId: data.externalId, externalName: data.name },
+          create: { categoryId, gatewayId, externalId: data.externalId, suppliedName: data.name, ...IMPORTED },
           update: {},
         }),
     });
@@ -114,7 +123,7 @@ export class TaxonomyUpsertService {
       label: 'Family',
       table: Prisma.raw('families'),
       findAlias: () =>
-        this.db.familyGatewayAlias
+        this.db.familyGatewayLink
           .findUnique({
             where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
             select: { familyId: true },
@@ -127,7 +136,7 @@ export class TaxonomyUpsertService {
             data: {
               name: data.name,
               slug,
-              gatewayAliases: {
+              gatewayLinks: {
                 create: { gatewayId, externalId: data.externalId, externalName: data.name },
               },
             },
@@ -135,7 +144,7 @@ export class TaxonomyUpsertService {
           })
           .then((row) => row.id),
       upsertAlias: (familyId) =>
-        this.db.familyGatewayAlias.upsert({
+        this.db.familyGatewayLink.upsert({
           where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
           create: { familyId, gatewayId, externalId: data.externalId, externalName: data.name },
           update: {},

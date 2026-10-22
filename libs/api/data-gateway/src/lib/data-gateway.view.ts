@@ -35,8 +35,7 @@ type InterviewColumns = Pick<
  *
  * A later success leaves the failure columns in place, so a failure is current
  * only while `lastInterviewFailedAt` isn't before `lastInterviewedAt` (#712).
- * The two are equal when a section failed inside an interview that succeeded,
- * and that failure is still current. A half-written pair reports no failure.
+ * A half-written pair reports no failure.
  */
 export function interviewStatus(row: InterviewColumns): DataGatewayInterviewStatus {
   const { firstInterviewedAt, lastInterviewedAt, lastInterviewFailedAt, lastInterviewFailure } = row;

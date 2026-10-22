@@ -1,4 +1,4 @@
-import { DatabaseService, PlatformType } from '@bge/database';
+import { DatabaseService, PlatformType, VocabularyLinkOrigin, VocabularyLinkStatus } from '@bge/database';
 import { LanguageLinkService } from '@bge/language';
 import type { GameData, GameReleaseData, LanguageData, PlatformData } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
@@ -36,10 +36,20 @@ export class PlatformUpsertService {
       select: { platformId: true },
     });
 
-    if (existing) {
+    if (existing?.platformId) {
       return existing.platformId;
     }
 
+    // An import's link is Resolved, and keeps what the DataGateway sent (#718).
+    const link = {
+      gatewayId,
+      externalId: data.externalId,
+      status: VocabularyLinkStatus.Resolved,
+      origin: VocabularyLinkOrigin.Import,
+      suppliedName: data.name,
+      suppliedAbbreviation: data.abbreviation ?? null,
+      suppliedPlatformType: toPlatformType(data.platformType),
+    };
     const slug = toSlug(data.name);
     this.logger.debug(`Upserting platform ${data.name} (${gatewayId}:${data.externalId})`);
 
@@ -53,14 +63,14 @@ export class PlatformUpsertService {
         abbreviation: data.abbreviation,
         platformType: toPlatformType(data.platformType),
         gatewayLinks: {
-          create: { gatewayId, externalId: data.externalId },
+          create: link,
         },
       },
       update: {
         gatewayLinks: {
           connectOrCreate: {
             where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
-            create: { gatewayId, externalId: data.externalId },
+            create: link,
           },
         },
       },

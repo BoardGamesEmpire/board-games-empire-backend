@@ -57,21 +57,6 @@ describe('interviewStatus', () => {
     expect(status.failure).toEqual({ code: DataGatewayInterviewFailure.DescribeFailed, at: T2 });
   });
 
-  // A section failure is written with the interview that succeeded around it,
-  // so the two times are equal (#712). It's still current.
-  it('reports a section failure stamped with the success it came with', () => {
-    const status = interviewStatus(
-      columns({
-        firstInterviewedAt: T1,
-        lastInterviewedAt: T2,
-        lastInterviewFailedAt: T2,
-        lastInterviewFailure: DataGatewayInterviewFailure.LanguageSectionFailed,
-      }),
-    );
-
-    expect(status.failure).toEqual({ code: DataGatewayInterviewFailure.LanguageSectionFailed, at: T2 });
-  });
-
   it.each([
     ['a failure time with no code', { lastInterviewFailedAt: T1 }],
     ['a code with no failure time', { lastInterviewFailure: DataGatewayInterviewFailure.PingFailed }],
@@ -102,13 +87,13 @@ describe('toDataGatewayView', () => {
       firstInterviewedAt: T1,
       lastInterviewedAt: T1,
       lastInterviewFailedAt: T1,
-      lastInterviewFailure: DataGatewayInterviewFailure.LanguageSectionFailed,
+      lastInterviewFailure: DataGatewayInterviewFailure.DescribeFailed,
     });
 
     const view = toDataGatewayView(row);
 
     expect(view.interview).toEqual(interviewStatus(row));
-    expect(view.lastInterviewFailure).toBe(DataGatewayInterviewFailure.LanguageSectionFailed);
+    expect(view.lastInterviewFailure).toBe(DataGatewayInterviewFailure.DescribeFailed);
     expect(view.id).toBe(row.id);
   });
 });

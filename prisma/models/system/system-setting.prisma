@@ -28,6 +28,13 @@ model SystemSetting {
   /// Pending links for admin review instead of being auto-added.
   reviewGatewayLanguages Boolean @default(false) @map("review_gateway_languages")
 
+  /// When true, a platform, category or mechanic a DataGateway sends that
+  /// matches no record waits as a Pending link for admin review, instead of
+  /// being added (#718). One setting per vocabulary.
+  reviewGatewayPlatforms  Boolean @default(false) @map("review_gateway_platforms")
+  reviewGatewayCategories Boolean @default(false) @map("review_gateway_categories")
+  reviewGatewayMechanics  Boolean @default(false) @map("review_gateway_mechanics")
+
   /// Who may be invited to a household (#278). `Public`: anyone. `Friends`:
   /// the inviter's friends, invited from their account; every invite by
   /// address is refused. The settings PATCH accepts no other level.

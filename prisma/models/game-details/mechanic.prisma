@@ -13,10 +13,10 @@ model Mechanic {
   enrichmentSource String?   @map("enrichment_source")
   frozenAt         DateTime? @map("frozen_at") @db.Timestamptz(3)
 
-  games          GameMechanic[]
-  favorites      FavoriteMechanic[]
-  disliked       DislikedMechanic[]
-  gatewayAliases MechanicGatewayAlias[]
+  games        GameMechanic[]
+  favorites    FavoriteMechanic[]
+  disliked     DislikedMechanic[]
+  gatewayLinks MechanicGatewayLink[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -25,22 +25,33 @@ model Mechanic {
   @@map("mechanics")
 }
 
-// Maps gateway-specific mechanic names/IDs to the canonical Mechanic record.
-// Created on import when a fuzzy match resolves to an existing canonical record,
-// or alongside a new Mechanic when no match is found.
-model MechanicGatewayAlias {
+// Maps a DataGateway's mechanic to a Mechanic record. A list job writes it
+// after an interview, and an import writes one for a mechanic no list
+// covered: linked to a record of the same slug or a similar name, or to a
+// new one (#718). A Pending or Ignored link has no mechanic.
+model MechanicGatewayLink {
   id String @id @default(cuid(2))
 
-  mechanic   Mechanic @relation(fields: [mechanicId], references: [id], onDelete: Cascade)
-  mechanicId String   @map("mechanic_id")
+  mechanic   Mechanic? @relation(fields: [mechanicId], references: [id], onDelete: Cascade)
+  mechanicId String?   @map("mechanic_id")
 
-  gatewayId    String @map("gateway_id")
-  externalId   String @map("external_id")
-  externalName String @map("external_name") // source name before normalization
+  gatewayId  String @map("gateway_id")
+  externalId String @map("external_id")
+
+  status VocabularyLinkStatus
+  origin VocabularyLinkOrigin
+
+  // The name the DataGateway sent, before normalization. Accept rebuilds
+  // the record from it (#715, #718).
+  suppliedName String @map("supplied_name")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@unique([gatewayId, externalId])
   @@index([mechanicId])
-  @@map("mechanic_gateway_aliases")
+  @@index([status])
+  @@map("mechanic_gateway_links")
 }
 
 model GameMechanic {

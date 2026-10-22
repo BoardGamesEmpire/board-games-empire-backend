@@ -26,18 +26,34 @@ model Platform {
   @@map("platforms")
 }
 
+// Maps a DataGateway's platform to a Platform record. A list job writes it
+// after an interview, and an import writes one for a platform no list
+// covered (#718). A Pending or Ignored link has no platform.
 model PlatformGatewayLink {
   id String @id @default(cuid(2))
 
-  platform   Platform @relation(fields: [platformId], references: [id], onDelete: Cascade)
-  platformId String   @map("platform_id")
+  platform   Platform? @relation(fields: [platformId], references: [id], onDelete: Cascade)
+  platformId String?   @map("platform_id")
 
-  // The gateway that sourced this platform record (IGDB, Steam, etc.)
+  // The DataGateway that sent this platform (IGDB, Steam, etc.)
   gatewayId  String @map("gateway_id")
   externalId String @map("external_id")
 
+  status VocabularyLinkStatus
+  origin VocabularyLinkOrigin
+
+  // What the DataGateway sent. Accept rebuilds the record from these, so a
+  // Pending link is settled without asking again (#715, #718).
+  suppliedName         String       @map("supplied_name")
+  suppliedAbbreviation String?      @map("supplied_abbreviation")
+  suppliedPlatformType PlatformType @map("supplied_platform_type")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
   @@unique([gatewayId, externalId])
   @@index([platformId])
+  @@index([status])
   @@map("platform_gateway_links")
 }
 

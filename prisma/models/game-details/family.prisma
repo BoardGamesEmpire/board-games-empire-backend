@@ -21,8 +21,8 @@ model Family {
   enrichmentSource String?   @map("enrichment_source")
   frozenAt         DateTime? @map("frozen_at") @db.Timestamptz(3)
 
-  games          GameFamily[]
-  gatewayAliases FamilyGatewayAlias[]
+  games        GameFamily[]
+  gatewayLinks FamilyGatewayLink[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -31,7 +31,10 @@ model Family {
   @@map("families")
 }
 
-model FamilyGatewayAlias {
+// Maps a DataGateway's family to a Family record, written at import. Unlike
+// the platform, category and mechanic links, it has no review status: no
+// DataGateway lists its families (#718).
+model FamilyGatewayLink {
   id String @id @default(cuid(2))
 
   family   Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
@@ -43,7 +46,7 @@ model FamilyGatewayAlias {
 
   @@unique([gatewayId, externalId])
   @@index([familyId])
-  @@map("family_gateway_aliases")
+  @@map("family_gateway_links")
 }
 
 model GameFamily {

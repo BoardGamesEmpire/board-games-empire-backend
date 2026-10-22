@@ -1,5 +1,5 @@
 import type { GameRelease, PlatformGatewayLink } from '@bge/database';
-import { PlatformType } from '@bge/database';
+import { PlatformType, VocabularyLinkOrigin, VocabularyLinkStatus } from '@bge/database';
 import { LanguageLinkService } from '@bge/language';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import type { GameData, PlatformData } from '@boardgamesempire/proto-gateway';
@@ -704,7 +704,15 @@ describe('PlatformUpsertService', () => {
             slug: 'tabletop',
             platformType: PlatformType.Tabletop,
             gatewayLinks: {
-              create: { gatewayId: GATEWAY_ID, externalId: 'tabletop' },
+              create: {
+                gatewayId: GATEWAY_ID,
+                externalId: 'tabletop',
+                status: VocabularyLinkStatus.Resolved,
+                origin: VocabularyLinkOrigin.Import,
+                suppliedName: 'Tabletop',
+                suppliedAbbreviation: null,
+                suppliedPlatformType: PlatformType.Tabletop,
+              },
             },
           }),
         }),
@@ -723,7 +731,15 @@ describe('PlatformUpsertService', () => {
             gatewayLinks: {
               connectOrCreate: {
                 where: { gatewayId_externalId: { gatewayId: 'gw-steam', externalId: 'steam-6' } },
-                create: { gatewayId: 'gw-steam', externalId: 'steam-6' },
+                create: {
+                  gatewayId: 'gw-steam',
+                  externalId: 'steam-6',
+                  status: VocabularyLinkStatus.Resolved,
+                  origin: VocabularyLinkOrigin.Import,
+                  suppliedName: 'PC (Microsoft Windows)',
+                  suppliedAbbreviation: 'PC',
+                  suppliedPlatformType: PlatformType.PC,
+                },
               },
             },
           },

@@ -350,15 +350,14 @@ export class GatewayInterviewService {
     const listsLanguages =
       answers.capabilities.includes(DataGatewayCapability.ListLanguages) &&
       !row.disabledCapabilities.includes(DataGatewayCapability.ListLanguages);
-    const sectionFailure = listsLanguages ? await this.linkLanguages(gatewayId, driver, signal) : null;
+    if (listsLanguages) {
+      await this.linkLanguages(gatewayId, driver, signal);
+    }
 
     const interviewedAt = new Date();
     await this.store(gatewayId, row, initiatedAt, interviewedAt, signal, {
       ...answers,
       lastInterviewedAt: interviewedAt,
-      // A failed section is recorded with the interview, at the same time,
-      // and retried at the next one. It doesn't hold the DataGateway back.
-      ...(sectionFailure && { lastInterviewFailedAt: interviewedAt, lastInterviewFailure: sectionFailure }),
     });
 
     this.logger.log(`Interviewed DataGateway ${gatewayId}`);
@@ -402,15 +401,12 @@ export class GatewayInterviewService {
 
   /**
    * The language section: links each language the DataGateway lists, under
-   * the unknown-language policy. Returns the failure code when it fails,
-   * instead of throwing, since a section that fails is retried at the next
-   * interview rather than failing this one.
+   * the unknown-language policy. A failure is only logged, never thrown,
+   * since a section that fails is retried at the next interview rather than
+   * failing this one. It isn't recorded with the interview: an interview's
+   * failure is about the interview alone (#718).
    */
-  private async linkLanguages(
-    gatewayId: string,
-    driver: DataGatewayDriver,
-    signal: AbortSignal,
-  ): Promise<DataGatewayInterviewFailure | null> {
+  private async linkLanguages(gatewayId: string, driver: DataGatewayDriver, signal: AbortSignal): Promise<void> {
     try {
       const response = await firstAnswer(driver.listLanguages({ correlationId: crypto.randomUUID() }), signal);
       const entries = (response.languages ?? [])
@@ -418,12 +414,10 @@ export class GatewayInterviewService {
         .filter((entry): entry is GatewayLanguageInput => entry !== null);
 
       await this.languageLinks.interview(gatewayId, entries, signal);
-      return null;
     } catch (err) {
       // Abandoning the interview isn't the section failing.
       signal.throwIfAborted();
       this.logger.warn(`The language section of DataGateway ${gatewayId}'s interview failed: ${errorMessage(err)}`);
-      return DataGatewayInterviewFailure.LanguageSectionFailed;
     }
   }
 

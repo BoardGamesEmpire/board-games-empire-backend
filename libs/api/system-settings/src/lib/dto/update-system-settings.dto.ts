@@ -139,6 +139,30 @@ export class UpdateSystemSettingsDto {
 
   @ApiPropertyOptional({
     description:
+      'Whether a platform a DataGateway lists that matches no record waits for review instead of being added.',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
+  reviewGatewayPlatforms?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Whether a category a DataGateway lists that matches no record waits for review instead of being added.',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
+  reviewGatewayCategories?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Whether a mechanic a DataGateway lists that matches no record waits for review instead of being added.',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
+  reviewGatewayMechanics?: boolean;
+
+  @ApiPropertyOptional({
+    description:
       "Who may be invited to a household. Public: anyone. Friends: only the inviter's friends, invited from their account; every invite by email address is refused. A user's own preference can narrow this, never widen it.",
     enum: INVITEE_POLICIES,
   })

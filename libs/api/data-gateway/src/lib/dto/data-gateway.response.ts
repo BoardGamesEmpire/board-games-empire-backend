@@ -44,8 +44,8 @@ class DataGatewayInterviewStatusDto implements DataGatewayInterviewStatus {
     type: DataGatewayInterviewFailureDto,
     nullable: true,
     description:
-      'The last failure, only while it is current: null once a later interview succeeded. A failed section ' +
-      '(LanguageSectionFailed) stays current beside the success it came with. The raw error is only logged.',
+      'The last failure, only while it is current: null once a later interview succeeded. The raw error is ' +
+      'only logged.',
   })
   failure!: DataGatewayInterviewFailureDto | null;
 }
