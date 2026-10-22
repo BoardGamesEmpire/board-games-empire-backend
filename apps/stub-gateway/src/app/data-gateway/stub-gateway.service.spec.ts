@@ -1,7 +1,15 @@
 import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { lastValueFrom, toArray, type Observable } from 'rxjs';
-import { STUB_BASE_GAME, STUB_EXPANSION, STUB_GAMES, STUB_LANGUAGES } from '../fixtures/catalog';
+import {
+  STUB_BASE_GAME,
+  STUB_CATEGORIES,
+  STUB_EXPANSION,
+  STUB_GAMES,
+  STUB_LANGUAGES,
+  STUB_MECHANICS,
+  STUB_PLATFORMS,
+} from '../fixtures/catalog';
 import { StubGatewayService } from './stub-gateway.service';
 
 const collect = <T>(source: Observable<T>) => lastValueFrom(source.pipe(toArray()));
@@ -43,6 +51,9 @@ describe('StubGatewayService', () => {
           proto.Capability.CAPABILITY_FETCH,
           proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
           proto.Capability.CAPABILITY_LIST_LANGUAGES,
+          proto.Capability.CAPABILITY_LIST_PLATFORMS,
+          proto.Capability.CAPABILITY_LIST_CATEGORIES,
+          proto.Capability.CAPABILITY_LIST_MECHANICS,
         ],
         coverage: {
           platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
@@ -90,6 +101,32 @@ describe('StubGatewayService', () => {
 
     it('makes up a correlation id when the request carries none', () => {
       expect(service.listLanguages({}).correlationId).toEqual(expect.any(String));
+    });
+  });
+
+  // The stub serves every list, so each list job runs in the e2e suites (#718).
+  describe('the vocabulary lists (#718)', () => {
+    it('lists its platforms, categories and mechanics', async () => {
+      await expect(lastValueFrom(service.listPlatforms({ correlationId: 'platforms-1' }))).resolves.toEqual({
+        correlationId: 'platforms-1',
+        platforms: STUB_PLATFORMS,
+      });
+      await expect(lastValueFrom(service.listCategories({ correlationId: 'categories-1' }))).resolves.toEqual({
+        correlationId: 'categories-1',
+        categories: STUB_CATEGORIES,
+      });
+      await expect(lastValueFrom(service.listMechanics({ correlationId: 'mechanics-1' }))).resolves.toEqual({
+        correlationId: 'mechanics-1',
+        mechanics: STUB_MECHANICS,
+      });
+    });
+
+    it('lists every platform, category and mechanic its games carry', () => {
+      for (const game of STUB_GAMES) {
+        expect(STUB_PLATFORMS).toEqual(expect.arrayContaining(game.platforms));
+        expect(STUB_CATEGORIES).toEqual(expect.arrayContaining(game.categories));
+        expect(STUB_MECHANICS).toEqual(expect.arrayContaining(game.mechanics));
+      }
     });
   });
 

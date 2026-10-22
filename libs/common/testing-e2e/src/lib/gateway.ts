@@ -104,16 +104,51 @@ export interface GatewayLanguagesReply {
   readonly languages: readonly GatewayLanguage[];
 }
 
+export interface GatewayPlatform {
+  readonly externalId: string;
+  readonly name: string;
+  readonly abbreviation?: string;
+  readonly platformType: string;
+}
+
+export interface GatewayPlatformsReply {
+  readonly correlationId: string;
+  readonly platforms: readonly GatewayPlatform[];
+}
+
+/** A category or mechanic as a DataGateway lists it. */
+export interface GatewayNamedEntry {
+  readonly externalId: string;
+  readonly name: string;
+}
+
+export interface GatewayCategoriesReply {
+  readonly correlationId: string;
+  readonly categories: readonly GatewayNamedEntry[];
+}
+
+export interface GatewayMechanicsReply {
+  readonly correlationId: string;
+  readonly mechanics: readonly GatewayNamedEntry[];
+}
+
 export interface GatewayHealthReply {
   readonly status: string;
 }
 
-/** The gateway RPCs that answer without calling the gateway's upstream. */
+/**
+ * The gateway's unary RPCs. Each answers without calling the gateway's
+ * upstream, except IGDB's lists of platforms and categories, which ask IGDB
+ * (#718).
+ */
 export interface GatewayClient {
   ping(correlationId: string): Promise<GatewayPingReply>;
   check(): Promise<GatewayHealthReply>;
   describe(correlationId: string): Promise<GatewayDescribeReply>;
   listLanguages(correlationId: string): Promise<GatewayLanguagesReply>;
+  listPlatforms(correlationId: string): Promise<GatewayPlatformsReply>;
+  listCategories(correlationId: string): Promise<GatewayCategoriesReply>;
+  listMechanics(correlationId: string): Promise<GatewayMechanicsReply>;
   close(): void;
 }
 
@@ -174,6 +209,9 @@ function connectGateway(app: string, address: string): GatewayClient {
     check: () => call('Check', { service: '' }),
     describe: (correlationId) => call('Describe', { correlationId }),
     listLanguages: (correlationId) => call('ListLanguages', { correlationId }),
+    listPlatforms: (correlationId) => call('ListPlatforms', { correlationId }),
+    listCategories: (correlationId) => call('ListCategories', { correlationId }),
+    listMechanics: (correlationId) => call('ListMechanics', { correlationId }),
     close: () => client.close(),
   };
 }

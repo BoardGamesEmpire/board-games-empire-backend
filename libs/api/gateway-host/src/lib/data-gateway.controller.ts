@@ -50,4 +50,19 @@ export class DataGatewayController implements proto.GatewayServiceController {
     this.logger.log('ListLanguages request received');
     return this.gatewayService.listLanguages(request);
   }
+
+  listPlatforms(request: proto.ListPlatformsRequest): Observable<proto.ListPlatformsResponse> {
+    this.logger.log('ListPlatforms request received');
+    return this.gatewayService.listPlatforms(request);
+  }
+
+  listCategories(request: proto.ListCategoriesRequest): Observable<proto.ListCategoriesResponse> {
+    this.logger.log('ListCategories request received');
+    return this.gatewayService.listCategories(request);
+  }
+
+  listMechanics(request: proto.ListMechanicsRequest): Observable<proto.ListMechanicsResponse> {
+    this.logger.log('ListMechanics request received');
+    return this.gatewayService.listMechanics(request);
+  }
 }

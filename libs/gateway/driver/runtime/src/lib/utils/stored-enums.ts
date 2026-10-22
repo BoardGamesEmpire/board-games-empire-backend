@@ -24,6 +24,9 @@ const CAPABILITIES: ByProtoName<DataGatewayCapability> = {
   [proto.Capability.CAPABILITY_FETCH]: DataGatewayCapability.Fetch,
   [proto.Capability.CAPABILITY_FETCH_EXPANSIONS]: DataGatewayCapability.FetchExpansions,
   [proto.Capability.CAPABILITY_LIST_LANGUAGES]: DataGatewayCapability.ListLanguages,
+  [proto.Capability.CAPABILITY_LIST_PLATFORMS]: DataGatewayCapability.ListPlatforms,
+  [proto.Capability.CAPABILITY_LIST_CATEGORIES]: DataGatewayCapability.ListCategories,
+  [proto.Capability.CAPABILITY_LIST_MECHANICS]: DataGatewayCapability.ListMechanics,
 };
 
 const PLATFORM_TYPES: ByProtoName<PlatformType> = {

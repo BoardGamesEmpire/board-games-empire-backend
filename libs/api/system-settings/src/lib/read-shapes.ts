@@ -30,6 +30,9 @@ export const SYSTEM_SETTINGS_SELECT = {
 
   auditLogRetentionDays: true,
   reviewGatewayLanguages: true,
+  reviewGatewayPlatforms: true,
+  reviewGatewayCategories: true,
+  reviewGatewayMechanics: true,
 
   householdInviteePolicy: true,
   eventInviteePolicy: true,

@@ -44,6 +44,9 @@ runDataGatewayDriverContract('InMemoryGatewayDriver', () => ({
     searchResults: [searchHit],
     expansionsByBaseExternalId: { 'bgg-13': [searchHit] },
     languages: [{ value: 'en-US', format: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47 }],
+    platforms: [{ externalId: 'tabletop', name: 'Tabletop', platformType: TABLETOP }],
+    categories: [{ externalId: '1009', name: 'Abstract Strategy' }],
+    mechanics: [{ externalId: '2082', name: 'Worker Placement' }],
     coverage: { platformTypes: [TABLETOP], contentTypes: [BASE_GAME, EXPANSION] },
     filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS],
   }),
@@ -52,6 +55,9 @@ runDataGatewayDriverContract('InMemoryGatewayDriver', () => ({
     proto.Capability.CAPABILITY_FETCH,
     proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
     proto.Capability.CAPABILITY_LIST_LANGUAGES,
+    proto.Capability.CAPABILITY_LIST_PLATFORMS,
+    proto.Capability.CAPABILITY_LIST_CATEGORIES,
+    proto.Capability.CAPABILITY_LIST_MECHANICS,
   ],
   filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS],
   knownExternalId: 'bgg-13',
@@ -159,6 +165,22 @@ describe('InMemoryGatewayDriver capabilities', () => {
     await expect(firstValueFrom(driver.fetchGame({ correlationId: 'x', externalId: 'bgg-13' }))).resolves.toMatchObject(
       { game: knownGame },
     );
+  });
+  it('answers UNIMPLEMENTED for a list it does not declare', async () => {
+    const driver = new InMemoryGatewayDriver({
+      platforms: [{ externalId: 'tabletop', name: 'Tabletop', platformType: TABLETOP }],
+      capabilities: [proto.Capability.CAPABILITY_FETCH],
+    });
+
+    await expect(firstValueFrom(driver.listPlatforms({ correlationId: 'x' }))).rejects.toMatchObject({
+      code: status.UNIMPLEMENTED,
+    });
+    await expect(firstValueFrom(driver.listCategories({ correlationId: 'x' }))).rejects.toMatchObject({
+      code: status.UNIMPLEMENTED,
+    });
+    await expect(firstValueFrom(driver.listMechanics({ correlationId: 'x' }))).rejects.toMatchObject({
+      code: status.UNIMPLEMENTED,
+    });
   });
 });
 

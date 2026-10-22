@@ -6,4 +6,7 @@ export const OPERATIONS: readonly proto.Capability[] = [
   proto.Capability.CAPABILITY_FETCH,
   proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
   proto.Capability.CAPABILITY_LIST_LANGUAGES,
+  proto.Capability.CAPABILITY_LIST_PLATFORMS,
+  proto.Capability.CAPABILITY_LIST_CATEGORIES,
+  proto.Capability.CAPABILITY_LIST_MECHANICS,
 ];

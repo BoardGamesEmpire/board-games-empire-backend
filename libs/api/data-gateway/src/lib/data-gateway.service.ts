@@ -7,7 +7,13 @@ import {
   Prisma,
   ResourceType,
 } from '@bge/database';
-import { GatewayConfigEvent, GatewayConfigEventsService, hashGatewayConfig } from '@bge/gateway-registry';
+import {
+  GatewayConfigEvent,
+  GatewayConfigEventsService,
+  hashGatewayConfig,
+  SECTION_ORDER,
+  VocabularySectionQueue,
+} from '@bge/gateway-registry';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer, Unscoped } from '@bge/permissions';
 import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
@@ -19,6 +25,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { WITH_SECTIONS, type DataGatewayWithSections } from './data-gateway.view';
 import { CreateDataGatewayDto, UpdateDataGatewayDto } from './dto';
 
 @Injectable()
@@ -28,6 +35,7 @@ export class DataGatewayService {
   constructor(
     private readonly db: DatabaseService,
     private readonly configEvents: GatewayConfigEventsService,
+    private readonly sectionQueue: VocabularySectionQueue,
     private readonly abilityService: AbilityService,
     private readonly scopeComposer: ScopeComposer,
   ) {}
@@ -43,7 +51,7 @@ export class DataGatewayService {
    * with no per-caller row set to name. Hiding tombstones is the same for
    * every caller, so `deletedAt: null` is a filter beside the composed clause.
    */
-  async getAll(pagination: PaginationQueryDto): Promise<PaginatedRows<DataGateway>> {
+  async getAll(pagination: PaginationQueryDto): Promise<PaginatedRows<DataGatewayWithSections>> {
     const where: Prisma.DataGatewayWhereInput = {
       AND: [
         this.scopeComposer.compose(
@@ -66,6 +74,7 @@ export class DataGatewayService {
           orderBy: { name: 'asc' },
           skip: pagination.skip,
           take: pagination.pageSize,
+          include: WITH_SECTIONS,
         }),
 
         this.db.dataGateway.count({ where }),
@@ -79,7 +88,7 @@ export class DataGatewayService {
   // Under the conditions of what the caller is about to do: a key's scope can
   // grant update on one DataGateway beside read on all, so a route that writes
   // finds its row under update, and one that wrote reads it back the same way.
-  async getById(id: string, action: Action = Action.read) {
+  async getById(id: string, action: Action = Action.read): Promise<DataGatewayWithSections> {
     try {
       return await this.db.dataGateway.findUniqueOrThrow({
         where: {
@@ -90,6 +99,7 @@ export class DataGatewayService {
             { deletedAt: null },
           ],
         },
+        include: WITH_SECTIONS,
       });
     } catch (error) {
       this.rethrowFailure(
@@ -100,7 +110,7 @@ export class DataGatewayService {
     }
   }
 
-  async create(createDataGatewayDto: CreateDataGatewayDto): Promise<DataGateway> {
+  async create(createDataGatewayDto: CreateDataGatewayDto): Promise<DataGatewayWithSections> {
     const userId = this.abilityService.getActingUserId();
 
     const gateway = await this.db.dataGateway.create({
@@ -109,13 +119,14 @@ export class DataGatewayService {
         authParameters: createDataGatewayDto.authParameters || {},
         createdBy: { connect: { id: userId } },
       },
+      include: WITH_SECTIONS,
     });
 
     await this.publishConfigEvent(gateway, 'created');
     return gateway;
   }
 
-  async update(gatewayId: string, updateDataGatewayDTO: UpdateDataGatewayDto): Promise<DataGateway> {
+  async update(gatewayId: string, updateDataGatewayDTO: UpdateDataGatewayDto): Promise<DataGatewayWithSections> {
     if (Object.keys(updateDataGatewayDTO).length === 0) {
       throw new BadRequestException(t('common.at_least_one_field'));
     }
@@ -124,8 +135,11 @@ export class DataGatewayService {
     // tombstone, so an update that still reached one would publish 'updated'
     // and reconnect a gateway the API says does not exist.
     try {
-      const existingGateway = await this.db.dataGateway.count({ where: { id: gatewayId, deletedAt: null } });
-      if (existingGateway === 0) {
+      const before = await this.db.dataGateway.findFirst({
+        where: { id: gatewayId, deletedAt: null },
+        select: { disabledCapabilities: true },
+      });
+      if (!before) {
         throw new NotFoundException(t('errors.data_gateway.not_found', { id: gatewayId }));
       }
 
@@ -155,9 +169,19 @@ export class DataGatewayService {
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.DataGateway, Action.update),
         },
         data: { ...update },
+        include: WITH_SECTIONS,
       });
 
       await this.publishConfigEvent(gateway, 'updated');
+
+      // A list switched back on loads now, not after the next interview, up
+      // to a day later (#718). Not awaited: queueing never rejects, but it
+      // hangs while the queue's Redis is unreachable.
+      const switchedOn = listsSwitchedOn(before.disabledCapabilities, gateway);
+      if (switchedOn.length > 0) {
+        void this.sectionQueue.enqueue(gateway.id, switchedOn, gateway.disabledCapabilities);
+      }
+
       return gateway;
     } catch (error) {
       this.rethrowFailure(
@@ -171,7 +195,7 @@ export class DataGatewayService {
   /**
    * @todo Consider what should happen to existing connections to the gateway when it is (soft) deleted.
    */
-  async delete(gatewayId: string): Promise<DataGateway> {
+  async delete(gatewayId: string): Promise<DataGatewayWithSections> {
     try {
       const existingGateway = await this.db.dataGateway.count({ where: { id: gatewayId, deletedAt: null } });
       if (existingGateway === 0) {
@@ -186,6 +210,7 @@ export class DataGatewayService {
           AND: [...this.abilityService.getCurrentResourceConditions(ResourceType.DataGateway, Action.delete)],
         },
         data: { deletedAt: new Date() },
+        include: WITH_SECTIONS,
       });
 
       await this.publishConfigEvent(gateway, 'deleted');
@@ -240,4 +265,14 @@ export class DataGatewayService {
       );
     }
   }
+}
+
+/** The lists the DataGateway declares that were switched off before the update and aren't after it. */
+function listsSwitchedOn(before: readonly DataGatewayCapability[], gateway: DataGateway): DataGatewayCapability[] {
+  return SECTION_ORDER.filter(
+    (capability) =>
+      before.includes(capability) &&
+      !gateway.disabledCapabilities.includes(capability) &&
+      gateway.capabilities.includes(capability),
+  );
 }

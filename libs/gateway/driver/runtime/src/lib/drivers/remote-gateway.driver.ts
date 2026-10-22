@@ -12,8 +12,14 @@ import type {
   GatewayServiceClient,
   HealthCheckRequest,
   HealthCheckResponse,
+  ListCategoriesRequest,
+  ListCategoriesResponse,
   ListLanguagesRequest,
   ListLanguagesResponse,
+  ListMechanicsRequest,
+  ListMechanicsResponse,
+  ListPlatformsRequest,
+  ListPlatformsResponse,
 } from '@boardgamesempire/proto-gateway';
 import { Logger } from '@nestjs/common';
 import type { ClientGrpcProxy } from '@nestjs/microservices';
@@ -69,6 +75,18 @@ export class RemoteGatewayDriver implements DataGatewayDriver {
 
   listLanguages(request: ListLanguagesRequest): Observable<ListLanguagesResponse> {
     return this.client.listLanguages(request);
+  }
+
+  listPlatforms(request: ListPlatformsRequest): Observable<ListPlatformsResponse> {
+    return this.client.listPlatforms(request);
+  }
+
+  listCategories(request: ListCategoriesRequest): Observable<ListCategoriesResponse> {
+    return this.client.listCategories(request);
+  }
+
+  listMechanics(request: ListMechanicsRequest): Observable<ListMechanicsResponse> {
+    return this.client.listMechanics(request);
   }
 
   /**

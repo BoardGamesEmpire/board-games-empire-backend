@@ -38,6 +38,15 @@ export interface InMemoryGatewayFixtures {
 
   /** listLanguages returns these. */
   languages?: proto.GatewayLanguageEntry[];
+
+  /** listPlatforms returns these. */
+  platforms?: proto.PlatformData[];
+
+  /** listCategories returns these. */
+  categories?: proto.CategoryData[];
+
+  /** listMechanics returns these. */
+  mechanics?: proto.MechanicData[];
 }
 
 /** gRPC's status code for an operation a DataGateway doesn't implement. */
@@ -193,6 +202,36 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
       of<proto.ListLanguagesResponse>({
         correlationId: request.correlationId ?? 'in-memory',
         languages: this.fixtures.languages ?? [],
+      })
+    );
+  }
+
+  listPlatforms(request: proto.ListPlatformsRequest): Observable<proto.ListPlatformsResponse> {
+    return (
+      this.refused<proto.ListPlatformsResponse>(proto.Capability.CAPABILITY_LIST_PLATFORMS) ??
+      of<proto.ListPlatformsResponse>({
+        correlationId: request.correlationId ?? 'in-memory',
+        platforms: this.fixtures.platforms ?? [],
+      })
+    );
+  }
+
+  listCategories(request: proto.ListCategoriesRequest): Observable<proto.ListCategoriesResponse> {
+    return (
+      this.refused<proto.ListCategoriesResponse>(proto.Capability.CAPABILITY_LIST_CATEGORIES) ??
+      of<proto.ListCategoriesResponse>({
+        correlationId: request.correlationId ?? 'in-memory',
+        categories: this.fixtures.categories ?? [],
+      })
+    );
+  }
+
+  listMechanics(request: proto.ListMechanicsRequest): Observable<proto.ListMechanicsResponse> {
+    return (
+      this.refused<proto.ListMechanicsResponse>(proto.Capability.CAPABILITY_LIST_MECHANICS) ??
+      of<proto.ListMechanicsResponse>({
+        correlationId: request.correlationId ?? 'in-memory',
+        mechanics: this.fixtures.mechanics ?? [],
       })
     );
   }

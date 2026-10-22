@@ -10,13 +10,13 @@ import {
 } from '@bge/database';
 import { toStoredContentType } from '@bge/gateway-registry';
 import { ServiceAccountService } from '@bge/services';
+import { VocabularyLinkService } from '@bge/vocabulary';
 import { DlcData, type GameData } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { ImportJobResult, PlatformGameRef } from '../interfaces/import-job.interface';
 import { toReleaseDate, toReleaseRegion } from './helpers';
 import { PersonUpsertService } from './person.service';
 import { PlatformUpsertService } from './platform.service';
-import { TaxonomyUpsertService } from './taxonomy.service';
 
 @Injectable()
 export class GameUpsertService {
@@ -24,7 +24,7 @@ export class GameUpsertService {
 
   constructor(
     private readonly db: DatabaseService,
-    private readonly taxonomy: TaxonomyUpsertService,
+    private readonly vocabulary: VocabularyLinkService,
     private readonly persons: PersonUpsertService,
     private readonly platform: PlatformUpsertService,
     private readonly serviceAccount: ServiceAccountService,
@@ -127,7 +127,7 @@ export class GameUpsertService {
       // A concurrent duplicate import can win the race between our findUnique
       // and this create, tripping the GameSource(gatewayId, externalId) unique
       // constraint (the only unique on this write — Game itself has none).
-      // Recover like TaxonomyUpsertService: re-fetch the winner and fall
+      // Recover as the vocabulary links do: re-fetch the winner and fall
       // through to the update path, so the losing job reports success for a
       // game that IS now in the system instead of failing terminally and
       // notifying the user ImportFailed (import jobs are single-attempt).
@@ -214,10 +214,13 @@ export class GameUpsertService {
    * the former per-item sequential resolve+upsert — ~N round trips per relation
    * — into concurrent resolution plus one insert, so a large bulk import no
    * longer serializes tens of thousands of join writes.
+   *
+   * An item that resolves to null is left out: its vocabulary link is Pending
+   * or Ignored, and a re-import after the link is settled adds it (#718).
    */
   private async linkResolved<T>(
     items: readonly T[],
-    resolveId: (item: T) => Promise<string>,
+    resolveId: (item: T) => Promise<string | null>,
     createLinks: (ids: string[]) => Promise<unknown>,
   ): Promise<void> {
     if (items.length === 0) {
@@ -225,16 +228,20 @@ export class GameUpsertService {
     }
 
     const resolved = await Promise.all(items.map(resolveId));
-    // Two source aliases can resolve to the same canonical id; dedupe so the
+    // Two DataGateway entries can resolve to the same record; dedupe so the
     // batch carries no in-statement duplicates.
-    const ids = [...new Set(resolved)];
+    const ids = [...new Set(resolved.filter((id): id is string => id !== null))];
+    if (ids.length === 0) {
+      return;
+    }
+
     await createLinks(ids);
   }
 
   private upsertMechanics(gameId: string, mechanics: GameData['mechanics'], gatewayId: string) {
     return this.linkResolved(
       mechanics,
-      (mechanic) => this.taxonomy.upsertMechanic(mechanic, gatewayId),
+      (mechanic) => this.vocabulary.resolveForImport('mechanic', gatewayId, mechanic),
       (mechanicIds) =>
         this.db.gameMechanic.createMany({
           data: mechanicIds.map((mechanicId) => ({ gameId, mechanicId })),
@@ -246,7 +253,7 @@ export class GameUpsertService {
   private upsertCategories(gameId: string, categories: GameData['categories'], gatewayId: string) {
     return this.linkResolved(
       categories,
-      (category) => this.taxonomy.upsertCategory(category, gatewayId),
+      (category) => this.vocabulary.resolveForImport('category', gatewayId, category),
       (categoryIds) =>
         this.db.gameCategory.createMany({
           data: categoryIds.map((categoryId) => ({ gameId, categoryId })),
@@ -258,7 +265,7 @@ export class GameUpsertService {
   private upsertFamilies(gameId: string, families: GameData['families'], gatewayId: string) {
     return this.linkResolved(
       families,
-      (family) => this.taxonomy.upsertFamily(family, gatewayId),
+      (family) => this.vocabulary.resolveForImport('family', gatewayId, family),
       (familyIds) =>
         this.db.gameFamily.createMany({
           data: familyIds.map((familyId) => ({ gameId, familyId })),
@@ -336,7 +343,13 @@ export class GameUpsertService {
 
       // Upsert DLC releases — same platform resolution as game releases
       for (const release of dlc.releases ?? []) {
-        const platformId = await this.platform.upsertPlatform(release.platform!, gatewayId);
+        const platformId = await this.platform.resolvePlatform(release.platform!, gatewayId);
+        if (!platformId) {
+          // Its platform's link waits for review or was ignored (#718).
+          this.logger.debug(`Skipping a release of DLC ${dlc.externalId}: its platform's link isn't Resolved`);
+          continue;
+        }
+
         const region = toReleaseRegion(release.localizations);
 
         await this.db.gameDlcRelease.upsert({

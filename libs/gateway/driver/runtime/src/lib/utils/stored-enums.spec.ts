@@ -1,6 +1,12 @@
-import { ContentType, PlatformType } from '@bge/database';
+import { ContentType, DataGatewayCapability, PlatformType } from '@bge/database';
 import * as proto from '@boardgamesempire/proto-gateway';
-import { toProtoContentType, toProtoPlatformType, toStoredContentType, toStoredPlatformType } from './stored-enums';
+import {
+  toProtoContentType,
+  toProtoPlatformType,
+  toStoredCapability,
+  toStoredContentType,
+  toStoredPlatformType,
+} from './stored-enums';
 
 describe('stored enums', () => {
   it('sends every stored platform type as a proto value that is stored as it again', () => {
@@ -46,5 +52,11 @@ describe('stored enums', () => {
 
   it('has no proto value for an unknown content type', () => {
     expect(toProtoContentType(ContentType.Unknown)).toBeUndefined();
+  });
+
+  it('stores each list capability (#718)', () => {
+    expect(toStoredCapability(proto.Capability.CAPABILITY_LIST_PLATFORMS)).toBe(DataGatewayCapability.ListPlatforms);
+    expect(toStoredCapability(proto.Capability.CAPABILITY_LIST_CATEGORIES)).toBe(DataGatewayCapability.ListCategories);
+    expect(toStoredCapability(proto.Capability.CAPABILITY_LIST_MECHANICS)).toBe(DataGatewayCapability.ListMechanics);
   });
 });

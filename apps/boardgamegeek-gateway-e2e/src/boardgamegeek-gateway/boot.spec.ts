@@ -42,6 +42,7 @@ describe('the BoardGameGeek gateway over gRPC', () => {
         'CAPABILITY_FETCH',
         'CAPABILITY_FETCH_EXPANSIONS',
         'CAPABILITY_LIST_LANGUAGES',
+        'CAPABILITY_LIST_PLATFORMS',
       ],
       filterableAxes: ['COVERAGE_AXIS_CONTENT_TYPE'],
       languageCodeFormats: {
@@ -67,5 +68,17 @@ describe('the BoardGameGeek gateway over gRPC', () => {
       expect.objectContaining({ value: 'English', format: 'LANGUAGE_CODE_FORMAT_NAME', iso6393: 'eng', iso6391: 'en' }),
     );
     expect(reply.languages.filter((language) => language.format !== 'LANGUAGE_CODE_FORMAT_NAME')).toEqual([]);
+  });
+
+  // Every game it sends is on this one platform (#718).
+  it('lists its one platform, Tabletop, on ListPlatforms', async () => {
+    const reply = await gateway().listPlatforms('e2e-platforms');
+
+    expect(reply).toEqual({
+      correlationId: 'e2e-platforms',
+      platforms: [
+        { externalId: 'bgg-tabletop', name: 'Tabletop', abbreviation: 'TT', platformType: 'PLATFORM_TYPE_TABLETOP' },
+      ],
+    });
   });
 });
