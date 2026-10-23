@@ -6,6 +6,7 @@ import { mintApiKey, type Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { inviteEnvelope, receivedInvitesEnvelope, revokeEnvelope } from './household-invite-wire';
+import { createMemberClient } from './household-request';
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
@@ -15,7 +16,8 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
  * - the invitee declines: `POST /api/invites/:inviteId/decline`, or
  *   `POST /api/invites/decline` with the token from its link in the body;
  * - the inviter withdraws: `POST /api/invites/:inviteId/withdraw`, whatever
- *   their role in the household now;
+ *   their role in the household now. Once they leave it there is nothing to
+ *   withdraw, since leaving revoked it (#747);
  * - an Owner or Admin revokes an invite someone else sent:
  *   `POST /api/households/:householdId/invites/:inviteId/revoke`.
  *
@@ -52,6 +54,8 @@ describe('declining, withdrawing and revoking a household invite', () => {
 
   const revoke = (actor: Caller, householdId: string, inviteId: string) =>
     request(baseUrl).post(`/api/households/${householdId}/invites/${inviteId}/revoke`).set(actor.headers);
+
+  const { removeMember, changeRole } = createMemberClient(baseUrl);
 
   const createdInvite = async (actor: SessionActor, householdId: string, body: Record<string, unknown>) =>
     inviteEnvelope(
@@ -238,7 +242,7 @@ describe('declining, withdrawing and revoking a household invite', () => {
       await expect(inbox(invitee)).resolves.toEqual([]);
     });
 
-    it('lets an inviter withdraw after they have been removed from the household', async () => {
+    it('lets an inviter withdraw after they have been demoted', async () => {
       const [owner, admin, invitee] = await Promise.all([actors.user(), actors.user(), actors.user()]);
       const { household, members } = await actors.householdWithMembers({
         owner,
@@ -246,14 +250,27 @@ describe('declining, withdrawing and revoking a household invite', () => {
       });
       const invite = await createdInvite(admin, household.id, { inviteeId: invitee.user.id });
 
-      await request(baseUrl)
-        .delete(`/api/households/${household.id}/members/${members[0].member.id}`)
-        .set(owner.headers)
-        .expect(200);
+      await changeRole(owner, household.id, members[0].member.id, SystemRole.HouseholdGuest).expect(200);
 
       await withdraw(admin, invite.id).expect(200);
 
       await expect(storedInvite(invite.id)).resolves.toMatchObject({ status: InviteStatus.Withdrawn });
+    });
+
+    it('leaves a removed inviter nothing to withdraw: being removed revoked it (#747)', async () => {
+      const [owner, admin, invitee] = await Promise.all([actors.user(), actors.user(), actors.user()]);
+      const { household, members } = await actors.householdWithMembers({
+        owner,
+        members: [{ actor: admin, role: SystemRole.HouseholdAdmin }],
+      });
+      const invite = await createdInvite(admin, household.id, { inviteeId: invitee.user.id });
+
+      await removeMember(owner, household.id, members[0].member.id).expect(200);
+
+      const refused = await withdraw(admin, invite.id).expect(409);
+
+      expect(messageOf(refused)).toContain(InviteStatus.Revoked);
+      await expect(storedInvite(invite.id)).resolves.toMatchObject({ status: InviteStatus.Revoked });
     });
 
     it('answers 403 for the invitee and 404 for a stranger, an Owner who did not send it among them', async () => {

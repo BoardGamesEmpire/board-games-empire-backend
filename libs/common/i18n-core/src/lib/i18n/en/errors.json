@@ -197,6 +197,7 @@
     "revoke_own_invite": "You sent invite {id}: withdraw it instead, while signed in",
     "awaiting_approval": "Invite {id} is awaiting approval and cannot be accepted yet",
     "not_awaiting_approval": "Invite {id} is not awaiting approval",
+    "sender_cannot_send": "The person who sent invite {id} can no longer send it, so it cannot be approved. Revoke it instead.",
     "not_outstanding": "Invite {id} is {status} and can no longer be changed",
     "expired": "Invite {id} has expired",
     "changed_concurrently": "Invite {id} changed while it was being updated; try again"

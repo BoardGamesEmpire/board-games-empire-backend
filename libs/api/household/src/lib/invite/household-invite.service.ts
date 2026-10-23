@@ -22,13 +22,15 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { CreateHouseholdInviteDto, ListHouseholdInvitesQueryDto, type AssignableHouseholdRole } from '../dto';
 import { assertHouseholdExists, lockExistingHousehold, resolveHouseholdRoleId } from '../household-access.helpers';
 import { SHOWN_NAME_SELECT, shownName } from '../shown-name';
-import { isHouseholdAuthority, ROSTER_ROLE_SELECT, type RosterRow } from './household-authority';
-
-/**
- * The household setting a member's invite is asked about (#166): whether
- * members may invite, and whether their invite waits for approval.
- */
-const INVITE_SETTINGS_SELECT = { memberInvitePolicy: true } as const satisfies Prisma.HouseholdSettingsSelect;
+import {
+  householdInviteSubject,
+  isHouseholdAuthority,
+  offeredRole,
+  readInviteAuthority,
+  ROSTER_ROLE_SELECT,
+  senderCouldStillSend,
+  type RosterRow,
+} from './household-authority';
 
 /**
  * The column each existing-invite check names. A revoke and an approve share
@@ -235,15 +237,22 @@ export class HouseholdInviteService {
    *    state below.
    * 5. The lib approves, bound to this household: 404 for an id from another
    *    one, 410 once expired, 409 unless it is awaiting approval.
+   * 6. Its sender must still be able to send it, directly or for approval,
+   *    on the roster and policy read under the lock: the question an accept
+   *    asks of an approved invite (#747). If not, the answer is 409 and the
+   *    rollback undoes the approval and the day's invite it took, so no
+   *    approval hands out an invite the accept would revoke. The invite stays
+   *    awaiting approval, for an approver to revoke.
    *
    * The invitee gets the full window a direct invite opens with, counted from
    * the approval, so the time the invite waited for an approver does not come
    * out of the invitee's time to answer it.
    *
-   * The household's member invite policy is not read: a change to it applies
-   * to the invites sent after it, so an invite sent for approval stays
-   * approvable after a switch to `Direct` or to `Off`. An approver may approve
-   * an invite they sent themselves, as a member promoted since.
+   * The household's member invite policy is read only through step 6: an
+   * invite sent for approval stays approvable after a switch to `Direct`,
+   * which its sender could still send it under, and not after one to `Off`.
+   * An approver may approve an invite they sent themselves, as a member
+   * promoted since.
    *
    * The approved invite is announced after commit, and any soft cap it went
    * past is warned of after it. An approver who is one of the household's
@@ -260,6 +269,17 @@ export class HouseholdInviteService {
         scope,
         expiresAt: new Date(Date.now() + DEFAULT_INVITE_TTL_MS),
       });
+
+      const sender = {
+        inviterId: approval.invite.inviter.id,
+        role: offeredRole(approval.invite) ?? SystemRole.HouseholdMember,
+        needsApproval: true,
+      };
+      const authority = await readInviteAuthority(tx, householdId);
+
+      if (!(await senderCouldStillSend(this.abilityService, tx, householdId, sender, authority))) {
+        throw new ConflictException(t('errors.invite.sender_cannot_send', { id: inviteId }));
+      }
 
       return { ...approval, softOverages };
     });
@@ -456,9 +476,11 @@ export class HouseholdInviteService {
   /**
    * Whether the acting user may invite into this household, offering `role`,
    * as `client` reads the household's roster and member invite policy (#166)
-   * in one query, and if so how the invite opens: directly, or awaiting
-   * approval. Refuses with 403 when they may do neither. A missing household
-   * reads as an empty roster with no policy, and the lock answers it 404.
+   * in one query ({@link readInviteAuthority}), and if so how the invite
+   * opens: directly, or awaiting approval. Refuses with 403 when they may do
+   * neither. A missing household reads as an empty roster with no policy, and
+   * the lock answers it 404. An accept asks the same of the invite's sender
+   * (#747).
    *
    * Two questions, in order, since the catalog holds the answer: whether they
    * may open the invite directly, as an owner or admin always may and a member
@@ -476,19 +498,9 @@ export class HouseholdInviteService {
     householdId: string,
     role: AssignableHouseholdRole,
   ): Promise<{ readonly members: RosterRow[]; readonly needsApproval: boolean }> {
-    const household = await client.household.findUnique({
-      where: { id: householdId },
-      select: { settings: { select: INVITE_SETTINGS_SELECT }, members: { select: ROSTER_ROLE_SELECT } },
-    });
-    const settings = household?.settings ?? null;
-    const members = household?.members ?? [];
-
-    const invite = (needsApproval: boolean) => ({
-      householdId,
-      needsApproval,
-      role: { name: role },
-      household: { settings, members },
-    });
+    const authority = await readInviteAuthority(client, householdId);
+    const { members } = authority;
+    const invite = (needsApproval: boolean) => householdInviteSubject(householdId, role, needsApproval, authority);
 
     if (this.abilityService.currentActorCan(Action.create, ResourceType.Invite, invite(false))) {
       return { members, needsApproval: false };

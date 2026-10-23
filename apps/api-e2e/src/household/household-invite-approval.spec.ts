@@ -321,7 +321,7 @@ describe('member invites, their approval, and the invites a user has sent', () =
       await approve(owner, householdId, waiting.id).expect(409);
     });
 
-    it('leaves a waiting invite waiting, and approvable, when the policy changes after it was sent', async () => {
+    it('leaves a waiting invite waiting when the policy changes after it was sent, approvable while its sender could still send it (#747)', async () => {
       const { householdId, owner, member, invitee, other } = await household();
       const waiting = await createdInvite(member, householdId, { inviteeId: invitee.user.id });
 
@@ -333,6 +333,17 @@ describe('member invites, their approval, and the invites a user has sent', () =
       await patchSettings(owner, householdId, { memberInvitePolicy: MemberInvitePolicy.Off }).expect(200);
       await expect(storedInvite(direct.id)).resolves.toMatchObject({ status: InviteStatus.Pending });
 
+      // Under Off the member could send it neither way, so an approval would
+      // hand out an invite the accept revokes. It is refused, and the invite
+      // waits on, unapproved.
+      const refused = await approve(owner, householdId, waiting.id).expect(409);
+      expect((refused.body as { message?: unknown }).message).toContain('can no longer send it');
+      await expect(storedInvite(waiting.id)).resolves.toMatchObject({
+        status: InviteStatus.AwaitingApproval,
+        approvedAt: null,
+      });
+
+      await patchSettings(owner, householdId, { memberInvitePolicy: MemberInvitePolicy.Direct }).expect(200);
       await approve(owner, householdId, waiting.id).expect(200);
     });
 
@@ -449,7 +460,7 @@ describe('member invites, their approval, and the invites a user has sent', () =
       expect(await sent(member, InviteStatus.Declined)).toHaveLength(1);
     });
 
-    it('shows a former member only the invites they can still withdraw there', async () => {
+    it('shows a former member nothing from a household they left, whose leaving revoked what was open (#747)', async () => {
       const { householdId, member } = await household(MemberInvitePolicy.Direct);
       const [openInvitee, lapsedInvitee, joiner] = await Promise.all([actors.user(), actors.user(), actors.user()]);
       const open = await createdInvite(member, householdId, { inviteeId: openInvitee.user.id });
@@ -472,11 +483,14 @@ describe('member invites, their approval, and the invites a user has sent', () =
 
       await request(baseUrl).delete(`/api/households/${householdId}/members/me`).set(member.headers).expect(200);
 
-      await expect(sent(member)).resolves.toEqual([expect.objectContaining({ id: open.id })]);
+      await expect(storedInvite(open.id)).resolves.toMatchObject({ status: InviteStatus.Revoked });
+      await expect(sent(member)).resolves.toEqual([]);
+      await expect(sent(member, InviteStatus.Revoked)).resolves.toEqual([]);
       await expect(sent(member, InviteStatus.Accepted)).resolves.toEqual([]);
       await expect(sent(member, InviteStatus.Expired)).resolves.toEqual([]);
 
-      await withdraw(member, open.id).expect(200);
+      // Nothing is left to take back.
+      await withdraw(member, open.id).expect(409);
     });
 
     it('lists nothing into a deleted household', async () => {
