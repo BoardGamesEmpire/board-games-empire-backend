@@ -27,6 +27,7 @@ import type { I18nService } from 'nestjs-i18n';
 import process from 'node:process';
 import { ADMIN_PLUGIN_OPTIONS } from './access/admin-roles';
 import type { AuthStorage } from './auth-storage';
+import { betterAuthLogger } from './better-auth-logger';
 import { AUTH_BASE_PATH, AUTH_CLIENT_IP_HEADER, AUTH_COOKIE_PREFIX } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
 import { providerPictureOnly } from './provider-picture';
@@ -191,6 +192,7 @@ export function authFactory(
 
   return betterAuth({
     telemetry: { enabled: false },
+    logger: betterAuthLogger(new Logger('BetterAuth')),
     advanced: {
       cookiePrefix: AUTH_COOKIE_PREFIX,
       disableOriginCheck: options.disableOriginCheck,
