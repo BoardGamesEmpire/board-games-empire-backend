@@ -18,10 +18,10 @@ export interface InMemoryGatewayFixtures {
   coverage?: proto.Coverage;
 
   /**
-   * The coverage axes describe declares its search narrows by, none unless
+   * The search filters describe declares its search narrows by, none unless
    * set. searchGames narrows by a request's filter on these alone.
    */
-  filterableAxes?: proto.CoverageAxis[];
+  filterableAxes?: proto.SearchFilterAxis[];
 
   /** fetchGame resolves against these by `externalId`. */
   games?: proto.GameData[];
@@ -245,18 +245,18 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
     return this.fixtures.capabilities ?? OPERATIONS;
   }
 
-  private get filterableAxes(): readonly proto.CoverageAxis[] {
+  private get filterableAxes(): readonly proto.SearchFilterAxis[] {
     return this.fixtures.filterableAxes ?? [];
   }
 
   /** Whether a game matches a filter, judged on the axes this driver declares alone. */
   private matchesFilter(game: proto.GameSearchData, filter: proto.SearchFilter | undefined): boolean {
-    const declares = (axis: proto.CoverageAxis): boolean => this.filterableAxes.includes(axis);
+    const declares = (axis: proto.SearchFilterAxis): boolean => this.filterableAxes.includes(axis);
 
     return (
-      (!declares(proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE) ||
+      (!declares(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE) ||
         listMatches(filter?.contentTypes, [game.contentType], proto.ContentType.CONTENT_TYPE_UNSPECIFIED)) &&
-      (!declares(proto.CoverageAxis.COVERAGE_AXIS_PLATFORM_TYPE) ||
+      (!declares(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLATFORM_TYPE) ||
         listMatches(
           filter?.platformTypes,
           (game.availablePlatforms ?? []).map((platform) => platform.platformType),

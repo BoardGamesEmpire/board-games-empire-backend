@@ -4,8 +4,8 @@ import { firstValueFrom, lastValueFrom, toArray } from 'rxjs';
 import { InMemoryGatewayDriver } from './in-memory-gateway.driver.js';
 import { runDataGatewayDriverContract } from './run-data-gateway-driver-contract.js';
 
-const { COVERAGE_AXIS_PLATFORM_TYPE: PLATFORM_TYPE_AXIS, COVERAGE_AXIS_CONTENT_TYPE: CONTENT_TYPE_AXIS } =
-  proto.CoverageAxis;
+const { SEARCH_FILTER_AXIS_PLATFORM_TYPE: PLATFORM_TYPE_AXIS, SEARCH_FILTER_AXIS_CONTENT_TYPE: CONTENT_TYPE_AXIS } =
+  proto.SearchFilterAxis;
 const { PLATFORM_TYPE_TABLETOP: TABLETOP, PLATFORM_TYPE_PC: PC } = proto.PlatformType;
 const {
   CONTENT_TYPE_BASE_GAME: BASE_GAME,

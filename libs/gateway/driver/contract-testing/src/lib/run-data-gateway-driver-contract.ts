@@ -14,10 +14,10 @@ export interface DataGatewayDriverContractContext {
   capabilities: proto.Capability[];
 
   /**
-   * The coverage axes its search narrows by. Its `describe` must declare
+   * The search filters its search narrows by. Its `describe` must declare
    * exactly these, and a search is filtered on each.
    */
-  filterableAxes: proto.CoverageAxis[];
+  filterableAxes: proto.SearchFilterAxis[];
 
   /** An externalId the driver can resolve via fetchGame. */
   knownExternalId: string;
@@ -34,14 +34,17 @@ export interface DataGatewayDriverContractContext {
  * or, when it lists none, tabletop or a base game. Undefined for an axis the
  * contract doesn't know.
  */
-const filterOn = (axis: proto.CoverageAxis, coverage: proto.Coverage | undefined): proto.SearchFilter | undefined => {
+const filterOn = (
+  axis: proto.SearchFilterAxis,
+  coverage: proto.Coverage | undefined,
+): proto.SearchFilter | undefined => {
   switch (axis) {
-    case proto.CoverageAxis.COVERAGE_AXIS_PLATFORM_TYPE:
+    case proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLATFORM_TYPE:
       return {
         platformTypes: [coverage?.platformTypes[0] ?? proto.PlatformType.PLATFORM_TYPE_TABLETOP],
         contentTypes: [],
       };
-    case proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE:
+    case proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE:
       return {
         platformTypes: [],
         contentTypes: [coverage?.contentTypes[0] ?? proto.ContentType.CONTENT_TYPE_BASE_GAME],

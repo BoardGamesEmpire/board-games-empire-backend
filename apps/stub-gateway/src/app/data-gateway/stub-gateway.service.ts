@@ -61,7 +61,7 @@ export class StubGatewayService extends GatewayServiceHost {
         platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
         contentTypes: [proto.ContentType.CONTENT_TYPE_BASE_GAME, proto.ContentType.CONTENT_TYPE_EXPANSION],
       },
-      filterableAxes: [proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE],
+      filterableAxes: [proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE],
       languageCodeFormats: {
         acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47],
         responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,

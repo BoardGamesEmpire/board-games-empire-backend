@@ -70,7 +70,7 @@ export class DataGatewayService extends GatewayServiceHost {
        * Search narrows by content type through the thing types it asks BGG
        * for. Its coverage is tabletop alone, which settles platform type.
        */
-      filterableAxes: [proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE],
+      filterableAxes: [proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE],
 
       /**
        * BGG accepts and emits English language display names ("English",

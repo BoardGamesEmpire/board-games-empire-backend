@@ -222,6 +222,81 @@ describe('SearchQueryDto', () => {
     });
   });
 
+  // A publish-year range narrows the search (#719): both bounds inclusive,
+  // either may be left out, and a year before the common era is negative.
+  describe('publish year', () => {
+    const yearErrors = async (plain: Record<string, unknown>) =>
+      validationCatalogKeys(
+        (await validate(toDtoWithPipe({ query: 'x', ...plain }))).filter((e) => e.property.startsWith('publishYear')),
+      );
+
+    it('takes an inclusive publish-year range with either bound alone', async () => {
+      await expect(yearErrors({ publishYearMin: 1990 })).resolves.toEqual({});
+      await expect(yearErrors({ publishYearMax: -500 })).resolves.toEqual({});
+      await expect(yearErrors({ publishYearMin: 1990, publishYearMax: 1990 })).resolves.toEqual({});
+    });
+
+    // Each bound travels as an int32, which wraps a larger one: 3000000000
+    // would reach the DataGateways as a year near -1.3 billion.
+    it('refuses a bound outside a 32-bit integer with validation.min or validation.max', async () => {
+      await expect(yearErrors({ publishYearMin: '3000000000' })).resolves.toEqual({
+        'publishYearMin.max': 'validation.max',
+      });
+      await expect(yearErrors({ publishYearMax: '-2147483649' })).resolves.toEqual({
+        'publishYearMax.min': 'validation.min',
+      });
+      await expect(yearErrors({ publishYearMin: '-2147483648', publishYearMax: '2147483647' })).resolves.toEqual({});
+    });
+
+    it('reads its bounds from the query string as integers', () => {
+      expect(toDtoWithPipe({ query: 'x', publishYearMin: '1990', publishYearMax: '-500' })).toMatchObject({
+        publishYearMin: 1990,
+        publishYearMax: -500,
+      });
+    });
+
+    it('refuses a non-integer bound with validation.isInt', async () => {
+      await expect(yearErrors({ publishYearMin: 1990.5 })).resolves.toEqual({
+        'publishYearMin.isInt': 'validation.isInt',
+      });
+      // Not a number at all, so it's out of range too, as a non-numeric limit is.
+      await expect(yearErrors({ publishYearMax: 'nineties' })).resolves.toEqual({
+        'publishYearMax.isInt': 'validation.isInt',
+        'publishYearMax.min': 'validation.min',
+        'publishYearMax.max': 'validation.max',
+      });
+    });
+
+    it('refuses a maximum below the minimum with validation.notLessThanProperty', async () => {
+      await expect(yearErrors({ publishYearMin: 2000, publishYearMax: 1990 })).resolves.toEqual({
+        'publishYearMax.notLessThanProperty': 'validation.notLessThanProperty',
+      });
+    });
+
+    // Implicit conversion reads a blank as 0, a year like any other, so
+    // `?publishYearMin=` would silently narrow from it.
+    it('treats an empty publishYearMin as absent', async () => {
+      const dto = toDtoWithPipe({ query: 'x', publishYearMin: '', publishYearMax: ' ' });
+
+      expect(dto.publishYearMin).toBeUndefined();
+      expect(dto.publishYearMax).toBeUndefined();
+      await expect(yearErrors({ publishYearMin: '' })).resolves.toEqual({});
+    });
+
+    it('reads publishYearIncludeUnknown=false as false', () => {
+      expect(toDtoWithPipe({ query: 'x', publishYearIncludeUnknown: 'false' }).publishYearIncludeUnknown).toBe(false);
+      expect(toDtoWithPipe({ query: 'x', publishYearIncludeUnknown: 'true' }).publishYearIncludeUnknown).toBe(true);
+    });
+
+    it('names a catalog key for a flag that is not a boolean', async () => {
+      const dto = Object.assign(new SearchQueryDto(), { query: 'x', publishYearIncludeUnknown: 'yes' });
+
+      expect(validationCatalogKeys(await validate(dto))).toEqual({
+        'publishYearIncludeUnknown.isBoolean': 'validation.isBoolean',
+      });
+    });
+  });
+
   // Each failure must name a validation catalog key, so the edge can render it
   // in the request locale. Assigned without the transformers: the
   // boolean transform coerces everything to a boolean, so only a raw value can

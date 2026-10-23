@@ -46,7 +46,7 @@ describe('the BoardGameGeek gateway over gRPC', () => {
         'CAPABILITY_LIST_CATEGORIES',
         'CAPABILITY_LIST_MECHANICS',
       ],
-      filterableAxes: ['COVERAGE_AXIS_CONTENT_TYPE'],
+      filterableAxes: ['SEARCH_FILTER_AXIS_CONTENT_TYPE'],
       languageCodeFormats: {
         acceptedRequestFormats: ['LANGUAGE_CODE_FORMAT_NAME'],
         responseFormat: 'LANGUAGE_CODE_FORMAT_NAME',

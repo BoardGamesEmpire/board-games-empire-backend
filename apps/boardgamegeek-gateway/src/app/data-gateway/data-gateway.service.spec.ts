@@ -97,7 +97,7 @@ describe('DataGatewayService', () => {
     });
 
     it('declares that its search narrows by content type alone', () => {
-      expect(service.describe({}).filterableAxes).toEqual([proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE]);
+      expect(service.describe({}).filterableAxes).toEqual([proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE]);
     });
 
     it('declares English language names, on requests and responses alike', () => {

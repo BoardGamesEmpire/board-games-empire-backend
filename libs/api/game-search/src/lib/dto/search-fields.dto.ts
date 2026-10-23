@@ -1,9 +1,31 @@
 import { PlatformType } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
-import { CappedOffsetPaginationQueryDto, TransformBoolean } from '@bge/shared';
+import { CappedOffsetPaginationQueryDto, NotLessThanProperty, TransformBoolean } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { SEARCHABLE_CONTENT_TYPES, type SearchableContentType } from '../search-filter';
+
+/**
+ * The range a publish-year bound can take: the proto carries each as an
+ * int32, which would wrap a larger one into some other year (#719).
+ */
+const INT32_MIN = -(2 ** 31);
+const INT32_MAX = 2 ** 31 - 1;
+
+/**
+ * Converts only a number or a numeric string into a bound, and reads a blank
+ * one as absent. Implicit conversion would make a blank string, `false` or
+ * `[]` 0 and `true` 1, each a publish year like any other, so a
+ * `?publishYearMin=` left empty or a frame's `false` would silently narrow the
+ * search from it. Anything else stays as sent, for `@IsInt` to refuse (#719).
+ */
+const TransformYearBound = () =>
+  Transform(({ obj, key, value }) => {
+    const raw: unknown = obj[key];
+    if (typeof raw === 'string') return raw.trim() === '' ? undefined : value;
+    return typeof raw === 'number' ? value : raw;
+  });
 
 /**
  * The fields a game search takes over REST and over the WebSocket, declared
@@ -45,6 +67,57 @@ export abstract class SearchFieldsDto extends CappedOffsetPaginationQueryDto(100
   @IsArray({ message: i18nValidationMessage('validation.isArray') })
   @IsIn(SEARCHABLE_CONTENT_TYPES, { each: true, message: i18nValidationMessage('validation.each.isIn') })
   contentTypes?: SearchableContentType[] | null;
+
+  /**
+   * The earliest publish year to find, inclusive (#719). A year before the
+   * common era is negative. Null, as a frame can send it, doesn't narrow.
+   */
+  @ApiPropertyOptional({
+    description:
+      'Earliest publish year to find, inclusive; negative before the common era. Only games published from it ' +
+      'are found, so a page can come back shorter than the limit.',
+    type: 'integer',
+    format: 'int32',
+  })
+  @IsOptional()
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
+  @Min(INT32_MIN, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
+  @Type(() => Number)
+  @TransformYearBound()
+  publishYearMin?: number | null;
+
+  /** The latest publish year to find, inclusive, and not below the earliest. */
+  @ApiPropertyOptional({
+    description:
+      'Latest publish year to find, inclusive, and not less than publishYearMin. Only games published up to it ' +
+      'are found, so a page can come back shorter than the limit.',
+    type: 'integer',
+    format: 'int32',
+  })
+  @IsOptional()
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
+  @Min(INT32_MIN, { message: i18nValidationMessage('validation.min') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
+  @NotLessThanProperty('publishYearMin')
+  @Type(() => Number)
+  @TransformYearBound()
+  publishYearMax?: number | null;
+
+  /**
+   * Whether a publish-year range keeps games with no known year, which it
+   * otherwise leaves out. With neither bound given it narrows nothing.
+   */
+  @ApiPropertyOptional({
+    description:
+      'Keep games with no known publish year in a publish-year range, which otherwise leaves them out. ' +
+      'Without publishYearMin or publishYearMax it changes nothing.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
+  @TransformBoolean()
+  publishYearIncludeUnknown?: boolean | null;
 
   /**
    * Whether to include the local DB in the search.

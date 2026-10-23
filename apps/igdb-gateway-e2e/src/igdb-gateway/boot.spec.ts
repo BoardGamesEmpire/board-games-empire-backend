@@ -70,7 +70,7 @@ describe('the IGDB gateway over gRPC', () => {
         'CAPABILITY_LIST_PLATFORMS',
         'CAPABILITY_LIST_CATEGORIES',
       ],
-      filterableAxes: ['COVERAGE_AXIS_PLATFORM_TYPE', 'COVERAGE_AXIS_CONTENT_TYPE'],
+      filterableAxes: ['SEARCH_FILTER_AXIS_PLATFORM_TYPE', 'SEARCH_FILTER_AXIS_CONTENT_TYPE'],
       languageCodeFormats: {
         acceptedRequestFormats: ['LANGUAGE_CODE_FORMAT_IETF_BCP_47', 'LANGUAGE_CODE_FORMAT_ISO_639_1'],
         responseFormat: 'LANGUAGE_CODE_FORMAT_IETF_BCP_47',

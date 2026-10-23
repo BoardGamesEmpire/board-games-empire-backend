@@ -1,4 +1,4 @@
-import { ContentFormat, ContentType, CoverageAxis, DataGatewayCapability, PlatformType } from '@bge/database';
+import { ContentFormat, ContentType, DataGatewayCapability, PlatformType, SearchFilterAxis } from '@bge/database';
 import {
   coverageOverlaps,
   GatewayRegistryService,
@@ -97,7 +97,7 @@ interface Registration {
   driver: DataGatewayDriver;
   capabilities: DataGatewayCapability[];
   coverage: StoredCoverage;
-  filterableAxes: CoverageAxis[];
+  filterableAxes: SearchFilterAxis[];
   contentFormat: ContentFormat | null;
 }
 
@@ -542,7 +542,7 @@ describe('GatewayGameSearchService', () => {
       const bgg = new InMemoryGatewayDriver({ searchResults: [tabletopCatan] });
       registry.register('bgg', bgg, EVERY_CAPABILITY, {
         coverage: TABLETOP_GAMES,
-        filterableAxes: [CoverageAxis.ContentType],
+        filterableAxes: [SearchFilterAxis.ContentType],
       });
       const searched = sentTo(bgg);
 
@@ -561,7 +561,7 @@ describe('GatewayGameSearchService', () => {
       const bgg = new InMemoryGatewayDriver({ searchResults: [tabletopCatan] });
       registry.register('bgg', bgg, EVERY_CAPABILITY, {
         coverage: TABLETOP_GAMES,
-        filterableAxes: [CoverageAxis.ContentType],
+        filterableAxes: [SearchFilterAxis.ContentType],
       });
       const searched = sentTo(bgg);
 
@@ -576,7 +576,7 @@ describe('GatewayGameSearchService', () => {
         'loose',
         new InMemoryGatewayDriver({ searchResults: [tabletopCatan, seafarers, catanOnPc, unclassified] }),
         EVERY_CAPABILITY,
-        { filterableAxes: [CoverageAxis.ContentType] },
+        { filterableAxes: [SearchFilterAxis.ContentType] },
       );
 
       const frames = await collect(
@@ -597,6 +597,94 @@ describe('GatewayGameSearchService', () => {
 
       expect(games(byContent)).toEqual([tabletopCatan]);
       expect(games(byPlatform)).toEqual([tabletopCatan]);
+    });
+
+    // A publish year narrows but never skips a DataGateway: none declares which
+    // years it covers (#719).
+    describe('by publish year', () => {
+      const dated = (externalId: string, yearPublished?: number): proto.GameSearchData => ({
+        ...searchHit(externalId, externalId),
+        yearPublished,
+      });
+
+      const byYear = (publishYear: proto.IntRange): proto.SearchFilter => ({
+        platformTypes: [],
+        contentTypes: [],
+        publishYear,
+      });
+
+      const [old, nineties, recent, undated] = [
+        dated('old', 1989),
+        dated('nineties', 1995),
+        dated('recent', 2010),
+        dated('undated'),
+      ];
+
+      it('removes every result outside the publish-year range, on the live path and on replay', async () => {
+        // It narrows by nothing, so it's asked one search for both and the year applies on the way out.
+        registry.register('bgg', new InMemoryGatewayDriver({ searchResults: [old, nineties, undated] }));
+
+        const live = await collect(service.searchGames(searchRequest({ filter: byYear({ min: 1990, max: 2000 }) })));
+        registry.resolved.length = 0;
+        const replay = await collect(
+          service.searchGames(searchRequest({ filter: byYear({ max: 1989, includeUnknown: true }) })),
+        );
+
+        expect(games(live)).toEqual([nineties]);
+        expect(registry.resolved).toEqual([]);
+        expect(games(replay)).toEqual([old, undated]);
+      });
+
+      it('sends the range to a DataGateway that narrows by publish year', async () => {
+        const bgg = new InMemoryGatewayDriver({ searchResults: [recent] });
+        registry.register('bgg', bgg, EVERY_CAPABILITY, { filterableAxes: [SearchFilterAxis.PublishYear] });
+        const searched = sentTo(bgg);
+
+        await collect(service.searchGames(searchRequest({ filter: byYear({ min: 2000, includeUnknown: false }) })));
+
+        expect(searched).toHaveBeenCalledWith(
+          expect.objectContaining({ filter: { platformTypes: [], contentTypes: [], publishYear: { min: 2000 } } }),
+        );
+      });
+
+      // One that narrows upstream leaves undated games out of a strict search's
+      // answer, so a loose search replaying that entry would never see them.
+      it('keys a search that keeps unknown publish years apart from one that doesn’t', async () => {
+        registry.register('bgg', new InMemoryGatewayDriver({ searchResults: [undated] }), EVERY_CAPABILITY, {
+          filterableAxes: [SearchFilterAxis.PublishYear],
+        });
+
+        await collect(service.searchGames(searchRequest({ filter: byYear({ min: 1990 }) })));
+        await collect(service.searchGames(searchRequest({ filter: byYear({ min: 1990, includeUnknown: true }) })));
+
+        const [strictKey, looseKey] = cache.get.mock.calls.map(([key]) => key);
+        expect(strictKey).toBeDefined();
+        expect(looseKey).not.toBe(strictKey);
+        expect(registry.resolved).toEqual(['bgg', 'bgg']);
+      });
+
+      it('asks a DataGateway that narrows by publish year again for each range it hasn’t been asked', async () => {
+        registry.register('bgg', new InMemoryGatewayDriver({ searchResults: [nineties] }), EVERY_CAPABILITY, {
+          filterableAxes: [SearchFilterAxis.PublishYear],
+        });
+
+        for (const range of [{ min: 1990 }, { min: 2000 }, { max: 1990 }, { max: 2000 }, { min: 2000 }]) {
+          await collect(service.searchGames(searchRequest({ filter: byYear(range) })));
+        }
+
+        expect(registry.resolved).toEqual(['bgg', 'bgg', 'bgg', 'bgg']);
+      });
+
+      it('sends a DataGateway that doesn’t narrow by publish year no year, and still filters its results', async () => {
+        const bgg = new InMemoryGatewayDriver({ searchResults: [old, recent] });
+        registry.register('bgg', bgg, EVERY_CAPABILITY, { filterableAxes: [SearchFilterAxis.ContentType] });
+        const searched = sentTo(bgg);
+
+        const frames = await collect(service.searchGames(searchRequest({ filter: byYear({ min: 2000 }) })));
+
+        expect(searched.mock.calls[0]?.[0]).not.toHaveProperty('filter');
+        expect(games(frames)).toEqual([recent]);
+      });
     });
   });
 
@@ -675,7 +763,7 @@ describe('GatewayGameSearchService', () => {
 
     it('asks a DataGateway again for a filter it narrows by that differs from the one it was asked', async () => {
       registry.register('bgg', new InMemoryGatewayDriver({ searchResults: [tabletopCatan, seafarers] }), undefined, {
-        filterableAxes: [CoverageAxis.ContentType],
+        filterableAxes: [SearchFilterAxis.ContentType],
       });
 
       await collect(service.searchGames(searchRequest({ filter: { platformTypes: [], contentTypes: [BASE_GAME] } })));
