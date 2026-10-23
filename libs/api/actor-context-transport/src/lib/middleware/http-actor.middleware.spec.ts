@@ -7,11 +7,14 @@ import {
 } from '@bge/actor-context';
 import { AuthService, type AuthUser } from '@bge/auth';
 import { I18nMessage, t } from '@bge/i18n';
+import { buildBasePinoOptions } from '@bge/logger';
 import { ForbiddenException, Logger, UnauthorizedException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import type { NextFunction, Request, Response } from 'express';
 import { ClsModule, ClsService } from 'nestjs-cls';
+import { Writable } from 'node:stream';
+import pino from 'pino';
 import { API_KEY_HEADER, HttpActorMiddleware } from './http-actor.middleware';
 
 type AuthMock = jest.Mocked<
@@ -312,6 +315,24 @@ describe('HttpActorMiddleware', () => {
         expect(captured.actor).toBeUndefined();
         expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/key-1.*user-9/));
       });
+    });
+
+    it('reads the key from a header the shared log options redact (#748)', () => {
+      // The logger lib names the header in its own redaction paths, so a
+      // renamed header would reach every access line unless this fails first.
+      const { redact } = buildBasePinoOptions({});
+      const lines: string[] = [];
+      const sink = new Writable({
+        write(chunk, _encoding, done) {
+          lines.push(String(chunk));
+          done();
+        },
+      });
+
+      pino({ redact }, sink).info({ req: { headers: { [API_KEY_HEADER]: 'key-secret' } } });
+
+      expect(lines.join('')).toContain('[Redacted]');
+      expect(lines.join('')).not.toContain('key-secret');
     });
   });
 
