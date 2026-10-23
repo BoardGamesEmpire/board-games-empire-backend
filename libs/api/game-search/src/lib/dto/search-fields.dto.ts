@@ -112,6 +112,7 @@ export abstract class SearchFieldsDto extends CappedOffsetPaginationQueryDto(100
     description:
       'Keep games with no known publish year in a publish-year range, which otherwise leaves them out. ' +
       'Without publishYearMin or publishYearMax it changes nothing.',
+    type: Boolean,
     default: false,
   })
   @IsOptional()

@@ -1,4 +1,5 @@
 import { validationCatalogKeys } from '@bge/testing';
+import { DECORATORS } from '@nestjs/swagger';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { SearchQueryDto } from './search-query.dto';
@@ -286,6 +287,14 @@ describe('SearchQueryDto', () => {
     it('reads publishYearIncludeUnknown=false as false', () => {
       expect(toDtoWithPipe({ query: 'x', publishYearIncludeUnknown: 'false' }).publishYearIncludeUnknown).toBe(false);
       expect(toDtoWithPipe({ query: 'x', publishYearIncludeUnknown: 'true' }).publishYearIncludeUnknown).toBe(true);
+    });
+
+    // `boolean | null` is reflected as Object, which the published schema
+    // would carry as an object reference rather than a boolean.
+    it('publishes publishYearIncludeUnknown as a boolean in the OpenAPI schema', () => {
+      expect(
+        Reflect.getMetadata(DECORATORS.API_MODEL_PROPERTIES, SearchQueryDto.prototype, 'publishYearIncludeUnknown'),
+      ).toMatchObject({ type: Boolean });
     });
 
     it('names a catalog key for a flag that is not a boolean', async () => {
