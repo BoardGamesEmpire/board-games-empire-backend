@@ -1523,8 +1523,10 @@ export const PERMISSION_CATALOG = [
   // list's ceiling is empty for everyone below staff: the composer ANDs it in,
   // and an Owner would page through nothing (#162).
   //
-  // Not the household detail's embed, which reads through the household and
-  // is #665's question, for members, guests and friends.
+  // The household detail embeds no invites (#665): every reader of the
+  // household reaches it, a member's friends included, and this is the only
+  // grant to read a household's invites below staff. An invite's own inviter
+  // and invitee read it without one, at `/invites/sent` and in their inbox.
   permission({
     action: Action.read,
     subject: ResourceType.Invite,
