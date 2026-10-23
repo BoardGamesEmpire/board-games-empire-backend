@@ -1,4 +1,4 @@
-export { buildBasePinoOptions, resolvePinoLevel } from './lib/base-pino.options';
+export { buildBasePinoOptions, resolvePinoLevel, type LogDestination } from './lib/base-pino.options';
 export { bootstrapLogging, type BootstrapLoggingConfig } from './lib/bootstrap-logging';
 export {
   createLoggerShutdown,

@@ -22,6 +22,9 @@ import { buildOtelPinoOptions, otelTraceMixin } from './otel-pino.options';
 
 const getSpanMock = trace.getSpan as jest.Mock;
 
+// Passed explicitly so no assertion depends on whether Jest itself runs on a terminal.
+const TERMINAL = { isTTY: true };
+
 const buildSpanContext = (overrides: Partial<SpanContext> = {}): SpanContext => ({
   traceId: 'a'.repeat(32),
   spanId: 'b'.repeat(16),
@@ -82,9 +85,15 @@ describe('otelTraceMixin', () => {
 describe('buildOtelPinoOptions', () => {
   describe('composition with @bge/logger base options', () => {
     it('preserves the pino-pretty target inherited from buildBasePinoOptions', () => {
-      const targets = getTargets(buildOtelPinoOptions({}));
+      const targets = getTargets(buildOtelPinoOptions({}, TERMINAL));
 
       expect(targets.some((t) => t.target === 'pino-pretty')).toBe(true);
+    });
+
+    it('passes stdout to the base options (#627)', () => {
+      const targets = getTargets(buildOtelPinoOptions({}, { isTTY: false }));
+
+      expect(targets[0].target).toBe('pino/file');
     });
 
     it('inherits the resolved level from base options at the top level', () => {
@@ -120,13 +129,17 @@ describe('buildOtelPinoOptions', () => {
     });
 
     it('appends pino-opentelemetry-transport when OTLP endpoint is set', () => {
-      const targets = getTargets(buildOtelPinoOptions({ OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318' }));
+      const targets = getTargets(
+        buildOtelPinoOptions({ OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318' }, TERMINAL),
+      );
 
       expect(targets.some((t) => t.target === 'pino-opentelemetry-transport')).toBe(true);
     });
 
     it('appends after the inherited base targets (does not replace them)', () => {
-      const targets = getTargets(buildOtelPinoOptions({ OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318' }));
+      const targets = getTargets(
+        buildOtelPinoOptions({ OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318' }, TERMINAL),
+      );
 
       expect(targets).toHaveLength(2);
       expect(targets[0].target).toBe('pino-pretty');
@@ -135,10 +148,13 @@ describe('buildOtelPinoOptions', () => {
 
     it('forwards OTEL_RESOURCE_ATTRIBUTES into the transport options', () => {
       const targets = getTargets(
-        buildOtelPinoOptions({
-          OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
-          OTEL_RESOURCE_ATTRIBUTES: 'service.name=bge-api,service.version=1.0.0',
-        }),
+        buildOtelPinoOptions(
+          {
+            OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
+            OTEL_RESOURCE_ATTRIBUTES: 'service.name=bge-api,service.version=1.0.0',
+          },
+          TERMINAL,
+        ),
       );
 
       const otelTransport = targets.find((t) => t.target === 'pino-opentelemetry-transport');
@@ -149,10 +165,13 @@ describe('buildOtelPinoOptions', () => {
 
     it('applies the resolved level to the OTLP transport target', () => {
       const targets = getTargets(
-        buildOtelPinoOptions({
-          LOG_LEVEL: 'warn',
-          OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
-        }),
+        buildOtelPinoOptions(
+          {
+            LOG_LEVEL: 'warn',
+            OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
+          },
+          TERMINAL,
+        ),
       );
 
       for (const target of targets) {
@@ -167,7 +186,7 @@ describe('buildOtelPinoOptions', () => {
       delete process.env['OTEL_EXPORTER_OTLP_ENDPOINT'];
 
       try {
-        const targets = getTargets(buildOtelPinoOptions());
+        const targets = getTargets(buildOtelPinoOptions(undefined, TERMINAL));
         expect(targets).toHaveLength(1);
         expect(targets[0].target).toBe('pino-pretty');
       } finally {
