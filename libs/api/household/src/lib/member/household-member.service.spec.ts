@@ -1108,6 +1108,86 @@ describe('HouseholdMemberService', () => {
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
     });
   });
+  describe('removeUserWithin (#782)', () => {
+    const asTx = (client: MockDatabaseService): Prisma.TransactionClient =>
+      client as unknown as Prisma.TransactionClient;
+    const target = makeMember({ id: 'member-2', userId: 'user-2' });
+
+    beforeEach(() => {
+      db.excludedGame.deleteMany.mockResolvedValue({ count: 0 } as never);
+      db.householdRole.deleteMany.mockResolvedValue({ count: 1 } as never);
+      db.householdMember.delete.mockResolvedValue(resolves(target));
+    });
+
+    it("removeUserWithin returns null for a user who isn't a member, and deletes nothing (#782)", async () => {
+      db.householdMember.findUnique.mockResolvedValue(null);
+
+      await expect(service.removeUserWithin(asTx(db), 'hh-1', 'user-2')).resolves.toBeNull();
+
+      expect(db.householdMember.findUnique).toHaveBeenCalledWith({
+        where: { householdId_userId: { householdId: 'hh-1', userId: 'user-2' } },
+        select: MEMBER_SELECT,
+      });
+      expect(db.householdMember.delete).not.toHaveBeenCalled();
+      expect(invites.revokeOutstandingOfUserWithin).not.toHaveBeenCalled();
+    });
+
+    it("removeUserWithin removes a member under the actor's manage conditions and hands back the revoked invites (#782)", async () => {
+      const revoked = [{ eventName: 'invite.revoked', subjectId: 'inv-1' }] as never;
+      db.householdMember.findUnique.mockResolvedValue(resolves(target));
+      db.householdMember.findFirst.mockResolvedValue(resolves(target));
+      invites.revokeOutstandingOfUserWithin.mockResolvedValue({ count: 1, events: revoked });
+
+      const removed = await service.removeUserWithin(asTx(db), 'hh-1', 'user-2');
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+        ResourceType.HouseholdMember,
+        Action.manage,
+      );
+      expect(db.householdMember.findFirst).toHaveBeenNthCalledWith(1, {
+        where: { householdId: 'hh-1', userId: 'user-2', AND: [COND] },
+        select: MEMBER_SELECT,
+      });
+      expect(db.householdMember.delete).toHaveBeenCalledWith({ where: { id: 'member-2' } });
+      expect(invites.revokeOutstandingOfUserWithin).toHaveBeenCalledWith(db, { householdId: 'hh-1' }, 'user-2');
+      expect(removed).toEqual({ removed: target, revoked });
+
+      // On the caller's transaction; evicting the cache and announcing the
+      // invites wait for the caller's commit.
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(permissions.invalidateUser).not.toHaveBeenCalled();
+      expect(invites.emit).not.toHaveBeenCalled();
+    });
+
+    it("removeUserWithin refuses with 403 a member the actor's manage conditions hide, as a household admin's hide another admin (#782)", async () => {
+      db.householdMember.findUnique.mockResolvedValue(resolves(target));
+      db.householdMember.findFirst.mockResolvedValue(null);
+      stubCounts({ scoped: 0, unscoped: 1 });
+
+      await expect(service.removeUserWithin(asTx(db), 'hh-1', 'user-2')).rejects.toMatchObject({
+        status: Http.Forbidden,
+        response: expect.objectContaining({ key: 'common.forbidden.delete' }),
+      });
+
+      expect(db.householdMember.delete).not.toHaveBeenCalled();
+      expect(invites.revokeOutstandingOfUserWithin).not.toHaveBeenCalled();
+    });
+
+    it('removeUserWithin refuses with 400 to remove the last owner (#782)', async () => {
+      const owner = makeOwner({ id: 'member-2', userId: 'user-2' });
+      db.householdMember.findUnique.mockResolvedValue(resolves(owner));
+      db.householdMember.findFirst.mockResolvedValue(resolves(owner));
+      stubRawQueries({ owners: ['member-2'] });
+
+      await expect(service.removeUserWithin(asTx(db), 'hh-1', 'user-2')).rejects.toMatchObject({
+        status: Http.BadRequest,
+        response: expect.objectContaining({ key: 'errors.household.last_owner' }),
+      });
+
+      expect(db.householdMember.delete).not.toHaveBeenCalled();
+    });
+  });
+
   describe('transferOwnership', () => {
     const ACTOR = () => makeOwner({ id: 'member-actor', userId: 'actor-1' });
     const TARGET = () => makeMember({ id: 'member-2', userId: 'user-2' });

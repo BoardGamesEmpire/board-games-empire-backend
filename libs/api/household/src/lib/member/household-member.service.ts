@@ -13,7 +13,7 @@ import {
   type ConstraintIdentity,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { InviteService } from '@bge/invites';
+import { InviteService, type InviteDomainEvent } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import { QuotaExceededException, QuotaService, type QuotaSoftOverageEvent } from '@bge/quota';
 import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
@@ -159,6 +159,16 @@ interface ScopedMemberDenials {
   onHidden: () => never | Promise<never>;
   /** No such row at all → the caller's 404. */
   onMissing: () => never;
+}
+
+/**
+ * A membership just removed, and the caller's post-commit homework: the
+ * removed member's ability cache to evict, and the invites revoked with it to
+ * announce (#747, #782).
+ */
+export interface RemovedMembership {
+  readonly removed: HouseholdMemberWithRelations;
+  readonly revoked: readonly InviteDomainEvent[];
 }
 
 @Injectable()
@@ -985,24 +995,57 @@ export class HouseholdMemberService {
   }
 
   /**
-   * Shared removal primitive for remove-member and leave-household: resolve
+   * Removes a user from the household on the caller's transaction, as a
+   * household ban does (#782), or returns null when they aren't a member.
+   *
+   * Asked of the acting user's `manage` conditions on `HouseholdMember`, as
+   * {@link removeMember} is: a household owner's reach every member, and a
+   * household admin's only those with the member or guest role (#168). A
+   * member they hide is refused with 403, and the last owner with 400. Their
+   * invites are revoked as leaving revokes them (#747).
+   *
+   * The caller evicts the removed user's ability cache and announces the
+   * revoked invites after its commit, as {@link deleteMembership} does.
+   */
+  async removeUserWithin(
+    tx: Prisma.TransactionClient,
+    householdId: string,
+    userId: string,
+  ): Promise<RemovedMembership | null> {
+    const membership = await this.findMembershipWithin(tx, householdId, userId);
+
+    if (!membership) {
+      return null;
+    }
+
+    const scopedWhere = {
+      householdId,
+      userId,
+      // eslint-disable-next-line no-restricted-syntax -- single-row delete by user, not a collection read
+      AND: this.abilityService.getCurrentResourceConditions(ResourceType.HouseholdMember, Action.manage),
+    } satisfies Prisma.HouseholdMemberWhereInput;
+
+    return this.deleteMembershipWithin(
+      tx,
+      scopedWhere,
+      { householdId, userId },
+      {
+        onHidden: () => {
+          throw new ForbiddenException(t('common.forbidden.delete'));
+        },
+        onMissing: () => {
+          throw new NotFoundException(t('errors.household.member_not_found', { memberId: membership.id, householdId }));
+        },
+      },
+    );
+  }
+
+  /**
+   * Shared by removing a member and leaving: resolve
    * the target under the caller's scoped `where`, enforce the last-owner
    * invariant, then delete the membership and its dependents in one
-   * transaction, evicting the removed user's ability cache after commit.
-   *
-   * Deletion order is mandatory — the schema declares no cascades, so
-   * `ExcludedGame` and the 1:1 `HouseholdRole` must go before the
-   * `HouseholdMember` row. The scoped `where` is asked again under the lock,
-   * before the first delete, so authorization is decided from locked state as
-   * well as at read time (403).
-   *
-   * Leaving and being removed end the same invites (#747), in the same
-   * transaction: those the member sent, whose authority ended with the
-   * membership, and those that name them by id, which would let them back
-   * in. Invites to their address stay open, since revoking those would tell
-   * each inviter whose address it was. The household row is locked first, the
-   * lock order the invites lib asks for. The revoked invites are announced
-   * after the cache eviction.
+   * transaction ({@link deleteMembershipWithin}), evicting the removed user's
+   * ability cache after commit and then announcing the invites it revoked.
    */
   private async deleteMembership(
     scopedWhere: Prisma.HouseholdMemberWhereInput & { householdId: string },
@@ -1010,77 +1053,9 @@ export class HouseholdMemberService {
     denials: ScopedMemberDenials,
   ): Promise<HouseholdMemberWithRelations> {
     try {
-      const { removed, revoked } = await this.db.$transaction(async (tx) => {
-        const member = await this.findScopedMemberOrThrow(tx, scopedWhere, unscopedWhere, denials);
-
-        // Lock unconditionally, and decide from the LOCKED set — never from
-        // `member.role`, which is a pre-lock read.
-        //
-        // Gating the lock on that read was sound only while nothing could
-        // promote a member to owner concurrently. #158 ships exactly that path:
-        // a member promoted by `transferOwnership` between this read and its
-        // commit would have been deleted with the last-owner check skipped
-        // entirely, leaving the household ownerless and unadministrable with no
-        // error raised anywhere.
-        //
-        // Reading before locking is safe because the decision uses only
-        // `member.id`, which is immutable, plus the locked owner set. Whichever
-        // way this interleaves with a concurrent transfer, one of the two blocks
-        // on the other's lock and observes its committed result. It also keeps
-        // 404/403 requests from taking a household-wide lock, which locking
-        // first would have done.
-        //
-        // The cost is that concurrent departures within one household serialize
-        // on it. That is the price of correctness under READ COMMITTED: there is
-        // no way to know whether the lock is needed without first taking it.
-        // Households are small and departures are rare.
-        //
-        // The household row is what does the serializing (#239). Taking only
-        // the owner rows left this path's worst case open: a transfer that
-        // promotes the departing member commits while this transaction waits,
-        // and the re-checked owner set comes back EMPTY — the old owner dropped
-        // out of it, the new owner was never in it — so the guard below sees no
-        // owners at all and deletes the household's only one.
-        await lockHouseholdForRoleTransition(tx, scopedWhere.householdId);
-        const ownerMemberIds = await this.lockHouseholdOwnerRows(tx, scopedWhere.householdId);
-
-        // Re-applies the scoped `where` under the lock, so a permission change
-        // that landed between the read and the lock still surfaces as 403. It
-        // comes before the last-owner check, authorization before validation,
-        // so a caller the locked state refuses learns nothing of the
-        // household's owners. And it comes BEFORE the dependents go: a grant
-        // that reads the member's household role, as a household admin's does
-        // (#168), matches nothing once the role row is deleted. The lock keeps
-        // the answer standing through the deletes, since every role transition
-        // and every removal in this household takes it too.
-        const reachable = await tx.householdMember.findFirst({
-          where: { ...scopedWhere, id: member.id },
-          select: { id: true },
-        });
-
-        if (!reachable) {
-          await denials.onHidden();
-        }
-
-        if (ownerMemberIds.includes(member.id) && ownerMemberIds.length <= 1) {
-          throw new BadRequestException(t('errors.household.last_owner', { householdId: scopedWhere.householdId }));
-        }
-
-        await tx.excludedGame.deleteMany({ where: { householdMemberId: member.id } });
-        // deleteMany: the 1:1 role relation is optional, so a role-less member
-        // must not turn the cleanup into a P2025.
-        await tx.householdRole.deleteMany({ where: { householdMemberId: member.id } });
-
-        await tx.householdMember.delete({ where: { id: member.id } });
-
-        const { events } = await this.invites.revokeOutstandingOfUserWithin(
-          tx,
-          { householdId: scopedWhere.householdId },
-          member.userId,
-        );
-
-        return { removed: member, revoked: events };
-      });
+      const { removed, revoked } = await this.db.$transaction((tx) =>
+        this.deleteMembershipWithin(tx, scopedWhere, unscopedWhere, denials),
+      );
 
       // The household just left this user's ability surface — evict their
       // cached graph so stale Household* abilities don't linger for the TTL.
@@ -1094,6 +1069,101 @@ export class HouseholdMemberService {
         operation: 'deleteMembership',
       });
     }
+  }
+
+  /**
+   * What removing a member, leaving and a household ban (#782) each do to
+   * the membership, on the caller's transaction.
+   *
+   * Deletion order is mandatory — the schema declares no cascades, so
+   * `ExcludedGame` and the 1:1 `HouseholdRole` must go before the
+   * `HouseholdMember` row. The scoped `where` is asked again under the lock,
+   * before the first delete, so authorization is decided from locked state as
+   * well as at read time (403).
+   *
+   * Leaving and being removed end the same invites (#747), in the same
+   * transaction: those the member sent, whose authority ended with the
+   * membership, and those that name them by id, which would let them back
+   * in. Invites to their address stay open, since revoking those would tell
+   * each inviter whose address it was. The household row is locked first, the
+   * lock order the invites lib asks for. The revoked invites are handed back
+   * for the caller to announce after its commit.
+   */
+  private async deleteMembershipWithin(
+    tx: Prisma.TransactionClient,
+    scopedWhere: Prisma.HouseholdMemberWhereInput & { householdId: string },
+    unscopedWhere: Prisma.HouseholdMemberWhereInput,
+    denials: ScopedMemberDenials,
+  ): Promise<RemovedMembership> {
+    const member = await this.findScopedMemberOrThrow(tx, scopedWhere, unscopedWhere, denials);
+
+    // Lock unconditionally, and decide from the LOCKED set — never from
+    // `member.role`, which is a pre-lock read.
+    //
+    // Gating the lock on that read was sound only while nothing could
+    // promote a member to owner concurrently. #158 ships exactly that path:
+    // a member promoted by `transferOwnership` between this read and its
+    // commit would have been deleted with the last-owner check skipped
+    // entirely, leaving the household ownerless and unadministrable with no
+    // error raised anywhere.
+    //
+    // Reading before locking is safe because the decision uses only
+    // `member.id`, which is immutable, plus the locked owner set. Whichever
+    // way this interleaves with a concurrent transfer, one of the two blocks
+    // on the other's lock and observes its committed result. It also keeps
+    // 404/403 requests from taking a household-wide lock, which locking
+    // first would have done.
+    //
+    // The cost is that concurrent departures within one household serialize
+    // on it. That is the price of correctness under READ COMMITTED: there is
+    // no way to know whether the lock is needed without first taking it.
+    // Households are small and departures are rare.
+    //
+    // The household row is what does the serializing (#239). Taking only
+    // the owner rows left this path's worst case open: a transfer that
+    // promotes the departing member commits while this transaction waits,
+    // and the re-checked owner set comes back EMPTY — the old owner dropped
+    // out of it, the new owner was never in it — so the guard below sees no
+    // owners at all and deletes the household's only one.
+    await lockHouseholdForRoleTransition(tx, scopedWhere.householdId);
+    const ownerMemberIds = await this.lockHouseholdOwnerRows(tx, scopedWhere.householdId);
+
+    // Re-applies the scoped `where` under the lock, so a permission change
+    // that landed between the read and the lock still surfaces as 403. It
+    // comes before the last-owner check, authorization before validation,
+    // so a caller the locked state refuses learns nothing of the
+    // household's owners. And it comes BEFORE the dependents go: a grant
+    // that reads the member's household role, as a household admin's does
+    // (#168), matches nothing once the role row is deleted. The lock keeps
+    // the answer standing through the deletes, since every role transition,
+    // and every member leaving or being removed, in this household takes it too.
+    const reachable = await tx.householdMember.findFirst({
+      where: { ...scopedWhere, id: member.id },
+      select: { id: true },
+    });
+
+    if (!reachable) {
+      await denials.onHidden();
+    }
+
+    if (ownerMemberIds.includes(member.id) && ownerMemberIds.length <= 1) {
+      throw new BadRequestException(t('errors.household.last_owner', { householdId: scopedWhere.householdId }));
+    }
+
+    await tx.excludedGame.deleteMany({ where: { householdMemberId: member.id } });
+    // deleteMany: the 1:1 role relation is optional, so a role-less member
+    // must not turn the cleanup into a P2025.
+    await tx.householdRole.deleteMany({ where: { householdMemberId: member.id } });
+
+    await tx.householdMember.delete({ where: { id: member.id } });
+
+    const { events } = await this.invites.revokeOutstandingOfUserWithin(
+      tx,
+      { householdId: scopedWhere.householdId },
+      member.userId,
+    );
+
+    return { removed: member, revoked: events };
   }
 
   /**
@@ -1142,7 +1212,7 @@ export class HouseholdMemberService {
    * first; this statement pins the rows this transaction is about to act on and
    * returns them. Both callers need the set, for different invariants:
    *
-   * - {@link deleteMembership} — a household must keep at least one owner.
+   * - {@link deleteMembershipWithin} — a household must keep at least one owner.
    * - {@link transferOwnership} — the acting owner must still be an owner, and
    *   the target must still not be, at the moment the writes are issued.
    *
@@ -1298,7 +1368,7 @@ export class HouseholdMemberService {
    * Returns `true` only when rows matching `unscopedWhere` exist but none are
    * visible under `scopedWhere` — the actor is being denied, not merely looking
    * at an empty set. Deliberately makes NO assumption about a household always
-   * having at least one member. The guard in {@link deleteMembership} refuses
+   * having at least one member. The guard in {@link deleteMembershipWithin} refuses
    * to let the last owner leave or be removed, so a household with an owner
    * keeps one, but comparing scoped against unscoped is exact either way, so
    * this check does not depend on that guard.

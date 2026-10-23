@@ -23,7 +23,10 @@
     "invite_declined": "Invite declined",
     "invite_withdrawn": "Invite withdrawn",
     "invite_revoked": "Invite revoked",
-    "invite_approved": "Invite approved; the invitee can now accept it"
+    "invite_approved": "Invite approved; the invitee can now accept it",
+    "ban_created": "User banned from the household",
+    "ban_updated": "Ban updated",
+    "ban_lifted": "Ban lifted"
   },
   "event": {
     "created": "Event created successfully",
