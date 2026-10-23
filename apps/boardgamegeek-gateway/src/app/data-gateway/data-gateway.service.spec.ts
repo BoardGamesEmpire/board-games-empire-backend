@@ -5,6 +5,7 @@ import { firstValueFrom, of, throwError } from 'rxjs';
 import { toArray } from 'rxjs/operators';
 import { BggService, type BggRequest } from '../bgg/bgg.service';
 import { BggLinkType, BggNameType, BggThingType, MAX_THINGS_PER_BATCH } from '../constants';
+import { toCategoryList, toMechanicList } from '../mappers/taxonomy.mapper';
 import type { BggSearchItem, BggThing } from '../types';
 import { DataGatewayService } from './data-gateway.service';
 
@@ -68,7 +69,7 @@ describe('DataGatewayService', () => {
       expect(service.describe({}).correlationId).toEqual(expect.any(String));
     });
 
-    it('declares search, fetch, fetch expansions and the lists of languages and platforms', () => {
+    it('declares search, fetch, fetch expansions and the lists of languages, platforms, categories and mechanics', () => {
       expect(new Set(service.describe({}).capabilities)).toEqual(
         new Set([
           proto.Capability.CAPABILITY_SEARCH,
@@ -76,11 +77,12 @@ describe('DataGatewayService', () => {
           proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
           proto.Capability.CAPABILITY_LIST_LANGUAGES,
           proto.Capability.CAPABILITY_LIST_PLATFORMS,
+          proto.Capability.CAPABILITY_LIST_CATEGORIES,
+          proto.Capability.CAPABILITY_LIST_MECHANICS,
         ]),
       );
     });
 
-    // BGG's category and mechanic lists are #839.
     it('declares list platforms', () => {
       expect(service.describe({}).capabilities).toContain(proto.Capability.CAPABILITY_LIST_PLATFORMS);
     });
@@ -125,6 +127,40 @@ describe('DataGatewayService', () => {
           },
         ],
       });
+      expect(bggService.call).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listCategories (#839)', () => {
+    it('echoes the correlation id, or makes one', async () => {
+      const echoed = await firstValueFrom(service.listCategories({ correlationId: 'corr-categories' }));
+      const made = await firstValueFrom(service.listCategories({}));
+
+      expect(echoed.correlationId).toBe('corr-categories');
+      expect(made.correlationId).toEqual(expect.any(String));
+    });
+
+    it('lists the table', async () => {
+      const response = await firstValueFrom(service.listCategories({ correlationId: 'corr-categories' }));
+
+      expect(response.categories).toEqual(toCategoryList());
+      expect(bggService.call).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listMechanics (#839)', () => {
+    it('echoes the correlation id, or makes one', async () => {
+      const echoed = await firstValueFrom(service.listMechanics({ correlationId: 'corr-mechanics' }));
+      const made = await firstValueFrom(service.listMechanics({}));
+
+      expect(echoed.correlationId).toBe('corr-mechanics');
+      expect(made.correlationId).toEqual(expect.any(String));
+    });
+
+    it('lists the table', async () => {
+      const response = await firstValueFrom(service.listMechanics({ correlationId: 'corr-mechanics' }));
+
+      expect(response.mechanics).toEqual(toMechanicList());
       expect(bggService.call).not.toHaveBeenCalled();
     });
   });

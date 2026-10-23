@@ -24,6 +24,7 @@ import {
   toThingTypes,
 } from '../mappers/game.mapper';
 import { toGatewayLanguageEntries } from '../mappers/language.mapper';
+import { toCategoryList, toMechanicList } from '../mappers/taxonomy.mapper';
 import type { BggThing } from '../types';
 
 const FETCH_GAME_TYPES = [BggThingType.BoardGame, BggThingType.BoardGameExpansion] as const;
@@ -54,8 +55,9 @@ export class DataGatewayService extends GatewayServiceHost {
         proto.Capability.CAPABILITY_FETCH,
         proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
         proto.Capability.CAPABILITY_LIST_LANGUAGES,
-        // Its category and mechanic lists are #839.
         proto.Capability.CAPABILITY_LIST_PLATFORMS,
+        proto.Capability.CAPABILITY_LIST_CATEGORIES,
+        proto.Capability.CAPABILITY_LIST_MECHANICS,
       ],
 
       /** The kinds of thing search and fetch ask BGG for, as the game mapper types them. */
@@ -98,6 +100,22 @@ export class DataGatewayService extends GatewayServiceHost {
       correlationId: request.correlationId ?? crypto.randomUUID(),
       platforms: [TABLETOP_PLATFORM],
     } satisfies proto.ListPlatformsResponse);
+  }
+
+  /** Its categories, from the table copied from BGG's browse page, since its API lists none (#839). */
+  override listCategories(request: proto.ListCategoriesRequest): Observable<proto.ListCategoriesResponse> {
+    return of({
+      correlationId: request.correlationId ?? crypto.randomUUID(),
+      categories: toCategoryList(),
+    } satisfies proto.ListCategoriesResponse);
+  }
+
+  /** Its mechanics, from the table copied from BGG's browse page, since its API lists none (#839). */
+  override listMechanics(request: proto.ListMechanicsRequest): Observable<proto.ListMechanicsResponse> {
+    return of({
+      correlationId: request.correlationId ?? crypto.randomUUID(),
+      mechanics: toMechanicList(),
+    } satisfies proto.ListMechanicsResponse);
   }
 
   healthCheck(request: proto.HealthCheckRequest): proto.HealthCheckResponse {
