@@ -90,6 +90,45 @@ describe('GameRequests', () => {
       expect(client.where).toHaveBeenCalledWith('version_parent = null & game_type != 14');
     });
 
+    it('narrows to games first released within the range, in Unix seconds (#719)', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, undefined, {
+        releasedBetween: { from: 631152000, before: 946684800, orUnknown: false },
+      })(client);
+      expect(client.where).toHaveBeenCalledWith(
+        'version_parent = null & game_type != 14 & first_release_date >= 631152000 & first_release_date < 946684800',
+      );
+    });
+
+    it('keeps games with no first release date when the range includes unknown ones (#719)', async () => {
+      const both = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, undefined, {
+        releasedBetween: { from: 631152000, before: 946684800, orUnknown: true },
+      })(both);
+      expect(both.where).toHaveBeenCalledWith(
+        'version_parent = null & game_type != 14' +
+          ' & ((first_release_date >= 631152000 & first_release_date < 946684800) | first_release_date = null)',
+      );
+
+      const before = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, undefined, { releasedBetween: { before: 946684800, orUnknown: true } })(
+        before,
+      );
+      expect(before.where).toHaveBeenCalledWith(
+        'version_parent = null & game_type != 14 & (first_release_date < 946684800 | first_release_date = null)',
+      );
+    });
+
+    it('leaves out the comparison of a bound left out (#719)', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, undefined, {
+        releasedBetween: { from: 631152000, orUnknown: false },
+      })(client);
+      expect(client.where).toHaveBeenCalledWith(
+        'version_parent = null & game_type != 14 & first_release_date >= 631152000',
+      );
+    });
+
     it('narrows to the game types and platform types it is given, before the language filter', async () => {
       const client = buildMockClient();
       await searchGamesRequest('Hades', 20, 0, 'en-US', {

@@ -18,6 +18,7 @@
   "isEmail": "{property} must be an email",
   "min": "{property} must not be less than {constraints.0}",
   "max": "{property} must not be greater than {constraints.0}",
+  "notLessThanProperty": "{property} must not be less than {constraints.0}",
   "minLength": "{property} must be longer than or equal to {constraints.0} characters",
   "maxLength": "{property} must be shorter than or equal to {constraints.0} characters",
   "isUUID": "{property} must be a UUID",

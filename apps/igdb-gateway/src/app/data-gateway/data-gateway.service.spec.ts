@@ -122,10 +122,11 @@ describe('DataGatewayService', () => {
       );
     });
 
-    it('declares that its search narrows by platform type and content type', () => {
+    it('declares publish year with platform type and content type', () => {
       expect(service.describe({}).filterableAxes).toEqual([
-        proto.CoverageAxis.COVERAGE_AXIS_PLATFORM_TYPE,
-        proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE,
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLATFORM_TYPE,
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE,
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR,
       ]);
     });
 

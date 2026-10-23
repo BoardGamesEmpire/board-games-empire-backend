@@ -189,6 +189,16 @@ function coerceYear(year: number | undefined): number | undefined {
   return typeof year === 'number' && year > 0 ? year : undefined;
 }
 
+/**
+ * A game's publish year as BGG sends it, with its "0 means unknown" sentinel
+ * unset. Unlike coerceYear it keeps negative years, which BGG uses for games
+ * from before the common era (#719). Sent as 0, an undated game would read as
+ * a year, fail every publish-year range, and be stored with it on import.
+ */
+export function toPublishYear(year: number | undefined): number | undefined {
+  return year === 0 ? undefined : year;
+}
+
 function toReleaseDate(year: number | undefined): string | undefined {
   const valid = coerceYear(year);
   return valid !== undefined ? `${valid}-01-01` : undefined;
@@ -262,7 +272,7 @@ export function searchItemToGameSearchData(item: BggSearchItem): proto.GameSearc
     externalId: String(item.id),
     title,
     contentType: BGG_CONTENT_TYPE_MAP[item.type] ?? proto.ContentType.CONTENT_TYPE_UNSPECIFIED,
-    yearPublished: item.yearpublished,
+    yearPublished: toPublishYear(item.yearpublished),
     sourceUrl: toSourceUrl({ id: item.id, type: item.type }),
     availablePlatforms: [TABLETOP_PLATFORM],
     availableReleases: [],
@@ -281,7 +291,7 @@ export function thingToGameSearchData(thing: BggThing): proto.GameSearchData {
     externalId: String(thing.id),
     title,
     contentType: toContentType(thing),
-    yearPublished: thing.yearpublished,
+    yearPublished: toPublishYear(thing.yearpublished),
     thumbnailUrl: decodeUrl(thing.thumbnail),
     sourceUrl: toSourceUrl(thing),
     averageRating: thing.statistics?.ratings?.average,
@@ -327,7 +337,7 @@ export function thingToGameData(thing: BggThing, locale?: string): proto.GameDat
     contentType: toContentType(thing),
 
     description: decodeDescription(thing.description),
-    yearPublished: thing.yearpublished,
+    yearPublished: toPublishYear(thing.yearpublished),
     thumbnailUrl: decodeUrl(thing.thumbnail),
     imageUrl: decodeUrl(thing.image),
     sourceUrl: toSourceUrl(thing),

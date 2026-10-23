@@ -1,7 +1,7 @@
 import { firstValueFrom } from 'rxjs';
 import type { BggClientLike } from '../bgg/interfaces';
 import { BggThingType, DEFAULT_BGG_SEARCH_TYPES } from '../constants';
-import type { BggSearchResult, BggThing } from '../types';
+import type { BggSearchItem, BggSearchResult, BggThing } from '../types';
 import {
   chunk,
   collapseSearchItems,
@@ -139,6 +139,52 @@ describe('searchGamesRequest', () => {
     await firstValueFrom(request$);
 
     expect(search).toHaveBeenCalledTimes(2);
+  });
+});
+
+// BGG pages in memory, so the range applies before the slice: offset and
+// limit count only games in range, and a page fills when BGG has more (#719).
+describe('searchGamesRequest with a publish-year range (#719)', () => {
+  const dated = (id: number, yearpublished?: number): BggSearchItem => ({
+    id,
+    type: BggThingType.BoardGame,
+    name: `Game ${id}`,
+    ...(yearpublished === undefined ? {} : { yearpublished }),
+  });
+
+  const searched = (items: BggSearchItem[], limit: number, range: Parameters<typeof searchGamesRequest>[4]) =>
+    firstValueFrom(
+      searchGamesRequest(
+        'x',
+        limit,
+        0,
+        DEFAULT_BGG_SEARCH_TYPES,
+        range,
+      )(buildMockClient({ searchResults: [{ total: items.length, items }] }).client),
+    ).then((result) => result.map((item) => item.id));
+
+  it('applies the publish-year range before paging', async () => {
+    await expect(searched([dated(1, 1990), dated(2, 2010), dated(3, 2011)], 2, { min: 2000 })).resolves.toEqual([2, 3]);
+  });
+
+  it('takes both bounds inclusive, and negative years', async () => {
+    const items = [dated(1, -2200), dated(2, -500), dated(3, 1990), dated(4, 1991)];
+
+    await expect(searched(items, 20, { min: -500, max: 1990 })).resolves.toEqual([2, 3]);
+  });
+
+  it('keeps an undated item only when the range includes unknown ones', async () => {
+    const items = [dated(1, 2010), dated(2), dated(3, 0)];
+
+    await expect(searched(items, 20, { min: 2000 })).resolves.toEqual([1]);
+    await expect(searched(items, 20, { min: 2000, includeUnknown: true })).resolves.toEqual([1, 2, 3]);
+  });
+
+  it('narrows nothing without a range, or with one that has no bound', async () => {
+    const items = [dated(1, 1990), dated(2)];
+
+    await expect(searched(items, 20, undefined)).resolves.toEqual([1, 2]);
+    await expect(searched(items, 20, { includeUnknown: false })).resolves.toEqual([1, 2]);
   });
 });
 

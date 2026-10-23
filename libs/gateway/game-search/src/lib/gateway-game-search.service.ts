@@ -1,12 +1,10 @@
 import { convertToMarkdown } from '@bge/content-format';
-import { type ContentFormat, type CoverageAxis, DatabaseService, DataGatewayCapability } from '@bge/database';
+import { type ContentFormat, DatabaseService, DataGatewayCapability, type SearchFilterAxis } from '@bge/database';
 import {
-  type CoverageFilter,
   GatewayRegistryService,
   GatewayRoutingRefusedError,
   type SearchResolution,
   type SearchRoute,
-  toCoverageFilter,
 } from '@bge/gateway-registry';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
@@ -14,7 +12,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
 import { defer, EMPTY, from, Observable, of } from 'rxjs';
 import { catchError, concatMap, endWith, filter, map, mergeMap, tap, throwIfEmpty } from 'rxjs/operators';
-import { filterFor, matchesFilter } from './search-filter';
+import { filterFor, matchesFilter, type ResultFilter, toResultFilter } from './search-filter';
 
 /**
  * Cap for concurrent per-game dedup lookups on the cache-replay path. Live
@@ -87,13 +85,15 @@ export class GatewayGameSearchService {
    * search narrows by, and removes every result the filter excludes, however
    * the DataGateway narrowed (#713). A named DataGateway whose coverage
    * doesn't overlap the filter isn't asked, and answers SOURCE_DONE alone.
+   * A publish year narrows the results but never skips a DataGateway, since
+   * none declares which years it covers (#719).
    */
   searchGames(request: proto.SearchGamesRequest): Observable<proto.SearchGameResult> {
     this.logger.debug(
       `Received search request with query '${request.query}' for gateways [${request.gatewayIds?.join(', ')}]`,
     );
 
-    const coverageFilter = toCoverageFilter(request.filter);
+    const resultFilter = toResultFilter(request.filter);
 
     // Filter blank/invalid ids: a targeted request searches only the valid
     // ids among those given (never resolves '' or a non-string leaked from a
@@ -110,12 +110,12 @@ export class GatewayGameSearchService {
     // process hasn't connected yet isn't reached by an untargeted search (#722).
     const targetIds$ = targeted
       ? of(requestedIds)
-      : defer(() => from(this.registry.routableGatewayIds(DataGatewayCapability.Search, coverageFilter)));
+      : defer(() => from(this.registry.routableGatewayIds(DataGatewayCapability.Search, resultFilter)));
 
     return targetIds$.pipe(
       mergeMap((ids) => from(ids)),
       tap((id) => this.logger.debug(`Initiating search on gateway ${id} for query '${request.query}'`)),
-      mergeMap((id) => this.searchGateway(id, request, coverageFilter)),
+      mergeMap((id) => this.searchGateway(id, request, resultFilter)),
     );
   }
 
@@ -211,9 +211,9 @@ export class GatewayGameSearchService {
   private searchGateway(
     gatewayId: string,
     request: proto.SearchGamesRequest,
-    coverageFilter: CoverageFilter,
+    resultFilter: ResultFilter,
   ): Observable<proto.SearchGameResult> {
-    return defer(() => from(this.registry.searchRoute(gatewayId, coverageFilter))).pipe(
+    return defer(() => from(this.registry.searchRoute(gatewayId, resultFilter))).pipe(
       // A route that can't be read leaves the search to the live path, as a
       // cache miss does. It reads the row again, and if that fails too it
       // answers UNAVAILABLE, keeping the failure's detail for the log.
@@ -230,7 +230,7 @@ export class GatewayGameSearchService {
         // the gateway registry refuses it, saying why, or connects and
         // interviews one never interviewed, whose coverage it then reads.
         if (!route.routable) {
-          return this.fetchFromGateway(gatewayId, request, coverageFilter);
+          return this.fetchFromGateway(gatewayId, request, resultFilter);
         }
 
         if (!route.covers) {
@@ -252,7 +252,7 @@ export class GatewayGameSearchService {
             if (cached === undefined) {
               this.logger.debug(`Cache miss for gateway ${gatewayId} and query '${request.query}'`);
               // Asked by the route already read, so its row isn't read again.
-              return this.fetchFromGateway(gatewayId, request, coverageFilter, async () => ({
+              return this.fetchFromGateway(gatewayId, request, resultFilter, async () => ({
                 driver: await route.driver(),
                 filterableAxes: route.filterableAxes,
                 contentFormat: route.contentFormat,
@@ -260,13 +260,7 @@ export class GatewayGameSearchService {
             }
 
             this.logger.debug(`Cache hit for gateway ${gatewayId} and query '${request.query}'`);
-            return this.emitCachedResults(
-              gatewayId,
-              request.correlationId,
-              cached,
-              coverageFilter,
-              route.contentFormat,
-            );
+            return this.emitCachedResults(gatewayId, request.correlationId, cached, resultFilter, route.contentFormat);
           }),
         );
       }),
@@ -288,8 +282,8 @@ export class GatewayGameSearchService {
   private fetchFromGateway(
     gatewayId: string,
     request: proto.SearchGamesRequest,
-    coverageFilter: CoverageFilter,
-    resolution: () => Promise<SearchResolution | null> = () => this.registry.resolveSearch(gatewayId, coverageFilter),
+    resultFilter: ResultFilter,
+    resolution: () => Promise<SearchResolution | null> = () => this.registry.resolveSearch(gatewayId, resultFilter),
   ): Observable<proto.SearchGameResult> {
     return defer(resolution).pipe(
       mergeMap((resolved) => {
@@ -308,7 +302,7 @@ export class GatewayGameSearchService {
           // source early. Serializing preserves gateway emission order (and
           // caps dedup concurrency on the live path as a side effect).
           concatMap((result: proto.GatewaySearchResult) =>
-            this.mapGatewayResult(gatewayId, result, accumulator, cacheKey, coverageFilter, resolved.contentFormat),
+            this.mapGatewayResult(gatewayId, result, accumulator, cacheKey, resultFilter, resolved.contentFormat),
           ),
           catchError((err) => {
             const message = err instanceof Error ? err.message : String(err);
@@ -340,7 +334,7 @@ export class GatewayGameSearchService {
     result: proto.GatewaySearchResult,
     accumulator: SearchAccumulator,
     cacheKey: string,
-    coverageFilter: CoverageFilter,
+    resultFilter: ResultFilter,
     contentFormat: ContentFormat | null,
   ): Observable<proto.SearchGameResult> {
     this.logger.debug(`Received search result from gateway ${gatewayId} with status ${result.status}`);
@@ -367,7 +361,7 @@ export class GatewayGameSearchService {
         this.logger.debug(`Accumulating game with externalId ${result.game.externalId} from gateway ${gatewayId}`);
         accumulator.games.push(result.game);
 
-        if (!matchesFilter(result.game, coverageFilter)) {
+        if (!matchesFilter(result.game, resultFilter)) {
           return EMPTY;
         }
 
@@ -440,10 +434,10 @@ export class GatewayGameSearchService {
     gatewayId: string,
     correlationId: string,
     cached: proto.GameSearchData[],
-    coverageFilter: CoverageFilter,
+    resultFilter: ResultFilter,
     contentFormat: ContentFormat | null,
   ): Observable<proto.SearchGameResult> {
-    const matching = cached.filter((game) => matchesFilter(game, coverageFilter));
+    const matching = cached.filter((game) => matchesFilter(game, resultFilter));
 
     const resultFrames$ = from(matching).pipe(
       // Bounded: an unbounded fan-out here issues one findUnique per cached
@@ -598,7 +592,7 @@ export class GatewayGameSearchService {
    */
   private gatewayRequest(
     request: proto.SearchGamesRequest,
-    filterableAxes: readonly CoverageAxis[],
+    filterableAxes: readonly SearchFilterAxis[],
   ): proto.GatewaySearchRequest {
     const sentFilter = filterFor(request.filter, filterableAxes);
 
@@ -630,7 +624,9 @@ export class GatewayGameSearchService {
   /**
    * Keyed by what the DataGateway was asked, so a filter on an axis it
    * doesn't narrow by shares the entry with the unfiltered search: the
-   * filter applies to the entry on the way out instead.
+   * filter applies to the entry on the way out instead. A publish year it
+   * narrows by keys the entry too, and whether it keeps unknown years: a
+   * search that keeps them mustn't replay one that had them left out (#719).
    */
   private buildSearchCacheKey(gatewayId: string, request: proto.GatewaySearchRequest): string {
     return [
@@ -642,6 +638,9 @@ export class GatewayGameSearchService {
       request.offset ?? '',
       request.filter?.platformTypes.join(',') ?? '',
       request.filter?.contentTypes.join(',') ?? '',
+      request.filter?.publishYear?.min ?? '',
+      request.filter?.publishYear?.max ?? '',
+      request.filter?.publishYear?.includeUnknown ? 'u' : '',
     ].join(':');
   }
 }

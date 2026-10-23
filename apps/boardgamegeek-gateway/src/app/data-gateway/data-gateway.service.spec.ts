@@ -96,8 +96,11 @@ describe('DataGatewayService', () => {
       );
     });
 
-    it('declares that its search narrows by content type alone', () => {
-      expect(service.describe({}).filterableAxes).toEqual([proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE]);
+    it('declares publish year and content type as its filterable axes', () => {
+      expect(service.describe({}).filterableAxes).toEqual([
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE,
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR,
+      ]);
     });
 
     it('declares English language names, on requests and responses alike', () => {
@@ -327,6 +330,40 @@ describe('DataGatewayService', () => {
 
         expect(frames).toEqual([{ correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE }]);
         expect(bggService.call).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('filtered by publish year (#719)', () => {
+      it('narrows by the publish-year range it is sent', async () => {
+        const search = jest.fn().mockResolvedValue([
+          {
+            total: 3,
+            items: [
+              { id: 1, type: BggThingType.BoardGame, name: 'Catan', yearpublished: 1995 },
+              { id: 2, type: BggThingType.BoardGame, name: 'Brass', yearpublished: 2018 },
+              { id: 3, type: BggThingType.BoardGame, name: 'Undated', yearpublished: 0 },
+            ],
+          },
+        ]);
+        bggService.call.mockImplementation((bggRequest) =>
+          (bggRequest as BggRequest<unknown>)({ search: { query: search } } as never),
+        );
+
+        const frames = await firstValueFrom(
+          service
+            .searchGames({
+              correlationId: 'c',
+              query: 'catan',
+              filter: { platformTypes: [], contentTypes: [], publishYear: { min: 2000, includeUnknown: true } },
+            })
+            .pipe(toArray()),
+        );
+
+        const results = frames.filter((frame) => frame.status === proto.ResultStatus.RESULT_STATUS_RESULT);
+        expect(results.map((frame) => [frame.game?.externalId, frame.game?.yearPublished])).toEqual([
+          ['2', 2018],
+          ['3', undefined],
+        ]);
       });
     });
   });

@@ -2,12 +2,12 @@ import {
   AuthType,
   ContentFormat,
   ContentType,
-  CoverageAxis,
   DataGatewayCapability,
   DataGatewayInterviewFailure,
   DataGatewaySectionFailure,
   LanguageCodeFormat,
   PlatformType,
+  SearchFilterAxis,
 } from '@bge/database';
 import { ApiProperty } from '@nestjs/swagger';
 import type {
@@ -155,8 +155,8 @@ export class DataGatewayResponseDto implements DataGatewayView {
   @ApiProperty({ enum: ContentType, enumName: 'ContentType', isArray: true })
   coverageContentTypes!: ContentType[];
 
-  @ApiProperty({ enum: CoverageAxis, enumName: 'CoverageAxis', isArray: true })
-  filterableAxes!: CoverageAxis[];
+  @ApiProperty({ enum: SearchFilterAxis, enumName: 'SearchFilterAxis', isArray: true })
+  filterableAxes!: SearchFilterAxis[];
 
   @ApiProperty({
     enum: LanguageCodeFormat,

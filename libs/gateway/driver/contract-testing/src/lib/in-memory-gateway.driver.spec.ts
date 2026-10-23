@@ -4,8 +4,11 @@ import { firstValueFrom, lastValueFrom, toArray } from 'rxjs';
 import { InMemoryGatewayDriver } from './in-memory-gateway.driver.js';
 import { runDataGatewayDriverContract } from './run-data-gateway-driver-contract.js';
 
-const { COVERAGE_AXIS_PLATFORM_TYPE: PLATFORM_TYPE_AXIS, COVERAGE_AXIS_CONTENT_TYPE: CONTENT_TYPE_AXIS } =
-  proto.CoverageAxis;
+const {
+  SEARCH_FILTER_AXIS_PLATFORM_TYPE: PLATFORM_TYPE_AXIS,
+  SEARCH_FILTER_AXIS_CONTENT_TYPE: CONTENT_TYPE_AXIS,
+  SEARCH_FILTER_AXIS_PUBLISH_YEAR: PUBLISH_YEAR_AXIS,
+} = proto.SearchFilterAxis;
 const { PLATFORM_TYPE_TABLETOP: TABLETOP, PLATFORM_TYPE_PC: PC } = proto.PlatformType;
 const {
   CONTENT_TYPE_BASE_GAME: BASE_GAME,
@@ -48,7 +51,7 @@ runDataGatewayDriverContract('InMemoryGatewayDriver', () => ({
     categories: [{ externalId: '1009', name: 'Abstract Strategy' }],
     mechanics: [{ externalId: '2082', name: 'Worker Placement' }],
     coverage: { platformTypes: [TABLETOP], contentTypes: [BASE_GAME, EXPANSION] },
-    filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS],
+    filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS, PUBLISH_YEAR_AXIS],
   }),
   capabilities: [
     proto.Capability.CAPABILITY_SEARCH,
@@ -59,7 +62,7 @@ runDataGatewayDriverContract('InMemoryGatewayDriver', () => ({
     proto.Capability.CAPABILITY_LIST_CATEGORIES,
     proto.Capability.CAPABILITY_LIST_MECHANICS,
   ],
-  filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS],
+  filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS, PUBLISH_YEAR_AXIS],
   knownExternalId: 'bgg-13',
   unknownExternalId: 'no-such-id',
   searchQuery: 'catan',
@@ -124,6 +127,26 @@ describe('InMemoryGatewayDriver search filter', () => {
     await expect(search(driver, { platformTypes: [PC], contentTypes: [EXPANSION] }).then(externalIds)).resolves.toEqual(
       ['seafarers'],
     );
+  });
+
+  it('applies a publish-year range on the axis it declares (#719)', async () => {
+    const dated = (externalId: string, yearPublished?: number) => ({ ...catan, externalId, yearPublished });
+    const searchResults = [dated('old', 1995), dated('new', 2010), dated('undated')];
+    const declaring = new InMemoryGatewayDriver({ searchResults, filterableAxes: [PUBLISH_YEAR_AXIS] });
+    const ignoring = new InMemoryGatewayDriver({ searchResults, filterableAxes: [CONTENT_TYPE_AXIS] });
+    const byYear = (publishYear: proto.IntRange) => ({ platformTypes: [], contentTypes: [], publishYear });
+
+    await expect(search(declaring, byYear({ min: 2000 })).then(externalIds)).resolves.toEqual(['new']);
+    await expect(search(declaring, byYear({ max: 1995, includeUnknown: true })).then(externalIds)).resolves.toEqual([
+      'old',
+      'undated',
+    ]);
+    await expect(search(declaring, byYear({ includeUnknown: false })).then(externalIds)).resolves.toEqual([
+      'old',
+      'new',
+      'undated',
+    ]);
+    await expect(search(ignoring, byYear({ min: 2000 })).then(externalIds)).resolves.toEqual(['old', 'new', 'undated']);
   });
 
   it('declares the coverage and filterable axes it is given', async () => {

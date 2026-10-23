@@ -6,6 +6,26 @@ import * as crypto from 'node:crypto';
 import { from, of, type Observable } from 'rxjs';
 import { STUB_CATEGORIES, STUB_GAMES, STUB_LANGUAGES, STUB_MECHANICS, STUB_PLATFORMS } from '../fixtures/catalog';
 
+/**
+ * Whether a publish year falls in a range, both bounds inclusive. A range
+ * with no bound narrows nothing, and a game with no year matches only when
+ * the range includes unknown ones (#719).
+ */
+function inYearRange(range: proto.IntRange | undefined, year: number | undefined): boolean {
+  const min = range?.min ?? undefined;
+  const max = range?.max ?? undefined;
+
+  if (min === undefined && max === undefined) {
+    return true;
+  }
+
+  if (year === undefined) {
+    return range?.includeUnknown === true;
+  }
+
+  return (min === undefined || year >= min) && (max === undefined || year <= max);
+}
+
 /** How a search result describes a game: the fields a real gateway fills there. */
 function toSearchData(game: proto.GameData): proto.GameSearchData {
   return {
@@ -42,8 +62,8 @@ export class StubGatewayService extends GatewayServiceHost {
 
   /**
    * Declares what its fixtures hold: tabletop base games and expansions,
-   * tagged in BCP 47. Its search narrows by content type, so a DataGateway
-   * the server sends a filter to runs in the e2e suites.
+   * tagged in BCP 47. Its search narrows by content type and publish year,
+   * so a DataGateway the server sends a filter to runs in the e2e suites.
    */
   describe(request: proto.DescribeRequest): proto.DescribeResponse {
     return {
@@ -61,7 +81,10 @@ export class StubGatewayService extends GatewayServiceHost {
         platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
         contentTypes: [proto.ContentType.CONTENT_TYPE_BASE_GAME, proto.ContentType.CONTENT_TYPE_EXPANSION],
       },
-      filterableAxes: [proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE],
+      filterableAxes: [
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE,
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR,
+      ],
       languageCodeFormats: {
         acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47],
         responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
@@ -96,9 +119,9 @@ export class StubGatewayService extends GatewayServiceHost {
   }
 
   /**
-   * Each game whose title contains the query, ignoring case, and whose
-   * content type the filter names, if it names any; paged by `offset` and
-   * `limit`.
+   * Each game whose title contains the query, ignoring case, whose content
+   * type the filter names, if it names any, and whose publish year is in the
+   * filter's range, if it gives one; paged by `offset` and `limit`.
    */
   searchGames(request: proto.GatewaySearchRequest): Observable<proto.GatewaySearchResult> {
     const query = request.query.trim().toLowerCase();
@@ -107,7 +130,8 @@ export class StubGatewayService extends GatewayServiceHost {
     const matches = STUB_GAMES.filter(
       (game) =>
         game.title.toLowerCase().includes(query) &&
-        (contentTypes.length === 0 || contentTypes.includes(game.contentType)),
+        (contentTypes.length === 0 || contentTypes.includes(game.contentType)) &&
+        inYearRange(request.filter?.publishYear, game.yearPublished),
     );
     const page = matches.slice(offset, request.limit === undefined ? undefined : offset + request.limit);
 

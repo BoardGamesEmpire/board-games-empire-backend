@@ -52,8 +52,16 @@ export class DataGatewayService extends GatewayServiceHost {
 
       coverage: { platformTypes: [...IGDB_PLATFORM_TYPES], contentTypes: [...IGDB_CONTENT_TYPES] },
 
-      /** Search narrows by both, through IGDB's game types and platform types (see toSearchNarrowing). */
-      filterableAxes: [proto.CoverageAxis.COVERAGE_AXIS_PLATFORM_TYPE, proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE],
+      /**
+       * Search narrows by both coverage axes, through IGDB's game types and
+       * platform types, and by publish year, through each game's first
+       * release date, its year read in UTC (see toSearchNarrowing).
+       */
+      filterableAxes: [
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLATFORM_TYPE,
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE,
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR,
+      ],
       languageCodeFormats: {
         acceptedRequestFormats: [
           proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,

@@ -129,10 +129,11 @@ export interface SearchResponse {
   readonly unavailableSources?: readonly string[];
 }
 
-/** A search's filter as the HTTP route takes it: comma-separated stored names. */
+/** A search's filter as the HTTP route takes it: comma-separated stored names, and publish-year bounds. */
 export interface SearchFilterParams {
   readonly platformTypes?: string;
   readonly contentTypes?: string;
+  readonly publishYearMin?: string;
 }
 
 /** A search of one gateway only, over HTTP. The api caches the answer per URL for a few minutes. */

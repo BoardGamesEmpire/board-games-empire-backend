@@ -79,8 +79,8 @@ function escapeSearchQuery(query: string): string {
 }
 
 /**
- * Search IGDB for games matching a query string, narrowed to the game types
- * and platform types `narrowing` names.
+ * Search IGDB for games matching a query string, narrowed to the game types,
+ * platform types and first release dates `narrowing` names.
  *
  * `version_parent = null` excludes alternate versions (regional, GOTY, etc.)
  * from search results — they clutter results without adding meaningful
@@ -103,6 +103,10 @@ export function searchGamesRequest(
     clauses.push(`platforms.platform_type = (${narrowing.platformTypes.join(',')})`);
   }
 
+  if (narrowing.releasedBetween) {
+    clauses.push(releasedBetweenClause(narrowing.releasedBetween));
+  }
+
   return (client: IGDBClient) => {
     const builder = client.fields(GAME_SEARCH_FIELDS).search(escapeSearchQuery(query));
     return includeLanguageFilter(builder, locale, clauses.join(' & '))
@@ -111,6 +115,29 @@ export function searchGamesRequest(
       .request<IgdbGame>(GAMES_ENDPOINT)
       .then((response) => response.data);
   };
+}
+
+/**
+ * The first release dates a search asks for. Parenthesized whole when it
+ * also asks for games with none, so the `|` can't reach the clauses beside it.
+ */
+function releasedBetweenClause({
+  from,
+  before,
+  orUnknown,
+}: NonNullable<IgdbSearchNarrowing['releasedBetween']>): string {
+  const bounds = [
+    ...(from === undefined ? [] : [`first_release_date >= ${from}`]),
+    ...(before === undefined ? [] : [`first_release_date < ${before}`]),
+  ];
+
+  if (!orUnknown) {
+    return bounds.join(' & ');
+  }
+
+  const range = bounds.length > 1 ? `(${bounds.join(' & ')})` : bounds.join('');
+
+  return `(${range} | first_release_date = null)`;
 }
 
 /**
