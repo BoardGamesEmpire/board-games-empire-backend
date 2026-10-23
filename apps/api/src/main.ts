@@ -7,7 +7,8 @@ import { bootstrapLogger, otel } from './app/lib/logger';
 
 // Imports below this line are instrumented by the OTel auto-instrumentations.
 import { AUTH_INSTANCE, AUTH_REQUEST_HANDLER } from '@bge/auth';
-import { createPrismaCliMigrator, nestLoggerFromPino, runBootstrap } from '@bge/bootstrap';
+import { createPrismaCliMigrator, runBootstrap } from '@bge/bootstrap';
+import { nestLoggerFromPino } from '@bge/logger';
 import { createWebClient } from '@bge/web-client';
 import { Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';

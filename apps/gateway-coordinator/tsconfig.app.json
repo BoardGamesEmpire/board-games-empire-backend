@@ -28,6 +28,9 @@
   ],
   "references": [
     {
+      "path": "../../libs/common/logger/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/gateway-host/tsconfig.lib.json"
     },
     {
@@ -49,6 +52,9 @@
       "path": "../../libs/gateway/game-search/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/env/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/gateway-coordinator-client/tsconfig.lib.json"
     },
     {
@@ -59,9 +65,6 @@
     },
     {
       "path": "../../libs/gateway/driver/runtime/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/common/env/tsconfig.lib.json"
     },
     {
       "path": "../../libs/database/tsconfig.lib.json"

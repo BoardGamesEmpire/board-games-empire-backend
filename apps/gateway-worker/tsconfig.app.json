@@ -28,6 +28,9 @@
   ],
   "references": [
     {
+      "path": "../../libs/common/logger/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/bootstrap/tsconfig.lib.json"
     },
     {
