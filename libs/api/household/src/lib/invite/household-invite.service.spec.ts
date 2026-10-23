@@ -1386,6 +1386,14 @@ describe('HouseholdInviteService', () => {
         );
       });
 
+      it('asks about the role the admission grants when the approved invite offers none', async () => {
+        approval = { ...approval, invite: { ...approval.invite, role: null } };
+
+        await service.approveInvite('hh-1', 'invite-1');
+
+        expect(senderCan).toHaveBeenCalledWith(Action.create, ResourceType.Invite, senderInstance(false));
+      });
+
       it("refuses with 409 when they could send it neither way, and announces nothing, so the rollback undoes the approval and the day's invite", async () => {
         senderCan.mockReturnValue(false);
 
