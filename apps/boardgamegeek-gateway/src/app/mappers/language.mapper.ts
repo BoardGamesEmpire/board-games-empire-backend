@@ -1,6 +1,7 @@
 import * as proto from '@boardgamesempire/proto-gateway';
 import { BggLinkType } from '../constants';
 import type { BggLink } from '../types';
+import { decodeText } from './decode-text';
 
 /**
  * Internal mapping from BGG language display names to canonical ISO
@@ -81,8 +82,8 @@ export function toLanguageData(link: BggLink): proto.LanguageData | null {
     return null;
   }
 
-  // BGG can send a link with no value, which is skipped like a blank one.
-  const name = typeof link.value === 'string' ? link.value.trim() : '';
+  // Decoded before the lookup, so an encoded name still finds its entry (#716).
+  const name = decodeText(link.value).trim();
   if (!name) {
     return null;
   }

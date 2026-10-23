@@ -1,7 +1,8 @@
 import { isTrue } from '@bge/env';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { BggLinkType, BggNameType, BggThingType, DEFAULT_EDITION_KEY } from '../constants';
-import type { BggLink, BggName, BggSearchItem, BggThing, BggVersion } from '../types';
+import type { BggLink, BggName, BggSearchItem, BggText, BggThing, BggVersion } from '../types';
+import { decodeDescription, decodeText } from './decode-text';
 import { toLanguageDataList } from './language.mapper';
 
 /**
@@ -49,9 +50,10 @@ export const TABLETOP_PLATFORM: proto.PlatformData = {
 
 /**
  * Picks the primary display name from a thing's `names` array, falling
- * back to the first entry if no primary is flagged.
+ * back to the first entry if no primary is flagged. The value is as BGG sent
+ * it, still encoded (#716).
  */
-export function selectPrimaryName(names: readonly BggName[] | undefined): string | undefined {
+export function selectPrimaryName(names: readonly BggName[] | undefined): BggText | undefined {
   if (!names?.length) {
     return undefined;
   }
@@ -60,12 +62,13 @@ export function selectPrimaryName(names: readonly BggName[] | undefined): string
   return (primary ?? names[0]).value;
 }
 
-function normalizeTitle(value: string | undefined): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
+/**
+ * A name as trimmed, decoded text, or undefined when it's blank or absent. A
+ * name the client parsed as a number or a boolean, such as "2048", is kept as
+ * text (#716).
+ */
+function normalizeTitle(value: BggText | undefined): string | undefined {
+  const trimmed = decodeText(value).trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
@@ -74,7 +77,7 @@ function normalizeTitle(value: string | undefined): string | undefined {
  * - canonical `names: [{ type: 'primary', value: '...' }]`
  * - flattened `name: '...'` with optional `alternateNames: string[]`
  */
-function selectThingTitle(thing: Pick<BggThing, 'names'> & { name?: string; alternateNames?: string[] }): string {
+function selectThingTitle(thing: Pick<BggThing, 'names' | 'name' | 'alternateNames'>): string {
   const directName = normalizeTitle(thing.name);
   if (directName) {
     return directName;
@@ -135,48 +138,48 @@ function linksOfType(thing: Pick<BggThing, 'links'>, type: BggLinkType): BggLink
   return (thing.links ?? []).filter((link) => link.type === type && !isInbound(link.inbound));
 }
 
-function toPersonData(link: BggLink): proto.PersonData {
-  return {
-    externalId: String(link.id),
-    name: link.value,
-  } satisfies proto.PersonData;
+/** A designer, artist, publisher, mechanic, category or family link: BGG's id and its name. */
+interface NamedLink {
+  externalId: string;
+  name: string;
 }
 
-function toPublisherData(link: BggLink): proto.PublisherData {
-  return {
-    externalId: String(link.id),
-    name: link.value,
-  } satisfies proto.PublisherData;
-}
-
-function toMechanicData(link: BggLink): proto.MechanicData {
-  return {
-    externalId: String(link.id),
-    name: link.value,
-  } satisfies proto.MechanicData;
-}
-
-function toCategoryData(link: BggLink): proto.CategoryData {
-  return {
-    externalId: String(link.id),
-    name: link.value,
-  } satisfies proto.CategoryData;
+/**
+ * The outbound links of `type`, each with its name trimmed and decoded. A link
+ * whose name is blank or absent is skipped: the server matches people by name
+ * and vocabulary entries by slug, so nameless links would all merge into one
+ * record named "" (#716).
+ */
+function namedLinksOfType(thing: Pick<BggThing, 'links'>, type: BggLinkType): NamedLink[] {
+  return linksOfType(thing, type).flatMap((link) => {
+    const name = normalizeTitle(link.value);
+    return name ? [{ externalId: String(link.id), name }] : [];
+  });
 }
 
 /**
  * Maps a BGG family link to proto FamilyData. BGG encodes a sub-classification
  * in the value's "<Type>: <name>" prefix; the prefix is parsed into familyType.
+ * The name arrives decoded, so the split sees the text a person reads (#716).
  */
-function toFamilyData(link: BggLink): proto.FamilyData {
-  const colonIndex = link.value.indexOf(':');
-  const familyType = colonIndex > 0 ? link.value.slice(0, colonIndex).trim() : undefined;
-  const name = colonIndex > 0 ? link.value.slice(colonIndex + 1).trim() : link.value;
+function toFamilyData({ externalId, name: value }: NamedLink): proto.FamilyData {
+  const colonIndex = value.indexOf(':');
+  const familyType = colonIndex > 0 ? value.slice(0, colonIndex).trim() : undefined;
+  const name = colonIndex > 0 ? value.slice(colonIndex + 1).trim() : value;
 
   return {
-    externalId: String(link.id),
+    externalId,
     name,
     familyType,
   } satisfies proto.FamilyData;
+}
+
+/**
+ * An image URL as BGG meant it: the parser leaves an `&amp;` in its query
+ * encoded (#716). A blank one is left out.
+ */
+function decodeUrl(value: string | undefined): string | undefined {
+  return decodeText(value).trim() || undefined;
 }
 
 /**
@@ -219,7 +222,7 @@ function toVersionRelease(version: BggVersion): proto.GameReleaseData {
     externalId: String(version.id),
     platform: TABLETOP_PLATFORM,
     status: proto.ReleaseStatus.RELEASE_STATUS_RELEASED,
-    editionName: version.name || undefined,
+    editionName: normalizeTitle(version.name),
     releaseYear: coerceYear(version.yearpublished),
     releaseDate: toReleaseDate(version.yearpublished),
     // BGG versions are flat — no edition hierarchy.
@@ -252,7 +255,8 @@ function toReleases(thing: BggThing): proto.GameReleaseData[] {
  * empty: search items have no platform/release data.
  */
 export function searchItemToGameSearchData(item: BggSearchItem): proto.GameSearchData {
-  const title = item.name ?? selectPrimaryName(item.names) ?? '';
+  // Trimmed, and a blank name falls back to `names`, as a fetched thing's title does (#716).
+  const title = normalizeTitle(item.name) ?? normalizeTitle(selectPrimaryName(item.names)) ?? '';
 
   return {
     externalId: String(item.id),
@@ -278,13 +282,13 @@ export function thingToGameSearchData(thing: BggThing): proto.GameSearchData {
     title,
     contentType: toContentType(thing),
     yearPublished: thing.yearpublished,
-    thumbnailUrl: thing.thumbnail,
+    thumbnailUrl: decodeUrl(thing.thumbnail),
     sourceUrl: toSourceUrl(thing),
     averageRating: thing.statistics?.ratings?.average,
     minPlayers: thing.minplayers,
     maxPlayers: thing.maxplayers,
     baseGameExternalId: toBaseGameExternalId(thing),
-    summary: thing.description,
+    summary: decodeDescription(thing.description),
     availablePlatforms: [TABLETOP_PLATFORM],
     availableReleases: [toSyntheticTabletopRelease(thing)],
   } satisfies proto.GameSearchData;
@@ -310,22 +314,22 @@ export function thingToGameData(thing: BggThing, locale?: string): proto.GameDat
       ? Math.round(ratings.averageweight * COMPLEXITY_WEIGHT_SCALE)
       : undefined;
 
-  const designers = linksOfType(thing, BggLinkType.BoardGameDesigner).map(toPersonData);
-  const artists = linksOfType(thing, BggLinkType.BoardGameArtist).map(toPersonData);
-  const publishers = linksOfType(thing, BggLinkType.BoardGamePublisher).map(toPublisherData);
-  const mechanics = linksOfType(thing, BggLinkType.BoardGameMechanic).map(toMechanicData);
-  const categories = linksOfType(thing, BggLinkType.BoardGameCategory).map(toCategoryData);
-  const families = linksOfType(thing, BggLinkType.BoardGameFamily).map(toFamilyData);
+  const designers: proto.PersonData[] = namedLinksOfType(thing, BggLinkType.BoardGameDesigner);
+  const artists: proto.PersonData[] = namedLinksOfType(thing, BggLinkType.BoardGameArtist);
+  const publishers: proto.PublisherData[] = namedLinksOfType(thing, BggLinkType.BoardGamePublisher);
+  const mechanics: proto.MechanicData[] = namedLinksOfType(thing, BggLinkType.BoardGameMechanic);
+  const categories: proto.CategoryData[] = namedLinksOfType(thing, BggLinkType.BoardGameCategory);
+  const families = namedLinksOfType(thing, BggLinkType.BoardGameFamily).map(toFamilyData);
 
   return {
     externalId: String(thing.id),
     title,
     contentType: toContentType(thing),
 
-    description: thing.description,
+    description: decodeDescription(thing.description),
     yearPublished: thing.yearpublished,
-    thumbnailUrl: thing.thumbnail,
-    imageUrl: thing.image,
+    thumbnailUrl: decodeUrl(thing.thumbnail),
+    imageUrl: decodeUrl(thing.image),
     sourceUrl: toSourceUrl(thing),
 
     designers,

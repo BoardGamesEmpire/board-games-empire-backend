@@ -144,6 +144,14 @@ describe('searchItemToGameSearchData', () => {
     expect(result.yearPublished).toBe(2017);
   });
 
+  it('decodes the title, and sends one the client parsed as a number as text (#716)', () => {
+    const encoded = makeBggSearchItem({ name: 'Tzolk&#039;in: The Mayan Calendar' });
+    const digits = makeBggSearchItem({ name: 2048 });
+
+    expect(searchItemToGameSearchData(encoded).title).toBe(`Tzolk'in: The Mayan Calendar`);
+    expect(searchItemToGameSearchData(digits).title).toBe('2048');
+  });
+
   it('maps boardgame type to BASE_GAME content type', () => {
     const result = searchItemToGameSearchData({ id: 1, type: BggThingType.BoardGame, name: 'Catan' });
 
@@ -182,6 +190,16 @@ describe('searchItemToGameSearchData', () => {
     });
 
     expect(result.title).toBe('From Names');
+  });
+
+  it('trims the title, as fetching the same game does (#716)', () => {
+    expect(searchItemToGameSearchData(makeBggSearchItem({ name: '  Catan ' })).title).toBe('Catan');
+  });
+
+  it('uses the names array when name is blank (#716)', () => {
+    const item = makeBggSearchItem({ name: ' ', names: [makeBggName({ value: 'From Names' })] });
+
+    expect(searchItemToGameSearchData(item).title).toBe('From Names');
   });
 
   it('returns an empty title when no name is available', () => {
@@ -295,6 +313,14 @@ describe('thingToGameData — version-driven releases', () => {
     expect(result.releases[1].editionName).toBe('Afrikaans edition');
   });
 
+  it('decodes an edition name (#716)', () => {
+    const thing = makeBggThing({
+      versions: [makeBggVersion({ id: 1, name: 'Collector&#039;s &amp; Deluxe Edition' })],
+    });
+
+    expect(thingToGameData(thing).releases[0].editionName).toBe(`Collector's & Deluxe Edition`);
+  });
+
   it('coerces BGG sentinel zero on yearpublished to undefined releaseYear', () => {
     const thing = makeBggThing({
       versions: [makeBggVersion({ id: 1, yearpublished: 0 })],
@@ -360,6 +386,61 @@ describe('thingToGameData — version-driven releases', () => {
     const releases = thingToGameData(thing).releases;
     expect(releases).toHaveLength(1);
     expect(releases[0].externalId).toBe(DEFAULT_EDITION_KEY);
+  });
+});
+
+describe('thingToGameData — links and image URLs (#716)', () => {
+  const nameless: BggLink[] = [
+    { type: BggLinkType.BoardGameDesigner, id: 1 } as BggLink,
+    { type: BggLinkType.BoardGameArtist, id: 2, value: ' ' },
+    { type: BggLinkType.BoardGamePublisher, id: 3, value: '' },
+    { type: BggLinkType.BoardGameMechanic, id: 4 } as BggLink,
+    { type: BggLinkType.BoardGameCategory, id: 5, value: '  ' },
+    { type: BggLinkType.BoardGameFamily, id: 6 } as BggLink,
+  ];
+
+  it('skips a link with a blank or absent name, so nameless links never merge into one record named ""', () => {
+    const game = thingToGameData(makeBggThing({ links: nameless }));
+
+    expect([game.designers, game.artists, game.publishers, game.mechanics, game.categories, game.families]).toEqual([
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+    ]);
+  });
+
+  it('trims and decodes a link name', () => {
+    const links: BggLink[] = [
+      { type: BggLinkType.BoardGameDesigner, id: 7, value: ' Daniele Tascini &amp; Simone Luciani ' },
+    ];
+
+    expect(thingToGameData(makeBggThing({ links })).designers).toEqual([
+      { externalId: '7', name: 'Daniele Tascini & Simone Luciani' },
+    ]);
+  });
+
+  it('decodes an image URL, so an `&amp;` in its query reaches the server as `&`', () => {
+    const thing = makeBggThing({
+      thumbnail: 'https://cf.geekdo-images.com/t.jpg?a=1&amp;b=2',
+      image: 'https://cf.geekdo-images.com/i.jpg?a=1&amp;b=2',
+    });
+
+    const game = thingToGameData(thing);
+
+    expect([game.thumbnailUrl, game.imageUrl]).toEqual([
+      'https://cf.geekdo-images.com/t.jpg?a=1&b=2',
+      'https://cf.geekdo-images.com/i.jpg?a=1&b=2',
+    ]);
+    expect(thingToGameSearchData(thing).thumbnailUrl).toBe('https://cf.geekdo-images.com/t.jpg?a=1&b=2');
+  });
+
+  it('leaves out a blank image URL', () => {
+    const game = thingToGameData(makeBggThing({ thumbnail: ' ', image: '' }));
+
+    expect([game.thumbnailUrl, game.imageUrl]).toEqual([undefined, undefined]);
   });
 });
 

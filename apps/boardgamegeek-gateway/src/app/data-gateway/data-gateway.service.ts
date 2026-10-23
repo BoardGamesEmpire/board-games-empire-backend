@@ -80,7 +80,7 @@ export class DataGatewayService extends GatewayServiceHost {
         passthroughSearchLanguage: false,
       },
 
-      /** BGG's descriptions carry no markup. Their entities still arrive encoded; #716 decodes them. */
+      /** BGG's descriptions carry no markup. */
       contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
     } satisfies proto.DescribeResponse;
   }
