@@ -115,6 +115,18 @@ describe('household wire parsers (pure logic)', () => {
         /an 'invites' key/,
       );
     });
+
+    it('rejects a roster entry that carries its excluded games, even none (#868)', () => {
+      const body = response({ household: { id: 'h1', members: [{ userId: 'u1', excludedFromHouseholds: [] }] } });
+
+      expect(() => readEnvelope(body, 'GET')).toThrow(/an 'excludedFromHouseholds' key/);
+    });
+
+    it('rejects a roster entry that is not an object', () => {
+      expect(() => readEnvelope(response({ household: { id: 'h1', members: ['u1'] } }), 'GET')).toThrow(
+        /a roster entry is not an object/,
+      );
+    });
   });
 
   describe('memberEnvelope', () => {
