@@ -110,9 +110,9 @@ export class DataGatewayService extends GatewayServiceHost {
 
   /**
    * Searches BGG for the request's query. A filter on content types narrows
-   * the thing types asked for. One naming nothing BGG has ends the search at
-   * once, without asking BGG, since an empty type list would ask it for
-   * every type.
+   * the thing types search keeps; BGG itself is always asked for both, since
+   * it labels expansions as base games in a base-game search (#777). A filter
+   * naming nothing BGG has ends the search at once, without asking BGG.
    */
   searchGames(request: proto.GatewaySearchRequest): Observable<proto.GatewaySearchResult> {
     const limit = request.limit ?? undefined;

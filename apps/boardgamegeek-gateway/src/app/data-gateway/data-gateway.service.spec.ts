@@ -237,16 +237,45 @@ describe('DataGatewayService', () => {
         ]);
       });
 
-      it('asks BGG only for the thing types of the content types named', async () => {
+      it('asks BGG for both thing types whatever the filter, and keeps only the content types named (#777)', async () => {
         await expect(
           typesAskedFor({ platformTypes: [], contentTypes: [proto.ContentType.CONTENT_TYPE_EXPANSION] }),
-        ).resolves.toBe(BggThingType.BoardGameExpansion);
+        ).resolves.toEqual([BggThingType.BoardGame, BggThingType.BoardGameExpansion]);
         await expect(
           typesAskedFor({
             platformTypes: [],
             contentTypes: [proto.ContentType.CONTENT_TYPE_BASE_GAME, proto.ContentType.CONTENT_TYPE_DLC],
           }),
-        ).resolves.toBe(BggThingType.BoardGame);
+        ).resolves.toEqual([BggThingType.BoardGame, BggThingType.BoardGameExpansion]);
+      });
+
+      it('sends no expansion from a search filtered to base games, though BGG also labels it a base game (#777)', async () => {
+        const search = jest.fn().mockResolvedValue([
+          {
+            total: 3,
+            items: [
+              { id: 1, type: BggThingType.BoardGame, name: 'Catan' },
+              { id: 2, type: BggThingType.BoardGame, name: 'Catan: Seafarers' },
+              { id: 2, type: BggThingType.BoardGameExpansion, name: 'Catan: Seafarers' },
+            ],
+          },
+        ]);
+        bggService.call.mockImplementation((bggRequest) =>
+          (bggRequest as BggRequest<unknown>)({ search: { query: search } } as never),
+        );
+
+        const frames = await firstValueFrom(
+          service
+            .searchGames({
+              correlationId: 'c',
+              query: 'catan',
+              filter: { platformTypes: [], contentTypes: [proto.ContentType.CONTENT_TYPE_BASE_GAME] },
+            })
+            .pipe(toArray()),
+        );
+
+        const results = frames.filter((frame) => frame.status === proto.ResultStatus.RESULT_STATUS_RESULT);
+        expect(results.map((frame) => frame.game?.externalId)).toEqual(['1']);
       });
 
       it('ends at once, without asking BGG, when it names nothing BGG search has', async () => {

@@ -1,5 +1,5 @@
-import { defer, from } from 'rxjs';
-import { map, mergeMap, skip, take, toArray } from 'rxjs/operators';
+import { defer } from 'rxjs';
+import { map } from 'rxjs/operators';
 import type { BggRequest } from '../bgg/bgg.service';
 import { BggThingType, DEFAULT_BGG_SEARCH_TYPES, DEFAULT_SEARCH_LIMIT } from '../constants';
 import type { BggSearchItem, BggThing } from '../types';
@@ -28,10 +28,17 @@ export interface ThingFetchOptions {
 }
 
 /**
- * Search BGG for things matching a free-text query.
+ * Search BGG for things matching a free-text query, keeping the thing types
+ * in `keep`.
  *
- * BGG's `/search` endpoint does not paginate server-side; `limit` is
- * applied client-side after the response is received.
+ * BGG is always asked for base games and expansions together. Asked for base
+ * games alone, it returns expansions labelled as base games; asked for both,
+ * it answers an expansion twice, once under each label. So the items are
+ * collapsed to one per game, then filtered to `keep`, and only then paged, so
+ * that `offset` and `limit` count distinct games (#777).
+ *
+ * BGG's `/search` endpoint does not paginate server-side; `offset` and
+ * `limit` are applied client-side after the response is received.
  *
  * The `defer` wrapper ensures the underlying HTTP call is re-issued on
  * each subscription — required so `BggService.call` can retry a 429
@@ -41,20 +48,44 @@ export function searchGamesRequest(
   query: string,
   limit: number = DEFAULT_SEARCH_LIMIT,
   offset = 0,
-  types: readonly BggThingType[] = DEFAULT_BGG_SEARCH_TYPES,
+  keep: readonly BggThingType[] = DEFAULT_BGG_SEARCH_TYPES,
 ): BggRequest<BggSearchItem[]> {
+  const kept = new Set<string>(keep);
+
   return (client) =>
     defer(() =>
       client.search.query({
         query,
-        type: normalizeTypes(types),
+        type: [...DEFAULT_BGG_SEARCH_TYPES],
       }),
     ).pipe(
-      mergeMap((result) => from(result.flatMap((result) => result.items))),
-      skip(offset),
-      take(limit),
-      toArray(),
+      map((results) =>
+        collapseSearchItems(results.flatMap((result) => result.items))
+          .filter((item) => kept.has(item.type))
+          .slice(offset, offset + limit),
+      ),
     );
+}
+
+/**
+ * One entry per BGG id, at the position of that id's first copy. An id is an
+ * expansion when any copy is labelled one, since BGG also answers expansions
+ * as base games (#777). Otherwise it keeps its first copy's type.
+ */
+export function collapseSearchItems(items: readonly BggSearchItem[]): BggSearchItem[] {
+  const byId = new Map<number, BggSearchItem>();
+
+  for (const item of items) {
+    const first = byId.get(item.id);
+
+    if (!first) {
+      byId.set(item.id, item);
+    } else if (item.type === BggThingType.BoardGameExpansion && first.type !== BggThingType.BoardGameExpansion) {
+      byId.set(item.id, { ...first, type: BggThingType.BoardGameExpansion });
+    }
+  }
+
+  return [...byId.values()];
 }
 
 /**
