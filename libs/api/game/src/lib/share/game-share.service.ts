@@ -106,8 +106,8 @@ export class GameShareService {
    *    answer decides whether the share takes effect at once or waits
    *    ({@link approvalUnder}).
    * 4. The insert. A second share to the same recipient is the unique index's,
-   *    and answers 409. A user whose account was deleted since it was read
-   *    fails the foreign key, and answers 404.
+   *    and answers 409. A game deleted since it was read, or a user whose
+   *    account was, fails the foreign key, and answers 404.
    *
    * The created share is announced after commit.
    */
@@ -157,11 +157,20 @@ export class GameShareService {
         throw new ConflictException(t('errors.game_share.already_shared', { gameId }));
       }
 
-      // The recipient is read without a lock, and staff can delete an account,
-      // so one deleted between that read and the insert fails the insert's
-      // foreign key. It is the same not found an id no account has answers.
-      if (recipient.kind === 'user' && isPrismaForeignKeyConstraintError(error)) {
-        throw new NotFoundException(t('errors.user.not_found', { id: recipient.userId }));
+      if (isPrismaForeignKeyConstraintError(error)) {
+        // The game is read without a lock, and its creator or an admin deletes
+        // it outright, so one deleted between that read and the insert fails
+        // the insert's foreign key. Asked first: a gone game is the answer
+        // whichever recipient was named.
+        if ((await this.db.game.count({ where: { id: gameId } })) === 0) {
+          throw new NotFoundException(t('errors.game.not_found', { id: gameId }));
+        }
+
+        // The recipient is read without a lock too, and staff can delete an
+        // account. It is the same not found an id no account has answers.
+        if (recipient.kind === 'user') {
+          throw new NotFoundException(t('errors.user.not_found', { id: recipient.userId }));
+        }
       }
 
       throw error;

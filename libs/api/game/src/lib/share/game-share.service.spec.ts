@@ -408,6 +408,7 @@ describe('GameShareService', () => {
 
     it('answers 404 for a user whose account was deleted between its read and the insert, the foreign key refusing it', async () => {
       db.gameShare.create.mockRejectedValue(foreignKeyViolation());
+      db.game.count.mockResolvedValue(1);
 
       await expect(service.create('game-1', toUser)).rejects.toEqual(
         new NotFoundException(t('errors.user.not_found', { id: 'user-2' })),
@@ -416,9 +417,31 @@ describe('GameShareService', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
-    it('leaves a foreign key failure on a household share as it is: no user was named', async () => {
+    // #810: the game is read without a lock, and deleting one removes its row,
+    // so the insert's foreign key is what finds it gone.
+    it.each([
+      ['user', toUser],
+      ['household', toHousehold],
+    ])(
+      'answers 404 for the game when it was deleted between its read and the insert of a share to a %s',
+      async (_label, dto) => {
+        db.gameShare.create.mockRejectedValue(foreignKeyViolation());
+        db.game.count.mockResolvedValue(0);
+
+        await expect(service.create('game-1', dto)).rejects.toEqual(
+          new NotFoundException(t('errors.game.not_found', { id: 'game-1' })),
+        );
+
+        // Any game by the id, deleted or not: only a removed row fails the key.
+        expect(db.game.count).toHaveBeenCalledWith({ where: { id: 'game-1' } });
+        expect(emitter.emit).not.toHaveBeenCalled();
+      },
+    );
+
+    it('leaves a foreign key failure on a household share as it is when the game is still there: no user was named', async () => {
       const failure = foreignKeyViolation();
       db.gameShare.create.mockRejectedValue(failure);
+      db.game.count.mockResolvedValue(1);
 
       await expect(service.create('game-1', toHousehold)).rejects.toBe(failure);
     });

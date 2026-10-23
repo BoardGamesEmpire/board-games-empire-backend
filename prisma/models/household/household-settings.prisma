@@ -20,8 +20,10 @@ enum MemberInvitePolicy {
 //
 // It governs the member role only. A household owner or admin always shares
 // directly, and a household guest never shares. A change applies to the shares
-// made after it: a share already waiting stays approvable. A share waiting for
-// approval grants the household nothing.
+// made after it, and approving a waiting share asks the policy as it is then,
+// as approving an invite does: after a switch to `Off` a waiting share can no
+// longer be approved, and after a switch to `Direct` it stays approvable. A
+// share waiting for approval grants the household nothing.
 enum MemberSharePolicy {
   // Members cannot share games into the household.
   Off
