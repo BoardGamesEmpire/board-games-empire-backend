@@ -126,11 +126,11 @@ export class HouseholdBanService {
    */
   async updateReason(householdId: string, userId: string, dto: UpdateHouseholdBanDto): Promise<HouseholdBanView> {
     const ban = await this.db.$transaction(async (tx) => {
-      await this.findBanAsAuthority(tx, householdId, userId, Action.update);
+      const existing = await this.findBanAsAuthority(tx, householdId, userId, Action.update);
 
       return this.writeToBan(householdId, userId, () =>
         tx.householdBan.update({
-          where: { householdId_userId: { householdId, userId } },
+          where: { id: existing.id },
           data: { reason: dto.reason },
           select: HOUSEHOLD_BAN_SELECT,
         }),
@@ -192,8 +192,13 @@ export class HouseholdBanService {
 
   /**
    * The ban an update or a lift acts on: `action` asked of the roster before
-   * and after the household's share lock, then the ban read. 404 when the
-   * user isn't banned.
+   * and after the household's share lock, each time about the ban as it was
+   * read just before. 404 when the user isn't banned, told only to a caller
+   * the answer under the lock lets through.
+   *
+   * The question names the ban by its id, as invite revoke names the invite
+   * (#164): an API key scoped to one ban holds its grant only on that id, and
+   * a denial scoped to one ban matches only an instance that names it.
    */
   private async findBanAsAuthority(
     tx: Prisma.TransactionClient,
@@ -201,20 +206,25 @@ export class HouseholdBanService {
     userId: string,
     action: typeof Action.update | typeof Action.delete,
   ) {
-    await this.assertBanAuthority(tx, householdId, action);
+    const before = await this.findBan(tx, householdId, userId);
+    await this.assertBanAuthority(tx, householdId, action, before?.id);
     await lockExistingHousehold(tx, householdId);
-    await this.assertBanAuthority(tx, householdId, action);
 
-    const ban = await tx.householdBan.findUnique({
-      where: { householdId_userId: { householdId, userId } },
-      select: HOUSEHOLD_BAN_SELECT,
-    });
+    const ban = await this.findBan(tx, householdId, userId);
+    await this.assertBanAuthority(tx, householdId, action, ban?.id);
 
     if (!ban) {
       throw this.banNotFound(householdId, userId);
     }
 
     return ban;
+  }
+
+  private findBan(tx: Prisma.TransactionClient, householdId: string, userId: string) {
+    return tx.householdBan.findUnique({
+      where: { householdId_userId: { householdId, userId } },
+      select: HOUSEHOLD_BAN_SELECT,
+    });
   }
 
   /**
@@ -260,16 +270,20 @@ export class HouseholdBanService {
    * Asks whether the acting user may `action` a ban from this household, of
    * the household's whole roster as `client` reads it, as the invite routes
    * ask: a roster cut down to the caller's own row would pass a `none` or
-   * `every` clause it should refuse.
+   * `every` clause it should refuse. An action on an existing ban names it by
+   * `banId`.
    */
   private async assertBanAuthority(
     client: DatabaseService | Prisma.TransactionClient,
     householdId: string,
     action: BanAction,
+    banId?: string,
   ): Promise<void> {
     const members = await readRoster(client, householdId);
+    const named = banId === undefined ? {} : { id: banId };
 
     this.abilityService.assertCurrentActorCan(action, ResourceType.HouseholdBan, {
+      ...named,
       householdId,
       household: { members },
     });

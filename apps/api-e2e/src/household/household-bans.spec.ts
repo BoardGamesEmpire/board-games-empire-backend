@@ -1,6 +1,7 @@
-import { InviteStatus, MemberInvitePolicy, SystemRole } from '@bge/database';
+import { InviteStatus, MemberInvitePolicy, ResourceType, SystemRole } from '@bge/database';
 import { arrangeInvite, createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
 import request from 'supertest';
+import { mintApiKey, type Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, withBarrier } from '../support/lock-barrier';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
@@ -62,13 +63,13 @@ describe('household bans (#782)', () => {
   const listBans = (actor: SessionActor, householdId: string) =>
     request(baseUrl).get(bansRoute(householdId)).set(actor.headers);
 
-  const changeReason = (actor: SessionActor, householdId: string, userId: string, body: Record<string, unknown>) =>
+  const changeReason = (actor: Caller, householdId: string, userId: string, body: Record<string, unknown>) =>
     request(baseUrl)
       .patch(`${bansRoute(householdId)}/${userId}`)
       .set(actor.headers)
       .send(body);
 
-  const liftBan = (actor: SessionActor, householdId: string, userId: string) =>
+  const liftBan = (actor: Caller, householdId: string, userId: string) =>
     request(baseUrl)
       .delete(`${bansRoute(householdId)}/${userId}`)
       .set(actor.headers);
@@ -280,6 +281,31 @@ describe('household bans (#782)', () => {
     await liftBan(h.owner, h.householdId, stranger.user.id).expect(200);
     await changeReason(h.owner, h.householdId, stranger.user.id, { reason: 'none' }).expect(404);
     await liftBan(h.owner, h.householdId, stranger.user.id).expect(404);
+  });
+
+  // A key scoped to one resource holds its grant only on { id: resourceId },
+  // so the ban is asked about by its id, as invite revoke asks about the
+  // invite (#164).
+  it('a key scoped to one ban changes and lifts that ban, and no other', async () => {
+    const h = await household();
+    const [first, second] = await Promise.all([actors.user(), actors.user()]);
+    await banUser(h.owner, h.householdId, { userId: first.user.id }).expect(201);
+    await banUser(h.owner, h.householdId, { userId: second.user.id }).expect(201);
+    const scopedTo = await storedBan(h.householdId, first.user.id);
+    const key = await mintApiKey(baseUrl, db.client, h.admin, {
+      slugs: ['update:household_ban', 'delete:household_ban'],
+      resourceType: ResourceType.HouseholdBan,
+      resourceId: scopedTo?.id,
+    });
+
+    await changeReason(key, h.householdId, second.user.id, { reason: 'not this one' }).expect(403);
+    await liftBan(key, h.householdId, second.user.id).expect(403);
+
+    await changeReason(key, h.householdId, first.user.id, { reason: 'this one' }).expect(200);
+    await liftBan(key, h.householdId, first.user.id).expect(200);
+
+    await expect(storedBan(h.householdId, first.user.id)).resolves.toBeNull();
+    await expect(storedBan(h.householdId, second.user.id)).resolves.toMatchObject({ reason: null });
   });
 
   it('the owner and admin list the bans newest first, in the pagination envelope', async () => {

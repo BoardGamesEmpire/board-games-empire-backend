@@ -303,6 +303,13 @@ describe('HouseholdBanService', () => {
   describe('updateReason and lift', () => {
     const PAIR = { householdId_userId: { householdId: 'hh-1', userId: 'user-2' } };
 
+    /**
+     * An existing ban is asked about by its id, as invite revoke asks about the
+     * invite (#164): a key scoped to one ban holds its grant only on that id,
+     * and a denial scoped to one ban matches only an instance that names it.
+     */
+    const NAMED_BAN_INSTANCE = { id: 'ban-1', ...BAN_INSTANCE };
+
     beforeEach(() => {
       db.householdBan.findUnique.mockResolvedValue(resolves(BAN_ROW));
     });
@@ -318,19 +325,20 @@ describe('HouseholdBanService', () => {
       });
       await expect(service.updateReason('hh-1', 'user-2', { reason: null })).resolves.toMatchObject({ reason: null });
 
+      // The row the question named is the row written.
       expect(db.householdBan.update).toHaveBeenNthCalledWith(1, {
-        where: PAIR,
+        where: { id: 'ban-1' },
         data: { reason: 'b' },
         select: HOUSEHOLD_BAN_SELECT,
       });
       expect(db.householdBan.update).toHaveBeenNthCalledWith(2, {
-        where: PAIR,
+        where: { id: 'ban-1' },
         data: { reason: null },
         select: HOUSEHOLD_BAN_SELECT,
       });
       // Asked before and after the household's share lock, each time.
       expect(abilityService.assertCurrentActorCan.mock.calls).toEqual(
-        Array.from({ length: 4 }, () => [Action.update, ResourceType.HouseholdBan, BAN_INSTANCE]),
+        Array.from({ length: 4 }, () => [Action.update, ResourceType.HouseholdBan, NAMED_BAN_INSTANCE]),
       );
       expect(db.$queryRaw.mock.calls.map(([query]) => isShareLockSql(query))).toEqual([true, true]);
     });
@@ -349,8 +357,41 @@ describe('HouseholdBanService', () => {
       }
 
       expect(db.householdBan.findUnique).toHaveBeenCalledWith({ where: PAIR, select: HOUSEHOLD_BAN_SELECT });
+      // With no ban to name, the instance names none.
+      expect(abilityService.assertCurrentActorCan.mock.calls).toEqual([
+        [Action.update, ResourceType.HouseholdBan, BAN_INSTANCE],
+        [Action.update, ResourceType.HouseholdBan, BAN_INSTANCE],
+        [Action.delete, ResourceType.HouseholdBan, BAN_INSTANCE],
+        [Action.delete, ResourceType.HouseholdBan, BAN_INSTANCE],
+      ]);
       expect(db.householdBan.update).not.toHaveBeenCalled();
       expect(db.householdBan.delete).not.toHaveBeenCalled();
+    });
+
+    it("asks about the ban read under the lock, and refuses with 403 rather than 404 a caller the lock's answer refuses (#782)", async () => {
+      // Lifted and banned again between the read before the lock and the one under it.
+      db.householdBan.findUnique
+        .mockResolvedValueOnce(resolves(BAN_ROW))
+        .mockResolvedValueOnce(resolves({ ...BAN_ROW, id: 'ban-2' }));
+      db.householdBan.delete.mockResolvedValue(resolves({ id: 'ban-2' }));
+
+      await service.lift('hh-1', 'user-2');
+
+      expect(abilityService.assertCurrentActorCan.mock.calls).toEqual([
+        [Action.delete, ResourceType.HouseholdBan, NAMED_BAN_INSTANCE],
+        [Action.delete, ResourceType.HouseholdBan, { ...BAN_INSTANCE, id: 'ban-2' }],
+      ]);
+      expect(db.householdBan.delete).toHaveBeenCalledWith({ where: { id: 'ban-2' } });
+
+      // Demoted before the lock was taken, with the ban lifted meanwhile.
+      db.householdBan.findUnique.mockResolvedValueOnce(resolves(BAN_ROW)).mockResolvedValueOnce(null);
+      abilityService.assertCurrentActorCan
+        .mockImplementationOnce(() => undefined)
+        .mockImplementationOnce(() => {
+          throw new ForbiddenException();
+        });
+
+      await expect(service.lift('hh-1', 'user-2')).rejects.toBeInstanceOf(ForbiddenException);
     });
 
     // Two lifts sent at once, as a double-click sends them, both read the ban
@@ -390,8 +431,8 @@ describe('HouseholdBanService', () => {
 
       expect(db.householdBan.delete).toHaveBeenCalledWith({ where: { id: 'ban-1' } });
       expect(abilityService.assertCurrentActorCan.mock.calls).toEqual([
-        [Action.delete, ResourceType.HouseholdBan, BAN_INSTANCE],
-        [Action.delete, ResourceType.HouseholdBan, BAN_INSTANCE],
+        [Action.delete, ResourceType.HouseholdBan, NAMED_BAN_INSTANCE],
+        [Action.delete, ResourceType.HouseholdBan, NAMED_BAN_INSTANCE],
       ]);
       expect(db.$queryRaw.mock.calls.map(([query]) => isShareLockSql(query))).toEqual([true]);
     });
