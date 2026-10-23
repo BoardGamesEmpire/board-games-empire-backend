@@ -25,8 +25,9 @@ function resizeCoverUrl(url: string, size: string): string {
   return toAbsoluteUrl(url).replace(/t_[a-z0-9_]+/, size);
 }
 
+/** Read in UTC, as a release's year is, so the two never fall a day apart (#719). */
 function toIsoDate(unixSeconds: number): string {
-  return <string>DateTime.fromSeconds(unixSeconds).toISODate();
+  return <string>DateTime.fromSeconds(unixSeconds, { zone: 'utc' }).toISODate();
 }
 
 /**

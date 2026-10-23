@@ -4,8 +4,8 @@ import type { IgdbGame } from '../types';
 import { toGameData, toGameSearchData, toSearchNarrowing, utcYearStart } from './game.mapper';
 
 // The proto GameReleaseData.release_date field is contractually an ISO 8601 date
-// string ("2007-09-25"). Assert shape rather than an exact value so the tests
-// stay stable regardless of the host timezone (toIsoDate is zone-dependent).
+// string ("2007-09-25"). These tests assert its shape. The exact date, read in
+// UTC, is held under "publish year" below (#719).
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 describe('game.mapper', () => {
@@ -187,6 +187,27 @@ describe('game.mapper', () => {
       expect(inZone('America/Los_Angeles', () => toGameSearchData(firstReleased(1577836800)).yearPublished)).toBe(2020);
       expect(inZone('Asia/Tokyo', () => toGameSearchData(firstReleased(1577836799)).yearPublished)).toBe(2019);
       expect(inZone('America/Los_Angeles', () => toGameData(firstReleased(1577836800)).yearPublished)).toBe(2020);
+    });
+
+    it('dates a release in UTC, so its date and its year agree', () => {
+      const game: IgdbGame = {
+        id: 1,
+        name: 'G',
+        release_dates: [
+          {
+            id: 10,
+            platform: { id: 6, name: 'PC', platform_type: PlatformType.Computer },
+            date: 1577836800,
+            region: Region.NorthAmerica,
+          },
+        ],
+      };
+
+      const [release] = inZone('America/Los_Angeles', () => toGameData(game).releases);
+
+      expect(release.releaseYear).toBe(2020);
+      expect(release.releaseDate).toBe('2020-01-01');
+      expect(release.localizations[0].releaseDate).toBe('2020-01-01');
     });
 
     // Date.UTC reads a year from 0 to 99 as 1900 plus it.
