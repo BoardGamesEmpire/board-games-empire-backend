@@ -1,32 +1,28 @@
 import { parseLogRecords, recordFields, stripAnsi, unexpectedErrors } from './logs';
 
-/** A line as the roles' logger writes it to a container's output: pino-pretty, coloured (#627). */
-const pinoLine = (level: string, colour: number, message: string) =>
-  `[01:20:12.687] \u001b[${colour}m${level}\u001b[39m (bge-api/1): \u001b[36m${message}\u001b[39m`;
+/** A line as the roles' logger writes it to a container's output when it is no terminal: pino's JSON (#627). */
+const jsonLine = (level: number, message: string, fields: Record<string, unknown> = {}) =>
+  JSON.stringify({ level, time: 1760000000000, service: 'bge-api', msg: message, ...fields });
 
-/** Prisma's report of the failed ledger read on a first boot (#638), as it prints it. */
-const FIRST_BOOT_LEDGER_ERROR = [
-  'prisma:error ',
+/**
+ * The failed ledger read on a first boot (#638), as DatabaseService logs it
+ * through Nest: Prisma's invocation block, then the error's code and message.
+ * The newlines sit inside the JSON string, so the record is still one line.
+ */
+const FIRST_BOOT_LEDGER_MESSAGE = [
+  '',
   'Invalid `prisma.$queryRaw()` invocation:',
   '',
   '',
   'Raw query failed. Code: `42P01`. Message: `relation "_prisma_migrations" does not exist`',
 ].join('\n');
 
-/** A line of better-auth's own logger, which writes to the console, as the api's output carries it. */
-const betterAuthLine = (level: string, message: string) =>
-  `2026-10-08T13:54:09.278Z ${level} [Better Auth]: ${message}`;
+const ledgerError = (message = FIRST_BOOT_LEDGER_MESSAGE) => jsonLine(50, message, { context: 'DatabaseService' });
 
-/** An `err` field as pino-pretty 13 prints it under its record's line, `singleLine` or not. */
-const ERR_FIELD = [
-  '    err: {',
-  '      "type": "Error",',
-  '      "message": "boom",',
-  '      "stack":',
-  '          Error: boom',
-  '              at bootstrap (/app/apps/api/dist/main.js:1:1)',
-  '    }',
-].join('\n');
+/** An `err` field as pino serializes it: part of the record's own line. */
+const ERR_FIELD = {
+  err: { type: 'Error', message: 'boom', stack: 'Error: boom\n    at bootstrap (/app/apps/api/dist/main.js:1:1)' },
+};
 
 /** What Node prints when a library hands an error to console.error. */
 const CONSOLE_ERROR_STACK = [
@@ -35,10 +31,8 @@ const CONSOLE_ERROR_STACK = [
 ].join('\n');
 
 describe('stripAnsi', () => {
-  it('removes the colour codes pino-pretty writes even when the output is not a terminal', () => {
-    expect(stripAnsi(pinoLine('INFO', 32, 'Bootstrap complete'))).toBe(
-      '[01:20:12.687] INFO (bge-api/1): Bootstrap complete',
-    );
+  it('removes colour codes, so colour that leaks into the output is still read', () => {
+    expect(stripAnsi('\u001b[32mINFO\u001b[39m up')).toBe('INFO up');
   });
 
   it('removes background colours and resets, as on a FATAL line', () => {
@@ -47,84 +41,69 @@ describe('stripAnsi', () => {
 });
 
 describe('parseLogRecords', () => {
-  it('reads one record per log line, with its level', () => {
-    const records = parseLogRecords(
-      [pinoLine('INFO', 32, 'Bootstrap complete'), pinoLine('WARN', 33, 'careful')].join('\n'),
-    );
+  it('reads one record per JSON line, with its level named', () => {
+    const lines = [
+      jsonLine(10, 'tracing'),
+      jsonLine(20, 'debugging'),
+      jsonLine(30, 'Bootstrap complete'),
+      jsonLine(40, 'careful'),
+      jsonLine(50, 'failed'),
+      jsonLine(60, 'dead'),
+    ];
 
-    expect(records.map(({ level, text }) => ({ level, text }))).toEqual([
-      { level: 'INFO', text: '[01:20:12.687] INFO (bge-api/1): Bootstrap complete' },
-      { level: 'WARN', text: '[01:20:12.687] WARN (bge-api/1): careful' },
-    ]);
-  });
-
-  it('keeps the error fields pino-pretty indents under a log line with it, at any level', () => {
-    const records = parseLogRecords(
-      [pinoLine('WARN', 33, 'retrying'), ERR_FIELD, pinoLine('INFO', 32, 'retried')].join('\n'),
-    );
-
-    expect(records.map(({ level }) => level)).toEqual(['WARN', 'INFO']);
-    expect(records[0].text).toBe(`[01:20:12.687] WARN (bge-api/1): retrying\n${ERR_FIELD}`);
-  });
-
-  // Apart from those fields, the roles' records are one line each, so other
-  // output after one is not part of it.
-  it('keeps output after a log line as a record of its own, without a level', () => {
-    const records = parseLogRecords([pinoLine('INFO', 32, 'connected'), CONSOLE_ERROR_STACK].join('\n'));
+    const records = parseLogRecords(lines.join('\n'));
 
     expect(records).toEqual([
-      { level: 'INFO', text: '[01:20:12.687] INFO (bge-api/1): connected' },
-      { level: undefined, text: CONSOLE_ERROR_STACK },
+      { level: 'TRACE', text: lines[0] },
+      { level: 'DEBUG', text: lines[1] },
+      { level: 'INFO', text: lines[2] },
+      { level: 'WARN', text: lines[3] },
+      { level: 'ERROR', text: lines[4] },
+      { level: 'FATAL', text: lines[5] },
     ]);
   });
 
-  it('keeps output that precedes any record, so nothing a crash prints is lost', () => {
-    const records = parseLogRecords(['node:internal/process', 'Error: boom', pinoLine('INFO', 32, 'up')].join('\n'));
+  it('names a level between the standard ones by the standard level below it', () => {
+    expect(parseLogRecords(jsonLine(35, 'custom')).map(({ level }) => level)).toEqual(['INFO']);
+  });
+
+  it('keeps output that is no record, such as a crash stack, as a record of its own without a level', () => {
+    const records = parseLogRecords([jsonLine(30, 'connected'), CONSOLE_ERROR_STACK, jsonLine(30, 'next')].join('\n'));
+
+    expect(records.map(({ level }) => level)).toEqual(['INFO', undefined, 'INFO']);
+    expect(records[1].text).toBe(CONSOLE_ERROR_STACK);
+  });
+
+  it('does not take JSON that is no record for one', () => {
+    const notRecords = ['{"level":"info","msg":"a string level"}', '[{"level":30}]', '{"msg":"no level"}', '42'];
+
+    const records = parseLogRecords(notRecords.join('\n'));
+
+    expect(records).toEqual([{ level: undefined, text: notRecords.join('\n') }]);
+  });
+
+  it('keeps output that precedes any record', () => {
+    const records = parseLogRecords(['node:internal/process', 'Error: boom', jsonLine(30, 'up')].join('\n'));
 
     expect(records[0]).toEqual({ level: undefined, text: 'node:internal/process\nError: boom' });
   });
 
-  it('makes no record of a blank line after a log line', () => {
-    const records = parseLogRecords([pinoLine('INFO', 32, 'up'), '', '   ', ''].join('\n'));
+  it('makes no record of a blank line', () => {
+    const records = parseLogRecords([jsonLine(30, 'up'), '', '   ', ''].join('\n'));
 
     expect(records.map(({ level }) => level)).toEqual(['INFO']);
   });
 
-  it("reads Prisma's own error output as an error record, with the lines it prints after it", () => {
-    const records = parseLogRecords([pinoLine('INFO', 32, 'starting'), FIRST_BOOT_LEDGER_ERROR].join('\n'));
+  it('keeps a blank line inside output that is no record', () => {
+    const records = parseLogRecords(['Error: boom', '', '    at main (/app/main.js:1:1)'].join('\n'));
 
-    expect(records.map(({ level }) => level)).toEqual(['INFO', 'ERROR']);
-    expect(records[1].text).toContain('_prisma_migrations');
+    expect(records).toEqual([{ level: undefined, text: 'Error: boom\n\n    at main (/app/main.js:1:1)' }]);
   });
 
-  it("reads better-auth's own lines as records, with the stack an error prints after one", () => {
-    const records = parseLogRecords(
-      [
-        `\u001b[2m2026-10-08T13:54:09.278Z\u001b[0m \u001b[33mWARN\u001b[0m \u001b[1m[Better Auth]:\u001b[0m careful`,
-        betterAuthLine('ERROR', 'sign-up failed'),
-        'Error: boom',
-        '    at signUp (/app/main.js:1:1)',
-        pinoLine('INFO', 32, 'request completed'),
-      ].join('\n'),
-    );
+  it('still strips colour codes, so a terminal-coloured line is read', () => {
+    const records = parseLogRecords(`\u001b[32m${jsonLine(30, 'up')}\u001b[39m`);
 
-    expect(records.map(({ level }) => level)).toEqual(['WARN', 'ERROR', 'INFO']);
-    expect(records[1].text).toBe(
-      `${betterAuthLine('ERROR', 'sign-up failed')}\nError: boom\n    at signUp (/app/main.js:1:1)`,
-    );
-  });
-
-  // Node prints an error the logger is handed after its line: the stack's
-  // frames indented, then the error's own fields, closed at the margin.
-  it('keeps what Node nests under a better-auth warning with it', () => {
-    const warning = [
-      `${betterAuthLine('WARN', 'Could not update user info on account link')} Error: boom`,
-      '    at linkAccount (/app/main.js:1:1) {',
-      "  code: 'P2002'",
-      '}',
-    ].join('\n');
-
-    expect(parseLogRecords(warning)).toEqual([{ level: 'WARN', text: warning }]);
+    expect(records).toEqual([{ level: 'INFO', text: jsonLine(30, 'up') }]);
   });
 
   it('reads no records from empty output', () => {
@@ -133,107 +112,90 @@ describe('parseLogRecords', () => {
 });
 
 describe('unexpectedErrors', () => {
-  it('reports ERROR and FATAL records', () => {
+  it('reports ERROR and FATAL records, and passes a warning that carries an err', () => {
     const records = parseLogRecords(
       [
-        pinoLine('INFO', 32, 'fine'),
-        pinoLine('WARN', 33, 'careful'),
-        pinoLine('ERROR', 31, 'bootstrap failed'),
-        `[01:20:12.688] \u001b[41mFATAL\u001b[49m (bge-api/1): \u001b[36mdead\u001b[39m`,
+        jsonLine(30, 'fine'),
+        jsonLine(40, 'retrying', ERR_FIELD),
+        jsonLine(50, 'bootstrap failed'),
+        jsonLine(60, 'dead', ERR_FIELD),
       ].join('\n'),
     );
 
     expect(unexpectedErrors(records).map(({ text }) => text)).toEqual([
-      '[01:20:12.687] ERROR (bge-api/1): bootstrap failed',
-      '[01:20:12.688] FATAL (bge-api/1): dead',
-    ]);
-  });
-
-  it('reports an error record once, with its fields, and passes a warning that carries an error', () => {
-    const records = parseLogRecords(
-      [pinoLine('WARN', 33, 'retrying'), ERR_FIELD, pinoLine('ERROR', 31, 'gave up'), ERR_FIELD].join('\n'),
-    );
-
-    expect(unexpectedErrors(records).map(({ text }) => text)).toEqual([
-      `[01:20:12.687] ERROR (bge-api/1): gave up\n${ERR_FIELD}`,
+      jsonLine(50, 'bootstrap failed'),
+      jsonLine(60, 'dead', ERR_FIELD),
     ]);
   });
 
   it('reports output that is no record, which may be an error', () => {
-    const records = parseLogRecords([pinoLine('INFO', 32, 'connected'), CONSOLE_ERROR_STACK].join('\n'));
-
-    expect(unexpectedErrors(records).map(({ text }) => text)).toEqual([CONSOLE_ERROR_STACK]);
-  });
-
-  it("reports better-auth's errors, not its warnings", () => {
-    const records = parseLogRecords(
-      [betterAuthLine('WARN', 'rate limiting is best-effort'), betterAuthLine('ERROR', 'sign-up failed')].join('\n'),
-    );
-
-    expect(unexpectedErrors(records).map(({ text }) => text)).toEqual([betterAuthLine('ERROR', 'sign-up failed')]);
-  });
-
-  it('reports output after a better-auth warning, which is no part of it', () => {
-    const records = parseLogRecords(
-      [betterAuthLine('WARN', 'rate limiting is best-effort'), CONSOLE_ERROR_STACK].join('\n'),
-    );
+    const records = parseLogRecords([jsonLine(30, 'connected'), CONSOLE_ERROR_STACK].join('\n'));
 
     expect(unexpectedErrors(records).map(({ text }) => text)).toEqual([CONSOLE_ERROR_STACK]);
   });
 
   // Until #638 lands, each role's first boot reads the ledger before the api
   // has created it, and Prisma reports the failed query. The roles expect it.
-  it("lets the first boot's ledger read pass", () => {
-    expect(unexpectedErrors(parseLogRecords(FIRST_BOOT_LEDGER_ERROR))).toEqual([]);
+  it("lets the first boot's ledger read pass, and reports output it runs on over", () => {
+    expect(unexpectedErrors(parseLogRecords(ledgerError()))).toEqual([]);
+
+    const records = parseLogRecords([ledgerError(), CONSOLE_ERROR_STACK].join('\n'));
+
+    expect(unexpectedErrors(records)).toEqual([{ level: undefined, text: CONSOLE_ERROR_STACK }]);
   });
 
-  it('reports output that the ledger read runs on over, with the read', () => {
-    const records = parseLogRecords([FIRST_BOOT_LEDGER_ERROR, CONSOLE_ERROR_STACK].join('\n'));
+  it('lets the ledger read pass without the invocation block before it', () => {
+    const bare = FIRST_BOOT_LEDGER_MESSAGE.split('\n').at(-1) as string;
 
-    expect(unexpectedErrors(records)).toEqual([
-      { level: 'ERROR', text: `${FIRST_BOOT_LEDGER_ERROR}\n${CONSOLE_ERROR_STACK}` },
-    ]);
+    expect(unexpectedErrors(parseLogRecords(ledgerError(bare)))).toEqual([]);
   });
 
-  it('reports any other Prisma error', () => {
-    const other = FIRST_BOOT_LEDGER_ERROR.replace('relation "_prisma_migrations" does not exist', 'deadlock detected');
-
-    expect(unexpectedErrors(parseLogRecords(other))).toHaveLength(1);
-  });
-
-  it('reports a ledger error that is not the missing table, as a broken ledger', () => {
-    const brokenLedger = FIRST_BOOT_LEDGER_ERROR.replace(
+  it('reports a ledger error that is not the missing table', () => {
+    const brokenLedger = FIRST_BOOT_LEDGER_MESSAGE.replace(
       'relation "_prisma_migrations" does not exist',
       'column "checksum" does not exist',
     );
 
-    expect(unexpectedErrors(parseLogRecords(brokenLedger))).toHaveLength(1);
+    expect(unexpectedErrors(parseLogRecords(ledgerError(brokenLedger)))).toHaveLength(1);
+  });
+
+  it('reports a missing table message that something follows, since it must end the message', () => {
+    const trailing = `${FIRST_BOOT_LEDGER_MESSAGE}\nand then more`;
+
+    expect(unexpectedErrors(parseLogRecords(ledgerError(trailing)))).toHaveLength(1);
+  });
+
+  it('does not pass another error that only quotes the ledger message in a field', () => {
+    const quoting = jsonLine(50, 'bootstrap failed', { cause: FIRST_BOOT_LEDGER_MESSAGE });
+
+    expect(unexpectedErrors(parseLogRecords(quoting))).toHaveLength(1);
   });
 });
 
-describe('recordFields', () => {
-  const [bootstrap] = parseLogRecords(
-    `[08:27:00.471] \u001b[32mINFO\u001b[39m (7): \u001b[36mBootstrap complete\u001b[39m \u001b[90m{"service":"bge-api","state":"behind","migrationsApplied":["20260109085042_init"],"seedsRun":true}\u001b[39m`,
-  );
-
-  it('reads the fields pino-pretty appends to a record', () => {
-    expect(recordFields(bootstrap)).toEqual({
-      service: 'bge-api',
+describe("a record's fields", () => {
+  const bootstrap = parseLogRecords(
+    jsonLine(30, 'Bootstrap complete', {
       state: 'behind',
       migrationsApplied: ['20260109085042_init'],
       seedsRun: true,
+      unknownMigrations: [],
+    }),
+  )[0];
+
+  it('reads a record’s fields, msg included', () => {
+    expect(recordFields(bootstrap)).toEqual({
+      level: 30,
+      time: 1760000000000,
+      service: 'bge-api',
+      msg: 'Bootstrap complete',
+      state: 'behind',
+      migrationsApplied: ['20260109085042_init'],
+      seedsRun: true,
+      unknownMigrations: [],
     });
   });
 
-  it('skips braces in the message itself', () => {
-    const [mapped] = parseLogRecords(
-      '[08:27:00.672] INFO (7): Mapped {/api/events, GET} route {"context":"RouterExplorer"}',
-    );
-
-    expect(recordFields(mapped)).toEqual({ context: 'RouterExplorer' });
-  });
-
-  it('reads nothing from a record without fields', () => {
-    expect(recordFields(parseLogRecords('[08:27:00.672] INFO (7): no fields here')[0])).toBeUndefined();
+  it('reads nothing from output that is no record', () => {
+    expect(recordFields(parseLogRecords(CONSOLE_ERROR_STACK)[0])).toBeUndefined();
   });
 });

@@ -331,7 +331,10 @@ export class Stack {
     return docker(composeArgs(this.project, this.runDir, args), { env: this.env });
   }
 
-  /** Everything a service's container has written, colour codes included. */
+  /**
+   * Everything a service's container has written. The process roles write JSON
+   * lines off a terminal, and `--no-color` strips any colour that leaked in.
+   */
   logs(service: SmokeService): Promise<string> {
     return this.compose(['logs', '--no-color', '--no-log-prefix', service]);
   }
