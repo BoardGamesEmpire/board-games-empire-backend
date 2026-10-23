@@ -323,12 +323,15 @@ describe('thingToGameData — version-driven releases', () => {
     expect(release.languages.map((l) => l.iso6393)).toEqual(['eng', 'deu']);
   });
 
-  it('drops unrecognized language link values', () => {
+  it('passes an unrecognized language on by name, with no ISO codes (#717)', () => {
     const thing = makeBggThing({
       versions: [makeBggVersion({ id: 1, languageNames: ['English', 'Klingon'] })],
     });
 
-    expect(thingToGameData(thing).releases[0].languages.map((l) => l.iso6393)).toEqual(['eng']);
+    expect(thingToGameData(thing).releases[0].languages).toEqual([
+      { iso6393: 'eng', iso6391: 'en', name: 'English' },
+      { name: 'Klingon' },
+    ]);
   });
 
   it('leaves parentEditionExternalId undefined for all BGG releases', () => {
