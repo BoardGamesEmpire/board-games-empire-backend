@@ -61,6 +61,24 @@ const listMatches = <T>(named: readonly T[] | undefined, values: readonly T[], u
   !named?.length || values.some((value) => value !== unspecified && named.includes(value));
 
 /**
+ * Whether a year falls in a range, both bounds inclusive. A range with no
+ * bound narrows nothing, and an unknown year matches only when the range
+ * includes unknown ones (#719).
+ */
+const yearMatches = (range: proto.IntRange | undefined, year: number | undefined): boolean => {
+  const min = range?.min ?? undefined;
+  const max = range?.max ?? undefined;
+
+  if (min === undefined && max === undefined) {
+    return true;
+  }
+
+  return year === undefined
+    ? range?.includeUnknown === true
+    : (min === undefined || year >= min) && (max === undefined || year <= max);
+};
+
+/**
  * Fixture-backed in-process `DataGatewayDriver`.
  *
  * Dual purpose, mirroring the storage contract-testing pattern:
@@ -261,7 +279,9 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
           filter?.platformTypes,
           (game.availablePlatforms ?? []).map((platform) => platform.platformType),
           proto.PlatformType.PLATFORM_TYPE_UNSPECIFIED,
-        ))
+        )) &&
+      (!declares(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR) ||
+        yearMatches(filter?.publishYear, game.yearPublished))
     );
   }
 

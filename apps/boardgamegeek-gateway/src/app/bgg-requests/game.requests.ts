@@ -1,7 +1,9 @@
+import type * as proto from '@boardgamesempire/proto-gateway';
 import { defer } from 'rxjs';
 import { map } from 'rxjs/operators';
 import type { BggRequest } from '../bgg/bgg.service';
 import { BggThingType, DEFAULT_BGG_SEARCH_TYPES, DEFAULT_SEARCH_LIMIT } from '../constants';
+import { toPublishYear } from '../mappers/game.mapper';
 import type { BggSearchItem, BggThing } from '../types';
 
 /**
@@ -29,13 +31,14 @@ export interface ThingFetchOptions {
 
 /**
  * Search BGG for things matching a free-text query, keeping the thing types
- * in `keep`.
+ * in `keep`, and the games published within `publishYear` when it's given.
  *
  * BGG is always asked for base games and expansions together. Asked for base
  * games alone, it returns expansions labelled as base games; asked for both,
  * it answers an expansion twice, once under each label. So the items are
- * collapsed to one per game, then filtered to `keep`, and only then paged, so
- * that `offset` and `limit` count distinct games (#777).
+ * collapsed to one per game, then filtered to `keep` and to the publish year,
+ * and only then paged, so that `offset` and `limit` count distinct games that
+ * match (#777, #719).
  *
  * BGG's `/search` endpoint does not paginate server-side; `offset` and
  * `limit` are applied client-side after the response is received.
@@ -49,8 +52,10 @@ export function searchGamesRequest(
   limit: number = DEFAULT_SEARCH_LIMIT,
   offset = 0,
   keep: readonly BggThingType[] = DEFAULT_BGG_SEARCH_TYPES,
+  publishYear?: proto.IntRange,
 ): BggRequest<BggSearchItem[]> {
   const kept = new Set<string>(keep);
+  const inYearRange = publishYearMatcher(publishYear);
 
   return (client) =>
     defer(() =>
@@ -61,10 +66,35 @@ export function searchGamesRequest(
     ).pipe(
       map((results) =>
         collapseSearchItems(results.flatMap((result) => result.items))
-          .filter((item) => kept.has(item.type))
+          .filter((item) => kept.has(item.type) && inYearRange(item))
           .slice(offset, offset + limit),
       ),
     );
+}
+
+/**
+ * Whether an item falls within a publish-year range, both bounds inclusive.
+ * An item with no year, which BGG writes as 0, matches only when the range
+ * includes unknown ones. A range with no bound matches every item, as the
+ * server reads it (#719).
+ */
+function publishYearMatcher(range: proto.IntRange | undefined): (item: BggSearchItem) => boolean {
+  const min = range?.min ?? undefined;
+  const max = range?.max ?? undefined;
+
+  if (min === undefined && max === undefined) {
+    return () => true;
+  }
+
+  return (item) => {
+    const year = toPublishYear(item.yearpublished);
+
+    if (year === undefined) {
+      return range?.includeUnknown === true;
+    }
+
+    return (min === undefined || year >= min) && (max === undefined || year <= max);
+  };
 }
 
 /**

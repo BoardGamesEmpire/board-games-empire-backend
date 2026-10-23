@@ -1,7 +1,7 @@
 import * as proto from '@boardgamesempire/proto-gateway';
 import { GameType, PlatformType, Region } from '../constants';
 import type { IgdbGame } from '../types';
-import { toGameData, toSearchNarrowing } from './game.mapper';
+import { toGameData, toGameSearchData, toSearchNarrowing, utcYearStart } from './game.mapper';
 
 // The proto GameReleaseData.release_date field is contractually an ISO 8601 date
 // string ("2007-09-25"). Assert shape rather than an exact value so the tests
@@ -133,6 +133,67 @@ describe('game.mapper', () => {
     it('answers null when an axis names nothing IGDB has, so IGDB isn’t asked', () => {
       expect(toSearchNarrowing(filter({ platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP] }))).toBeNull();
       expect(toSearchNarrowing(filter({ contentTypes: [proto.ContentType.CONTENT_TYPE_ACCESSORY] }))).toBeNull();
+    });
+
+    // IGDB dates a game by its first release, in Unix seconds, and a year is
+    // read in UTC, so the narrowing agrees with the year each result is sent
+    // with (#719).
+    it('narrows to games released from the minimum’s first day up to the day after the maximum’s last', () => {
+      expect(toSearchNarrowing(filter({ publishYear: { min: 1990, max: 1999 } }))).toEqual({
+        releasedBetween: { from: 631152000, before: 946684800, orUnknown: false },
+      });
+    });
+
+    it('narrows by one bound alone, and keeps undated games when the range includes unknown ones', () => {
+      expect(toSearchNarrowing(filter({ publishYear: { max: 1999, includeUnknown: true } }))).toEqual({
+        releasedBetween: { before: 946684800, orUnknown: true },
+      });
+    });
+
+    it('narrows nothing by a range with no bound', () => {
+      expect(toSearchNarrowing(filter({ publishYear: { includeUnknown: true } }))).toEqual({});
+    });
+
+    // A Date holds about 275,000 years either side of 1970. A bound past that
+    // narrows nothing on its side, and the server still removes what it excludes.
+    it('leaves out a bound no date can reach', () => {
+      expect(toSearchNarrowing(filter({ publishYear: { min: 1990, max: 300_000 } }))).toEqual({
+        releasedBetween: { from: 631152000, orUnknown: false },
+      });
+      expect(toSearchNarrowing(filter({ publishYear: { min: 300_000 } }))).toEqual({});
+    });
+  });
+
+  describe('publish year (#719)', () => {
+    /** Runs `read` with the process in `zone`, as a server outside UTC is. */
+    const inZone = <T>(zone: string, read: () => T): T => {
+      const previous = process.env['TZ'];
+      process.env['TZ'] = zone;
+      try {
+        return read();
+      } finally {
+        if (previous === undefined) {
+          delete process.env['TZ'];
+        } else {
+          process.env['TZ'] = previous;
+        }
+      }
+    };
+
+    const firstReleased = (first_release_date: number): IgdbGame => ({ id: 1, name: 'G', first_release_date });
+
+    it('reads a first release date’s year in UTC', () => {
+      // 2020-01-01T00:00:00Z is still 2019 in Los Angeles, and 2019-12-31T23:59:59Z is already 2020 in Tokyo.
+      expect(inZone('America/Los_Angeles', () => toGameSearchData(firstReleased(1577836800)).yearPublished)).toBe(2020);
+      expect(inZone('Asia/Tokyo', () => toGameSearchData(firstReleased(1577836799)).yearPublished)).toBe(2019);
+      expect(inZone('America/Los_Angeles', () => toGameData(firstReleased(1577836800)).yearPublished)).toBe(2020);
+    });
+
+    // Date.UTC reads a year from 0 to 99 as 1900 plus it.
+    it('takes years before 100 as written', () => {
+      expect(utcYearStart(50)).toBe(-60589296000);
+      expect(utcYearStart(2000)).toBe(946684800);
+      expect(utcYearStart(-500)).toBe(-77945673600);
     });
   });
 });

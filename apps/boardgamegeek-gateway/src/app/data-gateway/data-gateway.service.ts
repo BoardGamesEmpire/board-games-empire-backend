@@ -68,9 +68,14 @@ export class DataGatewayService extends GatewayServiceHost {
 
       /**
        * Search narrows by content type through the thing types it asks BGG
-       * for. Its coverage is tabletop alone, which settles platform type.
+       * for. Its coverage is tabletop alone, which settles platform type. It
+       * narrows by publish year too: BGG pages in memory, so the range applies
+       * before paging and pages fill with games in it (#719).
        */
-      filterableAxes: [proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE],
+      filterableAxes: [
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE,
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR,
+      ],
 
       /**
        * BGG accepts and emits English language display names ("English",
@@ -130,7 +135,8 @@ export class DataGatewayService extends GatewayServiceHost {
    * Searches BGG for the request's query. A filter on content types narrows
    * the thing types search keeps; BGG itself is always asked for both, since
    * it labels expansions as base games in a base-game search (#777). A filter
-   * naming nothing BGG has ends the search at once, without asking BGG.
+   * naming nothing BGG has ends the search at once, without asking BGG. A
+   * publish-year range narrows the games it keeps before they're paged (#719).
    */
   searchGames(request: proto.GatewaySearchRequest): Observable<proto.GatewaySearchResult> {
     const limit = request.limit ?? undefined;
@@ -146,7 +152,9 @@ export class DataGatewayService extends GatewayServiceHost {
       } satisfies proto.GatewaySearchResult);
     }
 
-    return this.bggService.call(searchGamesRequest(request.query, limit, offset, types)).pipe(
+    const search = searchGamesRequest(request.query, limit, offset, types, request.filter?.publishYear);
+
+    return this.bggService.call(search).pipe(
       tap((items) => this.logger.log(`searchGames found ${items.length} results for query '${request.query}'`)),
 
       mergeMap((items) => items),

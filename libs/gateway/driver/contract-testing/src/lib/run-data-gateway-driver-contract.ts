@@ -31,8 +31,9 @@ export interface DataGatewayDriverContractContext {
 
 /**
  * A filter naming one value on `axis`: the first its coverage lists there,
- * or, when it lists none, tabletop or a base game. Undefined for an axis the
- * contract doesn't know.
+ * or, when it lists none, tabletop or a base game. On publish year, a range
+ * wide enough, unknown years included, that the search query's results still
+ * match it (#719). Undefined for an axis the contract doesn't know.
  */
 const filterOn = (
   axis: proto.SearchFilterAxis,
@@ -49,6 +50,8 @@ const filterOn = (
         platformTypes: [],
         contentTypes: [coverage?.contentTypes[0] ?? proto.ContentType.CONTENT_TYPE_BASE_GAME],
       };
+    case proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR:
+      return { platformTypes: [], contentTypes: [], publishYear: { includeUnknown: true, min: -10000, max: 10000 } };
     default:
       return undefined;
   }
