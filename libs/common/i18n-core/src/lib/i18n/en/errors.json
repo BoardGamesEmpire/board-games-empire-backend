@@ -19,6 +19,14 @@
     "server_owned_stays_public": "Game with ID {id} was imported and must stay public",
     "description_too_long": "A game's description must be at most {max} characters"
   },
+  "game_share": {
+    "recipient_exactly_one": "Name exactly one recipient: a user id or a household id",
+    "self_share": "You cannot share a game with yourself",
+    "recipient_refused": "You cannot share a game with this user",
+    "not_owner": "Only the person who created game {gameId} can share it",
+    "already_shared": "Game {gameId} is already shared with this recipient",
+    "not_found": "Share with ID {id} not found for game {gameId}"
+  },
   "game_collection": {
     "not_found": "Collection entry with ID {id} not found",
     "release_platform_mismatch": "Release {releaseId} does not belong to platform game {platformGameId}"
