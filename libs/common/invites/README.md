@@ -75,7 +75,7 @@ A stranger addressing an invite that is not theirs, by id or by a link that is n
 
 **Withdraw and revoke never stand in for each other.** `revokeWithin` takes the `revokerId` and refuses the invite's own inviter, whatever authority they hold, and `withdrawWithin` answers to the inviter alone, whatever their role in the context now. So `invite.withdrawn` always means the sender took the invite back and `invite.revoked` always means someone else cancelled it, or the context closed (#164).
 
-An email-only invite (no `inviteeId`) answers to the token its link carries, and to the account holding its address when the consumer vouches for that address. Addressed by id it answers to nobody else, not even its inviter: the id is public to every context reader through the household detail, the token and the address are not.
+An email-only invite (no `inviteeId`) answers to the token its link carries, and to the account holding its address when the consumer vouches for that address. Addressed by id it answers to nobody else, not even its inviter: the id reaches every context reader, staff listing a household's invites among them, and the token reaches none of them.
 
 The address is the consumer's to vouch for, as `vouchedEmail` on the party lookup: the lib matches it, trimmed and lower-cased as it stores addresses, and never decides whose an address is. The household routes vouch for the acting user's address only once it is verified (#162, #724). A withheld invite is never reached by an address, as it is never reached by a token. `receivedInviteWhere(userId, vouchedEmail)` is the same rule as a `where` fragment, for a listing of the invites a user has received (#163's inbox), so a listed invite is always one its reader can answer by id.
 
@@ -133,7 +133,7 @@ All keys live under `errors.invite.*`.
 
 Expiry is lazy. Nothing stamps `Expired` the moment `expiresAt` passes:
 
-- **Reads compute it.** `findForParty` and `effectiveInviteStatus(row, now)` report an outstanding row past its date as `Expired` without touching it. Reads never write through. A listing filters the same way with `unexpiredInviteWhere(now)` beside its status filter, as the household detail embed does, so a list and a read never disagree about the same row.
+- **Reads compute it.** `findForParty` and `effectiveInviteStatus(row, now)` report an outstanding row past its date as `Expired` without touching it. Reads never write through. A listing filters the same way with `unexpiredInviteWhere(now)` beside its status filter, as the household invite list does, so a list and a read never disagree about the same row.
 - **Transitions persist it as their failure path.** A transition that meets an expired outstanding row stamps `Expired`, announces `invite.expired`, and refuses with 410.
 - **A create persists it for the rows in its way.** An expired-but-unstamped invite is still inside the partial unique index, so `createWithin` first stamps `Expired` any outstanding invite to the same invitee (by id or address) under the same context whose window has closed, on the caller's transaction, and hands their `invite.expired` events back as `expired` beside the created event. A re-invite after expiry therefore never waits on the sweep.
 - **The sweep persists the rest** (#165). `expireOutstandingWithin(tx, { limit })` stamps `Expired` on outstanding invites of every type whose window has closed, at most `limit` from each outstanding status, and hands back `{ count, events, drained }`. It writes the status only, as the other two stamps do: nobody responded. A caller drains a backlog in batches, one transaction each, emitting each batch's events after its commit and stopping at the first batch that comes back `drained`.
@@ -196,7 +196,7 @@ No invite webhook exists. Whether one should is a per-event decision on #245, an
 
 Two shapes, both `select`-based so a new column is invisible until someone names it (#297):
 
-- `CONTEXT_INVITE_SELECT` — what a context reader sees: `id`, `status`, `type`, `inviteeName`, `expiresAt`, `createdAt`, `role { id, name }`, `inviter { id, username, profile }`. The household detail embed uses it.
+- `CONTEXT_INVITE_SELECT` — what a context reader sees: `id`, `status`, `type`, `inviteeName`, `expiresAt`, `createdAt`, `role { id, name }`, `inviter { id, username, profile }`. A household's invite list starts from it, and revoke and approve results use it.
 - `PARTY_INVITE_SELECT` — that plus `inviteeEmail` and `message`, for the inviter and the invitee on their own rows only.
 
 One consumer widens the context shape by one column. The household lib adds `inviteeEmail`, and never `message`, for the household's own owners and admins, as its roster names them, on its invite list and with the answer to a revoke or an approve (#167). It reads the address itself, after the lib's read or transition. Which readers count as the household's authority is the household's rule, not this lib's, so the lib keeps two shapes, and the ledger in `read-shapes.ts` records that audience beside `inviteeEmail`.

@@ -1,5 +1,5 @@
 import { InviteStatus, InviteType, Reach, SystemRole } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import { befriend, createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -116,41 +116,45 @@ describe('household lifecycle', () => {
     });
 
     /**
-     * The end-to-end half of #297. `read-shapes.spec.ts` pins the select
-     * CONSTANT and the service specs pin that the query uses it; neither reads
-     * a response. This one does, over HTTP, against a real row — so a shape
-     * that is correct in source and wrong by the time it reaches a client
-     * still fails.
+     * #665. The detail reaches every reader of the household, a member's
+     * friends included, and only the household's owners and admins, and staff,
+     * read its invites. With an invite pending, no reader's detail carries one,
+     * the owner's included: they list them at
+     * `GET /households/:householdId/invites`.
+     *
+     * `readEnvelope` refuses an `invites` key too, so every detail read in the
+     * suite checks it; this one names the readers it was about. The members
+     * array is asserted first, so a body that never carried the household
+     * cannot pass the absence.
      */
-    it('publishes a pending invite without its accept token or invitee email', async () => {
-      const owner = await actors.user();
-      const fixture = await actors.householdWithMembers({ owner, name: 'Household with a pending invite' });
+    it("embeds none of the household's invites, for any reader", async () => {
+      const [owner, member, guest, friend] = await Promise.all([
+        actors.user(),
+        actors.user(),
+        actors.user(),
+        actors.user(),
+      ]);
+      const fixture = await actors.householdWithMembers({
+        owner,
+        name: 'Household with a pending invite',
+        members: [
+          { actor: member, role: SystemRole.HouseholdMember },
+          { actor: guest, role: SystemRole.HouseholdGuest },
+        ],
+      });
+      await db.client.household.update({ where: { id: fixture.household.id }, data: { reach: Reach.Friends } });
+      await befriend(db.client, friend, member);
 
-      const pending = await arrangeInvite(owner, fixture.household.id, InviteStatus.Pending);
+      await arrangeInvite(owner, fixture.household.id, InviteStatus.Pending);
 
-      const detail = readEnvelope(
-        await readHousehold(owner, fixture.household.id).expect(200),
-        'GET /api/households/:id',
+      const responses = await Promise.all(
+        [owner, member, guest, friend].map((reader) => readHousehold(reader, fixture.household.id).expect(200)),
       );
 
-      const invite = detail.household.invites.find((entry) => entry.id === pending.id);
-
-      // Asserted BEFORE the absences below, which an invite the read never
-      // returned would satisfy just as well.
-      expect(invite).toBeDefined();
-      expect(invite?.status).toBe(InviteStatus.Pending);
-
-      // Named one at a time rather than left to the key set, so a regression
-      // says WHICH credential came back instead of printing two sorted lists.
-      expect(invite).not.toHaveProperty('token');
-      expect(invite).not.toHaveProperty('inviteeEmail');
-
-      // And the whole key set, because naming the two known leaks only catches
-      // the two known leaks — the defect class is a column nobody chose to
-      // publish, which by definition is not on any list written today.
-      expect(Object.keys(invite ?? {}).sort()).toEqual(
-        ['createdAt', 'expiresAt', 'id', 'inviteeName', 'inviter', 'role', 'status', 'type'].sort(),
-      );
+      for (const response of responses) {
+        expect(response.body.household.members).toHaveLength(3);
+        expect(response.body.household).not.toHaveProperty('invites');
+      }
     });
   });
 

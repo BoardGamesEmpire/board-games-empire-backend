@@ -3,7 +3,6 @@ import {
   Action,
   DatabaseService,
   HouseholdMembershipOrigin,
-  InviteStatus,
   isPrismaDependentRecordNotFoundError,
   isPrismaUniqueConstraintError,
   Prisma,
@@ -11,7 +10,7 @@ import {
   SystemRole,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { CONTEXT_INVITE_SELECT, InviteService, unexpiredInviteWhere } from '@bge/invites';
+import { InviteService } from '@bge/invites';
 import { canonicalizeTag } from '@bge/locale';
 import {
   AbilityService,
@@ -124,8 +123,15 @@ export class HouseholdService {
     private readonly invites: InviteService,
   ) {}
 
+  /**
+   * The household, with its roster and settings. It embeds no invites (#665):
+   * this read reaches every reader of the household, a member's friends
+   * included, and a read on its invites belongs to the household's owners and
+   * admins, and to staff. They list them at
+   * `GET /households/:householdId/invites`, and an inviter finds their own at
+   * `GET /invites/sent`.
+   */
   async getHouseholdById(id: string) {
-    const now = new Date();
     const household = await this.db.household.findUnique({
       where: {
         id,
@@ -134,16 +140,6 @@ export class HouseholdService {
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.read),
       },
       include: {
-        invites: {
-          // Pending AND still inside its window. Expiry is lazy (#161): a
-          // Pending row past its date reads Expired everywhere else, so it is
-          // not listed as pending here either.
-          where: {
-            AND: [{ status: InviteStatus.Pending }, unexpiredInviteWhere(now)],
-          },
-          select: CONTEXT_INVITE_SELECT,
-        },
-
         languageTag: {
           select: {
             id: true,

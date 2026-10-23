@@ -62,8 +62,8 @@ describe('household read shapes', () => {
       // Agreement by test rather than by a shared constant: the roster's `user`
       // belongs to this lib and the inviter to `@bge/invites`, and neither
       // should import the other's notion of a user. What matters is that a
-      // client sees one spelling of a user on the detail view, so that is
-      // what is pinned.
+      // client sees one spelling of a user across the household's roster and
+      // its invite list, so that is what is pinned.
       expect(CONTEXT_INVITE_SELECT.inviter.select).toEqual(MEMBER_SELECT.user.select);
     });
   });

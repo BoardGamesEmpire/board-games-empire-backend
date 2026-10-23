@@ -2,39 +2,65 @@ import type { Invite } from '@bge/database';
 import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
 import {
   asPagination,
+  type ActorProjection,
   type HouseholdMemberProjection,
+  type HouseholdRoleProjection,
   type PaginationWire,
-  type PendingInviteProjection,
 } from './household-wire';
 
 /**
  * Wire-contract types and fail-loud parsers for the household invite routes
  * (#162), on the model of `household-wire.ts`.
  *
- * Three shapes reach a client. Every row carries the context shape, which is
- * the household detail's invite embed. A row the caller sent carries the party
- * shape: the context shape plus the address and the message they wrote. Any
- * other row carries the authority shape for the household's owners and admins
- * (#167): the context shape plus the address alone. The invitee's routes
- * (#163) answer in the party shape too, and their inbox adds the household
- * that sent each invite.
+ * Three shapes reach a client. Every row carries the context shape. A row the
+ * caller sent carries the party shape: the context shape plus the address and
+ * the message they wrote. Any other row carries the authority shape for the
+ * household's owners and admins (#167): the context shape plus the address
+ * alone. The invitee's routes (#163) answer in the party shape too, and their
+ * inbox adds the household that sent each invite.
  */
+
+/**
+ * An invite as a context reader gets it (`CONTEXT_INVITE_SELECT`), which is far
+ * narrower than the model.
+ *
+ * This shape publishes six of `Invite`'s scalars. The ledgers in the invites
+ * lib's `read-shapes.ts` give the reason each other one is withheld, and two
+ * of them are the whole of #297: `token` is a live accept credential, and
+ * `inviteeEmail` is an address belonging to someone who may have no account.
+ * Declaring either here would let an assertion on it typecheck and then pass
+ * vacuously against `undefined`.
+ *
+ * `Pick` rather than `Omit`, for the reason on `HouseholdMemberWire` in
+ * `household-wire.ts`: dropping or renaming a published column is a compile
+ * error at this declaration, while `Omit` would accept a key the model no
+ * longer carries and silently omit nothing.
+ */
+export type ContextInviteWire = Wire<
+  Pick<Invite, 'id' | 'status' | 'type' | 'inviteeName' | 'expiresAt' | 'createdAt'>
+>;
+
+/** A context invite with the `role` and `inviter` embeds, as #297 shapes it. */
+export interface ContextInviteProjection extends ContextInviteWire {
+  readonly role: HouseholdRoleProjection['role'] | null;
+  readonly inviter: ActorProjection;
+}
 
 /** The two columns the party shape adds; the authority shape adds the address alone (#167). */
 export type InvitePartyFieldsWire = Wire<Pick<Invite, 'inviteeEmail' | 'message'>>;
 
 /** An invite as its inviter sees it: what `POST` answers, and a listed row the caller sent. */
-export interface InvitePartyRowWire extends PendingInviteProjection, InvitePartyFieldsWire {}
+export interface InvitePartyRowWire extends ContextInviteProjection, InvitePartyFieldsWire {}
 
 /** An invite as the household's owners and admins see one they did not send (#167): the address, not the message. */
-export interface InviteAuthorityRowWire extends PendingInviteProjection, Wire<Pick<Invite, 'inviteeEmail'>> {}
+export interface InviteAuthorityRowWire extends ContextInviteProjection, Wire<Pick<Invite, 'inviteeEmail'>> {}
 
 /**
  * A listed row: the party shape on the caller's own rows; the authority shape
  * on the rest for the household's owners and admins, the context shape for
  * anyone else.
  */
-export type ListedInviteWire = PendingInviteProjection | InviteAuthorityRowWire | InvitePartyRowWire;
+export type ListedInviteWire = ContextInviteProjection | InviteAuthorityRowWire | InvitePartyRowWire;
 
 export interface CreateInviteEnvelope {
   readonly message: string;
@@ -83,7 +109,7 @@ export function inviteEnvelope(response: HttpResponseLike, request: RequestDescr
 
 export interface RevokeInviteEnvelope {
   readonly message: string;
-  readonly invite: PendingInviteProjection | InviteAuthorityRowWire;
+  readonly invite: ContextInviteProjection | InviteAuthorityRowWire;
 }
 
 /**
