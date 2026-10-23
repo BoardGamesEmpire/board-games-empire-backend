@@ -63,6 +63,7 @@ import type {
   InviteWithdrawal,
   OutstandingInviteExpiry,
   OutstandingInviteRevocation,
+  OutstandingInviteWithholding,
   RespondToInviteParams,
   RevokeInviteParams,
   WithdrawInviteParams,
@@ -605,6 +606,45 @@ export class InviteService {
     );
 
     return { count: events.length, events };
+  }
+
+  /**
+   * Withholds the outstanding invites into a context that name no user and
+   * go to one address, as a household ban does to the banned user's address
+   * (#782). A withheld invite is unreachable by id, by address and by its
+   * link, and its inviter sees no change: it still reads as sent.
+   *
+   * Never revoked: revoking would tell each inviter whose address it was. Nor
+   * announced, for the same reason, so no events come back.
+   *
+   * One guarded update, with no limit. The caller locks its context row
+   * first, as for {@link revokeOutstandingWithin}.
+   */
+  async withholdOutstandingToAddressWithin(
+    tx: Prisma.TransactionClient,
+    scope: InviteContextScope,
+    email: string,
+  ): Promise<OutstandingInviteWithholding> {
+    const inviteeEmail = normalizeInviteeEmail(email);
+
+    // A consumer's mistake, so a bare 500. A blank address normalises to
+    // null, which would match the invites that name no address at all.
+    if (inviteeEmail === null) {
+      throw new Error('An address to withhold invites to must not be blank');
+    }
+
+    const { count } = await tx.invite.updateMany({
+      where: {
+        ...scope,
+        inviteeId: null,
+        inviteeEmail,
+        withheld: false,
+        status: { in: [...OUTSTANDING_INVITE_STATUSES] },
+      },
+      data: { withheld: true },
+    });
+
+    return { count };
   }
 
   /**
