@@ -1585,7 +1585,9 @@ export const PERMISSION_CATALOG = [
   // The audience is revoke's, read off an instance for the same reason. It is
   // a permission of its own, bound to `approvedById`, the column only an
   // approval writes, and the approve route asks about that column: a role that
-  // may approve may not revoke on the strength of it, nor the reverse (#169).
+  // may approve may not revoke on the strength of it, nor the reverse. Every
+  // shipped role holds both or neither, but a server admin editing a role
+  // (#772), or a household restricting one (#845), can leave it just one.
   //
   // An approver may approve an invite they sent themselves, as a member
   // promoted since: refusing would block nothing, since they could withdraw it

@@ -1396,8 +1396,9 @@ describe('HouseholdInviteService', () => {
       expect(steps).toEqual(['revoke', 'address', 'commit', 'approve', 'address', 'commit']);
     });
 
-    // Staff may hold a grant here, and a member a custom role (#169); only the
-    // roster's owner and admin roles show the address.
+    // Staff may hold a grant here, and a member could hold extra permissions
+    // through a variant of their role (#844); only the roster's owner and admin
+    // roles show the address.
     it.each([
       ['staff, who hold no household role', 'staff-1'],
       ['a plain member', 'member-1'],

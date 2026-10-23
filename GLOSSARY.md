@@ -395,6 +395,10 @@ _Avoid_: household permission level
 **Member role**:
 The household role for regular members, above a household guest and below a household admin.
 
+**Household role variant**:
+Planned: a named set of extra permissions a household puts on top of one of the household roles the server ships. Whoever holds one keeps that household role, and gains permissions for the household's activity, such as its events and plays, but never for running the household.
+_Avoid_: custom role, for a household (custom roles are defined by server admins); household-defined role
+
 **Founder**:
 The user who created a household. They start as its owner, but the title records history, not current authority.
 _Avoid_: creator, created by

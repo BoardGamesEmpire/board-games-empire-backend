@@ -353,9 +353,10 @@ describe('member invites, their approval, and the invites a user has sent', () =
 
     describe('kept apart from revoking', () => {
       /**
-       * Takes `slug` from the household admin role while `work` runs, as a
-       * custom role holding only the other grant would (#169), and puts the
-       * rows back exactly. The admin's ability is built on their first
+       * Takes `slug` from the household admin role while `work` runs, leaving
+       * it only the other grant, as a server admin editing the role (#772) or
+       * a household restricting it (#845) could, and puts the rows back
+       * exactly. The admin's ability is built on their first
        * request, so it must come after this starts. The e2e suite runs on one
        * worker, so no other spec sees the gap.
        */

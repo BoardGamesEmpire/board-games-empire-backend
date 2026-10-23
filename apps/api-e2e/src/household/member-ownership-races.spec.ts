@@ -1,9 +1,8 @@
 import { SystemRole } from '@bge/database';
 import { createActors, type Actors } from '@bge/testing-e2e';
-import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { createMemberClient, membersPath } from './household-request';
+import { createMemberClient } from './household-request';
 
 /**
  * The product half of #239: concurrent owner transitions issued as real HTTP
@@ -41,7 +40,7 @@ describe('concurrent household owner transitions', () => {
     await db.close();
   });
 
-  const { leave, transferOwnership } = createMemberClient(baseUrl);
+  const { leave, transferOwnership, changeRole } = createMemberClient(baseUrl);
 
   const ownerCount = (householdId: string): Promise<number> =>
     db.client.householdRole.count({
@@ -159,10 +158,7 @@ describe('concurrent household owner transitions', () => {
 
     const [transfer, roleChange] = await Promise.all([
       transferOwnership(owner, fixture.household.id, target.member.id),
-      request(baseUrl)
-        .patch(`${membersPath(fixture.household.id)}/${target.member.id}/role`)
-        .set(admin.headers)
-        .send({ role: SystemRole.HouseholdGuest }),
+      changeRole(admin, fixture.household.id, target.member.id, SystemRole.HouseholdGuest),
     ]);
 
     // The transfer succeeds under BOTH orderings — promoting a guest is as

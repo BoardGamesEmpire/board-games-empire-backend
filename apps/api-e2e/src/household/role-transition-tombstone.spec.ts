@@ -1,11 +1,11 @@
 import { SystemRole } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { setTimeout as sleep } from 'node:timers/promises';
-import request from 'supertest';
+import type request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { createMemberClient, membersPath } from './household-request';
+import { createMemberClient } from './household-request';
 import { SOFT_DELETE_HOUSEHOLD } from './lock-fixtures';
 
 /**
@@ -62,7 +62,7 @@ describe('role transitions racing a soft-delete (#386)', () => {
     await db.close();
   });
 
-  const { removeMember, leave, transferOwnership } = createMemberClient(baseUrl);
+  const { removeMember, leave, transferOwnership, changeRole } = createMemberClient(baseUrl);
 
   interface Arrangement {
     readonly householdId: string;
@@ -97,11 +97,7 @@ describe('role transitions racing a soft-delete (#386)', () => {
     },
     {
       name: 'role change',
-      send: ({ householdId, owner, memberId }) =>
-        request(baseUrl)
-          .patch(`${membersPath(householdId)}/${memberId}/role`)
-          .set(owner.headers)
-          .send({ role: SystemRole.HouseholdAdmin }),
+      send: ({ householdId, owner, memberId }) => changeRole(owner, householdId, memberId, SystemRole.HouseholdAdmin),
     },
     {
       name: 'removal',

@@ -35,7 +35,7 @@ describe('household lifecycle', () => {
   const readHousehold = (actor: SessionActor, id: string) =>
     request(baseUrl).get(`${HOUSEHOLDS_PATH}/${id}`).set(actor.headers);
 
-  const { removeMember, leave, transferOwnership } = createMemberClient(baseUrl);
+  const { removeMember, leave, transferOwnership, changeRole } = createMemberClient(baseUrl);
 
   /**
    * Arranges an invite directly (#257): inline rather than as a
@@ -373,11 +373,7 @@ describe('household lifecycle', () => {
 
       await request(baseUrl).get(rosterPath).set(owner.headers).expect(404);
       await request(baseUrl).get(`${rosterPath}/${memberId}`).set(owner.headers).expect(404);
-      await request(baseUrl)
-        .patch(`${rosterPath}/${memberId}/role`)
-        .set(owner.headers)
-        .send({ role: SystemRole.HouseholdAdmin })
-        .expect(404);
+      await changeRole(owner, householdId, memberId, SystemRole.HouseholdAdmin).expect(404);
       await transferOwnership(owner, householdId, memberId).expect(404);
       await removeMember(owner, householdId, memberId).expect(404);
       await leave(member, householdId).expect(404);
