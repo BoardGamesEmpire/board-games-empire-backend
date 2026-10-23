@@ -1,5 +1,6 @@
 import { Action, HouseholdMembershipOrigin, Prisma, QuotaScope, ResourceType, SystemRole } from '@bge/database';
 import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
+import { InviteService } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import { QuotaExceededException, QuotaService, type QuotaCheckResult, type QuotaSoftOverageEvent } from '@bge/quota';
 import { DEFAULT_PAGE_SIZE } from '@bge/shared';
@@ -127,6 +128,7 @@ describe('HouseholdMemberService', () => {
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser' | 'invalidateUsers'>>;
   let events: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
   let quotas: jest.Mocked<Pick<QuotaService, 'consume' | 'emitSoftOverages'>>;
+  let invites: jest.Mocked<Pick<InviteService, 'revokeOutstandingOfUserWithin' | 'emit'>>;
   let compose: jest.SpyInstance;
 
   /**
@@ -194,6 +196,10 @@ describe('HouseholdMemberService', () => {
       consume: jest.fn().mockResolvedValue(quotaDecision()),
       emitSoftOverages: jest.fn(),
     };
+    invites = {
+      revokeOutstandingOfUserWithin: jest.fn().mockResolvedValue({ count: 0, events: [] }),
+      emit: jest.fn(),
+    };
 
     const ctx = await createTestingModuleWithDb({
       providers: [
@@ -205,6 +211,7 @@ describe('HouseholdMemberService', () => {
         { provide: PermissionsService, useValue: permissions },
         { provide: EventEmitter2, useValue: events },
         { provide: QuotaService, useValue: quotas },
+        { provide: InviteService, useValue: invites },
       ],
     });
 
@@ -837,6 +844,34 @@ describe('HouseholdMemberService', () => {
       expect(result.id).toBe('member-1');
     });
 
+    it('revokes the invites the member sent or that name them, in the same transaction, and announces them (#747)', async () => {
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
+      const revoked = [{ eventName: 'invite.revoked', subjectId: 'inv-1' }] as never;
+      // The mocked client and these mocks keep separate call-order counters,
+      // so each records what had happened when it ran.
+      const membershipDeleted: boolean[] = [];
+      const cacheEvicted: boolean[] = [];
+      invites.revokeOutstandingOfUserWithin.mockImplementation(async () => {
+        membershipDeleted.push(db.householdMember.delete.mock.calls.length > 0);
+        return { count: 1, events: revoked };
+      });
+      invites.emit.mockImplementation(() => {
+        cacheEvicted.push(permissions.invalidateUser.mock.calls.length > 0);
+      });
+
+      await service.removeMember('hh-1', 'member-1');
+
+      // On the transaction that removes them, under its household lock, and
+      // after the membership is gone: the authority that sent them went with
+      // it.
+      expect(invites.revokeOutstandingOfUserWithin).toHaveBeenCalledWith(db, { householdId: 'hh-1' }, 'user-1');
+      expect(membershipDeleted).toEqual([true]);
+
+      // Announced after commit, once the removed member's cache is evicted.
+      expect(invites.emit).toHaveBeenCalledWith(revoked);
+      expect(cacheEvicted).toEqual([true]);
+    });
+
     it('locks the owner rows and allows removing an owner when another owner remains', async () => {
       db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner()));
       db.$queryRaw.mockResolvedValue([{ household_member_id: 'member-1' }, { household_member_id: 'member-2' }]);
@@ -858,6 +893,8 @@ describe('HouseholdMemberService', () => {
       expect(db.householdRole.deleteMany).not.toHaveBeenCalled();
       expect(db.householdMember.delete).not.toHaveBeenCalled();
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
+      expect(invites.revokeOutstandingOfUserWithin).not.toHaveBeenCalled();
+      expect(invites.emit).not.toHaveBeenCalled();
     });
 
     it('throws NotFound when the household does not exist', async () => {
@@ -996,6 +1033,17 @@ describe('HouseholdMemberService', () => {
       });
       expect(db.householdMember.delete).toHaveBeenCalledWith({ where: { id: 'member-1' } });
       expect(permissions.invalidateUser).toHaveBeenCalledWith('actor-1');
+    });
+
+    it('revokes the invites the leaver sent or that name them, as being removed does (#747)', async () => {
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember({ userId: 'actor-1' })));
+
+      await service.leaveHousehold('hh-1');
+
+      // Leaving is the leaver's own act, but the authority their invites were
+      // sent with ends the same way.
+      expect(invites.revokeOutstandingOfUserWithin).toHaveBeenCalledWith(db, { householdId: 'hh-1' }, 'actor-1');
+      expect(invites.emit).toHaveBeenCalledWith([]);
     });
 
     it('rejects the sole owner leaving (400) — transfer ownership first', async () => {

@@ -1,5 +1,5 @@
-import { InviteStatus, InviteType, SystemRole } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
+import { InviteStatus, SystemRole } from '@bge/database';
+import { arrangeInvite, createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -41,30 +41,6 @@ describe('household invite inbox', () => {
 
   const verify = (actor: SessionActor) =>
     db.client.user.update({ where: { id: actor.user.id }, data: { emailVerified: true } });
-
-  /** An invite written directly, for a state no route produces. */
-  const arrangeInvite = (
-    inviter: SessionActor,
-    householdId: string,
-    data: {
-      inviteeId?: string;
-      inviteeEmail?: string;
-      status?: InviteStatus;
-      expiresAt?: Date;
-      withheld?: boolean;
-    },
-  ) =>
-    db.client.invite.create({
-      data: {
-        type: InviteType.Household,
-        inviterId: inviter.user.id,
-        householdId,
-        token: randomUUID(),
-        status: InviteStatus.Pending,
-        expiresAt: new Date(Date.now() + DAY_MS),
-        ...data,
-      },
-    });
 
   const ownedHousehold = async (name: string) => {
     const owner = await actors.user();
@@ -121,19 +97,31 @@ describe('household invite inbox', () => {
     const { household: open } = await ownedHousehold(`Open ${randomUUID()}`);
 
     // Withheld: a block or the invitee's preference refused it (#278).
-    await arrangeInvite(owner, household.id, { inviteeEmail: invitee.user.email, withheld: true });
+    await arrangeInvite(db.client, {
+      inviter: owner,
+      householdId: household.id,
+      inviteeEmail: invitee.user.email,
+      withheld: true,
+    });
     // Expired, though its row still says Pending.
-    await arrangeInvite(owner, household.id, {
+    await arrangeInvite(db.client, {
+      inviter: owner,
+      householdId: household.id,
       inviteeId: invitee.user.id,
       expiresAt: new Date(Date.now() - DAY_MS),
     });
-    await arrangeInvite(owner, household.id, { inviteeId: invitee.user.id, status: InviteStatus.Declined });
+    await arrangeInvite(db.client, {
+      inviter: owner,
+      householdId: household.id,
+      inviteeId: invitee.user.id,
+      status: InviteStatus.Declined,
+    });
     // Into a household they already belong to: its accept would be refused.
-    await arrangeInvite(owner, theirs.id, { inviteeEmail: invitee.user.email });
+    await arrangeInvite(db.client, { inviter: owner, householdId: theirs.id, inviteeEmail: invitee.user.email });
     // Into a deleted household.
-    await arrangeInvite(goneOwner, gone.id, { inviteeId: invitee.user.id });
+    await arrangeInvite(db.client, { inviter: goneOwner, householdId: gone.id, inviteeId: invitee.user.id });
     // One they sent, to an address that is their own.
-    await arrangeInvite(invitee, open.id, { inviteeEmail: invitee.user.email });
+    await arrangeInvite(db.client, { inviter: invitee, householdId: open.id, inviteeEmail: invitee.user.email });
 
     const { invites, pagination } = await received(invitee);
 

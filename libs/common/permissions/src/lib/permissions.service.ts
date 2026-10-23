@@ -6,6 +6,7 @@ import {
   loadPluginUnitEnablement,
   PluginGrantScope,
   PluginGrantStatus,
+  Prisma,
   riskCovers,
   type RiskLevel,
 } from '@bge/database';
@@ -90,7 +91,7 @@ export class PermissionsService {
     const userGraph = await this.getOrLoad(
       PermissionsService.userGraphCacheKey(userId),
       `user role graph for user ${userId}`,
-      () => this.loadUserGraph(userId),
+      () => this.loadUserGraph(this.db, userId),
       (graph) => this.cacheTtlForGraph(graph),
       // A graph holding no global role was read before its user's provisioning
       // committed (#490): every provisioned user holds one, and provisioning
@@ -104,6 +105,25 @@ export class PermissionsService {
     );
 
     return userGraph as UserWithRoles | null;
+  }
+
+  /**
+   * A user's permission graph as `tx` reads it, never from the cache and
+   * never cached: for asking about a user other than the actor at the moment
+   * a decision is made, when their roles may have changed a moment ago (#747).
+   * A role change evicts the cached graph only after it commits, so a cached
+   * read can still hold the role it replaced. Inside a transaction holding a
+   * lock the change also takes, this read sees exactly what committed.
+   *
+   * A user under a ban in force reads as no graph, as a deleted one does: they
+   * can neither sign in nor use a key, so they could do nothing now. The rule
+   * is the one better-auth applies at sign-in and the API key middleware
+   * applies per request: banned with no expiry, or with one still to come.
+   */
+  async loadUserRoleGraphWithin(tx: Prisma.TransactionClient, userId: string): Promise<UserWithRoles | null> {
+    const notBannedNow = { OR: [{ banned: null }, { banned: false }, { banExpires: { lte: new Date() } }] };
+
+    return (await this.loadUserGraph(tx, userId, notBannedNow)) as UserWithRoles | null;
   }
 
   /**
@@ -328,9 +348,13 @@ export class PermissionsService {
     return Math.max(MIN_CACHE_TTL_IN_MILLISECONDS, Math.min(CACHE_TTL_IN_MILLISECONDS, Math.min(...upcoming)));
   }
 
-  private loadUserGraph(userId: string) {
-    return this.db.user.findUnique({
-      where: { id: userId },
+  private loadUserGraph(
+    client: DatabaseService | Prisma.TransactionClient,
+    userId: string,
+    standing?: Prisma.UserWhereInput,
+  ) {
+    return client.user.findUnique({
+      where: { id: userId, ...(standing && { AND: standing }) },
       // Every role → permission hop below filters `permission.retiredAt: null`
       // (#235): a retired catalog row keeps whatever grants still reference it
       // and confers nothing through any of them.

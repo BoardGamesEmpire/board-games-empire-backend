@@ -1,14 +1,26 @@
 import { AuditContextService, type Actor } from '@bge/actor-context';
-import { HouseholdMembershipOrigin, InviteStatus, InviteType, Prisma, QuotaScope, SystemRole } from '@bge/database';
+import {
+  Action,
+  HouseholdMembershipOrigin,
+  InviteStatus,
+  InviteType,
+  MemberInvitePolicy,
+  Prisma,
+  QuotaScope,
+  ResourceType,
+  SystemRole,
+} from '@bge/database';
 import {
   InviteService,
   PARTY_INVITE_SELECT,
   type InviteAcceptance,
   type InviteDeclination,
+  type InviteOffer,
   type InvitePartyView,
+  type InviteRevocation,
   type InviteWithdrawal,
 } from '@bge/invites';
-import { PermissionsService } from '@bge/permissions';
+import { AbilityService, PermissionsService, type UserAbilityCheck } from '@bge/permissions';
 import { QuotaService, type QuotaSoftOverageEvent } from '@bge/quota';
 import {
   batchTransactionCall,
@@ -57,22 +69,51 @@ const OVERAGE: QuotaSoftOverageEvent = {
 /** Prisma's delegate types want full rows; the service selects narrower ones. */
 const resolves = (value: unknown) => value as never;
 
+/** The household as the sender check reads it under the lock: its roster and its member invite policy. */
+const AUTHORITY = {
+  settings: { memberInvitePolicy: MemberInvitePolicy.NeedsApproval },
+  members: [{ userId: INVITER_ID, role: { role: { name: SystemRole.HouseholdAdmin } } }],
+};
+
 describe('PartyInviteService', () => {
   let service: PartyInviteService;
   let db: MockDatabaseService;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getActor'>>;
   let invites: jest.Mocked<
-    Pick<InviteService, 'findPartyScopeWithin' | 'acceptWithin' | 'declineWithin' | 'withdrawWithin' | 'emit'>
+    Pick<
+      InviteService,
+      | 'findPartyScopeWithin'
+      | 'findAcceptableWithin'
+      | 'acceptWithin'
+      | 'revokeWithin'
+      | 'declineWithin'
+      | 'withdrawWithin'
+      | 'emit'
+    >
   >;
   let members: jest.Mocked<Pick<HouseholdMemberService, 'addMemberWithin'>>;
+  let abilities: jest.Mocked<Pick<AbilityService, 'userAbilityWithin'>>;
+  let senderCan: jest.Mock<boolean, Parameters<UserAbilityCheck>>;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser'>>;
   let quotas: jest.Mocked<Pick<QuotaService, 'emitSoftOverages'>>;
+  let offer: InviteOffer;
+  let revocation: InviteRevocation;
   let acceptance: InviteAcceptance;
   let declination: InviteDeclination;
   let withdrawal: InviteWithdrawal;
   let admission: AddMemberResult;
 
   beforeEach(async () => {
+    offer = {
+      id: 'invite-1',
+      inviterId: INVITER_ID,
+      role: { id: 'role-admin', name: SystemRole.HouseholdAdmin },
+      needsApproval: false,
+    };
+    revocation = {
+      invite: partyView({ status: InviteStatus.Revoked }),
+      event: { eventName: 'invite.revoked', subjectId: 'invite-1' } as never,
+    };
     acceptance = { invite: partyView(), event: { eventName: 'invite.accepted' } as never };
     declination = {
       invite: partyView({ status: InviteStatus.Declined }),
@@ -87,12 +128,16 @@ describe('PartyInviteService', () => {
     auditContext = { getActor: jest.fn().mockReturnValue(SESSION_USER) };
     invites = {
       findPartyScopeWithin: jest.fn().mockResolvedValue({ householdId: HOUSEHOLD_ID }),
+      findAcceptableWithin: jest.fn().mockImplementation(() => Promise.resolve(offer)),
       acceptWithin: jest.fn().mockImplementation(() => Promise.resolve(acceptance)),
+      revokeWithin: jest.fn().mockImplementation(() => Promise.resolve(revocation)),
       declineWithin: jest.fn().mockImplementation(() => Promise.resolve(declination)),
       withdrawWithin: jest.fn().mockImplementation(() => Promise.resolve(withdrawal)),
       emit: jest.fn(),
     };
     members = { addMemberWithin: jest.fn().mockImplementation(() => Promise.resolve(admission)) };
+    senderCan = jest.fn().mockReturnValue(true);
+    abilities = { userAbilityWithin: jest.fn().mockResolvedValue(senderCan) };
     permissions = { invalidateUser: jest.fn().mockResolvedValue(undefined) };
     quotas = { emitSoftOverages: jest.fn() };
 
@@ -102,6 +147,7 @@ describe('PartyInviteService', () => {
         { provide: AuditContextService, useValue: auditContext },
         { provide: InviteService, useValue: invites },
         { provide: HouseholdMemberService, useValue: members },
+        { provide: AbilityService, useValue: abilities },
         { provide: PermissionsService, useValue: permissions },
         { provide: QuotaService, useValue: quotas },
       ],
@@ -115,6 +161,7 @@ describe('PartyInviteService', () => {
     db.user.findUnique.mockResolvedValue(resolves({ email: ADDRESS, emailVerified: true }));
     db.invite.findMany.mockResolvedValue([]);
     db.invite.count.mockResolvedValue(0);
+    db.household.findUnique.mockResolvedValue(resolves(AUTHORITY));
   });
 
   describe.each([
@@ -175,6 +222,8 @@ describe('PartyInviteService', () => {
       const order: string[] = [];
       invites.findPartyScopeWithin.mockImplementation(async () => (order.push('read'), { householdId: HOUSEHOLD_ID }));
       db.$queryRaw.mockImplementation((async () => (order.push('lock'), [{ id: HOUSEHOLD_ID }])) as never);
+      invites.findAcceptableWithin.mockImplementation(async () => (order.push('offer'), offer));
+      senderCan.mockImplementation(() => (order.push('sender'), true));
       invites.acceptWithin.mockImplementation(async () => (order.push('accept'), acceptance));
       members.addMemberWithin.mockImplementation(async () => (order.push('admit'), admission));
 
@@ -187,6 +236,7 @@ describe('PartyInviteService', () => {
         type: InviteType.Household,
       };
       expect(invites.findPartyScopeWithin).toHaveBeenCalledWith(db, lookup, InviteType.Household);
+      expect(invites.findAcceptableWithin).toHaveBeenCalledWith(db, lookup);
       expect(invites.acceptWithin).toHaveBeenCalledWith(db, lookup);
       expect(members.addMemberWithin).toHaveBeenCalledWith(db, {
         householdId: HOUSEHOLD_ID,
@@ -197,8 +247,9 @@ describe('PartyInviteService', () => {
       });
 
       // The household row, then the invite, then the roster: the order a soft
-      // delete takes the first two in.
-      expect(order).toEqual(['read', 'lock', 'accept', 'admit']);
+      // delete takes the first two in. The sender is asked about under the
+      // lock, and only once the lib would let the accept through (#747).
+      expect(order).toEqual(['read', 'lock', 'offer', 'sender', 'accept', 'admit']);
 
       expect(invite).toBe(acceptance.invite);
       expect(member).toBe(admission.member);
@@ -288,6 +339,131 @@ describe('PartyInviteService', () => {
       expect(invites.acceptWithin).not.toHaveBeenCalled();
       expect(members.addMemberWithin).not.toHaveBeenCalled();
     });
+
+    describe('whether the sender could still send it (#747)', () => {
+      /** The instance the sender's own invite grants are asked about, as the create builds it. */
+      const subject = (needsApproval: boolean, role: SystemRole = SystemRole.HouseholdAdmin) => ({
+        householdId: HOUSEHOLD_ID,
+        needsApproval,
+        role: { name: role },
+        household: AUTHORITY,
+      });
+
+      it("asks the sender's own ability about the invite as one opened directly, with the household read under the lock", async () => {
+        await service.accept({ inviteId: 'invite-1' });
+
+        expect(db.household.findUnique).toHaveBeenCalledWith({
+          where: { id: HOUSEHOLD_ID },
+          select: {
+            settings: { select: { memberInvitePolicy: true } },
+            members: { select: { userId: true, role: { select: { role: { select: { name: true } } } } } },
+          },
+        });
+        expect(abilities.userAbilityWithin).toHaveBeenCalledWith(db, INVITER_ID);
+        expect(senderCan).toHaveBeenCalledTimes(1);
+        expect(senderCan).toHaveBeenCalledWith(Action.create, ResourceType.Invite, subject(false));
+      });
+
+      it('asks about the role the admission grants when the invite offers none', async () => {
+        offer = { ...offer, role: null };
+        acceptance = { ...acceptance, invite: partyView({ role: null }) };
+
+        await service.accept({ inviteId: 'invite-1' });
+
+        expect(senderCan).toHaveBeenCalledWith(
+          Action.create,
+          ResourceType.Invite,
+          subject(false, SystemRole.HouseholdMember),
+        );
+      });
+
+      it('accepts an approved invite its sender could still send for approval', async () => {
+        offer = { ...offer, needsApproval: true };
+        senderCan.mockReturnValueOnce(false).mockReturnValueOnce(true);
+
+        await service.accept({ inviteId: 'invite-1' });
+
+        expect(senderCan).toHaveBeenNthCalledWith(2, Action.create, ResourceType.Invite, subject(true));
+        // One graph for both questions.
+        expect(abilities.userAbilityWithin).toHaveBeenCalledTimes(1);
+        expect(invites.revokeWithin).not.toHaveBeenCalled();
+        expect(members.addMemberWithin).toHaveBeenCalled();
+      });
+
+      it('revokes an unapproved invite its sender could now send only for approval', async () => {
+        senderCan.mockReturnValueOnce(false).mockReturnValueOnce(true);
+
+        await expect(service.accept({ inviteId: 'invite-1' })).rejects.toMatchObject({ status: 409 });
+
+        // An invite that never waited for an approver isn't one now.
+        expect(senderCan).toHaveBeenCalledTimes(1);
+        expect(invites.revokeWithin).toHaveBeenCalled();
+      });
+
+      it('revokes the invite instead of accepting it, commits that, and answers 409 as for a revoked invite', async () => {
+        senderCan.mockReturnValue(false);
+        let committed = false;
+        db.$transaction.mockImplementation((async (work: (tx: MockDatabaseService) => Promise<unknown>) => {
+          const result = await work(db);
+          committed = true;
+          return result;
+        }) as never);
+        invites.emit.mockImplementation(() => expect(committed).toBe(true));
+
+        await expect(service.accept({ token: 'live-accept-credential' })).rejects.toMatchObject({
+          status: 409,
+          response: expect.objectContaining({
+            key: 'errors.invite.not_outstanding',
+            args: { id: 'invite-1', status: InviteStatus.Revoked },
+          }),
+        });
+
+        // By the id the read found, bound to the household, with the invitee as
+        // the one revoking: the lib refuses only the inviter.
+        expect(invites.revokeWithin).toHaveBeenCalledWith(db, {
+          inviteId: 'invite-1',
+          revokerId: INVITEE_ID,
+          scope: { householdId: HOUSEHOLD_ID },
+        });
+        expect(invites.emit).toHaveBeenCalledWith([revocation.event]);
+        expect(invites.acceptWithin).not.toHaveBeenCalled();
+        expect(members.addMemberWithin).not.toHaveBeenCalled();
+        expect(permissions.invalidateUser).not.toHaveBeenCalled();
+        expect(quotas.emitSoftOverages).not.toHaveBeenCalled();
+      });
+
+      it('asks nothing of the sender when the lib refuses the accept first', async () => {
+        invites.findAcceptableWithin.mockRejectedValue(new ConflictException('awaiting approval'));
+
+        await expect(service.accept({ inviteId: 'invite-1' })).rejects.toThrow(ConflictException);
+
+        expect(abilities.userAbilityWithin).not.toHaveBeenCalled();
+        expect(invites.revokeWithin).not.toHaveBeenCalled();
+      });
+
+      it('answers an existing member 409 already_a_member and revokes nothing, as the admission would', async () => {
+        senderCan.mockReturnValue(false);
+        db.household.findUnique.mockResolvedValue(
+          resolves({
+            ...AUTHORITY,
+            members: [
+              ...AUTHORITY.members,
+              { userId: INVITEE_ID, role: { role: { name: SystemRole.HouseholdMember } } },
+            ],
+          }),
+        );
+
+        await expect(service.accept({ inviteId: 'invite-1' })).rejects.toMatchObject({
+          status: 409,
+          response: expect.objectContaining({ key: 'errors.household.already_a_member' }),
+        });
+
+        // Revoking would commit, and tell the inviter that an address invite
+        // reached someone already in the household.
+        expect(invites.revokeWithin).not.toHaveBeenCalled();
+        expect(invites.emit).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('listReceived', () => {
@@ -357,7 +533,10 @@ describe('PartyInviteService', () => {
       }
     };
 
-    /** Where the inviter is no longer a member, only what they can still withdraw. */
+    /**
+     * Where the inviter is not a member, only what they can still withdraw: a
+     * server owner's invites, since leaving revoked a former member's (#747).
+     */
     const withdrawableOrStillMember = {
       OR: [
         { household: { is: { members: { some: { userId: INVITER_ID } } } } },

@@ -6,6 +6,7 @@ import {
   ConflictException,
   ForbiddenException,
   GoneException,
+  HttpException,
   InternalServerErrorException,
   Logger,
   NotFoundException,
@@ -1022,6 +1023,61 @@ describe('InviteService', () => {
     });
   });
 
+  describe('findAcceptableWithin', () => {
+    const lookup = { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID, type: InviteType.Household } as const;
+
+    it('reads as accept reads, writes nothing, and hands back who sent the invite and what it offers', async () => {
+      tx.invite.findFirst.mockResolvedValue({ ...rowWithToken(), needsApproval: false } as never);
+
+      const offer = await service.findAcceptableWithin(asTx(tx), lookup);
+
+      expect(tx.invite.findFirst).toHaveBeenCalledWith({
+        where: { ...partyWhereById('inv-1', INVITEE_ID), type: InviteType.Household },
+        select: { ...TRANSITION_SELECT, needsApproval: true },
+      });
+      expect(offer).toEqual({
+        id: 'inv-1',
+        inviterId: INVITER_ID,
+        role: { id: 'role-member', name: 'HouseholdMember' },
+        needsApproval: false,
+      });
+      expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
+      expect(db.invite.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('says an invite was sent to wait for an approver, as its row stores it (#747)', async () => {
+      tx.invite.findFirst.mockResolvedValue({ ...rowWithToken(), needsApproval: true } as never);
+
+      await expect(service.findAcceptableWithin(asTx(tx), lookup)).resolves.toMatchObject({ needsApproval: true });
+    });
+
+    // The consumer asks its own question of the offer only once the lib would
+    // have let the accept through, so every refusal the accept makes comes
+    // first, and comes out the same (#747).
+    it.each([
+      ['a stranger', null, INVITEE_ID],
+      ['the inviter', rowWithToken(), INVITER_ID],
+      ['an invite awaiting approval', rowWithToken({ status: InviteStatus.AwaitingApproval }), INVITEE_ID],
+      ...TERMINAL.map((status) => [`a ${status} invite`, rowWithToken({ status }), INVITEE_ID] as const),
+      ['an expired invite', rowWithToken({ expiresAt: PAST }), INVITEE_ID],
+    ] as const)('refuses %s exactly as acceptWithin does', async (_case, row, actingUserId) => {
+      const refusalOf = (refusal: HttpException) => ({ status: refusal.getStatus(), response: refusal.getResponse() });
+      db.invite.updateMany.mockResolvedValue({ count: 0 });
+
+      tx.invite.findFirst.mockResolvedValue(row as never);
+      const accepted = await service.acceptWithin(asTx(tx), { ...lookup, actingUserId }).then(() => null, refusalOf);
+
+      tx.invite.findFirst.mockResolvedValue(row === null ? null : ({ ...row, needsApproval: false } as never));
+      const found = await service
+        .findAcceptableWithin(asTx(tx), { ...lookup, actingUserId })
+        .then(() => null, refusalOf);
+
+      expect(accepted).not.toBeNull();
+      expect(found).toEqual(accepted);
+      expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
+    });
+  });
+
   describe('declineWithin', () => {
     it.each([InviteStatus.Pending, InviteStatus.AwaitingApproval])('declines from %s', async (status) => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ status }) as never);
@@ -1468,6 +1524,52 @@ describe('InviteService', () => {
       expect(tx.invite.updateManyAndReturn).toHaveBeenCalledWith(
         expect.objectContaining({ where: { eventId: 'ev-1', status: InviteStatus.Pending } }),
       );
+    });
+  });
+
+  describe('revokeOutstandingOfUserWithin', () => {
+    const DEPARTED_ID = 'user-departed';
+    const ofDeparted = { OR: [{ inviterId: DEPARTED_ID }, { inviteeId: DEPARTED_ID }] };
+
+    it("revokes the context's outstanding invites the user sent or that name them by id, AwaitingApproval first", async () => {
+      const sent = { ...rowWithToken({ id: 'inv-sent', inviterId: DEPARTED_ID }), status: InviteStatus.Revoked };
+      const named = { ...rowWithToken({ id: 'inv-named', inviteeId: DEPARTED_ID }), status: InviteStatus.Revoked };
+      tx.invite.updateManyAndReturn.mockResolvedValueOnce([sent] as never).mockResolvedValueOnce([named] as never);
+
+      const { count, events } = await service.revokeOutstandingOfUserWithin(
+        asTx(tx),
+        { householdId: 'hh-1' },
+        DEPARTED_ID,
+      );
+
+      // Invites to the user's address are not in the `where` at all: revoking
+      // them would tell each inviter whose address it was (#747).
+      expect(tx.invite.updateManyAndReturn).toHaveBeenNthCalledWith(1, {
+        where: { householdId: 'hh-1', ...ofDeparted, status: InviteStatus.AwaitingApproval },
+        data: { status: InviteStatus.Revoked, respondedAt: expect.any(Date) },
+        select: INVITE_SNAPSHOT_SELECT,
+      });
+      expect(tx.invite.updateManyAndReturn).toHaveBeenNthCalledWith(2, {
+        where: { householdId: 'hh-1', ...ofDeparted, status: InviteStatus.Pending },
+        data: { status: InviteStatus.Revoked, respondedAt: expect.any(Date) },
+        select: INVITE_SNAPSHOT_SELECT,
+      });
+
+      expect(count).toBe(2);
+      expect(events.map((event) => event.subjectId)).toEqual(['inv-sent', 'inv-named']);
+      expect(events[0].before.status).toBe(InviteStatus.AwaitingApproval);
+      expect(events[1].before.status).toBe(InviteStatus.Pending);
+      expect(events.every((event) => event instanceof InviteRevokedEvent)).toBe(true);
+      events.forEach(expectNoToken);
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('reports nothing when the user had nothing outstanding there', async () => {
+      tx.invite.updateManyAndReturn.mockResolvedValue([] as never);
+
+      await expect(
+        service.revokeOutstandingOfUserWithin(asTx(tx), { householdId: 'hh-1' }, DEPARTED_ID),
+      ).resolves.toEqual({ count: 0, events: [] });
     });
   });
 

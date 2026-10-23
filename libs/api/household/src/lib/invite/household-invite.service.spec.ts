@@ -20,7 +20,7 @@ import {
   type InvitePartyView,
   type InviteRevocation,
 } from '@bge/invites';
-import { AbilityService, ScopeComposer } from '@bge/permissions';
+import { AbilityService, ScopeComposer, type UserAbilityCheck } from '@bge/permissions';
 import { QuotaExceededException, QuotaService, type QuotaCheckResult, type QuotaSoftOverageEvent } from '@bge/quota';
 import {
   batchTransactionCall,
@@ -111,9 +111,14 @@ describe('HouseholdInviteService', () => {
   let abilityService: jest.Mocked<
     Pick<
       AbilityService,
-      'getActingUserId' | 'assertCurrentActorCan' | 'currentActorCan' | 'getCurrentResourceConditions'
+      | 'getActingUserId'
+      | 'assertCurrentActorCan'
+      | 'currentActorCan'
+      | 'getCurrentResourceConditions'
+      | 'userAbilityWithin'
     >
   >;
+  let senderCan: jest.Mock<boolean, Parameters<UserAbilityCheck>>;
   let invites: jest.Mocked<Pick<InviteService, 'createWithin' | 'revokeWithin' | 'approveWithin' | 'emit'>>;
   let quotas: jest.Mocked<Pick<QuotaService, 'consume' | 'emitSoftOverages'>>;
   let creation: InviteCreation;
@@ -121,11 +126,13 @@ describe('HouseholdInviteService', () => {
   let approval: InviteApproval;
 
   beforeEach(async () => {
+    senderCan = jest.fn().mockReturnValue(true);
     abilityService = {
       getActingUserId: jest.fn().mockReturnValue('owner-1'),
       assertCurrentActorCan: jest.fn(),
       currentActorCan: jest.fn().mockReturnValue(true),
       getCurrentResourceConditions: jest.fn().mockReturnValue([COND]),
+      userAbilityWithin: jest.fn().mockResolvedValue(senderCan),
     };
     creation = {
       invite: partyView(),
@@ -1353,6 +1360,51 @@ describe('HouseholdInviteService', () => {
       await expect(service.approveInvite('hh-1', 'invite-1')).rejects.toBeInstanceOf(ConflictException);
 
       expect(invites.emit).not.toHaveBeenCalled();
+    });
+
+    describe('whether the sender could still send it (#747)', () => {
+      /** The instance the sender's own invite grants are asked about, as the create builds it. */
+      const senderInstance = (needsApproval: boolean) => ({
+        householdId: 'hh-1',
+        needsApproval,
+        role: { name: SystemRole.HouseholdMember },
+        household: { settings: SETTINGS, members: ROSTER },
+      });
+
+      it("asks the sender's own ability, after the lib approves, either way an accept of the approved invite would", async () => {
+        senderCan.mockReturnValueOnce(false).mockReturnValueOnce(true);
+
+        await expect(service.approveInvite('hh-1', 'invite-1')).resolves.toMatchObject(approval.invite);
+
+        expect(abilityService.userAbilityWithin).toHaveBeenCalledWith(db, 'member-1');
+        expect(senderCan.mock.calls).toEqual([
+          [Action.create, ResourceType.Invite, senderInstance(false)],
+          [Action.create, ResourceType.Invite, senderInstance(true)],
+        ]);
+        expect(abilityService.userAbilityWithin.mock.invocationCallOrder[0]).toBeGreaterThan(
+          invites.approveWithin.mock.invocationCallOrder[0] as number,
+        );
+      });
+
+      it('asks about the role the admission grants when the approved invite offers none', async () => {
+        approval = { ...approval, invite: { ...approval.invite, role: null } };
+
+        await service.approveInvite('hh-1', 'invite-1');
+
+        expect(senderCan).toHaveBeenCalledWith(Action.create, ResourceType.Invite, senderInstance(false));
+      });
+
+      it("refuses with 409 when they could send it neither way, and announces nothing, so the rollback undoes the approval and the day's invite", async () => {
+        senderCan.mockReturnValue(false);
+
+        await expect(service.approveInvite('hh-1', 'invite-1')).rejects.toMatchObject({
+          status: 409,
+          response: expect.objectContaining({ key: 'errors.invite.sender_cannot_send', args: { id: 'invite-1' } }),
+        });
+
+        expect(invites.emit).not.toHaveBeenCalled();
+        expect(quotas.emitSoftOverages).not.toHaveBeenCalled();
+      });
     });
   });
 

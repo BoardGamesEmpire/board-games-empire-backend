@@ -1,11 +1,12 @@
-import { InviteStatus, InviteType, ResourceType, SystemRole } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
+import { InviteStatus, ResourceType, SystemRole } from '@bge/database';
+import { arrangeInvite, createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { mintApiKey, type Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { inviteEnvelope, receivedInvitesEnvelope, revokeEnvelope } from './household-invite-wire';
+import { createMemberClient } from './household-request';
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
@@ -15,7 +16,8 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
  * - the invitee declines: `POST /api/invites/:inviteId/decline`, or
  *   `POST /api/invites/decline` with the token from its link in the body;
  * - the inviter withdraws: `POST /api/invites/:inviteId/withdraw`, whatever
- *   their role in the household now;
+ *   their role in the household now. Once they leave it there is nothing to
+ *   withdraw, since leaving revoked it (#747);
  * - an Owner or Admin revokes an invite someone else sent:
  *   `POST /api/households/:householdId/invites/:inviteId/revoke`.
  *
@@ -53,6 +55,8 @@ describe('declining, withdrawing and revoking a household invite', () => {
   const revoke = (actor: Caller, householdId: string, inviteId: string) =>
     request(baseUrl).post(`/api/households/${householdId}/invites/${inviteId}/revoke`).set(actor.headers);
 
+  const { removeMember, changeRole } = createMemberClient(baseUrl);
+
   const createdInvite = async (actor: SessionActor, householdId: string, body: Record<string, unknown>) =>
     inviteEnvelope(
       await request(baseUrl).post(`/api/households/${householdId}/invites`).set(actor.headers).send(body).expect(201),
@@ -69,24 +73,6 @@ describe('declining, withdrawing and revoking a household invite', () => {
 
   const verify = (actor: SessionActor) =>
     db.client.user.update({ where: { id: actor.user.id }, data: { emailVerified: true } });
-
-  /** An invite written directly, for a state no route produces. */
-  const arrangeInvite = (
-    inviter: SessionActor,
-    householdId: string,
-    data: { inviteeId?: string; inviteeEmail?: string; status?: InviteStatus; expiresAt?: Date; withheld?: boolean },
-  ) =>
-    db.client.invite.create({
-      data: {
-        type: InviteType.Household,
-        inviterId: inviter.user.id,
-        householdId,
-        token: randomUUID(),
-        status: InviteStatus.Pending,
-        expiresAt: new Date(Date.now() + DAY_MS),
-        ...data,
-      },
-    });
 
   /** A key its owner minted, scoped to the given grants on `Invite`, or on the one invite `resourceId` names. */
   const inviteKey = (owner: SessionActor, slugs: readonly string[], resourceId?: string) =>
@@ -141,7 +127,9 @@ describe('declining, withdrawing and revoking a household invite', () => {
     it('declines an invite still awaiting approval: a refusal never waits on an approver', async () => {
       const [owner, invitee] = await Promise.all([actors.user(), actors.user()]);
       const { household } = await actors.householdWithMembers({ owner });
-      const invite = await arrangeInvite(owner, household.id, {
+      const invite = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: household.id,
         inviteeId: invitee.user.id,
         status: InviteStatus.AwaitingApproval,
       });
@@ -187,7 +175,12 @@ describe('declining, withdrawing and revoking a household invite', () => {
       await verify(blocked);
       const toInvitee = await createdInvite(owner, household.id, { inviteeId: invitee.user.id });
       const toUnverified = await createdInvite(owner, household.id, { inviteeEmail: unverified.user.email });
-      const withheld = await arrangeInvite(owner, household.id, { inviteeEmail: blocked.user.email, withheld: true });
+      const withheld = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: household.id,
+        inviteeEmail: blocked.user.email,
+        withheld: true,
+      });
 
       await declineById(stranger, toInvitee.id).expect(404);
       await declineByToken(stranger, `not-a-token-${randomUUID()}`).expect(404);
@@ -210,11 +203,15 @@ describe('declining, withdrawing and revoking a household invite', () => {
     it('answers 410 for an expired invite and 409 for a settled one', async () => {
       const [owner, lapsed, withdrawn] = await Promise.all([actors.user(), actors.user(), actors.user()]);
       const { household } = await actors.householdWithMembers({ owner });
-      const expired = await arrangeInvite(owner, household.id, {
+      const expired = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: household.id,
         inviteeId: lapsed.user.id,
         expiresAt: new Date(Date.now() - DAY_MS),
       });
-      const settled = await arrangeInvite(owner, household.id, {
+      const settled = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: household.id,
         inviteeId: withdrawn.user.id,
         status: InviteStatus.Withdrawn,
       });
@@ -245,7 +242,7 @@ describe('declining, withdrawing and revoking a household invite', () => {
       await expect(inbox(invitee)).resolves.toEqual([]);
     });
 
-    it('lets an inviter withdraw after they have been removed from the household', async () => {
+    it('lets an inviter withdraw after they have been demoted', async () => {
       const [owner, admin, invitee] = await Promise.all([actors.user(), actors.user(), actors.user()]);
       const { household, members } = await actors.householdWithMembers({
         owner,
@@ -253,14 +250,27 @@ describe('declining, withdrawing and revoking a household invite', () => {
       });
       const invite = await createdInvite(admin, household.id, { inviteeId: invitee.user.id });
 
-      await request(baseUrl)
-        .delete(`/api/households/${household.id}/members/${members[0].member.id}`)
-        .set(owner.headers)
-        .expect(200);
+      await changeRole(owner, household.id, members[0].member.id, SystemRole.HouseholdGuest).expect(200);
 
       await withdraw(admin, invite.id).expect(200);
 
       await expect(storedInvite(invite.id)).resolves.toMatchObject({ status: InviteStatus.Withdrawn });
+    });
+
+    it('leaves a removed inviter nothing to withdraw: being removed revoked it (#747)', async () => {
+      const [owner, admin, invitee] = await Promise.all([actors.user(), actors.user(), actors.user()]);
+      const { household, members } = await actors.householdWithMembers({
+        owner,
+        members: [{ actor: admin, role: SystemRole.HouseholdAdmin }],
+      });
+      const invite = await createdInvite(admin, household.id, { inviteeId: invitee.user.id });
+
+      await removeMember(owner, household.id, members[0].member.id).expect(200);
+
+      const refused = await withdraw(admin, invite.id).expect(409);
+
+      expect(messageOf(refused)).toContain(InviteStatus.Revoked);
+      await expect(storedInvite(invite.id)).resolves.toMatchObject({ status: InviteStatus.Revoked });
     });
 
     it('answers 403 for the invitee and 404 for a stranger, an Owner who did not send it among them', async () => {
@@ -282,11 +292,15 @@ describe('declining, withdrawing and revoking a household invite', () => {
     it('answers 410 for an expired invite and 409 for a settled one', async () => {
       const [owner, invitee] = await Promise.all([actors.user(), actors.user()]);
       const { household } = await actors.householdWithMembers({ owner });
-      const expired = await arrangeInvite(owner, household.id, {
+      const expired = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: household.id,
         inviteeId: invitee.user.id,
         expiresAt: new Date(Date.now() - DAY_MS),
       });
-      const declined = await arrangeInvite(owner, household.id, {
+      const declined = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: household.id,
         inviteeEmail: `declined-${randomUUID()}@e2e.invalid`,
         status: InviteStatus.Declined,
       });
@@ -371,11 +385,15 @@ describe('declining, withdrawing and revoking a household invite', () => {
         owner,
         members: [{ actor: admin, role: SystemRole.HouseholdAdmin }],
       });
-      const expired = await arrangeInvite(owner, household.id, {
+      const expired = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: household.id,
         inviteeId: lapsed.user.id,
         expiresAt: new Date(Date.now() - DAY_MS),
       });
-      const settled = await arrangeInvite(owner, household.id, {
+      const settled = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: household.id,
         inviteeId: declined.user.id,
         status: InviteStatus.Declined,
       });

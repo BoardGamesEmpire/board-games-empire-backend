@@ -8,17 +8,25 @@ import {
   isUserActor,
   type PluginActor,
 } from '@bge/actor-context';
-import { Action } from '@bge/database';
+import { Action, Prisma } from '@bge/database';
 import { t } from '@bge/i18n';
 import { subject } from '@casl/ability';
 import { accessibleBy, createPrismaAbility, type WhereInput } from '@casl/prisma';
-import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { AbilityFactory } from './ability.factory';
 import { AbilityContextNotPrimedError } from './errors/ability-context-not-primed.error';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type { AppAbility, ModelResourceType, SubjectInstance } from './interfaces';
 import { PermissionsService } from './permissions.service';
 import { AbilityContextInternalService } from './services/ability-context-internal.service';
+
+/** Whether one user's ability allows `action` on an `instance`, as {@link AbilityService.userAbilityWithin} built it. */
+export type UserAbilityCheck = <TResource extends ModelResourceType>(
+  action: Action,
+  resourceType: TResource,
+  instance: SubjectInstance<TResource>,
+  field?: string,
+) => boolean;
 
 /**
  * Central ability-resolution surface for every actor kind.
@@ -213,8 +221,48 @@ export class AbilityService {
     instance: SubjectInstance<TResource>,
     field?: string,
   ): boolean {
-    const abilities = this.getCurrentAbilities();
+    return this.allows(this.getCurrentAbilities(), action, resourceType, instance, field);
+  }
 
+  /**
+   * {@link currentActorCan}'s question, asked of another user: `userId`'s own
+   * ability, as a check that answers whether it allows `action` on an
+   * `instance`. For a decision about someone else's standing, as an accept
+   * asks whether an invite's sender could still send it (#747). The ability
+   * is built once, so a caller with two questions loads the graph once.
+   *
+   * It is built from the graph `tx` reads now, never from the cache
+   * ({@link PermissionsService.loadUserRoleGraphWithin}), so a role change
+   * that committed a moment ago is already in it. Only their user ability is
+   * asked: whatever an API key of theirs held when it acted, they hold no more
+   * than this. A user with no graph, deleted or banned since, is allowed
+   * nothing.
+   *
+   * A condition the matcher cannot evaluate is a fault in that user's grants,
+   * not anything the acting user did, so it answers 500 rather than the 403
+   * {@link currentActorCan} gives: the acting user was never refused anything.
+   */
+  async userAbilityWithin(tx: Prisma.TransactionClient, userId: string): Promise<UserAbilityCheck> {
+    const graph = await this.permissionsService.loadUserRoleGraphWithin(tx, userId);
+    const abilities = [this.abilityFactory.createForUser(graph)];
+
+    return (action, resourceType, instance, field) =>
+      this.allows(abilities, action, resourceType, instance, field, () => {
+        throw new InternalServerErrorException(t('errors.permission.condition_unevaluable'));
+      });
+  }
+
+  /** Whether every ability allows it, with a matcher failure refused rather than answered `false`. */
+  private allows<TResource extends ModelResourceType>(
+    abilities: readonly AppAbility[],
+    action: Action,
+    resourceType: TResource,
+    instance: SubjectInstance<TResource>,
+    field?: string,
+    refuse: () => never = () => {
+      throw new ForbiddenException(t('common.forbidden.action'));
+    },
+  ): boolean {
     try {
       return (
         abilities.length > 0 &&
@@ -226,7 +274,7 @@ export class AbilityService {
         error instanceof Error ? error.stack : String(error),
       );
 
-      throw new ForbiddenException(t('common.forbidden.action'));
+      return refuse();
     }
   }
 

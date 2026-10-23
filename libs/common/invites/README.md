@@ -4,7 +4,7 @@ The invite lifecycle for Board Games Empire, as primitives a context owner drive
 
 The lib ships:
 
-- `InviteService` — `findForParty`, `findPartyScopeWithin`, `createWithin`, `acceptWithin`, `declineWithin`, `withdrawWithin`, `revokeWithin`, `approveWithin`, `revokeOutstandingWithin`, `expireOutstandingWithin`, and `emit`.
+- `InviteService` — `findForParty`, `findPartyScopeWithin`, `findAcceptableWithin`, `createWithin`, `acceptWithin`, `declineWithin`, `withdrawWithin`, `revokeWithin`, `approveWithin`, `revokeOutstandingWithin`, `revokeOutstandingOfUserWithin`, `expireOutstandingWithin`, and `emit`.
 - `receivedInviteWhere`, the filter a listing of the invites a user has received is built on.
 - The read shapes every invite render goes through: `CONTEXT_INVITE_SELECT` (a context reader's view) and `PARTY_INVITE_SELECT` (a party's view).
 - The domain events a consumer announces after commit, and `effectiveInviteStatus` for lazy expiry on reads.
@@ -52,6 +52,10 @@ export class HouseholdService {
 
 The party view leaves the household's id out, so a consumer accepting by id or by token learns which row to lock from `findPartyScopeWithin(tx, lookup, InviteType.Household)` first. It binds the read as the transition does, so a stranger meets the same 404 before any household is named to them, and it takes no lock. A transition binds the type in its own read, so a decline or a withdraw, which locks nothing, needs no such read first (#164).
 
+**A consumer that asks something of an invite before accepting it** reads it with `findAcceptableWithin(tx, lookup)`, after the lock. It refuses exactly as `acceptWithin` would and writes nothing but the expiry stamp a 410 leaves. It hands back who sent the invite, the role it offers, and whether it was sent to wait for an approver. The household asks whether the sender could still send it, and revokes it with `revokeWithin` when not (#747). The question goes before the accept, not after it: an accept has already bound an invite by address to the acting user, and nothing later in the transaction could take that back without a trace.
+
+**A member who leaves the context** ends its invites with `revokeOutstandingOfUserWithin(tx, scope, userId)`, in the transaction that ends the membership, after locking the context row: the outstanding invites they sent, and those that name them by id (#747). Invites to their address are left open, since revoking them would tell each inviter whose address it was.
+
 ---
 
 ## Who may do what
@@ -62,6 +66,7 @@ A **party** read or transition binds its `where` to the acting user, as inviter 
 | ---------------------- | ------------ | ------------------------------------------------------------------------------ | ------------ |
 | `findForParty`         | either party | `inviterId` or `inviteeId`, or for email-only the token or a vouched address   | party view   |
 | `findPartyScopeWithin` | either party | as `findForParty`, and the invite's type                                       | its context  |
+| `findAcceptableWithin` | the invitee  | as `acceptWithin`                                                              | the offer    |
 | `createWithin`         | the inviter  | `inviterId` is the caller's acting user                                        | party view   |
 | `acceptWithin`         | the invitee  | `inviteeId`, or for email-only the token or a vouched address; and the type    | party view   |
 | `declineWithin`        | the invitee  | `inviteeId`, or for email-only the token or a vouched address; and the type    | party view   |
@@ -73,7 +78,7 @@ A stranger addressing an invite that is not theirs, by id or by a link that is n
 
 **Context authority is the consumer's to assert before calling.** An owner or admin revoking, an approver approving: the lib never checks a household or event role, and needs no `read` grant on `Invite` to do its work. That is also why an email-only invite, whose invitee is not a registered user and so can hold no grant, is reachable at all. What the lib does bind is the context that assertion was about: `revokeWithin` and `approveWithin` take the `scope` the caller's authority covers, a `householdId` or an `eventId`, and carry it into the read. A route that authorized an admin on one household and was handed an invite id from another transitions nothing, because the consumer's role check and the lib's query name the same context and neither is satisfied by the other's.
 
-**Withdraw and revoke never stand in for each other.** `revokeWithin` takes the `revokerId` and refuses the invite's own inviter, whatever authority they hold, and `withdrawWithin` answers to the inviter alone, whatever their role in the context now. So `invite.withdrawn` always means the sender took the invite back and `invite.revoked` always means someone else cancelled it, or the context closed (#164).
+**Withdraw and revoke never stand in for each other.** `revokeWithin` takes the `revokerId` and refuses the invite's own inviter, whatever authority they hold, and `withdrawWithin` answers to the inviter alone, whatever their role in the context now. So `invite.withdrawn` always means the sender took the invite back and `invite.revoked` always means someone else cancelled it, the context closed (#164), its sender or its invitee left the context, or an accept found its sender could no longer send it (#747).
 
 An email-only invite (no `inviteeId`) answers to the token its link carries, and to the account holding its address when the consumer vouches for that address. Addressed by id it answers to nobody else, not even its inviter: the id reaches every context reader, staff listing a household's invites among them, and the token reaches none of them.
 
@@ -142,7 +147,9 @@ The transition's stamp is written on the lib's own connection, **not** the calle
 
 `revokeOutstandingWithin` is the one exception: a context being closed revokes its expired-but-unstamped rows with the rest. The context is gone, and there is nobody left to tell "expired" instead.
 
-The bulk statements (`revokeOutstandingWithin`, `expireOutstandingWithin`, and the create's stamp above) visit one status at a time so each domain event carries the status its row left, and they visit `AwaitingApproval` **before** `Pending`. The only transition between the two is approve, and it only goes that way, so a row a rival approve moves in between is `Pending` by the second statement and still caught.
+`revokeOutstandingOfUserWithin` revokes them too, for the same reason: the membership that sent or would answer them is gone.
+
+The bulk statements (`revokeOutstandingWithin`, `revokeOutstandingOfUserWithin`, `expireOutstandingWithin`, and the create's stamp above) visit one status at a time so each domain event carries the status its row left, and they visit `AwaitingApproval` **before** `Pending`. The only transition between the two is approve, and it only goes that way, so a row a rival approve moves in between is `Pending` by the second statement and still caught.
 
 `expireOutstandingWithin`'s `limit` reads that many ids per status and then updates them with the guard restated beside the ids. It never uses `updateManyAndReturn`'s own `limit`, which leaves the guard out of the update's outer `where` and so can overwrite a rival's committed transition; `settleOutstandingWithin`'s doc comment gives the mechanism. `drained` comes from those reads, not from the count: it is true only when every status's read came back under the limit. A rival that settles part of a full read leaves the count short with more still overdue, so a caller that stopped on the count would leave the rest of a backlog for the next run.
 

@@ -1,5 +1,5 @@
 import { InviteStatus, InviteType, MemberInvitePolicy, SystemRole } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
+import { arrangeInvite, createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { createEventClient, EVENTS_PATH } from '../event/event-request';
@@ -48,16 +48,6 @@ describe('household invites', () => {
 
   const verify = (actor: SessionActor) =>
     db.client.user.update({ where: { id: actor.user.id }, data: { emailVerified: true } });
-
-  /** An invite written directly, for a status no route produces yet. */
-  const arrangeInvite = (
-    inviter: SessionActor,
-    householdId: string,
-    data: { status: InviteStatus; expiresAt: Date; inviteeEmail: string },
-  ) =>
-    db.client.invite.create({
-      data: { type: InviteType.Household, inviterId: inviter.user.id, householdId, token: randomUUID(), ...data },
-    });
 
   describe('creating', () => {
     it('lets an owner and an admin invite, and refuses a guest, and a member where members may not', async () => {
@@ -334,17 +324,23 @@ describe('household invites', () => {
 
       const open = await createdInvite(owner, household.id, { inviteeEmail: `open-${randomUUID()}@e2e.invalid` });
       // Still `Pending` on the row, but past its window: it is `Expired` now.
-      const lapsed = await arrangeInvite(owner, household.id, {
+      const lapsed = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: household.id,
         status: InviteStatus.Pending,
         expiresAt: new Date(Date.now() - DAY_MS),
         inviteeEmail: `lapsed-${randomUUID()}@e2e.invalid`,
       });
-      const declined = await arrangeInvite(owner, household.id, {
+      const declined = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: household.id,
         status: InviteStatus.Declined,
         expiresAt: new Date(Date.now() + DAY_MS),
         inviteeEmail: `declined-${randomUUID()}@e2e.invalid`,
       });
-      await arrangeInvite(outsider, other.id, {
+      await arrangeInvite(db.client, {
+        inviter: outsider,
+        householdId: other.id,
         status: InviteStatus.Pending,
         expiresAt: new Date(Date.now() + DAY_MS),
         inviteeEmail: `elsewhere-${randomUUID()}@e2e.invalid`,

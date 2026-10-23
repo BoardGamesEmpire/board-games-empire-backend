@@ -13,6 +13,7 @@ import {
   type ConstraintIdentity,
 } from '@bge/database';
 import { t } from '@bge/i18n';
+import { InviteService } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import { QuotaExceededException, QuotaService, type QuotaSoftOverageEvent } from '@bge/quota';
 import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
@@ -170,6 +171,7 @@ export class HouseholdMemberService {
     private readonly events: EventEmitter2,
     private readonly quotas: QuotaService,
     private readonly scopeComposer: ScopeComposer,
+    private readonly invites: InviteService,
   ) {}
 
   /**
@@ -984,6 +986,14 @@ export class HouseholdMemberService {
    * `HouseholdMember` row. The scoped `where` is asked again under the lock,
    * before the first delete, so authorization is decided from locked state as
    * well as at read time (403).
+   *
+   * Leaving and being removed end the same invites (#747), in the same
+   * transaction: those the member sent, whose authority ended with the
+   * membership, and those that name them by id, which would let them back
+   * in. Invites to their address stay open, since revoking those would tell
+   * each inviter whose address it was. The household row is locked first, the
+   * lock order the invites lib asks for. The revoked invites are announced
+   * after the cache eviction.
    */
   private async deleteMembership(
     scopedWhere: Prisma.HouseholdMemberWhereInput & { householdId: string },
@@ -991,7 +1001,7 @@ export class HouseholdMemberService {
     denials: ScopedMemberDenials,
   ): Promise<HouseholdMemberWithRelations> {
     try {
-      const removed = await this.db.$transaction(async (tx) => {
+      const { removed, revoked } = await this.db.$transaction(async (tx) => {
         const member = await this.findScopedMemberOrThrow(tx, scopedWhere, unscopedWhere, denials);
 
         // Lock unconditionally, and decide from the LOCKED set — never from
@@ -1054,12 +1064,19 @@ export class HouseholdMemberService {
 
         await tx.householdMember.delete({ where: { id: member.id } });
 
-        return member;
+        const { events } = await this.invites.revokeOutstandingOfUserWithin(
+          tx,
+          { householdId: scopedWhere.householdId },
+          member.userId,
+        );
+
+        return { removed: member, revoked: events };
       });
 
       // The household just left this user's ability surface — evict their
       // cached graph so stale Household* abilities don't linger for the TTL.
       await this.permissions.invalidateUser(removed.userId);
+      this.invites.emit(revoked);
 
       return removed;
     } catch (error) {
