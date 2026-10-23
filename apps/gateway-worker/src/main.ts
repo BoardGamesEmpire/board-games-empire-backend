@@ -24,6 +24,7 @@ async function bootstrap() {
 
   const app = await NestFactory.createApplicationContext(GatewayWorkerModule, {
     bufferLogs: true,
+    logger: nestLoggerFromPino(bootstrapLogger),
   });
 
   app.useLogger(app.get(PinoLogger));

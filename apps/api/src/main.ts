@@ -58,6 +58,7 @@ async function bootstrap() {
     // flow through nestjs-pino (and therefore through the OTel pipeline)
     // rather than going to stdout via Nest's default ConsoleLogger.
     bufferLogs: true,
+    logger: nestLoggerFromPino(bootstrapLogger),
   });
 
   app.useLogger(app.get(PinoLogger));

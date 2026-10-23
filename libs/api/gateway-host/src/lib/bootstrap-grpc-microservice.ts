@@ -1,4 +1,5 @@
 import { env } from '@bge/env';
+import { nestLoggerFromPino } from '@bge/logger';
 import { joinHostPort, walkDir } from '@bge/utils';
 import type { INestMicroservice, Type } from '@nestjs/common';
 import type { ConfigFactory, ConfigFactoryKeyHost } from '@nestjs/config';
@@ -85,13 +86,14 @@ export interface GrpcMicroserviceBootstrapConfig {
  * each app's `main.ts` is a single declarative call. The exception is an error
  * thrown while Nest builds the app's modules and providers, such as a root
  * config that fails validation or a config factory reading a missing
- * variable: Nest prints it through its own `ExceptionHandler` and exits 1
- * itself, so it never reaches the catch below (#627). A root config is
- * validated as the app module is imported, though, and Nest sees that failure
- * only when this is called in the same tick, as the gateways call it. The
- * coordinator awaits `runBootstrap` first, so Node reports the failure as an
- * unhandled rejection instead: still exit 1 and the variable named, but as a
- * raw stack, with no `bootstrap failed` record.
+ * variable: Nest logs it through its own `ExceptionHandler`, which writes to
+ * {@link GrpcMicroserviceBootstrapConfig.bootstrapLogger} as one record naming
+ * the variable, and exits 1 itself, so it never reaches the catch below
+ * (#627). A root config is validated as the app module is imported, though,
+ * and Nest sees that failure only when this is called in the same tick, as the
+ * gateways call it. The coordinator awaits `runBootstrap` first, so Node
+ * reports the failure as an unhandled rejection instead: still exit 1 and the
+ * variable named, but as a raw stack, with no `bootstrap failed` record (#647).
  *
  * The one gRPC bootstrap for the whole workspace. `bootstrapGrpcGateway`
  * specializes it for the gateway hosts; the gateway-coordinator app calls it
@@ -125,7 +127,10 @@ export async function bootstrapGrpcMicroservice(config: GrpcMicroserviceBootstra
     const app = await NestFactory.createMicroservice<AsyncMicroserviceOptions>(appModule, {
       // Buffer module-init logs until `useLogger` is called below, so they flow
       // through nestjs-pino rather than Nest's default ConsoleLogger to stdout.
+      // A module init that fails before then is logged through the bootstrap
+      // logger instead, as one record (#627).
       bufferLogs: true,
+      logger: nestLoggerFromPino(bootstrapLogger),
       // Resolved after the app's modules are, so the root config has been
       // validated by the time the address is read from it.
       inject: [addressConfig.KEY],
