@@ -112,7 +112,7 @@ describe('HouseholdBanService', () => {
     db.$queryRaw.mockResolvedValue([{ id: 'hh-1' }] as never);
     db.householdMember.findMany.mockResolvedValue(resolves(ROSTER));
     db.user.findUnique.mockResolvedValue(resolves({ id: 'user-2', email: 'sam@example.test' }));
-    db.householdBan.count.mockResolvedValue(0);
+    db.householdBan.findUnique.mockResolvedValue(null);
     db.householdBan.create.mockResolvedValue(resolves(BAN_ROW));
   });
 
@@ -189,15 +189,35 @@ describe('HouseholdBanService', () => {
       expect(db.householdBan.create).not.toHaveBeenCalled();
     });
 
+    it("answers 404, not 500, when the user's account is deleted between the read and the insert (#782)", async () => {
+      db.householdBan.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('foreign key', {
+          code: PrismaError.ForeignKeyConstraintViolation,
+          clientVersion: 'test',
+        }),
+      );
+
+      await expect(service.ban('hh-1', DTO)).rejects.toMatchObject({
+        status: Http.NotFound,
+        response: expect.objectContaining({ key: 'errors.user.not_found' }),
+      });
+
+      expect(permissions.invalidateUser).not.toHaveBeenCalled();
+      expect(invites.emit).not.toHaveBeenCalled();
+    });
+
     it('answers 409 when the user is already banned, and writes nothing (#782)', async () => {
-      db.householdBan.count.mockResolvedValue(1);
+      db.householdBan.findUnique.mockResolvedValue(resolves({ id: 'ban-1' }));
 
       await expect(service.ban('hh-1', DTO)).rejects.toMatchObject({
         status: Http.Conflict,
         response: expect.objectContaining({ key: 'errors.household.already_banned' }),
       });
 
-      expect(db.householdBan.count).toHaveBeenCalledWith({ where: { householdId: 'hh-1', userId: 'user-2' } });
+      expect(db.householdBan.findUnique).toHaveBeenCalledWith({
+        where: { householdId_userId: { householdId: 'hh-1', userId: 'user-2' } },
+        select: { id: true },
+      });
       expect(members.removeUserWithin).not.toHaveBeenCalled();
       expect(invites.revokeOutstandingOfUserWithin).not.toHaveBeenCalled();
       expect(invites.withholdOutstandingToAddressWithin).not.toHaveBeenCalled();

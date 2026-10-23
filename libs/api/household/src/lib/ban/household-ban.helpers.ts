@@ -11,7 +11,12 @@ export async function isBannedWithin(
   householdId: string,
   userId: string,
 ): Promise<boolean> {
-  return (await client.householdBan.count({ where: { householdId, userId } })) > 0;
+  const ban = await client.householdBan.findUnique({
+    where: { householdId_userId: { householdId, userId } },
+    select: { id: true },
+  });
+
+  return ban !== null;
 }
 
 /**

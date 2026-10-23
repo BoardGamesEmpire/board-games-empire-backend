@@ -34,7 +34,7 @@ import {
   isHouseholdAuthority,
   offeredRole,
   readInviteAuthority,
-  ROSTER_ROLE_SELECT,
+  readRoster,
   senderCouldStillSend,
   type RosterRow,
 } from './household-authority';
@@ -586,7 +586,7 @@ export class HouseholdInviteService {
       readonly role: { readonly name: string };
     },
   ): Promise<RosterRow[]> {
-    const members = await this.rosterOf(client, householdId);
+    const members = await readRoster(client, householdId);
     const named = existing === undefined ? {} : { id: existing.inviteId, role: existing.role };
 
     this.abilityService.assertCurrentActorCan(
@@ -621,11 +621,6 @@ export class HouseholdInviteService {
     });
 
     return { role: { name: invite?.role?.name ?? SystemRole.HouseholdMember } };
-  }
-
-  /** Each member's user id and household role, as `client` reads them. */
-  private rosterOf(client: DatabaseService | Prisma.TransactionClient, householdId: string): Promise<RosterRow[]> {
-    return client.householdMember.findMany({ where: { householdId }, select: ROSTER_ROLE_SELECT });
   }
 
   /**

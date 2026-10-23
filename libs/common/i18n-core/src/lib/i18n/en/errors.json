@@ -183,6 +183,7 @@
     "invitee_banned": "This user is banned from the household. Lift the ban to invite them.",
     "banned_from_household": "You can't become a member of this household because you are banned from it.",
     "ban_self": "You can't ban yourself from a household",
+    "ban_forbidden": "Only a household owner can ban a household admin or another owner",
     "already_banned": "This user is already banned from household {householdId}",
     "ban_not_found": "User {userId} is not banned from household {householdId}"
   },

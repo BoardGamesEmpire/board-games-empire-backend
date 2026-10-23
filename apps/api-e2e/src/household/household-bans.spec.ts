@@ -15,6 +15,7 @@ import {
 const BANNED_INVITEE = 'This user is banned from the household. Lift the ban to invite them.';
 const REFUSED = 'You cannot invite this user to a household';
 const BANNED_FROM_HOUSEHOLD = "You can't become a member of this household because you are banned from it.";
+const BAN_FORBIDDEN = 'Only a household owner can ban a household admin or another owner';
 
 /**
  * The household row as a role transition holds it. An accept's share lock
@@ -240,8 +241,10 @@ describe('household bans (#782)', () => {
       [otherAdmin, adminsInvite],
       [h.owner, ownersInvite],
     ] as const) {
-      await banUser(h.admin, h.householdId, { userId: target.user.id }).expect(403);
+      const refused = await banUser(h.admin, h.householdId, { userId: target.user.id }).expect(403);
 
+      // In a ban's words, not removal's "delete this resource".
+      expect(messageOf(refused)).toBe(BAN_FORBIDDEN);
       await expect(storedBan(h.householdId, target.user.id)).resolves.toBeNull();
       await expect(membership(h.householdId, target.user.id)).resolves.not.toBeNull();
       await expect(storedInvite(sent.id)).resolves.toMatchObject({ status: InviteStatus.Pending });

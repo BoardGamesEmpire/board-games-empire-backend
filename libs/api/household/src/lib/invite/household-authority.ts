@@ -1,4 +1,4 @@
-import { Action, Prisma, ResourceType, SystemRole } from '@bge/database';
+import { Action, DatabaseService, Prisma, ResourceType, SystemRole } from '@bge/database';
 import type { AbilityService } from '@bge/permissions';
 import { isAssignableHouseholdRole, type AssignableHouseholdRole } from '../dto';
 
@@ -15,6 +15,18 @@ export const ROSTER_ROLE_SELECT = {
 } as const satisfies Prisma.HouseholdMemberSelect;
 
 export type RosterRow = Prisma.HouseholdMemberGetPayload<{ select: typeof ROSTER_ROLE_SELECT }>;
+
+/**
+ * The household's whole roster, each member's user id and household role, as
+ * `client` reads it: the instance the invite routes and the ban routes (#782)
+ * ask their grants about.
+ */
+export function readRoster(
+  client: DatabaseService | Prisma.TransactionClient,
+  householdId: string,
+): Promise<RosterRow[]> {
+  return client.householdMember.findMany({ where: { householdId }, select: ROSTER_ROLE_SELECT });
+}
 
 /**
  * The household setting a member's invite is asked about (#166): whether

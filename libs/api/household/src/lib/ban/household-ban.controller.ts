@@ -34,7 +34,7 @@ export class HouseholdBanController {
       'and no admission lets them in. A member is removed from the household, as removing them would; a ' +
       'household admin bans people with the member or guest role, and people who aren’t members, but not ' +
       'a household admin or an owner. Their open invites by id, and the ones they sent, are revoked. Open ' +
-      'invites to their address are withheld: they still read as sent. Nobody is told of the ban, the ' +
+      'invites to their address are withheld: they still read as sent. Nobody is notified of the ban, the ' +
       'banned user included. The reason is seen only by the household’s owners and admins.',
   })
   @ApiParam({ name: 'householdId', type: String })

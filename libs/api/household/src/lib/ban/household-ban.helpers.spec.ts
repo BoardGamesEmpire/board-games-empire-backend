@@ -11,14 +11,20 @@ describe('household ban helpers (#782)', () => {
     tx = createMockDatabaseService();
   });
 
-  it('isBannedWithin reads the household and user pair (#782)', async () => {
-    tx.householdBan.count.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+  it('isBannedWithin looks the household and user pair up by its unique key (#782)', async () => {
+    tx.householdBan.findUnique.mockResolvedValueOnce({ id: 'ban-1' } as never).mockResolvedValueOnce(null);
 
     await expect(isBannedWithin(asTx(tx), 'hh-1', 'user-2')).resolves.toBe(true);
     await expect(isBannedWithin(asTx(tx), 'hh-1', 'user-3')).resolves.toBe(false);
 
-    expect(tx.householdBan.count).toHaveBeenNthCalledWith(1, { where: { householdId: 'hh-1', userId: 'user-2' } });
-    expect(tx.householdBan.count).toHaveBeenNthCalledWith(2, { where: { householdId: 'hh-1', userId: 'user-3' } });
+    expect(tx.householdBan.findUnique).toHaveBeenNthCalledWith(1, {
+      where: { householdId_userId: { householdId: 'hh-1', userId: 'user-2' } },
+      select: { id: true },
+    });
+    expect(tx.householdBan.findUnique).toHaveBeenNthCalledWith(2, {
+      where: { householdId_userId: { householdId: 'hh-1', userId: 'user-3' } },
+      select: { id: true },
+    });
   });
 
   it('addressHolderBannedWithin matches the address lower-cased and trimmed (#782)', async () => {

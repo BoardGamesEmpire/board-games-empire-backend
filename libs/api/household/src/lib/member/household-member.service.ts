@@ -716,8 +716,8 @@ export class HouseholdMemberService {
     // soft-delete (#154) cannot land between this check and the insert.
     await lockExistingHousehold(tx, householdId);
 
-    // A household ban refuses every admission, whichever consent path it came
-    // by (#782). Read under the lock, which a ban takes `FOR NO KEY UPDATE`,
+    // A household ban refuses every admission, whatever its membership origin
+    // (#782). Read under the lock, which a ban takes `FOR NO KEY UPDATE`,
     // so a ban that commits first is seen here, and asked before the quota so
     // a refused admission takes nothing.
     if (await isBannedWithin(tx, householdId, userId)) {
@@ -1001,8 +1001,9 @@ export class HouseholdMemberService {
    * Asked of the acting user's `manage` conditions on `HouseholdMember`, as
    * {@link removeMember} is: a household owner's reach every member, and a
    * household admin's only those with the member or guest role (#168). A
-   * member they hide is refused with 403, and the last owner with 400. Their
-   * invites are revoked as leaving revokes them (#747).
+   * member they hide is refused with 403, in a ban's own words rather than
+   * removal's, and the last owner with 400. Their invites are revoked as
+   * leaving revokes them (#747).
    *
    * The caller evicts the removed user's ability cache and announces the
    * revoked invites after its commit, as {@link deleteMembership} does.
@@ -1031,7 +1032,7 @@ export class HouseholdMemberService {
       { householdId, userId },
       {
         onHidden: () => {
-          throw new ForbiddenException(t('common.forbidden.delete'));
+          throw new ForbiddenException(t('errors.household.ban_forbidden'));
         },
         onMissing: () => {
           throw new NotFoundException(t('errors.household.member_not_found', { memberId: membership.id, householdId }));

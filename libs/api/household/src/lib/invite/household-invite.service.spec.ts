@@ -185,6 +185,7 @@ describe('HouseholdInviteService', () => {
       Promise.resolve({ id: `role-${args.where.name}` })) as never);
     db.household.count.mockResolvedValue(1);
     // Nobody is banned by default (#782).
+    db.householdBan.findUnique.mockResolvedValue(null);
     db.householdBan.count.mockResolvedValue(0);
     db.invite.findUniqueOrThrow.mockImplementation(((args: { select: Record<string, unknown> }) =>
       Promise.resolve(selected(STORED_INVITE, args.select))) as never);
@@ -882,13 +883,13 @@ describe('HouseholdInviteService', () => {
 
       describe('a household ban (#782)', () => {
         /** The household has banned `user-2`, who holds `sam@example.test`. */
-        const banned = () =>
-          db.householdBan.count.mockImplementation(((args: {
-            where: { userId?: string; user?: { is: { email: string } } };
-          }) =>
-            Promise.resolve(
-              args.where.userId === 'user-2' || args.where.user?.is.email === 'sam@example.test' ? 1 : 0,
-            )) as never);
+        const banned = () => {
+          db.householdBan.findUnique.mockImplementation(((args: {
+            where: { householdId_userId: { userId: string } };
+          }) => Promise.resolve(args.where.householdId_userId.userId === 'user-2' ? { id: 'ban-1' } : null)) as never);
+          db.householdBan.count.mockImplementation(((args: { where: { user: { is: { email: string } } } }) =>
+            Promise.resolve(args.where.user.is.email === 'sam@example.test' ? 1 : 0)) as never);
+        };
 
         /** The acting user holds the member role, under the `Direct` member invite policy. */
         const actAsMember = () => {
@@ -909,7 +910,10 @@ describe('HouseholdInviteService', () => {
             response: expect.objectContaining({ key: 'errors.household.invitee_banned' }),
           });
 
-          expect(db.householdBan.count).toHaveBeenCalledWith({ where: { householdId: 'hh-1', userId: 'user-2' } });
+          expect(db.householdBan.findUnique).toHaveBeenCalledWith({
+            where: { householdId_userId: { householdId: 'hh-1', userId: 'user-2' } },
+            select: { id: true },
+          });
           expect(quotas.consume).not.toHaveBeenCalled();
           expect(invites.createWithin).not.toHaveBeenCalled();
         });
@@ -943,7 +947,7 @@ describe('HouseholdInviteService', () => {
             response: expect.objectContaining({ key: 'errors.household.invitee_friends_only' }),
           });
 
-          expect(db.householdBan.count).not.toHaveBeenCalled();
+          expect(db.householdBan.findUnique).not.toHaveBeenCalled();
         });
 
         it("stores an invite by address to a banned user's address withheld, answering as any other (#782)", async () => {

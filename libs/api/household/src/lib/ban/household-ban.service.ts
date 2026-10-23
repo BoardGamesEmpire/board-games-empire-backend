@@ -3,6 +3,7 @@ import {
   DatabaseService,
   HUMAN_USER_WHERE,
   isPrismaDependentRecordNotFoundError,
+  isPrismaForeignKeyConstraintError,
   Prisma,
   ResourceType,
 } from '@bge/database';
@@ -13,7 +14,7 @@ import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateHouseholdBanDto, UpdateHouseholdBanDto } from '../dto';
 import { lockExistingHousehold, lockHouseholdForRoleTransition } from '../household-access.helpers';
-import { ROSTER_ROLE_SELECT } from '../invite/household-authority';
+import { readRoster } from '../invite/household-authority';
 import { HouseholdMemberService } from '../member/household-member.service';
 import { isBannedWithin } from './household-ban.helpers';
 import { HOUSEHOLD_BAN_SELECT, toHouseholdBanView, type HouseholdBanView } from './household-ban.read-shape';
@@ -25,7 +26,8 @@ type BanAction = typeof Action.create | typeof Action.read | typeof Action.updat
  * Bans a user from a household, changes a ban's reason, lifts a ban, and
  * lists a household's bans (#782). A ban is the household's lasting refusal:
  * the invite create and the admission read it (`household-ban.helpers.ts`).
- * Nobody is told of a ban, the banned user included.
+ * Nobody is notified of a ban, the banned user included. A banned user who
+ * reaches an admission anyway is refused, plainly and under a stable code.
  */
 @Injectable()
 export class HouseholdBanService {
@@ -60,7 +62,8 @@ export class HouseholdBanService {
    *    sent.
    * 7. The open invites to their address are withheld, never revoked, so no
    *    inviter learns whose address it was.
-   * 8. The ban is recorded.
+   * 8. The ban is recorded. A user deleted since step 5 is 404, as one
+   *    never found is.
    *
    * After commit a removed member's ability cache is evicted, and then the
    * revoked invites are announced. A refusal at any step writes nothing.
@@ -96,9 +99,11 @@ export class HouseholdBanService {
 
       await this.invites.withholdOutstandingToAddressWithin(tx, { householdId }, target.email);
 
-      const ban = await tx.householdBan.create({
-        data: { householdId, userId: target.id, bannedById: bannerId, reason: dto.reason ?? null },
-        select: HOUSEHOLD_BAN_SELECT,
+      const ban = await this.recordBan(tx, {
+        householdId,
+        userId: target.id,
+        bannedById: bannerId,
+        reason: dto.reason ?? null,
       });
 
       return { ban, wasMember: removed !== null, revoked };
@@ -230,6 +235,23 @@ export class HouseholdBanService {
     }
   }
 
+  /**
+   * Inserts the ban. Nothing locks the user row read at step 5, so a user
+   * deleted since fails the insert's foreign key: 404, as a user never found
+   * is, rather than a 500.
+   */
+  private async recordBan(tx: Prisma.TransactionClient, data: Prisma.HouseholdBanUncheckedCreateInput) {
+    try {
+      return await tx.householdBan.create({ data, select: HOUSEHOLD_BAN_SELECT });
+    } catch (error) {
+      if (isPrismaForeignKeyConstraintError(error)) {
+        throw new NotFoundException(t('errors.user.not_found', { id: data.userId }));
+      }
+
+      throw error;
+    }
+  }
+
   private banNotFound(householdId: string, userId: string): NotFoundException {
     return new NotFoundException(t('errors.household.ban_not_found', { userId, householdId }));
   }
@@ -245,7 +267,7 @@ export class HouseholdBanService {
     householdId: string,
     action: BanAction,
   ): Promise<void> {
-    const members = await client.householdMember.findMany({ where: { householdId }, select: ROSTER_ROLE_SELECT });
+    const members = await readRoster(client, householdId);
 
     this.abilityService.assertCurrentActorCan(action, ResourceType.HouseholdBan, {
       householdId,

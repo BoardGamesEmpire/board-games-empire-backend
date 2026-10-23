@@ -222,7 +222,7 @@ describe('HouseholdMemberService', () => {
     // Household exists by default; individual tests override the probe.
     db.household.count.mockResolvedValue(1);
     // Nobody is banned by default (#782).
-    db.householdBan.count.mockResolvedValue(0);
+    db.householdBan.findUnique.mockResolvedValue(null);
     // Mutations run inside a transaction; unwrap onto the mock delegates.
     unwrapTransaction(db);
     // The owner lock is taken on EVERY membership mutation now, not only when the
@@ -1164,9 +1164,10 @@ describe('HouseholdMemberService', () => {
       db.householdMember.findFirst.mockResolvedValue(null);
       stubCounts({ scoped: 0, unscoped: 1 });
 
+      // In a ban's words, not removal's: the caller asked for no delete.
       await expect(service.removeUserWithin(asTx(db), 'hh-1', 'user-2')).rejects.toMatchObject({
         status: Http.Forbidden,
-        response: expect.objectContaining({ key: 'common.forbidden.delete' }),
+        response: expect.objectContaining({ key: 'errors.household.ban_forbidden' }),
       });
 
       expect(db.householdMember.delete).not.toHaveBeenCalled();
@@ -1696,14 +1697,17 @@ describe('HouseholdMemberService', () => {
     describe('a household ban (#782)', () => {
       it('refuses a user the household has banned, before any quota is taken (#782)', async () => {
         stubAdmissible();
-        db.householdBan.count.mockResolvedValue(1);
+        db.householdBan.findUnique.mockResolvedValue({ id: 'ban-1' } as never);
 
         await expect(service.addMemberWithin(asTx(db), PARAMS)).rejects.toMatchObject({
           status: Http.Forbidden,
           response: expect.objectContaining({ key: 'errors.household.banned_from_household' }),
         });
 
-        expect(db.householdBan.count).toHaveBeenCalledWith({ where: { householdId: 'hh-1', userId: 'user-2' } });
+        expect(db.householdBan.findUnique).toHaveBeenCalledWith({
+          where: { householdId_userId: { householdId: 'hh-1', userId: 'user-2' } },
+          select: { id: true },
+        });
         expect(quotas.consume).not.toHaveBeenCalled();
         expect(db.householdMember.create).not.toHaveBeenCalled();
       });
@@ -1717,7 +1721,7 @@ describe('HouseholdMemberService', () => {
         const shareLock = db.$queryRaw.mock.calls.findIndex((call: unknown[]) => isHouseholdShareLockSql(call[0]));
         expect(shareLock).toBeGreaterThanOrEqual(0);
         expect(db.$queryRaw.mock.invocationCallOrder[shareLock]).toBeLessThan(
-          db.householdBan.count.mock.invocationCallOrder[0],
+          db.householdBan.findUnique.mock.invocationCallOrder[0],
         );
       });
     });
