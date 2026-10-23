@@ -25,7 +25,10 @@
     "recipient_refused": "You cannot share a game with this user",
     "not_owner": "Only the person who created game {gameId} can share it",
     "already_shared": "Game {gameId} is already shared with this recipient",
-    "not_found": "Share with ID {id} not found for game {gameId}"
+    "not_found": "Share with ID {id} not found for game {gameId}",
+    "not_found_in_household": "Share with ID {id} not found in household {householdId}",
+    "not_awaiting_approval": "Share {id} is already in effect, so there is nothing to approve",
+    "sharer_cannot_share": "The person who made share {id} can no longer share that game here, so it cannot be approved. Remove it instead."
   },
   "game_collection": {
     "not_found": "Collection entry with ID {id} not found",

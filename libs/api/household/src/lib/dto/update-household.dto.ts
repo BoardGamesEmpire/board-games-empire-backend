@@ -31,7 +31,7 @@ export class UpdateHouseholdSettingsDto {
       'Whether members may share games they created with the household. `Direct`: their shares take effect at ' +
       'once. `NeedsApproval` (the default): their shares wait for an owner or admin to approve them. `Off`: ' +
       'members cannot share. Owners and admins always share directly, and guests never share. A change applies ' +
-      'to shares made after it.',
+      'to shares made after it, and a switch to `Off` also stops a waiting share from being approved.',
   })
   @ValidateIf((_, value) => value !== undefined)
   @IsEnum(MemberSharePolicy, { message: i18nValidationMessage('validation.isEnum') })
