@@ -364,6 +364,14 @@ describe('household invites', () => {
       await listInvites(owner, household.id, { status: 'Lost' }).expect(400);
     });
 
+    /**
+     * Also the end-to-end half of #297, which the household detail carried
+     * until it stopped embedding invites (#665). `read-shapes.spec.ts` pins the
+     * select constant and the service specs pin that the query uses it;
+     * neither reads a response. This reads one over HTTP, in the context shape
+     * staff get, so a shape correct in source and wrong by the time it reaches
+     * a client still fails.
+     */
     it("lets staff read a household's invites, in the shape a context reader gets", async () => {
       const [owner, staff] = await Promise.all([actors.user(), actors.admin()]);
       const { household } = await actors.householdWithMembers({ owner });
@@ -374,8 +382,21 @@ describe('household invites', () => {
         'GET /api/households/:id/invites as staff',
       );
 
+      // Asserted BEFORE the absences below, which a row the read never
+      // returned would satisfy just as well.
       expect(asStaff.invites.map((row) => row.id)).toEqual([invite.id]);
+
+      // Named one at a time rather than left to the key set, so a regression
+      // says WHICH credential came back instead of printing two sorted lists.
+      expect(asStaff.invites[0]).not.toHaveProperty('token');
       expect(asStaff.invites[0]).not.toHaveProperty('inviteeEmail');
+
+      // And the whole key set, because naming the two known leaks only catches
+      // the two known leaks: the defect class is a column nobody chose to
+      // publish, which by definition is on no list written today.
+      expect(Object.keys(asStaff.invites[0]).sort()).toEqual(
+        ['createdAt', 'expiresAt', 'id', 'inviteeName', 'inviter', 'role', 'status', 'type'].sort(),
+      );
     });
   });
 });

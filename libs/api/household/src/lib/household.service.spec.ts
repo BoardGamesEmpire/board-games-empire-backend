@@ -1,16 +1,8 @@
 import type { Household } from '@bge/database';
-import {
-  Action,
-  HouseholdMembershipOrigin,
-  InviteStatus,
-  MemberInvitePolicy,
-  Prisma,
-  ResourceType,
-  SystemRole,
-} from '@bge/database';
+import { Action, HouseholdMembershipOrigin, MemberInvitePolicy, Prisma, ResourceType, SystemRole } from '@bge/database';
 import { uniqueViolation as sharedUniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
-import { CONTEXT_INVITE_SELECT, InviteService, type InviteRevokedEvent } from '@bge/invites';
+import { InviteService, type InviteRevokedEvent } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
@@ -86,24 +78,19 @@ describe('HouseholdService', () => {
     );
   });
 
-  // #297 / #296. The shapes themselves are pinned in `read-shapes.spec.ts`;
-  // these pin that the reads actually USE them. Without this, the service could
-  // regress to an inline `include:` — republishing `Invite.token` and the
-  // membership provenance columns — while every shape spec still passed.
-  it('shapes the pending-invite embed with CONTEXT_INVITE_SELECT, never the raw row', async () => {
+  // #665. The detail read reaches every reader of the household, a member's
+  // friends included, and a read on its invites belongs to the household's
+  // owners and admins, and to staff. A household's invites are listed at
+  // `GET /households/:householdId/invites` under that read, and an inviter's
+  // own at `GET /invites/sent`; the detail embeds none.
+  it("embeds none of the household's invites", async () => {
     db.household.findUnique.mockResolvedValue({ id: 'hh-1', members: [] } as unknown as HouseholdWithMembers);
 
     await service.getHouseholdById('hh-1');
 
     const [{ include }] = db.household.findUnique.mock.calls[0] as [{ include: Record<string, unknown> }];
 
-    // Pending and still inside its window: expiry is lazy, so a Pending row
-    // past its date is not a pending invite and is left out here as it is
-    // everywhere else (#161).
-    expect(include.invites).toEqual({
-      where: { AND: [{ status: InviteStatus.Pending }, { expiresAt: { gt: expect.any(Date) } }] },
-      select: CONTEXT_INVITE_SELECT,
-    });
+    expect(include).not.toHaveProperty('invites');
   });
 
   it("returns the household's settings to every reader of it, and only the settings it publishes (#166)", async () => {

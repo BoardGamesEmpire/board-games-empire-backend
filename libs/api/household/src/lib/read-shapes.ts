@@ -32,10 +32,10 @@ import { Prisma } from '@bge/database';
  *
  * Two models: `HouseholdMember`, and `HouseholdSettings` (#166). The invite
  * shapes this file used to carry live in `@bge/invites`, which owns every
- * invite read so the household detail, the invite routes and the lib's own
- * transitions cannot drift into three spellings of an invite. The `Household`
- * row that carries them is still `include:`-shaped in `household.service.ts`
- * — both the detail read and `HOUSEHOLD_LIST_INCLUDE` — so a column added to
+ * invite read so the invite routes and the lib's own transitions cannot drift
+ * into two spellings of an invite. The `Household` row is still
+ * `include:`-shaped in `household.service.ts` — both the detail read and
+ * `HOUSEHOLD_LIST_INCLUDE` — so a column added to
  * `Household` still reaches clients with this suite green. Nothing sensitive
  * ships today (`clientRequestId` is a per-creator idempotency key, and `deletedAt` is null
  * on every read but `GET /households/restorable`, where telling the household

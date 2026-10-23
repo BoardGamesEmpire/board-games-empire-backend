@@ -837,9 +837,9 @@ describe('InviteService', () => {
     });
 
     it('403s an email-only invite addressed by id, even to its inviter: only its link reaches it', async () => {
-      // The id is public to every context reader through the household detail.
-      // If it reached an email-only invite, anyone who could see the household
-      // could accept on the invitee's behalf.
+      // The id reaches every context reader, staff listing a household's
+      // invites among them. If it reached an email-only invite, anyone who
+      // could list them could accept on the invitee's behalf.
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ inviteeId: null }) as never);
 
       await expect(

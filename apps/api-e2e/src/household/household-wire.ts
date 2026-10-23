@@ -1,4 +1,4 @@
-import type { Household, HouseholdMember, HouseholdSettings, Invite } from '@bge/database';
+import type { Household, HouseholdMember, HouseholdSettings } from '@bge/database';
 import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
 
 /**
@@ -85,32 +85,6 @@ export interface ActorProjection {
   readonly profile: { readonly displayName: string | null; readonly avatarUrl: string | null } | null;
 }
 
-/**
- * The pending-invite row as the API RETURNS it, which is far narrower than the
- * model.
- *
- * This read publishes six of `Invite`'s scalars. The ledgers in the invites
- * lib's `read-shapes.ts` give the reason each other one is withheld, and two
- * of them are the whole of #297: `token` is a live accept credential, and
- * `inviteeEmail` is an address belonging to someone who may have no account.
- * Declaring either here would let an assertion on it typecheck and then pass
- * vacuously against `undefined`.
- *
- * `Pick` rather than `Omit`, for the reason on {@link HouseholdMemberWire}:
- * dropping or renaming a published column is a compile error at this
- * declaration, while `Omit` would accept a key the model no longer carries and
- * silently omit nothing.
- */
-export type PendingInviteWire = Wire<
-  Pick<Invite, 'id' | 'status' | 'type' | 'inviteeName' | 'expiresAt' | 'createdAt'>
->;
-
-/** A pending invite with the `role` and `inviter` embeds, as `D-297-6` shapes it. */
-export interface PendingInviteProjection extends PendingInviteWire {
-  readonly role: HouseholdRoleProjection['role'] | null;
-  readonly inviter: ActorProjection;
-}
-
 /** The `languageTag` select in `getHouseholdById` / `getHouseholdsForUser`. */
 export interface LanguageTagProjection {
   readonly id: string;
@@ -120,11 +94,13 @@ export interface LanguageTagProjection {
 /** A household's settings as the detail, the lists and `PATCH` publish them (#166). */
 export type HouseholdSettingsProjection = Wire<Pick<HouseholdSettings, 'memberInvitePolicy'>>;
 
-/** `getHouseholdById`'s shape: the row plus its member, language and settings embeds. */
+/**
+ * `getHouseholdById`'s shape: the row plus its member, language and settings
+ * embeds. No invites (#665): they are listed at `/households/:householdId/invites`.
+ */
 export interface HouseholdDetail extends HouseholdWire {
   readonly languageTag: LanguageTagProjection | null;
   readonly members: readonly HouseholdMemberProjection[];
-  readonly invites: readonly PendingInviteProjection[];
   readonly settings: HouseholdSettingsProjection | null;
 }
 
@@ -246,11 +222,12 @@ export function readEnvelope(response: HttpResponseLike, request: RequestDescrip
     return fail("the household carried no 'members' array", request, response);
   }
 
-  // Checked for the same reason `members` is, and for one more: the invite
-  // suite asserts what this array does NOT carry, and an absent array would
-  // make every one of those absence checks pass without reading a response.
-  if (!Array.isArray((household as unknown as HouseholdDetail).invites)) {
-    return fail("the household carried no 'invites' array", request, response);
+  // Every reader of the household gets this read, a member's friends included,
+  // and only the household's owners and admins, and staff, read its invites
+  // (#665). Refused here so every detail read in the suite checks it, not only
+  // the test that names it.
+  if ('invites' in household) {
+    return fail("the household carried an 'invites' key", request, response);
   }
 
   return { household: household as unknown as HouseholdDetail };
