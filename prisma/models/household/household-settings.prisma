@@ -16,6 +16,24 @@ enum MemberInvitePolicy {
   @@map("member_invite_policies")
 }
 
+// Whether a household's member role may share games into it, and how (#810).
+//
+// It governs the member role only. A household owner or admin always shares
+// directly, and a household guest never shares. A change applies to the shares
+// made after it: a share already waiting stays approvable. A share waiting for
+// approval grants the household nothing.
+enum MemberSharePolicy {
+  // Members cannot share games into the household.
+  Off
+  // A member's share waits for a household owner or admin to approve it
+  // before the household can see the game.
+  NeedsApproval
+  // A member's share takes effect at once.
+  Direct
+
+  @@map("member_share_policies")
+}
+
 // A household's own settings, one row per household (#166). Created with the
 // household, so every household has one; written by its owners and admins
 // through `PATCH /households/:id`. Which other household settings move here,
@@ -28,6 +46,7 @@ model HouseholdSettings {
   householdId String    @id @map("household_id")
 
   memberInvitePolicy MemberInvitePolicy @default(NeedsApproval) @map("member_invite_policy")
+  memberSharePolicy  MemberSharePolicy  @default(NeedsApproval) @map("member_share_policy")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)

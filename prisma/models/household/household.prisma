@@ -26,6 +26,7 @@ model Household {
   // campaigns        Campaign[]
   events               Event[]
   gameLocations        GameLocation[]
+  gameShares           GameShare[]
   gamePlaySessions     GamePlaySession[]
   invites              Invite[]
   members              HouseholdMember[]

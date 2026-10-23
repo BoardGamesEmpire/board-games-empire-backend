@@ -158,7 +158,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
   GamePlaySession: {
     User: { 'read:game_play_session': 'every row' },
   },
-  GameSharing: {},
+  GameShare: {},
   Platform: {
     User: { 'read:platform': 'every row' },
   },

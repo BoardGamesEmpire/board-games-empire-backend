@@ -5,11 +5,10 @@ import type { Prisma, ResourceType } from '@bge/database';
  *
  * `ResourceType` is a *superset* of the Prisma model names: alongside the
  * row-backed types (`Household`, `Event`, `Game`, …) it also carries aggregate /
- * synthetic resources that have no backing table — e.g. `Campaign`,
- * `GameSharing`. Intersecting with `Prisma.ModelName` narrows the union to
- * exactly the values that can index `@casl/prisma`'s `WhereInput<TModelName>`,
- * which lets `AbilityService` return a strictly-typed `WhereInput<TResource>[]`
- * with no cast and no `any`.
+ * synthetic resources that have no backing table — e.g. `Campaign`. Intersecting
+ * with `Prisma.ModelName` narrows the union to exactly the values that can index
+ * `@casl/prisma`'s `WhereInput<TModelName>`, which lets `AbilityService` return
+ * a strictly-typed `WhereInput<TResource>[]` with no cast and no `any`.
  *
  * Consequence (by design): a non-model `ResourceType` such as `ResourceType.Campaign`
  * is NOT assignable here, so `getCurrentResourceConditions(ResourceType.Campaign, …)`
