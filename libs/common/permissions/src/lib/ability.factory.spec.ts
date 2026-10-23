@@ -1641,6 +1641,45 @@ describe('AbilityFactory', () => {
     });
   });
 
+  describe("approving a member's game share (#810)", () => {
+    // The approval is bound to `approvedAt`, the column only an approval
+    // writes, so it passes no other update on a share: a household owner or
+    // admin can't move another member's share to another household or game on
+    // the strength of it.
+    const holding = (roleName: SystemRole) =>
+      factory.createForUser(
+        makeUser({
+          id: 'user-1',
+          householdMember: [
+            {
+              householdId: 'hh-1',
+              role: makeRole(roleName, [...ROLE_PERMISSION_CATALOG[roleName]].map(catalogPermission)),
+            },
+          ],
+        }),
+      );
+    const waiting = (roleName: SystemRole) =>
+      subject(ResourceType.GameShare, {
+        id: 'share-1',
+        householdId: 'hh-1',
+        sharedById: 'user-2',
+        approvedAt: null,
+        game: { deletedAt: null, createdById: 'user-2' },
+        household: { members: [{ userId: 'user-1', role: { role: { name: roleName } } }] },
+      });
+
+    it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin])(
+      "lets a %s approve another member's waiting share, and change no other column of it",
+      (roleName) => {
+        const ability = holding(roleName);
+
+        expect(ability.can(Action.update, waiting(roleName), 'approvedAt')).toBe(true);
+        expect(ability.can(Action.update, waiting(roleName), 'householdId')).toBe(false);
+        expect(ability.can(Action.update, waiting(roleName), 'gameId')).toBe(false);
+      },
+    );
+  });
+
   describe('acting on the household admin role (#168)', () => {
     // Only a household owner makes someone a household admin, changes a
     // household admin's role, removes one, invites with that role or revokes
@@ -1920,11 +1959,13 @@ describe('AbilityFactory', () => {
       expect(user.can(Action.delete, asEntity('Game', { createdById: 'someone-else' }))).toBe(false);
     });
 
-    it('lets an ordinary User read the games it created, a friend’s that reach friends, a friend of a friend’s that reach friends of friends and every Public one, and no others', () => {
+    it('lets an ordinary User read the games it created, a friend’s that reach friends, a friend of a friend’s that reach friends of friends, every Public one and the ones shared with it, and no others', () => {
       // The clause the game list, the by-id read and search all put in their
       // `where` (#472). Before, `read:game` carried no condition, so this was
       // `{}`: every signed-in user read every private game. A friend of a
       // friend whom a block separates from the creator is not let in (#496).
+      // A share reaches its recipient once it is in effect, and a block
+      // between the game's creator and a named recipient vetoes it (#810).
       const user = factory.createForUser(
         makeUser({
           id: 'user-1',
@@ -1937,9 +1978,32 @@ describe('AbilityFactory', () => {
           { friendshipsReceived: { some: { requesterId: 'user-1', status: 'Accepted' } } },
         ],
       };
+      const blockWithUser1 = {
+        OR: [
+          { friendshipsRequested: { some: { addresseeId: 'user-1', status: 'Blocked' } } },
+          { friendshipsReceived: { some: { requesterId: 'user-1', status: 'Blocked' } } },
+        ],
+      };
 
       expect(accessibleBy(user, Action.read).ofType('Game')).toEqual({
         OR: [
+          {
+            deletedAt: null,
+            OR: [
+              {
+                shares: { some: { userId: 'user-1', approvedAt: { not: null } } },
+                createdBy: { is: { NOT: blockWithUser1 } },
+              },
+              {
+                shares: {
+                  some: {
+                    approvedAt: { not: null },
+                    household: { is: { deletedAt: null, members: { some: { userId: 'user-1' } } } },
+                  },
+                },
+              },
+            ],
+          },
           { deletedAt: null, reach: 'Public' },
           {
             deletedAt: null,
@@ -1958,12 +2022,7 @@ describe('AbilityFactory', () => {
                         friendshipsReceived: { some: { status: 'Accepted', requester: { is: acceptedFriendOfUser1 } } },
                       },
                     ],
-                    NOT: {
-                      OR: [
-                        { friendshipsRequested: { some: { addresseeId: 'user-1', status: 'Blocked' } } },
-                        { friendshipsReceived: { some: { requesterId: 'user-1', status: 'Blocked' } } },
-                      ],
-                    },
+                    NOT: blockWithUser1,
                   },
                 },
               },
