@@ -184,6 +184,8 @@ describe('HouseholdInviteService', () => {
     db.role.findUnique.mockImplementation(((args: { where: { name: string } }) =>
       Promise.resolve({ id: `role-${args.where.name}` })) as never);
     db.household.count.mockResolvedValue(1);
+    // Nobody is banned by default (#782).
+    db.householdBan.count.mockResolvedValue(0);
     db.invite.findUniqueOrThrow.mockImplementation(((args: { select: Record<string, unknown> }) =>
       Promise.resolve(selected(STORED_INVITE, args.select))) as never);
     // The role an existing invite offers, read for a revoke or an approval (#168).
@@ -875,6 +877,99 @@ describe('HouseholdInviteService', () => {
           // Asked whatever the preference, so a FriendsOfFriends one costs no
           // read the others don't (#496).
           expect(db.user.count).toHaveBeenCalledTimes(1);
+        });
+      });
+
+      describe('a household ban (#782)', () => {
+        /** The household has banned `user-2`, who holds `sam@example.test`. */
+        const banned = () =>
+          db.householdBan.count.mockImplementation(((args: {
+            where: { userId?: string; user?: { is: { email: string } } };
+          }) =>
+            Promise.resolve(
+              args.where.userId === 'user-2' || args.where.user?.is.email === 'sam@example.test' ? 1 : 0,
+            )) as never);
+
+        /** The acting user holds the member role, under the `Direct` member invite policy. */
+        const actAsMember = () => {
+          abilityService.getActingUserId.mockReturnValue('member-1');
+          db.household.findUnique.mockResolvedValue(
+            resolves({ settings: { memberInvitePolicy: MemberInvitePolicy.Direct }, members: ROSTER }),
+          );
+        };
+
+        beforeEach(() => serverPolicy(Reach.Public));
+
+        it("refuses an invite by id to a banned user, in words for the household's owners and admins (#782)", async () => {
+          userById();
+          banned();
+
+          await expect(service.createInvite('hh-1', byId())).rejects.toMatchObject({
+            status: 403,
+            response: expect.objectContaining({ key: 'errors.household.invitee_banned' }),
+          });
+
+          expect(db.householdBan.count).toHaveBeenCalledWith({ where: { householdId: 'hh-1', userId: 'user-2' } });
+          expect(quotas.consume).not.toHaveBeenCalled();
+          expect(invites.createWithin).not.toHaveBeenCalled();
+        });
+
+        it("refuses a member's invite by id to a banned user with the generic refusal (#782)", async () => {
+          actAsMember();
+          userById();
+          banned();
+
+          // Members can't read the household's bans, so the refusal is the
+          // one a block or the invitee's preference gives.
+          await expect(service.createInvite('hh-1', byId())).rejects.toMatchObject({
+            status: 403,
+            response: expect.objectContaining({ key: 'errors.household.invitee_refused' }),
+          });
+
+          expect(quotas.consume).not.toHaveBeenCalled();
+          expect(invites.createWithin).not.toHaveBeenCalled();
+        });
+
+        it("asks about the ban only once the server's policy lets the invite through, so a member can't tell a ban from a block (#782)", async () => {
+          serverPolicy(Reach.Friends);
+          friendship(null);
+          actAsMember();
+          userById();
+          banned();
+
+          // Any other non-friend gets the policy's words, and so does this one.
+          await expect(service.createInvite('hh-1', byId())).rejects.toMatchObject({
+            status: 403,
+            response: expect.objectContaining({ key: 'errors.household.invitee_friends_only' }),
+          });
+
+          expect(db.householdBan.count).not.toHaveBeenCalled();
+        });
+
+        it("stores an invite by address to a banned user's address withheld, answering as any other (#782)", async () => {
+          inviterAddress('owner@example.test');
+          banned();
+
+          await expect(service.createInvite('hh-1', byAddress())).resolves.toBe(creation.invite);
+
+          expect(createdWith()).toMatchObject({ inviteeId: null, inviteeEmail: 'Sam@Example.test', withheld: true });
+          expect(invites.emit).toHaveBeenCalledWith([...creation.expired, creation.event]);
+        });
+
+        it('reads the ban for every invite by address, banned or not (#782)', async () => {
+          inviterAddress('owner@example.test');
+
+          await service.createInvite('hh-1', byAddress());
+
+          friendship(FriendshipStatus.Blocked);
+          await service.createInvite('hh-1', byAddress());
+
+          // Unbanned, so each invite is withheld exactly when the gate says so.
+          expect(invites.createWithin.mock.calls.map(([, params]) => params.withheld)).toEqual([false, true]);
+          expect(db.householdBan.count).toHaveBeenCalledTimes(2);
+          expect(db.householdBan.count).toHaveBeenCalledWith({
+            where: { householdId: 'hh-1', user: { is: { email: 'sam@example.test' } } },
+          });
         });
       });
     });

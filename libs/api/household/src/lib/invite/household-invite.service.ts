@@ -18,7 +18,14 @@ import {
 import { AbilityService, resolveActingUserIdOrNull, ScopeComposer } from '@bge/permissions';
 import { QuotaExceededException, QuotaService, type QuotaCheckContext, type QuotaSoftOverageEvent } from '@bge/quota';
 import { PaginatedRows } from '@bge/shared';
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { addressHolderBannedWithin, isBannedWithin } from '../ban/household-ban.helpers';
 import { CreateHouseholdInviteDto, ListHouseholdInvitesQueryDto, type AssignableHouseholdRole } from '../dto';
 import { assertHouseholdExists, lockExistingHousehold, resolveHouseholdRoleId } from '../household-access.helpers';
 import { SHOWN_NAME_SELECT, shownName } from '../shown-name';
@@ -116,9 +123,10 @@ export class HouseholdInviteService {
    *    stored as it is, bound to no account. The inviter is refused, and so is
    *    a current member named by id.
    * 5. The server's policy, a block between the two and the invitee's own
-   *    preference decide whether they may be invited (#278). By id, each
-   *    refuses with 403. By address, only the policy refuses; the other two
-   *    store the invite withheld, and it answers like any other.
+   *    preference decide whether they may be invited (#278), and then a
+   *    household ban (#782). By id, each refuses with 403. By address, only
+   *    the policy refuses; the other three store the invite withheld, and it
+   *    answers like any other ({@link withheldByBan}).
    * 6. The invite takes one of the inviter's and the household's invites for
    *    the day (#279), under the cap's advisory lock, so two invites at once
    *    cannot both take the last one. One that waits for approval takes only
@@ -157,7 +165,8 @@ export class HouseholdInviteService {
 
       const roleId = await resolveHouseholdRoleId(tx, role);
 
-      const { withheld } = await gateInvitee(tx, InviteType.Household, inviterId, invitee);
+      const gate = await gateInvitee(tx, InviteType.Household, inviterId, invitee);
+      const withheldByBan = await this.withheldByBan(tx, householdId, invitee, members, inviterId);
 
       const softOverages = await this.takeDailyInvite(
         tx,
@@ -171,7 +180,7 @@ export class HouseholdInviteService {
         ...invitee,
         roleId,
         message: dto.message ?? null,
-        withheld,
+        withheld: gate.withheld || withheldByBan,
         needsApproval,
       });
 
@@ -452,6 +461,45 @@ export class HouseholdInviteService {
       }),
       total,
     };
+  }
+
+  /**
+   * Whether a household ban keeps the invitee out (#782), asked once the
+   * invitee gate has let the invite through.
+   *
+   * By id, a banned invitee is refused with 403. The household's owners and
+   * admins are told it is the ban, which they can lift. Members can't read
+   * the household's bans, so their refusal doesn't name one: it is the one a
+   * block or the invitee's preference gives. Asked after the gate for the same
+   * reason: before it, a banned non-friend under a `Friends` policy would get
+   * those words where any other non-friend gets the policy's own.
+   *
+   * By address, the ban is read every time, banned or not, so the reads don't
+   * depend on who holds the address, and a banned holder's invite is stored
+   * withheld.
+   */
+  private async withheldByBan(
+    tx: Prisma.TransactionClient,
+    householdId: string,
+    invitee: StoredInvitee,
+    members: RosterRow[],
+    inviterId: string,
+  ): Promise<boolean> {
+    if (invitee.inviteeId === null) {
+      return addressHolderBannedWithin(tx, householdId, invitee.inviteeEmail);
+    }
+
+    if (await isBannedWithin(tx, householdId, invitee.inviteeId)) {
+      throw new ForbiddenException(
+        t(
+          isHouseholdAuthority(members, inviterId)
+            ? 'errors.household.invitee_banned'
+            : 'errors.household.invitee_refused',
+        ),
+      );
+    }
+
+    return false;
   }
 
   /**

@@ -221,6 +221,8 @@ describe('HouseholdMemberService', () => {
 
     // Household exists by default; individual tests override the probe.
     db.household.count.mockResolvedValue(1);
+    // Nobody is banned by default (#782).
+    db.householdBan.count.mockResolvedValue(0);
     // Mutations run inside a transaction; unwrap onto the mock delegates.
     unwrapTransaction(db);
     // The owner lock is taken on EVERY membership mutation now, not only when the
@@ -1609,6 +1611,35 @@ describe('HouseholdMemberService', () => {
       );
       expect(result.member).toBe(created);
       expect(result.admitted).toBe(true);
+    });
+
+    describe('a household ban (#782)', () => {
+      it('refuses a user the household has banned, before any quota is taken (#782)', async () => {
+        stubAdmissible();
+        db.householdBan.count.mockResolvedValue(1);
+
+        await expect(service.addMemberWithin(asTx(db), PARAMS)).rejects.toMatchObject({
+          status: Http.Forbidden,
+          response: expect.objectContaining({ key: 'errors.household.banned_from_household' }),
+        });
+
+        expect(db.householdBan.count).toHaveBeenCalledWith({ where: { householdId: 'hh-1', userId: 'user-2' } });
+        expect(quotas.consume).not.toHaveBeenCalled();
+        expect(db.householdMember.create).not.toHaveBeenCalled();
+      });
+
+      it('checks the ban under the household lock (#782)', async () => {
+        stubAdmissible();
+
+        await service.addMemberWithin(asTx(db), PARAMS);
+
+        // Both are the database double's mocks, so they share one call counter.
+        const shareLock = db.$queryRaw.mock.calls.findIndex((call: unknown[]) => isHouseholdShareLockSql(call[0]));
+        expect(shareLock).toBeGreaterThanOrEqual(0);
+        expect(db.$queryRaw.mock.invocationCallOrder[shareLock]).toBeLessThan(
+          db.householdBan.count.mock.invocationCallOrder[0],
+        );
+      });
     });
 
     it('defaults the role to HouseholdMember', async () => {

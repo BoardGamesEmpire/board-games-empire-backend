@@ -148,6 +148,7 @@ export function createMockDatabaseService(): MockDatabaseService {
     gameReleaseLanguage: mockDelegate(),
     gameSource: mockDelegate(),
     household: mockDelegate(),
+    householdBan: mockDelegate(),
     householdMember: mockDelegate(),
     householdPlugin: mockDelegate(),
     householdRole: mockDelegate(),

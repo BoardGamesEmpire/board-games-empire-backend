@@ -29,6 +29,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { isBannedWithin } from '../ban/household-ban.helpers';
 import {
   HOUSEHOLD_MEMBER_UNIQUE_COLUMNS,
   HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT,
@@ -704,6 +705,14 @@ export class HouseholdMemberService {
     // Locks the household row for the rest of the transaction, so a concurrent
     // soft-delete (#154) cannot land between this check and the insert.
     await lockExistingHousehold(tx, householdId);
+
+    // A household ban refuses every admission, whichever consent path it came
+    // by (#782). Read under the lock, which a ban takes `FOR NO KEY UPDATE`,
+    // so a ban that commits first is seen here, and asked before the quota so
+    // a refused admission takes nothing.
+    if (await isBannedWithin(tx, householdId, userId)) {
+      throw new ForbiddenException(t('errors.household.banned_from_household'));
+    }
 
     const existing = await this.findMembershipWithin(tx, householdId, userId);
 
