@@ -66,8 +66,12 @@ export function friendOfFriendOf(userId: string): Prisma.UserWhereInput {
   };
 }
 
-/** A block between the user being matched and `userId`, whichever placed it. */
-function blockWith(userId: string): Prisma.UserWhereInput {
+/**
+ * A block between the user being matched and `userId`, whichever placed it.
+ * The share rule uses it too, to veto an owner's user share (`gameSharedWith`,
+ * #810).
+ */
+export function blockWith(userId: string): Prisma.UserWhereInput {
   return {
     OR: [
       { friendshipsRequested: { some: { addresseeId: userId, status: FriendshipStatus.Blocked } } },
