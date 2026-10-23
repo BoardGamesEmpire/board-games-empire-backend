@@ -43,6 +43,8 @@ describe('the BoardGameGeek gateway over gRPC', () => {
         'CAPABILITY_FETCH_EXPANSIONS',
         'CAPABILITY_LIST_LANGUAGES',
         'CAPABILITY_LIST_PLATFORMS',
+        'CAPABILITY_LIST_CATEGORIES',
+        'CAPABILITY_LIST_MECHANICS',
       ],
       filterableAxes: ['COVERAGE_AXIS_CONTENT_TYPE'],
       languageCodeFormats: {
@@ -80,5 +82,21 @@ describe('the BoardGameGeek gateway over gRPC', () => {
         { externalId: 'bgg-tabletop', name: 'Tabletop', abbreviation: 'TT', platformType: 'PLATFORM_TYPE_TABLETOP' },
       ],
     });
+  });
+
+  it('lists its categories on ListCategories, from its table (#839)', async () => {
+    const reply = await gateway().listCategories('e2e-categories');
+
+    expect(reply.correlationId).toBe('e2e-categories');
+    expect(reply.categories).toHaveLength(85);
+    expect(reply.categories).toContainEqual({ externalId: '1009', name: 'Abstract Strategy' });
+  });
+
+  it('lists its mechanics on ListMechanics, from its table (#839)', async () => {
+    const reply = await gateway().listMechanics('e2e-mechanics');
+
+    expect(reply.correlationId).toBe('e2e-mechanics');
+    expect(reply.mechanics).toHaveLength(200);
+    expect(reply.mechanics).toContainEqual({ externalId: '2082', name: 'Worker Placement' });
   });
 });

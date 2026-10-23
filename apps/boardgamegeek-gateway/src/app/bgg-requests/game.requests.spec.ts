@@ -2,7 +2,26 @@ import { firstValueFrom } from 'rxjs';
 import type { BggClientLike } from '../bgg/interfaces';
 import { BggThingType, DEFAULT_BGG_SEARCH_TYPES } from '../constants';
 import type { BggSearchResult, BggThing } from '../types';
-import { chunk, fetchThingRequest, fetchThingsRequest, parseExternalId, searchGamesRequest } from './game.requests';
+import {
+  chunk,
+  collapseSearchItems,
+  fetchThingRequest,
+  fetchThingsRequest,
+  parseExternalId,
+  searchGamesRequest,
+} from './game.requests';
+
+/** Item 2 is an expansion, which BGG answers twice: once under each label (#777). */
+const BOTH_LABELS: BggSearchResult[] = [
+  {
+    total: 3,
+    items: [
+      { id: 1, type: BggThingType.BoardGame, name: 'Catan' },
+      { id: 2, type: BggThingType.BoardGame, name: 'Catan: Seafarers' },
+      { id: 2, type: BggThingType.BoardGameExpansion, name: 'Catan: Seafarers' },
+    ],
+  },
+];
 
 describe('searchGamesRequest', () => {
   it('forwards the query text to client.search.query', async () => {
@@ -13,20 +32,63 @@ describe('searchGamesRequest', () => {
     expect(search).toHaveBeenCalledWith(expect.objectContaining({ query: 'Catan' }));
   });
 
-  it('passes a single string when only one type is provided', async () => {
+  it('always asks BGG for base games and expansions, since a base-game search alone returns expansions labelled as base games (#777)', async () => {
     const { client, search } = buildMockClient();
 
     await firstValueFrom(searchGamesRequest('Catan', 20, 0, [BggThingType.BoardGame])(client));
 
-    expect(search).toHaveBeenCalledWith(expect.objectContaining({ type: BggThingType.BoardGame }));
+    expect(search).toHaveBeenCalledWith(expect.objectContaining({ type: [...DEFAULT_BGG_SEARCH_TYPES] }));
   });
 
-  it('passes an array when multiple types are provided', async () => {
-    const { client, search } = buildMockClient();
+  it('drops expansions from a search kept to base games (#777)', async () => {
+    const { client } = buildMockClient({ searchResults: BOTH_LABELS });
 
-    await firstValueFrom(searchGamesRequest('Catan')(client));
+    const result = await firstValueFrom(searchGamesRequest('Catan', 20, 0, [BggThingType.BoardGame])(client));
 
-    expect(search).toHaveBeenCalledWith(expect.objectContaining({ type: [...DEFAULT_BGG_SEARCH_TYPES] }));
+    expect(result.map((item) => item.id)).toEqual([1]);
+  });
+
+  it('keeps each expansion once in a search kept to expansions (#777)', async () => {
+    const { client } = buildMockClient({ searchResults: BOTH_LABELS });
+
+    const result = await firstValueFrom(searchGamesRequest('Catan', 20, 0, [BggThingType.BoardGameExpansion])(client));
+
+    expect(result.map((item) => item.id)).toEqual([2]);
+  });
+
+  it('pages after collapsing, so a page holds distinct games (#777)', async () => {
+    const searchResults: BggSearchResult[] = [
+      {
+        total: 10,
+        items: [1, 2, 3, 4, 5].flatMap((id) => [
+          { id, type: BggThingType.BoardGame, name: `Game ${id}` },
+          { id, type: BggThingType.BoardGameExpansion, name: `Game ${id}` },
+        ]),
+      },
+    ];
+    const { client } = buildMockClient({ searchResults });
+
+    const result = await firstValueFrom(searchGamesRequest('x', 3, 1)(client));
+
+    expect(result.map((item) => item.id)).toEqual([2, 3, 4]);
+  });
+
+  it('filters to the kept types before paging, so offset and limit count only kept games (#777)', async () => {
+    const searchResults: BggSearchResult[] = [
+      {
+        total: 6,
+        items: [1, 2, 3, 4, 5, 6].map((id) => ({
+          id,
+          type: id % 2 ? BggThingType.BoardGame : BggThingType.BoardGameExpansion,
+          name: `Game ${id}`,
+        })),
+      },
+    ];
+    const { client } = buildMockClient({ searchResults });
+
+    const result = await firstValueFrom(searchGamesRequest('x', 2, 1, [BggThingType.BoardGame])(client));
+
+    expect(result.map((item) => item.id)).toEqual([3, 5]);
   });
 
   it('truncates the result list to the supplied limit', async () => {
@@ -77,6 +139,15 @@ describe('searchGamesRequest', () => {
     await firstValueFrom(request$);
 
     expect(search).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('collapseSearchItems (#777)', () => {
+  it('labels an id an expansion when any copy says so, and keeps it once', () => {
+    expect(collapseSearchItems(BOTH_LABELS[0].items)).toEqual([
+      { id: 1, type: BggThingType.BoardGame, name: 'Catan' },
+      { id: 2, type: BggThingType.BoardGameExpansion, name: 'Catan: Seafarers' },
+    ]);
   });
 });
 

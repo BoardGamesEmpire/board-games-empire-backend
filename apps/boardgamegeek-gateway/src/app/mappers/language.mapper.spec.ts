@@ -24,10 +24,29 @@ describe('toLanguageData', () => {
     } satisfies proto.LanguageData);
   });
 
-  it('returns null for an unrecognized language name', () => {
+  it('passes a name the map doesn’t know on as a name, so the server can hold it for review (#717)', () => {
     const link: BggLink = { type: BggLinkType.Language, id: 9999, value: 'Klingon' };
 
-    expect(toLanguageData(link)).toBeNull();
+    const result = toLanguageData(link);
+
+    expect(result).toEqual({ name: 'Klingon' });
+    expect(result?.iso6393).toBeUndefined();
+  });
+
+  it('passes a name that is also an Object.prototype key on as a name (#717)', () => {
+    expect(toLanguageData({ type: BggLinkType.Language, id: 9996, value: 'constructor' })).toEqual({
+      name: 'constructor',
+    });
+    expect(toLanguageData({ type: BggLinkType.Language, id: 9995, value: 'toString' })).toEqual({ name: 'toString' });
+  });
+
+  it('skips a language link with a blank value (#717)', () => {
+    expect(toLanguageData({ type: BggLinkType.Language, id: 9998, value: '' })).toBeNull();
+    expect(toLanguageData({ type: BggLinkType.Language, id: 9998, value: '  ' })).toBeNull();
+  });
+
+  it('skips a language link with no value, rather than sending a nameless one (#717)', () => {
+    expect(toLanguageData({ type: BggLinkType.Language, id: 9997 } as BggLink)).toBeNull();
   });
 
   it('returns null when the link is not a language link', () => {
@@ -55,19 +74,20 @@ describe('toLanguageDataList', () => {
     expect(result[0].name).toBe('English');
   });
 
-  it('skips unknown languages without throwing', () => {
+  it('keeps an unknown name beside the known ones, each once (#717)', () => {
     const links: BggLink[] = [
       { type: BggLinkType.Language, id: 1, value: 'English' },
       { type: BggLinkType.Language, id: 2, value: 'Klingon' },
-      { type: BggLinkType.Language, id: 3, value: 'German' },
+      { type: BggLinkType.Language, id: 3, value: 'Klingon' },
     ];
 
-    const result = toLanguageDataList(links);
-
-    expect(result.map((l) => l.name)).toEqual(['English', 'German']);
+    expect(toLanguageDataList(links)).toEqual([
+      { iso6393: 'eng', iso6391: 'en', name: 'English' },
+      { name: 'Klingon' },
+    ]);
   });
 
-  it('deduplicates languages by iso6393', () => {
+  it('lists a language once when two links name it (#717)', () => {
     const links: BggLink[] = [
       { type: BggLinkType.Language, id: 1, value: 'English' },
       { type: BggLinkType.Language, id: 2, value: 'English' },
