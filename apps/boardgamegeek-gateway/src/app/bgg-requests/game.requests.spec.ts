@@ -73,6 +73,24 @@ describe('searchGamesRequest', () => {
     expect(result.map((item) => item.id)).toEqual([2, 3, 4]);
   });
 
+  it('filters to the kept types before paging, so offset and limit count only kept games (#777)', async () => {
+    const searchResults: BggSearchResult[] = [
+      {
+        total: 6,
+        items: [1, 2, 3, 4, 5, 6].map((id) => ({
+          id,
+          type: id % 2 ? BggThingType.BoardGame : BggThingType.BoardGameExpansion,
+          name: `Game ${id}`,
+        })),
+      },
+    ];
+    const { client } = buildMockClient({ searchResults });
+
+    const result = await firstValueFrom(searchGamesRequest('x', 2, 1, [BggThingType.BoardGame])(client));
+
+    expect(result.map((item) => item.id)).toEqual([3, 5]);
+  });
+
   it('truncates the result list to the supplied limit', async () => {
     const items: BggSearchResult[] = Array.from({ length: 50 }, (_, i) => ({
       total: 50,
