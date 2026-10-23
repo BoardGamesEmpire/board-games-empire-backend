@@ -31,6 +31,19 @@ describe('SearchStartDto', () => {
     });
   });
 
+  // REST splits a comma-separated list; a frame sends an array, so a string
+  // here is a malformed frame and must not be split into one (#565).
+  describe('gatewayIds', () => {
+    it('refuses a comma-separated gatewayIds string', async () => {
+      const dto = toDto({ ...base, gatewayIds: 'igdb-gw-1,bgg-gw-1' });
+
+      expect(dto.gatewayIds).toBe('igdb-gw-1,bgg-gw-1');
+      expect(validationCatalogKeys((await validate(dto)).filter((e) => e.property === 'gatewayIds'))).toEqual({
+        'gatewayIds.isArray': 'validation.isArray',
+      });
+    });
+  });
+
   describe('pageSize', () => {
     it('resolves to 20 when limit is absent', () => {
       expect(toDto(base).pageSize).toBe(20);

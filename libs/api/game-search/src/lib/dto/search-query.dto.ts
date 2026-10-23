@@ -1,24 +1,20 @@
 import { PlatformType } from '@bge/database';
-import { i18nValidationMessage } from '@bge/i18n';
-import { CappedOffsetPaginationQueryDto, TransformBoolean, TransformList } from '@bge/shared';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
+import { TransformList } from '@bge/shared';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { SEARCHABLE_CONTENT_TYPES, type SearchableContentType } from '../search-filter';
+import { SearchFieldsDto } from './search-fields.dto';
 
-export class SearchQueryDto extends CappedOffsetPaginationQueryDto(100, 20) {
-  @ApiProperty({ description: 'Search query string' })
-  @IsString({ message: i18nValidationMessage('validation.isString') })
-  query!: string;
-
+/**
+ * A REST game search. The list fields are redeclared only to split a
+ * comma-separated query string: their validators stay on the base (#565).
+ */
+export class SearchQueryDto extends SearchFieldsDto {
   @ApiPropertyOptional({
     description: 'Comma-separated gateway IDs to include. Empty = all active gateways.',
     type: String,
   })
-  @IsOptional()
-  @IsArray({ message: i18nValidationMessage('validation.isArray') })
-  @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
   @TransformList()
-  gatewayIds?: string[];
+  override gatewayIds?: string[];
 
   @ApiPropertyOptional({
     description:
@@ -27,11 +23,8 @@ export class SearchQueryDto extends CappedOffsetPaginationQueryDto(100, 20) {
     enum: PlatformType,
     isArray: true,
   })
-  @IsOptional()
-  @IsArray({ message: i18nValidationMessage('validation.isArray') })
-  @IsIn(Object.values(PlatformType), { each: true, message: i18nValidationMessage('validation.each.isIn') })
   @TransformList()
-  platformTypes?: PlatformType[];
+  override platformTypes?: PlatformType[];
 
   @ApiPropertyOptional({
     description:
@@ -40,28 +33,8 @@ export class SearchQueryDto extends CappedOffsetPaginationQueryDto(100, 20) {
     enum: SEARCHABLE_CONTENT_TYPES,
     isArray: true,
   })
-  @IsOptional()
-  @IsArray({ message: i18nValidationMessage('validation.isArray') })
-  @IsIn(SEARCHABLE_CONTENT_TYPES, { each: true, message: i18nValidationMessage('validation.each.isIn') })
   @TransformList()
-  contentTypes?: SearchableContentType[];
-
-  @ApiPropertyOptional({ description: 'Include local DB results', default: true })
-  @IsOptional()
-  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
-  @TransformBoolean()
-  includeLocal?: boolean = true;
-
-  @ApiPropertyOptional({ description: 'Include external gateway results', default: true })
-  @IsOptional()
-  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
-  @TransformBoolean()
-  includeExternal?: boolean = true;
-
-  @ApiPropertyOptional({ description: 'Locale hint for gateway-side optimizations (e.g. "en", "de")' })
-  @IsOptional()
-  @IsString({ message: i18nValidationMessage('validation.isString') })
-  locale?: string;
+  override contentTypes?: SearchableContentType[];
 
   // `limit` (capped at 100, local page size 20 when absent) and `offset` (bounded
   // by DEFAULT_MAX_OFFSET, default 0) are inherited from
