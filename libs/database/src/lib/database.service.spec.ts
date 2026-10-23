@@ -151,20 +151,6 @@ describe('DatabaseService', () => {
 
       await expect(service.onModuleInit()).rejects.toThrow('ECONNREFUSED');
     });
-
-    it('registers a query listener when database.logQueries is true', async () => {
-      const queryService = await createService({ logQueries: true });
-
-      await queryService.onModuleInit();
-
-      expect(queryService.$on).toHaveBeenCalledWith('query', expect.any(Function));
-    });
-
-    it('does not register a query listener when database.logQueries is absent', async () => {
-      await service.onModuleInit();
-
-      expect(service.$on).not.toHaveBeenCalledWith('query', expect.any(Function));
-    });
   });
 
   describe('Prisma log events', () => {
@@ -206,10 +192,32 @@ describe('DatabaseService', () => {
       expect(lastPrismaOptions().log).not.toContainEqual({ emit: 'event', level: 'query' });
     });
 
+    it('registers a query listener when database.logQueries is true', async () => {
+      const queryService = await createService({ logQueries: true });
+
+      expect(queryService.$on).toHaveBeenCalledWith('query', expect.any(Function));
+    });
+
+    it('does not register a query listener when database.logQueries is absent', () => {
+      expect(service.$on).not.toHaveBeenCalledWith('query', expect.any(Function));
+    });
+
+    it('listens for every requested level from construction, before $connect can emit one (#627)', async () => {
+      // With `emit: 'event'` Prisma prints nothing itself, so an event emitted
+      // before its listener exists is lost.
+      jest.spyOn(env, 'isDevelopment', 'get').mockReturnValue(true);
+
+      const devService = await createService({ logQueries: true });
+
+      const listened = (devService.$on as jest.Mock).mock.calls.map(([level]) => level);
+      const requested = (lastPrismaOptions().log as Array<{ level: string }>).map(({ level }) => level);
+      expect(listened).toEqual(requested);
+      expect(devService.$connect).not.toHaveBeenCalled();
+    });
+
     it('logs a Prisma error event as one error record (#627)', async () => {
       const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
       const message = 'Raw query failed. Code: `42P01`. Message: `relation "x" does not exist`';
-      await service.onModuleInit();
 
       handlerFor(service, 'error')(event(message));
 
@@ -222,7 +230,6 @@ describe('DatabaseService', () => {
       const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
       const log = jest.spyOn(Logger.prototype, 'log').mockImplementation();
       const devService = await createService();
-      await devService.onModuleInit();
       log.mockClear();
 
       handlerFor(devService, 'warn')(event('a warning'));
@@ -237,7 +244,6 @@ describe('DatabaseService', () => {
     it('logs the query and its duration', async () => {
       const log = jest.spyOn(Logger.prototype, 'log').mockImplementation();
       const queryService = await createService({ logQueries: true });
-      await queryService.onModuleInit();
       log.mockClear();
 
       handlerFor(
@@ -260,7 +266,6 @@ describe('DatabaseService', () => {
         jest.spyOn(Logger.prototype, level).mockImplementation(),
       );
       const queryService = await createService({ logQueries: true });
-      await queryService.onModuleInit();
 
       handlerFor(
         queryService,
