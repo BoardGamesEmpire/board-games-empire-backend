@@ -86,25 +86,33 @@ describe('PermissionsService', () => {
 
   describe('loadUserRoleGraphWithin', () => {
     it("reads on the caller's transaction, past a cached graph, and caches nothing (#747)", async () => {
-      const stale = makeUserGraph();
-      db.user.findUnique.mockResolvedValue(stale as unknown as User);
-      await service.getUserRoleGraph('user-1');
-      const set = jest.spyOn(cache, 'set');
+      // Both reads stamp their own expiry cutoff; a frozen clock keeps the two
+      // queries comparable when they straddle a millisecond.
+      jest.useFakeTimers({ now: new Date('2026-10-22T12:00:00Z') });
 
-      const tx = { user: { findUnique: jest.fn().mockResolvedValue({ ...stale, roles: [] }) } };
-      const result = await service.loadUserRoleGraphWithin(tx as never, 'user-1');
+      try {
+        const stale = makeUserGraph();
+        db.user.findUnique.mockResolvedValue(stale as unknown as User);
+        await service.getUserRoleGraph('user-1');
+        const set = jest.spyOn(cache, 'set');
 
-      expect(result).toEqual({ ...stale, roles: [] });
-      // The same graph the cached read loads, asked of the transaction.
-      const cachedRead = db.user.findUnique.mock.calls[0][0];
-      expect(tx.user.findUnique).toHaveBeenCalledWith({
-        ...cachedRead,
-        where: { ...cachedRead.where, AND: { OR: expect.any(Array) } },
-      });
-      expect(db.user.findUnique).toHaveBeenCalledTimes(1);
-      expect(set).not.toHaveBeenCalled();
-      // The cached graph is left alone.
-      await expect(service.getUserRoleGraph('user-1')).resolves.toBe(stale);
+        const tx = { user: { findUnique: jest.fn().mockResolvedValue({ ...stale, roles: [] }) } };
+        const result = await service.loadUserRoleGraphWithin(tx as never, 'user-1');
+
+        expect(result).toEqual({ ...stale, roles: [] });
+        // The same graph the cached read loads, asked of the transaction.
+        const cachedRead = db.user.findUnique.mock.calls[0][0];
+        expect(tx.user.findUnique).toHaveBeenCalledWith({
+          ...cachedRead,
+          where: { ...cachedRead.where, AND: { OR: expect.any(Array) } },
+        });
+        expect(db.user.findUnique).toHaveBeenCalledTimes(1);
+        expect(set).not.toHaveBeenCalled();
+        // The cached graph is left alone.
+        await expect(service.getUserRoleGraph('user-1')).resolves.toBe(stale);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('reads a user under a ban in force as no graph, as better-auth refuses them a sign-in (#747)', async () => {
