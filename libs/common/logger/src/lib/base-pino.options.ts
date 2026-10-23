@@ -16,6 +16,22 @@ const PRODUCTION_DEFAULT_LEVEL = 'info';
 const NON_PRODUCTION_DEFAULT_LEVEL = 'debug';
 
 /**
+ * The request and response header values censored on every log line (#748).
+ * pino-http serializes the full header set onto `req` and `res`, so without
+ * these paths a bearer token, a session cookie or an API key reaches the log
+ * verbatim. The paths are exact, not wildcards: they name the three request
+ * credentials and the response's `set-cookie`, and a header the request did
+ * not carry gets no placeholder. `set-cookie` is an array whenever the
+ * response sets more than one cookie, and pino censors the whole value.
+ */
+const CREDENTIAL_PATHS = [
+  'req.headers.authorization',
+  'req.headers.cookie',
+  'req.headers["x-api-key"]',
+  'res.headers["set-cookie"]',
+];
+
+/**
  * Resolves the pino log level from the supplied env. Reads
  * `env['LOG_LEVEL']` first; falls back to
  * {@link PRODUCTION_DEFAULT_LEVEL} when `env['NODE_ENV'] === 'production'`
@@ -43,6 +59,9 @@ export function resolvePinoLevel(env: NodeJS.ProcessEnv): string {
  *   (colorized, single-line). `pino-pretty` is a no-op for colors in
  *   non-TTY destinations, so the colorize flag is safe in production
  *   pipelines that ship to file or stdout-consuming collectors.
+ * - The request and response credential headers are redacted (see
+ *   {@link CREDENTIAL_PATHS}), so every process role that builds on these
+ *   options keeps them out of its log lines.
  *
  * Every env-derived value is read from the `env` parameter (default:
  * `process.env`). The function intentionally does not consult
@@ -58,8 +77,9 @@ export function resolvePinoLevel(env: NodeJS.ProcessEnv): string {
  *   the OTel trace correlation mixin and the conditional
  *   `pino-opentelemetry-transport` target.
  *
- * The caller is responsible for app-specific pino options not derived
- * from env (serializers, redaction rules, custom hooks).
+ * The base options already redact credentials; the caller adds only
+ * app-specific pino options not derived from env (serializers, custom
+ * hooks).
  */
 export function buildBasePinoOptions(env: NodeJS.ProcessEnv = process.env): LoggerOptions {
   const level = resolvePinoLevel(env);
@@ -77,6 +97,7 @@ export function buildBasePinoOptions(env: NodeJS.ProcessEnv = process.env): Logg
 
   return {
     level,
+    redact: { paths: CREDENTIAL_PATHS },
     transport: {
       targets: transportTargets,
     },
