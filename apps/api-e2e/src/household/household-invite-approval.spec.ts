@@ -1,4 +1,4 @@
-import { InviteStatus, MemberInvitePolicy, ResourceType, SystemRole } from '@bge/database';
+import { InviteStatus, MemberInvitePolicy, MemberSharePolicy, ResourceType, SystemRole } from '@bge/database';
 import { arrangeInvite, createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import request from 'supertest';
 import { mintApiKey, type Caller } from '../support/api-key';
@@ -21,7 +21,8 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
  * approving what waits (#166), and the list of invites a user has sent (#751).
  *
  * - `PATCH /api/households/:id` with `settings.memberInvitePolicy` sets the
- *   policy, and `GET /api/households/:id` shows it to every reader.
+ *   policy, and `GET /api/households/:id` shows it to every reader. The same
+ *   goes for `settings.memberSharePolicy` (#810).
  * - `POST /api/households/:householdId/invites` by a member opens the invite
  *   directly, awaiting approval, or not at all, as the policy says.
  * - `POST /api/households/:householdId/invites/:inviteId/approve` opens one
@@ -128,15 +129,15 @@ describe('member invites, their approval, and the invites a user has sent', () =
         ).household.settings;
 
       // A member's client needs it to know whether to offer an invite.
-      await expect(read(member)).resolves.toEqual({ memberInvitePolicy: MemberInvitePolicy.NeedsApproval });
-      await expect(read(guest)).resolves.toEqual({ memberInvitePolicy: MemberInvitePolicy.NeedsApproval });
+      await expect(read(member)).resolves.toMatchObject({ memberInvitePolicy: MemberInvitePolicy.NeedsApproval });
+      await expect(read(guest)).resolves.toMatchObject({ memberInvitePolicy: MemberInvitePolicy.NeedsApproval });
 
       // The list carries it as well, so a client need not read each household.
       const listed = listEnvelope(
         await request(baseUrl).get('/api/households').set(member.headers).expect(200),
         'GET /api/households',
       ).households.find((row) => row.id === householdId);
-      expect((listed as unknown as { settings: unknown } | undefined)?.settings).toEqual({
+      expect((listed as unknown as { settings: unknown } | undefined)?.settings).toMatchObject({
         memberInvitePolicy: MemberInvitePolicy.NeedsApproval,
       });
 
@@ -145,18 +146,97 @@ describe('member invites, their approval, and the invites a user has sent', () =
         'PATCH /api/households/:id',
       );
       // The answer carries what it wrote.
-      expect((patched.household as unknown as { settings: unknown }).settings).toEqual({
+      expect((patched.household as unknown as { settings: unknown }).settings).toMatchObject({
         memberInvitePolicy: MemberInvitePolicy.Direct,
       });
       await patchSettings(admin, householdId, { memberInvitePolicy: MemberInvitePolicy.Off }).expect(200);
-      await expect(read(member)).resolves.toEqual({ memberInvitePolicy: MemberInvitePolicy.Off });
+      await expect(read(member)).resolves.toMatchObject({ memberInvitePolicy: MemberInvitePolicy.Off });
 
       await patchSettings(member, householdId, { memberInvitePolicy: MemberInvitePolicy.Direct }).expect(403);
       await patchSettings(guest, householdId, { memberInvitePolicy: MemberInvitePolicy.Direct }).expect(403);
       await patchSettings(owner, householdId, { memberInvitePolicy: 'Sometimes' }).expect(400);
       await patchSettings(owner, householdId, {}).expect(400);
 
-      await expect(read(owner)).resolves.toEqual({ memberInvitePolicy: MemberInvitePolicy.Off });
+      await expect(read(owner)).resolves.toMatchObject({ memberInvitePolicy: MemberInvitePolicy.Off });
+    });
+  });
+
+  describe("the household's member share policy (#810)", () => {
+    it('defaults to NeedsApproval, shows to every reader, and is set by an owner or admin and no one else', async () => {
+      const { householdId, owner, admin, member, guest } = await household();
+
+      const read = async (actor: SessionActor) =>
+        readEnvelope(
+          await request(baseUrl).get(`/api/households/${householdId}`).set(actor.headers).expect(200),
+          'GET /api/households/:id',
+        ).household.settings;
+
+      // A member's client needs it to know whether to offer a share.
+      await expect(read(member)).resolves.toEqual({
+        memberInvitePolicy: MemberInvitePolicy.NeedsApproval,
+        memberSharePolicy: MemberSharePolicy.NeedsApproval,
+      });
+      await expect(read(guest)).resolves.toEqual({
+        memberInvitePolicy: MemberInvitePolicy.NeedsApproval,
+        memberSharePolicy: MemberSharePolicy.NeedsApproval,
+      });
+
+      // The list carries it as well, so a client need not read each household.
+      // Exact, since this is the only guard on the list's own include.
+      const listed = listEnvelope(
+        await request(baseUrl).get('/api/households').set(member.headers).expect(200),
+        'GET /api/households',
+      ).households.find((row) => row.id === householdId);
+      expect((listed as unknown as { settings: unknown } | undefined)?.settings).toEqual({
+        memberInvitePolicy: MemberInvitePolicy.NeedsApproval,
+        memberSharePolicy: MemberSharePolicy.NeedsApproval,
+      });
+
+      // The invite policy moves off its default first, so that a share patch
+      // leaving it alone shows in the answer instead of the default showing through.
+      await patchSettings(owner, householdId, { memberInvitePolicy: MemberInvitePolicy.Off }).expect(200);
+
+      const patched = createEnvelope(
+        await patchSettings(owner, householdId, { memberSharePolicy: MemberSharePolicy.Direct }).expect(200),
+        'PATCH /api/households/:id',
+      );
+      // The answer carries what it wrote, and the invite policy it left alone.
+      expect((patched.household as unknown as { settings: unknown }).settings).toEqual({
+        memberInvitePolicy: MemberInvitePolicy.Off,
+        memberSharePolicy: MemberSharePolicy.Direct,
+      });
+      await patchSettings(admin, householdId, { memberSharePolicy: MemberSharePolicy.Off }).expect(200);
+      await expect(read(member)).resolves.toMatchObject({ memberSharePolicy: MemberSharePolicy.Off });
+
+      // Each denial has its control: the owner's same patch succeeded above.
+      await patchSettings(member, householdId, { memberSharePolicy: MemberSharePolicy.Direct }).expect(403);
+      await patchSettings(guest, householdId, { memberSharePolicy: MemberSharePolicy.Direct }).expect(403);
+      await patchSettings(owner, householdId, { memberSharePolicy: 'Sometimes' }).expect(400);
+      await patchSettings(owner, householdId, { memberSharePolicy: null }).expect(400);
+
+      await expect(read(owner)).resolves.toEqual({
+        memberInvitePolicy: MemberInvitePolicy.Off,
+        memberSharePolicy: MemberSharePolicy.Off,
+      });
+    });
+
+    it("is set by the fixture's option, and is separate from the invite policy", async () => {
+      const [owner, member] = await Promise.all([actors.user(), actors.user()]);
+      const { household: created } = await actors.householdWithMembers({
+        owner,
+        members: [{ actor: member, role: SystemRole.HouseholdMember }],
+        memberSharePolicy: MemberSharePolicy.Direct,
+      });
+
+      const detail = readEnvelope(
+        await request(baseUrl).get(`/api/households/${created.id}`).set(member.headers).expect(200),
+        'GET /api/households/:id',
+      ).household;
+
+      expect(detail.settings).toEqual({
+        memberInvitePolicy: MemberInvitePolicy.NeedsApproval,
+        memberSharePolicy: MemberSharePolicy.Direct,
+      });
     });
   });
 

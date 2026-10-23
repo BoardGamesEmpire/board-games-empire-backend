@@ -1,4 +1,4 @@
-import { MemberInvitePolicy } from '@bge/database';
+import { MemberInvitePolicy, MemberSharePolicy } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -24,6 +24,18 @@ export class UpdateHouseholdSettingsDto {
   @ValidateIf((_, value) => value !== undefined)
   @IsEnum(MemberInvitePolicy, { message: i18nValidationMessage('validation.isEnum') })
   memberInvitePolicy?: MemberInvitePolicy;
+
+  @ApiPropertyOptional({
+    enum: MemberSharePolicy,
+    description:
+      'Whether members may share games they created with the household. `Direct`: their shares take effect at ' +
+      'once. `NeedsApproval` (the default): their shares wait for an owner or admin to approve them. `Off`: ' +
+      'members cannot share. Owners and admins always share directly, and guests never share. A change applies ' +
+      'to shares made after it.',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsEnum(MemberSharePolicy, { message: i18nValidationMessage('validation.isEnum') })
+  memberSharePolicy?: MemberSharePolicy;
 }
 
 /**

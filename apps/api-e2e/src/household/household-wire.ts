@@ -92,7 +92,7 @@ export interface LanguageTagProjection {
 }
 
 /** A household's settings as the detail, the lists and `PATCH` publish them (#166). */
-export type HouseholdSettingsProjection = Wire<Pick<HouseholdSettings, 'memberInvitePolicy'>>;
+export type HouseholdSettingsProjection = Wire<Pick<HouseholdSettings, 'memberInvitePolicy' | 'memberSharePolicy'>>;
 
 /**
  * `getHouseholdById`'s shape: the row plus its member, language and settings
