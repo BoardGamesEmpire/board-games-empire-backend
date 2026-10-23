@@ -50,10 +50,8 @@ export class GameSearchService {
   }
 
   /**
-   * The `where` a local title search reads within: {@link gameListScope}, the
-   * live Public games, the acting user's own, a friend's that reach friends
-   * and a friend of a friend's that reach friends of friends (#496), clipped
-   * by the acting user's ceiling.
+   * The `where` a local title search reads within: the set
+   * {@link gameListScope} names, clipped by the acting user's ceiling.
    * It is the set `GET /games` lists (#513).
    *
    * Synchronous, and each transport calls it before its search begins, for

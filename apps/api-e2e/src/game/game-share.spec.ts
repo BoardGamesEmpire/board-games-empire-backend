@@ -1,4 +1,4 @@
-import { FriendshipStatus, Reach, SystemRole, type DatabaseService } from '@bge/database';
+import { FriendshipStatus, MemberSharePolicy, Reach, SystemRole, type DatabaseService } from '@bge/database';
 import { ServiceAccountService } from '@bge/services';
 import { arrangeFriendship, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
@@ -6,6 +6,7 @@ import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { gameShareEnvelope, listGameSharesEnvelope } from './game-share-wire';
+import { listGamesEnvelope, localSearchGameIds } from './game-wire';
 
 /**
  * Sharing a game with a named user or a household, from the game's side
@@ -21,6 +22,10 @@ import { gameShareEnvelope, listGameSharesEnvelope } from './game-share-wire';
  * A game that exists and that the caller may not read answers 403 at
  * `GET /games/:id`, as `game-authorization.spec.ts` pins, so that is the
  * refusal the reads below expect.
+ *
+ * A share in effect also puts the game in its recipient's `GET /games` and
+ * local title search, which read the same set; one still waiting for approval,
+ * or into a household that is soft-deleted, is in neither.
  *
  * Every denial below is paired with a control on the same row or the same
  * route, so it cannot pass because the row was unreadable to everyone or the
@@ -53,6 +58,21 @@ describe('game shares', () => {
 
   const removeShare = (actor: AuthenticatedActor, gameId: string, shareId: string) =>
     request(baseUrl).delete(`${GAMES_PATH}/${gameId}/shares/${shareId}`).set(actor.headers);
+
+  // External gateways are left out: this suite runs no coordinator, and the
+  // local half is the one that reads the Game table.
+  const searchGames = (actor: AuthenticatedActor, query: string) =>
+    request(baseUrl).get(`${GAMES_PATH}/search`).query({ query, includeExternal: false }).set(actor.headers);
+
+  const listedIds = async (actor: AuthenticatedActor, who: string) =>
+    listGamesEnvelope(await request(baseUrl).get(GAMES_PATH).set(actor.headers).expect(200), `GET /api/games as ${who}`)
+      .games.map((game) => game.id)
+      .sort();
+
+  const searchedIds = async (actor: AuthenticatedActor, query: string, who: string) =>
+    localSearchGameIds(await searchGames(actor, query).expect(200), `GET /api/games/search as ${who}`)
+      .slice()
+      .sort();
 
   /** The share a 201 hands back, parsed. */
   const sharedWith = async (actor: AuthenticatedActor, gameId: string, body: Record<string, unknown>) =>
@@ -265,6 +285,114 @@ describe('game shares', () => {
 
     // Gone, so removing it again finds nothing.
     await removeShare(owner, game.id, share.id).expect(404);
+  });
+
+  // The list and the search read one scope, so each check below runs both. The
+  // tables are swept between tests, so a recipient's list is exactly what the
+  // test arranged, and a title token narrows the search to the test's games.
+  describe('in the list and the search', () => {
+    const arrangeTitled = (createdById: string, token: string, label: string) =>
+      arrangeGame(createdById, Reach.Private, `Shared ${token} ${label}`);
+
+    it('lists and finds a game shared with the user, and one shared with their household once in effect', async () => {
+      const [owner, recipient, reader, stranger] = await Promise.all([
+        actors.user(),
+        actors.user(),
+        actors.user(),
+        actors.user(),
+      ]);
+      const { household } = await actors.householdWithMembers({
+        owner,
+        members: [{ actor: reader, role: SystemRole.HouseholdMember }],
+      });
+      const token = randomUUID().slice(0, 8);
+      const toUser = await arrangeTitled(owner.user.id, token, 'to a user');
+      const toHousehold = await arrangeTitled(owner.user.id, token, 'to a household');
+      const unshared = await arrangeTitled(owner.user.id, token, 'unshared');
+
+      // Before the shares, none of the owner's Private games is the recipient's.
+      expect(await listedIds(recipient, 'the recipient')).toEqual([]);
+      expect(await searchedIds(recipient, token, 'the recipient')).toEqual([]);
+      expect(await listedIds(reader, 'the household member')).toEqual([]);
+
+      await sharedWith(owner, toUser.id, { userId: recipient.user.id });
+      const householdShare = await sharedWith(owner, toHousehold.id, { householdId: household.id });
+      expect(householdShare.approvedAt).not.toBeNull();
+
+      // A share to a user shows that user the one game, and a household's
+      // share shows it to the household's members only.
+      expect(await listedIds(recipient, 'the recipient')).toEqual([toUser.id]);
+      expect(await searchedIds(recipient, token, 'the recipient')).toEqual([toUser.id]);
+      expect(await listedIds(reader, 'the household member')).toEqual([toHousehold.id]);
+      expect(await searchedIds(reader, token, 'the household member')).toEqual([toHousehold.id]);
+
+      // The control: the owner finds all three, and a stranger none, so the
+      // two lists above are about the shares and not the token.
+      expect(await listedIds(owner, 'the owner')).toEqual([toUser.id, toHousehold.id, unshared.id].sort());
+      expect(await searchedIds(owner, token, 'the owner')).toEqual([toUser.id, toHousehold.id, unshared.id].sort());
+      expect(await listedIds(stranger, 'a stranger')).toEqual([]);
+      expect(await searchedIds(stranger, token, 'a stranger')).toEqual([]);
+    });
+
+    it('leaves a household share that waits for approval out of both, until it is approved', async () => {
+      const [owner, member, reader] = await Promise.all([actors.user(), actors.user(), actors.user()]);
+      const { household } = await actors.householdWithMembers({
+        owner,
+        members: [
+          { actor: member, role: SystemRole.HouseholdMember },
+          { actor: reader, role: SystemRole.HouseholdMember },
+        ],
+        memberSharePolicy: MemberSharePolicy.NeedsApproval,
+      });
+      const token = randomUUID().slice(0, 8);
+      const waiting = await arrangeTitled(member.user.id, token, 'waiting');
+      const inEffect = await arrangeTitled(owner.user.id, token, 'in effect');
+
+      const waitingShare = await sharedWith(member, waiting.id, { householdId: household.id });
+      expect(waitingShare.approvedAt).toBeNull();
+      // The control: a household owner's share takes effect at once under the
+      // same policy, and it is the only one the reader lists and finds.
+      expect((await sharedWith(owner, inEffect.id, { householdId: household.id })).approvedAt).not.toBeNull();
+
+      expect(await listedIds(reader, 'the household member')).toEqual([inEffect.id]);
+      expect(await searchedIds(reader, token, 'the household member')).toEqual([inEffect.id]);
+
+      await request(baseUrl)
+        .post(`/api/households/${household.id}/game-shares/${waitingShare.id}/approve`)
+        .set(owner.headers)
+        .expect(200);
+
+      expect(await listedIds(reader, 'the household member')).toEqual([waiting.id, inEffect.id].sort());
+      expect(await searchedIds(reader, token, 'the household member')).toEqual([waiting.id, inEffect.id].sort());
+    });
+
+    it("leaves a soft-deleted household's share out of both, while a share to a user stays in", async () => {
+      const [owner, reader] = await Promise.all([actors.user(), actors.user()]);
+      const { household } = await actors.householdWithMembers({
+        owner,
+        members: [{ actor: reader, role: SystemRole.HouseholdMember }],
+      });
+      const token = randomUUID().slice(0, 8);
+      const toHousehold = await arrangeTitled(owner.user.id, token, 'to a household');
+      const toUser = await arrangeTitled(owner.user.id, token, 'to a user');
+      await sharedWith(owner, toHousehold.id, { householdId: household.id });
+      await sharedWith(owner, toUser.id, { userId: reader.user.id });
+
+      // The control, in time: both shares are in effect, and both games show.
+      expect(await listedIds(reader, 'the household member')).toEqual([toHousehold.id, toUser.id].sort());
+      expect(await searchedIds(reader, token, 'the household member')).toEqual([toHousehold.id, toUser.id].sort());
+      await readGame(reader, toHousehold.id).expect(200);
+
+      await db.client.household.update({ where: { id: household.id }, data: { deletedAt: new Date() } });
+
+      // A restore (#175) would put the share back in effect, so the row stays
+      // while the household is deleted. The game it showed is gone from both,
+      // and by id, while the share to the user is untouched.
+      expect(await db.client.gameShare.count({ where: { gameId: toHousehold.id } })).toBe(1);
+      expect(await listedIds(reader, 'the household member')).toEqual([toUser.id]);
+      expect(await searchedIds(reader, token, 'the household member')).toEqual([toUser.id]);
+      await readGame(reader, toHousehold.id).expect(403);
+    });
   });
 
   describe('to a household', () => {
