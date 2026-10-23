@@ -119,6 +119,11 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'delete:event_game:household',
   'manage:quota:household_member',
   'delete:household_member:leave',
+  // Household bans (#782): owners and admins alike.
+  'create:household_ban',
+  'delete:household_ban',
+  'read:household_ban',
+  'update:household_ban',
   'read:quota:household',
   'delete:game_play_session:household',
   'delete:household',

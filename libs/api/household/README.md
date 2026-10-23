@@ -19,6 +19,13 @@ The server decides what each request may do, and this table is what it grants. A
 | Remove someone with the member or guest role                                         | Yes             | Yes             | No           | No              | Household role |
 | Remove a household admin                                                             | Yes             | No              | No           | No              | Household role |
 | Remove another household owner, unless they are the last                             | Yes             | No              | No           | No              | Household role |
+| Ban someone with the member or guest role                                            | Yes             | Yes             | No           | No              | Household role |
+| Ban a household admin                                                                | Yes             | No              | No           | No              | Household role |
+| Ban another household owner, unless they are the last                                | Yes             | No              | No           | No              | Household role |
+| Ban someone who isn't a member                                                       | Yes             | Yes             | No           | No              | Household role |
+| See the household's bans                                                             | Yes             | Yes             | No           | No              | Household role |
+| Change the reason for a ban                                                          | Yes             | Yes             | No           | No              | Household role |
+| Lift a ban                                                                           | Yes             | Yes             | No           | No              | Household role |
 | Transfer ownership                                                                   | Yes             | No              | No           | No              | Household role |
 | Leave the household                                                                  | Yes             | Yes             | Yes          | Yes             | Household role |
 | List the household's invites                                                         | Yes             | Yes             | No           | No              | Household role |
