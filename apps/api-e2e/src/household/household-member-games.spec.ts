@@ -1,10 +1,10 @@
 import { Reach, SystemRole } from '@bge/database';
-import { createActors, createHouseholdWithMembers, type Actors, type SessionActor } from '@bge/testing-e2e';
+import { befriend, createActors, createHouseholdWithMembers, type Actors, type SessionActor } from '@bge/testing-e2e';
 import request from 'supertest';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { memberGameSampleIds } from './household-wire';
+import { memberGameSampleIds, readEnvelope } from './household-wire';
 
 /**
  * The game sample `GET /api/households/:id` embeds for each member (#514).
@@ -86,6 +86,37 @@ describe('household member game sample', () => {
 
     await readEntry(viewer, privateEntry).expect(200);
     await readEntry(viewer, excludedEntry).expect(404);
+  });
+
+  /**
+   * #868. A member's excluded games filter their sample, and the read used to
+   * hand them on: every roster entry carried its member's
+   * `excludedFromHouseholds`, so any reader learned which games a member held
+   * back. A member and a friend of a member read it here, the friend through
+   * the household's reach. `readEnvelope` refuses the key on any roster entry;
+   * the roster is asserted too, so a body without members cannot pass the
+   * absence.
+   */
+  it('names no excluded game on any roster entry, for a member or a friend of one', async () => {
+    const { household, viewer, member, membership } = await arrangeHousehold();
+    const friend = await actors.user();
+    const excludedEntry = await arrangeCollectionEntry(db.client, member.user.id, Reach.Private);
+    await db.client.excludedGame.create({
+      data: { householdMemberId: membership.id, gameCollectionId: excludedEntry },
+    });
+    await db.client.household.update({ where: { id: household.id }, data: { reach: Reach.Friends } });
+    await befriend(db.client, friend, member);
+
+    const readers = [
+      { reader: viewer, label: 'a member' },
+      { reader: friend, label: 'a friend of a member' },
+    ];
+
+    for (const { reader, label } of readers) {
+      const response = await readHousehold(reader, household.id).expect(200);
+
+      expect(readEnvelope(response, `GET /api/households/:id as ${label}`).household.members).toHaveLength(3);
+    }
   });
 
   it('shows only what the reach admits once the member turns collection sharing off', async () => {
