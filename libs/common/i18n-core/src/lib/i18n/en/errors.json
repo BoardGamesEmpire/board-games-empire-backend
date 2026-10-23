@@ -317,5 +317,8 @@
   },
   "actor_context": {
     "not_user_attributable": "Actor kind '{kind}' cannot perform user-attributed writes."
+  },
+  "permission": {
+    "condition_unevaluable": "The server could not check a permission this needs, so nothing was changed. Try again later, and tell the server's operator if it keeps happening."
   }
 }
