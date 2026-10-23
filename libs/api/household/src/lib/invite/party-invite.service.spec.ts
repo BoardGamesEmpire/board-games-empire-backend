@@ -534,11 +534,15 @@ describe('PartyInviteService', () => {
     };
 
     /**
-     * Only households the inviter is still in, and that are live. Leaving one
-     * revokes every invite they had outstanding there (#747), so nothing they
-     * could withdraw is left in it.
+     * Where the inviter is not a member, only what they can still withdraw: a
+     * server owner's invites, since leaving revoked a former member's (#747).
      */
-    const stillAMember = { is: { deletedAt: null, members: { some: { userId: INVITER_ID } } } };
+    const withdrawableOrStillMember = {
+      OR: [
+        { household: { is: { members: { some: { userId: INVITER_ID } } } } },
+        { status: { in: [InviteStatus.AwaitingApproval, InviteStatus.Pending] }, expiresAt: { gt: NOW } },
+      ],
+    };
 
     it("lists the user's outstanding and expired household invites, newest first in one snapshot", () =>
       withFakeNow(async () => {
@@ -553,10 +557,13 @@ describe('PartyInviteService', () => {
           type: InviteType.Household,
           inviterId: INVITER_ID,
           // An invite into a deleted household is not listed; the delete revoked it.
-          household: stillAMember,
-          // Expired whether or not the sweep has stamped it, so the inviter
-          // sees it lapse and can send another.
-          status: { in: [InviteStatus.AwaitingApproval, InviteStatus.Pending, InviteStatus.Expired] },
+          household: { is: { deletedAt: null } },
+          AND: [
+            // Expired whether or not the sweep has stamped it, so the inviter
+            // sees it lapse and can send another.
+            { status: { in: [InviteStatus.AwaitingApproval, InviteStatus.Pending, InviteStatus.Expired] } },
+            withdrawableOrStillMember,
+          ],
         };
         expect(db.invite.findMany).toHaveBeenCalledWith({
           where,
@@ -572,28 +579,23 @@ describe('PartyInviteService', () => {
         expect(page).toEqual({ rows: [{ id: 'invite-1', status: InviteStatus.Pending, expiresAt: LATER }], total: 1 });
       }));
 
-    it('filters to any one status as it stands now, still only in households they are in', () =>
+    it('filters to any one status as it stands now, still only withdrawable rows where they left', () =>
       withFakeNow(async () => {
         await service.listSent(Object.assign(paginationQuery(), { status: InviteStatus.Accepted }));
         await service.listSent(Object.assign(paginationQuery(), { status: InviteStatus.Expired }));
 
         const whereOf = (call: number) =>
           (db.invite.findMany.mock.calls[call] as [{ where: Prisma.InviteWhereInput }])[0].where;
-        expect(whereOf(0)).toEqual({
-          type: InviteType.Household,
-          inviterId: INVITER_ID,
-          household: stillAMember,
-          status: InviteStatus.Accepted,
-        });
-        expect(whereOf(1)).toEqual({
-          type: InviteType.Household,
-          inviterId: INVITER_ID,
-          household: stillAMember,
-          OR: [
-            { status: InviteStatus.Expired },
-            { status: { in: [InviteStatus.AwaitingApproval, InviteStatus.Pending] }, expiresAt: { lte: NOW } },
-          ],
-        });
+        expect(whereOf(0).AND).toEqual([{ status: InviteStatus.Accepted }, withdrawableOrStillMember]);
+        expect(whereOf(1).AND).toEqual([
+          {
+            OR: [
+              { status: InviteStatus.Expired },
+              { status: { in: [InviteStatus.AwaitingApproval, InviteStatus.Pending] }, expiresAt: { lte: NOW } },
+            ],
+          },
+          withdrawableOrStillMember,
+        ]);
       }));
 
     it('reports an outstanding row past its expiry as Expired', () =>

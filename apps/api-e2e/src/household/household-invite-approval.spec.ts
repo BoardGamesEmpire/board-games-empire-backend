@@ -493,6 +493,25 @@ describe('member invites, their approval, and the invites a user has sent', () =
       await withdraw(member, open.id).expect(409);
     });
 
+    it("lists a server owner's open invite into a household they are not in, and nothing settled there (#747)", async () => {
+      const { householdId } = await household(MemberInvitePolicy.Direct);
+      const [serverOwner, openInvitee, joiner] = await Promise.all([actors.owner(), actors.user(), actors.user()]);
+      const open = await createdInvite(serverOwner, householdId, { inviteeId: openInvitee.user.id });
+      await arrangeInvite(db.client, {
+        inviter: serverOwner,
+        householdId,
+        inviteeId: joiner.user.id,
+        status: InviteStatus.Accepted,
+      });
+
+      // `manage:all` sends it without a seat in the household, and no
+      // departure ever revokes it, so it is theirs to find and take back.
+      await expect(sent(serverOwner)).resolves.toEqual([expect.objectContaining({ id: open.id })]);
+      await expect(sent(serverOwner, InviteStatus.Accepted)).resolves.toEqual([]);
+
+      await withdraw(serverOwner, open.id).expect(200);
+    });
+
     it('lists nothing into a deleted household', async () => {
       const { householdId, owner, member, invitee } = await household(MemberInvitePolicy.Direct);
       await createdInvite(member, householdId, { inviteeId: invitee.user.id });

@@ -13,6 +13,7 @@ import {
   InviteService,
   OUTSTANDING_INVITE_STATUSES,
   PARTY_INVITE_SELECT,
+  unexpiredInviteWhere,
   withEffectiveInviteStatus,
   type InvitePartyView,
   type InviteTarget,
@@ -107,11 +108,13 @@ export class PartyInviteService {
    * row reports its status as it stands now, so an outstanding row past its
    * date reads `Expired`.
    *
-   * Only households the inviter is still in are listed. Leaving one, or being
-   * removed, revokes every invite they had outstanding there (#747), so
-   * nothing there is left to withdraw, and a settled invite would go on
-   * telling a former member who joined. An invite into a deleted household is
-   * never listed, as the inbox lists none; the delete revoked it.
+   * Into a household the inviter is not a member of, only the invites they
+   * can still withdraw are listed, outstanding and unexpired, whatever the
+   * filter asks: a server owner may invite into any household without a seat
+   * in it. A former member has nothing left to withdraw there, since leaving
+   * or being removed revoked it (#747), and a settled invite there would go on
+   * telling them who joined. An invite into a deleted household is never
+   * listed, as the inbox lists none; the delete revoked it.
    *
    * Bound to the acting user by `inviterId`, as the lib binds a party, so no
    * grant on `Invite` is asked; only a person signed in as themself reads it.
@@ -130,8 +133,16 @@ export class PartyInviteService {
     const where: Prisma.InviteWhereInput = {
       type: InviteType.Household,
       inviterId: userId,
-      household: { is: { deletedAt: null, members: { some: { userId } } } },
-      ...statusWhere,
+      household: { is: { deletedAt: null } },
+      AND: [
+        statusWhere,
+        {
+          OR: [
+            { household: { is: { members: { some: { userId } } } } },
+            { status: { in: [...OUTSTANDING_INVITE_STATUSES] }, ...unexpiredInviteWhere(now) },
+          ],
+        },
+      ],
     };
 
     const { rows, total } = await this.pageOf(where, query);
