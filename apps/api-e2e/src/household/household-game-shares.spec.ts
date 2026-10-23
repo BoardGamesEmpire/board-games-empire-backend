@@ -52,6 +52,8 @@ const SHARE_TABLE: ReadonlyArray<readonly [MemberSharePolicy, Sharer, Outcome]> 
  * - `GET /api/households/:householdId/game-shares` lists the household's
  *   shares, waiting ones included, to its owners and admins.
  * - `DELETE /api/games/:id/shares/:shareId` removes one.
+ * - `DELETE /api/households/:id/members/me` and `DELETE …/members/:memberId`
+ *   take a member's shares into the household with them.
  *
  * A game that exists and that the caller may not read answers 403 at
  * `GET /games/:id`, as `game-authorization.spec.ts` pins, so that is what a
@@ -78,7 +80,7 @@ describe('household game shares', () => {
     await db.close();
   });
 
-  const { changeRole } = createMemberClient(baseUrl);
+  const { removeMember, leave, changeRole } = createMemberClient(baseUrl);
 
   const readGame = (actor: SessionActor, id: string) => request(baseUrl).get(`${GAMES_PATH}/${id}`).set(actor.headers);
 
@@ -481,5 +483,102 @@ describe('household game shares', () => {
       message: expect.stringContaining(householdId),
     });
     await expect(storedShare(share.id)).resolves.toEqual({ approvedAt: null, approvedById: null });
+  });
+
+  describe('when a member leaves or is removed', () => {
+    /** How the member departs: they leave, or a household owner removes them. */
+    const DEPARTURES = [
+      ['leave', (h: Awaited<ReturnType<typeof household>>) => leave(h.member, h.householdId)],
+      [
+        'are removed',
+        (h: Awaited<ReturnType<typeof household>>) => removeMember(h.owner, h.householdId, h.memberMemberId),
+      ],
+    ] as const;
+
+    it.each(DEPARTURES)("ends a member's game shares into the household when they %s", async (_how, depart) => {
+      const h = await household(MemberSharePolicy.NeedsApproval);
+      // The departing member belongs to a second household too, arranged
+      // before any request.
+      const [elsewhereOwner, elsewhereReader] = await Promise.all([actors.user(), actors.user()]);
+      const { household: elsewhere } = await actors.householdWithMembers({
+        owner: elsewhereOwner,
+        members: [
+          { actor: h.member, role: SystemRole.HouseholdMember },
+          { actor: elsewhereReader, role: SystemRole.HouseholdMember },
+        ],
+        memberSharePolicy: MemberSharePolicy.Direct,
+      });
+      const [inBoth, waiting, orphaned, readers] = await Promise.all([
+        arrangeGame(h.member.user.id),
+        arrangeGame(h.member.user.id),
+        arrangeGame(h.member.user.id),
+        arrangeGame(h.reader.user.id),
+      ]);
+
+      // The departing member's share in effect here and in the other household,
+      // one still waiting for approval here, and another member's share in
+      // effect here.
+      const inBothShare = await approved(
+        h.admin,
+        h.householdId,
+        (await sharedInto(h.member, inBoth.id, h.householdId)).id,
+      );
+      const inBothElsewhere = await sharedInto(h.member, inBoth.id, elsewhere.id);
+      const waitingShare = await sharedInto(h.member, waiting.id, h.householdId);
+      const readersShare = await approved(
+        h.admin,
+        h.householdId,
+        (await sharedInto(h.reader, readers.id, h.householdId)).id,
+      );
+      // A share whose `sharedById` an account deletion emptied (`SetNull`) is
+      // still the departing member's, since the game is.
+      const orphanedShare = await db.client.gameShare.create({
+        data: { gameId: orphaned.id, householdId: h.householdId, approvedAt: new Date() },
+        select: { id: true },
+      });
+
+      const householdShareIds = async () =>
+        listGameSharesEnvelope(
+          await listHouseholdShares(h.owner, h.householdId).expect(200),
+          'GET /api/households/:householdId/game-shares',
+        )
+          .shares.map((row) => row.id)
+          .sort();
+
+      // The controls first: before the departure the household's owner lists all
+      // four, and its other members read the three that are in effect.
+      expect(await householdShareIds()).toEqual(
+        [inBothShare.id, waitingShare.id, orphanedShare.id, readersShare.id].sort(),
+      );
+      await readGame(h.admin, inBoth.id).expect(200);
+      await readGame(h.admin, orphaned.id).expect(200);
+      await readGame(h.admin, readers.id).expect(200);
+      await readGame(h.admin, waiting.id).expect(403);
+      await readGame(elsewhereReader, inBoth.id).expect(200);
+
+      await depart(h).expect(200);
+
+      // Gone from the household: the list no longer has the departing member's
+      // rows, the waiting one included, and the household's other members no
+      // longer reach the games that were in effect.
+      expect(await householdShareIds()).toEqual([readersShare.id]);
+      expect(
+        await db.client.gameShare.count({
+          where: { householdId: h.householdId, game: { createdById: h.member.user.id } },
+        }),
+      ).toBe(0);
+      await readGame(h.admin, inBoth.id).expect(403);
+      await readGame(h.admin, orphaned.id).expect(403);
+
+      // Another member's share into the household stays.
+      await readGame(h.admin, readers.id).expect(200);
+      await readGame(h.guest, readers.id).expect(200);
+
+      // The departing member's share into their other household stays, and the
+      // game is theirs still.
+      await expect(storedShare(inBothElsewhere.id)).resolves.not.toBeNull();
+      await readGame(elsewhereReader, inBoth.id).expect(200);
+      await readGame(h.member, inBoth.id).expect(200);
+    });
   });
 });

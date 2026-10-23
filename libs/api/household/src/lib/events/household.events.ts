@@ -78,3 +78,28 @@ export class HouseholdGameShareApprovedEvent extends MutationEvent<GameShareSnap
     this.subjectId = after.id;
   }
 }
+
+/**
+ * Emitted once per share, after commit, when a member leaves the household or
+ * is removed from it and their game shares into it end with the membership
+ * (#810), waiting and in effect alike.
+ *
+ * `subject`/`subjectId` are the share, the row the departure deleted. Only
+ * `before` is populated, so `action` derives to `delete`, as it does for the
+ * share's deleted event in `@bge/game`, whose `GameShareSnapshot` it carries.
+ * Without it, a share's audit trail would show its creation and never its end.
+ */
+export class HouseholdGameShareEndedEvent extends MutationEvent<GameShareSnapshot> {
+  static readonly eventName = HouseholdEvents.GameShareEnded;
+
+  declare readonly before: GameShareSnapshot;
+  declare readonly after: null;
+
+  readonly subject = ResourceType.GameShare;
+  readonly subjectId: string;
+
+  constructor(before: GameShareSnapshot, initiatedAt: Date) {
+    super(before, null, initiatedAt);
+    this.subjectId = before.id;
+  }
+}
