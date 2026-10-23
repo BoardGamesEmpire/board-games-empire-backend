@@ -1,6 +1,5 @@
-import { InviteStatus, InviteType, MemberInvitePolicy, ResourceType, SystemRole } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
-import { randomUUID } from 'node:crypto';
+import { InviteStatus, MemberInvitePolicy, ResourceType, SystemRole } from '@bge/database';
+import { arrangeInvite, createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import request from 'supertest';
 import { mintApiKey, type Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -96,24 +95,6 @@ describe('member invites, their approval, and the invites a user has sent', () =
     ).invites;
 
   const storedInvite = (id: string) => db.client.invite.findUniqueOrThrow({ where: { id } });
-
-  /** An invite written directly, for a state no route produces in one step. */
-  const arrangeInvite = (
-    inviter: SessionActor,
-    householdId: string,
-    data: { inviteeId?: string; inviteeEmail?: string; status?: InviteStatus; expiresAt?: Date },
-  ) =>
-    db.client.invite.create({
-      data: {
-        type: InviteType.Household,
-        inviterId: inviter.user.id,
-        householdId,
-        token: randomUUID(),
-        status: InviteStatus.Pending,
-        expiresAt: new Date(Date.now() + DAY_MS),
-        ...data,
-      },
-    });
 
   /** The message a refusal carries, so a surprise reads as a diff rather than as a bare status. */
   const messageOf = (response: { body: unknown }) => (response.body as { message?: unknown } | null)?.message;
@@ -290,7 +271,9 @@ describe('member invites, their approval, and the invites a user has sent', () =
     it('gives the invitee a full week from the approval, however long the invite waited for it', async () => {
       const { householdId, admin, member, invitee } = await household();
       // Sent six days ago, with a day of its window left.
-      const waiting = await arrangeInvite(member, householdId, {
+      const waiting = await arrangeInvite(db.client, {
+        inviter: member,
+        householdId: householdId,
         inviteeId: invitee.user.id,
         status: InviteStatus.AwaitingApproval,
         expiresAt: new Date(Date.now() + DAY_MS),
@@ -309,7 +292,9 @@ describe('member invites, their approval, and the invites a user has sent', () =
       const { household: elsewhere } = await actors.householdWithMembers({ owner: otherOwner });
       const waiting = await createdInvite(member, householdId, { inviteeId: invitee.user.id });
       const open = await createdInvite(owner, householdId, { inviteeId: other.user.id });
-      const lapsed = await arrangeInvite(member, householdId, {
+      const lapsed = await arrangeInvite(db.client, {
+        inviter: member,
+        householdId: householdId,
         inviteeId: lapsedInvitee.user.id,
         status: InviteStatus.AwaitingApproval,
         expiresAt: new Date(Date.now() - DAY_MS),
@@ -438,11 +423,18 @@ describe('member invites, their approval, and the invites a user has sent', () =
     it('lists an expired invite before and after the sweep marks it, and not a settled one by default', async () => {
       const { householdId, member } = await household();
       const [lapsedInvitee, declinedInvitee] = await Promise.all([actors.user(), actors.user()]);
-      const lapsed = await arrangeInvite(member, householdId, {
+      const lapsed = await arrangeInvite(db.client, {
+        inviter: member,
+        householdId: householdId,
         inviteeId: lapsedInvitee.user.id,
         expiresAt: new Date(Date.now() - DAY_MS),
       });
-      await arrangeInvite(member, householdId, { inviteeId: declinedInvitee.user.id, status: InviteStatus.Declined });
+      await arrangeInvite(db.client, {
+        inviter: member,
+        householdId: householdId,
+        inviteeId: declinedInvitee.user.id,
+        status: InviteStatus.Declined,
+      });
 
       await expect(sent(member)).resolves.toEqual([
         expect.objectContaining({ id: lapsed.id, status: InviteStatus.Expired }),
@@ -461,11 +453,18 @@ describe('member invites, their approval, and the invites a user has sent', () =
       const { householdId, member } = await household(MemberInvitePolicy.Direct);
       const [openInvitee, lapsedInvitee, joiner] = await Promise.all([actors.user(), actors.user(), actors.user()]);
       const open = await createdInvite(member, householdId, { inviteeId: openInvitee.user.id });
-      await arrangeInvite(member, householdId, {
+      await arrangeInvite(db.client, {
+        inviter: member,
+        householdId,
         inviteeId: lapsedInvitee.user.id,
         expiresAt: new Date(Date.now() - DAY_MS),
       });
-      await arrangeInvite(member, householdId, { inviteeId: joiner.user.id, status: InviteStatus.Accepted });
+      await arrangeInvite(db.client, {
+        inviter: member,
+        householdId,
+        inviteeId: joiner.user.id,
+        status: InviteStatus.Accepted,
+      });
 
       // A control: while a member, they see all three as their filters ask.
       expect(await sent(member)).toHaveLength(2);

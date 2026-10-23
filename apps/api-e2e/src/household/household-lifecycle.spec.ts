@@ -1,5 +1,5 @@
-import { InviteStatus, InviteType, Reach, SystemRole } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import { InviteStatus, Reach, SystemRole } from '@bge/database';
+import { arrangeInvite, createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -37,33 +37,8 @@ describe('household lifecycle', () => {
 
   const { removeMember, leave, transferOwnership, changeRole } = createMemberClient(baseUrl);
 
-  /**
-   * Arranges an invite directly (#257): inline rather than as a
-   * `@bge/testing-e2e` factory. Each invite suite keeps a copy of its own for
-   * now. Extracting one shared factory falls to #747, whose e2e arranges
-   * invites for a removed member, by id and by address.
-   *
-   * `token` is random rather than sequential for the same reason
-   * `prepareSignup` is — it is unique-constrained, and predictable identifiers
-   * are what let state survive a truncate and collide with a later test (#268).
-   */
-  const arrangeInvite = async (
-    inviter: SessionActor,
-    householdId: string,
-    status: InviteStatus,
-  ): Promise<{ id: string }> =>
-    db.client.invite.create({
-      data: {
-        type: InviteType.Household,
-        status,
-        inviterId: inviter.user.id,
-        householdId,
-        inviteeEmail: `invitee-${randomUUID()}@e2e.invalid`,
-        token: randomUUID(),
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1_000),
-      },
-      select: { id: true },
-    });
+  /** An address no account has, so an invite to it reaches nobody the suite signs in as. */
+  const unknownAddress = () => `invitee-${randomUUID()}@e2e.invalid`;
 
   describe('creating a household', () => {
     it('persists the creator as its HouseholdOwner and returns the row', async () => {
@@ -126,7 +101,12 @@ describe('household lifecycle', () => {
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner, name: 'Household with a pending invite' });
 
-      const pending = await arrangeInvite(owner, fixture.household.id, InviteStatus.Pending);
+      const pending = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: fixture.household.id,
+        status: InviteStatus.Pending,
+        inviteeEmail: unknownAddress(),
+      });
 
       const detail = readEnvelope(
         await readHousehold(owner, fixture.household.id).expect(200),
@@ -260,9 +240,24 @@ describe('household lifecycle', () => {
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner, name: 'Household with invites' });
 
-      const pending = await arrangeInvite(owner, fixture.household.id, InviteStatus.Pending);
-      const awaiting = await arrangeInvite(owner, fixture.household.id, InviteStatus.AwaitingApproval);
-      const declined = await arrangeInvite(owner, fixture.household.id, InviteStatus.Declined);
+      const pending = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: fixture.household.id,
+        status: InviteStatus.Pending,
+        inviteeEmail: unknownAddress(),
+      });
+      const awaiting = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: fixture.household.id,
+        status: InviteStatus.AwaitingApproval,
+        inviteeEmail: unknownAddress(),
+      });
+      const declined = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: fixture.household.id,
+        status: InviteStatus.Declined,
+        inviteeEmail: unknownAddress(),
+      });
 
       await request(baseUrl).delete(`${HOUSEHOLDS_PATH}/${fixture.household.id}`).set(owner.headers).expect(200);
 
@@ -283,7 +278,12 @@ describe('household lifecycle', () => {
       const doomed = await actors.householdWithMembers({ owner, name: 'Doomed' });
       const survivor = await actors.householdWithMembers({ owner, name: 'Survivor' });
 
-      const bystander = await arrangeInvite(owner, survivor.household.id, InviteStatus.Pending);
+      const bystander = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: survivor.household.id,
+        status: InviteStatus.Pending,
+        inviteeEmail: unknownAddress(),
+      });
 
       await request(baseUrl).delete(`${HOUSEHOLDS_PATH}/${doomed.household.id}`).set(owner.headers).expect(200);
 
