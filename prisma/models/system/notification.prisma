@@ -99,5 +99,16 @@ enum NotificationType {
 
   GameAddedToEvent
 
+  /**
+   * Game share notifications (#810), each sent to a different audience:
+   * GameShareReceived: the user a share names, when it takes effect, which a
+   * share to a user does on create.
+   * GameShareAwaitingApproval: the owners and admins of the household a
+   * member's share was made to, except the member, until one approves it.
+   * A household share that takes effect on create tells nobody.
+   */
+  GameShareReceived
+  GameShareAwaitingApproval
+
   @@map("notification_types")
 }
