@@ -1,5 +1,12 @@
-import { AvailabilityResponse, EventParticipationStatus, OccurrenceStatus, Reach, SystemRole } from '@bge/database';
-import { befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import {
+  AvailabilityResponse,
+  EventParticipationStatus,
+  FriendshipStatus,
+  OccurrenceStatus,
+  Reach,
+  SystemRole,
+} from '@bge/database';
+import { arrangeFriendship, befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -350,10 +357,10 @@ describe('event read scope', () => {
 
     // The ladder reads upwards (#495). The event, occurrence and policy rules
     // once tested `Friends` alone, so an event widened past it hid from the
-    // host's friends. No route sets `FriendsOfFriends` until #496 defines it,
-    // so the event is created at `Friends` and widened directly. A friend
-    // reading a `Public` event can't tell the friends rule from the public
-    // one, so `Public` is pinned on a stranger below.
+    // host's friends. Created at its reach through the route, so the DTO's
+    // acceptance is part of the test (#496). A friend reading a `Public` event
+    // can't tell the friends rule from the public one, so `Public` is pinned on
+    // a stranger below.
     it.each([Reach.FriendsOfFriends])(
       "serves a friend of the host a %s event's occurrences and policy, and still refuses a stranger",
       async (reach) => {
@@ -361,8 +368,7 @@ describe('event read scope', () => {
         const friend = await actors.user();
         const stranger = await actors.user();
         await befriend(db.client, friend, host);
-        const { eventId, occurrenceId, guestEmail } = await arrangeEvent(host, { reach: Reach.Friends });
-        await db.client.event.update({ where: { id: eventId }, data: { reach } });
+        const { eventId, occurrenceId, guestEmail } = await arrangeEvent(host, { reach });
 
         const response = await readEvent(friend, eventId).expect(200);
         const read = eventDetailEnvelope(response, `GET /api/events/:id as a friend of the host, at ${reach}`);
@@ -374,6 +380,33 @@ describe('event read scope', () => {
         await readOccurrence(friend, eventId, occurrenceId).expect(200);
 
         await readEvent(stranger, eventId).expect(404);
+      },
+    );
+
+    // Two viewers reach the host through the same friend, so the blocked one's
+    // refusal is the block and nothing else (#496).
+    it.each([Reach.FriendsOfFriends])(
+      "serves a friend of the host's friend a %s event's occurrences and policy, and refuses one the host has blocked",
+      async (reach) => {
+        const [host, sharedFriend, viewer, blockedViewer] = await Promise.all(
+          Array.from({ length: 4 }, () => actors.user()),
+        );
+        await befriend(db.client, sharedFriend, host);
+        await befriend(db.client, viewer, sharedFriend);
+        await befriend(db.client, blockedViewer, sharedFriend);
+        await arrangeFriendship(db.client, host, blockedViewer, FriendshipStatus.Blocked);
+        const { eventId, occurrenceId, guestEmail } = await arrangeEvent(host, { reach });
+
+        const response = await readEvent(viewer, eventId).expect(200);
+        const read = eventDetailEnvelope(response, `GET /api/events/:id as a friend of a friend, at ${reach}`);
+        expect(read.occurrences.map((occurrence) => occurrence.id)).toEqual([occurrenceId]);
+        expect(read.policy?.eventId).toBe(eventId);
+        expect(read.attendees).toEqual([]);
+        expect(JSON.stringify(response.body)).not.toContain(guestEmail);
+
+        await readOccurrence(viewer, eventId, occurrenceId).expect(200);
+
+        await readEvent(blockedViewer, eventId).expect(404);
       },
     );
 

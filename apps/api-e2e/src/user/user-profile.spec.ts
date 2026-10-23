@@ -209,11 +209,21 @@ describe('user profile', () => {
       await readProfile(stranger, profileOwner.user.id).expect(404);
     });
 
-    // `FriendsOfFriends` names readers no rule serves until #496.
-    it('refuses a reach no profile read rule serves', async () => {
-      const profileOwner = await actors.user();
+    it('lets a friend of a friend read the profile once its owner sets it to FriendsOfFriends (#496)', async () => {
+      const { profileOwner, friend, stranger } = await arrange(Reach.Private);
+      const friendOfFriend = await actors.user();
+      await befriend(db.client, friendOfFriend, friend);
+      await readProfile(friendOfFriend, profileOwner.user.id).expect(404);
 
-      await editOwnProfile(profileOwner, { reach: Reach.FriendsOfFriends }).expect(400);
+      const edited = userProfile(
+        await editOwnProfile(profileOwner, { reach: Reach.FriendsOfFriends }).expect(200),
+        'PATCH /api/users/me/profile',
+      );
+      expect(edited).toMatchObject({ reach: Reach.FriendsOfFriends });
+
+      await readProfile(friendOfFriend, profileOwner.user.id).expect(200);
+      await readProfile(friend, profileOwner.user.id).expect(200);
+      await readProfile(stranger, profileOwner.user.id).expect(404);
     });
 
     it('refuses an avatar change for now', async () => {

@@ -140,6 +140,16 @@ describe('system settings update', () => {
       await expect(readSettings()).resolves.toEqual({ ...original, ...changed });
     });
 
+    it('accepts FriendsOfFriends for both invitee policies, and reads it back (#496)', async () => {
+      const admin = await actors.admin();
+      const changed = { householdInviteePolicy: Reach.FriendsOfFriends, eventInviteePolicy: Reach.FriendsOfFriends };
+
+      const { body } = await patch(admin, changed).expect(200);
+
+      expect(body.settings).toMatchObject(changed);
+      await expect(readSettings()).resolves.toEqual({ ...original, ...changed });
+    });
+
     it('accepts a century for each day count', async () => {
       const admin = await actors.admin();
       const century = Object.fromEntries(DAY_COUNTS.map((key) => [key, MAX_DAYS]));
@@ -211,11 +221,9 @@ describe('system settings update', () => {
       ['a blank name', { name: '   ' }],
       ['a name past the length limit', { name: 'x'.repeat(MAX_NAME_LENGTH + 1) }],
       ['the retention under its old name', { feedbackRetentionDays: 30 }],
-      // #496 has not defined the second degree, and the others are no policy.
-      ['an invitee policy of FriendsOfFriends', { householdInviteePolicy: Reach.FriendsOfFriends }],
+      // Neither is a policy the server offers.
       ['an invitee policy of Household, which is no longer a reach', { householdInviteePolicy: 'Household' }],
       ['an invitee policy of Private', { householdInviteePolicy: Reach.Private }],
-      ['an event invitee policy of FriendsOfFriends', { eventInviteePolicy: Reach.FriendsOfFriends }],
       ['an event invitee policy of Private', { eventInviteePolicy: Reach.Private }],
     ])('answers 400 to %s and writes nothing', async (_, body) => {
       await expectRefused(await actors.admin(), body);

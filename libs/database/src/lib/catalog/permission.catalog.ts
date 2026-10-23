@@ -1,6 +1,6 @@
 import type { EnumReachFilter, Prisma } from '../client';
 import { Action, ResourceType, RiskLevel } from '../client';
-import { acceptedFriendOf, REACHES_ADMITTING_FRIENDS } from '../utils/friendship-conditions';
+import { acceptedFriendOf, friendOfFriendOf, REACHES_ADMITTING_FRIENDS } from '../utils/friendship-conditions';
 import { assertJsonConditions, assertUniqueSlugs, assertValidSubjects } from './catalog-integrity';
 import type { CatalogSubject, DefinedPermission } from './permission-entry';
 import { permission } from './permission-entry';
@@ -23,6 +23,35 @@ const acceptedFriendOfActingUser = acceptedFriendOf('{{ user.id }}');
 const reachAdmittingFriends = {
   in: [...REACHES_ADMITTING_FRIENDS],
 } satisfies EnumReachFilter;
+
+// Relational clause meaning "this User node is a friend of a friend of the
+// acting user, with no block between them" (#496). Its shape is
+// `friendOfFriendOf`'s, which the game list scope and the invite gate share.
+// Module-private for the reasons `acceptedFriendOfActingUser` gives.
+//
+// Every friends-of-friends rule writes `{ AND: [{ reach: 'FriendsOfFriends' },
+// <relation> ] }`, unlike the friends rules, and for one reason: cost. The
+// first friendship step is a subquery Postgres builds once per statement. The
+// second runs again for every row that reaches it. Measured on #496, it made
+// a list three to ten times slower wherever it ran on rows a reach test would
+// have turned away.
+// - The rule admits `FriendsOfFriends` alone. A `Public` item reaches a friend
+//   of a friend through the public rule beside it, so an arm that also passed
+//   `Public` rows would run the second step on them for nothing. The ceiling's
+//   arms come in the order the grants load, which nothing fixes.
+// - The reach test comes first in an `AND`, which Prisma emits in order.
+//   Written as sibling keys, a relation nested in a to-one filter is emitted
+//   ahead of the scalar beside it.
+const friendOfFriendOfActingUser = friendOfFriendOf('{{ user.id }}');
+
+// The owner's preference for showing their collection to friends. An absent
+// preferences row reads as the schema default, `true`, as FriendshipService
+// reads it. The friends-of-friends rule carries it too, so a wider circle never
+// sees what the narrower one can't (#496). Module-private for the reasons
+// `acceptedFriendOfActingUser` gives.
+const showsCollectionToFriends = {
+  OR: [{ preferences: null }, { preferences: { is: { showCollectionToFriends: true } } }],
+} satisfies Prisma.UserWhereInput;
 
 // An EventGame hangs off the event itself or off one of its occurrences
 // (exactly one FK is set), so a grant bound to an event has to name both
@@ -251,13 +280,14 @@ export const PERMISSION_CATALOG = [
   // --- App Level / User ---
   //
   // A profile has a reach, split like the Game family: your own, whatever its
-  // reach, a friend's that reaches their friends, and everyone's `Public`
-  // ones. The unconditioned read these replace served every profile to every
-  // user, whatever its owner chose (#495). User search composes this read, so
-  // a profile is found only where it can be read. The friends and public reads
-  // rate `Medium`, as `read:user:searchable` does: they are other users'
-  // personal details, such as accessibility needs, that their owners chose to
-  // show.
+  // reach, a friend's that reaches their friends, a friend of a friend's that
+  // reaches friends of friends (#496), and everyone's `Public` ones. The
+  // unconditioned read these replace served every profile to every user,
+  // whatever its owner chose (#495). User search composes this read, so a
+  // profile is found only where it can be read. The friends, friends-of-friends
+  // and public reads rate `Medium`, as `read:user:searchable` does: they are
+  // other users' personal details, such as accessibility needs, that their
+  // owners chose to show.
   // TODO: consider the ability to block other users from viewing your profile, etc.
   permission({
     action: Action.read,
@@ -274,6 +304,14 @@ export const PERMISSION_CATALOG = [
     slug: 'read:user:profile:friends',
     riskLevel: RiskLevel.Medium,
     reason: "View a friend's profile that reaches their friends",
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.UserProfile,
+    conditions: { AND: [{ reach: 'FriendsOfFriends' }, { user: { is: friendOfFriendOfActingUser } }] },
+    slug: 'read:user:profile:friends-of-friends',
+    riskLevel: RiskLevel.Medium,
+    reason: "View a friend of a friend's profile that reaches friends of friends",
   }),
   permission({
     action: Action.read,
@@ -352,6 +390,18 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: "View a friend's events that reach their friends",
   }),
+  // Friends-of-friends reach: read what reaches a friend of a friend, unless a
+  // block stands between them and the owner (#496). Each of these adds to its
+  // friends rule, which keeps serving direct friends, and leaves `Public` to
+  // the public rule. Shaped as `friendOfFriendOfActingUser` explains.
+  permission({
+    action: Action.read,
+    subject: ResourceType.Event,
+    conditions: { AND: [{ reach: 'FriendsOfFriends' }, { createdBy: { is: friendOfFriendOfActingUser } }] },
+    slug: 'read:event:friends-of-friends',
+    riskLevel: RiskLevel.Medium,
+    reason: "View a friend of a friend's events that reach friends of friends",
+  }),
   // Public reach: every signed-in user on the server reads a `Public` event,
   // its dates and its policy, capacity included. No attendee read comes with
   // it, as none comes with the friends rules, so who attends stays with the
@@ -408,6 +458,17 @@ export const PERMISSION_CATALOG = [
     slug: 'read:game:friends',
     riskLevel: RiskLevel.Low,
     reason: "View a friend's games that reach their friends",
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.Game,
+    conditions: {
+      deletedAt: null,
+      AND: [{ reach: 'FriendsOfFriends' }, { createdBy: { is: friendOfFriendOfActingUser } }],
+    },
+    slug: 'read:game:friends-of-friends',
+    riskLevel: RiskLevel.Low,
+    reason: "View a friend of a friend's games that reach friends of friends",
   }),
   // Import jobs only (#479). An import job describes public content, so every
   // user may watch every import, as the import status route and the import
@@ -570,6 +631,17 @@ export const PERMISSION_CATALOG = [
     slug: 'read:event_occurrence:friends',
     riskLevel: RiskLevel.Medium,
     reason: "View the occurrences of a friend's events that reach their friends",
+  }),
+  // Bound and rated as `read:event:friends-of-friends` is.
+  permission({
+    action: Action.read,
+    subject: ResourceType.EventOccurrence,
+    conditions: {
+      event: { is: { AND: [{ reach: 'FriendsOfFriends' }, { createdBy: { is: friendOfFriendOfActingUser } }] } },
+    },
+    slug: 'read:event_occurrence:friends-of-friends',
+    riskLevel: RiskLevel.Medium,
+    reason: "View the occurrences of a friend of a friend's events that reach friends of friends",
   }),
   // Bound and rated as `read:event:public` is.
   permission({
@@ -970,6 +1042,17 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: "View the policy configuration of a friend's events that reach their friends",
   }),
+  // Bound and rated as `read:event:friends-of-friends` is.
+  permission({
+    action: Action.read,
+    subject: ResourceType.EventPolicy,
+    conditions: {
+      event: { is: { AND: [{ reach: 'FriendsOfFriends' }, { createdBy: { is: friendOfFriendOfActingUser } }] } },
+    },
+    slug: 'read:event_policy:friends-of-friends',
+    riskLevel: RiskLevel.Medium,
+    reason: "View the policy configuration of a friend of a friend's events that reach friends of friends",
+  }),
   // Bound and rated as `read:event:public` is.
   permission({
     action: Action.read,
@@ -1059,28 +1142,35 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: 'View collections shared with your household',
   }),
-  // Row visible to accepted friends of the owner when the owner's
-  // preferences allow it (absent preferences row → schema default `true`,
-  // mirroring FriendshipService). FriendsOfFriends currently grants to
-  // direct friends only — 2-hop traversal is #496.
+  // An entry reaches the owner's accepted friends at every rung from
+  // `Friends` up, and friends of friends at `FriendsOfFriends`, each only while
+  // the owner's preferences show the collection to friends (#496). A `Public`
+  // entry reaches everyone through the public rule.
   permission({
     action: Action.read,
     subject: ResourceType.GameCollection,
     conditions: {
       deletedAt: null,
       reach: reachAdmittingFriends,
-      user: {
-        is: {
-          AND: [
-            { OR: [{ preferences: null }, { preferences: { is: { showCollectionToFriends: true } } }] },
-            acceptedFriendOfActingUser,
-          ],
-        },
-      },
+      user: { is: { AND: [showsCollectionToFriends, acceptedFriendOfActingUser] } },
     },
     slug: 'read:game_collection:friends',
     riskLevel: RiskLevel.Medium,
     reason: "View your friends' collections",
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.GameCollection,
+    conditions: {
+      deletedAt: null,
+      AND: [
+        { reach: 'FriendsOfFriends' },
+        { user: { is: { AND: [showsCollectionToFriends, friendOfFriendOfActingUser] } } },
+      ],
+    },
+    slug: 'read:game_collection:friends-of-friends',
+    riskLevel: RiskLevel.Medium,
+    reason: "View a friend of a friend's collections that reach friends of friends",
   }),
   permission({
     action: Action.read,

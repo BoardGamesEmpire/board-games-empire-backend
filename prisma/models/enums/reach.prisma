@@ -2,9 +2,9 @@
 /// friends, friends of friends, or everyone (`Public`). Everyone is every
 /// signed-in account on the server, and for collection entries guests too
 /// (#484). The ladder reads upwards: each rung reaches everyone the rung below
-/// it does. `FriendsOfFriends` admits direct friends only until #496 defines
-/// friends of friends. A share adds readers on top of a reach; it is a separate
-/// row, not a rung (#495).
+/// it does. Direct friends read up the ladder through the friends rules, and
+/// friends of friends through their own rules (#496). A share adds readers on
+/// top of a reach; it is a separate row, not a rung (#495).
 enum Reach {
   Friends
   FriendsOfFriends

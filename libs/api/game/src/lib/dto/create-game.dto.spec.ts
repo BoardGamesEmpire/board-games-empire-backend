@@ -16,21 +16,15 @@ describe.each([
       forbidNonWhitelisted: true,
     });
 
-  it.each([Reach.Public, Reach.Friends, Reach.Private])('accepts %s', async (reach) => {
+  // Every rung a game read rule serves, friends of friends included (#496).
+  it.each([Reach.Public, Reach.FriendsOfFriends, Reach.Friends, Reach.Private])('accepts %s', async (reach) => {
     await expect(errorsFor({ reach })).resolves.toHaveLength(0);
   });
 
-  it.each([Reach.FriendsOfFriends])(
-    'refuses %s — no read rule would honour it until #496, so the game would claim readers it doesn’t have',
-    async (reach) => {
-      const errors = await errorsFor({ reach });
-
-      expect(errors.map((error) => error.property)).toEqual(['reach']);
-    },
-  );
-
-  it('refuses Household, which is no longer a reach (#808)', async () => {
-    const errors = await errorsFor({ reach: 'Household' });
+  // `Household` is no longer a reach (#808), and null would reach a
+  // non-nullable column as a 500.
+  it.each([['Household'], [null]])('refuses %p', async (reach) => {
+    const errors = await errorsFor({ reach });
 
     expect(errors.map((error) => error.property)).toEqual(['reach']);
   });

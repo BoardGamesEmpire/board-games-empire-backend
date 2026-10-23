@@ -493,6 +493,35 @@ describe('EventService', () => {
       expect(db.event.create).toHaveBeenCalled();
     });
 
+    // The event's own settings and words, not the household's (#496).
+    it("lets in a friend of a friend under the server's FriendsOfFriends event policy", async () => {
+      db.systemSetting.findUnique.mockResolvedValue({
+        householdInviteePolicy: Reach.Friends,
+        eventInviteePolicy: Reach.FriendsOfFriends,
+      } as never);
+      db.user.count.mockResolvedValue(1);
+
+      await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);
+
+      expect(db.event.create).toHaveBeenCalled();
+    });
+
+    it("refuses someone no friend links under the server's FriendsOfFriends event policy, in its own words", async () => {
+      db.systemSetting.findUnique.mockResolvedValue({
+        householdInviteePolicy: Reach.Public,
+        eventInviteePolicy: Reach.FriendsOfFriends,
+      } as never);
+      db.user.count.mockResolvedValue(0);
+
+      const error = await service
+        .createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto)
+        .catch((reason: unknown) => reason);
+
+      expect(error).toBeInstanceOf(ForbiddenException);
+      expect((error as ForbiddenException).message).toContain('errors.event.invitee_friends_of_friends_only');
+      expect(db.event.create).not.toHaveBeenCalled();
+    });
+
     it('asks nothing about the creator listed among the invitees', async () => {
       await service.createEvent({ title: 'X', inviteUserIds: ['user-1'] } as CreateEventDto);
 

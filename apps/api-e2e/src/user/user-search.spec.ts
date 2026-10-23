@@ -14,9 +14,10 @@ import { userSearchPage } from './user-wire';
  * whose username, first name or display name matches the term, the caller
  * left out. The caller's `User` and `UserProfile` ceilings clip it. Every
  * user's are `read:user:searchable`, which repeats the ban and opt-in clauses,
- * and the profile reads: their own, a friend's that reaches friends, and every
- * `Public` one. So a profile whose reach shuts the acting user out is not
- * found (#495). An API key's scope narrows it.
+ * and the profile reads: their own, a friend's that reaches friends, a friend
+ * of a friend's that reaches friends of friends (#496), and every `Public`
+ * one. So a profile whose reach shuts the acting user out is not found
+ * (#495). An API key's scope narrows it.
  *
  * The other users are arranged by the test itself: the database is reset
  * before each one, so no user but those below exists to be matched.
@@ -140,13 +141,17 @@ describe('user search', () => {
       expect(idsOf(asViewer.users)).not.toContain(owner.user.id);
     });
 
-    // `FriendsOfFriends` admits direct friends only until #496 defines a
-    // friend of a friend.
-    it('leaves a FriendsOfFriends profile out for a friend of a friend', async () => {
+    // Two viewers reach the owner through the same friend, so the blocked
+    // one's miss is the block and nothing else (#496).
+    it('finds a FriendsOfFriends profile for a friend of a friend, and not for one its owner has blocked', async () => {
       const { term, friend, owner, stranger: viewer } = await arrangeFriends();
+      const blockedViewer = await actors.user({ username: `${term}-blocked` });
       await db.client.userProfile.update({ where: { userId: owner.user.id }, data: { reach: Reach.FriendsOfFriends } });
       await befriend(db.client, viewer, friend);
+      await befriend(db.client, blockedViewer, friend);
+      await arrangeFriendship(db.client, owner, blockedViewer, FriendshipStatus.Blocked);
 
+      // A direct friend finds it through the friends rule.
       const asFriend = userSearchPage(await search(friend, term).expect(200), 'GET /api/users/search as a friend');
       expect(idsOf(asFriend.users)).toContain(owner.user.id);
 
@@ -154,7 +159,15 @@ describe('user search', () => {
         await search(viewer, term).expect(200),
         'GET /api/users/search as a friend of a friend',
       );
-      expect(idsOf(asViewer.users)).not.toContain(owner.user.id);
+      expect(idsOf(asViewer.users)).toContain(owner.user.id);
+
+      const asBlocked = userSearchPage(
+        await search(blockedViewer, term).expect(200),
+        'GET /api/users/search as a friend of a friend the owner blocked',
+      );
+      expect(idsOf(asBlocked.users)).not.toContain(owner.user.id);
+      // Control: the blocked viewer's search works, and finds the friend.
+      expect(idsOf(asBlocked.users)).toContain(friend.user.id);
     });
 
     // `isSearchable` decides whether a readable profile is offered to search,

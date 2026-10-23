@@ -28,7 +28,8 @@ describe('UpdateHouseholdDto', () => {
   });
 
   // The rungs a household read rule serves, and no others. `Public` waits on
-  // #231 (#495), and null would reach a non-nullable column as a 500.
+  // #231 (#495), and so does `FriendsOfFriends` (#496). Null would reach a
+  // non-nullable column as a 500.
   it.each([['Public'], ['FriendsOfFriends'], ['Household'], [null]])('rejects reach %p', async (reach) => {
     await expect(propertiesWithErrors({ reach })).resolves.toEqual(['reach']);
   });

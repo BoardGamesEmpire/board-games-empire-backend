@@ -10,6 +10,10 @@ import { inviteEnvelope, inviteListEnvelope } from './household-invite-wire';
 const FRIENDS_ONLY =
   'This server only allows household invites to your friends, invited from their account rather than by email address';
 
+/** The same refusal under `FriendsOfFriends`, which names who that policy lets in (#496). */
+const FRIENDS_OF_FRIENDS_ONLY =
+  'This server only allows household invites to your friends and friends of friends, invited from their account rather than by email address';
+
 /** A block's or a preference's refusal by id: one message, so the inviter cannot tell which. */
 const REFUSED = 'You cannot invite this user to a household';
 
@@ -18,9 +22,9 @@ const REFUSED = 'You cannot invite this user to a household';
  * between the two, and the invitee's own preference, checked in that order.
  *
  * By id, each refuses with 403. By address, the server's policy refuses every
- * address under `Friends`, and a block or a preference refuses nothing: the
- * invite is stored withheld and answers like any other, so the answer never
- * depends on who holds the address.
+ * address under `Friends` and `FriendsOfFriends`, and a block or a preference
+ * refuses nothing: the invite is stored withheld and answers like any other,
+ * so the answer never depends on who holds the address.
  *
  * The settings row is on the isolation sweep's preserved list, so each test
  * puts the policy back. The defaults, `Public` and no preference row, are what
@@ -171,6 +175,31 @@ describe('household invite gating', () => {
 
       expect(messages).toEqual([FRIENDS_ONLY, FRIENDS_ONLY, FRIENDS_ONLY, FRIENDS_ONLY]);
       expect(await db.client.invite.count({ where: { householdId: household.id } })).toBe(1);
+    });
+
+    // A friend of a friend's address is refused as any other is, so a refusal
+    // tells the inviter nothing about whose address it is (#496).
+    it('under FriendsOfFriends, lets a friend of a friend in by id and refuses a stranger by id and every address', async () => {
+      const [owner, friend, friendOfFriend, stranger] = await Promise.all(
+        Array.from({ length: 4 }, () => actors.user()),
+      );
+      const { household } = await actors.householdWithMembers({ owner });
+      await befriend(db.client, owner, friend);
+      await befriend(db.client, friend, friendOfFriend);
+      await setPolicy(Reach.FriendsOfFriends);
+
+      await createdInvite(owner, household.id, { inviteeId: friend.user.id });
+      await createdInvite(owner, household.id, { inviteeId: friendOfFriend.user.id });
+
+      const messages = [
+        await refusal(owner, household.id, { inviteeId: stranger.user.id }),
+        await refusal(owner, household.id, { inviteeEmail: friendOfFriend.user.email }),
+        await refusal(owner, household.id, { inviteeEmail: stranger.user.email }),
+        await refusal(owner, household.id, { inviteeEmail: `nobody-${randomUUID()}@e2e.invalid` }),
+      ];
+
+      expect(messages).toEqual(Array(4).fill(FRIENDS_OF_FRIENDS_ONLY));
+      expect(await db.client.invite.count({ where: { householdId: household.id } })).toBe(2);
     });
 
     it('under Public, lets in a non-friend by id and by address', async () => {

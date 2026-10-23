@@ -98,14 +98,13 @@ describe('UpdateSystemSettingsDto', () => {
   });
 
   describe.each(['householdInviteePolicy', 'eventInviteePolicy'])('%s', (property) => {
-    it.each(['Public', 'Friends'])('accepts %s', async (level) => {
+    it.each(['Public', 'FriendsOfFriends', 'Friends'])('accepts %s', async (level) => {
       expect(await keysFor({ [property]: level })).toEqual({});
     });
 
-    // FriendsOfFriends waits on #496, which defines friends of friends,
     // Household is no reach at all (#495), and Private would turn every invite
-    // of the kind off: none is a policy the server offers yet.
-    it.each(['FriendsOfFriends', 'Household', 'Private', 'Anyone'])('refuses %s', async (level) => {
+    // of the kind off: neither is a policy the server offers.
+    it.each(['Household', 'Private', 'Anyone'])('refuses %s', async (level) => {
       expect(await keysFor({ [property]: level })).toEqual({
         [`${property}.isIn`]: 'validation.isIn',
       });

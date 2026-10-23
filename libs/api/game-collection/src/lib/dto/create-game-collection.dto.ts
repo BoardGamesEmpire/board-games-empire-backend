@@ -4,14 +4,14 @@ import { ReachProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, Max, Min } from 'class-validator';
 
-const COLLECTION_REACHES = [Reach.Private, Reach.Friends, Reach.Public] as const;
+const COLLECTION_REACHES = [Reach.Private, Reach.Friends, Reach.FriendsOfFriends, Reach.Public] as const;
 export type CollectionReach = (typeof COLLECTION_REACHES)[number];
 
 /**
- * A collection entry's reach: every rung a collection read rule serves.
- * `FriendsOfFriends` waits on #496, which defines friends of friends. The
- * owner's households see the entry whatever its reach (#495). Shared with
- * `UpdateGameCollectionDto`, which names no default.
+ * A collection entry's reach: every rung a collection read rule serves,
+ * friends of friends included (#496). The owner's households see the entry
+ * whatever its reach (#495). Shared with `UpdateGameCollectionDto`, which
+ * names no default.
  */
 export function CollectionReachProperty(defaultReach?: CollectionReach): PropertyDecorator {
   return ReachProperty({
@@ -20,7 +20,9 @@ export function CollectionReachProperty(defaultReach?: CollectionReach): Propert
     description:
       'Who may see this entry besides its owner and the households they share their games with. `Private`: ' +
       "no one. `Friends`: the owner's friends, unless the owner hides their collection from friends. " +
-      '`Public`: everyone on the server, guests included.',
+      "`FriendsOfFriends`: the owner's friends and friends of friends, unless a block stands between the " +
+      'owner and the reader, and unless the owner hides their collection from friends. `Public`: everyone on ' +
+      'the server, guests included.',
   });
 }
 

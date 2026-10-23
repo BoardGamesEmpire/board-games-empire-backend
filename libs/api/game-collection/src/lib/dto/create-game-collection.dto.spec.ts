@@ -20,7 +20,7 @@ describe.each([
     return errors.map((error) => error.property);
   };
 
-  it.each([Reach.Private, Reach.Friends, Reach.Public])('accepts %s', async (reach) => {
+  it.each([Reach.Private, Reach.Friends, Reach.FriendsOfFriends, Reach.Public])('accepts %s', async (reach) => {
     await expect(propertiesWithErrors({ reach })).resolves.toEqual([]);
   });
 
@@ -28,10 +28,9 @@ describe.each([
     await expect(propertiesWithErrors({})).resolves.toEqual([]);
   });
 
-  // `FriendsOfFriends` waits on #496, which defines friends of friends,
   // `Household` is no longer a reach (#495), and null would reach a
   // non-nullable column as a 500.
-  it.each([['FriendsOfFriends'], ['Household'], [null]])('rejects %p', async (reach) => {
+  it.each([['Household'], [null]])('rejects %p', async (reach) => {
     await expect(propertiesWithErrors({ reach })).resolves.toEqual(['reach']);
   });
 });
