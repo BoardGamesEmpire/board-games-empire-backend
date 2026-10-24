@@ -45,8 +45,9 @@ export interface CacheStoreOptions {
 
 /**
  * The Redis key a {@link createCacheStore} store keeps `key` under, for code
- * that reads or removes keys without the store: the api's boot flush and the
- * e2e suite. The prefix is the adapter's. A glob in `key` stays a glob.
+ * that reads or removes keys without the store: the api's boot flush, the
+ * e2e suite, and the commands better-auth's storage sends in one step (#832).
+ * The prefix is the adapter's. A glob in `key` stays a glob.
  */
 export function cacheStoreKey(namespace: string, key: string): string {
   return `namespace:${namespace}:${key}`;

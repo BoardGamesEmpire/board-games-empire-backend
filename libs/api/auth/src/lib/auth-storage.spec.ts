@@ -70,7 +70,7 @@ describe('createAuthStorage', () => {
 
 describe('createRedisAuthStorage', () => {
   /** Stands in for the shared cache client and records the commands it is given. */
-  function recordingClient() {
+  function recordingClient({ evalResult = 1, evalError }: { evalResult?: number; evalError?: Error } = {}) {
     const commands: unknown[][] = [];
     const client = {
       options: { family: 4 },
@@ -78,6 +78,13 @@ describe('createRedisAuthStorage', () => {
       async set(...args: unknown[]) {
         commands.push(['set', ...args]);
         return 'OK';
+      },
+      async eval(...args: unknown[]) {
+        commands.push(['eval', ...args]);
+        if (evalError) {
+          throw evalError;
+        }
+        return evalResult;
       },
     };
 
@@ -94,5 +101,37 @@ describe('createRedisAuthStorage', () => {
     expect(commands).toEqual([
       ['set', 'namespace:api:cache:auth_session-token', expect.stringContaining('"session"'), 'PX', 604_800_000],
     ]);
+  });
+
+  it('counts a request in one EVAL on the key get reads, expiring it after the window in milliseconds (#832)', async () => {
+    const { client, commands } = recordingClient({ evalResult: 4 });
+
+    await expect(createRedisAuthStorage(client).increment('198.51.100.4/sign-in/email', 10)).resolves.toBe(4);
+
+    expect(commands).toEqual([
+      [
+        'eval',
+        expect.stringMatching(/INCR[\s\S]*PEXPIRE[\s\S]*'NX'/),
+        1,
+        'namespace:api:cache:auth_198.51.100.4/sign-in/email',
+        10_000,
+      ],
+    ]);
+  });
+
+  it('rounds a window that is not whole milliseconds up, as PEXPIRE takes whole ones (#832)', async () => {
+    const { client, commands } = recordingClient();
+
+    await createRedisAuthStorage(client).increment('198.51.100.4/sign-in/email', 1.0005);
+
+    expect(commands[0].at(-1)).toBe(1001);
+  });
+
+  it('raises a failed count, so the limiter refuses rather than lets the request through (#832)', async () => {
+    const { client } = recordingClient({ evalError: new Error('Connection is closed.') });
+
+    await expect(createRedisAuthStorage(client).increment('198.51.100.4/sign-in/email', 10)).rejects.toThrow(
+      'Connection is closed.',
+    );
   });
 });
