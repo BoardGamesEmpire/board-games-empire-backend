@@ -27,6 +27,7 @@ model Household {
   bans                 HouseholdBan[]
   events               Event[]
   gameLocations        GameLocation[]
+  gameShares           GameShare[]
   gamePlaySessions     GamePlaySession[]
   invites              Invite[]
   members              HouseholdMember[]

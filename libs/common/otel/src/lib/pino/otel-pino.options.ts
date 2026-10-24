@@ -45,10 +45,10 @@ export function otelTraceMixin(): Record<string, string> {
  *
  * - {@link otelTraceMixin} is always applied so every record carries
  *   trace correlation when a span is active.
- * - The log level and the `pino-pretty` transport target are taken
- *   verbatim from the base options. Level resolution is centralized
- *   in `@bge/logger`'s {@link resolvePinoLevel} so the appended OTLP
- *   target picks up the same value.
+ * - The log level, the credential redaction and the `pino-pretty`
+ *   transport target are taken verbatim from the base options. Level
+ *   resolution is centralized in `@bge/logger`'s {@link resolvePinoLevel}
+ *   so the appended OTLP target picks up the same value.
  * - When `env['OTEL_EXPORTER_OTLP_ENDPOINT']` is set,
  *   `pino-opentelemetry-transport` is appended as a second target.
  *   Logs are forwarded to the OTel Logs SDK and exported via the
@@ -62,9 +62,10 @@ export function otelTraceMixin(): Record<string, string> {
  * `env` object, which keeps tests deterministic.
  *
  * Designed to be passed to `bootstrapLogging` (via
- * `bootstrapObservability`) for service-wide pino setup. The caller
- * is responsible for app-specific pino options not derived from env
- * (serializers, redaction rules, custom hooks).
+ * `bootstrapObservability`) for service-wide pino setup. The base
+ * options already redact credentials; the caller adds only
+ * app-specific pino options not derived from env (serializers, custom
+ * hooks).
  */
 export function buildOtelPinoOptions(env: NodeJS.ProcessEnv = process.env): LoggerOptions {
   const base = buildBasePinoOptions(env);

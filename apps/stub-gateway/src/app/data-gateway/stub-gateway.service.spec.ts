@@ -59,7 +59,10 @@ describe('StubGatewayService', () => {
           platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
           contentTypes: [proto.ContentType.CONTENT_TYPE_BASE_GAME, proto.ContentType.CONTENT_TYPE_EXPANSION],
         },
-        filterableAxes: [proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE],
+        filterableAxes: [
+          proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE,
+          proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR,
+        ],
         languageCodeFormats: {
           acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47],
           responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
@@ -155,6 +158,22 @@ describe('StubGatewayService', () => {
       await expect(search('island', { filter: expansions, limit: 1 }).then(titlesOf)).resolves.toEqual([
         STUB_EXPANSION.title,
       ]);
+    });
+
+    // So the e2e suites cover a DataGateway the server sends a range to (#719).
+    it('narrows its fixtures by publish year, both bounds inclusive, before paging', async () => {
+      const byYear = (publishYear: proto.IntRange) => ({ platformTypes: [], contentTypes: [], publishYear });
+
+      await expect(search('island', { filter: byYear({ min: 2021 }) }).then(titlesOf)).resolves.toEqual([
+        STUB_EXPANSION.title,
+      ]);
+      await expect(search('island', { filter: byYear({ min: 2020, max: 2020 }) }).then(titlesOf)).resolves.toEqual([
+        STUB_BASE_GAME.title,
+      ]);
+      await expect(search('island', { filter: byYear({ min: 2021 }), limit: 1 }).then(titlesOf)).resolves.toEqual([
+        STUB_EXPANSION.title,
+      ]);
+      await expect(search('island', { filter: byYear({ max: 1999 }) }).then(titlesOf)).resolves.toEqual([]);
     });
 
     it('ignores platform types, which it doesn’t narrow by', async () => {

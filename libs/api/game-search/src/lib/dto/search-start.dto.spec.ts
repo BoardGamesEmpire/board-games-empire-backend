@@ -1,6 +1,7 @@
 import { validationCatalogKeys } from '@bge/testing';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { toProtoSearchFilter } from '../search-filter';
 import { SearchCancelDto, SearchStartDto } from './search-start.dto';
 
 describe('SearchStartDto', () => {
@@ -28,6 +29,76 @@ describe('SearchStartDto', () => {
       const dto = toDto({ ...base, includeLocal: 'false', includeExternal: 'false' });
       expect(dto.includeLocal).toBe(false);
       expect(dto.includeExternal).toBe(false);
+    });
+  });
+
+  // REST splits a comma-separated list; a frame sends an array, so a string
+  // here is a malformed frame and must not be split into one (#565).
+  describe('gatewayIds', () => {
+    it('refuses a comma-separated gatewayIds string', async () => {
+      const dto = toDto({ ...base, gatewayIds: 'igdb-gw-1,bgg-gw-1' });
+
+      expect(dto.gatewayIds).toBe('igdb-gw-1,bgg-gw-1');
+      expect(validationCatalogKeys((await validate(dto)).filter((e) => e.property === 'gatewayIds'))).toEqual({
+        'gatewayIds.isArray': 'validation.isArray',
+      });
+    });
+  });
+
+  // A publish-year range narrows the search (#719), as on REST.
+  describe('publish year', () => {
+    const yearErrors = async (plain: Record<string, unknown>) =>
+      validationCatalogKeys(
+        (await validate(toDto({ ...base, ...plain }))).filter((e) => e.property.startsWith('publishYear')),
+      );
+
+    it('takes an inclusive publish-year range with either bound alone', async () => {
+      await expect(yearErrors({ publishYearMin: 1990 })).resolves.toEqual({});
+      await expect(yearErrors({ publishYearMax: -500 })).resolves.toEqual({});
+    });
+
+    it('refuses a non-integer bound with validation.isInt', async () => {
+      await expect(yearErrors({ publishYearMin: 1990.5 })).resolves.toEqual({
+        'publishYearMin.isInt': 'validation.isInt',
+      });
+    });
+
+    it('refuses a bound outside a 32-bit integer, which the proto would wrap', async () => {
+      await expect(yearErrors({ publishYearMax: 2 ** 31 })).resolves.toEqual({
+        'publishYearMax.max': 'validation.max',
+      });
+      await expect(yearErrors({ publishYearMin: -(2 ** 31) - 1 })).resolves.toEqual({
+        'publishYearMin.min': 'validation.min',
+      });
+    });
+
+    it('refuses a maximum below the minimum with validation.notLessThanProperty', async () => {
+      await expect(yearErrors({ publishYearMin: 2000, publishYearMax: 1990 })).resolves.toEqual({
+        'publishYearMax.notLessThanProperty': 'validation.notLessThanProperty',
+      });
+    });
+
+    // A frame can send null, as it can for the lists, and null doesn't narrow.
+    it('lets null through for each bound and the flag', async () => {
+      const plain = { publishYearMin: null, publishYearMax: 2000, publishYearIncludeUnknown: null };
+
+      await expect(yearErrors(plain)).resolves.toEqual({});
+      expect(toProtoSearchFilter(toDto({ ...base, ...plain }))?.publishYear).toEqual({ max: 2000 });
+    });
+
+    // Implicit conversion would read false as 0 and true as 1, both real years.
+    it('refuses a boolean or array bound rather than reading it as a year', async () => {
+      await expect(yearErrors({ publishYearMin: false, publishYearMax: true })).resolves.toMatchObject({
+        'publishYearMin.isInt': 'validation.isInt',
+        'publishYearMax.isInt': 'validation.isInt',
+      });
+      await expect(yearErrors({ publishYearMin: [] })).resolves.toMatchObject({
+        'publishYearMin.isInt': 'validation.isInt',
+      });
+    });
+
+    it('reads an empty bound as absent rather than as year 0', () => {
+      expect(toDto({ ...base, publishYearMin: '' }).publishYearMin).toBeUndefined();
     });
   });
 

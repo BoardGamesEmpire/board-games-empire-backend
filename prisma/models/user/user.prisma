@@ -44,6 +44,10 @@ model User {
   preferences UserPreferences?
   profile     UserProfile?
 
+  gameSharesReceived GameShare[] @relation("GameSharesReceived")
+  gameSharesCreated  GameShare[] @relation("GameSharesCreated")
+  gameSharesApproved GameShare[] @relation("GameSharesApproved")
+
   invitesReceived Invite[] @relation("InvitesReceived")
   invitesSent     Invite[] @relation("InvitesSent")
   approvedInvites Invite[] @relation("ApprovedInvites")

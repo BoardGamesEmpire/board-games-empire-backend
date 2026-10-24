@@ -69,6 +69,7 @@ model Game {
   updatedBy   User?   @relation("GamesUpdated", fields: [updatedById], references: [id])
   updatedById String? @map("updated_by_id")
 
+  shares             GameShare[]
   userCustomizations UserGameCustomization[]
   favorites          FavoriteGame[]          @relation("FavoriteGames")
   disliked           DislikedGame[]          @relation("DislikedGames")

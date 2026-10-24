@@ -1,4 +1,8 @@
-import type { TransportTargetOptions } from 'pino';
+import http from 'node:http';
+import { Writable } from 'node:stream';
+import pino, { type TransportTargetOptions } from 'pino';
+import pinoHttp from 'pino-http';
+import request from 'supertest';
 import { buildBasePinoOptions, resolvePinoLevel } from './base-pino.options';
 
 /**
@@ -116,5 +120,114 @@ describe('buildBasePinoOptions', () => {
         process.env['NODE_ENV'] = originalNodeEnv;
       }
     }
+  });
+});
+
+describe('credential redaction (#748)', () => {
+  type LogRecord = Record<string, any>;
+
+  const CREDENTIAL_HEADERS = {
+    Authorization: 'Bearer bearer-secret',
+    Cookie: 'bge.session=cookie-secret',
+    'X-API-Key': 'key-secret',
+  };
+
+  let server: http.Server;
+  let lines: string[];
+
+  const records = (): LogRecord[] =>
+    lines
+      .join('')
+      .split('\n')
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line));
+
+  const findRecord = (msg: string): LogRecord => {
+    const record = records().find((r) => r['msg'] === msg);
+    if (!record) {
+      throw new Error(`no log record with msg "${msg}"`);
+    }
+    return record;
+  };
+
+  // pino-http writes the access line when the response finishes, which can
+  // land just after the client has read the response.
+  const waitForAccessLine = async (): Promise<void> => {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (records().some((r) => r['msg'] === 'request completed')) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('the access line was never logged');
+  };
+
+  beforeEach(() => {
+    // Strip the transport: pino refuses a destination stream alongside one.
+    const { transport: _transport, ...options } = buildBasePinoOptions({ LOG_LEVEL: 'debug' });
+    lines = [];
+    const sink = new Writable({
+      write(chunk, _encoding, done) {
+        lines.push(String(chunk));
+        done();
+      },
+    });
+    const httpLogger = pinoHttp({ logger: pino(options, sink) });
+
+    server = http.createServer((req, res) => {
+      httpLogger(req, res);
+      req.log.info('inside the handler');
+      res.setHeader('Set-Cookie', ['bge.session=cookie-secret', 'bge.other=second-secret']);
+      res.end();
+    });
+  });
+
+  afterEach(() => {
+    server.close();
+  });
+
+  it('logs no authorization, cookie or x-api-key value on the access line, at debug', async () => {
+    await request(server).get('/').set(CREDENTIAL_HEADERS);
+    await waitForAccessLine();
+
+    const { req } = findRecord('request completed');
+
+    expect(req.headers.authorization).toBe('[Redacted]');
+    expect(req.headers.cookie).toBe('[Redacted]');
+    expect(req.headers['x-api-key']).toBe('[Redacted]');
+    const output = lines.join('');
+    expect(output).not.toContain('bearer-secret');
+    expect(output).not.toContain('cookie-secret');
+    expect(output).not.toContain('key-secret');
+  });
+
+  it('logs no set-cookie value, however many cookies the response sets', async () => {
+    await request(server).get('/');
+    await waitForAccessLine();
+
+    const { res } = findRecord('request completed');
+
+    expect(res.headers['set-cookie']).toBe('[Redacted]');
+    expect(lines.join('')).not.toContain('second-secret');
+  });
+
+  it('redacts the request on a line the handler logs while the request is handled', async () => {
+    await request(server).get('/').set(CREDENTIAL_HEADERS);
+    await waitForAccessLine();
+
+    const { req } = findRecord('inside the handler');
+
+    expect(req.headers.authorization).toBe('[Redacted]');
+  });
+
+  it('adds no placeholder for a credential the request did not carry', async () => {
+    await request(server).get('/');
+    await waitForAccessLine();
+
+    const { req } = findRecord('request completed');
+
+    expect(req.headers).not.toHaveProperty('authorization');
+    expect(req.headers).not.toHaveProperty('cookie');
+    expect(req.headers).not.toHaveProperty('x-api-key');
   });
 });

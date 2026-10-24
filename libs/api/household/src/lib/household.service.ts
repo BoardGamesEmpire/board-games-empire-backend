@@ -149,24 +149,15 @@ export class HouseholdService {
         },
 
         // To every reader of the household (#166): a member's client reads the
-        // member invite policy here to know whether to offer an invite.
+        // member invite and share policies here to know whether to offer an
+        // invite or a share (#810).
         settings: { select: HOUSEHOLD_SETTINGS_SELECT },
 
-        members: {
-          select: {
-            ...MEMBER_SELECT,
-
-            // Composed onto the roster shape rather than added to it: the
-            // sampled game-collection presentation below is this read's
-            // concern, not part of the roster surface every other member read
-            // returns (#155).
-            excludedFromHouseholds: {
-              select: {
-                gameCollectionId: true,
-              },
-            },
-          },
-        },
+        // The roster surface and nothing else. Every reader of the household
+        // gets this response, guests and a member's friends too, so a
+        // member's excluded games are filtered out of their sample in its own
+        // read, never selected here (#868).
+        members: { select: MEMBER_SELECT },
       },
     });
 
@@ -179,12 +170,7 @@ export class HouseholdService {
       throw new NotFoundException(t('errors.household.not_found', { id }));
     }
 
-    const memberGamesPromises = household.members.map((member) =>
-      this.getSelectMemberGames(
-        member.userId,
-        member.excludedFromHouseholds.map(({ gameCollectionId }) => gameCollectionId),
-      ),
-    );
+    const memberGamesPromises = household.members.map((member) => this.getSelectMemberGames(member.userId, member.id));
 
     const memberGames = await Promise.all(memberGamesPromises);
     const memberGamesMap = memberGames.reduce(
@@ -223,16 +209,19 @@ export class HouseholdService {
    * catalog's rule by hand. Only ids are loaded for the whole visible set, and
    * the full shape only for the five sampled.
    *
-   * This household's exclusions sit beside the composed clause. The ceiling's
-   * household rule approximates `showAllGames` and exclusions across every
-   * household the owner and viewer share, not just this one; the exact rule
-   * for a single household belongs to the collection pool read (#367).
+   * The games the member excluded from this household sit beside the
+   * composed clause, as a filter on the entry's `ExcludedGame` rows for this
+   * membership, so the roster read never has to carry them (#868). The
+   * ceiling's household rule approximates `showAllGames` and excluded games
+   * across every household the owner and viewer share, not just this one; the
+   * exact rule for a single household belongs to the collection pool read
+   * (#367).
    */
-  private async getSelectMemberGames(memberId: string, excludedCollectionIds: string[]) {
+  private async getSelectMemberGames(memberId: string, householdMemberId: string) {
     // One where for both reads: the member's live entries under the ceiling,
-    // this household's exclusions beside it. The second read narrows it to the
-    // sample, so an entry deleted or made Private between the two reads is not
-    // served from it.
+    // the games they excluded from this household beside it. The second read
+    // narrows it to the sample, so an entry deleted or made Private between
+    // the two reads is not served from it.
     const memberEntriesWhere = (sampled?: string[]) => ({
       AND: [
         this.scopeComposer.compose(ResourceType.GameCollection, Action.read, {
@@ -240,7 +229,7 @@ export class HouseholdService {
           deletedAt: null,
           ...(sampled ? { id: { in: sampled } } : {}),
         }),
-        ...(excludedCollectionIds.length > 0 ? [{ id: { notIn: excludedCollectionIds } }] : []),
+        { excludedFromHouseholds: { none: { householdMemberId } } },
       ],
     });
 

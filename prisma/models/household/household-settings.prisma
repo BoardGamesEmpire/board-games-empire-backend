@@ -2,8 +2,10 @@
 //
 // It governs the member role only. A household owner or admin always invites
 // directly, and a household guest never invites. A change applies to the
-// invites sent after it: one already waiting stays waiting, and an
-// outstanding one stays outstanding.
+// invites sent after it, and approving or accepting an invite asks the policy
+// as it is then (#747): an invite stands only while its sender could still
+// send it as it was sent. So after a switch to `Off` a member's waiting invite
+// can no longer be approved, and their outstanding one admits nobody.
 enum MemberInvitePolicy {
   // Members cannot invite.
   Off
@@ -14,6 +16,26 @@ enum MemberInvitePolicy {
   Direct
 
   @@map("member_invite_policies")
+}
+
+// Whether a household's member role may share games into it, and how (#810).
+//
+// It governs the member role only. A household owner or admin always shares
+// directly, and a household guest never shares. A change applies to the shares
+// made after it, and approving a waiting share asks the policy as it is then,
+// as approving an invite does: after a switch to `Off` a waiting share can no
+// longer be approved, and after a switch to `Direct` it stays approvable. A
+// share waiting for approval grants the household nothing.
+enum MemberSharePolicy {
+  // Members cannot share games into the household.
+  Off
+  // A member's share waits for a household owner or admin to approve it
+  // before the household can see the game.
+  NeedsApproval
+  // A member's share takes effect at once.
+  Direct
+
+  @@map("member_share_policies")
 }
 
 // A household's own settings, one row per household (#166). Created with the
@@ -28,6 +50,7 @@ model HouseholdSettings {
   householdId String    @id @map("household_id")
 
   memberInvitePolicy MemberInvitePolicy @default(NeedsApproval) @map("member_invite_policy")
+  memberSharePolicy  MemberSharePolicy  @default(NeedsApproval) @map("member_share_policy")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)

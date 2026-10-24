@@ -75,10 +75,12 @@ const ACTOR_SELECT = {
  * role-change responses, which return rows a client may correlate without
  * tracking which request produced them.
  *
- * Intentionally lean in the other direction too: `excludedFromHouseholds` and
- * the sampled game-collection shaping are `HouseholdService.getHouseholdById`
- * presentation concerns, not part of the roster surface (#155). That read
- * composes them onto this shape rather than widening it for everyone.
+ * Intentionally lean in the other direction too: the sampled game-collection
+ * shaping is a `HouseholdService.getHouseholdById` presentation concern, not
+ * part of the roster surface (#155). That read composes it onto this shape
+ * rather than widening it for everyone. A member's excluded games are not on
+ * it at all: that read filters them out of the sample in the sample's own
+ * query, and no roster read returns them (#868).
  */
 export const MEMBER_SELECT = {
   id: true,
@@ -117,10 +119,12 @@ export const MEMBER_SCALARS_OMITTED = {
 /**
  * A household's settings as the household's detail, its lists and its update
  * return them (#166), to every reader of the household: a member's client
- * needs the member invite policy to know whether to offer an invite.
+ * needs the member invite policy to know whether to offer an invite, and the
+ * member share policy to know whether to offer a share (#810).
  */
 export const HOUSEHOLD_SETTINGS_SELECT = {
   memberInvitePolicy: true,
+  memberSharePolicy: true,
 } as const satisfies Prisma.HouseholdSettingsSelect;
 
 /**

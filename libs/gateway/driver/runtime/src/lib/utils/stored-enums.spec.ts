@@ -1,4 +1,4 @@
-import { ContentType, DataGatewayCapability, PlatformType } from '@bge/database';
+import { ContentType, DataGatewayCapability, PlatformType, SearchFilterAxis } from '@bge/database';
 import * as proto from '@boardgamesempire/proto-gateway';
 import {
   toProtoContentType,
@@ -6,6 +6,7 @@ import {
   toStoredCapability,
   toStoredContentType,
   toStoredPlatformType,
+  toStoredSearchFilterAxis,
 } from './stored-enums';
 
 describe('stored enums', () => {
@@ -58,5 +59,11 @@ describe('stored enums', () => {
     expect(toStoredCapability(proto.Capability.CAPABILITY_LIST_PLATFORMS)).toBe(DataGatewayCapability.ListPlatforms);
     expect(toStoredCapability(proto.Capability.CAPABILITY_LIST_CATEGORIES)).toBe(DataGatewayCapability.ListCategories);
     expect(toStoredCapability(proto.Capability.CAPABILITY_LIST_MECHANICS)).toBe(DataGatewayCapability.ListMechanics);
+  });
+
+  it('stores publish year as a filterable axis (#719)', () => {
+    expect(toStoredSearchFilterAxis(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR)).toBe(
+      SearchFilterAxis.PublishYear,
+    );
   });
 });

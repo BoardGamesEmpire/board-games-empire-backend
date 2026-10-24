@@ -1,4 +1,4 @@
-import { Action, HUMAN_USER_WHERE, Prisma, ResourceType, SystemRole } from '@bge/database';
+import { Action, HUMAN_USER_WHERE, Prisma, ResourceType, SystemRole, type GameShare } from '@bge/database';
 import { InviteService, type InviteDomainEvent } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
@@ -52,6 +52,7 @@ const BAN_VIEW = {
 };
 
 const REVOKED = [{ eventName: 'invite.revoked', subjectId: 'inv-1' }] as unknown as InviteDomainEvent[];
+const ENDED_SHARES = [{ id: 'share-1', gameId: 'game-1', householdId: 'hh-1' }] as unknown as GameShare[];
 
 const resolves = (value: unknown) => value as never;
 
@@ -74,7 +75,7 @@ describe('HouseholdBanService', () => {
   let invites: jest.Mocked<
     Pick<InviteService, 'revokeOutstandingOfUserWithin' | 'withholdOutstandingToAddressWithin' | 'emit'>
   >;
-  let members: jest.Mocked<Pick<HouseholdMemberService, 'removeUserWithin'>>;
+  let members: jest.Mocked<Pick<HouseholdMemberService, 'removeUserWithin' | 'emitGameSharesEnded'>>;
   let compose: jest.SpyInstance;
 
   beforeEach(async () => {
@@ -89,7 +90,7 @@ describe('HouseholdBanService', () => {
       withholdOutstandingToAddressWithin: jest.fn().mockResolvedValue({ count: 0 }),
       emit: jest.fn(),
     };
-    members = { removeUserWithin: jest.fn().mockResolvedValue(null) };
+    members = { removeUserWithin: jest.fn().mockResolvedValue(null), emitGameSharesEnded: jest.fn() };
 
     const ctx = await createTestingModuleWithDb({
       providers: [
@@ -224,11 +225,11 @@ describe('HouseholdBanService', () => {
       expect(db.householdBan.create).not.toHaveBeenCalled();
     });
 
-    it('bans a member: removes them, withholds their address invites, records the ban, then evicts their cache and announces the revoked invites after commit (#782)', async () => {
+    it('bans a member: removes them, withholds their address invites, records the ban, then evicts their cache and announces the revoked invites and the ended game shares after commit (#782, #810)', async () => {
       const steps: string[] = [];
       members.removeUserWithin.mockImplementation(async () => {
         steps.push('remove');
-        return { removed: {}, revoked: REVOKED } as unknown as RemovedMembership;
+        return { removed: {}, revoked: REVOKED, endedShares: ENDED_SHARES } as unknown as RemovedMembership;
       });
       invites.withholdOutstandingToAddressWithin.mockImplementation(async () => {
         steps.push('withhold');
@@ -249,10 +250,13 @@ describe('HouseholdBanService', () => {
       invites.emit.mockImplementation(() => {
         steps.push('emit');
       });
+      members.emitGameSharesEnded.mockImplementation(() => {
+        steps.push('shares');
+      });
 
       await expect(service.ban('hh-1', DTO)).resolves.toEqual(BAN_VIEW);
 
-      expect(steps).toEqual(['remove', 'withhold', 'insert', 'commit', 'evict', 'emit']);
+      expect(steps).toEqual(['remove', 'withhold', 'insert', 'commit', 'evict', 'emit', 'shares']);
       expect(members.removeUserWithin).toHaveBeenCalledWith(db, 'hh-1', 'user-2');
       // Removing them revoked their invites already, as leaving does.
       expect(invites.revokeOutstandingOfUserWithin).not.toHaveBeenCalled();
@@ -267,6 +271,7 @@ describe('HouseholdBanService', () => {
       });
       expect(permissions.invalidateUser).toHaveBeenCalledWith('user-2');
       expect(invites.emit).toHaveBeenCalledWith(REVOKED);
+      expect(members.emitGameSharesEnded).toHaveBeenCalledWith(ENDED_SHARES, expect.any(Date));
     });
 
     it('bans a non-member: revokes their invites by id and the ones they sent, withholds their address invites, records the ban, and evicts no cache (#782)', async () => {
@@ -286,6 +291,8 @@ describe('HouseholdBanService', () => {
       });
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
       expect(invites.emit).toHaveBeenCalledWith(REVOKED);
+      // Only a member shares a game into the household (#810).
+      expect(members.emitGameSharesEnded).toHaveBeenCalledWith([], expect.any(Date));
     });
 
     it("leaves everything as it was when removing the member is refused, as for a household admin's ban of an admin (#782)", async () => {
@@ -297,6 +304,7 @@ describe('HouseholdBanService', () => {
       expect(db.householdBan.create).not.toHaveBeenCalled();
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
       expect(invites.emit).not.toHaveBeenCalled();
+      expect(members.emitGameSharesEnded).not.toHaveBeenCalled();
     });
   });
 

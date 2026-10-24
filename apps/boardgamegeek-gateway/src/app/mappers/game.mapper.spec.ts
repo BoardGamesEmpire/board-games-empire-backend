@@ -222,6 +222,25 @@ describe('searchItemToGameSearchData', () => {
   });
 });
 
+// BGG writes 0 for a game whose year it doesn't know. Sent on, it would read
+// as a year, fail every publish-year range, and be stored on import (#719).
+describe('publish year (#719)', () => {
+  it("sends BGG's year 0 as no publish year, and keeps negative years", () => {
+    const cases: [number | undefined, number | undefined][] = [
+      [0, undefined],
+      [-2200, -2200],
+      [2017, 2017],
+      [undefined, undefined],
+    ];
+
+    for (const [yearpublished, expected] of cases) {
+      expect(searchItemToGameSearchData(makeBggSearchItem({ yearpublished })).yearPublished).toBe(expected);
+      expect(thingToGameSearchData(makeBggThing({ yearpublished })).yearPublished).toBe(expected);
+      expect(thingToGameData(makeBggThing({ yearpublished })).yearPublished).toBe(expected);
+    }
+  });
+});
+
 describe('thingToGameSearchData — synthetic release', () => {
   it('emits a single default-edition Tabletop release with the year as the release date', () => {
     const result = thingToGameSearchData(makeBggThing({ id: 174430, yearpublished: 2017 }));

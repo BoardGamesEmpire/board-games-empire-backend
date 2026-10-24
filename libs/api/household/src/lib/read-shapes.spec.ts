@@ -83,5 +83,9 @@ describe('household read shapes', () => {
     it('publishes the member invite policy, which a member needs to know whether they may invite', () => {
       expect(scalarKeysOf(HOUSEHOLD_SETTINGS_SELECT)).toContain('memberInvitePolicy');
     });
+
+    it('publishes the member share policy, which a member needs to know whether they may share (#810)', () => {
+      expect(scalarKeysOf(HOUSEHOLD_SETTINGS_SELECT)).toContain('memberSharePolicy');
+    });
   });
 });

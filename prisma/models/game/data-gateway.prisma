@@ -32,7 +32,7 @@ model DataGateway {
   capabilities                DataGatewayCapability[] @default([])
   coveragePlatformTypes       PlatformType[]          @default([]) @map("coverage_platform_types")
   coverageContentTypes        ContentType[]           @default([]) @map("coverage_content_types")
-  filterableAxes              CoverageAxis[]          @default([]) @map("filterable_axes")
+  filterableAxes              SearchFilterAxis[]      @default([]) @map("filterable_axes")
   acceptedLanguageCodeFormats LanguageCodeFormat[]    @default([]) @map("accepted_language_code_formats")
   responseLanguageCodeFormat  LanguageCodeFormat?     @map("response_language_code_format")
   passthroughSearchLanguage   Boolean?                @map("passthrough_search_language")
@@ -86,13 +86,14 @@ enum DataGatewayCapability {
   @@map("data_gateway_capabilities")
 }
 
-// A coverage axis a DataGateway's search can filter by. Mirrors proto
-// CoverageAxis (bge.gateway.v1).
-enum CoverageAxis {
+// A search filter a DataGateway's search can narrow by. Mirrors proto
+// SearchFilterAxis (bge.gateway.v1).
+enum SearchFilterAxis {
   PlatformType
   ContentType
+  PublishYear
 
-  @@map("coverage_axes")
+  @@map("search_filter_axes")
 }
 
 // The form a DataGateway's free text arrives in. Mirrors proto ContentFormat

@@ -61,7 +61,8 @@ export class HouseholdBanService {
    * 6. A member is removed, under the caller's own `manage` scope on the
    *    member: a household admin who may not remove a household admin or an
    *    owner may not ban one either (403), and the last owner is refused
-   *    (400). Leaving's revokes come with it (#747). A non-member's invites
+   *    (400). Leaving's revokes come with it (#747), and the game shares
+   *    leaving ends (#810). A non-member's invites
    *    are revoked the same way: those that name them by id, and those they
    *    sent.
    * 7. The open invites to their address are withheld, never revoked, so no
@@ -70,7 +71,8 @@ export class HouseholdBanService {
    *    never found is.
    *
    * After commit a removed member's ability cache is evicted, and then the
-   * revoked invites are announced. A refusal at any step writes nothing.
+   * revoked invites and the ended game shares are announced. A refusal at any
+   * step writes nothing.
    */
   async ban(householdId: string, dto: CreateHouseholdBanDto): Promise<HouseholdBanView> {
     const bannerId = this.abilityService.getActingUserId();
@@ -79,7 +81,8 @@ export class HouseholdBanService {
       throw new BadRequestException(t('errors.household.ban_self'));
     }
 
-    const { ban, wasMember, revoked } = await this.db.$transaction(async (tx) => {
+    const initiatedAt = new Date();
+    const { ban, wasMember, revoked, endedShares } = await this.db.$transaction(async (tx) => {
       await this.assertBanAuthority(tx, householdId, Action.create);
       await lockHouseholdForRoleTransition(tx, householdId);
       await this.assertBanAuthority(tx, householdId, Action.create);
@@ -110,7 +113,9 @@ export class HouseholdBanService {
         reason: dto.reason ?? null,
       });
 
-      return { ban, wasMember: removed !== null, revoked };
+      // Only a member shares a game into the household, so a non-member has
+      // no shares to end.
+      return { ban, wasMember: removed !== null, revoked, endedShares: removed?.endedShares ?? [] };
     });
 
     // The household just left a removed member's ability surface.
@@ -119,6 +124,7 @@ export class HouseholdBanService {
     }
 
     this.invites.emit(revoked);
+    this.members.emitGameSharesEnded(endedShares, initiatedAt);
 
     return toHouseholdBanView(ban);
   }

@@ -114,4 +114,47 @@ describe('game search filter', () => {
     await search(user, { query: 'anything', contentTypes: 'Unknown' }).expect(400);
     await search(user, { query: 'anything', contentTypes: 'BaseGame' }).expect(200);
   });
+
+  // A publish-year range narrows the search in the game catalog too, and
+  // leaves out a game with no known year unless asked to keep it (#719).
+  it('narrows the search in the game catalog by publish year, keeping undated games only when asked', async () => {
+    const user = await actors.user();
+    const token = randomUUID().slice(0, 8);
+    const arrangeDated = async (title: string, publishYear: number | null) =>
+      (
+        await db.client.game.create({
+          data: {
+            title,
+            publishYear,
+            contentType: ContentType.BaseGame,
+            reach: Reach.Public,
+            createdById: user.user.id,
+          },
+          select: { id: true },
+        })
+      ).id;
+
+    const nineties = await arrangeDated(`Year ${token} 1995`, 1995);
+    const recent = await arrangeDated(`Year ${token} 2010`, 2010);
+    const undated = await arrangeDated(`Year ${token} undated`, null);
+
+    expect(await searchedIds(user, { query: token })).toEqual([nineties, recent, undated].sort());
+    expect(await searchedIds(user, { query: token, publishYearMin: '2000' })).toEqual([recent]);
+    expect(await searchedIds(user, { query: token, publishYearMax: '1995' })).toEqual([nineties]);
+    expect(
+      await searchedIds(user, { query: token, publishYearMin: '2000', publishYearIncludeUnknown: 'true' }),
+    ).toEqual([recent, undated].sort());
+    expect(await searchedIds(user, { query: token, publishYearMin: '', publishYearIncludeUnknown: 'true' })).toEqual(
+      [nineties, recent, undated].sort(),
+    );
+  });
+
+  // Each bound travels as an int32, which would wrap a larger one into some other year.
+  it('refuses a publish-year maximum below its minimum, or a bound past a 32-bit integer, with 400', async () => {
+    const user = await actors.user();
+
+    await search(user, { query: 'anything', publishYearMin: '2000', publishYearMax: '1990' }).expect(400);
+    await search(user, { query: 'anything', publishYearMin: '3000000000' }).expect(400);
+    await search(user, { query: 'anything', publishYearMin: '1990', publishYearMax: '1990' }).expect(200);
+  });
 });

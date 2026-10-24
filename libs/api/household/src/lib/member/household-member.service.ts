@@ -2,6 +2,7 @@ import {
   Action,
   constraintIdentity,
   DatabaseService,
+  gameShareSnapshot,
   HouseholdMembershipOrigin,
   identifiesConstraint,
   isIdentifiedConstraint,
@@ -11,6 +12,7 @@ import {
   ResourceType,
   SystemRole,
   type ConstraintIdentity,
+  type GameShare,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { InviteService, type InviteDomainEvent } from '@bge/invites';
@@ -36,7 +38,11 @@ import {
   HOUSEHOLD_MEMBER_UNIQUE_FIELDS,
 } from '../constants/household.constants';
 import { isAssignableHouseholdRole, UpdateMemberRoleDto, type AssignableHouseholdRole } from '../dto';
-import { HouseholdOwnershipTransferredEvent, type HouseholdOwnershipSnapshot } from '../events/household.events';
+import {
+  HouseholdGameShareEndedEvent,
+  HouseholdOwnershipTransferredEvent,
+  type HouseholdOwnershipSnapshot,
+} from '../events/household.events';
 import {
   assertHouseholdExists,
   lockExistingHousehold,
@@ -163,12 +169,13 @@ interface ScopedMemberDenials {
 
 /**
  * A membership just removed, and the caller's post-commit homework: the
- * removed member's ability cache to evict, and the invites revoked with it to
- * announce (#747, #782).
+ * removed member's ability cache to evict, and the invites revoked and game
+ * shares ended with it to announce (#747, #782, #810).
  */
 export interface RemovedMembership {
   readonly removed: HouseholdMemberWithRelations;
   readonly revoked: readonly InviteDomainEvent[];
+  readonly endedShares: readonly GameShare[];
 }
 
 @Injectable()
@@ -1046,7 +1053,8 @@ export class HouseholdMemberService {
    * the target under the caller's scoped `where`, enforce the last-owner
    * invariant, then delete the membership and its dependents in one
    * transaction ({@link deleteMembershipWithin}), evicting the removed user's
-   * ability cache after commit and then announcing the invites it revoked.
+   * ability cache after commit, then announcing the invites it revoked and the
+   * game shares it ended (#810).
    */
   private async deleteMembership(
     scopedWhere: Prisma.HouseholdMemberWhereInput & { householdId: string },
@@ -1054,7 +1062,8 @@ export class HouseholdMemberService {
     denials: ScopedMemberDenials,
   ): Promise<HouseholdMemberWithRelations> {
     try {
-      const { removed, revoked } = await this.db.$transaction((tx) =>
+      const initiatedAt = new Date();
+      const { removed, revoked, endedShares } = await this.db.$transaction((tx) =>
         this.deleteMembershipWithin(tx, scopedWhere, unscopedWhere, denials),
       );
 
@@ -1062,6 +1071,7 @@ export class HouseholdMemberService {
       // cached graph so stale Household* abilities don't linger for the TTL.
       await this.permissions.invalidateUser(removed.userId);
       this.invites.emit(revoked);
+      this.emitGameSharesEnded(endedShares, initiatedAt);
 
       return removed;
     } catch (error) {
@@ -1087,8 +1097,13 @@ export class HouseholdMemberService {
    * membership, and those that name them by id, which would let them back
    * in. Invites to their address stay open, since revoking those would tell
    * each inviter whose address it was. The household row is locked first, the
-   * lock order the invites lib asks for. The revoked invites are handed back
-   * for the caller to announce after its commit.
+   * lock order the invites lib asks for.
+   *
+   * Leaving and being removed also end the member's game shares into the
+   * household (#810): the shares of the games they created, which they
+   * shared on the standing the membership gave them. Their shares into other
+   * households stay. The revoked invites and the ended shares are handed back
+   * for the caller to announce after its commit, the invites first.
    */
   private async deleteMembershipWithin(
     tx: Prisma.TransactionClient,
@@ -1152,6 +1167,15 @@ export class HouseholdMemberService {
     }
 
     await tx.excludedGame.deleteMany({ where: { householdMemberId: member.id } });
+    // The shares into this household of the games the member created end
+    // with the membership (#810), as the invites they sent do (#747): the
+    // standing to share into the household was the membership's. Keyed on
+    // the game's owner, not `sharedById`, which `SetNull` empties when the
+    // sharer's account is deleted and would leave that share standing. Only
+    // a game's owner shares it, so these are all the member's shares, those
+    // waiting for approval too. Shares into the member's other households
+    // are those households' to keep.
+    const endedShares = await this.endGameSharesWithin(tx, scopedWhere.householdId, member.userId);
     // deleteMany: the 1:1 role relation is optional, so a role-less member
     // must not turn the cleanup into a P2025.
     await tx.householdRole.deleteMany({ where: { householdMemberId: member.id } });
@@ -1164,7 +1188,56 @@ export class HouseholdMemberService {
       member.userId,
     );
 
-    return { removed: member, revoked: events };
+    return { removed: member, revoked: events, endedShares };
+  }
+
+  /**
+   * Deletes the shares into this household of the games `userId` created
+   * (#810), and hands back each one this transaction deleted, for its event.
+   *
+   * One guarded delete per share read, rather than one `deleteMany`: Prisma's
+   * `deleteMany` returns no rows, and the sharer's own delete takes no
+   * household lock (`GameShareService.delete`), so a share read here may be
+   * gone by its delete. A share whose delete counts nothing was removed and
+   * announced by the sharer, and is not announced again. A member's shares
+   * into one household are few, so the per-row statements cost little.
+   */
+  private async endGameSharesWithin(
+    tx: Prisma.TransactionClient,
+    householdId: string,
+    userId: string,
+  ): Promise<GameShare[]> {
+    const shares = await tx.gameShare.findMany({ where: { householdId, game: { is: { createdById: userId } } } });
+    const ended: GameShare[] = [];
+
+    for (const share of shares) {
+      const { count } = await tx.gameShare.deleteMany({ where: { id: share.id } });
+
+      if (count > 0) {
+        ended.push(share);
+      }
+    }
+
+    return ended;
+  }
+
+  /**
+   * Announces the game shares a departure ended, one event each: a member
+   * leaving, being removed or being banned (#782). The departure is committed
+   * by then, so a listener's throw is logged rather than answered as a 500,
+   * for the reason `emitOwnershipTransferred` gives.
+   */
+  emitGameSharesEnded(shares: readonly GameShare[], initiatedAt: Date): void {
+    for (const share of shares) {
+      try {
+        this.events.emit(
+          HouseholdGameShareEndedEvent.eventName,
+          new HouseholdGameShareEndedEvent(gameShareSnapshot(share), initiatedAt),
+        );
+      } catch (error) {
+        this.logger.error('Departure committed but a game share emission failed', { error, shareId: share.id });
+      }
+    }
   }
 
   /**

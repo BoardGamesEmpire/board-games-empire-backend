@@ -33,9 +33,8 @@ export class GameService {
    * create between them makes `total` — and the `hasMore` derived from it —
    * describe a catalog the caller was never served.
    *
-   * The scope is {@link gameListScope}, the live Public games, the acting
-   * user's own, a friend's that reach friends and a friend of a friend's that
-   * reach friends of friends (#496), and the ceiling only clips it (#513).
+   * The scope is the set {@link gameListScope} names, and the ceiling only
+   * clips it (#513).
    * For an `apiKey` actor it carries the key ∩ owner floor.
    *
    * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:

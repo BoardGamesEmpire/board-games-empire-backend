@@ -1,19 +1,19 @@
 import {
   ContentFormat,
   ContentType,
-  CoverageAxis,
   DataGatewayCapability,
   LanguageCodeFormat,
   PlatformType,
+  SearchFilterAxis,
 } from '@bge/database';
 import type { DescribeResponse, GatewayPingResponse } from '@boardgamesempire/proto-gateway';
 import {
   toStoredCapability,
   toStoredContentFormat,
   toStoredContentType,
-  toStoredCoverageAxis,
   toStoredLanguageCodeFormat,
   toStoredPlatformType,
+  toStoredSearchFilterAxis,
 } from './stored-enums';
 
 /** What an interview stores on the DataGateway's row, from its Ping and its Describe. */
@@ -21,7 +21,7 @@ export interface InterviewAnswers {
   capabilities: DataGatewayCapability[];
   coveragePlatformTypes: PlatformType[];
   coverageContentTypes: ContentType[];
-  filterableAxes: CoverageAxis[];
+  filterableAxes: SearchFilterAxis[];
   acceptedLanguageCodeFormats: LanguageCodeFormat[];
   responseLanguageCodeFormat: LanguageCodeFormat | null;
   passthroughSearchLanguage: boolean | null;
@@ -67,7 +67,7 @@ export function toInterviewAnswers(description: DescribeResponse, ping: GatewayP
       PlatformType,
     ),
     coverageContentTypes: translateInEnumOrder(description.coverage?.contentTypes, toStoredContentType, ContentType),
-    filterableAxes: translateInEnumOrder(description.filterableAxes, toStoredCoverageAxis, CoverageAxis),
+    filterableAxes: translateInEnumOrder(description.filterableAxes, toStoredSearchFilterAxis, SearchFilterAxis),
     // Most preferred first: the server will translate a search language into
     // the first of these it can produce.
     acceptedLanguageCodeFormats: translate(formats?.acceptedRequestFormats, toStoredLanguageCodeFormat),

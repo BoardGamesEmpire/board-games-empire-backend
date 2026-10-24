@@ -61,11 +61,11 @@ export interface HouseholdRoleProjection {
 }
 
 /**
- * Deliberately partial: the detail read also embeds each member's `user` and
- * their `excludedFromHouseholds` join, which nothing here asserts on yet.
- * Omitting them fails in the safe direction — an assertion on one is a compile
- * error, not a green test against `undefined` — so they are added when a spec
- * first needs them rather than kept speculatively in step with the service.
+ * Deliberately partial: the detail read also embeds each member's `user`,
+ * which nothing here asserts on yet. Omitting it fails in the safe direction —
+ * an assertion on it is a compile error, not a green test against `undefined`
+ * — so it is added when a spec first needs it rather than kept speculatively
+ * in step with the service.
  */
 export interface HouseholdMemberProjection extends HouseholdMemberWire {
   readonly role: HouseholdRoleProjection | null;
@@ -92,7 +92,7 @@ export interface LanguageTagProjection {
 }
 
 /** A household's settings as the detail, the lists and `PATCH` publish them (#166). */
-export type HouseholdSettingsProjection = Wire<Pick<HouseholdSettings, 'memberInvitePolicy'>>;
+export type HouseholdSettingsProjection = Wire<Pick<HouseholdSettings, 'memberInvitePolicy' | 'memberSharePolicy'>>;
 
 /**
  * `getHouseholdById`'s shape: the row plus its member, language and settings
@@ -228,6 +228,19 @@ export function readEnvelope(response: HttpResponseLike, request: RequestDescrip
   // the test that names it.
   if ('invites' in household) {
     return fail("the household carried an 'invites' key", request, response);
+  }
+
+  // The games a member excluded from the household filter their game sample
+  // and go no further: what they held back is not every reader's to see
+  // (#868). Checked per entry, so an entry that is not an object fails here
+  // rather than passing the check unread.
+  for (const member of (household as unknown as HouseholdDetail).members as unknown[]) {
+    if (!isRecord(member)) {
+      return fail('a roster entry is not an object', request, response);
+    }
+    if ('excludedFromHouseholds' in member) {
+      return fail("a roster entry carried an 'excludedFromHouseholds' key", request, response);
+    }
   }
 
   return { household: household as unknown as HouseholdDetail };

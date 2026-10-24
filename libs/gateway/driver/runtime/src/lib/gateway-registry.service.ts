@@ -4,8 +4,8 @@ import {
   DataGatewayCapability,
   type ContentFormat,
   type ContentType,
-  type CoverageAxis,
   type PlatformType,
+  type SearchFilterAxis,
 } from '@bge/database';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { Injectable, Logger, OnApplicationShutdown, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
@@ -51,7 +51,7 @@ interface RoutingRow {
   disabledCapabilities: DataGatewayCapability[];
   coveragePlatformTypes: PlatformType[];
   coverageContentTypes: ContentType[];
-  filterableAxes: CoverageAxis[];
+  filterableAxes: SearchFilterAxis[];
   contentFormat: ContentFormat | null;
 }
 
@@ -82,8 +82,8 @@ export type SearchRoute =
       /** Whether its coverage overlaps the search's filter. One that doesn't isn't asked. */
       readonly covers: boolean;
 
-      /** The coverage axes its search narrows by. The filter it's sent carries only these. */
-      readonly filterableAxes: readonly CoverageAxis[];
+      /** The search filters its search narrows by. The filter it's sent carries only these. */
+      readonly filterableAxes: readonly SearchFilterAxis[];
 
       /** The content format its results' summaries arrive in, null when it declared none. */
       readonly contentFormat: ContentFormat | null;
@@ -104,9 +104,9 @@ export interface GatewayResolution {
   readonly contentFormat: ContentFormat | null;
 }
 
-/** A DataGateway a search will ask, and the coverage axes its search narrows by. */
+/** A DataGateway a search will ask, and the search filters its search narrows by. */
 export interface SearchResolution extends GatewayResolution {
-  readonly filterableAxes: readonly CoverageAxis[];
+  readonly filterableAxes: readonly SearchFilterAxis[];
 }
 
 /**
@@ -476,7 +476,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
 
   /**
    * {@link resolve} for a search narrowed by `filter`: the driver, with the
-   * coverage axes its search narrows by, or null when its coverage doesn't
+   * search filters its search narrows by, or null when its coverage doesn't
    * overlap the filter, so it needn't be asked. Refuses as resolve does, and
    * first, so a DataGateway that may not search says why whatever its
    * coverage. One never interviewed is interviewed before its coverage is

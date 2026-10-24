@@ -1,3 +1,4 @@
+import { buildBasePinoOptions } from '@bge/logger';
 import type { Span, SpanContext } from '@opentelemetry/api';
 import type { LoggerOptions, TransportTargetOptions } from 'pino';
 
@@ -90,6 +91,16 @@ describe('buildOtelPinoOptions', () => {
       const options = buildOtelPinoOptions({ LOG_LEVEL: 'warn' });
 
       expect(options.level).toBe('warn');
+    });
+
+    it('keeps the base credential redaction (#748)', () => {
+      const options = buildOtelPinoOptions({});
+
+      // Asserting the shape too: without it, two undefined values would compare equal.
+      expect(options.redact).toEqual(
+        expect.objectContaining({ paths: expect.arrayContaining(['req.headers.authorization']) }),
+      );
+      expect(options.redact).toEqual(buildBasePinoOptions({}).redact);
     });
   });
 

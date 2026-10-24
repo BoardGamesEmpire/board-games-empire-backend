@@ -3,11 +3,11 @@ import {
   AuthType,
   ContentFormat,
   ContentType,
-  CoverageAxis,
   DatabaseService,
   DataGatewayCapability,
   DataGatewayInterviewFailure,
   PlatformType,
+  SearchFilterAxis,
 } from '@bge/database';
 import { CACHE_REDIS_CLIENT } from '@bge/redis';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
@@ -91,7 +91,7 @@ describe('GatewayRegistryService', () => {
     });
 
   /** An interviewed row that declared `coverage`, and that its search narrows by `filterableAxes`. */
-  const coveringRow = (id: string, coverage: StoredCoverage, filterableAxes: CoverageAxis[] = []) => {
+  const coveringRow = (id: string, coverage: StoredCoverage, filterableAxes: SearchFilterAxis[] = []) => {
     interviewedRow(id);
     table.patch(id, { ...coverage, filterableAxes });
   };
@@ -378,19 +378,19 @@ describe('GatewayRegistryService', () => {
 
   describe('searchRoute', () => {
     it('reads by the row how a search reaches a DataGateway, without connecting it', async () => {
-      coveringRow('bgg', TABLETOP_GAMES, [CoverageAxis.ContentType]);
+      coveringRow('bgg', TABLETOP_GAMES, [SearchFilterAxis.ContentType]);
 
       await expect(service.searchRoute('bgg', { platformTypes: new Set([Tabletop]) })).resolves.toEqual({
         routable: true,
         covers: true,
-        filterableAxes: [CoverageAxis.ContentType],
+        filterableAxes: [SearchFilterAxis.ContentType],
         contentFormat: null,
         driver: expect.any(Function),
       });
       await expect(service.searchRoute('bgg', { platformTypes: new Set([PlatformType.PC]) })).resolves.toEqual({
         routable: true,
         covers: false,
-        filterableAxes: [CoverageAxis.ContentType],
+        filterableAxes: [SearchFilterAxis.ContentType],
         contentFormat: null,
         driver: expect.any(Function),
       });
@@ -432,12 +432,12 @@ describe('GatewayRegistryService', () => {
 
   describe('resolveSearch', () => {
     it('resolves a DataGateway whose coverage overlaps the filter, with the axes its search narrows by', async () => {
-      coveringRow('bgg', TABLETOP_GAMES, [CoverageAxis.ContentType]);
+      coveringRow('bgg', TABLETOP_GAMES, [SearchFilterAxis.ContentType]);
       const driver = stubFactory(makeDriver());
 
       await expect(service.resolveSearch('bgg', { contentTypes: new Set([ContentType.Expansion]) })).resolves.toEqual({
         driver,
-        filterableAxes: [CoverageAxis.ContentType],
+        filterableAxes: [SearchFilterAxis.ContentType],
         contentFormat: null,
       });
     });

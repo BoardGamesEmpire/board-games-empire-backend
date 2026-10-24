@@ -50,6 +50,20 @@ message SearchFilter {
 
   // Matched against a game's content type.
   repeated ContentType content_types = 2;
+
+  // Matched against a game's publish year. A game with no known year is kept
+  // only when the range includes unknown ones. Unset doesn't narrow.
+  optional IntRange publish_year = 3;
+}
+
+// An inclusive range a search filter narrows by (#719). Either bound may be
+// left out, and a range with neither doesn't narrow. A game with no known
+// value never matches one unless include_unknown is set. Optional throughout,
+// since the gRPC loader leaves an unset scalar undefined rather than zero.
+message IntRange {
+  optional int32 min = 1;
+  optional int32 max = 2;
+  optional bool include_unknown = 3;
 }
 
 enum AgeRatingAuthority {

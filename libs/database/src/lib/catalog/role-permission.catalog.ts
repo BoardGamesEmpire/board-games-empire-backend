@@ -114,6 +114,7 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'create:event_occurrence:household',
   'create:event:household',
   'create:game_play_session:household',
+  'create:game_share:household',
   'create:household_invite',
   'create:play_record:household',
   'delete:event_game:household',
@@ -126,6 +127,7 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'update:household_ban',
   'read:quota:household',
   'delete:game_play_session:household',
+  'delete:game_share:household',
   'delete:household',
   'manage:attendee_game_list:household',
   'manage:event_attendee:household',
@@ -144,6 +146,7 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   // The Event row itself. Without it an owner updates a household event and
   // manages its attendees but cannot read the event unless attending it.
   'read:event:participant:household',
+  'read:game_share:household',
   'read:household',
   'read:household_invite',
   'read:household_member',
@@ -155,6 +158,7 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'update:event_policy:household',
   'update:event:household',
   'update:game_play_session:household',
+  'update:game_share:approve',
   'update:household',
   'update:household_invite:approve',
   'update:household_invite:revoke',
@@ -360,8 +364,14 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:game:friends',
     'read:game:friends-of-friends',
     'read:game:public',
+    'read:game:shared',
     'read:job',
     'update:game:own',
+
+    // game share
+    'create:game_share',
+    'delete:game_share',
+    'read:game_share:own',
 
     // game collection
     'create:game_collection',
@@ -437,6 +447,10 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     // guests never invite.
     'create:household_invite:member-approval',
     'create:household_invite:member-direct',
+    // Members share the games they created under the household's member share
+    // policy (#810); guests never share with the household.
+    'create:game_share:household:member-approval',
+    'create:game_share:household:member-direct',
     'create:play_record:household',
     'read:attendee_game_list:household',
     'read:event_attendee:household',
