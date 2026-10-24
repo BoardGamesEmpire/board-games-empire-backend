@@ -2,13 +2,14 @@ import {
   Action,
   DatabaseService,
   HUMAN_USER_WHERE,
+  InviteType,
   isPrismaDependentRecordNotFoundError,
   isPrismaForeignKeyConstraintError,
   Prisma,
   ResourceType,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { InviteService } from '@bge/invites';
+import { gateWithholdsByAddress, InviteService } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
@@ -19,6 +20,7 @@ import {
   lockHouseholdForRoleTransition,
 } from '../household-access.helpers';
 import { readRoster } from '../invite/household-authority';
+import { HouseholdNotificationListener } from '../listeners/household-notification.listener';
 import { HouseholdMemberService } from '../member/household-member.service';
 import { isBannedWithin } from './household-ban.helpers';
 import { HOUSEHOLD_BAN_SELECT, toHouseholdBanView, type HouseholdBanView } from './household-ban.read-shape';
@@ -42,6 +44,7 @@ export class HouseholdBanService {
     private readonly permissions: PermissionsService,
     private readonly invites: InviteService,
     private readonly members: HouseholdMemberService,
+    private readonly notifier: HouseholdNotificationListener,
   ) {}
 
   /**
@@ -152,19 +155,48 @@ export class HouseholdBanService {
 
   /**
    * Lifts a ban, asked as {@link updateReason} asks, and hands it back as it
-   * was. The user may be invited by id again. Invites to their address that
-   * the ban withheld stay withheld: lifting the ban doesn't send them.
+   * was. Every way back in opens again: the user may be invited by id, an
+   * admission lets them in, and the open invites to their address that the
+   * ban withheld are released, all but those #278's gate would still
+   * withhold from their inviter. After commit the user is told of each
+   * released invite their inbox now lists, as of one just sent.
+   *
+   * Under the household lock a ban takes, not the share lock: an invite
+   * create by address holds the share lock while it reads the ban, so with
+   * only a share lock here, an invite that read the ban before this commit
+   * could store itself withheld after the release had run, and stay so.
    */
   async lift(householdId: string, userId: string): Promise<HouseholdBanView> {
-    const ban = await this.db.$transaction(async (tx) => {
+    const { ban, released } = await this.db.$transaction(async (tx) => {
       const existing = await this.findBanAsAuthority(tx, householdId, userId, Action.delete);
 
       await this.writeToBan(householdId, userId, () => tx.householdBan.delete({ where: { id: existing.id } }));
 
-      return existing;
+      return { ban: existing, released: await this.releaseWithheldWithin(tx, householdId, userId) };
     });
 
+    await this.notifier.onInvitesReleased(released);
+
     return toHouseholdBanView(ban);
+  }
+
+  /**
+   * Releases the open invites into the household to the user's address that
+   * are withheld, keeping those the gate would withhold from their inviter
+   * now (#278). Read by the address the user holds now, which is the one
+   * their inbox matches.
+   */
+  private async releaseWithheldWithin(tx: Prisma.TransactionClient, householdId: string, userId: string) {
+    const user = await tx.user.findUnique({ where: { id: userId }, select: { email: true } });
+
+    // The ban's row cascades with the user, so a lift that found it finds them.
+    if (!user) {
+      return [];
+    }
+
+    return this.invites.releaseWithheldToAddressWithin(tx, { householdId }, user.email, (invite) =>
+      gateWithholdsByAddress(tx, InviteType.Household, invite.inviterId, user.email),
+    );
   }
 
   /**
@@ -208,9 +240,10 @@ export class HouseholdBanService {
 
   /**
    * The ban an update or a lift acts on: `action` asked of the roster before
-   * and after the household's share lock, each time about the ban as it was
-   * read just before. 404 when the user isn't banned, told only to a caller
-   * the answer under the lock lets through.
+   * and after the household's lock, each time about the ban as it was read
+   * just before. An update takes the share lock, and a lift the lock a ban
+   * takes ({@link lift} says why). 404 when the user isn't banned, told only
+   * to a caller the answer under the lock lets through.
    *
    * The question names the ban by its id, as invite revoke names the invite
    * (#164): an API key scoped to one ban holds its grant only on that id, and
@@ -224,7 +257,12 @@ export class HouseholdBanService {
   ) {
     const before = await this.findBan(tx, householdId, userId);
     await this.assertBanAuthority(tx, householdId, action, before?.id);
-    await lockExistingHousehold(tx, householdId);
+
+    if (action === Action.delete) {
+      await lockHouseholdForRoleTransition(tx, householdId);
+    } else {
+      await lockExistingHousehold(tx, householdId);
+    }
 
     const ban = await this.findBan(tx, householdId, userId);
     await this.assertBanAuthority(tx, householdId, action, ban?.id);

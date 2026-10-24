@@ -1,6 +1,25 @@
-import { InviteStatus, MemberInvitePolicy, ResourceType, SystemRole } from '@bge/database';
-import { arrangeInvite, createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
+import {
+  FriendshipStatus,
+  InviteStatus,
+  MemberInvitePolicy,
+  MemberSharePolicy,
+  NotificationType,
+  Reach,
+  ResourceType,
+  SystemRole,
+} from '@bge/database';
+import {
+  arrangeFriendship,
+  arrangeInvite,
+  createActors,
+  type Actors,
+  type AuthenticatedActor,
+  type SessionActor,
+} from '@bge/testing-e2e';
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
+import { gameShareEnvelope } from '../game/game-share-wire';
+import { unreadWhen } from '../notification/unread-poll';
 import { mintApiKey, type Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, withBarrier } from '../support/lock-barrier';
@@ -33,6 +52,8 @@ const HOLD_HOUSEHOLD = 'SELECT h.id FROM households h WHERE h.id = $1 FOR NO KEY
  *   removed leaves open (#747).
  * - While it stands, an invite to them by id is refused, one to their address
  *   is stored withheld, and no admission lets them in.
+ * - Lifting it opens every way back in. The invites to their address it
+ *   withheld reach them, all but those #278's gate would still withhold.
  * - Household owners and admins ban, list, change and lift. A household admin
  *   bans only someone with the member or guest role, or a non-member.
  *
@@ -94,6 +115,35 @@ describe('household bans (#782)', () => {
   const verify = (actor: SessionActor) =>
     db.client.user.update({ where: { id: actor.user.id }, data: { emailVerified: true } });
 
+  /** The invites a user's inbox lists (#163), by id. */
+  const inboxOf = async (actor: SessionActor) =>
+    receivedInvitesEnvelope(
+      await request(baseUrl).get('/api/invites').set(actor.headers).expect(200),
+      'GET /api/invites',
+    ).invites.map((received) => received.id);
+
+  /** Polls until the user has been told of this invite (#167): the listener may run after the response. */
+  const toldOf = (actor: SessionActor, inviteId: string) =>
+    unreadWhen(baseUrl, actor, (unread) =>
+      unread.some(
+        (notification) =>
+          notification.type === NotificationType.HouseholdInviteReceived &&
+          notification.payload['inviteId'] === inviteId,
+      ),
+    );
+
+  const arrangeGame = (createdById: string) =>
+    db.client.game.create({
+      data: { title: `e2e game ${randomUUID().slice(0, 8)}`, reach: Reach.Private, createdById },
+      select: { id: true },
+    });
+
+  const shareInto = async (actor: SessionActor, gameId: string, householdId: string) =>
+    gameShareEnvelope(
+      await request(baseUrl).post(`/api/games/${gameId}/shares`).set(actor.headers).send({ householdId }).expect(201),
+      'POST /api/games/:id/shares',
+    ).share;
+
   /** The message a refusal carries, so a surprise reads as a diff rather than as a bare status. */
   const messageOf = (response: { body: unknown }) => (response.body as { message?: unknown } | null)?.message;
 
@@ -115,8 +165,13 @@ describe('household bans (#782)', () => {
    */
   const household = async ({
     memberInvitePolicy,
+    memberSharePolicy,
     secondAdmin = false,
-  }: { memberInvitePolicy?: MemberInvitePolicy; secondAdmin?: boolean } = {}) => {
+  }: {
+    memberInvitePolicy?: MemberInvitePolicy;
+    memberSharePolicy?: MemberSharePolicy;
+    secondAdmin?: boolean;
+  } = {}) => {
     const [owner, admin, member, guest] = await Promise.all([
       actors.user(),
       actors.user(),
@@ -133,6 +188,7 @@ describe('household bans (#782)', () => {
         ...(otherAdmin === null ? [] : [{ actor: otherAdmin, role: SystemRole.HouseholdAdmin }]),
       ],
       memberInvitePolicy,
+      memberSharePolicy,
     });
 
     return { householdId: created.id, owner, admin, member, guest, otherAdmin };
@@ -168,6 +224,20 @@ describe('household bans (#782)', () => {
       'GET /api/invites',
     );
     expect(invites.map((received) => received.id)).not.toContain(byAddress.id);
+  });
+
+  // #810: a ban removes a member as removal does, so it ends the shares
+  // removal ends.
+  it("banning a member ends their game shares into the household, and leaves another member's", async () => {
+    const h = await household({ memberSharePolicy: MemberSharePolicy.Direct });
+    const [bannedGame, adminsGame] = await Promise.all([arrangeGame(h.member.user.id), arrangeGame(h.admin.user.id)]);
+    const bannedShare = await shareInto(h.member, bannedGame.id, h.householdId);
+    const adminsShare = await shareInto(h.admin, adminsGame.id, h.householdId);
+
+    await banUser(h.owner, h.householdId, { userId: h.member.user.id }).expect(201);
+
+    await expect(db.client.gameShare.findUnique({ where: { id: bannedShare.id } })).resolves.toBeNull();
+    await expect(db.client.gameShare.findUnique({ where: { id: adminsShare.id } })).resolves.not.toBeNull();
   });
 
   it('after a ban, an invite by id is refused, in words for owners and plain for members', async () => {
@@ -345,7 +415,7 @@ describe('household bans (#782)', () => {
     await expect(storedBan(h.householdId, stranger.user.id)).resolves.toMatchObject({ reason: null });
   });
 
-  it('lifting a ban lets an invite by id go out and be accepted, and leaves a withheld invite unreachable', async () => {
+  it('lifting a ban releases the invite it withheld: the user is told of it and accepts it, and an invite by id goes out', async () => {
     const h = await household();
     const stranger = await actors.user();
     await verify(stranger);
@@ -363,12 +433,48 @@ describe('household bans (#782)', () => {
     expect(ban.user.id).toBe(stranger.user.id);
     await expect(storedBan(h.householdId, stranger.user.id)).resolves.toBeNull();
 
-    // Lifting the ban doesn't send what it withheld.
-    await accept(stranger, byAddress.id).expect(404);
+    // Released as if just sent: in their inbox, and they're told of it.
+    await expect(storedInvite(byAddress.id)).resolves.toMatchObject({ status: InviteStatus.Pending, withheld: false });
+    await expect(inboxOf(stranger)).resolves.toContain(byAddress.id);
+    await toldOf(stranger, byAddress.id);
 
-    const byId = await createdInvite(h.owner, h.householdId, { inviteeId: stranger.user.id });
-    acceptEnvelope(await accept(stranger, byId.id).expect(200), 'POST /api/invites/:id/accept');
+    // An invite by id goes out again too.
+    await createdInvite(h.owner, h.householdId, { inviteeId: stranger.user.id });
+
+    acceptEnvelope(await accept(stranger, byAddress.id).expect(200), 'POST /api/invites/:id/accept');
     await expect(membership(h.householdId, stranger.user.id)).resolves.not.toBeNull();
+  });
+
+  it('an invite made by address during a ban reaches the user once it is lifted', async () => {
+    const h = await household();
+    const stranger = await actors.user();
+    await verify(stranger);
+    await banUser(h.owner, h.householdId, { userId: stranger.user.id }).expect(201);
+    const duringBan = await createdInvite(h.admin, h.householdId, { inviteeEmail: stranger.user.email });
+    await expect(storedInvite(duringBan.id)).resolves.toMatchObject({ withheld: true });
+
+    await liftBan(h.owner, h.householdId, stranger.user.id).expect(200);
+
+    await expect(inboxOf(stranger)).resolves.toContain(duringBan.id);
+    acceptEnvelope(await accept(stranger, duringBan.id).expect(200), 'POST /api/invites/:id/accept');
+    await expect(membership(h.householdId, stranger.user.id)).resolves.not.toBeNull();
+  });
+
+  // #278 withholds an invite by address from someone who blocked its sender.
+  // Lifting a ban takes away the ban's reason, not that one.
+  it('lifting a ban leaves withheld an invite the gate would still withhold from its sender', async () => {
+    const h = await household();
+    const stranger = await actors.user();
+    await verify(stranger);
+    await arrangeFriendship(db.client, stranger, h.admin, FriendshipStatus.Blocked);
+    const fromBlocked = await createdInvite(h.admin, h.householdId, { inviteeEmail: stranger.user.email });
+    await banUser(h.owner, h.householdId, { userId: stranger.user.id }).expect(201);
+
+    await liftBan(h.owner, h.householdId, stranger.user.id).expect(200);
+
+    await expect(storedInvite(fromBlocked.id)).resolves.toMatchObject({ status: InviteStatus.Pending, withheld: true });
+    await expect(inboxOf(stranger)).resolves.not.toContain(fromBlocked.id);
+    await accept(stranger, fromBlocked.id).expect(404);
   });
 
   it('an accept queued behind a ban is refused', async () => {

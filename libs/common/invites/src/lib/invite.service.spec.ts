@@ -26,6 +26,7 @@ import {
   InviteExpiredEvent,
   InviteRevokedEvent,
   InviteWithdrawnEvent,
+  toInviteSnapshot,
   type InviteDomainEvent,
 } from './events/invite.events';
 import { InviteService, receivedInviteWhere } from './invite.service';
@@ -1628,6 +1629,67 @@ describe('InviteService', () => {
         service.withholdOutstandingToAddressWithin(asTx(tx), { householdId: 'hh-1' }, '   '),
       ).rejects.toThrow('An address to withhold invites to must not be blank');
       expect(tx.invite.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('releaseWithheldToAddressWithin', () => {
+    const GUARD = {
+      householdId: 'hh-1',
+      inviteeId: null,
+      inviteeEmail: 'banned@example.com',
+      withheld: true,
+      status: { in: [...OUTSTANDING_INVITE_STATUSES] },
+    };
+    const kept = rowWithToken({ id: 'inv-kept', inviteeId: null, inviterId: 'blocked-inviter' });
+    const freed = rowWithToken({ id: 'inv-freed', inviteeId: null });
+
+    it('releases the withheld outstanding invites to the address that the caller keeps no hold on, restating the guard (#782)', async () => {
+      tx.invite.findMany.mockResolvedValue([kept, freed] as never);
+      tx.invite.updateManyAndReturn.mockResolvedValue([freed] as never);
+      const keepWithheld = jest.fn((invite: { inviterId: string }) =>
+        Promise.resolve(invite.inviterId === 'blocked-inviter'),
+      );
+
+      const released = await service.releaseWithheldToAddressWithin(
+        asTx(tx),
+        { householdId: 'hh-1' },
+        '  Banned@Example.COM ',
+        keepWithheld,
+      );
+
+      expect(tx.invite.findMany).toHaveBeenCalledWith({ where: GUARD, select: INVITE_SNAPSHOT_SELECT });
+      // Asked about as a snapshot, so the token never reaches the caller.
+      expect(keepWithheld).toHaveBeenCalledWith(toInviteSnapshot(kept));
+      expect(keepWithheld.mock.calls[0][0]).not.toHaveProperty('token');
+      expect(tx.invite.updateManyAndReturn).toHaveBeenCalledWith({
+        where: { ...GUARD, id: { in: ['inv-freed'] } },
+        data: { withheld: false },
+        select: INVITE_SNAPSHOT_SELECT,
+      });
+      expect(released).toEqual([toInviteSnapshot(freed)]);
+      // Never announced: an event would carry a withheld invite to the audit log.
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('writes nothing when every withheld invite stays withheld, or there is none (#782)', async () => {
+      tx.invite.findMany.mockResolvedValueOnce([kept] as never).mockResolvedValueOnce([] as never);
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await expect(
+          service.releaseWithheldToAddressWithin(asTx(tx), { householdId: 'hh-1' }, 'banned@example.com', () =>
+            Promise.resolve(true),
+          ),
+        ).resolves.toEqual([]);
+      }
+
+      expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
+    });
+
+    it('refuses a blank address, which would match the invites that name no address (#782)', async () => {
+      await expect(
+        service.releaseWithheldToAddressWithin(asTx(tx), { householdId: 'hh-1' }, '   ', () => Promise.resolve(false)),
+      ).rejects.toThrow('An address to release invites to must not be blank');
+      expect(tx.invite.findMany).not.toHaveBeenCalled();
     });
   });
 

@@ -41,6 +41,7 @@ import {
   InviteWithdrawnEvent,
   toInviteSnapshot,
   type InviteDomainEvent,
+  type InviteSnapshot,
   type InviteTransitionEvent,
   type InviteTransitionEventClass,
 } from './events/invite.events';
@@ -645,6 +646,66 @@ export class InviteService {
     });
 
     return { count };
+  }
+
+  /**
+   * Releases the withheld outstanding invites into a context to one address,
+   * as lifting a household ban does (#782), all but those `keepWithheld`
+   * answers true for: the caller asks there whatever else still withholds an
+   * invite, such as #278's gate. A released invite is reachable by its
+   * address again, as if it had never been withheld. Its inviter sees no
+   * change, since a withheld invite already read as sent.
+   *
+   * Not announced: a released invite's status doesn't change, and an event
+   * would carry a withheld invite to the audit log. The caller tells the
+   * invitee, if anyone, from the snapshots it gets back.
+   *
+   * The caller locks its context row first, against every write that reads
+   * or withholds these invites, so the read and the update see one set. The
+   * update restates the guard, so a row the expiry sweep stamped in between
+   * stays as it was.
+   */
+  async releaseWithheldToAddressWithin(
+    tx: Prisma.TransactionClient,
+    scope: InviteContextScope,
+    email: string,
+    keepWithheld: (invite: InviteSnapshot) => Promise<boolean>,
+  ): Promise<InviteSnapshot[]> {
+    const inviteeEmail = normalizeInviteeEmail(email);
+
+    // A consumer's mistake, so a bare 500, as for the withhold.
+    if (inviteeEmail === null) {
+      throw new Error('An address to release invites to must not be blank');
+    }
+
+    const guard: Prisma.InviteWhereInput = {
+      ...scope,
+      inviteeId: null,
+      inviteeEmail,
+      withheld: true,
+      status: { in: [...OUTSTANDING_INVITE_STATUSES] },
+    };
+
+    const withheld = await tx.invite.findMany({ where: guard, select: INVITE_SNAPSHOT_SELECT });
+    const releasing: string[] = [];
+
+    for (const row of withheld) {
+      if (!(await keepWithheld(toInviteSnapshot(row)))) {
+        releasing.push(row.id);
+      }
+    }
+
+    if (releasing.length === 0) {
+      return [];
+    }
+
+    const released = await tx.invite.updateManyAndReturn({
+      where: { ...guard, id: { in: releasing } },
+      data: { withheld: false },
+      select: INVITE_SNAPSHOT_SELECT,
+    });
+
+    return released.map(toInviteSnapshot);
   }
 
   /**

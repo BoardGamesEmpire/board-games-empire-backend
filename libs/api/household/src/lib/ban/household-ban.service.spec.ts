@@ -1,5 +1,15 @@
-import { Action, HUMAN_USER_WHERE, Prisma, ResourceType, SystemRole, type GameShare } from '@bge/database';
-import { InviteService, type InviteDomainEvent } from '@bge/invites';
+import {
+  Action,
+  FriendshipStatus,
+  HUMAN_USER_WHERE,
+  InviteStatus,
+  InviteType,
+  Prisma,
+  ResourceType,
+  SystemRole,
+  type GameShare,
+} from '@bge/database';
+import { InviteService, type InviteDomainEvent, type InviteSnapshot } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
@@ -11,6 +21,7 @@ import {
 } from '@bge/testing';
 import { ForbiddenException } from '@nestjs/common';
 import { Http, PrismaError } from '@status/codes';
+import { HouseholdNotificationListener } from '../listeners/household-notification.listener';
 import { HouseholdMemberService, type RemovedMembership } from '../member/household-member.service';
 import { HOUSEHOLD_BAN_SELECT } from './household-ban.read-shape';
 import { HouseholdBanService } from './household-ban.service';
@@ -54,6 +65,21 @@ const BAN_VIEW = {
 const REVOKED = [{ eventName: 'invite.revoked', subjectId: 'inv-1' }] as unknown as InviteDomainEvent[];
 const ENDED_SHARES = [{ id: 'share-1', gameId: 'game-1', householdId: 'hh-1' }] as unknown as GameShare[];
 
+const RELEASED: InviteSnapshot = {
+  id: 'inv-9',
+  type: InviteType.Household,
+  status: InviteStatus.Pending,
+  inviterId: 'owner-1',
+  inviteeId: null,
+  inviteeName: null,
+  inviteeEmail: 'sam@example.test',
+  householdId: 'hh-1',
+  eventId: null,
+  roleId: 'role-member',
+  expiresAt: LATER,
+  respondedAt: null,
+};
+
 const resolves = (value: unknown) => value as never;
 
 const dependentRecordNotFound = () =>
@@ -73,8 +99,12 @@ describe('HouseholdBanService', () => {
   >;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser'>>;
   let invites: jest.Mocked<
-    Pick<InviteService, 'revokeOutstandingOfUserWithin' | 'withholdOutstandingToAddressWithin' | 'emit'>
+    Pick<
+      InviteService,
+      'revokeOutstandingOfUserWithin' | 'withholdOutstandingToAddressWithin' | 'releaseWithheldToAddressWithin' | 'emit'
+    >
   >;
+  let notifier: jest.Mocked<Pick<HouseholdNotificationListener, 'onInvitesReleased'>>;
   let members: jest.Mocked<Pick<HouseholdMemberService, 'removeUserWithin' | 'emitGameSharesEnded'>>;
   let compose: jest.SpyInstance;
 
@@ -88,8 +118,10 @@ describe('HouseholdBanService', () => {
     invites = {
       revokeOutstandingOfUserWithin: jest.fn().mockResolvedValue({ count: 0, events: [] }),
       withholdOutstandingToAddressWithin: jest.fn().mockResolvedValue({ count: 0 }),
+      releaseWithheldToAddressWithin: jest.fn().mockResolvedValue([]),
       emit: jest.fn(),
     };
+    notifier = { onInvitesReleased: jest.fn().mockResolvedValue(undefined) };
     members = { removeUserWithin: jest.fn().mockResolvedValue(null), emitGameSharesEnded: jest.fn() };
 
     const ctx = await createTestingModuleWithDb({
@@ -102,6 +134,7 @@ describe('HouseholdBanService', () => {
         { provide: PermissionsService, useValue: permissions },
         { provide: InviteService, useValue: invites },
         { provide: HouseholdMemberService, useValue: members },
+        { provide: HouseholdNotificationListener, useValue: notifier },
       ],
     });
 
@@ -402,8 +435,8 @@ describe('HouseholdBanService', () => {
       await expect(service.lift('hh-1', 'user-2')).rejects.toBeInstanceOf(ForbiddenException);
     });
 
-    // Two lifts sent at once, as a double-click sends them, both read the ban
-    // under the household's share lock; the write that lands second finds it
+    // Two lifts sent at once, as a double-click sends them: the second waits
+    // on the household lock the first holds, and its write finds the ban
     // gone (#782).
     it('lift answers 404, not 500, when a lift that landed first already deleted the ban (#782)', async () => {
       db.householdBan.delete.mockRejectedValue(dependentRecordNotFound());
@@ -442,7 +475,70 @@ describe('HouseholdBanService', () => {
         [Action.delete, ResourceType.HouseholdBan, NAMED_BAN_INSTANCE],
         [Action.delete, ResourceType.HouseholdBan, NAMED_BAN_INSTANCE],
       ]);
-      expect(db.$queryRaw.mock.calls.map(([query]) => isShareLockSql(query))).toEqual([true]);
+      // The lock a ban takes, not the share lock: an invite create holds the
+      // share lock while it reads the ban.
+      expect(db.$queryRaw.mock.calls.map(([query]) => isRoleTransitionLockSql(query))).toEqual([true]);
+    });
+
+    it("lift releases the withheld invites to the user's address, then tells them after commit (#782)", async () => {
+      const order: string[] = [];
+      db.householdBan.delete.mockImplementation((() => {
+        order.push('delete');
+        return Promise.resolve({ id: 'ban-1' });
+      }) as never);
+      invites.releaseWithheldToAddressWithin.mockImplementation(() => {
+        order.push('release');
+        return Promise.resolve([RELEASED]);
+      });
+      db.$transaction.mockImplementation((async (fn: (tx: unknown) => Promise<unknown>) => {
+        const result = await fn(db);
+        order.push('commit');
+        return result;
+      }) as never);
+      notifier.onInvitesReleased.mockImplementation(() => {
+        order.push('notify');
+        return Promise.resolve();
+      });
+
+      await service.lift('hh-1', 'user-2');
+
+      // By the address the user holds now, which their inbox matches.
+      expect(db.user.findUnique).toHaveBeenCalledWith({ where: { id: 'user-2' }, select: { email: true } });
+      expect(invites.releaseWithheldToAddressWithin).toHaveBeenCalledWith(
+        db,
+        { householdId: 'hh-1' },
+        'sam@example.test',
+        expect.any(Function),
+      );
+      expect(notifier.onInvitesReleased).toHaveBeenCalledWith([RELEASED]);
+      expect(order).toEqual(['delete', 'release', 'commit', 'notify']);
+    });
+
+    it("lift keeps withheld what #278's gate would still withhold from the invite's sender (#782)", async () => {
+      db.householdBan.delete.mockResolvedValue(resolves({ id: 'ban-1' }));
+      db.userPreferences.findFirst.mockResolvedValue(null);
+      db.user.count.mockResolvedValue(0);
+
+      await service.lift('hh-1', 'user-2');
+
+      const keepWithheld = invites.releaseWithheldToAddressWithin.mock.calls[0][3];
+
+      db.friendship.findFirst.mockResolvedValueOnce(resolves({ status: FriendshipStatus.Blocked }));
+      await expect(keepWithheld(RELEASED)).resolves.toBe(true);
+
+      db.friendship.findFirst.mockResolvedValueOnce(null);
+      await expect(keepWithheld(RELEASED)).resolves.toBe(false);
+
+      // Asked about the invite's own sender, through the address.
+      expect(db.friendship.findFirst).toHaveBeenLastCalledWith({
+        where: {
+          OR: [
+            { requesterId: 'owner-1', addressee: { email: 'sam@example.test' } },
+            { addresseeId: 'owner-1', requester: { email: 'sam@example.test' } },
+          ],
+        },
+        select: { status: true },
+      });
     });
   });
 
