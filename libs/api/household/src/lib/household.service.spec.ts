@@ -1,5 +1,13 @@
 import type { Household } from '@bge/database';
-import { Action, HouseholdMembershipOrigin, MemberInvitePolicy, Prisma, ResourceType, SystemRole } from '@bge/database';
+import {
+  Action,
+  HouseholdMembershipOrigin,
+  MemberInvitePolicy,
+  MemberSharePolicy,
+  Prisma,
+  ResourceType,
+  SystemRole,
+} from '@bge/database';
 import { uniqueViolation as sharedUniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
 import { InviteService, type InviteRevokedEvent } from '@bge/invites';
@@ -100,9 +108,10 @@ describe('HouseholdService', () => {
 
     const [{ include }] = db.household.findUnique.mock.calls[0] as [{ include: Record<string, unknown> }];
 
-    // A member's client needs the invite policy to know whether to offer an
-    // invite, so it rides on the read every member already makes.
-    expect(include.settings).toEqual({ select: { memberInvitePolicy: true } });
+    // A member's client needs the invite and share policies to know whether to
+    // offer an invite or a share (#810), so they ride on the read every member
+    // already makes.
+    expect(include.settings).toEqual({ select: { memberInvitePolicy: true, memberSharePolicy: true } });
   });
 
   // #868. The detail roster used to select each member's excluded games beside
@@ -480,6 +489,18 @@ describe('HouseholdService', () => {
       });
     });
 
+    it('writes the member share policy beside the invite policy in the same upsert (#810)', async () => {
+      await service.updateHousehold('hh-1', {
+        settings: { memberInvitePolicy: MemberInvitePolicy.Off, memberSharePolicy: MemberSharePolicy.Direct },
+      });
+
+      const settings = {
+        memberInvitePolicy: MemberInvitePolicy.Off,
+        memberSharePolicy: MemberSharePolicy.Direct,
+      };
+      expect(written()).toEqual({ settings: { upsert: { create: settings, update: settings } } });
+    });
+
     it('writes no settings when the patch names none', async () => {
       await service.updateHousehold('hh-1', { name: 'New' });
 
@@ -490,13 +511,15 @@ describe('HouseholdService', () => {
       await service.updateHousehold('hh-1', { name: 'New' });
 
       expect(db.household.update).toHaveBeenCalledWith(
-        expect.objectContaining({ include: { settings: { select: { memberInvitePolicy: true } } } }),
+        expect.objectContaining({
+          include: { settings: { select: { memberInvitePolicy: true, memberSharePolicy: true } } },
+        }),
       );
     });
 
     it.each([
       ['empty settings', { settings: {} }],
-      ['settings naming nothing', { settings: { memberInvitePolicy: undefined } }],
+      ['settings naming nothing', { settings: { memberInvitePolicy: undefined, memberSharePolicy: undefined } }],
       ['a household field naming nothing', { name: undefined }],
     ])('rejects %s as an empty patch', async (_label, dto) => {
       await expect(service.updateHousehold('hh-1', dto)).rejects.toThrow(BadRequestException);

@@ -137,6 +137,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
       'read:game:friends': 'binds user.id',
       'read:game:friends-of-friends': 'binds user.id',
       'read:game:public': 'fixed filter',
+      'read:game:shared': 'binds user.id',
     },
   },
   GameCollection: {
@@ -158,7 +159,11 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
   GamePlaySession: {
     User: { 'read:game_play_session': 'every row' },
   },
-  GameSharing: {},
+  GameShare: {
+    User: { 'read:game_share:own': 'binds user.id' },
+    HouseholdOwner: { 'read:game_share:household': 'binds householdId, user.id' },
+    HouseholdAdmin: { 'read:game_share:household': 'binds householdId, user.id' },
+  },
   Platform: {
     User: { 'read:platform': 'every row' },
   },

@@ -1,6 +1,8 @@
 export * from './lib/constants/household-events.constant';
 export * from './lib/constants/household.constants';
 export * from './lib/events/household.events';
+export * from './lib/game-share/household-game-share.controller';
+export * from './lib/game-share/household-game-share.service';
 export {
   HouseholdLivenessGuard,
   HouseholdPathParam,

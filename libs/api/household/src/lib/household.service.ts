@@ -149,7 +149,8 @@ export class HouseholdService {
         },
 
         // To every reader of the household (#166): a member's client reads the
-        // member invite policy here to know whether to offer an invite.
+        // member invite and share policies here to know whether to offer an
+        // invite or a share (#810).
         settings: { select: HOUSEHOLD_SETTINGS_SELECT },
 
         // The roster surface and nothing else. Every reader of the household

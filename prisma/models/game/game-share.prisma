@@ -1,0 +1,34 @@
+/// A game shown to one named user or one household on top of its reach (#810).
+/// Only the game's owner shares it. A share is in effect once `approvedAt` is
+/// set: on create for a user recipient and for a household share made
+/// directly, on approval for a member's share under `NeedsApproval`.
+model GameShare {
+  id String @id @default(cuid(2))
+
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  // Exactly one recipient is set; a CHECK constraint in the migration enforces it.
+  user        User?      @relation("GameSharesReceived", fields: [userId], references: [id], onDelete: Cascade)
+  userId      String?    @map("user_id")
+  household   Household? @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  householdId String?    @map("household_id")
+
+  sharedBy   User?   @relation("GameSharesCreated", fields: [sharedById], references: [id], onDelete: SetNull)
+  sharedById String? @map("shared_by_id")
+
+  // `approvedById` records who approved a waiting share: null on a direct share
+  // and on a user share. `SetNull` on the approver's deletion leaves the share in
+  // effect, since `approvedAt` is what marks it.
+  approvedBy   User?     @relation("GameSharesApproved", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedById String?   @map("approved_by_id")
+  approvedAt   DateTime? @map("approved_at") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([gameId, userId])
+  @@unique([gameId, householdId])
+  @@index([userId])
+  @@index([householdId])
+  @@map("game_shares")
+}

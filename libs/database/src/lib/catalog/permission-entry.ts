@@ -84,7 +84,7 @@ export type SubjectWhereInput = ForEverySubject<{
   DataGateway: Prisma.DataGatewayWhereInput;
   GamePlayResult: Prisma.GamePlayResultWhereInput;
   GamePlaySession: Prisma.GamePlaySessionWhereInput;
-  GameSharing: never; // no model
+  GameShare: Prisma.GameShareWhereInput;
   Platform: Prisma.PlatformWhereInput;
   PlatformGame: Prisma.PlatformGameWhereInput;
   RuleVariant: Prisma.RuleVariantWhereInput;
@@ -143,7 +143,7 @@ export type SubjectScalarField = ForEverySubject<{
   DataGateway: Prisma.DataGatewayScalarFieldEnum;
   GamePlayResult: Prisma.GamePlayResultScalarFieldEnum;
   GamePlaySession: Prisma.GamePlaySessionScalarFieldEnum;
-  GameSharing: never; // no model
+  GameShare: Prisma.GameShareScalarFieldEnum;
   Platform: Prisma.PlatformScalarFieldEnum;
   PlatformGame: Prisma.PlatformGameScalarFieldEnum;
   RuleVariant: Prisma.RuleVariantScalarFieldEnum;

@@ -33,6 +33,7 @@ import {
   HOUSEHOLD_MEMBER_UNIQUE_FIELDS,
 } from '../constants/household.constants';
 import type { AssignableHouseholdRole } from '../dto';
+import { HouseholdGameShareEndedEvent } from '../events/household.events';
 import { MEMBER_SELECT } from '../read-shapes';
 import {
   HouseholdMemberService,
@@ -112,6 +113,20 @@ const makeOwner = (overrides: Partial<HouseholdMemberWithRelations> = {}): House
  * fixtures below carry no casts for the same reason.
  */
 const resolves = (rows: HouseholdMemberWithRelations | HouseholdMemberWithRelations[]) => rows as never;
+
+const SHARE_APPROVED_AT = new Date('2026-10-01T00:00:00.000Z');
+
+/** A share of a game `user-1` created, in effect in `hh-1` (#810). */
+const gameShareRow = (id: string) => ({
+  id,
+  gameId: `game-${id}`,
+  userId: null,
+  householdId: 'hh-1',
+  sharedById: 'user-1',
+  approvedById: null,
+  approvedAt: SHARE_APPROVED_AT,
+  createdAt: SHARE_APPROVED_AT,
+});
 
 const dependentRecordNotFound = () =>
   new Prisma.PrismaClientKnownRequestError('no rows', {
@@ -789,6 +804,8 @@ describe('HouseholdMemberService', () => {
   describe('removeMember', () => {
     beforeEach(() => {
       db.excludedGame.deleteMany.mockResolvedValue({ count: 0 } as never);
+      db.gameShare.findMany.mockResolvedValue([] as never);
+      db.gameShare.deleteMany.mockResolvedValue({ count: 1 } as never);
       db.householdRole.deleteMany.mockResolvedValue({ count: 1 } as never);
       db.householdMember.delete.mockResolvedValue(resolves(makeMember() as never));
     });
@@ -820,6 +837,9 @@ describe('HouseholdMemberService', () => {
       expect(db.householdMember.delete).toHaveBeenCalled();
 
       expect(db.excludedGame.deleteMany).toHaveBeenCalledWith({ where: { householdMemberId: 'member-1' } });
+      expect(db.gameShare.findMany).toHaveBeenCalledWith({
+        where: { householdId: 'hh-1', game: { is: { createdById: 'user-1' } } },
+      });
       expect(db.householdRole.deleteMany).toHaveBeenCalledWith({ where: { householdMemberId: 'member-1' } });
       expect(db.householdMember.delete).toHaveBeenCalledWith({ where: { id: 'member-1' } });
 
@@ -832,6 +852,7 @@ describe('HouseholdMemberService', () => {
       const recheckOrder = db.householdMember.findFirst.mock.invocationCallOrder[1];
       expect(recheckOrder).toBeGreaterThan(db.$queryRaw.mock.invocationCallOrder[0]);
       expect(recheckOrder).toBeLessThan(db.excludedGame.deleteMany.mock.invocationCallOrder[0]);
+      expect(recheckOrder).toBeLessThan(db.gameShare.findMany.mock.invocationCallOrder[0]);
 
       // No cascades exist in the schema — dependents strictly before the member row.
       const excludedOrder = db.excludedGame.deleteMany.mock.invocationCallOrder[0];
@@ -839,6 +860,7 @@ describe('HouseholdMemberService', () => {
       const memberOrder = db.householdMember.delete.mock.invocationCallOrder[0];
       expect(excludedOrder).toBeLessThan(roleOrder);
       expect(roleOrder).toBeLessThan(memberOrder);
+      expect(db.gameShare.findMany.mock.invocationCallOrder[0]).toBeLessThan(memberOrder);
 
       expect(permissions.invalidateUser).toHaveBeenCalledWith('user-1');
       expect(result.id).toBe('member-1');
@@ -872,6 +894,69 @@ describe('HouseholdMemberService', () => {
       expect(cacheEvicted).toEqual([true]);
     });
 
+    it("ends the game shares of the removed member's games into the household, keyed on the game's owner (#810)", async () => {
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
+      db.gameShare.findMany.mockResolvedValue([gameShareRow('share-1'), gameShareRow('share-2')] as never);
+
+      await service.removeMember('hh-1', 'member-1');
+
+      // The game's owner, not `sharedById`: that column is emptied when the
+      // sharer's account is deleted, and a share without a sharer is still the
+      // owner's. Only the game's owner shares it, so this is every share the
+      // member made. Scoped to this household: their shares into another stay.
+      expect(db.gameShare.findMany).toHaveBeenCalledTimes(1);
+      expect(db.gameShare.findMany).toHaveBeenCalledWith({
+        where: { householdId: 'hh-1', game: { is: { createdById: 'user-1' } } },
+      });
+      expect(db.gameShare.deleteMany).toHaveBeenCalledTimes(2);
+      expect(db.gameShare.deleteMany).toHaveBeenNthCalledWith(1, { where: { id: 'share-1' } });
+      expect(db.gameShare.deleteMany).toHaveBeenNthCalledWith(2, { where: { id: 'share-2' } });
+    });
+
+    it('announces each game share the removal ended, after commit and the cache eviction (#810)', async () => {
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
+      db.gameShare.findMany.mockResolvedValue([gameShareRow('share-1'), gameShareRow('share-2')] as never);
+      // The sharer removed `share-2` themselves between the read and its
+      // delete: their delete takes no household lock, and announced it.
+      db.gameShare.deleteMany.mockResolvedValueOnce({ count: 1 } as never).mockResolvedValueOnce({ count: 0 } as never);
+      const cacheEvicted: boolean[] = [];
+      events.emit.mockImplementation(() => {
+        cacheEvicted.push(permissions.invalidateUser.mock.calls.length > 0);
+        return true;
+      });
+
+      await service.removeMember('hh-1', 'member-1');
+
+      expect(events.emit).toHaveBeenCalledTimes(1);
+      expect(events.emit).toHaveBeenCalledWith(
+        HouseholdEvents.GameShareEnded,
+        expect.any(HouseholdGameShareEndedEvent),
+      );
+      const event = events.emit.mock.calls[0]?.[1] as HouseholdGameShareEndedEvent;
+      expect(event.subjectId).toBe('share-1');
+      expect(event.before).toEqual({
+        id: 'share-1',
+        gameId: 'game-share-1',
+        userId: null,
+        householdId: 'hh-1',
+        sharedById: 'user-1',
+        approvedById: null,
+        approvedAt: SHARE_APPROVED_AT,
+      });
+      expect(event.after).toBeNull();
+      expect(cacheEvicted).toEqual([true]);
+    });
+
+    it('still answers the removal when announcing an ended game share throws, since it has committed (#810)', async () => {
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
+      db.gameShare.findMany.mockResolvedValue([gameShareRow('share-1')] as never);
+      events.emit.mockImplementation(() => {
+        throw new Error('listener failed');
+      });
+
+      await expect(service.removeMember('hh-1', 'member-1')).resolves.toMatchObject({ id: 'member-1' });
+    });
+
     it('locks the owner rows and allows removing an owner when another owner remains', async () => {
       db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner()));
       db.$queryRaw.mockResolvedValue([{ household_member_id: 'member-1' }, { household_member_id: 'member-2' }]);
@@ -890,6 +975,7 @@ describe('HouseholdMemberService', () => {
       await expect(service.removeMember('hh-1', 'member-1')).rejects.toThrow(BadRequestException);
 
       expect(db.excludedGame.deleteMany).not.toHaveBeenCalled();
+      expect(db.gameShare.deleteMany).not.toHaveBeenCalled();
       expect(db.householdRole.deleteMany).not.toHaveBeenCalled();
       expect(db.householdMember.delete).not.toHaveBeenCalled();
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
@@ -958,6 +1044,7 @@ describe('HouseholdMemberService', () => {
       });
 
       expect(db.excludedGame.deleteMany).not.toHaveBeenCalled();
+      expect(db.gameShare.deleteMany).not.toHaveBeenCalled();
       expect(db.householdRole.deleteMany).not.toHaveBeenCalled();
       expect(db.householdMember.delete).not.toHaveBeenCalled();
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
@@ -1007,6 +1094,8 @@ describe('HouseholdMemberService', () => {
   describe('leaveHousehold', () => {
     beforeEach(() => {
       db.excludedGame.deleteMany.mockResolvedValue({ count: 0 } as never);
+      db.gameShare.findMany.mockResolvedValue([] as never);
+      db.gameShare.deleteMany.mockResolvedValue({ count: 1 } as never);
       db.householdRole.deleteMany.mockResolvedValue({ count: 1 } as never);
       db.householdMember.delete.mockResolvedValue(resolves(makeMember() as never));
     });
@@ -1044,6 +1133,16 @@ describe('HouseholdMemberService', () => {
       // sent with ends the same way.
       expect(invites.revokeOutstandingOfUserWithin).toHaveBeenCalledWith(db, { householdId: 'hh-1' }, 'actor-1');
       expect(invites.emit).toHaveBeenCalledWith([]);
+    });
+
+    it("ends the game shares of the leaver's games into the household, as being removed does (#810)", async () => {
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember({ userId: 'actor-1' })));
+
+      await service.leaveHousehold('hh-1');
+
+      expect(db.gameShare.findMany).toHaveBeenCalledWith({
+        where: { householdId: 'hh-1', game: { is: { createdById: 'actor-1' } } },
+      });
     });
 
     it('rejects the sole owner leaving (400) — transfer ownership first', async () => {
@@ -2128,6 +2227,7 @@ describe('HouseholdMemberService', () => {
     const captureLockSql = async (): Promise<string> => {
       db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner()));
       db.excludedGame.deleteMany.mockResolvedValue({ count: 0 } as never);
+      db.gameShare.findMany.mockResolvedValue([] as never);
       db.householdRole.deleteMany.mockResolvedValue({ count: 1 } as never);
       db.householdMember.delete.mockResolvedValue(resolves(makeOwner() as never));
       stubRawQueries({ owners: ['member-1', 'member-2'] });
@@ -2169,6 +2269,7 @@ describe('HouseholdMemberService', () => {
       const captureTransitionLockSql = async (): Promise<string> => {
         db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner()));
         db.excludedGame.deleteMany.mockResolvedValue({ count: 0 } as never);
+        db.gameShare.findMany.mockResolvedValue([] as never);
         db.householdRole.deleteMany.mockResolvedValue({ count: 1 } as never);
         db.householdMember.delete.mockResolvedValue(resolves(makeOwner() as never));
         stubRawQueries({ owners: ['member-1', 'member-2'] });

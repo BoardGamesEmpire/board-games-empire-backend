@@ -4,47 +4,53 @@ Households: trust groups of any size whose members share their games and plan pl
 
 ## What each household role can do
 
-The server decides what each request may do, and this table is what it grants. A client can read it, by the viewer's household role and the household's member invite policy, to hide what the viewer can't do. The server still refuses anything the table says No to.
+The server decides what each request may do, and this table is what it grants. A client can read it, by the viewer's household role and the household's member invite and member share policies, to hide what the viewer can't do. The server still refuses anything the table says No to.
 
 <!-- household-role-table:start -->
 
-| Action                                                                               | Household owner | Household admin | Member role  | Household guest | Granted by     |
-| ------------------------------------------------------------------------------------ | --------------- | --------------- | ------------ | --------------- | -------------- |
-| See the household                                                                    | Yes             | Yes             | Yes          | Yes             | Household role |
-| Edit the household and its settings                                                  | Yes             | Yes             | No           | No              | Household role |
-| Delete the household                                                                 | Yes             | No              | No           | No              | Household role |
-| See the roster                                                                       | Yes             | Yes             | Yes          | Yes             | Household role |
-| Change the household role of someone with the member or guest role                   | Yes             | Yes             | No           | No              | Household role |
-| Make someone a household admin, or change a household admin's role                   | Yes             | No              | No           | No              | Household role |
-| Remove someone with the member or guest role                                         | Yes             | Yes             | No           | No              | Household role |
-| Remove a household admin                                                             | Yes             | No              | No           | No              | Household role |
-| Remove another household owner, unless they are the last                             | Yes             | No              | No           | No              | Household role |
-| Transfer ownership                                                                   | Yes             | No              | No           | No              | Household role |
-| Leave the household                                                                  | Yes             | Yes             | Yes          | Yes             | Household role |
-| List the household's invites                                                         | Yes             | Yes             | No           | No              | Household role |
-| Invite with the member or guest role, when the member invite policy is Direct        | Yes             | Yes             | Yes          | No              | Household role |
-| Invite with the member or guest role, when the member invite policy is NeedsApproval | Yes             | Yes             | For approval | No              | Household role |
-| Invite with the member or guest role, when the member invite policy is Off           | Yes             | Yes             | No           | No              | Household role |
-| Invite with the household admin role                                                 | Yes             | No              | No           | No              | Household role |
-| Approve an invite sent for approval                                                  | Yes             | Yes             | No           | No              | Household role |
-| Revoke an invite offering the member or guest role                                   | Yes             | Yes             | No           | No              | Household role |
-| Revoke an invite offering the household admin role                                   | Yes             | No              | No           | No              | Household role |
-| Create a household event                                                             | Yes             | Yes             | Yes          | No              | Household role |
-| See household events, their occurrences and their event policies                     | Yes             | Yes             | Yes          | Yes             | Household role |
-| See the attendees of household events                                                | Yes             | Yes             | Yes          | No              | Household role |
-| Edit any household event                                                             | Yes             | Yes             | No           | No              | Household role |
-| Cancel an occurrence of any household event                                          | Yes             | Yes             | No           | No              | Household role |
-| Delete an occurrence of a household event they don't host                            | No              | No              | No           | No              | Household role |
-| Delete a household event they don't host                                             | No              | No              | No           | No              | Household role |
-| Record a household play                                                              | Yes             | Yes             | Yes          | No              | Household role |
-| Edit or delete a household play                                                      | Yes             | Yes             | No           | No              | Household role |
-| Record results for a household play                                                  | Yes             | Yes             | Yes          | No              | Household role |
-| Manage the household's plugins                                                       | Yes             | Yes             | No           | No              | Household role |
-| See the household's quotas                                                           | Yes             | Yes             | No           | No              | Household role |
-| Set quotas for each membership                                                       | Yes             | Yes             | No           | No              | Household role |
-| See the household's game pool                                                        | Yes             | Yes             | Yes          | Yes             | User           |
-| Join a play as a player                                                              | Yes             | Yes             | Yes          | Yes             | User           |
-| Create and edit house rules                                                          | Yes             | Yes             | Yes          | Yes             | User           |
+| Action                                                                                      | Household owner | Household admin | Member role  | Household guest | Granted by     |
+| ------------------------------------------------------------------------------------------- | --------------- | --------------- | ------------ | --------------- | -------------- |
+| See the household                                                                           | Yes             | Yes             | Yes          | Yes             | Household role |
+| Edit the household and its settings                                                         | Yes             | Yes             | No           | No              | Household role |
+| Delete the household                                                                        | Yes             | No              | No           | No              | Household role |
+| See the roster                                                                              | Yes             | Yes             | Yes          | Yes             | Household role |
+| Change the household role of someone with the member or guest role                          | Yes             | Yes             | No           | No              | Household role |
+| Make someone a household admin, or change a household admin's role                          | Yes             | No              | No           | No              | Household role |
+| Remove someone with the member or guest role                                                | Yes             | Yes             | No           | No              | Household role |
+| Remove a household admin                                                                    | Yes             | No              | No           | No              | Household role |
+| Remove another household owner, unless they are the last                                    | Yes             | No              | No           | No              | Household role |
+| Transfer ownership                                                                          | Yes             | No              | No           | No              | Household role |
+| Leave the household                                                                         | Yes             | Yes             | Yes          | Yes             | Household role |
+| List the household's invites                                                                | Yes             | Yes             | No           | No              | Household role |
+| Invite with the member or guest role, when the member invite policy is Direct               | Yes             | Yes             | Yes          | No              | Household role |
+| Invite with the member or guest role, when the member invite policy is NeedsApproval        | Yes             | Yes             | For approval | No              | Household role |
+| Invite with the member or guest role, when the member invite policy is Off                  | Yes             | Yes             | No           | No              | Household role |
+| Invite with the household admin role                                                        | Yes             | No              | No           | No              | Household role |
+| Approve an invite sent for approval                                                         | Yes             | Yes             | No           | No              | Household role |
+| Revoke an invite offering the member or guest role                                          | Yes             | Yes             | No           | No              | Household role |
+| Revoke an invite offering the household admin role                                          | Yes             | No              | No           | No              | Household role |
+| Share a game they created with the household, when the member share policy is Direct        | Yes             | Yes             | Yes          | No              | Household role |
+| Share a game they created with the household, when the member share policy is NeedsApproval | Yes             | Yes             | For approval | No              | Household role |
+| Share a game they created with the household, when the member share policy is Off           | Yes             | Yes             | No           | No              | Household role |
+| See the household's game shares                                                             | Yes             | Yes             | No           | No              | Household role |
+| Approve a game share sent for approval                                                      | Yes             | Yes             | No           | No              | Household role |
+| Remove a game share from the household                                                      | Yes             | Yes             | No           | No              | Household role |
+| Create a household event                                                                    | Yes             | Yes             | Yes          | No              | Household role |
+| See household events, their occurrences and their event policies                            | Yes             | Yes             | Yes          | Yes             | Household role |
+| See the attendees of household events                                                       | Yes             | Yes             | Yes          | No              | Household role |
+| Edit any household event                                                                    | Yes             | Yes             | No           | No              | Household role |
+| Cancel an occurrence of any household event                                                 | Yes             | Yes             | No           | No              | Household role |
+| Delete an occurrence of a household event they don't host                                   | No              | No              | No           | No              | Household role |
+| Delete a household event they don't host                                                    | No              | No              | No           | No              | Household role |
+| Record a household play                                                                     | Yes             | Yes             | Yes          | No              | Household role |
+| Edit or delete a household play                                                             | Yes             | Yes             | No           | No              | Household role |
+| Record results for a household play                                                         | Yes             | Yes             | Yes          | No              | Household role |
+| Manage the household's plugins                                                              | Yes             | Yes             | No           | No              | Household role |
+| See the household's quotas                                                                  | Yes             | Yes             | No           | No              | Household role |
+| Set quotas for each membership                                                              | Yes             | Yes             | No           | No              | Household role |
+| See the household's game pool                                                               | Yes             | Yes             | Yes          | Yes             | User           |
+| Join a play as a player                                                                     | Yes             | Yes             | Yes          | Yes             | User           |
+| Create and edit house rules                                                                 | Yes             | Yes             | Yes          | Yes             | User           |
 
 <!-- household-role-table:end -->
 
@@ -53,8 +59,12 @@ The server decides what each request may do, and this table is what it grants. A
 - **Granted by User:** these rows come from User, the base role every registered user holds, not from the household role. No household role can take them away. Narrowing one for guests would mean changing the User role's own permission.
 - **Only a household owner acts on the household admin role (#168).** A household admin changes the household role of, removes, invites and revokes the invites of people with the member or guest role. Nobody changes their own household role. A household admin who wants to step down asks an owner, or leaves.
 - **The member invite policy (#166)** decides how people with the member role invite: directly, for a household owner's or admin's approval, or not at all. Household owners and admins always invite directly, and household guests never invite.
+- **The member share policy (#810)** decides how people with the member role share a game they created with the household: directly, for a household owner's or admin's approval, or not at all. Household owners and admins always share directly, and household guests never share with the household. A share waiting for approval grants the household nothing until it is approved.
+- **Your own game shares need no household role (#810).** Whoever shared a game removes their own share, and whoever created a game sees its shares, whatever their household role: these come from User. So the table's rows on seeing, approving and removing the household's game shares are about other members' shares, and its three rows on sharing a game are about one the viewer created.
+- **A household's game shares are listed and approved on the household (#810).** `GET /api/households/:householdId/game-shares` lists every share into the household, waiting ones included, each with the game's id, title and thumbnail, so an approver can tell what they are approving. `POST /api/households/:householdId/game-shares/:shareId/approve` puts a waiting share in effect. Approving a share asks whether the person who made it could still share it, directly or for approval, with their household role and the member share policy as they are at that moment, as approving an invite asks of its sender. If the sharer has since been demoted to guest or banned, or the policy switched to Off, the approval is refused and the share stays waiting until someone removes it. After a switch to Direct it stays approvable. Turning a share down is removing it, at `DELETE /api/games/:id/shares/:shareId`.
 - **Withdrawing an invite you sent** needs no permission (#164). Revoking is cancelling an invite someone else sent.
 - **Leaving a household, or being removed from it, revokes invites (#747).** The invites the person sent and still open are revoked, and so are open invites to them by id. Invites to their email address stay open, because revoking them would show each sender whose address it was. So someone removed while an invite to their verified address is open can still accept it and rejoin, until it expires or a household owner or admin revokes it. Keeping someone out for good is a household ban (#782).
+- **Leaving a household, or being removed from it, ends the person's game shares into it (#810).** Every share into the household of a game they created ends, waiting ones included, as the invites they sent are revoked (#747): the standing to share into the household was the membership's. Their shares into other households stay.
 - **Accepting an invite checks that its sender could still send it (#747).** The check uses the sender's household role and the member invite policy as they are at that moment. If the sender has left, been demoted or banned, or the policy has been tightened since, the invite is revoked and the person accepting gets the same error as for any revoked invite. Someone who is already a member gets the already-a-member error instead, and nothing is revoked. An invite that an owner or admin approved still stands if the sender could send it for approval.
 - **Approving an invite asks the same question.** A household owner or admin can't approve an invite whose sender could no longer send it, directly or for approval: the approval is refused, takes nothing from the day's invite allowance, and the invite stays waiting for approval until someone revokes it.
 - **Invites don't come with the household.** Reading the household (`GET /api/households/:id`) reaches everyone who can see it, a member's friends included, so it carries no invites (#665). Listing the household's invites (`GET /api/households/:householdId/invites`), past ones included, is a household owner's or admin's, and their list adds each invitee's address (#167). An inviter finds the invites they sent at `GET /api/invites/sent`.

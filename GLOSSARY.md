@@ -193,7 +193,7 @@ How far from its owner an item can be seen: only the owner, friends, friends of 
 _Avoid_: visibility
 
 **Share**:
-A named user or household that an item is also shown to, whatever its reach.
+A record that also shows one item to a named user or household, whatever its reach. The user or household it names is its recipient.
 _Avoid_: visibility
 
 ### Roles and permissions
@@ -428,6 +428,9 @@ Which ways into a household are open to people outside it.
 
 **Member invite policy**:
 A household setting that decides how holders of the member role may invite: directly, only once a household owner or admin approves each invite, or not at all. A household's owners and admins always invite directly, and its guests never do.
+
+**Member share policy**:
+A household setting that decides how holders of the member role may share games they created with the household: directly, only once a household owner or admin approves each share, or not at all. A household's owners and admins always share directly, and its guests never do. It does not govern collection sharing, which puts a member's games into the household's game pool.
 
 **Join request**:
 Planned: a user asking to join a household, which its owners or admins approve or deny.

@@ -17,6 +17,18 @@ const ACCEPTED_FRIEND_OF_ACTING_USER = {
 };
 
 /**
+ * "A block between this User node and the acting user, whichever placed it",
+ * as the friends-of-friends rules and the share rule veto it (#496, #810).
+ * Written out for the reason `ACCEPTED_FRIEND_OF_ACTING_USER` is.
+ */
+const BLOCK_WITH_ACTING_USER = {
+  OR: [
+    { friendshipsRequested: { some: { addresseeId: '{{ user.id }}', status: 'Blocked' } } },
+    { friendshipsReceived: { some: { requesterId: '{{ user.id }}', status: 'Blocked' } } },
+  ],
+};
+
+/**
  * "A friend of a friend of the acting user, with no block between them", as a
  * friends-of-friends rule binds it (#496). Written out for the reason
  * `ACCEPTED_FRIEND_OF_ACTING_USER` is.
@@ -26,12 +38,7 @@ const FRIEND_OF_FRIEND_OF_ACTING_USER = {
     { friendshipsRequested: { some: { status: 'Accepted', addressee: { is: ACCEPTED_FRIEND_OF_ACTING_USER } } } },
     { friendshipsReceived: { some: { status: 'Accepted', requester: { is: ACCEPTED_FRIEND_OF_ACTING_USER } } } },
   ],
-  NOT: {
-    OR: [
-      { friendshipsRequested: { some: { addresseeId: '{{ user.id }}', status: 'Blocked' } } },
-      { friendshipsReceived: { some: { requesterId: '{{ user.id }}', status: 'Blocked' } } },
-    ],
-  },
+  NOT: BLOCK_WITH_ACTING_USER,
 };
 
 // Importing the catalog modules IS the positive integrity case: each runs its
@@ -258,7 +265,7 @@ describe('the shipped catalogs', () => {
       }
     });
 
-    it('let User read its own games, a friend’s that reach friends and everyone’s Public ones, and nothing else', () => {
+    it('let User read its own games, a friend’s that reach friends, everyone’s Public ones and the ones shared with it, and nothing else', () => {
       const conditionsOf = (slug: string) => PERMISSION_CATALOG.find((entry) => entry.slug === slug)?.conditions;
 
       // `User` is held by every signed-in actor, so an unconditioned read here
@@ -272,8 +279,46 @@ describe('the shipped catalogs', () => {
         createdBy: { is: ACCEPTED_FRIEND_OF_ACTING_USER },
       });
       expect(conditionsOf('read:game:public')).toStrictEqual({ deletedAt: null, reach: 'Public' });
+      // A share counts once it is in effect, and a user share only while no
+      // block stands between its owner and the recipient (#810). A lost
+      // `approvedAt` test would open a waiting share before anyone approved it.
+      expect(conditionsOf('read:game:shared')).toStrictEqual({
+        deletedAt: null,
+        OR: [
+          {
+            shares: { some: { userId: '{{ user.id }}', approvedAt: { not: null } } },
+            createdBy: { is: { NOT: BLOCK_WITH_ACTING_USER } },
+          },
+          {
+            shares: {
+              some: {
+                approvedAt: { not: null },
+                household: { is: { deletedAt: null, members: { some: { userId: '{{ user.id }}' } } } },
+              },
+            },
+          },
+        ],
+      });
       expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toEqual(
-        expect.arrayContaining(['read:game', 'read:game:friends', 'read:game:public']),
+        expect.arrayContaining(['read:game', 'read:game:friends', 'read:game:public', 'read:game:shared']),
+      );
+    });
+
+    // Every signed-in user shares the games they created (#810). Pinned
+    // exactly, as the game reads are: a lost `createdById` would let anyone
+    // share anyone's game, and a lost `householdId: null` would let a user
+    // share into any household past its member share policy.
+    it('let User share only its own live games with users, list their shares and remove the shares it made', () => {
+      const conditionsOf = (slug: string) => PERMISSION_CATALOG.find((entry) => entry.slug === slug)?.conditions;
+
+      expect(conditionsOf('create:game_share')).toStrictEqual({
+        householdId: null,
+        game: { is: { deletedAt: null, createdById: '{{ user.id }}' } },
+      });
+      expect(conditionsOf('read:game_share:own')).toStrictEqual({ game: { is: { createdById: '{{ user.id }}' } } });
+      expect(conditionsOf('delete:game_share')).toStrictEqual({ sharedById: '{{ user.id }}' });
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toEqual(
+        expect.arrayContaining(['create:game_share', 'read:game_share:own', 'delete:game_share']),
       );
     });
 

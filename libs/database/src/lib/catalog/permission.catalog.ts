@@ -1,6 +1,7 @@
 import type { EnumReachFilter, Prisma } from '../client';
 import { Action, ResourceType, RiskLevel } from '../client';
 import { acceptedFriendOf, friendOfFriendOf, REACHES_ADMITTING_FRIENDS } from '../utils/friendship-conditions';
+import { gameSharedWith } from '../utils/share-conditions';
 import { assertJsonConditions, assertUniqueSlugs, assertValidSubjects } from './catalog-integrity';
 import type { CatalogSubject, DefinedPermission } from './permission-entry';
 import { permission } from './permission-entry';
@@ -43,6 +44,13 @@ const reachAdmittingFriends = {
 //   Written as sibling keys, a relation nested in a to-one filter is emitted
 //   ahead of the scalar beside it.
 const friendOfFriendOfActingUser = friendOfFriendOf('{{ user.id }}');
+
+// The games shared with the acting user, by name or through a household they
+// belong to, once each share is in effect (#810). Its shape is
+// `gameSharedWith`'s, which the game list scope shares, so a read by id and
+// the list agree on what is shared with a user. Module-private for the reasons
+// `acceptedFriendOfActingUser` gives.
+const gameSharedWithActingUser = gameSharedWith('{{ user.id }}');
 
 // The owner's preference for showing their collection to friends. An absent
 // preferences row reads as the schema default, `true`, as FriendshipService
@@ -111,6 +119,16 @@ const ownerMembershipOfActingUser = {
   role: { is: { role: { is: { name: 'HouseholdOwner' } } } },
 } satisfies Prisma.HouseholdMemberWhereInput;
 
+// The acting user's membership row holding `HouseholdMember`, in the household
+// whose `members.some` it is spliced into: what a member's invite and share
+// permissions gate on, beside the household's policy (#166, #810). One
+// fragment keeps an edit to who counts from missing a copy. Typed and
+// module-private for the reasons `acceptedFriendOfActingUser` gives.
+const memberRoleMembershipOfActingUser = {
+  userId: '{{ user.id }}',
+  role: { is: { role: { is: { name: 'HouseholdMember' } } } },
+} satisfies Prisma.HouseholdMemberWhereInput;
+
 // The household roles a household admin acts on: the member and guest roles.
 // Only a household owner acts on the household admin role (#168), so the
 // household admin's copies of the member, invite and revoke permissions match
@@ -130,10 +148,37 @@ const memberInviteUnder = (memberInvitePolicy: 'Direct' | 'NeedsApproval') =>
     household: {
       is: {
         settings: { is: { memberInvitePolicy } },
-        members: { some: { userId: '{{ user.id }}', role: { is: { role: { is: { name: 'HouseholdMember' } } } } } },
+        members: { some: memberRoleMembershipOfActingUser },
       },
     },
   }) satisfies Prisma.InviteWhereInput;
+
+// A live game the acting user created, in the share whose `game` it is spliced
+// into: every create of a share names one (#810). One fragment keeps an edit to
+// which games may be shared from missing a copy. Typed and module-private for
+// the reasons `acceptedFriendOfActingUser` gives.
+const liveGameOfActingUser = {
+  deletedAt: null,
+  createdById: '{{ user.id }}',
+} satisfies Prisma.GameWhereInput;
+
+// A member's share of a game into their own household (#810): the acting user
+// holds the member role there, the household's settings let members share in
+// this way, and the game is a live one the acting user created. A household
+// owner or admin shares directly, whatever the policy, and a guest never
+// shares with the household.
+// Typed and module-private for the reasons `acceptedFriendOfActingUser` gives.
+const memberShareUnder = (memberSharePolicy: 'Direct' | 'NeedsApproval') =>
+  ({
+    householdId: '{{ householdId }}',
+    game: { is: liveGameOfActingUser },
+    household: {
+      is: {
+        settings: { is: { memberSharePolicy } },
+        members: { some: memberRoleMembershipOfActingUser },
+      },
+    },
+  }) satisfies Prisma.GameShareWhereInput;
 
 /**
  * The complete seeded permission catalog — the manifest of every permission
@@ -431,9 +476,11 @@ export const PERMISSION_CATALOG = [
   // rows, `:friends` is a friend's games that reach their friends, and
   // `:public` is everyone else's view. A game carries a reach its creator
   // chooses, and `User` is held by every signed-in actor, so an unconditioned
-  // read here would hand every private game to everyone (#472).
+  // read here would hand every private game to everyone (#472). `:shared` is
+  // the games their owners shared with the acting user, on top of each game's
+  // reach (#810).
   // `:public` is static — no render variable — so a plugin can hold it; the
-  // other two bind `user.id`, which is outside a plugin's render context.
+  // rest bind `user.id`, which is outside a plugin's render context.
   // Staff read everything through `read:public_content`.
   permission({
     action: Action.read,
@@ -469,6 +516,17 @@ export const PERMISSION_CATALOG = [
     slug: 'read:game:friends-of-friends',
     riskLevel: RiskLevel.Low,
     reason: "View a friend of a friend's games that reach friends of friends",
+  }),
+  // A share waiting for approval grants nothing, and a block between the
+  // game's owner and a named recipient vetoes the user share (#810). Shaped
+  // as `gameSharedWithActingUser` explains.
+  permission({
+    action: Action.read,
+    subject: ResourceType.Game,
+    conditions: { deletedAt: null, ...gameSharedWithActingUser },
+    slug: 'read:game:shared',
+    riskLevel: RiskLevel.Low,
+    reason: 'View the games shared with you or with a household you belong to',
   }),
   // Import jobs only (#479). An import job describes public content, so every
   // user may watch every import, as the import status route and the import
@@ -520,6 +578,133 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Low,
     reason: 'Delete own games',
     conditions: { createdById: '{{ user.id }}' },
+  }),
+
+  // --- Game Shares ---
+  //
+  // A game's owner shows it to one named user or one household, on top of its
+  // reach (#810). A share is in effect once `approvedAt` is set, and only then
+  // does `read:game:shared` admit anyone through it. Every create names the
+  // game as a live one the acting user created.
+  //
+  // The grants `User` holds rate `Low`: each acts on the actor's own game, or
+  // a share they made, toward someone they chose. The household ones rate
+  // `Medium`: a household share shows the game to the whole roster, and the
+  // household owner's and admin's grants act on shares other members made.
+  //
+  // A share to a named user. It names no household, so no household's member
+  // share policy has a say in it.
+  permission({
+    action: Action.create,
+    subject: ResourceType.GameShare,
+    conditions: { householdId: null, game: { is: liveGameOfActingUser } },
+    slug: 'create:game_share',
+    riskLevel: RiskLevel.Low,
+    reason: 'Share a game you created with another user',
+  }),
+  // A game's owner lists its shares, to users and households alike, waiting
+  // ones included.
+  permission({
+    action: Action.read,
+    subject: ResourceType.GameShare,
+    conditions: { game: { is: { createdById: '{{ user.id }}' } } },
+    slug: 'read:game_share:own',
+    riskLevel: RiskLevel.Low,
+    reason: 'View the shares of the games you created',
+  }),
+  // The sharer removes a share they made, to a user or to a household.
+  permission({
+    action: Action.delete,
+    subject: ResourceType.GameShare,
+    conditions: { sharedById: '{{ user.id }}' },
+    slug: 'delete:game_share',
+    riskLevel: RiskLevel.Low,
+    reason: 'Remove a share you made',
+  }),
+  // A household owner or admin shares a game they created into the household
+  // directly, whatever its member share policy, as they always invite
+  // directly. The instance must carry the household's members with their
+  // roles, or the role clause denies it.
+  permission({
+    action: Action.create,
+    subject: ResourceType.GameShare,
+    conditions: {
+      householdId: '{{ householdId }}',
+      game: { is: liveGameOfActingUser },
+      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+    },
+    slug: 'create:game_share:household',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Share a game you created with your household',
+  }),
+  // A member shares under the household's own policy, as two permissions the
+  // service asks about in turn, as a member's invite does (#166): first
+  // whether the share may take effect at once, then whether it may wait for
+  // approval. Whichever passes decides `approvedAt`; the client never says.
+  // Under `Off` neither does. The instance carries the household's settings
+  // beside its roster.
+  //
+  // Which household role shares how, under each policy, is the table in
+  // `libs/api/household/README.md`.
+  permission({
+    action: Action.create,
+    subject: ResourceType.GameShare,
+    conditions: memberShareUnder('Direct'),
+    slug: 'create:game_share:household:member-direct',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Share a game you created with your household, when its members may share directly',
+  }),
+  permission({
+    action: Action.create,
+    subject: ResourceType.GameShare,
+    conditions: { ...memberShareUnder('NeedsApproval'), approvedAt: null },
+    slug: 'create:game_share:household:member-approval',
+    riskLevel: RiskLevel.Medium,
+    reason: "Share a game you created with your household for an owner's or admin's approval",
+  }),
+  // A household's shares, waiting and in effect, are its owners' and admins'
+  // to list, as its invites are. A member lists the shares of the games they
+  // created through `read:game_share:own`.
+  permission({
+    action: Action.read,
+    subject: ResourceType.GameShare,
+    conditions: {
+      householdId: '{{ householdId }}',
+      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+    },
+    slug: 'read:game_share:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "View a household's game shares",
+  }),
+  // Approving puts a member's waiting share in effect. The audience is the
+  // list's. A type-only check passes any household's owner or admin, so the
+  // route asks about a share of THIS household. Bound to `approvedAt`, the
+  // column only an approval writes, as `update:household_invite:approve` is
+  // bound to its own, and the approve route asks about that column.
+  permission({
+    action: Action.update,
+    subject: ResourceType.GameShare,
+    fields: ['approvedAt'],
+    conditions: {
+      householdId: '{{ householdId }}',
+      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+    },
+    slug: 'update:game_share:approve',
+    riskLevel: RiskLevel.Medium,
+    reason: "Approve a member's game share to the household",
+  }),
+  // A household owner or admin removes a share from the household, whoever
+  // made it, waiting or in effect.
+  permission({
+    action: Action.delete,
+    subject: ResourceType.GameShare,
+    conditions: {
+      householdId: '{{ householdId }}',
+      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+    },
+    slug: 'delete:game_share:household',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Remove a game share from the household',
   }),
 
   // --- PlatformGame ---
