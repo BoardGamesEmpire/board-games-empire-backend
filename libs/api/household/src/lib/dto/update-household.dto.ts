@@ -19,7 +19,8 @@ export class UpdateHouseholdSettingsDto {
     description:
       'Whether members may invite. `Direct`: their invites go straight to the invitee. `NeedsApproval` (the ' +
       'default): their invites wait for an owner or admin to approve them. `Off`: members cannot invite. Owners ' +
-      'and admins always invite directly, and guests never invite. A change applies to invites sent after it.',
+      'and admins always invite directly, and guests never invite. A change applies to invites sent after it, and ' +
+      'a switch to `Off` also stops a waiting invite from being approved and an outstanding one from being accepted.',
   })
   @ValidateIf((_, value) => value !== undefined)
   @IsEnum(MemberInvitePolicy, { message: i18nValidationMessage('validation.isEnum') })

@@ -2,8 +2,10 @@
 //
 // It governs the member role only. A household owner or admin always invites
 // directly, and a household guest never invites. A change applies to the
-// invites sent after it: one already waiting stays waiting, and an
-// outstanding one stays outstanding.
+// invites sent after it, and approving or accepting an invite asks the policy
+// as it is then (#747): an invite stands only while its sender could still
+// send it as it was sent. So after a switch to `Off` a member's waiting invite
+// can no longer be approved, and their outstanding one admits nobody.
 enum MemberInvitePolicy {
   // Members cannot invite.
   Off

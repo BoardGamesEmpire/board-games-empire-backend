@@ -193,7 +193,7 @@ How far from its owner an item can be seen: only the owner, friends, friends of 
 _Avoid_: visibility
 
 **Share**:
-A named user or household that an item is also shown to, whatever its reach.
+A record that also shows one item to a named user or household, whatever its reach. The user or household it names is its recipient.
 _Avoid_: visibility
 
 ### Roles and permissions
