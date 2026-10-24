@@ -12,9 +12,9 @@ import { createMemberClient } from './household-request';
  *
  * - Leaving and being removed revoke, in the same transaction, the outstanding
  *   invites the member sent and the invites that name them by id.
- * - Invites to their address stay open: revoking those would tell each
- *   inviter whose address it was. Keeping someone out for good is a household
- *   ban's (#782), which changes the case pinned here when it lands.
+ * - Invites to their address stay open when they leave or are removed:
+ *   revoking those would tell each inviter whose address it was. A household
+ *   ban (#782) is what closes them, by withholding them.
  * - Accepting an invite asks whether its sender could still send it now, with
  *   the role it offers. If not, the invite is revoked, and the invitee meets
  *   the 409 a revoked invite gets.
@@ -124,7 +124,8 @@ describe('household invites when a member leaves, and the sender check at accept
         await expectRevokedRefusal(await accept(h.member, byId.id).expect(409), byId.id);
         await expect(membership(h.householdId, h.member.user.id)).resolves.toBeNull();
 
-        // Open on purpose, until a household ban (#782) can refuse them.
+        // Open on purpose: leaving or being removed leaves an address invite
+        // open, and a household ban (#782) is what closes it.
         await expect(storedInvite(byAddress.id)).resolves.toMatchObject({ status: InviteStatus.Pending });
         acceptEnvelope(await accept(h.member, byAddress.id).expect(200), 'POST /api/invites/:id/accept');
         await expect(membership(h.householdId, h.member.user.id)).resolves.not.toBeNull();

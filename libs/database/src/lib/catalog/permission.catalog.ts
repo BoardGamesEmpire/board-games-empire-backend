@@ -153,6 +153,14 @@ const memberInviteUnder = (memberInvitePolicy: 'Direct' | 'NeedsApproval') =>
     },
   }) satisfies Prisma.InviteWhereInput;
 
+// A ban from a household the acting user is an owner or admin of, as the four
+// household ban permissions condition on it (#782). Typed and module-private
+// for the reasons `acceptedFriendOfActingUser` gives.
+const ownerOrAdminHouseholdBan = {
+  householdId: '{{ householdId }}',
+  household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+} satisfies Prisma.HouseholdBanWhereInput;
+
 // A live game the acting user created, in the share whose `game` it is spliced
 // into: every create of a share names one (#810). One fragment keeps an edit to
 // which games may be shared from missing a copy. Typed and module-private for
@@ -1593,6 +1601,47 @@ export const PERMISSION_CATALOG = [
     slug: 'delete:household_member:leave',
     riskLevel: RiskLevel.Low,
     reason: 'Leave a household you belong to',
+  }),
+  // Household bans (#782), held by household owners and admins alike. A ban
+  // of a current member removes them, and the service asks about removing
+  // them through the actor's `manage` scope on the member, which keeps a household
+  // admin to the member and guest roles (#168). The ban row itself carries no
+  // role for a copy limited to admins to read.
+  //
+  // `create` is `High`: it removes a member and keeps someone out of the
+  // household for good. Lifting one is `Medium`, since it reopens the household
+  // to invites; changing the reason touches only text its owners and admins read.
+  permission({
+    action: Action.read,
+    subject: ResourceType.HouseholdBan,
+    conditions: ownerOrAdminHouseholdBan,
+    slug: 'read:household_ban',
+    riskLevel: RiskLevel.Low,
+    reason: "See your household's bans",
+  }),
+  permission({
+    action: Action.create,
+    subject: ResourceType.HouseholdBan,
+    conditions: ownerOrAdminHouseholdBan,
+    slug: 'create:household_ban',
+    riskLevel: RiskLevel.High,
+    reason: 'Ban someone from your household',
+  }),
+  permission({
+    action: Action.update,
+    subject: ResourceType.HouseholdBan,
+    conditions: ownerOrAdminHouseholdBan,
+    slug: 'update:household_ban',
+    riskLevel: RiskLevel.Low,
+    reason: 'Change the reason for a ban from your household',
+  }),
+  permission({
+    action: Action.delete,
+    subject: ResourceType.HouseholdBan,
+    conditions: ownerOrAdminHouseholdBan,
+    slug: 'delete:household_ban',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Lift a ban from your household',
   }),
   // No permission creates a HouseholdRole row. Adding a member writes its role
   // row in the same transaction (`addMemberWithin`), and no route asks

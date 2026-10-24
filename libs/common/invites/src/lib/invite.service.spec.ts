@@ -13,7 +13,11 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InviteEvents } from './constants/invite-events.constant';
-import { DEFAULT_INVITE_TTL_MS, INVITE_TOKEN_MINT_ATTEMPTS } from './constants/invite.constants';
+import {
+  DEFAULT_INVITE_TTL_MS,
+  INVITE_TOKEN_MINT_ATTEMPTS,
+  OUTSTANDING_INVITE_STATUSES,
+} from './constants/invite.constants';
 import {
   InviteAcceptedEvent,
   InviteApprovedEvent,
@@ -1570,6 +1574,60 @@ describe('InviteService', () => {
       await expect(
         service.revokeOutstandingOfUserWithin(asTx(tx), { householdId: 'hh-1' }, DEPARTED_ID),
       ).resolves.toEqual({ count: 0, events: [] });
+    });
+  });
+
+  describe('withholdOutstandingToAddressWithin', () => {
+    it('withholds the outstanding invites by address into the context, normalising the address (#782)', async () => {
+      tx.invite.updateMany.mockResolvedValue({ count: 2 } as never);
+
+      const result = await service.withholdOutstandingToAddressWithin(
+        asTx(tx),
+        { householdId: 'hh-1' },
+        '  Banned@Example.COM ',
+      );
+
+      expect(tx.invite.updateMany).toHaveBeenCalledWith({
+        where: {
+          householdId: 'hh-1',
+          inviteeId: null,
+          inviteeEmail: 'banned@example.com',
+          withheld: false,
+          status: { in: [...OUTSTANDING_INVITE_STATUSES] },
+        },
+        data: { withheld: true },
+      });
+      expect(result).toEqual({ count: 2 });
+    });
+
+    it('announces nothing, so no inviter learns whose address it was (#782)', async () => {
+      tx.invite.updateMany.mockResolvedValue({ count: 1 } as never);
+
+      const result = await service.withholdOutstandingToAddressWithin(
+        asTx(tx),
+        { householdId: 'hh-1' },
+        'banned@example.com',
+      );
+
+      expect(result).not.toHaveProperty('events');
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('stays in its context (#782)', async () => {
+      tx.invite.updateMany.mockResolvedValue({ count: 0 } as never);
+
+      await service.withholdOutstandingToAddressWithin(asTx(tx), { eventId: 'ev-1' }, 'banned@example.com');
+
+      const [{ where }] = tx.invite.updateMany.mock.calls[0] as [{ where: Prisma.InviteWhereInput }];
+      expect(where).toMatchObject({ eventId: 'ev-1' });
+      expect(where).not.toHaveProperty('householdId');
+    });
+
+    it('refuses a blank address, which would match the invites that name no address (#782)', async () => {
+      await expect(
+        service.withholdOutstandingToAddressWithin(asTx(tx), { householdId: 'hh-1' }, '   '),
+      ).rejects.toThrow('An address to withhold invites to must not be blank');
+      expect(tx.invite.updateMany).not.toHaveBeenCalled();
     });
   });
 

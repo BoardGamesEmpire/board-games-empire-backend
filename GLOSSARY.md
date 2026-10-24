@@ -163,7 +163,7 @@ An offer to join a household, an event, a campaign or the server, which the invi
 _Avoid_: invitation; invite for an attendee's RSVP state (say invited)
 
 **Ban**:
-A user being barred from a server, for a time or for good. A qualified ban, such as a feedback ban, or a planned chat or game-creation ban, bars them from one activity only.
+A user being barred from a server, for a time or for good. A qualified ban, such as a feedback ban, or a planned chat or game-creation ban, bars them from one activity only. A household ban bars someone from one household: they can't be invited to it, and no admission lets them in.
 _Avoid_: banned for the service account's sign-in lock (say cannot sign in)
 
 ### Friends and sharing

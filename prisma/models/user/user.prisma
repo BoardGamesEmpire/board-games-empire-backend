@@ -80,6 +80,10 @@ model User {
   // or the founder themselves. `HouseholdMember.origin` says which.
   householdMembersAdded HouseholdMember[] @relation("HouseholdMembersAdded")
 
+  // The households that have banned this user, and the bans they issued (#782).
+  householdBans       HouseholdBan[] @relation("HouseholdBansReceived")
+  householdBansIssued HouseholdBan[] @relation("HouseholdBansIssued")
+
   // campaignsOwned    Campaign[] @relation("CampaignOwner")
   // campaignsMastered Campaign[] @relation("CampaignGameMaster")
   // campaignCharacters               CampaignCharacter[]

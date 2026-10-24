@@ -236,6 +236,8 @@ describe('HouseholdMemberService', () => {
 
     // Household exists by default; individual tests override the probe.
     db.household.count.mockResolvedValue(1);
+    // Nobody is banned by default (#782).
+    db.householdBan.findUnique.mockResolvedValue(null);
     // Mutations run inside a transaction; unwrap onto the mock delegates.
     unwrapTransaction(db);
     // The owner lock is taken on EVERY membership mutation now, not only when the
@@ -1205,6 +1207,91 @@ describe('HouseholdMemberService', () => {
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
     });
   });
+  describe('removeUserWithin (#782)', () => {
+    const asTx = (client: MockDatabaseService): Prisma.TransactionClient =>
+      client as unknown as Prisma.TransactionClient;
+    const target = makeMember({ id: 'member-2', userId: 'user-2' });
+
+    beforeEach(() => {
+      db.excludedGame.deleteMany.mockResolvedValue({ count: 0 } as never);
+      db.householdRole.deleteMany.mockResolvedValue({ count: 1 } as never);
+      db.householdMember.delete.mockResolvedValue(resolves(target));
+    });
+
+    it("removeUserWithin returns null for a user who isn't a member, and deletes nothing (#782)", async () => {
+      db.householdMember.findUnique.mockResolvedValue(null);
+
+      await expect(service.removeUserWithin(asTx(db), 'hh-1', 'user-2')).resolves.toBeNull();
+
+      expect(db.householdMember.findUnique).toHaveBeenCalledWith({
+        where: { householdId_userId: { householdId: 'hh-1', userId: 'user-2' } },
+        select: MEMBER_SELECT,
+      });
+      expect(db.householdMember.delete).not.toHaveBeenCalled();
+      expect(invites.revokeOutstandingOfUserWithin).not.toHaveBeenCalled();
+    });
+
+    it("removeUserWithin removes a member under the actor's manage conditions and hands back the revoked invites and the ended game shares (#782, #810)", async () => {
+      const revoked = [{ eventName: 'invite.revoked', subjectId: 'inv-1' }] as never;
+      db.householdMember.findUnique.mockResolvedValue(resolves(target));
+      db.householdMember.findFirst.mockResolvedValue(resolves(target));
+      invites.revokeOutstandingOfUserWithin.mockResolvedValue({ count: 1, events: revoked });
+      db.gameShare.findMany.mockResolvedValue([gameShareRow('share-1')] as never);
+      db.gameShare.deleteMany.mockResolvedValue({ count: 1 } as never);
+
+      const removed = await service.removeUserWithin(asTx(db), 'hh-1', 'user-2');
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+        ResourceType.HouseholdMember,
+        Action.manage,
+      );
+      expect(db.householdMember.findFirst).toHaveBeenNthCalledWith(1, {
+        where: { householdId: 'hh-1', userId: 'user-2', AND: [COND] },
+        select: MEMBER_SELECT,
+      });
+      expect(db.householdMember.delete).toHaveBeenCalledWith({ where: { id: 'member-2' } });
+      expect(invites.revokeOutstandingOfUserWithin).toHaveBeenCalledWith(db, { householdId: 'hh-1' }, 'user-2');
+      expect(db.gameShare.deleteMany).toHaveBeenCalledWith({ where: { id: 'share-1' } });
+      expect(removed).toEqual({ removed: target, revoked, endedShares: [gameShareRow('share-1')] });
+
+      // On the caller's transaction; evicting the cache and announcing the
+      // invites and the shares wait for the caller's commit.
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(permissions.invalidateUser).not.toHaveBeenCalled();
+      expect(invites.emit).not.toHaveBeenCalled();
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+
+    it("removeUserWithin refuses with 403 a member the actor's manage conditions hide, as a household admin's hide another admin (#782)", async () => {
+      db.householdMember.findUnique.mockResolvedValue(resolves(target));
+      db.householdMember.findFirst.mockResolvedValue(null);
+      stubCounts({ scoped: 0, unscoped: 1 });
+
+      // In a ban's words, not removal's: the caller asked for no delete.
+      await expect(service.removeUserWithin(asTx(db), 'hh-1', 'user-2')).rejects.toMatchObject({
+        status: Http.Forbidden,
+        response: expect.objectContaining({ key: 'errors.household.ban_forbidden' }),
+      });
+
+      expect(db.householdMember.delete).not.toHaveBeenCalled();
+      expect(invites.revokeOutstandingOfUserWithin).not.toHaveBeenCalled();
+    });
+
+    it('removeUserWithin refuses with 400 to remove the last owner (#782)', async () => {
+      const owner = makeOwner({ id: 'member-2', userId: 'user-2' });
+      db.householdMember.findUnique.mockResolvedValue(resolves(owner));
+      db.householdMember.findFirst.mockResolvedValue(resolves(owner));
+      stubRawQueries({ owners: ['member-2'] });
+
+      await expect(service.removeUserWithin(asTx(db), 'hh-1', 'user-2')).rejects.toMatchObject({
+        status: Http.BadRequest,
+        response: expect.objectContaining({ key: 'errors.household.last_owner' }),
+      });
+
+      expect(db.householdMember.delete).not.toHaveBeenCalled();
+    });
+  });
+
   describe('transferOwnership', () => {
     const ACTOR = () => makeOwner({ id: 'member-actor', userId: 'actor-1' });
     const TARGET = () => makeMember({ id: 'member-2', userId: 'user-2' });
@@ -1708,6 +1795,38 @@ describe('HouseholdMemberService', () => {
       );
       expect(result.member).toBe(created);
       expect(result.admitted).toBe(true);
+    });
+
+    describe('a household ban (#782)', () => {
+      it('refuses a user the household has banned, before any quota is taken (#782)', async () => {
+        stubAdmissible();
+        db.householdBan.findUnique.mockResolvedValue({ id: 'ban-1' } as never);
+
+        await expect(service.addMemberWithin(asTx(db), PARAMS)).rejects.toMatchObject({
+          status: Http.Forbidden,
+          response: expect.objectContaining({ key: 'errors.household.banned_from_household' }),
+        });
+
+        expect(db.householdBan.findUnique).toHaveBeenCalledWith({
+          where: { householdId_userId: { householdId: 'hh-1', userId: 'user-2' } },
+          select: { id: true },
+        });
+        expect(quotas.consume).not.toHaveBeenCalled();
+        expect(db.householdMember.create).not.toHaveBeenCalled();
+      });
+
+      it('checks the ban under the household lock (#782)', async () => {
+        stubAdmissible();
+
+        await service.addMemberWithin(asTx(db), PARAMS);
+
+        // Both are the database double's mocks, so they share one call counter.
+        const shareLock = db.$queryRaw.mock.calls.findIndex((call: unknown[]) => isHouseholdShareLockSql(call[0]));
+        expect(shareLock).toBeGreaterThanOrEqual(0);
+        expect(db.$queryRaw.mock.invocationCallOrder[shareLock]).toBeLessThan(
+          db.householdBan.findUnique.mock.invocationCallOrder[0],
+        );
+      });
     });
 
     it('defaults the role to HouseholdMember', async () => {
