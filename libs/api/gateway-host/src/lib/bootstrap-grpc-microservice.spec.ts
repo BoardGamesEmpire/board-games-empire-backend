@@ -99,8 +99,10 @@ function appWithInvalidConfig(): Type<unknown> {
 }
 
 interface LogRecord {
+  readonly level?: number;
   readonly msg: string;
-  readonly err?: { readonly message: string };
+  readonly context?: string;
+  readonly err?: { readonly message: string; readonly stack?: string };
 }
 
 /** A real pino logger whose records are kept in memory, in the order they were written. */
@@ -217,8 +219,8 @@ describe('bootstrapGrpcMicroservice', () => {
   });
 
   describe('when the config fails validation', () => {
-    it('lets Nest name the variable that failed, before anything reads the address', async () => {
-      // Nest prints the failure, then exits the process. Thrown here instead,
+    it('logs the variable that failed through the bootstrap logger, before anything reads the address (#627)', async () => {
+      // Nest logs the failure, then exits the process. Thrown here instead,
       // so the boot stops where it would have. Nest aborts when that exit
       // throws, so the abort throws too.
       const stopped = (): never => {
@@ -234,11 +236,21 @@ describe('bootstrapGrpcMicroservice', () => {
       await bootstrap({ appModule: appWithInvalidConfig(), addressConfig: requiredAddress, bootstrapLogger: logger });
 
       const printed = stderr.mock.calls.map(([chunk]) => String(chunk)).join('');
+      const printedToStdout = stdout.mock.calls.map(([chunk]) => String(chunk)).join('');
       stderr.mockRestore();
       stdout.mockRestore();
 
       expect(exit).toHaveBeenCalledWith(1);
-      expect(printed).toContain(`"${CREDENTIAL_ENV}" is required`);
+      // Exactly one error record, from Nest's own ExceptionHandler and carrying
+      // the error's stack, rather than Nest's colour-coded console output.
+      const failures = records.filter(
+        (record) => record.level === 50 && record.msg.includes(`"${CREDENTIAL_ENV}" is required`),
+      );
+      expect(failures).toHaveLength(1);
+      expect(failures[0].context).toBe('ExceptionHandler');
+      expect(failures[0].err?.stack).toEqual(expect.any(String));
+      expect(printed).toBe('');
+      expect(printedToStdout).toBe('');
       // Neither Nest's output nor the bootstrap's own log names the address.
       expect(printed + JSON.stringify(records)).not.toContain(HOST_ENV);
     });

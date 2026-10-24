@@ -142,6 +142,42 @@ describe('the password routes authFactory serves', () => {
   });
 });
 
+/** A database where every lookup finds nothing. */
+const noUsers = new Proxy(
+  {},
+  { get: () => new Proxy({}, { get: (_model, operation) => async () => (operation === 'findMany' ? [] : null) }) },
+) as PrismaClient;
+
+/**
+ * better-auth's Prisma adapter prints its debug lines through a console logger
+ * of its own, never through the `logger` option, so they would bypass pino:
+ * colour codes and multi-line objects, with each query's inputs and results in
+ * them (#627). Fails with the adapter's `debugLogs` on.
+ */
+describe("authFactory's database reads", () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('write nothing to the console (#627)', async () => {
+    const auth = authFactory(noUsers, config);
+    const writes = (['log', 'info', 'warn', 'error', 'debug'] as const).map((method) =>
+      jest.spyOn(console, method).mockImplementation(() => undefined),
+    );
+
+    const response = await auth.handler(
+      new Request('http://localhost:33333/api/auth/sign-in/email', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'nobody@example.com', password: 'not-the-password' }),
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    for (const write of writes) {
+      expect(write).not.toHaveBeenCalled();
+    }
+  });
+});
+
 /**
  * better-auth's own rate limits run in its router, ahead of every hook, so
  * these go through a real instance's handler (#640). Each sign-in is a wrong
@@ -149,12 +185,6 @@ describe('the password routes authFactory serves', () => {
  * 401 after hashing the password, as it would for a registered user's wrong one.
  */
 describe("authFactory's sign-in rate limit", () => {
-  /** Every lookup finds nothing. */
-  const noUsers = new Proxy(
-    {},
-    { get: () => new Proxy({}, { get: (_model, operation) => async () => (operation === 'findMany' ? [] : null) }) },
-  ) as PrismaClient;
-
   /**
    * An instance over an in-memory store, with the limiter on. better-auth
    * turns it on only when NODE_ENV is production, which it reads once, at

@@ -3,7 +3,7 @@ import { Writable } from 'node:stream';
 import pino, { type TransportTargetOptions } from 'pino';
 import pinoHttp from 'pino-http';
 import request from 'supertest';
-import { buildBasePinoOptions, resolvePinoLevel } from './base-pino.options';
+import { buildBasePinoOptions, resolvePinoLevel, type LogDestination } from './base-pino.options';
 
 /**
  * Narrows the loose `LoggerOptions['transport']` to the multi-target
@@ -19,6 +19,9 @@ const getTargets = (transport: unknown): TransportTargetOptions[] => {
   }
   throw new Error('expected transport to expose targets[]');
 };
+
+// Passed explicitly so no assertion depends on whether Jest itself runs on a terminal.
+const TERMINAL = { isTTY: true };
 
 describe('resolvePinoLevel', () => {
   it('uses LOG_LEVEL when set', () => {
@@ -44,32 +47,38 @@ describe('resolvePinoLevel', () => {
 
 describe('buildBasePinoOptions', () => {
   it('always configures at least one transport target', () => {
-    const options = buildBasePinoOptions({});
+    const options = buildBasePinoOptions({}, TERMINAL);
 
     expect(getTargets(options.transport)).toHaveLength(1);
   });
 
-  it('configures pino-pretty as the sole default target', () => {
-    const targets = getTargets(buildBasePinoOptions({}).transport);
+  it('pretty-prints with colour when stdout is a terminal', () => {
+    const targets = getTargets(buildBasePinoOptions({}, { isTTY: true }).transport);
 
-    expect(targets).toHaveLength(1);
-    expect(targets[0].target).toBe('pino-pretty');
+    expect(targets).toEqual([{ target: 'pino-pretty', level: 'debug', options: { colorize: true, singleLine: true } }]);
   });
 
-  it('configures pino-pretty with colorize and singleLine', () => {
-    const [target] = getTargets(buildBasePinoOptions({}).transport);
+  it('writes JSON lines to stdout when stdout is not a terminal (#627)', () => {
+    const targets = getTargets(buildBasePinoOptions({}, { isTTY: false }).transport);
 
-    expect(target.options).toEqual({ colorize: true, singleLine: true });
+    expect(targets).toEqual([{ target: 'pino/file', level: 'debug', options: { destination: 1 } }]);
+  });
+
+  it('treats a stream without isTTY as no terminal (#627)', () => {
+    // A piped process.stdout has no isTTY property at runtime, though its type declares one.
+    const targets = getTargets(buildBasePinoOptions({}, {} as LogDestination).transport);
+
+    expect(targets).toEqual([{ target: 'pino/file', level: 'debug', options: { destination: 1 } }]);
   });
 
   it('applies the resolved level to the top-level options', () => {
-    const options = buildBasePinoOptions({ LOG_LEVEL: 'warn' });
+    const options = buildBasePinoOptions({ LOG_LEVEL: 'warn' }, TERMINAL);
 
     expect(options.level).toBe('warn');
   });
 
   it('applies the resolved level to every transport target', () => {
-    const targets = getTargets(buildBasePinoOptions({ LOG_LEVEL: 'warn' }).transport);
+    const targets = getTargets(buildBasePinoOptions({ LOG_LEVEL: 'warn' }, TERMINAL).transport);
 
     for (const target of targets) {
       expect(target.level).toBe('warn');
@@ -84,16 +93,19 @@ describe('buildBasePinoOptions', () => {
 
   it('does NOT inject a pino-opentelemetry-transport target', () => {
     const targets = getTargets(
-      buildBasePinoOptions({
-        OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
-      }).transport,
+      buildBasePinoOptions(
+        {
+          OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
+        },
+        TERMINAL,
+      ).transport,
     );
 
     expect(targets.some((t) => t.target === 'pino-opentelemetry-transport')).toBe(false);
   });
 
   it('does NOT install a mixin (OTel correlation is layered by @bge/otel)', () => {
-    const options = buildBasePinoOptions({});
+    const options = buildBasePinoOptions({}, TERMINAL);
 
     expect(options.mixin).toBeUndefined();
   });

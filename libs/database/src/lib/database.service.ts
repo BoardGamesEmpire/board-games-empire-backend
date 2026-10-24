@@ -7,9 +7,22 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { Prisma, PrismaClient } from './client';
 
+/**
+ * Names the log levels Prisma may emit as events, so `$on` accepts them.
+ * Without it the client is typed with no log events, and `$on` takes `never`.
+ */
+type DatabaseClientOptions = Required<Pick<Prisma.PrismaClientOptions, 'adapter'>> & {
+  log: Array<{ emit: 'event'; level: Prisma.LogLevel }>;
+};
+
+/** One handler per Prisma log level, typed with the event `$on` passes for it. */
+type PrismaLogHandlers = {
+  [Level in Prisma.LogLevel]: (event: Level extends 'query' ? Prisma.QueryEvent : Prisma.LogEvent) => void;
+};
+
 @Injectable()
 export class DatabaseService
-  extends PrismaClient
+  extends PrismaClient<DatabaseClientOptions>
   implements OnModuleInit, OnApplicationShutdown, DatabasePoolMetricsSource
 {
   private readonly logger = new Logger(DatabaseService.name);
@@ -23,19 +36,43 @@ export class DatabaseService
    */
   private readonly pool: Pool;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(configService: ConfigService) {
     Logger.log('Initializing DatabaseService', DatabaseService.name);
 
     const connectionString = configService.getOrThrow<string>('database.url');
     const schema = new URL(connectionString).searchParams.get('schema') ?? configService.get<string>('database.schema');
     const pool = new Pool({ connectionString });
+    // Queries are opt-in, because a query line is noise in development and
+    // the log is no place for their parameters.
+    const levels: Prisma.LogLevel[] = [
+      'error',
+      ...(env.isDevelopment ? (['warn', 'info'] as const) : []),
+      ...(configService.get<boolean>('database.logQueries') === true ? (['query'] as const) : []),
+    ];
 
     super({
       adapter: new PrismaPg(pool, { schema }),
-      log: env.isDevelopment ? ['query', 'info', 'warn', 'error'] : ['error'],
+      // Events, not the default stdout output: Prisma prints its own
+      // multi-line `prisma:error` text there, outside the logger's redaction
+      // and format (#627).
+      log: levels.map((level) => ({ emit: 'event', level })),
     });
 
     this.pool = pool;
+
+    // Listened for here, before anything can query: with `emit: 'event'`
+    // Prisma prints nothing itself, so an event emitted before its listener
+    // exists is lost.
+    const handlers: PrismaLogHandlers = {
+      error: (e) => this.logger.error(e.message),
+      warn: (e) => this.logger.warn(e.message),
+      info: (e) => this.logger.log(e.message),
+      // The query event's `params` are left out on purpose: they can carry
+      // session tokens (#627).
+      query: (e) => this.logger.log(`Query: ${e.query} (${e.duration}ms)`),
+    };
+    const listen = <Level extends Prisma.LogLevel>(level: Level) => this.$on(level, handlers[level]);
+    levels.forEach(listen);
 
     // https://github.com/prisma/prisma/issues/18628#issuecomment-3213927054
     Object.assign(this, this.$extends(createCaslExtension()));
@@ -48,15 +85,6 @@ export class DatabaseService
     } catch (error) {
       this.logger.error(error);
       throw error;
-    }
-
-    if (this.configService.get<string>('database.logQueries')) {
-      // @ts-expect-error - TS likes to whine about non-existent problems
-      this.$on('query', (e: Prisma.QueryEvent) => {
-        this.logger.log('Query: ' + e.query);
-        this.logger.log('Params: ' + e.params);
-        this.logger.log('Duration: ' + e.duration + 'ms');
-      });
     }
   }
 

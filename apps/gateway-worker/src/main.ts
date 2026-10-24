@@ -6,7 +6,8 @@ import { registerShutdownHandlers } from '@bge/otel';
 import { bootstrapLogger, otel } from './app/lib/logger';
 
 // Imports below this line are instrumented by the OTel auto-instrumentations.
-import { nestLoggerFromPino, runBootstrap } from '@bge/bootstrap';
+import { runBootstrap } from '@bge/bootstrap';
+import { nestLoggerFromPino } from '@bge/logger';
 import { NestFactory } from '@nestjs/core';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { GatewayWorkerModule } from './app/gateway-worker.module';
@@ -23,6 +24,7 @@ async function bootstrap() {
 
   const app = await NestFactory.createApplicationContext(GatewayWorkerModule, {
     bufferLogs: true,
+    logger: nestLoggerFromPino(bootstrapLogger),
   });
 
   app.useLogger(app.get(PinoLogger));

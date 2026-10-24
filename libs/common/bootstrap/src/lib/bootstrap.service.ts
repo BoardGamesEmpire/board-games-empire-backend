@@ -1,4 +1,5 @@
 import { DatabaseService, MIGRATION_NAMES } from '@bge/database';
+import { structuredLogMessage } from '@bge/logger';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PgAdvisoryLock } from './advisory-lock';
@@ -10,7 +11,6 @@ import {
   resolveMigrationCredential,
   unusedMigrationCredentialWarning,
 } from './migration-credential';
-import { structuredLogMessage } from './nest-logger';
 import type { BootstrapLogger, CacheFlush } from './ports';
 import { PrismaSchemaLedger } from './prisma-ledger';
 import { runBootstrapSequence, type BootstrapSummary } from './runner';
