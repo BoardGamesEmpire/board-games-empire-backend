@@ -229,7 +229,11 @@ export function authFactory(
     experimental: { joins: true },
     secret: options.secret,
     database: prismaAdapter(prisma, {
-      debugLogs: configService?.get<boolean>('system.is_production') !== true,
+      // Off everywhere (#627). The adapter prints these through a console
+      // logger of its own, never the `logger` above, so they would bypass pino,
+      // and they carry each query's inputs and results: addresses, session
+      // tokens, password hashes. DATABASE_LOG_QUERIES shows the queries instead.
+      debugLogs: false,
       transaction: false,
       provider: 'postgresql',
     }),
