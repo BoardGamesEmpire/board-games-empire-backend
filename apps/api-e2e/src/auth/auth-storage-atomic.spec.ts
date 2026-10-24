@@ -8,13 +8,16 @@ import { apiCacheKey } from '../support/api-cache';
 import { REDIS_IMAGE } from '../support/e2e-env';
 
 /**
- * better-auth's storage over a real Redis, counting a request against a rate
- * limit in one step (#832). In-process rather than over HTTP: the e2e api runs
- * as `NODE_ENV=test`, so better-auth's limiter is off there. Over a real
- * Redis, because the step is a Redis command, which an in-memory store can't
- * stand in for. Each instance here is one api process, so two instances over
- * two clients are two processes sharing one Redis. Like
- * `bootstrap/cache-flush.spec.ts`, this spec starts its own container.
+ * better-auth's storage over a real Redis, doing in one step what better-auth
+ * would otherwise do in two: counting a request against a rate limit (#832),
+ * and using up a single-use verification value (#888). In-process rather than
+ * over HTTP: the e2e api runs as `NODE_ENV=test`, so better-auth's limiter is
+ * off there, and the harness runs one api process, where better-auth's own
+ * lock already keeps a value single-use. Over a real Redis, because each step
+ * is a Redis command, which an in-memory store can't stand in for. Each
+ * instance here is one api process, so two instances over two clients are two
+ * processes sharing one Redis. Like `bootstrap/cache-flush.spec.ts`, this spec
+ * starts its own container.
  */
 
 /** The configuration an instance needs to build, with email and password sign-in on. */
@@ -125,6 +128,36 @@ describe("better-auth's storage over Redis", () => {
       expect(first).toBeGreaterThan(0);
       expect(first).toBeLessThanOrEqual(10_000);
       expect(first - second).toBeGreaterThanOrEqual(50);
+    });
+  });
+
+  describe('verification values', () => {
+    it('go to exactly one of two api processes using one at once (#888)', async () => {
+      const [one, two] = [createRedisAuthStorage(redisA), createRedisAuthStorage(redisB)];
+      await one.set('verification:race', 'payload', 60);
+
+      const taken = await Promise.all([one.getAndDelete('verification:race'), two.getAndDelete('verification:race')]);
+
+      expect(taken.filter((value) => value === 'payload')).toHaveLength(1);
+      expect(taken.filter((value) => value === undefined)).toHaveLength(1);
+    });
+
+    it('are used once by better-auth, through getAndDelete, with no warning (#888)', async () => {
+      // better-auth warns once per instance, the first time it falls back to
+      // a read and then a delete, so the instance is this test's own.
+      const warn = jest.spyOn(Logger.prototype, 'warn');
+      const ctx = await authFactory(noUsers, config, createRedisAuthStorage(redisA)).$context;
+      await ctx.internalAdapter.createVerificationValue({
+        identifier: 'e2e-single-use',
+        value: 'u1',
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+
+      await expect(ctx.internalAdapter.consumeVerificationValue('e2e-single-use')).resolves.toMatchObject({
+        value: 'u1',
+      });
+      await expect(ctx.internalAdapter.consumeVerificationValue('e2e-single-use')).resolves.toBeNull();
+      expect(warn).not.toHaveBeenCalledWith(expect.objectContaining({ msg: expect.stringMatching(/getAndDelete/) }));
     });
   });
 });

@@ -8,8 +8,8 @@ import type Keyv from 'keyv';
  */
 export type AuthStorage = NonNullable<BetterAuthOptions['secondaryStorage']>;
 
-/** {@link AuthStorage} with the one-step count better-auth uses when a storage has it. */
-export type RedisAuthStorage = AuthStorage & Required<Pick<AuthStorage, 'increment'>>;
+/** {@link AuthStorage} with the one-step count and read-and-delete better-auth uses when a storage has them. */
+export type RedisAuthStorage = AuthStorage & Required<Pick<AuthStorage, 'increment' | 'getAndDelete'>>;
 
 /**
  * Where better-auth's keys sit in the store. Unchanged from when the shared
@@ -62,9 +62,10 @@ return count`;
  *   rate limiter fails first on every `/api/auth` request, counting it ahead
  *   of every hook, rather than letting the request through unlimited.
  *
- * Keyv can't count in one step, so over this alone better-auth counts requests
- * against a rate limit with a read and then a write.
- * {@link createRedisAuthStorage} adds the step.
+ * Keyv can't count, or read and delete, in one step. So over this alone
+ * better-auth counts requests against a rate limit with a read and then a
+ * write, and uses a single-use value with a read and then a delete.
+ * {@link createRedisAuthStorage} adds both steps.
  */
 export function createAuthStorage(store: Keyv): AuthStorage {
   if (!store.throwOnErrors) {
@@ -98,6 +99,12 @@ export function createAuthStorage(store: Keyv): AuthStorage {
  *   concurrent requests could all read the same count, and all get through.
  *   Counted here, they are counted across every api process sharing the
  *   Redis. A count that fails is raised, as every call here is.
+ * - **A single-use value is used in one step** (#888). better-auth reads a
+ *   verification value, such as a reset link's, and then deletes it, under a
+ *   lock that spans one process only. Two api processes could each read the
+ *   value before either deleted it, and both use it. `GETDEL` gives it to one
+ *   of them. It returns what `get` would: the value inside Keyv's envelope, or
+ *   nothing once the envelope's expiry has passed.
  */
 export function createRedisAuthStorage(client: Redis): RedisAuthStorage {
   const store = createCacheStore(client, STORE_NAMESPACE, { throwOnErrors: true });
@@ -109,6 +116,20 @@ export function createRedisAuthStorage(client: Redis): RedisAuthStorage {
       // Rounded up, because PEXPIRE takes whole milliseconds and a window such
       // as 1.0005 s would fail the script after its INCR.
       return Number(await client.eval(INCREMENT_SCRIPT, 1, physicalKey(key), Math.ceil(ttl * 1000)));
+    },
+
+    async getAndDelete(key) {
+      const raw = await client.getdel(physicalKey(key));
+      if (raw === null) {
+        return undefined;
+      }
+
+      const envelope = await store.deserializeData<unknown>(raw);
+      if (!envelope || (typeof envelope.expires === 'number' && Date.now() > envelope.expires)) {
+        return undefined;
+      }
+
+      return envelope.value;
     },
   };
 }
