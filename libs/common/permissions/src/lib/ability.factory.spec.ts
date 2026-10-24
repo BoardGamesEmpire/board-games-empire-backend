@@ -874,10 +874,11 @@ describe('AbilityFactory', () => {
     });
   });
 
-  // No route reads a profile yet (#819), so this rendering is the proof that a
-  // friend reads a profile whose reach admits friends. User search composes it.
+  // The profile route (#819) and user search both read through this rule. The
+  // friendship test sits behind the ban test, so a banned user's profile is
+  // left out (#840).
   describe('read:user:profile:friends — relation-scoped rendering', () => {
-    it("renders the acting user id into both friendship directions of the profile's owner", () => {
+    it("renders the acting user id into both friendship directions of the profile's owner, behind the owner's ban test", () => {
       const user = makeUser({
         id: 'user-42',
         roles: [makeRole('User', [catalogPermission('read:user:profile:friends')])],
@@ -889,9 +890,14 @@ describe('AbilityFactory', () => {
         reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
         user: {
           is: {
-            OR: [
-              { friendshipsRequested: { some: { addresseeId: 'user-42', status: 'Accepted' } } },
-              { friendshipsReceived: { some: { requesterId: 'user-42', status: 'Accepted' } } },
+            AND: [
+              { banned: false },
+              {
+                OR: [
+                  { friendshipsRequested: { some: { addresseeId: 'user-42', status: 'Accepted' } } },
+                  { friendshipsReceived: { some: { requesterId: 'user-42', status: 'Accepted' } } },
+                ],
+              },
             ],
           },
         },

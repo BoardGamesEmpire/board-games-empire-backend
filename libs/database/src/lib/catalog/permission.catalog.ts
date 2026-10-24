@@ -61,6 +61,12 @@ const showsCollectionToFriends = {
   OR: [{ preferences: null }, { preferences: { is: { showCollectionToFriends: true } } }],
 } satisfies Prisma.UserWhereInput;
 
+// A user who isn't banned, by the test user search applies
+// (`read:user:searchable`): `banned` alone, not its expiry, so a lapsed ban
+// still counts until better-auth lifts it at the user's next sign-in (#840).
+// Module-private for the reasons `acceptedFriendOfActingUser` gives.
+const unbannedUser = { banned: false } satisfies Prisma.UserWhereInput;
+
 // An EventGame hangs off the event itself or off one of its occurrences
 // (exactly one FK is set), so a grant bound to an event has to name both
 // paths, and the household variant both paths' households. Typed as the
@@ -332,7 +338,10 @@ export const PERMISSION_CATALOG = [
   // profile is found only where it can be read. The friends, friends-of-friends
   // and public reads rate `Medium`, as `read:user:searchable` does: they are
   // other users' personal details, such as accessibility needs, that their
-  // owners chose to show.
+  // owners chose to show. The friends, friends-of-friends and public reads
+  // leave out a banned user's profile, as user search leaves them out; the
+  // user's own read, staff and the Owner still reach it. What else a ban hides
+  // is #887 (#840).
   // TODO: consider the ability to block other users from viewing your profile, etc.
   permission({
     action: Action.read,
@@ -345,7 +354,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.read,
     subject: ResourceType.UserProfile,
-    conditions: { reach: reachAdmittingFriends, user: { is: acceptedFriendOfActingUser } },
+    conditions: { reach: reachAdmittingFriends, user: { is: { AND: [unbannedUser, acceptedFriendOfActingUser] } } },
     slug: 'read:user:profile:friends',
     riskLevel: RiskLevel.Medium,
     reason: "View a friend's profile that reaches their friends",
@@ -353,7 +362,9 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.read,
     subject: ResourceType.UserProfile,
-    conditions: { AND: [{ reach: 'FriendsOfFriends' }, { user: { is: friendOfFriendOfActingUser } }] },
+    conditions: {
+      AND: [{ reach: 'FriendsOfFriends' }, { user: { is: { AND: [unbannedUser, friendOfFriendOfActingUser] } } }],
+    },
     slug: 'read:user:profile:friends-of-friends',
     riskLevel: RiskLevel.Medium,
     reason: "View a friend of a friend's profile that reaches friends of friends",
@@ -361,7 +372,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.read,
     subject: ResourceType.UserProfile,
-    conditions: { reach: 'Public' },
+    conditions: { reach: 'Public', user: { is: unbannedUser } },
     slug: 'read:user:profile:public',
     riskLevel: RiskLevel.Medium,
     reason: 'View public user profiles',
