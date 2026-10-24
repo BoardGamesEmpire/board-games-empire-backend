@@ -439,6 +439,29 @@ describe('HouseholdBanService', () => {
   });
 
   describe('list', () => {
+    beforeEach(() => db.household.count.mockResolvedValue(1));
+
+    // A key holding only `read` on bans isn't asked by the liveness guard,
+    // which asks only an actor that may read Household, so the service asks.
+    it('answers 404 for a missing or deleted household only to a caller who may read its bans (#782)', async () => {
+      db.household.count.mockResolvedValue(0);
+
+      await expect(service.list('hh-1', paginationQuery({ limit: 10 }))).rejects.toMatchObject({
+        status: Http.NotFound,
+        response: expect.objectContaining({ key: 'errors.household.not_found' }),
+      });
+      expect(db.household.count).toHaveBeenCalledWith({ where: { id: 'hh-1', deletedAt: null } });
+      expect(db.householdBan.findMany).not.toHaveBeenCalled();
+
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+      db.household.count.mockClear();
+
+      await expect(service.list('hh-1', paginationQuery({ limit: 10 }))).rejects.toBeInstanceOf(ForbiddenException);
+      expect(db.household.count).not.toHaveBeenCalled();
+    });
+
     it('list composes the read on HouseholdBan for the household, newest first (#782)', async () => {
       db.householdBan.findMany.mockResolvedValue(resolves([BAN_ROW]));
       db.householdBan.count.mockResolvedValue(1);

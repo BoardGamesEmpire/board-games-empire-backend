@@ -13,7 +13,11 @@ import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissi
 import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateHouseholdBanDto, UpdateHouseholdBanDto } from '../dto';
-import { lockExistingHousehold, lockHouseholdForRoleTransition } from '../household-access.helpers';
+import {
+  assertHouseholdExists,
+  lockExistingHousehold,
+  lockHouseholdForRoleTransition,
+} from '../household-access.helpers';
 import { readRoster } from '../invite/household-authority';
 import { HouseholdMemberService } from '../member/household-member.service';
 import { isBannedWithin } from './household-ban.helpers';
@@ -163,12 +167,18 @@ export class HouseholdBanService {
    * type-only check passes an owner or admin of SOME household. The rows then
    * compose under the same grant.
    *
+   * The household's liveness is asked after that, as the invite list asks it:
+   * the liveness guard passes an actor that may not read Household, a key
+   * holding only `read` on bans among them, and a soft delete keeps the bans.
+   * Only a caller who may read them learns that the household is gone.
+   *
    * REPEATABLE READ, so `total` and the rows come from one snapshot (#230).
    * `id` breaks ties on `createdAt`, so a row cannot cross a page boundary
    * between two requests.
    */
   async list(householdId: string, query: PaginationQueryDto): Promise<PaginatedRows<HouseholdBanView>> {
     await this.assertBanAuthority(this.db, householdId, Action.read);
+    await assertHouseholdExists(this.db, householdId);
 
     const where = this.scopeComposer.compose(ResourceType.HouseholdBan, Action.read, { householdId });
 
