@@ -194,6 +194,10 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
     HouseholdGuest: { 'read:household_member': 'binds householdId' },
   },
   HouseholdRole: {},
+  HouseholdBan: {
+    HouseholdOwner: { 'read:household_ban': 'binds householdId, user.id' },
+    HouseholdAdmin: { 'read:household_ban': 'binds householdId, user.id' },
+  },
   Invite: {
     HouseholdOwner: { 'read:household_invite': 'binds householdId, user.id' },
     HouseholdAdmin: { 'read:household_invite': 'binds householdId, user.id' },

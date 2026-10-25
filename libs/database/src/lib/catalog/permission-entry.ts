@@ -93,6 +93,7 @@ export type SubjectWhereInput = ForEverySubject<{
   Household: Prisma.HouseholdWhereInput;
   HouseholdMember: Prisma.HouseholdMemberWhereInput;
   HouseholdRole: Prisma.HouseholdRoleWhereInput;
+  HouseholdBan: Prisma.HouseholdBanWhereInput;
   Invite: Prisma.InviteWhereInput;
   // Event
   Event: Prisma.EventWhereInput;
@@ -152,6 +153,7 @@ export type SubjectScalarField = ForEverySubject<{
   Household: Prisma.HouseholdScalarFieldEnum;
   HouseholdMember: Prisma.HouseholdMemberScalarFieldEnum;
   HouseholdRole: Prisma.HouseholdRoleScalarFieldEnum;
+  HouseholdBan: Prisma.HouseholdBanScalarFieldEnum;
   Invite: Prisma.InviteScalarFieldEnum;
   // Event
   Event: Prisma.EventScalarFieldEnum;

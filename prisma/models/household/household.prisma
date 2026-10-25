@@ -24,6 +24,7 @@ model Household {
   reach Reach @default(Private)
 
   // campaigns        Campaign[]
+  bans                 HouseholdBan[]
   events               Event[]
   gameLocations        GameLocation[]
   gameShares           GameShare[]

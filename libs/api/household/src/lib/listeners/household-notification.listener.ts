@@ -80,6 +80,30 @@ export class HouseholdNotificationListener {
     }
   }
 
+  /**
+   * Invites a lifted household ban released (#782): their invitee hears of
+   * each one their inbox now lists, as of an invite just sent. Called by the
+   * ban service after commit rather than through an event, which would carry
+   * an invite that was withheld to the audit log. One by one, so one failure
+   * loses only its own notification.
+   */
+  async onInvitesReleased(invites: readonly InviteSnapshot[]): Promise<void> {
+    for (const invite of invites) {
+      if (!isHouseholdInvite(invite) || invite.status !== InviteStatus.Pending) {
+        continue;
+      }
+
+      try {
+        await this.notifyInvitee(invite);
+      } catch (err) {
+        this.logger.error(
+          `Failed to notify on a released invite inviteId=${invite.id}`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      }
+    }
+  }
+
   /** An invite that waited is approved (#166): it is now the household's offer, and its invitee hears of it. */
   @OnEvent(InviteEvents.Approved, { async: true })
   async onInviteApproved(event: InviteApprovedEvent): Promise<void> {

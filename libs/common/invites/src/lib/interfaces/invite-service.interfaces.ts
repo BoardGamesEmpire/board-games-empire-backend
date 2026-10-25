@@ -202,6 +202,15 @@ export interface OutstandingInviteRevocation {
   readonly events: readonly InviteRevokedEvent[];
 }
 
+/**
+ * A bulk withholding (#782): how many rows were marked. No events: the
+ * invites' status doesn't change, and announcing them would tell each inviter
+ * whose address it was.
+ */
+export interface OutstandingInviteWithholding {
+  readonly count: number;
+}
+
 export interface ExpireOutstandingInvitesParams {
   /** The most rows expired from each outstanding status, so one call moves at most twice this many. */
   readonly limit: number;

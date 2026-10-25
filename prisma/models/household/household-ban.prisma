@@ -1,0 +1,26 @@
+// A user a household has banned (#782). The household's lasting refusal:
+// no invite reaches them, and no admission lets them in. One row per
+// household and user; lifting the ban deletes it. The reason is for the
+// household's owners and admins and is never shown to the banned user.
+model HouseholdBan {
+  id String @id @default(cuid(2))
+
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  householdId String    @map("household_id")
+
+  user   User   @relation("HouseholdBansReceived", fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id")
+
+  bannedBy   User?   @relation("HouseholdBansIssued", fields: [bannedById], references: [id], onDelete: SetNull)
+  bannedById String? @map("banned_by_id")
+
+  reason String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([householdId, userId], map: "household_ban_household_user_unique")
+  @@index([userId])
+  @@index([bannedById])
+  @@map("household_bans")
+}

@@ -42,6 +42,12 @@ export const HOUSEHOLD_INVITE_MAX_NAME_LENGTH = 100;
 export const HOUSEHOLD_INVITE_MAX_MESSAGE_LENGTH = 1_000;
 
 /**
+ * Wire-contract cap on a household ban's reason (#782): a note for the
+ * household's owners and admins, as long as an invite's message.
+ */
+export const HOUSEHOLD_BAN_MAX_REASON_LENGTH = 1_000;
+
+/**
  * DB name of the `@@unique([createdById, clientRequestId])` constraint, as
  * mapped in `household.prisma`.
  *

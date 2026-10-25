@@ -140,6 +140,26 @@ export async function gateInvitee(
   return { withheld: false };
 }
 
+/**
+ * Whether #278's gate would withhold an invite by address from the inviter
+ * now: a block between the inviter and whoever holds the address, or that
+ * holder's preference. The server's policy isn't asked: it refuses an invite
+ * by address at create, before any is stored, and an invite already stored
+ * stays outstanding whatever the policy has become since.
+ *
+ * For a caller releasing a withheld invite (#782), so that an invite the gate
+ * would still withhold stays withheld. It makes the gate's reads, so they
+ * don't depend on who holds the address either.
+ */
+export async function gateWithholdsByAddress(
+  tx: Prisma.TransactionClient,
+  type: GatedInviteType,
+  inviterId: string,
+  address: string,
+): Promise<boolean> {
+  return addressHolderRefuses(tx, GATE_SETTINGS[type], inviterId, address);
+}
+
 /** The server's policy refusing an invite, in words that name who it lets in. */
 function policyRefusal(settings: GateSettings, policy: Reach): ForbiddenException {
   return new ForbiddenException(

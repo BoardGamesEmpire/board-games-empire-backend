@@ -1,4 +1,4 @@
-import type { Invite } from '@bge/database';
+import type { HouseholdBan, Invite } from '@bge/database';
 import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
 import {
   asPagination,
@@ -229,3 +229,99 @@ export function receivedInvitesEnvelope(
  * and the household it is into.
  */
 export const sentInvitesEnvelope = receivedInvitesEnvelope;
+
+/** Someone a household ban names (#782): by id, and as they are shown. */
+export interface BanPartyWire {
+  readonly id: string;
+  readonly name: string;
+}
+
+/**
+ * A household ban as its owners and admins get it (#782). `Pick` for the
+ * reason `ContextInviteWire` gives.
+ */
+export interface HouseholdBanWire extends Wire<
+  Pick<HouseholdBan, 'id' | 'householdId' | 'reason' | 'createdAt' | 'updatedAt'>
+> {
+  readonly user: BanPartyWire;
+  readonly bannedBy: BanPartyWire | null;
+}
+
+export interface BanEnvelope {
+  readonly message: string;
+  readonly ban: HouseholdBanWire;
+}
+
+export interface BansPage {
+  readonly bans: readonly HouseholdBanWire[];
+  readonly pagination: PaginationWire;
+}
+
+function isBanParty(value: unknown): value is BanPartyWire {
+  return hasStringId(value) && typeof value['name'] === 'string';
+}
+
+/**
+ * Whether `value` is a ban with every key a client reads. `reason` and
+ * `bannedBy` must be PRESENT, as a value or `null`, for the reason
+ * {@link inviteEnvelope} gives.
+ */
+function isBan(value: unknown): value is HouseholdBanWire {
+  return (
+    hasStringId(value) &&
+    typeof value['householdId'] === 'string' &&
+    'reason' in value &&
+    isBanParty(value['user']) &&
+    'bannedBy' in value &&
+    (value['bannedBy'] === null || isBanParty(value['bannedBy']))
+  );
+}
+
+/**
+ * `POST /api/households/:householdId/bans`, and `PATCH` and `DELETE`
+ * `…/bans/:userId` (#782): `{ message, ban }`.
+ */
+export function banEnvelope(response: HttpResponseLike, request: RequestDescription): BanEnvelope {
+  if (!isRecord(response.body)) {
+    return fail('the body is not an object', request, response);
+  }
+
+  const ban = response.body['ban'];
+  if (!isBan(ban)) {
+    return fail(
+      "it carried no 'ban' with a string id, householdId, user, and a reason and bannedBy",
+      request,
+      response,
+    );
+  }
+
+  const message = response.body['message'];
+  if (typeof message !== 'string') {
+    return fail("it carried no 'message' string", request, response);
+  }
+
+  return { message, ban };
+}
+
+/** `GET /api/households/:householdId/bans` (#782): `{ bans: [...], pagination }`. */
+export function bansPage(response: HttpResponseLike, request: RequestDescription): BansPage {
+  if (!isRecord(response.body)) {
+    return fail('the body is not an object', request, response);
+  }
+
+  const bans = response.body['bans'];
+  if (!Array.isArray(bans) || !bans.every(isBan)) {
+    return fail("it carried no 'bans' array of bans", request, response);
+  }
+
+  const pagination = asPagination(response.body['pagination']);
+  if (pagination === undefined) {
+    return fail("it carried no consistent 'pagination' envelope", request, response);
+  }
+
+  if (bans.length > pagination.limit || bans.length > pagination.total) {
+    return fail(`it carried ${bans.length} bans, more than its pagination admits`, request, response);
+  }
+
+  return { bans, pagination };
+}
