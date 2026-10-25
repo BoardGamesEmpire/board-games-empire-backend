@@ -12,10 +12,10 @@ const SCAN_PAGE = 500;
 
 /**
  * The api's cache flush (#236): SCAN each pattern and UNLINK what it yields.
- * The patterns are the physical keys the api's cache store writes, its prefix
- * and namespace in front of the logical key
- * (`namespace:api:cache:bge:user:permissions:*` for the ability graphs),
- * composed by the entrypoint that owns both halves.
+ * The patterns are the physical keys the permissions cache writes, its prefix
+ * and namespace in front of the logical key (for the ability graphs,
+ * `namespace:permissions:cache:bge:user:permissions:*`), composed by the
+ * entrypoint that owns both halves.
  * Every graph goes, not the affected users': the plan does not name them, and
  * a deploy is exactly when a stale grant matters. SCAN walks the keyspace by
  * cursor and UNLINK reclaims memory off the command thread, so a large cache

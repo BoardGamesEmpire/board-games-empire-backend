@@ -21,7 +21,8 @@ const KEY_PREFIX = 'auth_';
  * The api's cache namespace, `API_CACHE_NAMESPACE` in the api's
  * `cache.config.ts`, which a lib can't import. Sharing it keeps better-auth's
  * keys where they were (`namespace:api:cache:auth_*`). The api's boot flush
- * removes only permission keys under it, so sessions survive a restart.
+ * removes nothing under it: it removes permission keys, which live under
+ * `namespace:permissions:cache:` (#786), so sessions survive a restart.
  */
 const STORE_NAMESPACE = 'api:cache';
 

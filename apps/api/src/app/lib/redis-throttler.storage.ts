@@ -34,12 +34,13 @@ const REQUEST_UNIT = '{request}';
  * are the newest of four things that collide in that configuration and the
  * least costly of them: the same database carries better-auth's sessions
  * (`namespace:api:cache:auth_*`), the cached ability graphs
- * (`namespace:api:cache:bge:user:permissions:*`), and the bootstrap advisory lock
- * (`bge:bootstrap`). A throttle-only namespace would leave sessions and
- * permission graphs shared while making the arrangement look isolated, which is
- * worse than a collision everyone can see. What that configuration actually
- * wants is a per-run prefix across the whole harness — the isolation #341's
- * own description assumed was already in place, and which does not exist.
+ * (`namespace:permissions:cache:bge:user:permissions:*`), and the bootstrap
+ * advisory lock (`bge:bootstrap`). A throttle-only namespace would leave
+ * sessions and permission graphs shared while making the arrangement look
+ * isolated, which is worse than a collision everyone can see. What that
+ * configuration actually wants is a per-run prefix across the whole harness
+ * — the isolation #341's own description assumed was already in place, and
+ * which does not exist.
  */
 const KEY_PREFIX = 'bge:throttle';
 
