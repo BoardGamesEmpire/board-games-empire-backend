@@ -19,6 +19,7 @@ import {
   WEBHOOK_DELIVERY_BACKOFF_MS,
   WEBHOOK_DELIVERY_JOB,
   WEBHOOK_FAILED_JOB_RETENTION,
+  WEBHOOK_GRAPH_READ_BATCH_SIZE,
   WEBHOOK_QUEUE_NAME,
 } from '../constants/webhook-queue.constants';
 import type { WebhookDeliveryJob } from '../interfaces/webhook-delivery-job.interface';
@@ -40,8 +41,8 @@ import type { WebhookDeliveryJob } from '../interfaces/webhook-delivery-job.inte
  * emitting write changed counts whether or not anything evicted the
  * subscriber's graph first (#732). The read sees only what has committed, so
  * every emit must follow its write's commit. A subscriber under a ban has no
- * graph and receives nothing (#906). Every subscriber's graph is read in one
- * read per fan-out, and each ability is built once per subscriber.
+ * graph and receives nothing (#906). Subscribers' graphs are read a batch of
+ * subscribers at a time (#921), and each ability is built once per subscriber.
  *
  * The handler never throws into the emitter — a webhook failure must not break
  * the domain transaction that produced the event.
@@ -111,37 +112,55 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
     // matching subscriptions costs one ability build + one visibility query, not
     // one each.
     const visibilityCache = new Map<string, boolean>();
-    const graphs = await this.permissions.loadUserRoleGraphs([
-      ...new Set(subscriptions.map((subscription) => subscription.createdById)),
-    ]);
+    const subscriptionsByOwner = new Map<string, string[]>();
+    for (const { id, createdById } of subscriptions) {
+      subscriptionsByOwner.set(createdById, [...(subscriptionsByOwner.get(createdById) ?? []), id]);
+    }
+    const owners = [...subscriptionsByOwner.entries()];
     let failures = 0;
 
-    for (const subscription of subscriptions) {
-      // Isolate each subscription: a single failed enqueue (e.g. a transient
-      // Redis blip on queue.add) or visibility lookup must NOT abort the fan-out
-      // and silently strip the event from every subscriber later in the list.
-      // Log the one that failed and carry on so deliveries are independent.
+    // A batch of owners at a time, so the graphs held at once stay bounded
+    // however many subscribe (#921), and a failed read loses only its batch.
+    for (let start = 0; start < owners.length; start += WEBHOOK_GRAPH_READ_BATCH_SIZE) {
+      const batch = owners.slice(start, start + WEBHOOK_GRAPH_READ_BATCH_SIZE);
+
+      let graphs: ReadonlyMap<string, UserWithRoles>;
       try {
-        const visible = await this.visibleTo(
-          subscription.createdById,
-          graphs,
-          descriptor,
-          event.subjectId,
-          visibilityCache,
-        );
-
-        if (!visible) {
-          continue;
-        }
-
-        await this.enqueue(subscription.id, eventType, event, actor);
+        graphs = await this.permissions.loadUserRoleGraphs(batch.map(([ownerId]) => ownerId));
       } catch (err) {
-        failures += 1;
+        const dropped = batch.reduce((count, [, subscriptionIds]) => count + subscriptionIds.length, 0);
+        failures += dropped;
         this.logger.error(
-          `Failed to enqueue webhook delivery for subscription ${subscription.id} on "${eventType}" ` +
-            `(subject ${event.subjectId}): ${err instanceof Error ? err.message : err}`,
+          `Failed to read the permissions of ${batch.length} webhook subscribers on "${eventType}" ` +
+            `(subject ${event.subjectId}), dropping ${dropped} deliveries: ${err instanceof Error ? err.message : err}`,
           err instanceof Error ? err.stack : undefined,
         );
+        continue;
+      }
+
+      for (const [ownerId, subscriptionIds] of batch) {
+        for (const subscriptionId of subscriptionIds) {
+          // Isolate each subscription: a single failed enqueue (e.g. a transient
+          // Redis blip on queue.add) or visibility lookup must NOT abort the fan-out
+          // and silently strip the event from every subscriber later in the list.
+          // Log the one that failed and carry on so deliveries are independent.
+          try {
+            const visible = await this.visibleTo(ownerId, graphs, descriptor, event.subjectId, visibilityCache);
+
+            if (!visible) {
+              continue;
+            }
+
+            await this.enqueue(subscriptionId, eventType, event, actor);
+          } catch (err) {
+            failures += 1;
+            this.logger.error(
+              `Failed to enqueue webhook delivery for subscription ${subscriptionId} on "${eventType}" ` +
+                `(subject ${event.subjectId}): ${err instanceof Error ? err.message : err}`,
+              err instanceof Error ? err.stack : undefined,
+            );
+          }
+        }
       }
     }
 

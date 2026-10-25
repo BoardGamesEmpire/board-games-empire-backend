@@ -24,6 +24,15 @@ export const WEBHOOK_DELIVERY_ATTEMPTS = 5;
 /** Base backoff in ms for the delivery job's exponential retry. */
 export const WEBHOOK_DELIVERY_BACKOFF_MS = 2_000;
 
+/**
+ * How many subscribers' permission graphs the dispatcher reads at once. A graph
+ * runs to hundreds of permissions and grows with every event its user attends
+ * (#921): reading every subscriber's together held about 600 MB per thousand
+ * subscribers for the whole fan-out. A failed read loses this many
+ * subscribers' deliveries, not the event's.
+ */
+export const WEBHOOK_GRAPH_READ_BATCH_SIZE = 100;
+
 /** Per-delivery HTTP timeout handed to SecureHttpService. */
 export const WEBHOOK_DELIVERY_TIMEOUT_MS = 10_000;
 

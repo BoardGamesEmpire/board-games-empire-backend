@@ -129,7 +129,8 @@ export class PermissionsService {
    * {@link loadUserRoleGraphWithin} reads one but in a single read for them
    * all: for judging many users at once, as the webhook dispatcher judges
    * every subscriber to an event (#732). A user under a ban in force, or one
-   * deleted, is missing from the map.
+   * deleted, is missing from the map. Every graph read is held at once, and a
+   * graph is large (#921), so a caller with many users passes a batch at a time.
    */
   async loadUserRoleGraphs(userIds: readonly string[]): Promise<Map<string, UserWithRoles>> {
     if (userIds.length === 0) {

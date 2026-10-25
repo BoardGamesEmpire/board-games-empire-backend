@@ -7,7 +7,11 @@ import { WebhookEventRegistry, WebhookEventType, WebhookVisibilityService } from
 import { createPrismaAbility } from '@casl/prisma';
 import { getQueueToken } from '@nestjs/bullmq';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { WEBHOOK_DELIVERY_ATTEMPTS, WEBHOOK_QUEUE_NAME } from '../constants/webhook-queue.constants';
+import {
+  WEBHOOK_DELIVERY_ATTEMPTS,
+  WEBHOOK_GRAPH_READ_BATCH_SIZE,
+  WEBHOOK_QUEUE_NAME,
+} from '../constants/webhook-queue.constants';
 import { WebhookDispatcherService } from './webhook-dispatcher.service';
 
 describe('WebhookDispatcherService', () => {
@@ -175,7 +179,7 @@ describe('WebhookDispatcherService', () => {
     expect(permissions.getUserRoleGraph).not.toHaveBeenCalled();
   });
 
-  // One read for every subscriber, not one each: an event can have many (#732).
+  // One read for many subscribers, not one each: an event can have many (#732).
   it('reads the graphs of every distinct subscriber in one read per fan-out (#732)', async () => {
     db.webhookSubscription.findMany.mockResolvedValue([
       { id: 'sub-1', createdById: 'owner-1' },
@@ -187,6 +191,32 @@ describe('WebhookDispatcherService', () => {
 
     expect(permissions.loadUserRoleGraphs).toHaveBeenCalledTimes(1);
     expect(permissions.loadUserRoleGraphs).toHaveBeenCalledWith(['owner-1', 'owner-2']);
+  });
+
+  const subscriptionsOfOwners = (count: number) =>
+    Array.from({ length: count }, (_, i) => ({ id: `sub-${i}`, createdById: `owner-${i}` })) as WebhookSubscription[];
+
+  // A graph is large and grows with its user's events, so the graphs held at
+  // once are bounded, not the whole fan-out's (#921).
+  it('reads the graphs a batch of subscribers at a time (#921)', async () => {
+    db.webhookSubscription.findMany.mockResolvedValue(subscriptionsOfOwners(WEBHOOK_GRAPH_READ_BATCH_SIZE + 1));
+
+    await dispatch(WebhookEventType.EventCreated, event());
+
+    const reads = permissions.loadUserRoleGraphs.mock.calls.map(([ids]) => ids);
+    expect(reads.map((ids) => ids.length)).toEqual([WEBHOOK_GRAPH_READ_BATCH_SIZE, 1]);
+    expect(reads[1]).toEqual([`owner-${WEBHOOK_GRAPH_READ_BATCH_SIZE}`]);
+    expect(queue.add).toHaveBeenCalledTimes(WEBHOOK_GRAPH_READ_BATCH_SIZE + 1);
+  });
+
+  it('delivers to the subscribers of the other batches when one batch fails to read', async () => {
+    db.webhookSubscription.findMany.mockResolvedValue(subscriptionsOfOwners(WEBHOOK_GRAPH_READ_BATCH_SIZE + 1));
+    permissions.loadUserRoleGraphs.mockRejectedValueOnce(new Error('db blip'));
+
+    await expect(dispatch(WebhookEventType.EventCreated, event())).resolves.toBeUndefined();
+
+    const delivered = queue.add.mock.calls.map(([, job]) => job.subscriptionId);
+    expect(delivered).toEqual([`sub-${WEBHOOK_GRAPH_READ_BATCH_SIZE}`]);
   });
 
   it('gives a banned or deleted subscriber, who has no graph, an ability built from nothing (#906)', async () => {
