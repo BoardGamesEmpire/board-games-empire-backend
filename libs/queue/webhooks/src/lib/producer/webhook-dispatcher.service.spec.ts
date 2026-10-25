@@ -39,7 +39,13 @@ describe('WebhookDispatcherService', () => {
     visibility = { isVisibleTo: jest.fn().mockResolvedValue(true) };
     auditContext = { getActor: jest.fn().mockReturnValue(null) };
     emitter = { onAny: jest.fn(), offAny: jest.fn() };
-    permissions = { getUserRoleGraph: jest.fn(), loadUserRoleGraphs: jest.fn().mockResolvedValue(new Map()) };
+    permissions = {
+      getUserRoleGraph: jest.fn(),
+      // Every subscriber is in good standing unless a test says otherwise.
+      loadUserRoleGraphs: jest.fn(
+        async (ids: readonly string[]) => new Map(ids.map((id) => [id, { id } as UserWithRoles])),
+      ),
+    };
     abilityFactory = { createForUser: jest.fn().mockReturnValue(ability) };
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
@@ -219,12 +225,15 @@ describe('WebhookDispatcherService', () => {
     expect(delivered).toEqual([`sub-${WEBHOOK_GRAPH_READ_BATCH_SIZE}`]);
   });
 
-  it('gives a banned or deleted subscriber, who has no graph, an ability built from nothing (#906)', async () => {
+  it('skips a banned or deleted subscriber, who has no graph, without a visibility query (#906)', async () => {
     db.webhookSubscription.findMany.mockResolvedValue([{ id: 'sub-1', createdById: 'owner-1' } as WebhookSubscription]);
+    permissions.loadUserRoleGraphs.mockResolvedValue(new Map());
 
     await dispatch(WebhookEventType.EventCreated, event());
 
-    expect(abilityFactory.createForUser).toHaveBeenCalledWith(null);
+    expect(abilityFactory.createForUser).not.toHaveBeenCalled();
+    expect(visibility.isVisibleTo).not.toHaveBeenCalled();
+    expect(queue.add).not.toHaveBeenCalled();
   });
 
   it('does not enqueue for a subscription whose owner cannot see the subject', async () => {

@@ -114,7 +114,12 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
     const visibilityCache = new Map<string, boolean>();
     const subscriptionsByOwner = new Map<string, string[]>();
     for (const { id, createdById } of subscriptions) {
-      subscriptionsByOwner.set(createdById, [...(subscriptionsByOwner.get(createdById) ?? []), id]);
+      const ids = subscriptionsByOwner.get(createdById);
+      if (ids) {
+        ids.push(id);
+      } else {
+        subscriptionsByOwner.set(createdById, [id]);
+      }
     }
     const owners = [...subscriptionsByOwner.entries()];
     let failures = 0;
@@ -139,13 +144,20 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
       }
 
       for (const [ownerId, subscriptionIds] of batch) {
+        // A banned or deleted owner has no graph, so nothing to judge and no
+        // delivery (#906).
+        const graph = graphs.get(ownerId);
+        if (!graph) {
+          continue;
+        }
+
         for (const subscriptionId of subscriptionIds) {
           // Isolate each subscription: a single failed enqueue (e.g. a transient
           // Redis blip on queue.add) or visibility lookup must NOT abort the fan-out
           // and silently strip the event from every subscriber later in the list.
           // Log the one that failed and carry on so deliveries are independent.
           try {
-            const visible = await this.visibleTo(ownerId, graphs, descriptor, event.subjectId, visibilityCache);
+            const visible = await this.visibleTo(graph, descriptor, event.subjectId, visibilityCache);
 
             if (!visible) {
               continue;
@@ -191,22 +203,21 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
   }
 
   private async visibleTo(
-    userId: string,
-    graphs: ReadonlyMap<string, UserWithRoles>,
+    graph: UserWithRoles,
     descriptor: WebhookEventDescriptor,
     subjectId: string,
     cache: Map<string, boolean>,
   ): Promise<boolean> {
-    const cached = cache.get(userId);
+    const cached = cache.get(graph.id);
     if (cached !== undefined) {
       return cached;
     }
-    const ability = this.abilityFactory.createForUser(graphs.get(userId) ?? null);
+    const ability = this.abilityFactory.createForUser(graph);
     const visible = await this.visibility.isVisibleTo(descriptor.subject, subjectId, ability, {
       action: descriptor.requiredAction,
       subjectDeleted: descriptor.subjectDeleted ?? false,
     });
-    cache.set(userId, visible);
+    cache.set(graph.id, visible);
     return visible;
   }
 
