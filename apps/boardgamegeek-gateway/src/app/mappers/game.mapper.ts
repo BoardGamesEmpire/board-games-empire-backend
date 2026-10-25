@@ -190,6 +190,14 @@ function coerceYear(year: number | undefined): number | undefined {
 }
 
 /**
+ * Coerces BGG's "0 means unknown" sentinel on a player count, play time or
+ * minimum age into undefined (#869).
+ */
+function coercePositive(value: number | undefined): number | undefined {
+  return typeof value === 'number' && value > 0 ? value : undefined;
+}
+
+/**
  * A game's publish year as BGG sends it, with its "0 means unknown" sentinel
  * unset. Unlike coerceYear it keeps negative years, which BGG uses for games
  * from before the common era (#719). Sent as 0, an undated game would read as
@@ -295,8 +303,10 @@ export function thingToGameSearchData(thing: BggThing): proto.GameSearchData {
     thumbnailUrl: decodeUrl(thing.thumbnail),
     sourceUrl: toSourceUrl(thing),
     averageRating: thing.statistics?.ratings?.average,
-    minPlayers: thing.minplayers,
-    maxPlayers: thing.maxplayers,
+    minPlayers: coercePositive(thing.minplayers),
+    maxPlayers: coercePositive(thing.maxplayers),
+    minPlaytime: coercePositive(thing.minplaytime) ?? coercePositive(thing.playingtime),
+    maxPlaytime: coercePositive(thing.maxplaytime) ?? coercePositive(thing.playingtime),
     baseGameExternalId: toBaseGameExternalId(thing),
     summary: decodeDescription(thing.description),
     availablePlatforms: [TABLETOP_PLATFORM],
@@ -352,11 +362,11 @@ export function thingToGameData(thing: BggThing, locale?: string): proto.GameDat
     averageRating: ratings?.average,
     bayesRating: ratings?.bayesaverage,
     ratingsCount: ratings?.usersrated,
-    minPlayers: thing.minplayers,
-    maxPlayers: thing.maxplayers,
-    minPlaytime: thing.minplaytime ?? thing.playingtime,
-    maxPlaytime: thing.maxplaytime ?? thing.playingtime,
-    minAge: thing.minage,
+    minPlayers: coercePositive(thing.minplayers),
+    maxPlayers: coercePositive(thing.maxplayers),
+    minPlaytime: coercePositive(thing.minplaytime) ?? coercePositive(thing.playingtime),
+    maxPlaytime: coercePositive(thing.maxplaytime) ?? coercePositive(thing.playingtime),
+    minAge: coercePositive(thing.minage),
     complexityWeight,
 
     baseGameExternalId: toBaseGameExternalId(thing),

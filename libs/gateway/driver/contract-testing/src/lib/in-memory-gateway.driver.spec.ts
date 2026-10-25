@@ -8,6 +8,8 @@ const {
   SEARCH_FILTER_AXIS_PLATFORM_TYPE: PLATFORM_TYPE_AXIS,
   SEARCH_FILTER_AXIS_CONTENT_TYPE: CONTENT_TYPE_AXIS,
   SEARCH_FILTER_AXIS_PUBLISH_YEAR: PUBLISH_YEAR_AXIS,
+  SEARCH_FILTER_AXIS_PLAYER_COUNT: PLAYER_COUNT_AXIS,
+  SEARCH_FILTER_AXIS_PLAY_TIME: PLAY_TIME_AXIS,
 } = proto.SearchFilterAxis;
 const { PLATFORM_TYPE_TABLETOP: TABLETOP, PLATFORM_TYPE_PC: PC } = proto.PlatformType;
 const {
@@ -51,7 +53,7 @@ runDataGatewayDriverContract('InMemoryGatewayDriver', () => ({
     categories: [{ externalId: '1009', name: 'Abstract Strategy' }],
     mechanics: [{ externalId: '2082', name: 'Worker Placement' }],
     coverage: { platformTypes: [TABLETOP], contentTypes: [BASE_GAME, EXPANSION] },
-    filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS, PUBLISH_YEAR_AXIS],
+    filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS, PUBLISH_YEAR_AXIS, PLAYER_COUNT_AXIS, PLAY_TIME_AXIS],
   }),
   capabilities: [
     proto.Capability.CAPABILITY_SEARCH,
@@ -62,7 +64,7 @@ runDataGatewayDriverContract('InMemoryGatewayDriver', () => ({
     proto.Capability.CAPABILITY_LIST_CATEGORIES,
     proto.Capability.CAPABILITY_LIST_MECHANICS,
   ],
-  filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS, PUBLISH_YEAR_AXIS],
+  filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS, PUBLISH_YEAR_AXIS, PLAYER_COUNT_AXIS, PLAY_TIME_AXIS],
   knownExternalId: 'bgg-13',
   unknownExternalId: 'no-such-id',
   searchQuery: 'catan',
@@ -147,6 +149,79 @@ describe('InMemoryGatewayDriver search filter', () => {
       'undated',
     ]);
     await expect(search(ignoring, byYear({ min: 2000 })).then(externalIds)).resolves.toEqual(['old', 'new', 'undated']);
+  });
+
+  // A bound alone is one count, and a game missing either count is unknown (#869).
+  it('applies a player-count range on the axis it declares (#869)', async () => {
+    const counted = (externalId: string, minPlayers?: number | null, maxPlayers?: number | null) =>
+      ({ ...catan, externalId, minPlayers, maxPlayers }) as proto.GameSearchData;
+    const searchResults = [counted('two-four', 2, 4), counted('two-six', 2, 6), counted('two-unknown', 2, null)];
+    const declaring = new InMemoryGatewayDriver({ searchResults, filterableAxes: [PLAYER_COUNT_AXIS] });
+    const ignoring = new InMemoryGatewayDriver({ searchResults, filterableAxes: [PLAY_TIME_AXIS] });
+    const byCount = (playerCount: proto.IntRange) => ({ platformTypes: [], contentTypes: [], playerCount });
+
+    await expect(search(declaring, byCount({ min: 5 })).then(externalIds)).resolves.toEqual(['two-six']);
+    await expect(search(declaring, byCount({ min: 3, max: 4 })).then(externalIds)).resolves.toEqual([
+      'two-four',
+      'two-six',
+    ]);
+    await expect(search(declaring, byCount({ max: 6, includeUnknown: true })).then(externalIds)).resolves.toEqual([
+      'two-six',
+      'two-unknown',
+    ]);
+    await expect(search(declaring, byCount({ includeUnknown: false })).then(externalIds)).resolves.toEqual([
+      'two-four',
+      'two-six',
+      'two-unknown',
+    ]);
+    await expect(search(ignoring, byCount({ min: 5 })).then(externalIds)).resolves.toEqual([
+      'two-four',
+      'two-six',
+      'two-unknown',
+    ]);
+  });
+
+  // A game with one play time plays that long, and a bound left out doesn't narrow that side (#869).
+  it('applies a play-time range on the axis it declares (#869)', async () => {
+    const timed = (externalId: string, minPlaytime?: number | null, maxPlaytime?: number | null) =>
+      ({ ...catan, externalId, minPlaytime, maxPlaytime }) as proto.GameSearchData;
+    const searchResults = [
+      timed('short', 30, 60),
+      timed('long', 30, 120),
+      timed('one-time', 60),
+      timed('untimed', null),
+    ];
+    const declaring = new InMemoryGatewayDriver({ searchResults, filterableAxes: [PLAY_TIME_AXIS] });
+    const ignoring = new InMemoryGatewayDriver({ searchResults, filterableAxes: [PLAYER_COUNT_AXIS] });
+    const byTime = (playTime: proto.IntRange) => ({ platformTypes: [], contentTypes: [], playTime });
+
+    await expect(search(declaring, byTime({ max: 90 })).then(externalIds)).resolves.toEqual(['short', 'one-time']);
+    await expect(search(declaring, byTime({ min: 45 })).then(externalIds)).resolves.toEqual(['one-time']);
+    await expect(search(declaring, byTime({ min: 45, includeUnknown: true })).then(externalIds)).resolves.toEqual([
+      'one-time',
+      'untimed',
+    ]);
+    await expect(search(declaring, byTime({ includeUnknown: false })).then(externalIds)).resolves.toEqual([
+      'short',
+      'long',
+      'one-time',
+      'untimed',
+    ]);
+    await expect(search(ignoring, byTime({ max: 90 })).then(externalIds)).resolves.toEqual([
+      'short',
+      'long',
+      'one-time',
+      'untimed',
+    ]);
+
+    // A game with only a maximum plays that long too: it stands for the missing minimum.
+    const maxOnly = new InMemoryGatewayDriver({
+      searchResults: [timed('max-only', undefined, 60)],
+      filterableAxes: [PLAY_TIME_AXIS],
+    });
+
+    await expect(search(maxOnly, byTime({ min: 45 })).then(externalIds)).resolves.toEqual(['max-only']);
+    await expect(search(maxOnly, byTime({ min: 75 })).then(externalIds)).resolves.toEqual([]);
   });
 
   it('declares the coverage and filterable axes it is given', async () => {
