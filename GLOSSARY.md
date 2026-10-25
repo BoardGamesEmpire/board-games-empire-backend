@@ -352,6 +352,14 @@ _Avoid_: key permission
 A staff member acting as another user through that user's own session. It is deliberately blocked, both to start and to use, until there is a decision on how it would be audited.
 _Avoid_: act as user (a different, superseded idea)
 
+**Client request id**:
+A key a client sends with a create so that, if it has to send the create again, the server returns the record it already made instead of making another. Each user's keys are their own.
+_Avoid_: idempotency key (reserved for a request header, #905), correlation id (request tracing)
+
+**Replay**:
+A repeated request that finds the record its first attempt made, and returns it without making another or notifying anyone again.
+_Avoid_: retry (the client's act, not the server's answer), dedup (that names matching taxonomy and platforms on import)
+
 ### Quotas and audit
 
 **Quota**:

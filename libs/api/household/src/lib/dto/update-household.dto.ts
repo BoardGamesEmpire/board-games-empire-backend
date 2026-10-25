@@ -40,7 +40,7 @@ export class UpdateHouseholdSettingsDto {
 }
 
 /**
- * Everything a create sets, less the create's own idempotency key, plus the
+ * Everything a create sets, less the create's own client request id, plus the
  * household's settings.
  *
  * `clientRequestId` is how a retried create finds the row it already made

@@ -13,7 +13,7 @@ const USER_THROTTLE_LIMIT = 30;
  * Issue 251's rate-limit claim: a replay CONSUMES throttle budget, and the response when the budget
  * runs out is a 429 rather than a 500.
  *
- * Both halves matter to a client. The first says an idempotency key is not a
+ * Both halves matter to a client. The first says a client request id is not a
  * licence to retry without limit — the short-circuit saves the database write,
  * not the request. The second is the difference between a retryable answer and
  * the failure #251 fixed: a 500 on a legitimate retry is what the whole feature

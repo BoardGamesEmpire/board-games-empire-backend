@@ -37,7 +37,7 @@ import { Prisma } from '@bge/database';
  * `include:`-shaped in `household.service.ts` — both the detail read and
  * `HOUSEHOLD_LIST_INCLUDE` — so a column added to
  * `Household` still reaches clients with this suite green. Nothing sensitive
- * ships today (`clientRequestId` is a per-creator idempotency key, and `deletedAt` is null
+ * ships today (`clientRequestId` is a per-creator client request id, and `deletedAt` is null
  * on every read but `GET /households/restorable`, where telling the household
  * owners who can restore it when it was deleted is intended), which is why it
  * was left rather than folded in: converting it changes the exported
