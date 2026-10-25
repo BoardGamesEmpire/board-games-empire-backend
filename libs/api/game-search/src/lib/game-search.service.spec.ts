@@ -6,6 +6,7 @@ import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
   createMockAbilityService,
   createTestingModuleWithDb,
+  makeGame,
   MOCK_ACTING_USER_ID,
   type MockAbilityService,
   type MockDatabaseService,
@@ -143,6 +144,24 @@ describe('GameSearchService', () => {
       );
     });
 
+    // A search result carries play time as the game catalog stores it, in
+    // minutes (#869), and leaves out a time the game doesn't have.
+    it('carries each game’s play time in minutes', async () => {
+      db.game.findMany.mockResolvedValue([
+        makeGame({ minPlayTime: 60, maxPlayTime: 120 }),
+        makeGame({ id: 'g2', minPlayTime: 45, maxPlayTime: null }),
+      ]);
+
+      const [both, minimumOnly] = await service.queryLocalGames('brass', service.localSearchScope(), 10, 0, {});
+
+      expect(db.game.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ select: expect.objectContaining({ minPlayTime: true, maxPlayTime: true }) }),
+      );
+      expect(both).toMatchObject({ minPlayTime: 60, maxPlayTime: 120 });
+      expect(minimumOnly).toMatchObject({ minPlayTime: 45 });
+      expect(minimumOnly?.maxPlayTime).toBeUndefined();
+    });
+
     it('takes only a scope that localSearchScope built', async () => {
       // A type test: `game-search:typecheck` enforces the directive (an unused
       // one is itself a compile error), and jest only confirms it runs. A
@@ -232,6 +251,81 @@ describe('GameSearchService', () => {
         }),
       );
       expect(coordinator.searchGames).toHaveBeenNthCalledWith(2, expect.objectContaining({ filter: undefined }));
+    });
+
+    // #869: both ranges reach the coordinator as the caller sent them, and
+    // narrow the search in the game catalog by the same rules.
+    it('sends the coordinator the player-count and play-time ranges, and narrows the search in the game catalog by them', async () => {
+      coordinator.searchGames.mockReturnValue(EMPTY);
+
+      await firstValueFrom(
+        service.search(
+          plainToInstance(SearchQueryDto, {
+            query: 'brass',
+            playerCountMin: 5,
+            playTimeMax: 90,
+            playTimeIncludeUnknown: true,
+          }),
+        ),
+      );
+
+      expect(coordinator.searchGames).toHaveBeenCalledWith(
+        expect.objectContaining({
+          filter: {
+            platformTypes: [],
+            contentTypes: [],
+            playerCount: { min: 5 },
+            playTime: { max: 90, includeUnknown: true },
+          },
+        }),
+      );
+      expect(db.game.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            AND: [
+              COMPOSED,
+              TITLE_BRASS,
+              { minPlayers: { lte: 5 }, maxPlayers: { gte: 5 } },
+              {
+                OR: [
+                  { OR: [{ maxPlayTime: { lte: 90 } }, { maxPlayTime: null, minPlayTime: { lte: 90 } }] },
+                  { minPlayTime: null, maxPlayTime: null },
+                ],
+              },
+            ],
+          },
+        }),
+      );
+    });
+  });
+
+  // #869: a DataGateway's result carries play time in minutes, as the proto
+  // sends it, and leaves out a time the DataGateway didn't send.
+  describe('mapProtoGame', () => {
+    const resultWith = (game: Partial<proto.GameSearchData>): proto.SearchGameResult => ({
+      correlationId: 'c1',
+      gatewayId: 'gw-1',
+      status: proto.ResultStatus.RESULT_STATUS_RESULT,
+      game: {
+        externalId: 'ext-1',
+        title: 'Brass',
+        contentType: proto.ContentType.CONTENT_TYPE_BASE_GAME,
+        availablePlatforms: [],
+        availableReleases: [],
+        ...game,
+      },
+    });
+
+    it('carries the play time a DataGateway sends, in minutes', () => {
+      expect(service.mapProtoGame(resultWith({ minPlaytime: 60, maxPlaytime: 120 }))).toMatchObject({
+        minPlayTime: 60,
+        maxPlayTime: 120,
+      });
+
+      const minimumOnly = service.mapProtoGame(resultWith({ minPlaytime: 45 }));
+
+      expect(minimumOnly.minPlayTime).toBe(45);
+      expect(minimumOnly.maxPlayTime).toBeUndefined();
     });
   });
 });

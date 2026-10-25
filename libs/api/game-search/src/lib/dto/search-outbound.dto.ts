@@ -54,6 +54,14 @@ export interface WsGameSearchResult {
 
   maxPlayers?: number;
   minPlayers?: number;
+
+  /**
+   * Play time in minutes (#869). A game may carry just one of the two, and
+   * that one is then its whole play time.
+   */
+  maxPlayTime?: number;
+  minPlayTime?: number;
+
   platforms: WsPlatformData[];
   sourceUrl?: string;
   thumbnailUrl?: string;

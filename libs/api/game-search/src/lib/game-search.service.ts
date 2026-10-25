@@ -122,6 +122,8 @@ export class GameSearchService {
         averageRating: true,
         minPlayers: true,
         maxPlayers: true,
+        minPlayTime: true,
+        maxPlayTime: true,
 
         gameSources: {
           select: { sourceUrl: true },
@@ -188,6 +190,8 @@ export class GameSearchService {
         averageRating: game.averageRating ?? undefined,
         minPlayers: game.minPlayers ?? undefined,
         maxPlayers: game.maxPlayers ?? undefined,
+        minPlayTime: game.minPlayTime ?? undefined,
+        maxPlayTime: game.maxPlayTime ?? undefined,
         inSystem: true,
         gameId: game.id,
 
@@ -324,6 +328,8 @@ export class GameSearchService {
       averageRating: game.averageRating,
       minPlayers: game.minPlayers,
       maxPlayers: game.maxPlayers,
+      minPlayTime: game.minPlaytime,
+      maxPlayTime: game.maxPlaytime,
       baseGameExternalId: game.baseGameExternalId,
       inSystem: result.inSystem ?? false,
       gameId: result.gameId,
