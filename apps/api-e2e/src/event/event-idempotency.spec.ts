@@ -126,6 +126,44 @@ describe('event create idempotency (#252)', () => {
       await expect(eventsCreatedBy(actor)).resolves.toBe(1);
     });
 
+    it('answers the loser of a concurrent create outside a household with what the winner answered', async () => {
+      // Outside a household the creator reads the event's attendees and policy
+      // only through the host role its create adds. The loser primed its
+      // abilities at the start of its request, before the winner committed
+      // that role, so a replay read under them came back with no attendees and
+      // no policy. The creator's user row is held as the household test holds
+      // it: the event insert's foreign key on `created_by_id` waits behind it,
+      // after both lookups have missed.
+      const actor = await actors.user();
+      const body = { title: 'Concurrent event outside a household', clientRequestId: freshKey() };
+
+      const [first, second] = await withBarrier(async (barrier) => {
+        const { holder } = barrier;
+
+        await holder.begin();
+        await holder.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [actor.user.id]);
+
+        const inFlight = [createEvent(actor, body), createEvent(actor, body)].map((test) =>
+          test.then((response) => response),
+        );
+
+        await expectBackendsQueuedBehind(barrier, {
+          heldBy: holder.pid,
+          count: 2,
+          description: 'both creates, at the event insert',
+        });
+        await holder.commit();
+
+        return Promise.all(inFlight);
+      });
+
+      expect([first.status, second.status]).toEqual([201, 201]);
+      expect(eventEnvelope(first, 'POST /api/events (concurrent A)').id).toBe(
+        eventEnvelope(second, 'POST /api/events (concurrent B)').id,
+      );
+      expect(second.body).toEqual(first.body);
+    });
+
     it('returns the original, and ignores a retry that changes the title and adds an invitee', async () => {
       const [host, invitee, latecomer] = [await actors.user(), await actors.user(), await actors.user()];
       const clientRequestId = freshKey();

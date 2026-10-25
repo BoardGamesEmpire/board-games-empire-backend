@@ -321,28 +321,14 @@ export class EventService {
     });
 
     if (replayed) {
-      // A replay evicts, as the original did: eviction is idempotent, and it
-      // heals an original that committed but crashed before its own eviction
-      // ran. Nothing records which attendee rows the create made, so it
-      // evicts every user with a row on the event now: the original's host
-      // and invitees, and anyone added or removed since, whose own add or
-      // removal evicted them already and costs one graph rebuild here. The
-      // retry's invitees were never added. Read unscoped, unlike the response:
-      // whose graph is stale does not depend on whom the creator may see.
-      //
-      // It emits nothing (#252): the original emitted once it committed, and
-      // a second round would notify its invitees and fire its webhook twice.
+      // A replay emits nothing (#252): the original emitted once it
+      // committed, and a second round would notify its invitees and fire its
+      // webhook twice. It has already evicted, in `findReplayedEvent`.
       //
       // Known residual: an original that committed but crashed before its
       // emits leaves its invitees unnotified, and the replay does not make up
       // for it. Emitting here would notify twice in the far commoner case
       // where the original's emits ran, and nothing records which case this is.
-      const rows = await this.db.eventAttendee.findMany({ where: { eventId: event.id }, select: { userId: true } });
-
-      await this.permissions.invalidateUsers(
-        Array.from(new Set([userId, ...rows.flatMap(({ userId: id }) => (id === null ? [] : [id]))])),
-      );
-
       return event;
     }
 
@@ -400,6 +386,9 @@ export class EventService {
    * creator who still hosts the event gets what the create answered; one who
    * has lost read on it since gets the event and only what they may still
    * see of it.
+   *
+   * A row found here is always a replay, so this is also where the replay
+   * evicts, before the parts are read.
    */
   private async findReplayedEvent(userId: string, clientRequestId: string): Promise<CreatedEvent | null> {
     const event = await this.db.event.findUnique({
@@ -409,6 +398,29 @@ export class EventService {
     if (!event) {
       return null;
     }
+
+    // A replay evicts, as the original did: eviction is idempotent, and it
+    // heals an original that committed but crashed before its own eviction
+    // ran. Nothing records which attendee rows the create made, so it evicts
+    // every user with a row on the event now: the original's host and
+    // invitees, and anyone added or removed since, whose own add or removal
+    // evicted them already and costs one graph rebuild here. The retry's
+    // invitees were never added. Read unscoped, unlike the parts below: whose
+    // graph is stale does not depend on whom the creator may see.
+    const rows = await this.db.eventAttendee.findMany({ where: { eventId: event.id }, select: { userId: true } });
+
+    await this.permissions.invalidateUsers(
+      Array.from(new Set([userId, ...rows.flatMap(({ userId: id }) => (id === null ? [] : [id]))])),
+    );
+
+    // Then this request's abilities are resolved again. They were primed when
+    // it began, which for the loser of a concurrent create is before the
+    // winner committed the host role, and after a crash before the original's
+    // eviction they came from the stale graph. Outside a household that role
+    // is the creator's only read on the parts, so the replay answered with no
+    // attendees and no policy. Re-priming the current actor keeps an API key's
+    // restriction: the key's scope is resolved again with the user's graph.
+    await this.abilityService.primeCurrentActor();
 
     const [occurrences, attendees, policy] = await this.db.$transaction(
       [

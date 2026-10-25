@@ -124,6 +124,51 @@ describe('FeedbackService', () => {
       );
     });
 
+    it('persists every optional field the client sent', async () => {
+      await service.submit(
+        'user-1',
+        makeDto({
+          title: 'Add fails',
+          context: FeedbackContext.Client,
+          appVersion: '1.2.3',
+          platform: 'web',
+          locale: 'en-US',
+          deviceInfo: { browser: 'Firefox' },
+        }),
+      );
+
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            title: 'Add fails',
+            context: FeedbackContext.Client,
+            severity: FeedbackSeverity.High,
+            appVersion: '1.2.3',
+            platform: 'web',
+            locale: 'en-US',
+            deviceInfo: { browser: 'Firefox' },
+          }),
+        }),
+      );
+    });
+
+    it('stores null for each optional field the client left out', async () => {
+      await service.submit('user-1', makeDto({ category: FeedbackCategory.FeatureRequest, severity: undefined }));
+
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            title: null,
+            severity: null,
+            appVersion: null,
+            platform: null,
+            locale: null,
+            deviceInfo: Prisma.DbNull,
+          }),
+        }),
+      );
+    });
+
     it('marks redactionApplied=true when the client redacted fields', async () => {
       db.feedbackReport.create.mockResolvedValue(stubReport());
 

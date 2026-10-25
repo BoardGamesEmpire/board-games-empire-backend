@@ -285,6 +285,20 @@ describe('HouseholdService', () => {
     expect(permissions.invalidateUser).toHaveBeenCalledWith('user-1');
   });
 
+  it('create links the language tag the request names, by its canonical form', async () => {
+    db.languageTag.findUnique.mockResolvedValue({ id: 'tag-en-us' } as never);
+    db.household.create.mockResolvedValue({ id: 'hh-1', createdById: 'user-1' } as Household);
+
+    await service.create({ name: 'Home', language: 'en-us' });
+
+    expect(db.languageTag.findUnique).toHaveBeenCalledWith({ where: { tag: 'en-US' }, select: { id: true } });
+    expect(db.household.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ languageTag: { connect: { id: 'tag-en-us' } } }),
+      }),
+    );
+  });
+
   /**
    * Through `createOrReplay` (#252), whose own spec covers the order of its
    * lookups and which errors it rethrows. What is left here is the household's

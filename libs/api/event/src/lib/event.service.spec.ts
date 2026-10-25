@@ -1,5 +1,15 @@
 import type { Event } from '@bge/database';
-import { Action, FriendshipStatus, HUMAN_USER_WHERE, Prisma, Reach, ResourceType } from '@bge/database';
+import {
+  Action,
+  EventSchedulingMode,
+  EventStatus,
+  FriendshipStatus,
+  HUMAN_USER_WHERE,
+  OccurrenceStatus,
+  Prisma,
+  Reach,
+  ResourceType,
+} from '@bge/database';
 import { uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
@@ -598,6 +608,114 @@ describe('EventService', () => {
     expect(emitted.invitedUserIds).toEqual(['user-2']);
   });
 
+  describe('what createEvent writes', () => {
+    const startDate = new Date('2026-11-01T18:00:00.000Z');
+    const endDate = new Date('2026-11-01T22:00:00.000Z');
+
+    beforeEach(() => {
+      db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
+      db.event.create.mockResolvedValue(makeEvent({ id: 'event-1', createdById: MOCK_ACTING_USER_ID }));
+    });
+
+    /** What the `call`-th create wrote. */
+    const written = (call = 0) => db.event.create.mock.calls[call][0].data;
+
+    it('schedules a fixed event, confirming its one occurrence with a policy of its own', async () => {
+      await service.createEvent({
+        title: 'X',
+        occurrences: [{ label: 'Night', startDate, endDate, location: 'Den' }],
+      } as CreateEventDto);
+
+      expect(written().status).toBe(EventStatus.Scheduled);
+      expect(written().occurrences).toEqual({
+        create: [
+          {
+            label: 'Night',
+            startDate,
+            endDate,
+            location: 'Den',
+            sortOrder: 0,
+            policy: { create: {} },
+            status: OccurrenceStatus.Confirmed,
+            confirmedAt: expect.any(Date),
+          },
+        ],
+      });
+    });
+
+    // A poll's occurrences are the candidates its votes choose between, so
+    // none is confirmed and none gets a policy until one is chosen.
+    it('plans a poll, proposing each occurrence in the order given unless it names its own', async () => {
+      await service.createEvent({
+        title: 'X',
+        schedulingMode: EventSchedulingMode.Poll,
+        occurrences: [{ startDate, sortOrder: 5 }, { startDate: endDate }],
+      } as CreateEventDto);
+
+      expect(written().status).toBe(EventStatus.Planning);
+      expect(written()).toHaveProperty('occurrences.create', [
+        expect.objectContaining({
+          sortOrder: 5,
+          policy: undefined,
+          status: OccurrenceStatus.Proposed,
+          confirmedAt: null,
+        }),
+        expect.objectContaining({
+          sortOrder: 1,
+          policy: undefined,
+          status: OccurrenceStatus.Proposed,
+          confirmedAt: null,
+        }),
+      ]);
+    });
+
+    it('writes no occurrences for an empty list', async () => {
+      await service.createEvent({ title: 'X', occurrences: [] } as unknown as CreateEventDto);
+
+      expect(written().occurrences).toBeUndefined();
+    });
+
+    it('refuses a fixed event with more than one occurrence before writing', async () => {
+      await expect(
+        service.createEvent({ title: 'X', occurrences: [{ startDate }, { startDate: endDate }] } as CreateEventDto),
+      ).rejects.toThrow(BadRequestException);
+      expect(db.event.create).not.toHaveBeenCalled();
+    });
+
+    it('creates an empty policy when the request names none', async () => {
+      await service.createEvent({ title: 'X' } as CreateEventDto);
+
+      expect(written().policy).toEqual({ create: {} });
+    });
+
+    it("links the policy's allowed categories when it names some", async () => {
+      await service.createEvent({
+        title: 'X',
+        policy: { restrictToGameCategories: true, allowedCategoryIds: ['cat-1', 'cat-2'] },
+      } as CreateEventDto);
+
+      expect(written()).toMatchObject({
+        policy: {
+          create: {
+            restrictToGameCategories: true,
+            allowedCategories: {
+              create: [{ category: { connect: { id: 'cat-1' } } }, { category: { connect: { id: 'cat-2' } } }],
+            },
+          },
+        },
+      });
+    });
+
+    it('links no categories for an empty or absent list', async () => {
+      await service.createEvent({ title: 'X', policy: { allowedCategoryIds: [] } } as unknown as CreateEventDto);
+      await service.createEvent({ title: 'X', policy: { maxAttendees: 6 } } as CreateEventDto);
+
+      expect(written(0)).not.toHaveProperty('policy.create.allowedCategories');
+      expect(written(1)).not.toHaveProperty('policy.create.allowedCategories');
+      expect(written(1)).toHaveProperty('policy.create.maxAttendees', 6);
+    });
+  });
+
   describe('createEvent with a client request id (#252)', () => {
     // The event a first attempt made, as the replay lookup reads it.
     const original = makeEvent({ id: 'event-1', title: 'Original', createdById: 'user-1' });
@@ -702,6 +820,44 @@ describe('EventService', () => {
         select: { userId: true },
       });
       expect(permissions.invalidateUsers).toHaveBeenCalledWith(['user-1', 'user-3']);
+    });
+
+    // The abilities primed at the request's start can predate the host role:
+    // the loser of a concurrent create primed before the winner committed it,
+    // and a retry after a crash before the original's eviction read the stale
+    // graph. Outside a household that role is the creator's only read on the
+    // parts, so they must be read under abilities resolved after the eviction.
+    it('evicts, then primes the abilities again, before it reads the parts', async () => {
+      // One log across mocks from different factories, whose call counters
+      // are not comparable.
+      const steps: string[] = [];
+      db.event.findUnique.mockResolvedValue(original);
+      permissions.invalidateUsers.mockImplementation(async () => void steps.push('evict'));
+      abilityService.primeCurrentActor.mockImplementation(async () => void steps.push('prime'));
+      abilityService.getCurrentResourceConditions.mockImplementation((type) => {
+        steps.push(`ceiling:${type}`);
+
+        return [COND];
+      });
+
+      await service.createEvent(retry);
+
+      expect(steps).toEqual([
+        'evict',
+        'prime',
+        `ceiling:${ResourceType.EventOccurrence}`,
+        `ceiling:${ResourceType.EventAttendee}`,
+        `ceiling:${ResourceType.EventPolicy}`,
+      ]);
+    });
+
+    it('primes the abilities again only on a replay', async () => {
+      db.event.findUnique.mockResolvedValue(null);
+      db.event.create.mockResolvedValue(makeEvent({ id: 'event-2', createdById: 'user-1' }));
+
+      await service.createEvent({ title: 'X', clientRequestId: 'k' } as CreateEventDto);
+
+      expect(abilityService.primeCurrentActor).not.toHaveBeenCalled();
     });
 
     it('emits neither the created event nor its webhook on a replay, so no invitee is notified twice', async () => {
