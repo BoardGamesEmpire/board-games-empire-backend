@@ -15,6 +15,7 @@ import {
 } from '@bge/i18n';
 import {
   AbilityService,
+  PERMISSIONS_CACHE,
   PermissionsModule,
   PermissionsService,
   PoliciesGuard,
@@ -347,6 +348,10 @@ describe('AuthenticatedGateway (over a real socket)', () => {
       .useModule(StubDatabaseModule)
       .overrideProvider(PermissionsService)
       .useValue({ getUserRoleGraph })
+      // Never read, since the service above is stubbed. The real one needs the
+      // shared cache client, which this spec doesn't open (#786).
+      .overrideProvider(PERMISSIONS_CACHE)
+      .useValue({})
       .compile();
 
     app = moduleRef.createNestApplication({ logger: false });

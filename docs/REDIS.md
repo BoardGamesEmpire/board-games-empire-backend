@@ -48,6 +48,16 @@ operation, and it resets every other caller's budget with it. **It also signs
 everyone out**: better-auth keeps sessions in the same database, under
 `namespace:api:cache:auth_*`, for their full seven days (#640).
 
+Permission graphs, which abilities are built from, and the version tokens that
+guard them live under `namespace:permissions:cache:`. Every process reads that
+one store, so an eviction in one process, or the api's boot flush, reaches the
+graph every other process would read (#786). That holds only while every
+process points its cache connection (`REDIS_HOST`, `REDIS_PORT`,
+`REDIS_DATABASE`) at the same database: nothing checks it, and a process
+pointed elsewhere keeps serving graphs the api evicted until their TTL ends,
+up to five minutes. `FLUSHDB` clears them too, which costs each user and API
+key one reload.
+
 ### Why three databases?
 
 **Cache and queue must be isolated** because BullMQ uses blocking commands

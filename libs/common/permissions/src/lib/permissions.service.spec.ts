@@ -9,10 +9,10 @@ import {
   User,
 } from '@bge/database';
 import { createTestingModuleWithDb, makePermission, type MockDatabaseService } from '@bge/testing';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Logger } from '@nestjs/common';
 import { createCache, type Cache } from 'cache-manager';
 import type { ApikeyWithScopes, UserPermissionWithPermission, UserWithRoles } from './interfaces';
+import { PERMISSIONS_CACHE } from './permissions-cache';
 import { PermissionsService } from './permissions.service';
 
 describe('PermissionsService', () => {
@@ -26,8 +26,7 @@ describe('PermissionsService', () => {
     cache = createCache();
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
-      providers: [PermissionsService],
-      overrideProviders: [{ provide: CACHE_MANAGER, useValue: cache }],
+      providers: [PermissionsService, { provide: PERMISSIONS_CACHE, useValue: cache }],
     });
 
     service = module.get(PermissionsService);

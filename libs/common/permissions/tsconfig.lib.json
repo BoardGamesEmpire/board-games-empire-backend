@@ -18,7 +18,7 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
-      "path": "../testing/tsconfig.lib.json"
+      "path": "../redis/tsconfig.lib.json"
     },
     {
       "path": "../shared/tsconfig.lib.json"
@@ -27,10 +27,13 @@
       "path": "../i18n/tsconfig.lib.json"
     },
     {
+      "path": "../../plugin/manifest/tsconfig.lib.json"
+    },
+    {
       "path": "../actor-context/tsconfig.lib.json"
     },
     {
-      "path": "../../plugin/manifest/tsconfig.lib.json"
+      "path": "../testing/tsconfig.lib.json"
     },
     {
       "path": "../../database/tsconfig.lib.json"

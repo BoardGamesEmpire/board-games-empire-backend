@@ -26,8 +26,7 @@ export const cacheConfigValidationSchema = {
 /**
  * The namespace of the api's cache store: every key `CacheModule` writes is
  * stored as `cacheStoreKey(API_CACHE_NAMESPACE, key)`, `namespace:api:cache:`
- * in front of the key. Shared with the bootstrap's cache flush (`main.ts`),
- * whose SCAN patterns must name the physical key, not the logical one
- * (#236).
+ * in front of the key. Permission graphs aren't among them: they live in the
+ * store every process shares, under `PERMISSIONS_CACHE_NAMESPACE` (#786).
  */
 export const API_CACHE_NAMESPACE = 'api:cache';
