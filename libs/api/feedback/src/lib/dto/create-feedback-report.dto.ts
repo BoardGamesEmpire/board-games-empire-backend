@@ -1,7 +1,8 @@
 import { FeedbackCategory, FeedbackContext, FeedbackSeverity } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
+import { ClientRequestIdProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
+import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -11,14 +12,12 @@ import {
   IsOptional,
   IsString,
   MaxLength,
-  MinLength,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import {
   FEEDBACK_BREADCRUMBS_MAX_BYTES,
   FEEDBACK_MAX_APP_VERSION_LENGTH,
-  FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH,
   FEEDBACK_MAX_LOCALE_LENGTH,
   FEEDBACK_MAX_MESSAGE_LENGTH,
   FEEDBACK_MAX_PLATFORM_LENGTH,
@@ -127,26 +126,7 @@ export class CreateFeedbackReportDto {
   @MaxJsonBytes(FEEDBACK_BREADCRUMBS_MAX_BYTES)
   breadcrumbs?: BreadcrumbDto[];
 
-  @ApiPropertyOptional({
-    description:
-      'Client-supplied idempotency key, scoped per user. A repeat submission with the same key returns the ' +
-      'ORIGINAL report (same id, same 201 envelope) instead of creating a duplicate, and does not re-trigger ' +
-      'sink fan-out — the payload of the repeat is ignored (first writer wins). Keys are retained for as long ' +
-      'as the report is, i.e. until the retention sweep purges it. The Flutter client mints a cuid2 at compose ' +
-      'time and reuses it for every queued retry, but any stable opaque string is accepted. Surrounding ' +
-      'whitespace is trimmed; a blank key is rejected rather than silently ignored.',
-    minLength: 1,
-    maxLength: FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH,
-  })
-  @IsOptional()
-  @IsString({ message: i18nValidationMessage('validation.isString') })
-  @MinLength(1, { message: i18nValidationMessage('validation.minLength') })
-  @MaxLength(FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH, { message: i18nValidationMessage('validation.maxLength') })
-  // Trim before length validation so a whitespace-only key collapses to '' and
-  // fails MinLength (a 400) rather than reaching the service, where it would be
-  // normalized away and silently cost the caller its idempotency guarantee.
-  // Trimming also makes retries that differ only in padding resolve to one key.
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @ClientRequestIdProperty('feedback report', 'A repeat does not forward the report to its sinks again.')
   clientRequestId?: string;
 
   @ApiPropertyOptional({

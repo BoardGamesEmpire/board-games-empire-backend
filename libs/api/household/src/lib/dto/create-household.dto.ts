@@ -1,10 +1,8 @@
 import { Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
-import { ReachProperty } from '@bge/shared';
+import { ClientRequestIdProperty, ReachProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
-import { HOUSEHOLD_MAX_CLIENT_REQUEST_ID_LENGTH } from '../constants/household.constants';
+import { IsOptional, IsString } from 'class-validator';
 
 const HOUSEHOLD_REACHES = [Reach.Private, Reach.Friends] as const;
 export type HouseholdReach = (typeof HOUSEHOLD_REACHES)[number];
@@ -50,24 +48,6 @@ export class CreateHouseholdDto {
   @IsString({ message: i18nValidationMessage('validation.isString') })
   language?: string;
 
-  @ApiPropertyOptional({
-    description:
-      'Client-supplied idempotency key, scoped per user. A repeat POST with the same key returns the ' +
-      'ORIGINAL household (same id, same 201 envelope) instead of creating a duplicate — the payload of ' +
-      'the repeat is ignored (first writer wins). Keys are retained indefinitely. The Flutter client ' +
-      'sends its queued operation `localId` (a cuid2), but any stable opaque string is accepted. ' +
-      'Surrounding whitespace is trimmed; a blank key is rejected rather than silently ignored.',
-    minLength: 1,
-    maxLength: HOUSEHOLD_MAX_CLIENT_REQUEST_ID_LENGTH,
-  })
-  @IsOptional()
-  @IsString({ message: i18nValidationMessage('validation.isString') })
-  @MinLength(1, { message: i18nValidationMessage('validation.minLength') })
-  @MaxLength(HOUSEHOLD_MAX_CLIENT_REQUEST_ID_LENGTH, { message: i18nValidationMessage('validation.maxLength') })
-  // Trim before length validation so a whitespace-only key collapses to '' and
-  // fails MinLength (a 400) rather than reaching the service, where it would be
-  // normalized away and silently cost the caller its idempotency guarantee.
-  // Trimming also makes retries that differ only in padding hash to one key.
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @ClientRequestIdProperty('household')
   clientRequestId?: string;
 }
