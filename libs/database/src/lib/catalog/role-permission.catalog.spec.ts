@@ -357,18 +357,24 @@ describe('the shipped catalogs', () => {
     });
 
     // A profile has a reach, and user search composes this read, so a profile
-    // that is not `Public` is its owner's alone, in search too (#495). Pinned
-    // exactly, as the game reads are: a lost clause hands every profile to
-    // every user.
-    it('let User read its own profile, a friend’s that reaches friends and everyone’s Public ones, and let no anonymous user read them', () => {
+    // that is not `Public` is its owner's alone, in search too (#495). A banned
+    // user's profile is their own and staff's alone, as user search already
+    // hides them (#840). Pinned exactly, as the game reads are: a lost clause
+    // hands every profile to every user.
+    it('let User read its own profile, an unbanned friend’s that reaches friends and every unbanned user’s Public one, and let no anonymous user read them', () => {
       const conditionsOf = (slug: string) => PERMISSION_CATALOG.find((entry) => entry.slug === slug)?.conditions;
 
+      // A banned user keeps their own profile, so this rule carries no ban
+      // clause (#840).
       expect(conditionsOf('read:user:profile:own')).toStrictEqual({ userId: '{{ user.id }}' });
       expect(conditionsOf('read:user:profile:friends')).toStrictEqual({
         reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
-        user: { is: ACCEPTED_FRIEND_OF_ACTING_USER },
+        user: { is: { AND: [{ banned: false }, ACCEPTED_FRIEND_OF_ACTING_USER] } },
       });
-      expect(conditionsOf('read:user:profile:public')).toStrictEqual({ reach: 'Public' });
+      expect(conditionsOf('read:user:profile:public')).toStrictEqual({
+        reach: 'Public',
+        user: { is: { banned: false } },
+      });
       expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toEqual(
         expect.arrayContaining(['read:user:profile:own', 'read:user:profile:friends', 'read:user:profile:public']),
       );
@@ -461,7 +467,12 @@ describe('the shipped catalogs', () => {
       ],
       [
         'read:user:profile:friends-of-friends',
-        { AND: [{ reach: 'FriendsOfFriends' }, { user: { is: FRIEND_OF_FRIEND_OF_ACTING_USER } }] },
+        {
+          AND: [
+            { reach: 'FriendsOfFriends' },
+            { user: { is: { AND: [{ banned: false }, FRIEND_OF_FRIEND_OF_ACTING_USER] } } },
+          ],
+        },
         RiskLevel.Medium,
       ],
       [
@@ -515,7 +526,11 @@ describe('the shipped catalogs', () => {
         { event: { is: { reach: 'Public' } } },
       ],
       ['read:event_policy:friends-of-friends', 'read:event_policy:public', { event: { is: { reach: 'Public' } } }],
-      ['read:user:profile:friends-of-friends', 'read:user:profile:public', { reach: 'Public' }],
+      [
+        'read:user:profile:friends-of-friends',
+        'read:user:profile:public',
+        { reach: 'Public', user: { is: { banned: false } } },
+      ],
       ['read:game:friends-of-friends', 'read:game:public', { deletedAt: null, reach: 'Public' }],
       ['read:game_collection:friends-of-friends', 'read:game_collection:public', { deletedAt: null, reach: 'Public' }],
     ])('let every reader of %s read Public items through %s', (friendsOfFriendsSlug, publicSlug, conditions) => {

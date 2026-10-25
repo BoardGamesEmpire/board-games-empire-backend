@@ -17,7 +17,9 @@ const OWNER_ONLY = ['dietaryRestrictions', 'accessibilityNeeds', 'reach', 'isSea
  * A profile is read under its reach: by its owner, by their accepted friends
  * when it reaches friends, and by every signed-in user when it is `Public`.
  * Staff read every profile. Anything else answers 404, as a missing profile
- * does. The owner-only fields go to the profile's owner alone.
+ * does. The owner-only fields go to the profile's owner alone. A user reading
+ * by reach gets 404 for a banned user's profile, and staff still read it
+ * (#840).
  */
 describe('user profile', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -51,6 +53,10 @@ describe('user profile', () => {
 
     return { profileOwner, friend, stranger };
   };
+
+  /** Bans the user, writing the columns directly, as the API key spec does. */
+  const ban = (actor: AuthenticatedActor, data: { banExpires?: Date } = {}) =>
+    db.client.user.update({ where: { id: actor.user.id }, data: { banned: true, ...data } });
 
   it('lets a friend read a Friends profile, and answers a stranger 404', async () => {
     const { profileOwner, friend, stranger } = await arrange(Reach.Friends);
@@ -102,6 +108,68 @@ describe('user profile', () => {
 
     await readProfile(friend, profileOwner.user.id).expect(200);
     await readProfile(viewer, profileOwner.user.id).expect(404);
+  });
+
+  // A banned user's profile is hidden from other users as user search hides
+  // them (#840). The reader gets the profile before the ban, so the 404 is
+  // the ban's, not the reach's.
+  it.each([
+    [Reach.Public, 'a stranger', 'stranger'],
+    [Reach.Friends, 'a friend', 'friend'],
+    [Reach.FriendsOfFriends, 'a friend of a friend', 'friendOfFriend'],
+  ] as const)(
+    'answers 404 for a banned user’s %s profile to %s who read it before the ban (#840)',
+    async (reach, _reader, readerKey) => {
+      const { profileOwner, friend, stranger } = await arrange(reach);
+      let reader = readerKey === 'friend' ? friend : stranger;
+      if (readerKey === 'friendOfFriend') {
+        reader = await actors.user();
+        await befriend(db.client, reader, friend);
+      }
+
+      await readProfile(reader, profileOwner.user.id).expect(200);
+      await ban(profileOwner);
+
+      await readProfile(reader, profileOwner.user.id).expect(404);
+    },
+  );
+
+  // better-auth lifts an expired ban only at the user's next sign-in, and user
+  // search waits for that too, so the profile stays hidden until then (#840).
+  it('still answers 404 for a ban that has lapsed but not been lifted (#840)', async () => {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const { profileOwner, stranger } = await arrange(Reach.Public);
+    await readProfile(stranger, profileOwner.user.id).expect(200);
+
+    await ban(profileOwner, { banExpires: new Date(Date.now() - DAY_MS) });
+
+    await readProfile(stranger, profileOwner.user.id).expect(404);
+  });
+
+  // The read conditions are evaluated in the database on every request, not
+  // cached per user, so lifting the ban shows the profile at once (#840).
+  it('serves the profile again once the ban is lifted (#840)', async () => {
+    const { profileOwner, stranger } = await arrange(Reach.Public);
+    await ban(profileOwner);
+    await readProfile(stranger, profileOwner.user.id).expect(404);
+
+    await db.client.user.update({ where: { id: profileOwner.user.id }, data: { banned: false, banExpires: null } });
+
+    await readProfile(stranger, profileOwner.user.id).expect(200);
+  });
+
+  it('serves staff a banned user’s profile, without its owner-only fields (#840)', async () => {
+    const [{ profileOwner }, admin] = await Promise.all([arrange(Reach.Public), actors.admin()]);
+    await ban(profileOwner);
+
+    const asAdmin = userProfile(
+      await readProfile(admin, profileOwner.user.id).expect(200),
+      'GET /api/users/:id/profile of a banned user as staff',
+    );
+    expect(asAdmin.userId).toBe(profileOwner.user.id);
+    for (const field of OWNER_ONLY) {
+      expect(asAdmin).not.toHaveProperty(field);
+    }
   });
 
   // `me/profile` is declared before `:id/profile`, so "me" is never read as a
