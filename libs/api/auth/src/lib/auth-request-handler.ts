@@ -23,11 +23,10 @@ const AUTH_UNAVAILABLE = 'AUTH_UNAVAILABLE';
  * - **429.** better-auth's rate limiter answers with fixed English text and no
  *   code. It keeps its status and headers, `X-Retry-After` among them, and
  *   gets `RATE_LIMITED`. A 429 that already carries a code is left as it is.
- * - **A request better-auth could not answer.** Its limiter reads the request
- *   count from the store ahead of every hook, outside better-auth's own error
- *   handling, so with Redis unreachable the handler throws and Express would
- *   answer a bare 500. It is answered 503 with `AUTH_UNAVAILABLE` instead, and
- *   logged.
+ * - **A request better-auth could not answer.** Its limiter counts the request
+ *   in the store ahead of every hook, outside better-auth's own error handling,
+ *   so with Redis unreachable the handler throws and Express would answer a
+ *   bare 500. It is answered 503 with `AUTH_UNAVAILABLE` instead, and logged.
  *
  * Every other answer passes through as better-auth gave it. Messages are
  * rendered in the fallback locale, as the settings gates' are: `/api/auth/*`

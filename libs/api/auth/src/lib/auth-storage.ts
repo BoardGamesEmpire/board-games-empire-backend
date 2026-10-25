@@ -1,4 +1,4 @@
-import { createCacheStore, type Redis } from '@bge/redis';
+import { cacheStoreKey, createCacheStore, type Redis } from '@bge/redis';
 import type { BetterAuthOptions } from 'better-auth';
 import type Keyv from 'keyv';
 
@@ -7,6 +7,9 @@ import type Keyv from 'keyv';
  * values and rate-limit counts. Every TTL it passes is in seconds.
  */
 export type AuthStorage = NonNullable<BetterAuthOptions['secondaryStorage']>;
+
+/** {@link AuthStorage} with the one-step count and read-and-delete better-auth uses when a storage has them. */
+export type RedisAuthStorage = AuthStorage & Required<Pick<AuthStorage, 'increment' | 'getAndDelete'>>;
 
 /**
  * Where better-auth's keys sit in the store. Unchanged from when the shared
@@ -21,6 +24,18 @@ const KEY_PREFIX = 'auth_';
  * removes only permission keys under it, so sessions survive a restart.
  */
 const STORE_NAMESPACE = 'api:cache';
+
+/**
+ * Counts a request against a rate limit and returns the new count (#832). A
+ * Lua script, which Redis runs (not Node), so the count and its expiry are one
+ * command. Concurrent requests each get a count of their own, and a failed
+ * script rejects `EVAL`, where a MULTI's `exec()` would resolve with the error
+ * beside its reply. `NX` sets the expiry only on a count that has none, so a
+ * later request in the window doesn't push it out.
+ */
+const INCREMENT_SCRIPT = `local count = redis.call('INCR', KEYS[1])
+redis.call('PEXPIRE', KEYS[1], ARGV[1], 'NX')
+return count`;
 
 /**
  * better-auth's secondary storage over a Keyv store of its own (#640).
@@ -44,12 +59,13 @@ const STORE_NAMESPACE = 'api:cache';
  *   tell that the session survived (#487). A failed read is an error too, so
  *   with Redis unreachable no session can be read wherever one is checked,
  *   over HTTP or WebSocket, rather than reading as signed out. better-auth's
- *   rate limiter fails first on every `/api/auth` request, reading its count
- *   ahead of every hook, rather than letting the request through unlimited.
+ *   rate limiter fails first on every `/api/auth` request, counting it ahead
+ *   of every hook, rather than letting the request through unlimited.
  *
- * There is no `increment` yet, so better-auth counts requests against a rate
- * limit with a read and then a write, which concurrent requests can slip
- * between (#832).
+ * Keyv can't count, or read and delete, in one step. So over this alone
+ * better-auth counts requests against a rate limit with a read and then a
+ * write, and uses a single-use value with a read and then a delete.
+ * {@link createRedisAuthStorage} adds both steps.
  */
 export function createAuthStorage(store: Keyv): AuthStorage {
   if (!store.throwOnErrors) {
@@ -75,7 +91,50 @@ export function createAuthStorage(store: Keyv): AuthStorage {
   };
 }
 
-/** {@link createAuthStorage} over the shared cache client, the api's Redis connection for caches. */
-export function createRedisAuthStorage(client: Redis): AuthStorage {
-  return createAuthStorage(createCacheStore(client, STORE_NAMESPACE, { throwOnErrors: true }));
+/**
+ * {@link createAuthStorage} over the shared cache client, the api's Redis
+ * connection for caches.
+ *
+ * - **A rate-limit count is one step** (#832). With a read and then a write,
+ *   concurrent requests could all read the same count, and all get through.
+ *   Counted here, they are counted across every api process sharing the
+ *   Redis. A count that fails is raised, as every call here is.
+ * - **A single-use value is used in one step** (#888). better-auth reads a
+ *   verification value, such as a reset link's, and then deletes it, under a
+ *   lock that spans one process only. Two api processes could each read the
+ *   value before either deleted it, and both use it. `GETDEL` gives it to one
+ *   of them. It returns what `get` would: the value inside Keyv's envelope, or
+ *   nothing once the envelope's expiry has passed.
+ */
+export function createRedisAuthStorage(client: Redis): RedisAuthStorage {
+  const store = createCacheStore(client, STORE_NAMESPACE, { throwOnErrors: true });
+
+  return {
+    ...createAuthStorage(store),
+
+    async increment(key, ttl) {
+      // Rounded up, because PEXPIRE takes whole milliseconds and a window such
+      // as 1.0005 s would fail the script after its INCR.
+      return Number(await client.eval(INCREMENT_SCRIPT, 1, physicalKey(key), Math.ceil(ttl * 1000)));
+    },
+
+    async getAndDelete(key) {
+      const raw = await client.getdel(physicalKey(key));
+      if (raw === null) {
+        return undefined;
+      }
+
+      const envelope = await store.deserializeData<unknown>(raw);
+      if (!envelope || (typeof envelope.expires === 'number' && Date.now() > envelope.expires)) {
+        return undefined;
+      }
+
+      return envelope.value;
+    },
+  };
+}
+
+/** The Redis key the store keeps better-auth's `key` under, for a command sent around the store. */
+function physicalKey(key: string): string {
+  return cacheStoreKey(STORE_NAMESPACE, `${KEY_PREFIX}${key}`);
 }
