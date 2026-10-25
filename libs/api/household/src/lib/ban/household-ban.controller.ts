@@ -98,8 +98,9 @@ export class HouseholdBanController {
   @ApiOperation({
     summary: 'Lift a ban (owner or admin)',
     description:
-      'The user may be invited by id again. Invites to their address that the ban withheld stay withheld, ' +
-      'so lifting the ban sends none of them. The answer carries the ban as it was.',
+      'The user may be invited by id again, and an admission lets them in. Invites to their address that ' +
+      'the ban withheld reach them, and they are told of each, all but those their blocks or invite ' +
+      'preferences would still withhold from the sender. The answer carries the ban as it was.',
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiParam({ name: 'userId', type: String, description: 'The banned user' })
