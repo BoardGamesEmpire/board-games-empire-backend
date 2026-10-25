@@ -95,3 +95,13 @@ export interface WsSourceUnavailablePayload {
   correlationId: string;
   source: string;
 }
+
+/**
+ * A DataGateway the search's filter skipped (#869): it can't filter by a
+ * player-count or play-time range the search gave without keeping unknown
+ * values, so it wasn't asked. It is that DataGateway's last frame.
+ */
+export interface WsSourceUnfilterablePayload {
+  correlationId: string;
+  source: string;
+}

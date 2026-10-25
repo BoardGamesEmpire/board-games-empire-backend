@@ -14,7 +14,7 @@ import {
 import * as proto from '@boardgamesempire/proto-gateway';
 import { ForbiddenException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
-import { EMPTY, firstValueFrom } from 'rxjs';
+import { EMPTY, firstValueFrom, of } from 'rxjs';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { GameSearchService } from './game-search.service';
 
@@ -296,6 +296,50 @@ describe('GameSearchService', () => {
           },
         }),
       );
+    });
+  });
+
+  // #869: the coordinator answers a DataGateway that can't apply a player-count
+  // or play-time range with one UNFILTERABLE frame, in place of asking it.
+  // Without a note of it, every such DataGateway would read as "no results".
+  describe('search (REST): DataGateways a search filter skipped', () => {
+    const frame = (gatewayId: string, status: proto.ResultStatus): proto.SearchGameResult => ({
+      correlationId: 'c1',
+      gatewayId,
+      status,
+    });
+
+    const externalOnly = () =>
+      plainToInstance(SearchQueryDto, { query: 'brass', includeLocal: false, playerCountMin: 5 });
+
+    it('lists a DataGateway answering UNFILTERABLE in unfilterableSources (#869)', async () => {
+      coordinator.searchGames.mockReturnValue(of(frame('bgg', proto.ResultStatus.RESULT_STATUS_UNFILTERABLE)));
+
+      const response = await firstValueFrom(service.search(externalOnly()));
+
+      expect(response.unfilterableSources).toEqual(['bgg']);
+      expect(response.resultsBySource).not.toHaveProperty('bgg');
+    });
+
+    it('keeps a skipped DataGateway apart from the unavailable, and omits the list when none was skipped (#869)', async () => {
+      coordinator.searchGames.mockReturnValue(
+        of(
+          frame('bgg', proto.ResultStatus.RESULT_STATUS_UNFILTERABLE),
+          frame('igdb', proto.ResultStatus.RESULT_STATUS_UNAVAILABLE),
+          frame('igdb', proto.ResultStatus.RESULT_STATUS_SOURCE_DONE),
+        ),
+      );
+
+      const mixed = await firstValueFrom(service.search(externalOnly()));
+
+      expect(mixed.unfilterableSources).toEqual(['bgg']);
+      expect(mixed.unavailableSources).toEqual(['igdb']);
+
+      coordinator.searchGames.mockReturnValue(of(frame('bgg', proto.ResultStatus.RESULT_STATUS_SOURCE_DONE)));
+
+      const unskipped = await firstValueFrom(service.search(externalOnly()));
+
+      expect(unskipped).not.toHaveProperty('unfilterableSources');
     });
   });
 
