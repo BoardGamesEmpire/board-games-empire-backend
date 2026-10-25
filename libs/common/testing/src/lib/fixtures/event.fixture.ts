@@ -143,6 +143,7 @@ export function makeEvent(overrides: Partial<Event> = {}): Event {
     url: null,
     type: EventType.CasualGathering,
     reach: Reach.Friends,
+    clientRequestId: null,
     deletedAt: null,
     cancelledById: null,
     deletedById: null,

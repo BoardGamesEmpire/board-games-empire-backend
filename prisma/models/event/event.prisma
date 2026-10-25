@@ -32,6 +32,12 @@ model Event {
   type  EventType @default(CasualGathering)
   reach Reach     @default(Friends)
 
+  // Client-supplied key for POST /events (#252), as Household.clientRequestId
+  // is for POST /households. A repeat create with the same key returns the
+  // ORIGINAL event instead of inserting a second one. Kept as long as the row:
+  // the client's offline queue can hold a retry arbitrarily long.
+  clientRequestId String? @map("client_request_id")
+
   recurrenceRule   EventRecurrenceRule?      @relation("RecurringEventInstances", fields: [recurrenceRuleId], references: [id])
   recurrenceRuleId String?                   @map("recurrence_rule_id")
   recurrenceStatus RecurrenceInstanceStatus? @map("recurrence_status")
@@ -52,6 +58,9 @@ model Event {
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
+  // Per creator, never global, as on households and feedback reports. NULLs
+  // are distinct, so unkeyed creates are unaffected.
+  @@unique([createdById, clientRequestId], map: "event_created_by_client_request_id_unique")
   @@index([householdId])
   @@index([createdById])
   @@map("events")

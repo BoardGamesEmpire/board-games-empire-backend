@@ -1,11 +1,13 @@
 import {
   Action,
+  createOrReplay,
   DatabaseService,
   Event,
   EventParticipationStatus,
   EventSchedulingMode,
   EventStatus,
   isPrismaDependentRecordNotFoundError,
+  normalizeClientRequestId,
   OccurrenceStatus,
   Prisma,
   ResourceType,
@@ -23,6 +25,11 @@ import { isDeepStrictEqual } from 'node:util';
 import { assertInvitable } from './attendee/invitable';
 import { ATTENDEE_ORDER } from './constants/attendee-order.constant';
 import { ATTENDEE_USER_AND_ROLE_INCLUDE } from './constants/attendee-user-and-role.constant';
+import {
+  EVENT_CREATE_ATTENDEE_INCLUDE,
+  EVENT_CREATE_INCLUDE,
+  type CreatedEvent,
+} from './constants/event-create-include.constant';
 import { NOT_REMOVED } from './constants/not-removed.constant';
 import { OCCURRENCE_ORDER } from './constants/occurrence-order.constant';
 import type { CreateEventDto } from './dto/create-event.dto';
@@ -173,138 +180,171 @@ export class EventService {
   async createEvent(dto: CreateEventDto): Promise<Event> {
     const initiatedAt = new Date();
     const userId = this.abilityService.getActingUserId();
-    const { occurrences, policy, householdId = null, inviteUserIds = [], ...eventFields } = dto;
-
-    // The route's type-level check passes every user, since `create:event`
-    // exists for all of them. What decides it is the household the event
-    // joins: `create:event` covers none, and each household's own grant
-    // covers that household. `null` goes on the subject explicitly — the
-    // matcher reads a missing field as `null`, so leaving it out would pass
-    // any household as an event outside one. No role renders for a
-    // soft-deleted or unknown household, so no household grant matches it.
-    this.abilityService.assertCurrentActorCan(Action.create, ResourceType.Event, { householdId });
-
-    this.validateOccurrencesForMode(dto.schedulingMode ?? EventSchedulingMode.Fixed, occurrences);
+    const {
+      occurrences,
+      policy,
+      householdId = null,
+      inviteUserIds = [],
+      clientRequestId: rawClientRequestId,
+      ...eventFields
+    } = dto;
+    const clientRequestId = normalizeClientRequestId(rawClientRequestId);
     const uniqueInviteIds = Array.from(new Set(inviteUserIds.filter((id) => id !== userId)));
 
-    const event = await this.db.$transaction(async (tx) => {
-      // The check above cannot settle whether the household is still live.
-      // It read a graph that may predate a soft-delete, since the graph is
-      // cached and eviction is best-effort, and a delete can commit after the
-      // graph was built. The site Owner's grant names no household at all.
-      // The share lock answers a dead or unknown household with 404, and holds
-      // a concurrent soft-delete off until this event is written.
-      if (householdId !== null) {
-        await lockExistingHousehold(tx, householdId);
-      }
+    // A retried create finds the event its first attempt made before any
+    // check below runs (#252). The checks judged the original; a household
+    // deleted or an invitee who blocked the creator since must not turn the
+    // retry of a create that succeeded into a 404 or a 403.
+    const { row: event, replayed } = await createOrReplay<CreatedEvent>({
+      clientRequestId,
+      find: (key) => this.findReplayedEvent(userId, key),
+      logger: this.logger,
+      label: 'event create',
+      create: async () => {
+        // The route's type-level check passes every user, since `create:event`
+        // exists for all of them. What decides it is the household the event
+        // joins: `create:event` covers none, and each household's own grant
+        // covers that household. `null` goes on the subject explicitly — the
+        // matcher reads a missing field as `null`, so leaving it out would pass
+        // any household as an event outside one. No role renders for a
+        // soft-deleted or unknown household, so no household grant matches it.
+        this.abilityService.assertCurrentActorCan(Action.create, ResourceType.Event, { householdId });
 
-      await assertInvitable(tx, userId, uniqueInviteIds);
+        this.validateOccurrencesForMode(dto.schedulingMode ?? EventSchedulingMode.Fixed, occurrences);
 
-      const created = await tx.event.create({
-        data: {
-          ...eventFields,
+        return this.db.$transaction(async (tx) => {
+          // The check above cannot settle whether the household is still live.
+          // It read a graph that may predate a soft-delete, since the graph is
+          // cached and eviction is best-effort, and a delete can commit after the
+          // graph was built. The site Owner's grant names no household at all.
+          // The share lock answers a dead or unknown household with 404, and holds
+          // a concurrent soft-delete off until this event is written.
+          if (householdId !== null) {
+            await lockExistingHousehold(tx, householdId);
+          }
 
-          household: householdId !== null ? { connect: { id: householdId } } : undefined,
-          status: dto.schedulingMode === EventSchedulingMode.Poll ? EventStatus.Planning : EventStatus.Scheduled,
+          await assertInvitable(tx, userId, uniqueInviteIds);
 
-          createdBy: { connect: { id: userId } },
+          return tx.event.create({
+            data: {
+              ...eventFields,
+              clientRequestId,
 
-          occurrences:
-            occurrences && occurrences.length > 0
-              ? {
-                  create: occurrences.map((occ, idx) => ({
-                    label: occ.label,
-                    startDate: occ.startDate,
-                    endDate: occ.endDate,
-                    location: occ.location,
-                    sortOrder: occ.sortOrder ?? idx,
-                    policy: dto.schedulingMode === EventSchedulingMode.Poll ? undefined : { create: {} },
-                    status:
-                      dto.schedulingMode === EventSchedulingMode.Poll
-                        ? OccurrenceStatus.Proposed
-                        : OccurrenceStatus.Confirmed,
-                    confirmedAt: dto.schedulingMode === EventSchedulingMode.Poll ? null : new Date(),
-                  })),
-                }
-              : undefined,
+              household: householdId !== null ? { connect: { id: householdId } } : undefined,
+              status: dto.schedulingMode === EventSchedulingMode.Poll ? EventStatus.Planning : EventStatus.Scheduled,
 
-          policy: {
-            create: policy
-              ? {
-                  allowMemberInvites: policy.allowMemberInvites,
-                  allowGuestInvites: policy.allowGuestInvites,
-                  maxAttendees: policy.maxAttendees,
-                  requireHostApprovalToJoin: policy.requireHostApprovalToJoin,
-                  allowSpectators: policy.allowSpectators,
-                  maxTotalParticipants: policy.maxTotalParticipants,
-                  strictCapacity: policy.strictCapacity,
-                  gameAdditionMode: policy.gameAdditionMode,
-                  restrictToAttendeePool: policy.restrictToAttendeePool,
-                  restrictToGameCategories: policy.restrictToGameCategories,
-                  fillerMaxPlayTime: policy.fillerMaxPlayTime,
-                  voteThresholdType: policy.voteThresholdType,
-                  voteThresholdValue: policy.voteThresholdValue,
-                  voteQuorumType: policy.voteQuorumType,
-                  voteQuorumValue: policy.voteQuorumValue,
-                  voteEligibility: policy.voteEligibility,
-                  interestedWeight: policy.interestedWeight,
-                  votingWindowHours: policy.votingWindowHours,
-                  ...(policy.allowedCategoryIds?.length
-                    ? {
-                        allowedCategories: {
-                          create: policy.allowedCategoryIds.map((catId) => ({
-                            category: { connect: { id: catId } },
-                          })),
-                        },
-                      }
-                    : {}),
-                  // always create an event policy -- even an empty one
-                }
-              : {},
-          },
+              createdBy: { connect: { id: userId } },
 
-          attendees: {
-            create: [
-              // Creator is automatically added as EventOrganizer attendee
-              {
-                user: { connect: { id: userId } },
-                status: EventParticipationStatus.Attending,
-                role: {
-                  create: {
-                    role: { connect: { name: SystemRole.EventHost } },
-                  },
-                },
+              occurrences:
+                occurrences && occurrences.length > 0
+                  ? {
+                      create: occurrences.map((occ, idx) => ({
+                        label: occ.label,
+                        startDate: occ.startDate,
+                        endDate: occ.endDate,
+                        location: occ.location,
+                        sortOrder: occ.sortOrder ?? idx,
+                        policy: dto.schedulingMode === EventSchedulingMode.Poll ? undefined : { create: {} },
+                        status:
+                          dto.schedulingMode === EventSchedulingMode.Poll
+                            ? OccurrenceStatus.Proposed
+                            : OccurrenceStatus.Confirmed,
+                        confirmedAt: dto.schedulingMode === EventSchedulingMode.Poll ? null : new Date(),
+                      })),
+                    }
+                  : undefined,
+
+              policy: {
+                create: policy
+                  ? {
+                      allowMemberInvites: policy.allowMemberInvites,
+                      allowGuestInvites: policy.allowGuestInvites,
+                      maxAttendees: policy.maxAttendees,
+                      requireHostApprovalToJoin: policy.requireHostApprovalToJoin,
+                      allowSpectators: policy.allowSpectators,
+                      maxTotalParticipants: policy.maxTotalParticipants,
+                      strictCapacity: policy.strictCapacity,
+                      gameAdditionMode: policy.gameAdditionMode,
+                      restrictToAttendeePool: policy.restrictToAttendeePool,
+                      restrictToGameCategories: policy.restrictToGameCategories,
+                      fillerMaxPlayTime: policy.fillerMaxPlayTime,
+                      voteThresholdType: policy.voteThresholdType,
+                      voteThresholdValue: policy.voteThresholdValue,
+                      voteQuorumType: policy.voteQuorumType,
+                      voteQuorumValue: policy.voteQuorumValue,
+                      voteEligibility: policy.voteEligibility,
+                      interestedWeight: policy.interestedWeight,
+                      votingWindowHours: policy.votingWindowHours,
+                      ...(policy.allowedCategoryIds?.length
+                        ? {
+                            allowedCategories: {
+                              create: policy.allowedCategoryIds.map((catId) => ({
+                                category: { connect: { id: catId } },
+                              })),
+                            },
+                          }
+                        : {}),
+                      // always create an event policy -- even an empty one
+                    }
+                  : {},
               },
-              ...uniqueInviteIds.map((inviteId) => ({
-                user: { connect: { id: inviteId } },
-                status: EventParticipationStatus.Invited,
-                role: {
-                  create: {
-                    role: { connect: { name: SystemRole.EventParticipant } },
-                  },
-                },
-              })),
-            ],
-          },
-        },
 
-        include: {
-          occurrences: { orderBy: OCCURRENCE_ORDER },
-          policy: true,
-          attendees: {
-            include: {
-              role: {
-                include: {
-                  role: { select: { id: true, name: true } },
-                },
+              attendees: {
+                create: [
+                  // The creator joins as the event's host
+                  {
+                    user: { connect: { id: userId } },
+                    status: EventParticipationStatus.Attending,
+                    role: {
+                      create: {
+                        role: { connect: { name: SystemRole.EventHost } },
+                      },
+                    },
+                  },
+                  ...uniqueInviteIds.map((inviteId) => ({
+                    user: { connect: { id: inviteId } },
+                    status: EventParticipationStatus.Invited,
+                    role: {
+                      create: {
+                        role: { connect: { name: SystemRole.EventParticipant } },
+                      },
+                    },
+                  })),
+                ],
               },
             },
-          },
-        },
-      });
 
-      return created;
+            include: EVENT_CREATE_INCLUDE,
+          });
+        });
+      },
     });
+
+    if (replayed) {
+      // A replay evicts, as the original did: eviction is idempotent, and it
+      // heals an original that committed but crashed before its own eviction
+      // ran. Nothing records which attendee rows the create made, so it
+      // evicts every user with a row on the event now: the original's host
+      // and invitees, and anyone added or removed since, whose own add or
+      // removal evicted them already and costs one graph rebuild here. The
+      // retry's invitees were never added. Read unscoped, unlike the response:
+      // whose graph is stale does not depend on whom the creator may see.
+      //
+      // It emits nothing (#252): the original emitted once it committed, and
+      // a second round would notify its invitees and fire its webhook twice.
+      //
+      // Known residual: an original that committed but crashed before its
+      // emits leaves its invitees unnotified, and the replay does not make up
+      // for it. Emitting here would notify twice in the far commoner case
+      // where the original's emits ran, and nothing records which case this is.
+      const rows = await this.db.eventAttendee.findMany({ where: { eventId: event.id }, select: { userId: true } });
+
+      await this.permissions.invalidateUsers(
+        Array.from(new Set([userId, ...rows.flatMap(({ userId: id }) => (id === null ? [] : [id]))])),
+      );
+
+      return event;
+    }
 
     // The creator's graph was cached by this request, before the host row
     // existed, and each invitee's predates their participant row. Without the
@@ -342,7 +382,62 @@ export class EventService {
       }),
     );
 
+    // Here rather than in the controller, which cannot tell a replay from a
+    // create: a retried create made nothing, and must not log that it did.
+    this.logger.log(`Event "${event.title}" (${event.id}) created by user ${event.createdById}`);
+
     return event;
+  }
+
+  /**
+   * The event a keyed create made under `clientRequestId`, for its replay
+   * (#252), in the shape the create returned it.
+   *
+   * The row comes back whatever has happened to it since, soft delete
+   * included: it is the creator's own create, and its outcome. The parts are
+   * other users' data, so each is read under its own type's ceiling, as
+   * `getEventById` reads them (#560), and a removed attendee is left out. A
+   * creator who still hosts the event gets what the create answered; one who
+   * has lost read on it since gets the event and only what they may still
+   * see of it.
+   */
+  private async findReplayedEvent(userId: string, clientRequestId: string): Promise<CreatedEvent | null> {
+    const event = await this.db.event.findUnique({
+      where: { createdById_clientRequestId: { createdById: userId, clientRequestId } },
+    });
+
+    if (!event) {
+      return null;
+    }
+
+    const [occurrences, attendees, policy] = await this.db.$transaction(
+      [
+        this.db.eventOccurrence.findMany({
+          where: this.scopeComposer.compose(ResourceType.EventOccurrence, Action.read, { eventId: event.id }),
+          orderBy: OCCURRENCE_ORDER,
+        }),
+
+        this.db.eventAttendee.findMany({
+          where: this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, {
+            eventId: event.id,
+            ...NOT_REMOVED,
+          }),
+          include: EVENT_CREATE_ATTENDEE_INCLUDE,
+          orderBy: ATTENDEE_ORDER,
+        }),
+
+        this.db.eventPolicy.findUnique({
+          where: {
+            eventId: event.id,
+            // eslint-disable-next-line no-restricted-syntax -- the event's one policy row, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.read),
+          },
+        }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    return { ...event, occurrences, attendees, policy };
   }
 
   async updateEvent(id: string, dto: UpdateEventDto): Promise<Event> {
