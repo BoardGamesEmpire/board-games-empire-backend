@@ -7,11 +7,15 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { localSearchGameIds } from './game-wire';
 
 /**
- * A search narrowed by platform type and content type, on its local half,
- * against real rows (#713). A game matches content types by its own, and
- * platform types by the platforms it's on, so a game on none matches no
- * platform type. Portable is stored as itself, so a filter on it finds a
- * game on a portable platform.
+ * A search in the game catalog narrowed by each of its five filters, against
+ * real rows: platform type and content type (#713), publish year (#719),
+ * player count and play time (#869). A game matches content types by its
+ * own, and platform types by the platforms it's on, so a game on none matches
+ * no platform type. Portable is stored as itself, so a filter on it finds a
+ * game on a portable platform. Each of the three ranges keeps a game with no
+ * known value only when asked, and a blank bound narrows nothing. A bound
+ * below its floor or past a 32-bit integer, or a maximum below its minimum,
+ * answers 400.
  *
  * Every narrowed search is paired with the unfiltered one as its control, so
  * a filter can't pass by the search finding nothing at all.
@@ -75,6 +79,19 @@ describe('game search filter', () => {
 
     return game.id;
   };
+
+  /** A public base game in the game catalog, with the player counts and play times it's given (#869). */
+  const arrangeRanged = async (
+    title: string,
+    values: { minPlayers?: number; maxPlayers?: number; minPlayTime?: number; maxPlayTime?: number },
+    createdById: string,
+  ) =>
+    (
+      await db.client.game.create({
+        data: { title, ...values, contentType: ContentType.BaseGame, reach: Reach.Public, createdById },
+        select: { id: true },
+      })
+    ).id;
 
   it('narrows the local half by platform type and content type, and leaves out a game on no platform', async () => {
     const user = await actors.user();
@@ -156,5 +173,74 @@ describe('game search filter', () => {
     await search(user, { query: 'anything', publishYearMin: '2000', publishYearMax: '1990' }).expect(400);
     await search(user, { query: 'anything', publishYearMin: '3000000000' }).expect(400);
     await search(user, { query: 'anything', publishYearMin: '1990', publishYearMax: '1990' }).expect(200);
+  });
+
+  // A game night's player count is everyone who might come, so a bound alone
+  // is one count: a minimum of 5 finds games for 5, not for 5 or more. A game
+  // missing either count is unknown, and kept only when asked (#869).
+  it('narrows the search in the game catalog by player count, keeping a game missing a count only when asked', async () => {
+    const user = await actors.user();
+    const token = randomUUID().slice(0, 8);
+
+    const upToFour = await arrangeRanged(`Players ${token} 2-4`, { minPlayers: 2, maxPlayers: 4 }, user.user.id);
+    const upToSix = await arrangeRanged(`Players ${token} 2-6`, { minPlayers: 2, maxPlayers: 6 }, user.user.id);
+    const noMaximum = await arrangeRanged(`Players ${token} 2-unknown`, { minPlayers: 2 }, user.user.id);
+
+    expect(await searchedIds(user, { query: token })).toEqual([upToFour, upToSix, noMaximum].sort());
+    expect(await searchedIds(user, { query: token, playerCountMin: '5' })).toEqual([upToSix]);
+    expect(await searchedIds(user, { query: token, playerCountMin: '3', playerCountMax: '4' })).toEqual(
+      [upToFour, upToSix].sort(),
+    );
+    expect(
+      await searchedIds(user, {
+        query: token,
+        playerCountMin: '3',
+        playerCountMax: '4',
+        playerCountIncludeUnknown: 'true',
+      }),
+    ).toEqual([upToFour, upToSix, noMaximum].sort());
+  });
+
+  // A game's whole play time, in minutes, must fit the range, and a game with
+  // one play time takes that long. A bound left out doesn't narrow that side,
+  // and only a game with neither time is unknown (#869).
+  it('narrows it by play time in minutes, reading a game with one time as that time', async () => {
+    const user = await actors.user();
+    const token = randomUUID().slice(0, 8);
+
+    const upToAnHour = await arrangeRanged(`Time ${token} 30-60`, { minPlayTime: 30, maxPlayTime: 60 }, user.user.id);
+    const upToTwoHours = await arrangeRanged(
+      `Time ${token} 30-120`,
+      { minPlayTime: 30, maxPlayTime: 120 },
+      user.user.id,
+    );
+    const anHour = await arrangeRanged(`Time ${token} 60`, { minPlayTime: 60 }, user.user.id);
+    const untimed = await arrangeRanged(`Time ${token} untimed`, {}, user.user.id);
+
+    expect(await searchedIds(user, { query: token })).toEqual([upToAnHour, upToTwoHours, anHour, untimed].sort());
+    expect(await searchedIds(user, { query: token, playTimeMax: '90' })).toEqual([upToAnHour, anHour].sort());
+    // Both 30-minute games can end too soon, whatever their longest time.
+    expect(await searchedIds(user, { query: token, playTimeMin: '45' })).toEqual([anHour]);
+    expect(await searchedIds(user, { query: token, playTimeMax: '90', playTimeIncludeUnknown: 'true' })).toEqual(
+      [upToAnHour, anHour, untimed].sort(),
+    );
+    // A blank bound is absent, not 0, so it narrows nothing.
+    expect(await searchedIds(user, { query: token, playTimeMax: '', playTimeIncludeUnknown: 'true' })).toEqual(
+      [upToAnHour, upToTwoHours, anHour, untimed].sort(),
+    );
+  });
+
+  // A game takes at least one player, and no game plays in negative time (#869).
+  it('refuses a player count below 1, a negative play time, or a maximum below its minimum, with 400', async () => {
+    const user = await actors.user();
+
+    await search(user, { query: 'anything', playerCountMin: '0' }).expect(400);
+    await search(user, { query: 'anything', playerCountMax: '0' }).expect(400);
+    await search(user, { query: 'anything', playTimeMin: '-1' }).expect(400);
+    await search(user, { query: 'anything', playerCountMin: '4', playerCountMax: '3' }).expect(400);
+    await search(user, { query: 'anything', playTimeMin: '90', playTimeMax: '60' }).expect(400);
+
+    await search(user, { query: 'anything', playerCountMin: '1', playerCountMax: '1' }).expect(200);
+    await search(user, { query: 'anything', playTimeMin: '0', playTimeMax: '0' }).expect(200);
   });
 });
