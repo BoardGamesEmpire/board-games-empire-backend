@@ -135,6 +135,52 @@ describe('PermissionsService', () => {
     });
   });
 
+  describe('loadUserRoleGraphs', () => {
+    it('reads every user in one read, with the graph and ban rule a single read uses, and caches nothing (#732)', async () => {
+      const now = new Date('2026-10-22T12:00:00Z');
+      jest.useFakeTimers({ now });
+
+      try {
+        const tx = { user: { findUnique: jest.fn().mockResolvedValue(null) } };
+        await service.loadUserRoleGraphWithin(tx as never, 'user-1');
+        const set = jest.spyOn(cache, 'set');
+        const first = makeUserGraph({ id: 'user-1' });
+        const second = makeUserGraph({ id: 'user-2' });
+        db.user.findMany.mockResolvedValue([first, second] as unknown as User[]);
+
+        const graphs = await service.loadUserRoleGraphs(['user-1', 'user-2']);
+
+        expect(graphs).toEqual(
+          new Map([
+            ['user-1', first],
+            ['user-2', second],
+          ]),
+        );
+        const single = tx.user.findUnique.mock.calls[0][0];
+        expect(db.user.findMany).toHaveBeenCalledWith({
+          select: single.select,
+          where: { id: { in: ['user-1', 'user-2'] }, AND: single.where.AND },
+        });
+        expect(set).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('leaves out a user the read does not return, as one banned or deleted (#906)', async () => {
+      db.user.findMany.mockResolvedValue([makeUserGraph({ id: 'user-1' })] as unknown as User[]);
+
+      const graphs = await service.loadUserRoleGraphs(['user-1', 'user-2']);
+
+      expect(graphs.has('user-2')).toBe(false);
+    });
+
+    it('reads nothing for no users', async () => {
+      await expect(service.loadUserRoleGraphs([])).resolves.toEqual(new Map());
+      expect(db.user.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getUserRoleGraph', () => {
     it('returns the cached graph without hitting the database on a cache hit', async () => {
       const graph = makeUserGraph();

@@ -1,6 +1,6 @@
 import { AuditContextService } from '@bge/actor-context';
 import { Action, ResourceType, WebhookSubscription, WebhookSubscriptionStatus } from '@bge/database';
-import { AbilityFactory, PermissionsService, type AppAbility } from '@bge/permissions';
+import { AbilityFactory, PermissionsService, type AppAbility, type UserWithRoles } from '@bge/permissions';
 import { createTestingModuleWithDb, MockDatabaseService } from '@bge/testing';
 import type { WebhookEmittableEvent } from '@bge/webhooks';
 import { WebhookEventRegistry, WebhookEventType, WebhookVisibilityService } from '@bge/webhooks';
@@ -18,6 +18,8 @@ describe('WebhookDispatcherService', () => {
   let visibility: jest.Mocked<Pick<WebhookVisibilityService, 'isVisibleTo'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getActor'>>;
   let emitter: jest.Mocked<Pick<EventEmitter2, 'onAny' | 'offAny'>>;
+  let permissions: jest.Mocked<Pick<PermissionsService, 'getUserRoleGraph' | 'loadUserRoleGraphs'>>;
+  let abilityFactory: jest.Mocked<Pick<AbilityFactory, 'createForUser'>>;
 
   const ability = createPrismaAbility([]) as AppAbility;
 
@@ -33,14 +35,16 @@ describe('WebhookDispatcherService', () => {
     visibility = { isVisibleTo: jest.fn().mockResolvedValue(true) };
     auditContext = { getActor: jest.fn().mockReturnValue(null) };
     emitter = { onAny: jest.fn(), offAny: jest.fn() };
+    permissions = { getUserRoleGraph: jest.fn(), loadUserRoleGraphs: jest.fn().mockResolvedValue(new Map()) };
+    abilityFactory = { createForUser: jest.fn().mockReturnValue(ability) };
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
       providers: [
         WebhookDispatcherService,
         WebhookEventRegistry,
         { provide: EventEmitter2, useValue: emitter },
-        { provide: PermissionsService, useValue: { getUserRoleGraph: jest.fn().mockResolvedValue({}) } },
-        { provide: AbilityFactory, useValue: { createForUser: jest.fn().mockReturnValue(ability) } },
+        { provide: PermissionsService, useValue: permissions },
+        { provide: AbilityFactory, useValue: abilityFactory },
         { provide: WebhookVisibilityService, useValue: visibility },
         { provide: AuditContextService, useValue: auditContext },
         { provide: getQueueToken(WEBHOOK_QUEUE_NAME), useValue: queue },
@@ -158,6 +162,39 @@ describe('WebhookDispatcherService', () => {
     const [, job, opts] = queue.add.mock.calls[0];
     expect(job.deliveryId).not.toContain('sub-1');
     expect(opts.jobId).toBe(job.deliveryId);
+  });
+
+  it("builds each subscriber's ability from the graph the database holds now, never the cache (#732)", async () => {
+    db.webhookSubscription.findMany.mockResolvedValue([{ id: 'sub-1', createdById: 'owner-1' } as WebhookSubscription]);
+    const graph = { id: 'owner-1' } as UserWithRoles;
+    permissions.loadUserRoleGraphs.mockResolvedValue(new Map([['owner-1', graph]]));
+
+    await dispatch(WebhookEventType.EventCreated, event());
+
+    expect(abilityFactory.createForUser).toHaveBeenCalledWith(graph);
+    expect(permissions.getUserRoleGraph).not.toHaveBeenCalled();
+  });
+
+  // One read for every subscriber, not one each: an event can have many (#732).
+  it('reads the graphs of every distinct subscriber in one read per fan-out (#732)', async () => {
+    db.webhookSubscription.findMany.mockResolvedValue([
+      { id: 'sub-1', createdById: 'owner-1' },
+      { id: 'sub-2', createdById: 'owner-2' },
+      { id: 'sub-3', createdById: 'owner-1' },
+    ] as WebhookSubscription[]);
+
+    await dispatch(WebhookEventType.EventCreated, event());
+
+    expect(permissions.loadUserRoleGraphs).toHaveBeenCalledTimes(1);
+    expect(permissions.loadUserRoleGraphs).toHaveBeenCalledWith(['owner-1', 'owner-2']);
+  });
+
+  it('gives a banned or deleted subscriber, who has no graph, an ability built from nothing (#906)', async () => {
+    db.webhookSubscription.findMany.mockResolvedValue([{ id: 'sub-1', createdById: 'owner-1' } as WebhookSubscription]);
+
+    await dispatch(WebhookEventType.EventCreated, event());
+
+    expect(abilityFactory.createForUser).toHaveBeenCalledWith(null);
   });
 
   it('does not enqueue for a subscription whose owner cannot see the subject', async () => {

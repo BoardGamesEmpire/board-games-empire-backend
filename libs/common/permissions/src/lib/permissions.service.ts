@@ -121,9 +121,32 @@ export class PermissionsService {
    * applies per request: banned with no expiry, or with one still to come.
    */
   async loadUserRoleGraphWithin(tx: Prisma.TransactionClient, userId: string): Promise<UserWithRoles | null> {
-    const notBannedNow = { OR: [{ banned: null }, { banned: false }, { banExpires: { lte: new Date() } }] };
+    return (await this.loadUserGraph(tx, userId, PermissionsService.notBannedNow())) as UserWithRoles | null;
+  }
 
-    return (await this.loadUserGraph(tx, userId, notBannedNow)) as UserWithRoles | null;
+  /**
+   * Several users' graphs as they have committed, read as
+   * {@link loadUserRoleGraphWithin} reads one but in a single read for them
+   * all: for judging many users at once, as the webhook dispatcher judges
+   * every subscriber to an event (#732). A user under a ban in force, or one
+   * deleted, is missing from the map.
+   */
+  async loadUserRoleGraphs(userIds: readonly string[]): Promise<Map<string, UserWithRoles>> {
+    if (userIds.length === 0) {
+      return new Map();
+    }
+
+    const graphs = (await this.db.user.findMany({
+      where: { id: { in: [...userIds] }, AND: PermissionsService.notBannedNow() },
+      select: PermissionsService.userGraphSelect(),
+    })) as UserWithRoles[];
+
+    return new Map(graphs.map((graph) => [graph.id, graph]));
+  }
+
+  /** Not banned, or banned with an expiry already past. */
+  private static notBannedNow(): Prisma.UserWhereInput {
+    return { OR: [{ banned: null }, { banned: false }, { banExpires: { lte: new Date() } }] };
   }
 
   /**
@@ -355,100 +378,107 @@ export class PermissionsService {
   ) {
     return client.user.findUnique({
       where: { id: userId, ...(standing && { AND: standing }) },
-      // Every role → permission hop below filters `permission.retiredAt: null`
-      // (#235): a retired catalog row keeps whatever grants still reference it
-      // and confers nothing through any of them.
-      select: {
-        id: true,
-        roles: {
-          select: {
-            role: {
-              select: {
-                name: true,
-                permissions: {
-                  where: { permission: { retiredAt: null } },
-                  select: {
-                    permission: true,
-                  },
-                },
-              },
-            },
-          },
-        },
+      select: PermissionsService.userGraphSelect(),
+    });
+  }
 
-        householdMember: {
-          // A soft-deleted household must not contribute household-scoped grants:
-          // the row survives the (soft) delete, so exclude memberships whose
-          // household is gone or abilities would linger past a cache refresh.
-          where: { household: { deletedAt: null } },
-          select: {
-            householdId: true,
-            role: {
-              select: {
-                role: {
-                  select: {
-                    name: true,
-                    permissions: {
-                      where: { permission: { retiredAt: null } },
-                      select: {
-                        permission: true,
-                      },
-                    },
-                  },
+  /**
+   * What a user's permission graph is read with. Every role → permission hop
+   * filters `permission.retiredAt: null` (#235): a retired catalog row keeps
+   * whatever grants still reference it and confers nothing through any of
+   * them.
+   */
+  private static userGraphSelect() {
+    return {
+      id: true,
+      roles: {
+        select: {
+          role: {
+            select: {
+              name: true,
+              permissions: {
+                where: { permission: { retiredAt: null } },
+                select: {
+                  permission: true,
                 },
-              },
-            },
-          },
-        },
-
-        eventsAttended: {
-          select: {
-            eventId: true,
-            role: {
-              select: {
-                role: {
-                  select: {
-                    name: true,
-                    permissions: {
-                      where: { permission: { retiredAt: null } },
-                      select: {
-                        permission: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-
-        // Direct per-user overrides (grants + inverse denials). Already-expired
-        // rows are excluded at query time; the factory re-checks `expiresAt` at
-        // build time as the backstop. An override of a retired permission is
-        // excluded the same way (#235).
-        permissions: {
-          where: {
-            OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-            permission: { retiredAt: null },
-          },
-          select: {
-            inverted: true,
-            resourceType: true,
-            resourceId: true,
-            expiresAt: true,
-            permission: {
-              select: {
-                action: true,
-                subject: true,
-                conditions: true,
-                fields: true,
-                inverted: true,
               },
             },
           },
         },
       },
-    });
+
+      householdMember: {
+        // A soft-deleted household must not contribute household-scoped grants:
+        // the row survives the (soft) delete, so exclude memberships whose
+        // household is gone or abilities would linger past a cache refresh.
+        where: { household: { deletedAt: null } },
+        select: {
+          householdId: true,
+          role: {
+            select: {
+              role: {
+                select: {
+                  name: true,
+                  permissions: {
+                    where: { permission: { retiredAt: null } },
+                    select: {
+                      permission: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      eventsAttended: {
+        select: {
+          eventId: true,
+          role: {
+            select: {
+              role: {
+                select: {
+                  name: true,
+                  permissions: {
+                    where: { permission: { retiredAt: null } },
+                    select: {
+                      permission: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      // Direct per-user overrides (grants + inverse denials). Already-expired
+      // rows are excluded at query time; the factory re-checks `expiresAt` at
+      // build time as the backstop. An override of a retired permission is
+      // excluded the same way (#235).
+      permissions: {
+        where: {
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+          permission: { retiredAt: null },
+        },
+        select: {
+          inverted: true,
+          resourceType: true,
+          resourceId: true,
+          expiresAt: true,
+          permission: {
+            select: {
+              action: true,
+              subject: true,
+              conditions: true,
+              fields: true,
+              inverted: true,
+            },
+          },
+        },
+      },
+    } satisfies Prisma.UserSelect;
   }
 
   /**

@@ -1,6 +1,6 @@
 import { AuditContextService, type Actor } from '@bge/actor-context';
 import { DatabaseService, Prisma, ResourceType, WebhookSubscriptionStatus } from '@bge/database';
-import { AbilityFactory, PermissionsService } from '@bge/permissions';
+import { AbilityFactory, PermissionsService, type UserWithRoles } from '@bge/permissions';
 import {
   WebhookEventRegistry,
   WebhookVisibilityService,
@@ -35,8 +35,13 @@ import type { WebhookDeliveryJob } from '../interfaces/webhook-delivery-job.inte
  *
  * Authorization is CASL-at-dispatch: a subscription receives an event only if
  * its creator can currently take the descriptor's `requiredAction` on the
- * subject instance. The owner's ability is built per dispatch and memoized for
- * the burst, since `getUserRoleGraph` is cached but `createForUser` is not.
+ * subject instance. Each subscriber's ability is built from the graph the
+ * database holds when the event is dispatched, never the cache, so a grant the
+ * emitting write changed counts whether or not anything evicted the
+ * subscriber's graph first (#732). The read sees only what has committed, so
+ * every emit must follow its write's commit. A subscriber under a ban has no
+ * graph and receives nothing (#906). Every subscriber's graph is read in one
+ * read per fan-out, and each ability is built once per subscriber.
  *
  * The handler never throws into the emitter — a webhook failure must not break
  * the domain transaction that produced the event.
@@ -106,6 +111,9 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
     // matching subscriptions costs one ability build + one visibility query, not
     // one each.
     const visibilityCache = new Map<string, boolean>();
+    const graphs = await this.permissions.loadUserRoleGraphs([
+      ...new Set(subscriptions.map((subscription) => subscription.createdById)),
+    ]);
     let failures = 0;
 
     for (const subscription of subscriptions) {
@@ -114,7 +122,13 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
       // and silently strip the event from every subscriber later in the list.
       // Log the one that failed and carry on so deliveries are independent.
       try {
-        const visible = await this.visibleTo(subscription.createdById, descriptor, event.subjectId, visibilityCache);
+        const visible = await this.visibleTo(
+          subscription.createdById,
+          graphs,
+          descriptor,
+          event.subjectId,
+          visibilityCache,
+        );
 
         if (!visible) {
           continue;
@@ -159,6 +173,7 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
 
   private async visibleTo(
     userId: string,
+    graphs: ReadonlyMap<string, UserWithRoles>,
     descriptor: WebhookEventDescriptor,
     subjectId: string,
     cache: Map<string, boolean>,
@@ -167,8 +182,7 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
     if (cached !== undefined) {
       return cached;
     }
-    const graph = await this.permissions.getUserRoleGraph(userId);
-    const ability = this.abilityFactory.createForUser(graph);
+    const ability = this.abilityFactory.createForUser(graphs.get(userId) ?? null);
     const visible = await this.visibility.isVisibleTo(descriptor.subject, subjectId, ability, {
       action: descriptor.requiredAction,
       subjectDeleted: descriptor.subjectDeleted ?? false,

@@ -558,26 +558,6 @@ describe('EventService', () => {
     });
   });
 
-  // #538. The webhook dispatcher reads each subscriber's graph after the emit
-  // returns. Until the eviction, the creator's graph and each invitee's predate
-  // their role on the event, which is their only read on an event outside a
-  // household, so the dispatcher would refuse them their own event.
-  it('createEvent emits only after evicting the graphs it changed', async () => {
-    db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
-    db.event.create.mockResolvedValue(makeEvent({ id: 'event-1', createdById: 'user-1' }));
-    abilityService.getActingUserId.mockReturnValue('user-1');
-
-    await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);
-
-    const [evicted] = permissions.invalidateUsers.mock.invocationCallOrder;
-    const emitted = emitter.emit.mock.invocationCallOrder;
-
-    expect(emitted).toHaveLength(2);
-    for (const order of emitted) {
-      expect(order).toBeGreaterThan(evicted);
-    }
-  });
-
   it('createEvent emits an EventCreatedEvent with the created row snapshot', async () => {
     db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
     db.event.create.mockResolvedValue(makeEvent({ id: 'event-1', title: 'X', createdById: 'user-1' }));
