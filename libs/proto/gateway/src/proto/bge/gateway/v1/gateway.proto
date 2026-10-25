@@ -116,11 +116,20 @@ message Coverage {
 // content type are coverage axes too, so a filter on them also skips a
 // DataGateway that covers none of what it names. Publish year never skips
 // one: no DataGateway declares which years it covers (#719).
+//
+// For player count and play time, declaring one promises that the results
+// carry the value (GameSearchData's player counts and play times) and that the
+// search narrows by it. Without that promise the coordinator can't count on
+// any result passing, so a search that names the range, and doesn't keep
+// games with an unknown value, skips a DataGateway that doesn't declare it
+// (#869).
 enum SearchFilterAxis {
   SEARCH_FILTER_AXIS_UNSPECIFIED = 0;
   SEARCH_FILTER_AXIS_PLATFORM_TYPE = 1;
   SEARCH_FILTER_AXIS_CONTENT_TYPE = 2;
   SEARCH_FILTER_AXIS_PUBLISH_YEAR = 3;
+  SEARCH_FILTER_AXIS_PLAYER_COUNT = 4;
+  SEARCH_FILTER_AXIS_PLAY_TIME = 5;
 }
 
 // How a DataGateway writes language codes. Search and fetch requests carry
