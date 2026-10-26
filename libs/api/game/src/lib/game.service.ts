@@ -356,11 +356,6 @@ export class GameService {
   }
 
   /**
-   * A new or changed description as the game stores it: Markdown with
-   * nothing unsafe in it, as an imported one is (#714). One longer than
-   * {@link GAME_DESCRIPTION_MAX_LENGTH} is refused before it's parsed.
-   */
-  /**
    * Refuses an update that would leave a range's minimum above its maximum.
    * The DTO checks a range sent whole, but a PATCH may send one end alone,
    * and that end has to be held to the one already stored (#869). A field
@@ -384,6 +379,11 @@ export class GameService {
     }
   }
 
+  /**
+   * A new or changed description as the game stores it: Markdown with
+   * nothing unsafe in it, as an imported one is (#714). One longer than
+   * {@link GAME_DESCRIPTION_MAX_LENGTH} is refused before it's parsed.
+   */
   private sanitizedDescription<T extends null | undefined>(description: string | T): string | T {
     if (typeof description === 'string' && description.length > GAME_DESCRIPTION_MAX_LENGTH) {
       throw new BadRequestException(t('errors.game.description_too_long', { max: GAME_DESCRIPTION_MAX_LENGTH }));
