@@ -59,9 +59,11 @@ describe('StubGatewayService', () => {
           platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
           contentTypes: [proto.ContentType.CONTENT_TYPE_BASE_GAME, proto.ContentType.CONTENT_TYPE_EXPANSION],
         },
+        // Not play time, so the e2e suites cover a DataGateway a play-time search skips (#869).
         filterableAxes: [
           proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE,
           proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR,
+          proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAYER_COUNT,
         ],
         languageCodeFormats: {
           acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47],
@@ -176,6 +178,36 @@ describe('StubGatewayService', () => {
       await expect(search('island', { filter: byYear({ max: 1999 }) }).then(titlesOf)).resolves.toEqual([]);
     });
 
+    // A bound alone is one count, so a minimum of 5 means "supports 5" (#869).
+    it('narrows its fixtures to the games that support every player count in the range, before paging', async () => {
+      const byCount = (playerCount: proto.IntRange) => ({ platformTypes: [], contentTypes: [], playerCount });
+
+      await expect(search('island', { filter: byCount({ min: 5 }) }).then(titlesOf)).resolves.toEqual([
+        STUB_EXPANSION.title,
+      ]);
+      await expect(search('island', { filter: byCount({ max: 5 }) }).then(titlesOf)).resolves.toEqual([
+        STUB_EXPANSION.title,
+      ]);
+      await expect(search('island', { filter: byCount({ min: 2, max: 4 }) }).then(titlesOf)).resolves.toEqual([
+        STUB_BASE_GAME.title,
+        STUB_EXPANSION.title,
+      ]);
+      await expect(search('island', { filter: byCount({ min: 5 }), limit: 1 }).then(titlesOf)).resolves.toEqual([
+        STUB_EXPANSION.title,
+      ]);
+      await expect(search('island', { filter: byCount({ min: 1 }) }).then(titlesOf)).resolves.toEqual([]);
+    });
+
+    // It doesn't declare play time, so the server checks the play times its results carry (#869).
+    it('ignores a play-time range, which it doesn’t narrow by', async () => {
+      const short = { platformTypes: [], contentTypes: [], playTime: { max: 10 } };
+
+      await expect(search('island', { filter: short }).then(titlesOf)).resolves.toEqual([
+        STUB_BASE_GAME.title,
+        STUB_EXPANSION.title,
+      ]);
+    });
+
     it('ignores platform types, which it doesn’t narrow by', async () => {
       const pc = { platformTypes: [proto.PlatformType.PLATFORM_TYPE_PC], contentTypes: [] };
 
@@ -200,6 +232,8 @@ describe('StubGatewayService', () => {
         yearPublished: STUB_BASE_GAME.yearPublished,
         minPlayers: STUB_BASE_GAME.minPlayers,
         maxPlayers: STUB_BASE_GAME.maxPlayers,
+        minPlaytime: STUB_BASE_GAME.minPlaytime,
+        maxPlaytime: STUB_BASE_GAME.maxPlaytime,
         availablePlatforms: STUB_BASE_GAME.platforms,
       });
     });

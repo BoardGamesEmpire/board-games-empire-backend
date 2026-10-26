@@ -26,6 +26,34 @@ function inYearRange(range: proto.IntRange | undefined, year: number | undefined
   return (min === undefined || year >= min) && (max === undefined || year <= max);
 }
 
+/**
+ * Whether a game supports every player count in a range (#869). A bound alone
+ * is one count: a minimum of 5 means "supports 5", not "5 or more". A range
+ * with no bound narrows nothing, and a game missing either of its counts
+ * matches only when the range includes unknown ones.
+ */
+function supportsPlayerCount(
+  range: proto.IntRange | undefined,
+  minPlayers: number | undefined,
+  maxPlayers: number | undefined,
+): boolean {
+  const min = range?.min ?? undefined;
+  const max = range?.max ?? undefined;
+
+  if (min === undefined && max === undefined) {
+    return true;
+  }
+
+  if (minPlayers === undefined || maxPlayers === undefined) {
+    return range?.includeUnknown === true;
+  }
+
+  const lo = min ?? max;
+  const hi = max ?? min;
+
+  return (lo === undefined || minPlayers <= lo) && (hi === undefined || hi <= maxPlayers);
+}
+
 /** How a search result describes a game: the fields a real gateway fills there. */
 function toSearchData(game: proto.GameData): proto.GameSearchData {
   return {
@@ -36,6 +64,8 @@ function toSearchData(game: proto.GameData): proto.GameSearchData {
     averageRating: game.averageRating,
     minPlayers: game.minPlayers,
     maxPlayers: game.maxPlayers,
+    minPlaytime: game.minPlaytime,
+    maxPlaytime: game.maxPlaytime,
     baseGameExternalId: game.baseGameExternalId,
     summary: game.description,
     availablePlatforms: game.platforms,
@@ -62,8 +92,10 @@ export class StubGatewayService extends GatewayServiceHost {
 
   /**
    * Declares what its fixtures hold: tabletop base games and expansions,
-   * tagged in BCP 47. Its search narrows by content type and publish year,
-   * so a DataGateway the server sends a filter to runs in the e2e suites.
+   * tagged in BCP 47. Its search narrows by content type, publish year and
+   * player count, so a DataGateway the server sends a filter to runs in the
+   * e2e suites. It doesn't declare play time, though its results carry play
+   * times, so they also cover a DataGateway a play-time search skips (#869).
    */
   describe(request: proto.DescribeRequest): proto.DescribeResponse {
     return {
@@ -84,6 +116,7 @@ export class StubGatewayService extends GatewayServiceHost {
       filterableAxes: [
         proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE,
         proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR,
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAYER_COUNT,
       ],
       languageCodeFormats: {
         acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47],
@@ -120,8 +153,12 @@ export class StubGatewayService extends GatewayServiceHost {
 
   /**
    * Each game whose title contains the query, ignoring case, whose content
-   * type the filter names, if it names any, and whose publish year is in the
-   * filter's range, if it gives one; paged by `offset` and `limit`.
+   * type the filter names, if it names any, and whose publish year and player
+   * counts fit the filter's ranges, if it gives them; paged by `offset` and
+   * `limit`. It ignores a play-time range: it doesn't declare play time, so
+   * the e2e suites cover a DataGateway a play-time search skips. A search that
+   * keeps unknown play times still asks it, and the server checks the play
+   * times its results carry (#869).
    */
   searchGames(request: proto.GatewaySearchRequest): Observable<proto.GatewaySearchResult> {
     const query = request.query.trim().toLowerCase();
@@ -131,7 +168,8 @@ export class StubGatewayService extends GatewayServiceHost {
       (game) =>
         game.title.toLowerCase().includes(query) &&
         (contentTypes.length === 0 || contentTypes.includes(game.contentType)) &&
-        inYearRange(request.filter?.publishYear, game.yearPublished),
+        inYearRange(request.filter?.publishYear, game.yearPublished) &&
+        supportsPlayerCount(request.filter?.playerCount, game.minPlayers, game.maxPlayers),
     );
     const page = matches.slice(offset, request.limit === undefined ? undefined : offset + request.limit);
 
