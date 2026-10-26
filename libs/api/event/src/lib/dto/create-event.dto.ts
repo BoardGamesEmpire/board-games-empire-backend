@@ -1,6 +1,6 @@
 import { EventSchedulingMode, EventType, Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
-import { ReachProperty } from '@bge/shared';
+import { ClientRequestIdProperty, ReachProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
@@ -124,4 +124,7 @@ export class CreateEventDto {
   @Type(() => CreateEventPolicyDto)
   @IsOptional()
   policy?: CreateEventPolicyDto;
+
+  @ClientRequestIdProperty('event', 'A repeat does not notify its invitees or fire its webhook again.')
+  clientRequestId?: string;
 }

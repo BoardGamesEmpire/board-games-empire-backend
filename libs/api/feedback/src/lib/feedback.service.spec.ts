@@ -8,14 +8,14 @@ import {
   Prisma,
   ResourceType,
 } from '@bge/database';
-import { uniqueViolation as sharedUniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
+import { uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { DeploymentInfoService } from '@bge/services';
 import { createTestingModuleWithDb, MockDatabaseService } from '@bge/testing';
 import { NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DateTime } from 'luxon';
 import { FeedbackEvents } from './constants/feedback-events.constant';
-import { FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT, FEEDBACK_CREATE_PERMISSION_SLUG } from './constants/feedback.constants';
+import { FEEDBACK_CREATE_PERMISSION_SLUG } from './constants/feedback.constants';
 import { BreadcrumbLogLevel, type BreadcrumbDto } from './dto/breadcrumb.dto';
 import { CreateFeedbackReportDto } from './dto/create-feedback-report.dto';
 import { FeedbackService } from './feedback.service';
@@ -124,6 +124,51 @@ describe('FeedbackService', () => {
       );
     });
 
+    it('persists every optional field the client sent', async () => {
+      await service.submit(
+        'user-1',
+        makeDto({
+          title: 'Add fails',
+          context: FeedbackContext.Client,
+          appVersion: '1.2.3',
+          platform: 'web',
+          locale: 'en-US',
+          deviceInfo: { browser: 'Firefox' },
+        }),
+      );
+
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            title: 'Add fails',
+            context: FeedbackContext.Client,
+            severity: FeedbackSeverity.High,
+            appVersion: '1.2.3',
+            platform: 'web',
+            locale: 'en-US',
+            deviceInfo: { browser: 'Firefox' },
+          }),
+        }),
+      );
+    });
+
+    it('stores null for each optional field the client left out', async () => {
+      await service.submit('user-1', makeDto({ category: FeedbackCategory.FeatureRequest, severity: undefined }));
+
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            title: null,
+            severity: null,
+            appVersion: null,
+            platform: null,
+            locale: null,
+            deviceInfo: Prisma.DbNull,
+          }),
+        }),
+      );
+    });
+
     it('marks redactionApplied=true when the client redacted fields', async () => {
       db.feedbackReport.create.mockResolvedValue(stubReport());
 
@@ -211,22 +256,14 @@ describe('FeedbackService', () => {
     });
   });
 
-  describe('submit idempotency (#251)', () => {
-    /**
-     * A P2002 in the shape Prisma actually raises, via `@bge/database`'s shared
-     * factory. `target` is OPTIONAL and absent by default: omitting it reproduces
-     * what `@prisma/client@7.8.0` + `@prisma/adapter-pg` reports, and every case in
-     * this block used to pass one — which is why the shape-sniffing discriminator
-     * this replaced was never once tested against reality.
-     *
-     * Fabricated centrally rather than here (#298). Four specs previously invented
-     * their own payload, so each discriminator was only ever tested against the
-     * mock that fed it, and no single place could be compared against a real
-     * database. `apps/api-e2e/src/database/p2002-shape.spec.ts` is what keeps the
-     * shared factory honest.
-     */
-    const uniqueViolation = (target?: string | string[]) =>
-      target === undefined ? uniqueViolationWithoutMeta() : sharedUniqueViolation({ target });
+  /**
+   * Through `createOrReplay` (#252), whose own spec covers the order of its
+   * lookups and which errors it rethrows. What is left here is the report's
+   * part: the lookup it passes, the work a replay skips, and the emit it
+   * suppresses.
+   */
+  describe('submit idempotency (#251, #252)', () => {
+    const original = stubReport({ id: 'fb-original', userId: 'user-1', clientRequestId: 'key-1' });
 
     it('persists the client-supplied key on the row', async () => {
       db.feedbackReport.create.mockResolvedValue(stubReport());
@@ -240,9 +277,9 @@ describe('FeedbackService', () => {
       );
     });
 
-    it('replays: returns the ORIGINAL report on a key conflict instead of surfacing it', async () => {
-      const original = stubReport({ id: 'fb-original', userId: 'user-1', clientRequestId: 'key-1' });
-      db.feedbackReport.create.mockRejectedValue(uniqueViolation(FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT));
+    it('replays the report already under the key, before reading settings, redacting or writing', async () => {
+      // The lookup comes first: a replay's payload is ignored, so redacting it
+      // would be work whose result is thrown away.
       db.feedbackReport.findUnique.mockResolvedValue(original);
 
       await expect(service.submit('user-1', makeDto({ clientRequestId: 'key-1' }))).resolves.toBe(original);
@@ -250,11 +287,13 @@ describe('FeedbackService', () => {
       expect(db.feedbackReport.findUnique).toHaveBeenCalledWith({
         where: { userId_clientRequestId: { userId: 'user-1', clientRequestId: 'key-1' } },
       });
+      expect(db.systemSetting.findFirst).not.toHaveBeenCalled();
+      expect(redaction.scrubString).not.toHaveBeenCalled();
+      expect(db.feedbackReport.create).not.toHaveBeenCalled();
     });
 
     it('does NOT re-emit FeedbackReportSubmitted on a replay', async () => {
-      db.feedbackReport.create.mockRejectedValue(uniqueViolation(FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT));
-      db.feedbackReport.findUnique.mockResolvedValue(stubReport({ id: 'fb-original' }));
+      db.feedbackReport.findUnique.mockResolvedValue(original);
 
       await service.submit('user-1', makeDto({ clientRequestId: 'key-1' }));
 
@@ -277,74 +316,14 @@ describe('FeedbackService', () => {
       );
     });
 
-    it('replays when the P2002 carries NO meta at all', async () => {
-      // THE REGRESSION TEST. This is what Prisma 7 + PrismaPg actually raises,
-      // and what the previous `meta.target` discriminator could never match: it
-      // rethrew, reinstating the 500-then-retry-forever loop #251 was built to
-      // remove. Found via the household equivalent's e2e coverage (#257); an
-      // e2e proof for this path is #262.
-      const original = stubReport({ id: 'fb-original' });
-      db.feedbackReport.create.mockRejectedValue(uniqueViolation());
-      db.feedbackReport.findUnique.mockResolvedValue(original);
+    it('replays the report a concurrent duplicate committed when the create trips the unique, without emitting', async () => {
+      // Both submissions missed the first lookup. The P2002 carries no usable
+      // `meta`, as Prisma 7 with PrismaPg raises it (#257): the row decides.
+      db.feedbackReport.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(original);
+      db.feedbackReport.create.mockRejectedValue(uniqueViolationWithoutMeta());
 
       await expect(service.submit('user-1', makeDto({ clientRequestId: 'key-1' }))).resolves.toBe(original);
-    });
-
-    it.each([
-      ['the mapped index name', FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT],
-      ['the Prisma field-name array', ['userId', 'clientRequestId']],
-      ['the raw column names', ['user_id', 'client_request_id']],
-      ['an unrecognized string', 'some_future_prisma_spelling'],
-    ])('replays regardless of the reported target shape: %s', async (_label, target) => {
-      // Recovery keys off the ROW, not the error shape, so none of these are
-      // special-cased any more. Kept as a set because the shape is exactly what
-      // drifts across Prisma versions, and the point is that drift no longer
-      // changes the outcome.
-      const original = stubReport({ id: 'fb-original' });
-      db.feedbackReport.create.mockRejectedValue(uniqueViolation(target));
-      db.feedbackReport.findUnique.mockResolvedValue(original);
-
-      await expect(service.submit('user-1', makeDto({ clientRequestId: 'key-1' }))).resolves.toBe(original);
-    });
-
-    it('rethrows a P2002 from a different unique, because no row exists under the key', async () => {
-      // Declined by the LOOKUP now rather than by inspecting the error: no row
-      // under this key means nothing committed, so there is no replay to serve.
-      // `feedback_reports` has only the one unique besides its primary key, so
-      // this branch should be unreachable in practice -- the service warns when
-      // it is taken.
-      const error = uniqueViolation(['sinkSlug', 'externalId']);
-      db.feedbackReport.create.mockRejectedValue(error);
-      db.feedbackReport.findUnique.mockResolvedValue(null);
-
-      await expect(service.submit('user-1', makeDto({ clientRequestId: 'key-1' }))).rejects.toBe(error);
-      expect(db.feedbackReport.findUnique).toHaveBeenCalled();
       expect(events.emit).not.toHaveBeenCalled();
-    });
-
-    it('rethrows a matching P2002 when no key was supplied (keyless submissions never replay)', async () => {
-      const error = uniqueViolation(FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT);
-      db.feedbackReport.create.mockRejectedValue(error);
-
-      await expect(service.submit('user-1', makeDto())).rejects.toBe(error);
-      expect(db.feedbackReport.findUnique).not.toHaveBeenCalled();
-    });
-
-    it('rethrows the original error when the replay lookup finds nothing', async () => {
-      const error = uniqueViolation(FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT);
-      db.feedbackReport.create.mockRejectedValue(error);
-      db.feedbackReport.findUnique.mockResolvedValue(null);
-
-      await expect(service.submit('user-1', makeDto({ clientRequestId: 'key-1' }))).rejects.toBe(error);
-      expect(events.emit).not.toHaveBeenCalled();
-    });
-
-    it('rethrows non-unique-constraint failures untouched', async () => {
-      const error = new Error('connection reset');
-      db.feedbackReport.create.mockRejectedValue(error);
-
-      await expect(service.submit('user-1', makeDto({ clientRequestId: 'key-1' }))).rejects.toBe(error);
-      expect(db.feedbackReport.findUnique).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -357,22 +336,13 @@ describe('FeedbackService', () => {
 
       // Persisting '' would put every blank-key submission by this user into one
       // shared bucket, silently replaying unrelated reports.
+      expect(db.feedbackReport.findUnique).not.toHaveBeenCalled();
       expect(db.feedbackReport.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ clientRequestId: undefined }) }),
       );
     });
 
-    it('never replays a blank key, even on an idempotency-unique conflict', async () => {
-      const error = uniqueViolation(FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT);
-      db.feedbackReport.create.mockRejectedValue(error);
-
-      await expect(service.submit('user-1', makeDto({ clientRequestId: '' }))).rejects.toBe(error);
-      expect(db.feedbackReport.findUnique).not.toHaveBeenCalled();
-    });
-
     it('trims a padded key so the DTO and in-process paths share one bucket', async () => {
-      const original = stubReport({ id: 'fb-original' });
-      db.feedbackReport.create.mockRejectedValue(uniqueViolation(FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT));
       db.feedbackReport.findUnique.mockResolvedValue(original);
 
       await expect(service.submit('user-1', makeDto({ clientRequestId: '  key-1  ' }))).resolves.toBe(original);

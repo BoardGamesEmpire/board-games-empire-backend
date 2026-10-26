@@ -1,10 +1,11 @@
 import type { Household } from '@bge/database';
 import {
   Action,
+  createOrReplay,
   DatabaseService,
   HouseholdMembershipOrigin,
   isPrismaDependentRecordNotFoundError,
-  isPrismaUniqueConstraintError,
+  normalizeClientRequestId,
   Prisma,
   ResourceType,
   SystemRole,
@@ -291,167 +292,104 @@ export class HouseholdService {
     return languageTag.id;
   }
 
+  /**
+   * Creates a household with the acting user as its owner.
+   *
+   * Keyed by `clientRequestId` (#210) through `createOrReplay` (#252): a
+   * repeat under a key this user already used returns the ORIGINAL household,
+   * even one soft-deleted since, rather than creating a second. The lookup
+   * runs before the language tag resolves, so a tag the server has stopped
+   * supporting can't refuse the retry of a create that succeeded.
+   */
   async create(createHouseholdDto: CreateHouseholdDto) {
     const userId = this.abilityService.getActingUserId();
     const { language, clientRequestId: rawClientRequestId, ...rest } = createHouseholdDto;
-    const languageTagId = await this.resolveLanguageTagId(language);
+    const clientRequestId = normalizeClientRequestId(rawClientRequestId);
 
-    // A blank key is not a key. The DTO rejects one over HTTP, but `create` is
-    // also callable in-process, and persisting '' would put every keyless
-    // internal create by a user into one shared idempotency bucket — the second
-    // would silently "replay" the first. Trim so both entry points agree on the
-    // bucket: the DTO trims too, so a padded key can't split into two rows.
-    const clientRequestId = rawClientRequestId?.trim() || undefined;
+    const { row: household } = await createOrReplay({
+      clientRequestId,
+      // No `deletedAt: null` filter: the keyed create semantically succeeded,
+      // and that row, even if since soft-deleted, is its canonical outcome for
+      // the client to reconcile against.
+      find: (key) =>
+        this.db.household.findUnique({
+          where: { createdById_clientRequestId: { createdById: userId, clientRequestId: key } },
+        }),
+      logger: this.logger,
+      label: 'household create',
+      create: async () => {
+        const languageTagId = await this.resolveLanguageTagId(language);
 
-    let household: Household;
-    try {
-      // Optimistic insert — no pre-flight key lookup. A concurrent duplicate
-      // submission races here; the loser trips the composite unique and is
-      // recovered in the catch below (same shape as GameService.create's
-      // GameSource race recovery).
-      household = await this.db.household.create({
-        data: {
-          ...rest,
-          clientRequestId,
-          languageTag: languageTagId
-            ? {
-                connect: {
-                  id: languageTagId,
-                },
-              }
-            : undefined,
+        return this.db.household.create({
+          data: {
+            ...rest,
+            clientRequestId,
+            languageTag: languageTagId
+              ? {
+                  connect: {
+                    id: languageTagId,
+                  },
+                }
+              : undefined,
 
-          createdBy: {
-            connect: {
-              id: userId,
+            createdBy: {
+              connect: {
+                id: userId,
+              },
             },
-          },
 
-          // Every household has its settings row, with each setting at its
-          // default (#166). In the same statement, so no household is ever
-          // without one.
-          settings: { create: {} },
+            // Every household has its settings row, with each setting at its
+            // default (#166). In the same statement, so no household is ever
+            // without one.
+            settings: { create: {} },
 
-          members: {
-            create: {
-              userId,
-              // Provenance (#276). The founder is the one membership that is not
-              // produced by `addMemberWithin`: this create is deliberately NOT
-              // transactional, which is what makes the P2002 replay recovery
-              // below legal (Postgres aborts a transaction on constraint
-              // violation, so a catch-and-recover inside one cannot re-read).
-              // Routing it through the seam would force a transaction it does
-              // not need and break that. It is also the only case where
-              // `HouseholdOwner` is legitimate.
-              //
-              // Quota (#159): this row is not CHARGED — creation never consumes,
-              // so a household can always be created regardless of the cap — but
-              // it IS COUNTED. `countHouseholdMembers` counts every row in the
-              // household, so a cap of N is a roster cap of N with the founder
-              // inside it, and the first admission through the seam already sees
-              // usage of 1.
-              origin: HouseholdMembershipOrigin.Founder,
-              addedById: userId,
-              role: {
-                create: {
-                  role: {
-                    connect: {
-                      name: SystemRole.HouseholdOwner,
+            members: {
+              create: {
+                userId,
+                // Provenance (#276). The founder is the one membership that is not
+                // produced by `addMemberWithin`: this create is deliberately NOT
+                // inside a transaction of ours, which is what lets `createOrReplay`
+                // re-read after a P2002 (Postgres aborts a transaction on
+                // constraint violation, so a recovery inside one cannot re-read).
+                // Routing it through the seam would force a transaction it does
+                // not need and break that. It is also the only case where
+                // `HouseholdOwner` is legitimate.
+                //
+                // Quota (#159): this row is not CHARGED — creation never consumes,
+                // so a household can always be created regardless of the cap — but
+                // it IS COUNTED. `countHouseholdMembers` counts every row in the
+                // household, so a cap of N is a roster cap of N with the founder
+                // inside it, and the first admission through the seam already sees
+                // usage of 1.
+                origin: HouseholdMembershipOrigin.Founder,
+                addedById: userId,
+                role: {
+                  create: {
+                    role: {
+                      connect: {
+                        name: SystemRole.HouseholdOwner,
+                      },
                     },
                   },
                 },
               },
             },
           },
-        },
-      });
-    } catch (error) {
-      const replayed =
-        clientRequestId === undefined ? null : await this.recoverKeyedCreate(error, userId, clientRequestId);
-
-      if (!replayed) {
-        throw error;
-      }
-
-      return replayed;
-    }
+        });
+      },
+    });
 
     // The acting user just became a HouseholdOwner — evict their cached ability
     // graph so the new household-scoped grants resolve on their next request.
+    //
+    // A replay evicts too. Replays are usually pure no-ops, but the one
+    // pathological original — committed, then crashed before its own eviction
+    // ran — leaves the owner's ability graph stale; the retry is the natural
+    // place to heal it, and eviction is idempotent and cheap. A household
+    // create emits nothing, so there is nothing for a replay to suppress.
     await this.permissions.invalidateUser(userId);
 
     return household;
-  }
-
-  /**
-   * Idempotent replay (#210). A create that trips the `(createdById,
-   * clientRequestId)` unique means the original COMMITTED — the retry exists
-   * only because its response was lost in transit — so return the original row
-   * rather than surfacing the conflict.
-   *
-   * Returns `null` when the caller should rethrow: a P2002 on some other unique
-   * with no row under this key, or any non-unique failure.
-   *
-   * THE ROW DECIDES, NOT THE ERROR SHAPE. This previously discriminated on
-   * `meta.target`, accepting three spellings because Prisma has reported
-   * different ones across provider/version combinations. Under Prisma 7 with
-   * the `PrismaPg` driver adapter it reports NONE of them: `meta` carries no
-   * usable `target` at all, so the discriminator never matched, every keyed
-   * retry rethrew, and #210's guarantee inverted into a 500 on exactly the
-   * request it exists to make safe. Verified end-to-end in
-   * `apps/api-e2e/src/household/household-idempotency.spec.ts` (#257), which is
-   * how it was found — the unit specs all fabricated a `meta.target`, so the
-   * mock was the only thing the discriminator was ever tested against.
-   *
-   * Keying off the lookup instead is both correct and shape-independent: a row
-   * under `(userId, clientRequestId)` means this key's create already
-   * committed, which is precisely the condition a replay must return, whatever
-   * the database chose to say about which index it was. `clientRequestId` is
-   * the only unique on `households` that involves it, so there is no other
-   * conflict this could be confused with.
-   */
-  private async recoverKeyedCreate(error: unknown, userId: string, clientRequestId: string): Promise<Household | null> {
-    if (!isPrismaUniqueConstraintError(error)) {
-      return null;
-    }
-
-    // The lookup deliberately omits the `deletedAt: null` filter: the keyed
-    // create semantically succeeded, and that row — even if since soft-deleted —
-    // is its canonical outcome for the client to reconcile against.
-    const existing = await this.db.household.findUnique({
-      where: { createdById_clientRequestId: { createdById: userId, clientRequestId } },
-    });
-
-    if (!existing) {
-      // Should be unreachable. `clientRequestId` participates in the only unique
-      // on `households`, and the nested member insert cannot collide on a
-      // freshly generated household id, so a P2002 with no row under this key
-      // means something we do not understand happened.
-      //
-      // WARN, not debug: `resolvePinoLevel` drops debug in production, and this
-      // is the branch that reinstates a 500 on a legitimate retry — the exact
-      // failure this recovery path exists to remove, and one that took an e2e
-      // suite to notice the first time. Matches the level its twin in
-      // `FeedbackService.recoverKeyedSubmit` uses for the same tripwire. The
-      // whole `meta` is logged rather than just `target`, since `target` being
-      // absent is what made the old discriminator useless.
-      this.logger.warn(
-        `Keyed household create raised P2002 with no row under the key; ` +
-          `meta=${JSON.stringify(error.meta)}. Rethrowing.`,
-      );
-
-      return null;
-    }
-
-    this.logger.debug(`Idempotent replay of household create for user ${userId}; returning household ${existing.id}`);
-
-    // Evict on replay too. Replays are usually pure no-ops, but the one
-    // pathological original — committed, then crashed before its own eviction
-    // ran — leaves the owner's ability graph stale; the retry is the natural
-    // place to heal it, and eviction is idempotent and cheap.
-    await this.permissions.invalidateUser(userId);
-
-    return existing;
   }
 
   /**

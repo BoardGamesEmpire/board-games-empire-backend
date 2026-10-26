@@ -12,9 +12,10 @@ model Household {
   createdBy   User   @relation("HouseholdsCreated", fields: [createdById], references: [id])
   createdById String @map("created_by_id")
 
-  // Client-supplied idempotency key for POST /households (#210). A repeat
-  // submission with the same key short-circuits on the composite unique below
-  // and returns the ORIGINAL row instead of inserting a duplicate. Retained
+  // Client request id for POST /households (#210). A repeat submission with
+  // the same key finds this row before inserting, through `createOrReplay`
+  // (#252), and returns the ORIGINAL row instead of a duplicate; the composite
+  // unique below catches the concurrent duplicate the lookup can't. Retained
   // indefinitely on the row: the client's offline queue can hold a retry
   // arbitrarily long, so a TTL'd key would silently reopen the duplicate hole.
   clientRequestId String? @map("client_request_id")

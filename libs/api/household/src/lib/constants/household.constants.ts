@@ -25,14 +25,6 @@ export const HOUSEHOLD_RESTORE_WINDOW_MS = HOUSEHOLD_RESTORE_WINDOW_DAYS * 24 * 
 export const HOUSEHOLD_RESTORE_PERMISSION_SLUG = 'update:household:restore' satisfies PermissionSlug;
 
 /**
- * Wire-contract cap for `CreateHouseholdDto.clientRequestId` (#210). Mirrors
- * `FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH`: generous enough for any client id
- * scheme (the Flutter client sends a cuid2 `localId`), tight enough that the
- * unique index never carries unbounded input.
- */
-export const HOUSEHOLD_MAX_CLIENT_REQUEST_ID_LENGTH = 128;
-
-/**
  * Wire-contract caps on a household invite's free text (#162). The name is
  * what a context reader sees beside the inviter, so it is a display name's
  * length; the message is a note to the invitee, not a document.
@@ -48,27 +40,10 @@ export const HOUSEHOLD_INVITE_MAX_MESSAGE_LENGTH = 1_000;
 export const HOUSEHOLD_BAN_MAX_REASON_LENGTH = 1_000;
 
 /**
- * DB name of the `@@unique([createdById, clientRequestId])` constraint, as
- * mapped in `household.prisma`.
- *
- * NO LONGER A DISCRIMINATOR. `recoverKeyedCreate` used to match this against a
- * P2002's `meta.target`; Prisma 7 with the `PrismaPg` driver adapter reports no
- * usable `target`, so the match never fired and every keyed retry became a 500
- * (found by #257's e2e coverage). Replay now keys off the presence of a row
- * under `(createdById, clientRequestId)`, which is shape-independent.
- *
- * Retained as the name of record for the constraint: the e2e suite asserts that
- * the database does NOT report it, which is the assumption worth pinning, and a
- * rename in `household.prisma` should be visible from TypeScript.
- */
-export const HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT = 'household_created_by_client_request_id_unique';
-
-/**
  * DB name of the `@@unique([householdId, userId])` constraint, as mapped in
  * `prisma/models/household/household-member.prisma`.
  *
- * NAME OF RECORD ONLY — nothing compares against it on Postgres. Same status as
- * {@link HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT}, for a related reason.
+ * NAME OF RECORD ONLY — nothing compares against it on Postgres.
  *
  * The constraint was named rather than left to Prisma's default so that a P2002
  * could be matched against it exactly. That reasoning was sound and the mechanism

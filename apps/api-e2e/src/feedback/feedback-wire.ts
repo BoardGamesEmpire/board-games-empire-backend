@@ -82,13 +82,13 @@ export function submitEnvelope(response: HttpResponseLike, request: RequestDescr
  * `feedback_reports`, as mapped in
  * `prisma/models/feedback/feedback-report.prisma`.
  *
- * Inlined rather than imported from `@bge/feedback` for the reason
- * `household-wire.ts` gives for its own constraint: the suite is black-box, and
- * what is asserted is what POSTGRES reports.
+ * Kept here rather than in `@bge/feedback`, which no longer names it, for the
+ * reason `household-wire.ts` gives for its own constraint: the suite is
+ * black-box, and what is asserted is what POSTGRES reports.
  *
  * Note what is NOT here. The household module carries a long note on
  * `meta.target` because it once discriminated on it; `FeedbackService` never
- * gets the chance to — `recoverKeyedSubmit` keys replay off the presence of a
+ * gets the chance to — `createOrReplay` keys replay off the presence of a
  * row under this key, which is shape-independent. The one place the P2002
  * payload shape is pinned is `apps/api-e2e/src/database/p2002-shape.spec.ts`,
  * and this suite deliberately declines to copy it here: a second probe would
