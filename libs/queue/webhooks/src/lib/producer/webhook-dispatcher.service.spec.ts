@@ -1,13 +1,17 @@
 import { AuditContextService } from '@bge/actor-context';
 import { Action, ResourceType, WebhookSubscription, WebhookSubscriptionStatus } from '@bge/database';
-import { AbilityFactory, PermissionsService, type AppAbility } from '@bge/permissions';
+import { AbilityFactory, PermissionsService, type AppAbility, type UserWithRoles } from '@bge/permissions';
 import { createTestingModuleWithDb, MockDatabaseService } from '@bge/testing';
 import type { WebhookEmittableEvent } from '@bge/webhooks';
 import { WebhookEventRegistry, WebhookEventType, WebhookVisibilityService } from '@bge/webhooks';
 import { createPrismaAbility } from '@casl/prisma';
 import { getQueueToken } from '@nestjs/bullmq';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { WEBHOOK_DELIVERY_ATTEMPTS, WEBHOOK_QUEUE_NAME } from '../constants/webhook-queue.constants';
+import {
+  WEBHOOK_DELIVERY_ATTEMPTS,
+  WEBHOOK_GRAPH_READ_BATCH_SIZE,
+  WEBHOOK_QUEUE_NAME,
+} from '../constants/webhook-queue.constants';
 import { WebhookDispatcherService } from './webhook-dispatcher.service';
 
 describe('WebhookDispatcherService', () => {
@@ -18,6 +22,8 @@ describe('WebhookDispatcherService', () => {
   let visibility: jest.Mocked<Pick<WebhookVisibilityService, 'isVisibleTo'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getActor'>>;
   let emitter: jest.Mocked<Pick<EventEmitter2, 'onAny' | 'offAny'>>;
+  let permissions: jest.Mocked<Pick<PermissionsService, 'getUserRoleGraph' | 'loadUserRoleGraphs'>>;
+  let abilityFactory: jest.Mocked<Pick<AbilityFactory, 'createForUser'>>;
 
   const ability = createPrismaAbility([]) as AppAbility;
 
@@ -33,14 +39,22 @@ describe('WebhookDispatcherService', () => {
     visibility = { isVisibleTo: jest.fn().mockResolvedValue(true) };
     auditContext = { getActor: jest.fn().mockReturnValue(null) };
     emitter = { onAny: jest.fn(), offAny: jest.fn() };
+    permissions = {
+      getUserRoleGraph: jest.fn(),
+      // Every subscriber is in good standing unless a test says otherwise.
+      loadUserRoleGraphs: jest.fn(
+        async (ids: readonly string[]) => new Map(ids.map((id) => [id, { id } as UserWithRoles])),
+      ),
+    };
+    abilityFactory = { createForUser: jest.fn().mockReturnValue(ability) };
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
       providers: [
         WebhookDispatcherService,
         WebhookEventRegistry,
         { provide: EventEmitter2, useValue: emitter },
-        { provide: PermissionsService, useValue: { getUserRoleGraph: jest.fn().mockResolvedValue({}) } },
-        { provide: AbilityFactory, useValue: { createForUser: jest.fn().mockReturnValue(ability) } },
+        { provide: PermissionsService, useValue: permissions },
+        { provide: AbilityFactory, useValue: abilityFactory },
         { provide: WebhookVisibilityService, useValue: visibility },
         { provide: AuditContextService, useValue: auditContext },
         { provide: getQueueToken(WEBHOOK_QUEUE_NAME), useValue: queue },
@@ -158,6 +172,68 @@ describe('WebhookDispatcherService', () => {
     const [, job, opts] = queue.add.mock.calls[0];
     expect(job.deliveryId).not.toContain('sub-1');
     expect(opts.jobId).toBe(job.deliveryId);
+  });
+
+  it("builds each subscriber's ability from the graph the database holds now, never the cache (#732)", async () => {
+    db.webhookSubscription.findMany.mockResolvedValue([{ id: 'sub-1', createdById: 'owner-1' } as WebhookSubscription]);
+    const graph = { id: 'owner-1' } as UserWithRoles;
+    permissions.loadUserRoleGraphs.mockResolvedValue(new Map([['owner-1', graph]]));
+
+    await dispatch(WebhookEventType.EventCreated, event());
+
+    expect(abilityFactory.createForUser).toHaveBeenCalledWith(graph);
+    expect(permissions.getUserRoleGraph).not.toHaveBeenCalled();
+  });
+
+  // One read for many subscribers, not one each: an event can have many (#732).
+  it('reads the graphs of every distinct subscriber in one read per fan-out (#732)', async () => {
+    db.webhookSubscription.findMany.mockResolvedValue([
+      { id: 'sub-1', createdById: 'owner-1' },
+      { id: 'sub-2', createdById: 'owner-2' },
+      { id: 'sub-3', createdById: 'owner-1' },
+    ] as WebhookSubscription[]);
+
+    await dispatch(WebhookEventType.EventCreated, event());
+
+    expect(permissions.loadUserRoleGraphs).toHaveBeenCalledTimes(1);
+    expect(permissions.loadUserRoleGraphs).toHaveBeenCalledWith(['owner-1', 'owner-2']);
+  });
+
+  const subscriptionsOfOwners = (count: number) =>
+    Array.from({ length: count }, (_, i) => ({ id: `sub-${i}`, createdById: `owner-${i}` })) as WebhookSubscription[];
+
+  // A graph is large and grows with its user's events, so the graphs held at
+  // once are bounded, not the whole fan-out's (#921).
+  it('reads the graphs a batch of subscribers at a time (#921)', async () => {
+    db.webhookSubscription.findMany.mockResolvedValue(subscriptionsOfOwners(WEBHOOK_GRAPH_READ_BATCH_SIZE + 1));
+
+    await dispatch(WebhookEventType.EventCreated, event());
+
+    const reads = permissions.loadUserRoleGraphs.mock.calls.map(([ids]) => ids);
+    expect(reads.map((ids) => ids.length)).toEqual([WEBHOOK_GRAPH_READ_BATCH_SIZE, 1]);
+    expect(reads[1]).toEqual([`owner-${WEBHOOK_GRAPH_READ_BATCH_SIZE}`]);
+    expect(queue.add).toHaveBeenCalledTimes(WEBHOOK_GRAPH_READ_BATCH_SIZE + 1);
+  });
+
+  it('delivers to the subscribers of the other batches when one batch fails to read', async () => {
+    db.webhookSubscription.findMany.mockResolvedValue(subscriptionsOfOwners(WEBHOOK_GRAPH_READ_BATCH_SIZE + 1));
+    permissions.loadUserRoleGraphs.mockRejectedValueOnce(new Error('db blip'));
+
+    await expect(dispatch(WebhookEventType.EventCreated, event())).resolves.toBeUndefined();
+
+    const delivered = queue.add.mock.calls.map(([, job]) => job.subscriptionId);
+    expect(delivered).toEqual([`sub-${WEBHOOK_GRAPH_READ_BATCH_SIZE}`]);
+  });
+
+  it('skips a banned or deleted subscriber, who has no graph, without a visibility query (#906)', async () => {
+    db.webhookSubscription.findMany.mockResolvedValue([{ id: 'sub-1', createdById: 'owner-1' } as WebhookSubscription]);
+    permissions.loadUserRoleGraphs.mockResolvedValue(new Map());
+
+    await dispatch(WebhookEventType.EventCreated, event());
+
+    expect(abilityFactory.createForUser).not.toHaveBeenCalled();
+    expect(visibility.isVisibleTo).not.toHaveBeenCalled();
+    expect(queue.add).not.toHaveBeenCalled();
   });
 
   it('does not enqueue for a subscription whose owner cannot see the subject', async () => {

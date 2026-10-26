@@ -336,9 +336,9 @@ export class EventService {
     // existed, and each invitee's predates their participant row. Without the
     // eviction none of them holds a role on the event until the cache expires.
     //
-    // Evicted before the emits: the webhook dispatcher reads each subscriber's
-    // graph once the emit returns, and outside a household that role is the
-    // creator's and invitees' only read on the event (#538).
+    // The eviction is for these users' own next requests. The webhook
+    // dispatcher reads each subscriber's graph from the database, so it doesn't
+    // depend on this running before the emits (#732).
     await this.permissions.invalidateUsers([userId, ...uniqueInviteIds]);
 
     this.eventEmitter.emit(
