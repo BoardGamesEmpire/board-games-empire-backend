@@ -26,4 +26,19 @@ describe('CreateEventDto', () => {
   it('rejects an empty householdId', async () => {
     await expect(propertiesWithErrors({ title: 'Game night', householdId: '' })).resolves.toEqual(['householdId']);
   });
+
+  describe('clientRequestId (#252)', () => {
+    it('trims a padded key, so a retry that differs only in padding replays the same event', async () => {
+      const dto = plainToInstance(CreateEventDto, { title: 'Game night', clientRequestId: '  k ' });
+
+      await expect(validate(dto, { whitelist: true, forbidNonWhitelisted: true })).resolves.toEqual([]);
+      expect(dto.clientRequestId).toBe('k');
+    });
+
+    it('rejects a blank key rather than reading it as none', async () => {
+      await expect(propertiesWithErrors({ title: 'Game night', clientRequestId: '' })).resolves.toEqual([
+        'clientRequestId',
+      ]);
+    });
+  });
 });

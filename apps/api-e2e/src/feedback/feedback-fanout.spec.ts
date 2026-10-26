@@ -145,7 +145,7 @@ describe('feedback sink fan-out suppression on replay (#251)', () => {
   });
 
   it('does not resurrect a lost fan-out on replay — the report stays undeliverable (#264)', async () => {
-    // CHARACTERIZATION of the residual `recoverKeyedSubmit` documents and #251
+    // CHARACTERIZATION of the residual `FeedbackService.submit` documents and #251
     // deliberately did not heal: if the original committed but its fan-out never
     // happened, the replay acknowledges a report no sink will ever receive, and
     // the client stops retrying because it got a 201.

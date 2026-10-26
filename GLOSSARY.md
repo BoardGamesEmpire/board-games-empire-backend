@@ -352,6 +352,14 @@ _Avoid_: key permission
 A staff member acting as another user through that user's own session. It is deliberately blocked, both to start and to use, until there is a decision on how it would be audited.
 _Avoid_: act as user (a different, superseded idea)
 
+**Client request id**:
+A key a client sends with a create so that, if it has to send the create again, the server returns the record it already made instead of making another. Each user's keys are their own.
+_Avoid_: idempotency key (reserved for a request header, #905), correlation id (request tracing)
+
+**Replay**:
+A repeated request that finds the record its first attempt made, and returns it without making another or notifying anyone again.
+_Avoid_: retry (the client's act, not the server's answer), dedup (that names matching taxonomy and platforms on import)
+
 ### Quotas and audit
 
 **Quota**:
@@ -625,7 +633,7 @@ A way a game can be played on a platform, such as solo, local, online, asynchron
 _Avoid_: capability, platform feature
 
 **Play time**:
-How long a game is expected to take, as a range. A source may also give a typical play time.
+How long one sitting of a game is expected to take, as a range in minutes. A single time is a range whose ends are equal, and a typical time a source gives stands for both ends when it gives no range. It isn't the time to finish a game over many plays, such as a campaign.
 
 **Game length**:
 A named band of play time, such as short or long, that a user can pick as the length they prefer.

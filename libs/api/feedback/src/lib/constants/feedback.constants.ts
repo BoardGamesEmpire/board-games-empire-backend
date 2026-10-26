@@ -35,29 +35,6 @@ export const FEEDBACK_MAX_APP_VERSION_LENGTH = 64;
 export const FEEDBACK_MAX_PLATFORM_LENGTH = 32;
 export const FEEDBACK_MAX_LOCALE_LENGTH = 32;
 
-/**
- * Wire-contract cap for `CreateFeedbackReportDto.clientRequestId`. Generous
- * enough for any client id scheme (the Flutter client mints a cuid2 at compose
- * time), tight enough that the unique index never carries unbounded input.
- * Mirrors `HOUSEHOLD_MAX_CLIENT_REQUEST_ID_LENGTH`.
- */
-export const FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH = 128;
-
-/**
- * DB name of the `@@unique([userId, clientRequestId])` index, as mapped in
- * `feedback-report.prisma`.
- *
- * NO LONGER A DISCRIMINATOR. `recoverKeyedSubmit` used to match this against a
- * P2002's `meta.target`; Prisma 7 with the `PrismaPg` driver adapter reports no
- * usable `target`, so the match never fired and every keyed retry became a
- * 500 — the exact failure #251 exists to remove, reinstated silently. Replay now
- * keys off the presence of a row under `(userId, clientRequestId)`.
- *
- * Retained as the name of record for the index, so a rename in the schema stays
- * visible from TypeScript.
- */
-export const FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT = 'feedback_report_user_client_request_id_unique';
-
 /** Cap on the `userRedactedFields` array length. */
 export const FEEDBACK_MAX_REDACTED_FIELDS = 64;
 

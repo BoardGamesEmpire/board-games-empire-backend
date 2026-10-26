@@ -11,12 +11,12 @@ import {
   type RiskLevel,
 } from '@bge/database';
 import { isPluginPermissionSlug, parsePluginPermissionSlug } from '@boardgamesempire/plugin-manifest';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
 import { randomUUID } from 'node:crypto';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type { ApikeyWithScopes, PluginGrantSnapshot, UserWithRoles } from './interfaces';
+import { PERMISSIONS_CACHE } from './permissions-cache';
 
 /**
  * What {@link PermissionsService.getOrLoad} caches: the loaded value, tagged
@@ -56,7 +56,7 @@ export class PermissionsService {
 
   constructor(
     private readonly db: DatabaseService,
-    @Inject(CACHE_MANAGER) private readonly cache: Cache,
+    @Inject(PERMISSIONS_CACHE) private readonly cache: Cache,
   ) {}
 
   /**

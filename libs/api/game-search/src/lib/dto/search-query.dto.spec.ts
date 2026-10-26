@@ -2,6 +2,7 @@ import { validationCatalogKeys } from '@bge/testing';
 import { DECORATORS } from '@nestjs/swagger';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { toProtoSearchFilter } from '../search-filter';
 import { SearchQueryDto } from './search-query.dto';
 
 describe('SearchQueryDto', () => {
@@ -302,6 +303,117 @@ describe('SearchQueryDto', () => {
 
       expect(validationCatalogKeys(await validate(dto))).toEqual({
         'publishYearIncludeUnknown.isBoolean': 'validation.isBoolean',
+      });
+    });
+  });
+
+  // Player-count and play-time ranges narrow the search (#869), read as the
+  // publish year's are, except that a player count is at least 1 and a play
+  // time, in minutes, at least 0.
+  describe('player count and play time', () => {
+    const rangeErrors = async (plain: Record<string, unknown>) =>
+      validationCatalogKeys(
+        (await validate(toDtoWithPipe({ query: 'x', ...plain }))).filter((e) => e.property.startsWith('play')),
+      );
+
+    it('reads its bounds from the query string as integers, from 1 player and 0 minutes', async () => {
+      const plain = { playerCountMin: '1', playerCountMax: '4', playTimeMin: '0', playTimeMax: '90' };
+
+      expect(toDtoWithPipe({ query: 'x', ...plain })).toMatchObject({
+        playerCountMin: 1,
+        playerCountMax: 4,
+        playTimeMin: 0,
+        playTimeMax: 90,
+      });
+      await expect(rangeErrors(plain)).resolves.toEqual({});
+      await expect(rangeErrors({ playerCountMin: '4', playerCountMax: '4' })).resolves.toEqual({});
+    });
+
+    it('refuses a player count below 1 and a play time below 0 with validation.min', async () => {
+      await expect(rangeErrors({ playerCountMin: '0', playerCountMax: '0' })).resolves.toEqual({
+        'playerCountMin.min': 'validation.min',
+        'playerCountMax.min': 'validation.min',
+      });
+      await expect(rangeErrors({ playTimeMin: '-1', playTimeMax: '-1' })).resolves.toEqual({
+        'playTimeMin.min': 'validation.min',
+        'playTimeMax.min': 'validation.min',
+      });
+    });
+
+    // Each bound travels as an int32, as a publish year does.
+    it('refuses a bound outside a 32-bit integer with validation.max', async () => {
+      await expect(rangeErrors({ playerCountMax: '2147483648', playTimeMax: '2147483648' })).resolves.toEqual({
+        'playerCountMax.max': 'validation.max',
+        'playTimeMax.max': 'validation.max',
+      });
+      await expect(rangeErrors({ playerCountMax: '2147483647', playTimeMax: '2147483647' })).resolves.toEqual({});
+    });
+
+    it('refuses a non-integer bound with validation.isInt', async () => {
+      await expect(rangeErrors({ playerCountMin: 2.5 })).resolves.toEqual({
+        'playerCountMin.isInt': 'validation.isInt',
+      });
+      // Not a number at all, so it's out of range too, as a non-numeric year is.
+      await expect(rangeErrors({ playTimeMax: 'an hour' })).resolves.toEqual({
+        'playTimeMax.isInt': 'validation.isInt',
+        'playTimeMax.min': 'validation.min',
+        'playTimeMax.max': 'validation.max',
+      });
+    });
+
+    it('refuses a maximum below the minimum with validation.notLessThanProperty', async () => {
+      await expect(rangeErrors({ playerCountMin: '5', playerCountMax: '3' })).resolves.toEqual({
+        'playerCountMax.notLessThanProperty': 'validation.notLessThanProperty',
+      });
+      await expect(rangeErrors({ playTimeMin: '90', playTimeMax: '60' })).resolves.toEqual({
+        'playTimeMax.notLessThanProperty': 'validation.notLessThanProperty',
+      });
+    });
+
+    // Implicit conversion reads a blank as 0, so `?playTimeMax=` would find
+    // only games of 0 minutes, and `?playerCountMin=` would answer 400.
+    it('reads a blank bound as absent, so ?playTimeMax= does not narrow to 0 minutes', async () => {
+      const plain = { playerCountMin: '', playerCountMax: ' ', playTimeMin: ' ', playTimeMax: '' };
+      const dto = toDtoWithPipe({ query: 'x', ...plain });
+
+      expect(dto.playerCountMin).toBeUndefined();
+      expect(dto.playerCountMax).toBeUndefined();
+      expect(dto.playTimeMin).toBeUndefined();
+      expect(dto.playTimeMax).toBeUndefined();
+      expect(toProtoSearchFilter(dto)).toBeUndefined();
+      await expect(rangeErrors(plain)).resolves.toEqual({});
+    });
+
+    it('reads each include-unknown flag from the query string', () => {
+      expect(
+        toDtoWithPipe({ query: 'x', playerCountIncludeUnknown: 'false', playTimeIncludeUnknown: 'true' }),
+      ).toMatchObject({ playerCountIncludeUnknown: false, playTimeIncludeUnknown: true });
+    });
+
+    it('publishes each bound as an int32 integer and each flag as a boolean in the OpenAPI schema', () => {
+      const schemaOf = (property: string) =>
+        Reflect.getMetadata(DECORATORS.API_MODEL_PROPERTIES, SearchQueryDto.prototype, property);
+
+      for (const bound of ['playerCountMin', 'playerCountMax', 'playTimeMin', 'playTimeMax']) {
+        expect(schemaOf(bound)).toMatchObject({ type: 'integer', format: 'int32' });
+      }
+      for (const flag of ['playerCountIncludeUnknown', 'playTimeIncludeUnknown']) {
+        expect(schemaOf(flag)).toMatchObject({ type: Boolean });
+      }
+      expect(schemaOf('playTimeMin').description).toContain('minutes');
+      expect(schemaOf('playTimeMax').description).toContain('minutes');
+    });
+
+    it('names a catalog key for a flag that is not a boolean', async () => {
+      const dto = Object.assign(new SearchQueryDto(), {
+        query: 'x',
+        playerCountIncludeUnknown: 'yes',
+        playTimeIncludeUnknown: 'yes',
+      });
+
+      expect(validationCatalogKeys(await validate(dto))).toEqual({
+        'playerCountIncludeUnknown.isBoolean': 'validation.isBoolean',
+        'playTimeIncludeUnknown.isBoolean': 'validation.isBoolean',
       });
     });
   });

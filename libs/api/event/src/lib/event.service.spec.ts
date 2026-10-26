@@ -1,5 +1,16 @@
 import type { Event } from '@bge/database';
-import { Action, FriendshipStatus, HUMAN_USER_WHERE, Prisma, Reach, ResourceType } from '@bge/database';
+import {
+  Action,
+  EventSchedulingMode,
+  EventStatus,
+  FriendshipStatus,
+  HUMAN_USER_WHERE,
+  OccurrenceStatus,
+  Prisma,
+  Reach,
+  ResourceType,
+} from '@bge/database';
+import { uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
@@ -11,12 +22,14 @@ import {
   makeEventPolicy,
   MOCK_ACTING_USER_ID,
   paginationQuery,
+  unwrapTransaction,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
 import { WebhookEventType } from '@bge/webhooks';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EVENT_CREATE_INCLUDE } from './constants/event-create-include.constant';
 import type { CreateEventDto } from './dto/create-event.dto';
 import { EventService } from './event.service';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
@@ -573,5 +586,328 @@ describe('EventService', () => {
     expect(emitted.before).toBeNull();
     expect(emitted.after).toEqual(expect.objectContaining({ id: 'event-1', title: 'X', createdById: 'user-1' }));
     expect(emitted.invitedUserIds).toEqual(['user-2']);
+  });
+
+  describe('what createEvent writes', () => {
+    const startDate = new Date('2026-11-01T18:00:00.000Z');
+    const endDate = new Date('2026-11-01T22:00:00.000Z');
+
+    beforeEach(() => {
+      db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
+      db.event.create.mockResolvedValue(makeEvent({ id: 'event-1', createdById: MOCK_ACTING_USER_ID }));
+    });
+
+    /** What the `call`-th create wrote. */
+    const written = (call = 0) => db.event.create.mock.calls[call][0].data;
+
+    it('schedules a fixed event, confirming its one occurrence with a policy of its own', async () => {
+      await service.createEvent({
+        title: 'X',
+        occurrences: [{ label: 'Night', startDate, endDate, location: 'Den' }],
+      } as CreateEventDto);
+
+      expect(written().status).toBe(EventStatus.Scheduled);
+      expect(written().occurrences).toEqual({
+        create: [
+          {
+            label: 'Night',
+            startDate,
+            endDate,
+            location: 'Den',
+            sortOrder: 0,
+            policy: { create: {} },
+            status: OccurrenceStatus.Confirmed,
+            confirmedAt: expect.any(Date),
+          },
+        ],
+      });
+    });
+
+    // A poll's occurrences are the candidates its votes choose between, so
+    // none is confirmed and none gets a policy until one is chosen.
+    it('plans a poll, proposing each occurrence in the order given unless it names its own', async () => {
+      await service.createEvent({
+        title: 'X',
+        schedulingMode: EventSchedulingMode.Poll,
+        occurrences: [{ startDate, sortOrder: 5 }, { startDate: endDate }],
+      } as CreateEventDto);
+
+      expect(written().status).toBe(EventStatus.Planning);
+      expect(written()).toHaveProperty('occurrences.create', [
+        expect.objectContaining({
+          sortOrder: 5,
+          policy: undefined,
+          status: OccurrenceStatus.Proposed,
+          confirmedAt: null,
+        }),
+        expect.objectContaining({
+          sortOrder: 1,
+          policy: undefined,
+          status: OccurrenceStatus.Proposed,
+          confirmedAt: null,
+        }),
+      ]);
+    });
+
+    it('writes no occurrences for an empty list', async () => {
+      await service.createEvent({ title: 'X', occurrences: [] } as unknown as CreateEventDto);
+
+      expect(written().occurrences).toBeUndefined();
+    });
+
+    it('refuses a fixed event with more than one occurrence before writing', async () => {
+      await expect(
+        service.createEvent({ title: 'X', occurrences: [{ startDate }, { startDate: endDate }] } as CreateEventDto),
+      ).rejects.toThrow(BadRequestException);
+      expect(db.event.create).not.toHaveBeenCalled();
+    });
+
+    it('creates an empty policy when the request names none', async () => {
+      await service.createEvent({ title: 'X' } as CreateEventDto);
+
+      expect(written().policy).toEqual({ create: {} });
+    });
+
+    it("links the policy's allowed categories when it names some", async () => {
+      await service.createEvent({
+        title: 'X',
+        policy: { restrictToGameCategories: true, allowedCategoryIds: ['cat-1', 'cat-2'] },
+      } as CreateEventDto);
+
+      expect(written()).toMatchObject({
+        policy: {
+          create: {
+            restrictToGameCategories: true,
+            allowedCategories: {
+              create: [{ category: { connect: { id: 'cat-1' } } }, { category: { connect: { id: 'cat-2' } } }],
+            },
+          },
+        },
+      });
+    });
+
+    it('links no categories for an empty or absent list', async () => {
+      await service.createEvent({ title: 'X', policy: { allowedCategoryIds: [] } } as unknown as CreateEventDto);
+      await service.createEvent({ title: 'X', policy: { maxAttendees: 6 } } as CreateEventDto);
+
+      expect(written(0)).not.toHaveProperty('policy.create.allowedCategories');
+      expect(written(1)).not.toHaveProperty('policy.create.allowedCategories');
+      expect(written(1)).toHaveProperty('policy.create.maxAttendees', 6);
+    });
+  });
+
+  describe('createEvent with a client request id (#252)', () => {
+    // The event a first attempt made, as the replay lookup reads it.
+    const original = makeEvent({ id: 'event-1', title: 'Original', createdById: 'user-1' });
+    const occurrence = makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' });
+    const policy = makeEventPolicy('event-1');
+
+    // Every attendee row on the event: its host, one invitee, and a guest, who
+    // has no account and so no graph to evict.
+    const attendeeRows = [{ userId: 'user-1' }, { userId: 'user-3' }, { userId: null }];
+
+    // A retry whose payload differs from the original's, in a household that
+    // has since been deleted: the replay must answer with the original anyway.
+    const retry = {
+      title: 'Different',
+      householdId: 'hh-gone',
+      inviteUserIds: ['user-9'],
+      clientRequestId: 'k',
+    } as CreateEventDto;
+
+    /** The attendees the replay's scoped read returns; the eviction's unscoped read gets every row. */
+    const attendeesReadAs = (scoped: unknown[]) =>
+      db.eventAttendee.findMany.mockImplementation(((args: { select?: unknown }) =>
+        Promise.resolve(args.select ? attendeeRows : scoped)) as never);
+
+    beforeEach(() => {
+      abilityService.getActingUserId.mockReturnValue('user-1');
+      unwrapTransaction(db);
+      db.eventOccurrence.findMany.mockResolvedValue([occurrence]);
+      db.eventPolicy.findUnique.mockResolvedValue(policy);
+      attendeesReadAs([]);
+    });
+
+    it('replays the event already under the key, before any check, lock or write', async () => {
+      db.event.findUnique.mockResolvedValue(original);
+
+      await expect(service.createEvent(retry)).resolves.toEqual({
+        ...original,
+        occurrences: [occurrence],
+        attendees: [],
+        policy,
+      });
+      expect(abilityService.assertCurrentActorCan).not.toHaveBeenCalled();
+      // Only the replay's batch read: the create's interactive transaction never opens.
+      expect(db.$transaction.mock.calls.every(([operations]) => Array.isArray(operations))).toBe(true);
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+      expect(db.event.create).not.toHaveBeenCalled();
+    });
+
+    it('looks the key up under the creator, with no `deletedAt` filter and nothing embedded', async () => {
+      db.event.findUnique.mockResolvedValue(original);
+
+      await service.createEvent(retry);
+
+      // No `deletedAt` filter: the row is the create's outcome even after a
+      // soft delete, and the client reconciles against it. Nothing embedded:
+      // an `include` would hand the creator every attendee whatever they may
+      // read now.
+      expect(db.event.findUnique).toHaveBeenCalledWith({
+        where: { createdById_clientRequestId: { createdById: 'user-1', clientRequestId: 'k' } },
+      });
+    });
+
+    // A creator who has lost read on the event since, or a removed attendee,
+    // must not come back from a retry the way `GET /events/:id` would refuse.
+    it("reads the replay's parts under their own ceilings, in the create's shape, without removed attendees", async () => {
+      db.event.findUnique.mockResolvedValue(original);
+
+      await service.createEvent(retry);
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventOccurrence, Action.read, { eventId: 'event-1' });
+      expect(db.eventOccurrence.findMany).toHaveBeenCalledWith({
+        where: { eventId: 'event-1', AND: [COND] },
+        orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+      });
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, {
+        eventId: 'event-1',
+        removedAt: null,
+      });
+      expect(db.eventAttendee.findMany).toHaveBeenCalledWith({
+        where: { eventId: 'event-1', removedAt: null, AND: [COND] },
+        include: EVENT_CREATE_INCLUDE.attendees.include,
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.EventPolicy, Action.read);
+      expect(db.eventPolicy.findUnique).toHaveBeenCalledWith({ where: { eventId: 'event-1', AND: [COND] } });
+      expect(batchTransactionCall(db).options).toEqual({
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      });
+    });
+
+    // Eviction is idempotent, and it heals an original that committed but
+    // crashed before its own eviction ran. Whose graph is stale does not
+    // depend on whom the creator may see, so the scoped read, empty here,
+    // does not decide it. The retry's invitees were never added.
+    it("evicts every attendee row's user on a replay, read unscoped, not the retry's invitees", async () => {
+      db.event.findUnique.mockResolvedValue(original);
+
+      await service.createEvent(retry);
+
+      expect(db.eventAttendee.findMany).toHaveBeenCalledWith({
+        where: { eventId: 'event-1' },
+        select: { userId: true },
+      });
+      expect(permissions.invalidateUsers).toHaveBeenCalledWith(['user-1', 'user-3']);
+    });
+
+    // The abilities primed at the request's start can predate the host role:
+    // the loser of a concurrent create primed before the winner committed it,
+    // and a retry after a crash before the original's eviction read the stale
+    // graph. Outside a household that role is the creator's only read on the
+    // parts, so they must be read under abilities resolved after the eviction.
+    it('evicts, then primes the abilities again, before it reads the parts', async () => {
+      // One log across mocks from different factories, whose call counters
+      // are not comparable.
+      const steps: string[] = [];
+      db.event.findUnique.mockResolvedValue(original);
+      permissions.invalidateUsers.mockImplementation(async () => void steps.push('evict'));
+      abilityService.primeCurrentActor.mockImplementation(async () => void steps.push('prime'));
+      abilityService.getCurrentResourceConditions.mockImplementation((type) => {
+        steps.push(`ceiling:${type}`);
+
+        return [COND];
+      });
+
+      await service.createEvent(retry);
+
+      expect(steps).toEqual([
+        'evict',
+        'prime',
+        `ceiling:${ResourceType.EventOccurrence}`,
+        `ceiling:${ResourceType.EventAttendee}`,
+        `ceiling:${ResourceType.EventPolicy}`,
+      ]);
+    });
+
+    it('primes the abilities again only on a replay', async () => {
+      db.event.findUnique.mockResolvedValue(null);
+      db.event.create.mockResolvedValue(makeEvent({ id: 'event-2', createdById: 'user-1' }));
+
+      await service.createEvent({ title: 'X', clientRequestId: 'k' } as CreateEventDto);
+
+      expect(abilityService.primeCurrentActor).not.toHaveBeenCalled();
+    });
+
+    it('emits neither the created event nor its webhook on a replay, so no invitee is notified twice', async () => {
+      db.event.findUnique.mockResolvedValue(original);
+
+      await service.createEvent(retry);
+
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('logs a create, and not a replay, which made nothing', async () => {
+      const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      db.event.findUnique.mockResolvedValueOnce(original).mockResolvedValueOnce(null);
+      db.event.create.mockResolvedValue(makeEvent({ id: 'event-2', title: 'Fresh', createdById: 'user-1' }));
+
+      await service.createEvent(retry);
+      expect(log).not.toHaveBeenCalled();
+
+      await service.createEvent({ title: 'Fresh', clientRequestId: 'k2' } as CreateEventDto);
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(log).toHaveBeenCalledWith('Event "Fresh" (event-2) created by user user-1');
+
+      log.mockRestore();
+    });
+
+    it('replays the row a concurrent duplicate committed when its create trips the unique', async () => {
+      db.event.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(original);
+      db.$transaction.mockImplementation(((operations: unknown) =>
+        Array.isArray(operations) ? Promise.all(operations) : Promise.reject(uniqueViolationWithoutMeta())) as never);
+
+      await expect(
+        service.createEvent({ title: 'Original', clientRequestId: 'k' } as CreateEventDto),
+      ).resolves.toMatchObject({ id: 'event-1' });
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('stores the key on a fresh create, and emits each event once', async () => {
+      db.event.findUnique.mockResolvedValue(null);
+      db.event.create.mockResolvedValue(makeEvent({ id: 'event-2', createdById: 'user-1' }));
+
+      await service.createEvent({ title: 'X', clientRequestId: 'k' } as CreateEventDto);
+
+      expect(db.event.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ clientRequestId: 'k' }) }),
+      );
+      expect(emitter.emit.mock.calls.map(([name]) => name)).toEqual([
+        EventCreatedEvent.eventName,
+        WebhookEventType.EventCreated,
+      ]);
+    });
+
+    // DTO validation never runs for an in-process caller, so the service
+    // normalizes the key itself.
+    it('reads a whitespace-only key as no key', async () => {
+      db.event.create.mockResolvedValue(makeEvent({ id: 'event-2', createdById: 'user-1' }));
+
+      await service.createEvent({ title: 'X', clientRequestId: '   ' } as CreateEventDto);
+
+      expect(db.event.findUnique).not.toHaveBeenCalled();
+      expect(db.event.create.mock.calls[0][0].data.clientRequestId).toBeUndefined();
+    });
+
+    it('trims a padded key, so it finds the event its unpadded twin made', async () => {
+      db.event.findUnique.mockResolvedValue(original);
+
+      await service.createEvent({ ...retry, clientRequestId: '  k  ' });
+
+      expect(db.event.findUnique).toHaveBeenCalledWith({
+        where: { createdById_clientRequestId: { createdById: 'user-1', clientRequestId: 'k' } },
+      });
+    });
   });
 });

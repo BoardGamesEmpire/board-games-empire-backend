@@ -6,7 +6,7 @@ import { WebhookEventType } from '@bge/webhooks';
 import request from 'supertest';
 import { createEventClient, EVENTS_PATH } from '../event/event-request';
 import { createMemberClient } from '../household/household-request';
-import { apiCacheHas } from '../support/api-cache';
+import { permissionsCacheHas } from '../support/api-cache';
 import { requireBaseUrl } from '../support/e2e-env';
 import { isolateQueue } from '../support/queue-isolation';
 import { waitForStableJobCount } from '../support/queues';
@@ -135,7 +135,7 @@ describe('webhook dispatch from the API (#538)', () => {
       resourceType: ResourceType.Event,
       eventTypes: [WebhookEventType.EventCreated],
     });
-    expect(await apiCacheHas(PermissionsService.userGraphCacheKey(watcher.user.id))).toBe(true);
+    expect(await permissionsCacheHas(PermissionsService.userGraphCacheKey(watcher.user.id))).toBe(true);
 
     // The fixture writes the roster directly and creating the event evicts
     // only its creator's graph, so nothing evicts the watcher's. A member

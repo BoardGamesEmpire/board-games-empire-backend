@@ -15,8 +15,8 @@ export interface BootstrapCacheOptions {
   /**
    * The physical key globs to remove after a reconcile that wrote rows: the
    * cache store's prefix and namespace in front of the logical key, for
-   * example `namespace:api:cache:bge:user:permissions:*`. Composed by the
-   * entrypoint, which owns both halves; this module knows neither.
+   * example `namespace:permissions:cache:bge:user:permissions:*`. Composed by
+   * the entrypoint, which owns both halves; this module knows neither.
    */
   readonly flushPatterns: readonly string[];
 }

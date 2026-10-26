@@ -7,11 +7,10 @@ import { MediaSweepModule } from '@bge/media';
 import { BullMQQueueDepthRecorderModule, createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
 import { FeedbackQueueConsumerModule } from '@bge/queue-feedback';
 import { WebhookQueueConsumerModule, WebhookQueueProducerModule } from '@bge/queue-webhooks';
-import { CACHE_REDIS_CLIENT, createCacheStore, QUEUE_REDIS_CLIENT, Redis, RedisModule } from '@bge/redis';
+import { QUEUE_REDIS_CLIENT, RedisModule } from '@bge/redis';
 import { StorageModule } from '@bge/storage';
 import { WebhooksModule } from '@bge/webhooks';
 import { BullModule } from '@nestjs/bullmq';
-import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
@@ -48,15 +47,6 @@ import { baseLogger } from './lib/logger';
         inject: [ConfigService],
         useFactory: (config: ConfigService) => config.getOrThrow('redis.queue'),
       },
-    }),
-
-    CacheModule.registerAsync({
-      isGlobal: true,
-      inject: [CACHE_REDIS_CLIENT, ConfigService],
-      useFactory: (cacheClient: Redis, configService: ConfigService) => ({
-        stores: [createCacheStore(cacheClient, 'worker:cache')],
-        ttl: configService.get<number>('cache.ttl'),
-      }),
     }),
 
     // BullMQ telemetry attaches at the root so every Worker registered

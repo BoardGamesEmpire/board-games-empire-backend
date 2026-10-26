@@ -3,6 +3,7 @@ export * from './deadlock';
 export * from './friendship-conditions';
 export * from './household-share-lock';
 export * from './human-user';
+export * from './keyed-create';
 export * from './permission-conditions';
 export * from './plugin-grant.constants';
 export * from './plugin-unit-enablement';

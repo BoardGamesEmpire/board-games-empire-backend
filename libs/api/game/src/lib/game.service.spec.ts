@@ -283,7 +283,82 @@ describe('GameService', () => {
 
     expect(db.game.findFirst).toHaveBeenCalledWith({
       where: { id: 'game-1', AND: [COND] },
-      select: { description: true, createdBy: { select: { isServiceAccount: true } } },
+      select: {
+        description: true,
+        minPlayers: true,
+        maxPlayers: true,
+        minPlayTime: true,
+        maxPlayTime: true,
+        createdBy: { select: { isServiceAccount: true } },
+      },
+    });
+  });
+
+  /**
+   * #869. The DTO refuses a range sent whole in the wrong order, but a PATCH
+   * may send one end alone, so the service holds it to the end already stored.
+   */
+  describe('a range given one end at a time', () => {
+    const stored = {
+      minPlayers: 2,
+      maxPlayers: 4,
+      minPlayTime: 60,
+      maxPlayTime: 120,
+      createdBy: { isServiceAccount: false },
+    } as never;
+
+    beforeEach(() => {
+      db.game.findFirst.mockResolvedValue(stored);
+      db.game.update.mockResolvedValue({ id: 'game-1' } as Game);
+    });
+
+    it.each<[string, UpdateGameDto, Record<string, unknown>]>([
+      [
+        'a maximum play time below the stored minimum',
+        { maxPlayTime: 30 },
+        { minField: 'minPlayTime', min: 60, maxField: 'maxPlayTime', max: 30 },
+      ],
+      [
+        'a minimum play time above the stored maximum',
+        { minPlayTime: 180 },
+        { minField: 'minPlayTime', min: 180, maxField: 'maxPlayTime', max: 120 },
+      ],
+      [
+        'a maximum player count below the stored minimum',
+        { maxPlayers: 1 },
+        { minField: 'minPlayers', min: 2, maxField: 'maxPlayers', max: 1 },
+      ],
+      [
+        'a minimum player count above the stored maximum',
+        { minPlayers: 5 },
+        { minField: 'minPlayers', min: 5, maxField: 'maxPlayers', max: 4 },
+      ],
+    ])('refuses %s, before any write', async (_label, patch, args) => {
+      const refusal = service.updateGame('game-1', patch);
+
+      await expect(refusal).rejects.toThrow(BadRequestException);
+      await expect(refusal).rejects.toMatchObject({ response: { key: 'errors.game.range_reversed', args } });
+      expect(db.game.update).not.toHaveBeenCalled();
+    });
+
+    it.each<[string, UpdateGameDto]>([
+      ['an end equal to the stored other end', { maxPlayTime: 60, minPlayers: 4 }],
+      ['both ends moved past the stored ones, in order', { minPlayTime: 150, maxPlayTime: 180 }],
+      ['the other end cleared with null', { minPlayTime: null as unknown as number, maxPlayTime: 30 }],
+      ['no range at all', { title: 'New' }],
+    ])('takes %s', async (_label, patch) => {
+      await service.updateGame('game-1', patch);
+
+      expect(db.game.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining(patch) }));
+    });
+
+    it('takes either end when the other is unknown', async () => {
+      db.game.findFirst.mockResolvedValue(userOwned);
+
+      await service.updateGame('game-1', { maxPlayTime: 1 });
+      await service.updateGame('game-1', { minPlayers: 99 });
+
+      expect(db.game.update).toHaveBeenCalledTimes(2);
     });
   });
 

@@ -1,7 +1,7 @@
 import { PermissionsService } from '@bge/permissions';
 import { createActors, performSignup, waitForProvisionedRoleNames, type Actors } from '@bge/testing-e2e';
 import request from 'supertest';
-import { apiCacheHas } from '../support/api-cache';
+import { permissionsCacheHas } from '../support/api-cache';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, withBarrier } from '../support/lock-barrier';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
@@ -57,7 +57,7 @@ describe('a request sent before signup provisioning commits', () => {
       // Read while provisioning is still held, so no eviction after its commit
       // can have run yet. The later request alone cannot tell "nothing stale
       // was cached" from "something stale was cached and then evicted".
-      const cachedWhilePending = await apiCacheHas(PermissionsService.userGraphCacheKey(signup.userId));
+      const cachedWhilePending = await permissionsCacheHas(PermissionsService.userGraphCacheKey(signup.userId));
 
       await holder.commit();
       await waitForProvisionedRoleNames(db.client, signup.userId, signup.username);
@@ -103,11 +103,11 @@ async function cachedPastEviction(
 ): Promise<boolean> {
   const cacheKey = PermissionsService.userGraphCacheKey(userId);
 
-  if (await apiCacheHas(cacheKey)) {
+  if (await permissionsCacheHas(cacheKey)) {
     return true;
   }
 
   await request(baseUrl).get(HOUSEHOLDS_PATH).set(headers);
 
-  return apiCacheHas(cacheKey);
+  return permissionsCacheHas(cacheKey);
 }

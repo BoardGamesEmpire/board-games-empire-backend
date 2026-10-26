@@ -7,7 +7,7 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { createFeedbackClient, freshFeedbackKey, reportPayload } from './feedback-request';
 import { submitEnvelope } from './feedback-wire';
 
-/** Mirrors `FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH`; inlined per the black-box rule. */
+/** Mirrors `@bge/shared`'s `MAX_CLIENT_REQUEST_ID_LENGTH`; inlined per the black-box rule. */
 const MAX_CLIENT_REQUEST_ID_LENGTH = 128;
 
 /**
@@ -254,7 +254,7 @@ describe('feedback submission idempotency (#251 acceptance)', () => {
       // adapter, this observes a shape the application does not.
       //
       // Scope: this asserts the TRIGGER and nothing about `meta`.
-      // `recoverKeyedSubmit` keys replay off the presence of a row under the
+      // `createOrReplay` keys replay off the presence of a row under the
       // composite key, so the error's shape is not load-bearing here. The one
       // place the P2002 payload shape is pinned is
       // `apps/api-e2e/src/database/p2002-shape.spec.ts`; a second probe here
@@ -304,7 +304,7 @@ describe('feedback submission idempotency (#251 acceptance)', () => {
     });
 
     it('leaves the rethrow branch unreachable: one unique besides the primary key', async () => {
-      // `recoverKeyedSubmit` warns and rethrows when a P2002 arrives with no row
+      // `createOrReplay` warns and rethrows when a P2002 arrives with no row
       // under the key. `feedback_reports` carries exactly one unique index
       // besides its primary key, so that branch should not be reachable — which
       // is why it logs at `warn` rather than `debug`: it is the branch that

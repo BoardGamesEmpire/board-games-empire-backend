@@ -37,4 +37,12 @@ export class SearchResponseDto {
     items: { type: 'string' },
   })
   unavailableSources?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      "Sources not asked, because they can't filter by a player-count or play-time range the search gave without keeping unknown values",
+    type: 'array',
+    items: { type: 'string' },
+  })
+  unfilterableSources?: string[];
 }

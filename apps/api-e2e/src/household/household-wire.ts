@@ -18,7 +18,7 @@ import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescripti
  * suite became its second consumer (#262). Re-exported below so this module's
  * public surface is unchanged.
  *
- * The constraint name below is inlined rather than imported from `@bge/household`
+ * The constraint name below is kept in this suite rather than in `@bge/household`
  * deliberately, matching the reasoning in `signup.ts`: this suite is black-box,
  * and importing the product lib would pull its Nest module graph (controller
  * decorators, `@bge/permissions`, `@bge/i18n`, rxjs) into the test process to
@@ -476,9 +476,9 @@ export function restorableListEnvelope(
 
 /**
  * DB name of the `@@unique([createdById, clientRequestId])` constraint, as
- * mapped in `prisma/models/household/household.prisma`. Mirrors
- * `HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT` in `@bge/household` — see the file
- * header for why it is inlined rather than imported.
+ * mapped in `prisma/models/household/household.prisma`. The application never
+ * names it: replay keys off the row under the key (#252), so this suite holds
+ * the only copy. See the file header for why a suite keeps its own.
  */
 export const HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT = 'household_created_by_client_request_id_unique';
 

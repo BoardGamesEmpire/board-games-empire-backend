@@ -79,6 +79,64 @@ const yearMatches = (range: proto.IntRange | undefined, year: number | undefined
 };
 
 /**
+ * Whether a game supports every player count in a range (#869). A bound alone
+ * is one count: a minimum of 5 means "supports 5", not "5 or more". A range
+ * with no bound narrows nothing, and a game missing either of its counts
+ * matches only when the range includes unknown ones.
+ */
+const playerCountMatches = (
+  range: proto.IntRange | undefined,
+  minPlayers: number | undefined,
+  maxPlayers: number | undefined,
+): boolean => {
+  const min = range?.min ?? undefined;
+  const max = range?.max ?? undefined;
+  const gameMin = minPlayers ?? undefined;
+  const gameMax = maxPlayers ?? undefined;
+
+  if (min === undefined && max === undefined) {
+    return true;
+  }
+
+  if (gameMin === undefined || gameMax === undefined) {
+    return range?.includeUnknown === true;
+  }
+
+  const lo = min ?? max;
+  const hi = max ?? min;
+
+  return (lo === undefined || gameMin <= lo) && (hi === undefined || hi <= gameMax);
+};
+
+/**
+ * Whether a game's whole play time, in minutes, fits a range (#869). A game
+ * with one play time plays that long, so it stands for both ends, and a bound
+ * left out doesn't narrow that side. A range with no bound narrows nothing,
+ * and a game with neither time matches only when the range includes unknown
+ * ones.
+ */
+const playTimeMatches = (
+  range: proto.IntRange | undefined,
+  minPlaytime: number | undefined,
+  maxPlaytime: number | undefined,
+): boolean => {
+  const min = range?.min ?? undefined;
+  const max = range?.max ?? undefined;
+  const gameMin = minPlaytime ?? maxPlaytime ?? undefined;
+  const gameMax = maxPlaytime ?? minPlaytime ?? undefined;
+
+  if (min === undefined && max === undefined) {
+    return true;
+  }
+
+  if (gameMin === undefined || gameMax === undefined) {
+    return range?.includeUnknown === true;
+  }
+
+  return (min === undefined || min <= gameMin) && (max === undefined || gameMax <= max);
+};
+
+/**
  * Fixture-backed in-process `DataGatewayDriver`.
  *
  * Dual purpose, mirroring the storage contract-testing pattern:
@@ -281,7 +339,11 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
           proto.PlatformType.PLATFORM_TYPE_UNSPECIFIED,
         )) &&
       (!declares(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR) ||
-        yearMatches(filter?.publishYear, game.yearPublished))
+        yearMatches(filter?.publishYear, game.yearPublished)) &&
+      (!declares(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAYER_COUNT) ||
+        playerCountMatches(filter?.playerCount, game.minPlayers, game.maxPlayers)) &&
+      (!declares(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAY_TIME) ||
+        playTimeMatches(filter?.playTime, game.minPlaytime, game.maxPlaytime))
     );
   }
 

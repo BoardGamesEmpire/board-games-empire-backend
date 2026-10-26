@@ -241,6 +241,79 @@ describe('publish year (#719)', () => {
   });
 });
 
+// BGG writes 0 for a player count or play time it doesn't know, as it does for
+// a year. Sent on, a 0-minute game would fit every play-time maximum, and a
+// 0–0 game would read as known, dropped where an unknown one is kept, on BGG's
+// results and on the games imported from it (#869).
+describe('player counts and play times (#869)', () => {
+  const mapped = (thing: BggThing) => [thingToGameSearchData(thing), thingToGameData(thing)];
+
+  it('reads playingtime as both ends of a play time BGG gives no range for, on an expansion search result too', () => {
+    for (const game of mapped(makeBggThing({ playingtime: 120 }))) {
+      expect([game.minPlaytime, game.maxPlaytime]).toEqual([120, 120]);
+    }
+  });
+
+  it('prefers the minimum and maximum play time to playingtime', () => {
+    for (const game of mapped(makeBggThing({ minplayers: 2, maxplayers: 5, minplaytime: 45, maxplaytime: 75 }))) {
+      expect([game.minPlayers, game.maxPlayers, game.minPlaytime, game.maxPlaytime]).toEqual([2, 5, 45, 75]);
+    }
+  });
+
+  it("sends BGG's 0 as no player count or play time", () => {
+    for (const game of mapped(
+      makeBggThing({ minplayers: 0, maxplayers: 0, minplaytime: 0, maxplaytime: 0, playingtime: 0 }),
+    )) {
+      expect([game.minPlayers, game.maxPlayers, game.minPlaytime, game.maxPlaytime]).toEqual([
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+      ]);
+    }
+  });
+
+  // BGG's 0 here is the same sentinel, and POST /games refuses a minimum age
+  // of 0, so import doesn't store one either.
+  it("imports BGG's 0 as no minimum age", () => {
+    expect(thingToGameData(makeBggThing({ minage: 0 })).minAge).toBeUndefined();
+  });
+
+  it('falls back on playingtime when the minimum play time is 0', () => {
+    for (const game of mapped(makeBggThing({ minplaytime: 0, playingtime: 90 }))) {
+      expect([game.minPlaytime, game.maxPlaytime]).toEqual([90, 90]);
+    }
+  });
+
+  // BGG holds some pairs with the minimum above the maximum, and there's no
+  // telling which end is wrong. Both ends go unknown rather than reversed,
+  // which would fit play-time filters the game can't (#869).
+  it('sends a reversed player count or play time as unknown at both ends', () => {
+    for (const game of mapped(makeBggThing({ minplayers: 5, maxplayers: 2, minplaytime: 120, maxplaytime: 60 }))) {
+      expect([game.minPlayers, game.maxPlayers, game.minPlaytime, game.maxPlaytime]).toEqual([
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+      ]);
+    }
+  });
+
+  it('checks the order after playingtime stands in for a missing end', () => {
+    for (const game of mapped(makeBggThing({ minplaytime: 120, maxplaytime: 0, playingtime: 60 }))) {
+      expect([game.minPlaytime, game.maxPlaytime]).toEqual([undefined, undefined]);
+    }
+  });
+
+  it('keeps a range with equal ends, or with one end unknown', () => {
+    for (const game of mapped(
+      makeBggThing({ minplayers: 4, maxplayers: 4, minplaytime: 30, maxplaytime: 0, playingtime: 0 }),
+    )) {
+      expect([game.minPlayers, game.maxPlayers, game.minPlaytime, game.maxPlaytime]).toEqual([4, 4, 30, undefined]);
+    }
+  });
+});
+
 describe('thingToGameSearchData — synthetic release', () => {
   it('emits a single default-edition Tabletop release with the year as the release date', () => {
     const result = thingToGameSearchData(makeBggThing({ id: 174430, yearpublished: 2017 }));

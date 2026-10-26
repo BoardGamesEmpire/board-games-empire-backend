@@ -17,7 +17,6 @@ model UserGameCustomization {
   minPlayers Int? @map("min_players")
   maxPlayers Int? @map("max_players")
 
-  playingTime Int? @map("playing_time")
   minPlayTime Int? @map("min_play_time")
   maxPlayTime Int? @map("max_play_time")
 

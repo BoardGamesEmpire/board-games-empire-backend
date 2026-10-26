@@ -71,7 +71,6 @@ export class EventController {
   @Post()
   createEvent(@Body() createEventDto: CreateEventDto) {
     return from(this.eventService.createEvent(createEventDto)).pipe(
-      tap((event) => this.logger.log(`Event "${event.title}" (${event.id}) created by user ${event.createdById}`)),
       map((event) => ({ message: t('success.event.created'), event })),
     );
   }

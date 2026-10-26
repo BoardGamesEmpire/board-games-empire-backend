@@ -10,6 +10,7 @@ export enum SearchEvents {
   SearchError = 'search:error',
   SearchRateLimited = 'search:rate_limited',
   SearchUnavailable = 'search:unavailable',
+  SearchUnfilterable = 'search:unfilterable',
 }
 
 export type SearchEventKey = keyof typeof SearchEvents;

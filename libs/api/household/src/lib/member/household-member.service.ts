@@ -818,11 +818,11 @@ export class HouseholdMemberService {
       // those to 409 would hide an unrelated database failure behind a
       // confidently wrong answer.
       //
-      // Unlike `HouseholdService.recoverKeyedCreate` and
-      // `FeedbackService.recoverKeyedSubmit`, this cannot decide by re-reading the
-      // row: Postgres has already aborted the transaction and Prisma opens no
-      // savepoint, so a lookup here would itself fail. The error payload is the
-      // only remaining source of truth (#298).
+      // Unlike the keyed creates, which recover through `createOrReplay` (#252),
+      // this cannot decide by re-reading the row: Postgres has already aborted
+      // the transaction and Prisma opens no savepoint, so a lookup here would
+      // itself fail. The error payload is the only remaining source of truth
+      // (#298).
       if (isPrismaUniqueConstraintError(error)) {
         const identity = constraintIdentity(error);
 

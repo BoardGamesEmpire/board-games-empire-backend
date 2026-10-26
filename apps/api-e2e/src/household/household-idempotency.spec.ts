@@ -3,6 +3,7 @@ import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
+import { expectBackendsQueuedBehind, withBarrier } from '../support/lock-barrier';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { constraintTargetNames, createEnvelope } from './household-wire';
 
@@ -85,11 +86,17 @@ describe('household create idempotency (#210 acceptance)', () => {
     });
 
     it('produces exactly one household when both submissions are in flight at once', async () => {
-      // The case only a real database can show. Both requests traverse real
-      // HTTP into the running server and race on the unique index; the loser
-      // blocks until the winner commits, then recovers the committed row.
-      // `maxWorkers: 1` constrains test-level parallelism, not request-level
-      // concurrency within a test.
+      // The case only a real database can show, and only if both requests miss
+      // `createOrReplay`'s first lookup: otherwise the second is an ordinary
+      // replay and the unique never fires. Fired with a bare `Promise.all`, the
+      // first could commit before the second looked, which passes the same way.
+      //
+      // So the creator's user row is held FOR UPDATE. The household insert's
+      // foreign key on `created_by_id` takes FOR KEY SHARE on that row, which
+      // waits behind it, and both the insert and that check come after the
+      // lookup. Released, one request commits; the other, queued on its unique
+      // entry, fails once that commits, and its second lookup finds the first
+      // one's household.
       //
       // Deliberately two requests, not a large burst: the `default` throttler
       // keys on handler plus IP, so a burst here lands in this endpoint's own
@@ -99,7 +106,32 @@ describe('household create idempotency (#210 acceptance)', () => {
       const actor = await actors.user();
       const payload: CreateHouseholdPayload = { name: 'Concurrent household', clientRequestId: freshKey() };
 
-      const [first, second] = await Promise.all([post(actor, payload), post(actor, payload)]);
+      const [first, second] = await withBarrier(async (barrier) => {
+        const { holder } = barrier;
+
+        await holder.begin();
+        await holder.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [actor.user.id]);
+
+        // supertest sends nothing until asked, so `then` sends both now.
+        const inFlight = [post(actor, payload), post(actor, payload)].map((test) => test.then((response) => response));
+
+        const queued = await expectBackendsQueuedBehind(barrier, {
+          heldBy: holder.pid,
+          count: 2,
+          description: 'both creates, at the household insert',
+        });
+
+        // Both are at the insert, so both have already looked the key up and
+        // missed. A request queued earlier, before its lookup, would not be.
+        expect(queued.map(({ query }) => query)).toEqual([
+          expect.stringMatching(/^INSERT INTO "[^"]+"\."households"/),
+          expect.stringMatching(/^INSERT INTO "[^"]+"\."households"/),
+        ]);
+
+        await holder.commit();
+
+        return Promise.all(inFlight);
+      });
 
       // Asserted rather than `.expect(201)`-chained so a 500 from a failed
       // discriminator reports its status instead of an unhandled rejection.
@@ -135,8 +167,8 @@ describe('household create idempotency (#210 acceptance)', () => {
     });
 
     it('returns the tombstone when the original was since soft-deleted', async () => {
-      // `recoverKeyedCreate` looks the key up WITHOUT a `deletedAt: null`
-      // filter on purpose: the keyed create semantically succeeded, and that
+      // The replay lookup runs WITHOUT a `deletedAt: null` filter on
+      // purpose: the keyed create semantically succeeded, and that
       // row is its canonical outcome even after deletion. The alternative —
       // creating a second household — would silently defeat the key.
       const actor = await actors.user();
@@ -318,8 +350,9 @@ describe('household create idempotency (#210 acceptance)', () => {
       // What remains is the property THIS suite depends on, and only that:
       //
       //   1. A duplicate keyed insert DOES raise a P2002. Load-bearing, because
-      //      the household and feedback recovery paths key off the ROW but only
-      //      look for the row once they see a unique violation.
+      //      a concurrent duplicate misses `createOrReplay`'s first lookup,
+      //      and the second runs only once the create raises a unique
+      //      violation (#252).
       //   2. `meta.target` is empty. Characterization, so the assumption cannot
       //      rot silently — a populated target would be welcome, but resuming
       //      use of it must be a decision rather than a drift.
