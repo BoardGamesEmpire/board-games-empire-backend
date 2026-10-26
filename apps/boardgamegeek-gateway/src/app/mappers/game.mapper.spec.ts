@@ -284,6 +284,34 @@ describe('player counts and play times (#869)', () => {
       expect([game.minPlaytime, game.maxPlaytime]).toEqual([90, 90]);
     }
   });
+
+  // BGG holds some pairs with the minimum above the maximum, and there's no
+  // telling which end is wrong. Both ends go unknown rather than reversed,
+  // which would fit play-time filters the game can't (#869).
+  it('sends a reversed player count or play time as unknown at both ends', () => {
+    for (const game of mapped(makeBggThing({ minplayers: 5, maxplayers: 2, minplaytime: 120, maxplaytime: 60 }))) {
+      expect([game.minPlayers, game.maxPlayers, game.minPlaytime, game.maxPlaytime]).toEqual([
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+      ]);
+    }
+  });
+
+  it('checks the order after playingtime stands in for a missing end', () => {
+    for (const game of mapped(makeBggThing({ minplaytime: 120, maxplaytime: 0, playingtime: 60 }))) {
+      expect([game.minPlaytime, game.maxPlaytime]).toEqual([undefined, undefined]);
+    }
+  });
+
+  it('keeps a range with equal ends, or with one end unknown', () => {
+    for (const game of mapped(
+      makeBggThing({ minplayers: 4, maxplayers: 4, minplaytime: 30, maxplaytime: 0, playingtime: 0 }),
+    )) {
+      expect([game.minPlayers, game.maxPlayers, game.minPlaytime, game.maxPlaytime]).toEqual([4, 4, 30, undefined]);
+    }
+  });
 });
 
 describe('thingToGameSearchData — synthetic release', () => {

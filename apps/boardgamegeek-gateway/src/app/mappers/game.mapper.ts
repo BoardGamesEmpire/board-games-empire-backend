@@ -198,6 +198,36 @@ function coercePositive(value: number | undefined): number | undefined {
 }
 
 /**
+ * Both ends of a range BGG sends, or neither when its minimum is above its
+ * maximum (#869). BGG's data holds such pairs, and there's no telling which
+ * end is wrong. Kept, a reversed play time fits filters the game can't, and
+ * the api refuses one from any other writer. Swapping the ends is the other
+ * reading, left for later.
+ */
+function orderedRange(min: number | undefined, max: number | undefined): [number | undefined, number | undefined] {
+  return min !== undefined && max !== undefined && min > max ? [undefined, undefined] : [min, max];
+}
+
+/** A thing's player counts, each end unknown when BGG doesn't know it. */
+function toPlayerCounts(thing: BggThing): Pick<proto.GameSearchData, 'minPlayers' | 'maxPlayers'> {
+  const [minPlayers, maxPlayers] = orderedRange(coercePositive(thing.minplayers), coercePositive(thing.maxplayers));
+  return { minPlayers, maxPlayers };
+}
+
+/**
+ * A thing's play time in minutes. playingtime stands in for an end BGG
+ * gives no minimum or maximum for.
+ */
+function toPlayTimes(thing: BggThing): Pick<proto.GameSearchData, 'minPlaytime' | 'maxPlaytime'> {
+  const playingTime = coercePositive(thing.playingtime);
+  const [minPlaytime, maxPlaytime] = orderedRange(
+    coercePositive(thing.minplaytime) ?? playingTime,
+    coercePositive(thing.maxplaytime) ?? playingTime,
+  );
+  return { minPlaytime, maxPlaytime };
+}
+
+/**
  * A game's publish year as BGG sends it, with its "0 means unknown" sentinel
  * unset. Unlike coerceYear it keeps negative years, which BGG uses for games
  * from before the common era (#719). Sent as 0, an undated game would read as
@@ -303,10 +333,8 @@ export function thingToGameSearchData(thing: BggThing): proto.GameSearchData {
     thumbnailUrl: decodeUrl(thing.thumbnail),
     sourceUrl: toSourceUrl(thing),
     averageRating: thing.statistics?.ratings?.average,
-    minPlayers: coercePositive(thing.minplayers),
-    maxPlayers: coercePositive(thing.maxplayers),
-    minPlaytime: coercePositive(thing.minplaytime) ?? coercePositive(thing.playingtime),
-    maxPlaytime: coercePositive(thing.maxplaytime) ?? coercePositive(thing.playingtime),
+    ...toPlayerCounts(thing),
+    ...toPlayTimes(thing),
     baseGameExternalId: toBaseGameExternalId(thing),
     summary: decodeDescription(thing.description),
     availablePlatforms: [TABLETOP_PLATFORM],
@@ -362,10 +390,8 @@ export function thingToGameData(thing: BggThing, locale?: string): proto.GameDat
     averageRating: ratings?.average,
     bayesRating: ratings?.bayesaverage,
     ratingsCount: ratings?.usersrated,
-    minPlayers: coercePositive(thing.minplayers),
-    maxPlayers: coercePositive(thing.maxplayers),
-    minPlaytime: coercePositive(thing.minplaytime) ?? coercePositive(thing.playingtime),
-    maxPlaytime: coercePositive(thing.maxplaytime) ?? coercePositive(thing.playingtime),
+    ...toPlayerCounts(thing),
+    ...toPlayTimes(thing),
     minAge: coercePositive(thing.minage),
     complexityWeight,
 
