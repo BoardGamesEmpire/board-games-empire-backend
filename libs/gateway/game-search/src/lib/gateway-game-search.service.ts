@@ -12,7 +12,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
 import { defer, EMPTY, from, Observable, of } from 'rxjs';
 import { catchError, concatMap, endWith, filter, map, mergeMap, tap, throwIfEmpty } from 'rxjs/operators';
-import { filterFor, matchesFilter, type ResultFilter, toResultFilter } from './search-filter';
+import { filterFor, matchesFilter, type ResultFilter, toResultFilter, unfilterableAxes } from './search-filter';
 
 /**
  * Cap for concurrent per-game dedup lookups on the cache-replay path. Live
@@ -86,7 +86,11 @@ export class GatewayGameSearchService {
    * the DataGateway narrowed (#713). A named DataGateway whose coverage
    * doesn't overlap the filter isn't asked, and answers SOURCE_DONE alone.
    * A publish year narrows the results but never skips a DataGateway, since
-   * none declares which years it covers (#719).
+   * none declares which years it covers (#719). A player count or play time
+   * that keeps no unknown values skips a DataGateway that doesn't declare it:
+   * without that promise none of its results can be counted on to pass.
+   * Unless its coverage misses first, that DataGateway answers UNFILTERABLE
+   * alone (#869).
    */
   searchGames(request: proto.SearchGamesRequest): Observable<proto.SearchGameResult> {
     this.logger.debug(
@@ -237,6 +241,13 @@ export class GatewayGameSearchService {
           return this.uncoveredSearch(gatewayId, request.correlationId);
         }
 
+        // Checked before the cache read: one that can't apply a range the
+        // search names isn't asked, nor answered from its cache (#869).
+        const unfilterable = unfilterableAxes(resultFilter, route.filterableAxes);
+        if (unfilterable.length > 0) {
+          return this.unfilterableSearch(gatewayId, request.correlationId, unfilterable);
+        }
+
         const cacheKey = this.buildSearchCacheKey(gatewayId, this.gatewayRequest(request, route.filterableAxes));
 
         return from(this.cache.get<proto.GameSearchData[]>(cacheKey)).pipe(
@@ -289,6 +300,14 @@ export class GatewayGameSearchService {
       mergeMap((resolved) => {
         if (!resolved) {
           return this.uncoveredSearch(gatewayId, request.correlationId);
+        }
+
+        // Checked here too for the live path: a named DataGateway this process
+        // hasn't connected arrives without a route, and its search filters
+        // are read only as it's resolved (#869).
+        const unfilterable = unfilterableAxes(resultFilter, resolved.filterableAxes);
+        if (unfilterable.length > 0) {
+          return this.unfilterableSearch(gatewayId, request.correlationId, unfilterable);
         }
 
         const gatewayRequest = this.gatewayRequest(request, resolved.filterableAxes);
@@ -622,11 +641,34 @@ export class GatewayGameSearchService {
   }
 
   /**
+   * The answer of a DataGateway that can't apply a range the search names
+   * (#869). It doesn't promise that its results carry the value, so none can
+   * be counted on to pass, and asking would spend an upstream call on results
+   * the server would likely drop. It isn't asked, and nothing is cached for it.
+   */
+  private unfilterableSearch(
+    gatewayId: string,
+    correlationId: string,
+    axes: readonly SearchFilterAxis[],
+  ): Observable<proto.SearchGameResult> {
+    this.logger.debug(
+      `Gateway ${gatewayId} doesn't declare ${axes.join(', ')}, which the search's filter names; not asking it`,
+    );
+
+    return of<proto.SearchGameResult>({
+      correlationId,
+      gatewayId,
+      status: proto.ResultStatus.RESULT_STATUS_UNFILTERABLE,
+    });
+  }
+
+  /**
    * Keyed by what the DataGateway was asked, so a filter on an axis it
    * doesn't narrow by shares the entry with the unfiltered search: the
    * filter applies to the entry on the way out instead. A publish year it
    * narrows by keys the entry too, and whether it keeps unknown years: a
    * search that keeps them mustn't replay one that had them left out (#719).
+   * So do a player count and a play time it narrows by (#869).
    */
   private buildSearchCacheKey(gatewayId: string, request: proto.GatewaySearchRequest): string {
     return [
@@ -641,6 +683,12 @@ export class GatewayGameSearchService {
       request.filter?.publishYear?.min ?? '',
       request.filter?.publishYear?.max ?? '',
       request.filter?.publishYear?.includeUnknown ? 'u' : '',
+      request.filter?.playerCount?.min ?? '',
+      request.filter?.playerCount?.max ?? '',
+      request.filter?.playerCount?.includeUnknown ? 'u' : '',
+      request.filter?.playTime?.min ?? '',
+      request.filter?.playTime?.max ?? '',
+      request.filter?.playTime?.includeUnknown ? 'u' : '',
     ].join(':');
   }
 }

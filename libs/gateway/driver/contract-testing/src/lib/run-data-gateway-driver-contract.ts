@@ -33,7 +33,12 @@ export interface DataGatewayDriverContractContext {
  * A filter naming one value on `axis`: the first its coverage lists there,
  * or, when it lists none, tabletop or a base game. On publish year, a range
  * wide enough, unknown years included, that the search query's results still
- * match it (#719). Undefined for an axis the contract doesn't know.
+ * match it (#719). On play time, likewise: a maximum no play time exceeds,
+ * unknown times included (#869). On player count, one player, unknown
+ * counts included: a bound alone is one count, so no range matches every
+ * game, and this one may match none of the query's results. The case checks
+ * only that the search ends with SOURCE_DONE (#869). Undefined for an axis
+ * the contract doesn't know.
  */
 const filterOn = (
   axis: proto.SearchFilterAxis,
@@ -52,6 +57,10 @@ const filterOn = (
       };
     case proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR:
       return { platformTypes: [], contentTypes: [], publishYear: { includeUnknown: true, min: -10000, max: 10000 } };
+    case proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAYER_COUNT:
+      return { platformTypes: [], contentTypes: [], playerCount: { min: 1, includeUnknown: true } };
+    case proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAY_TIME:
+      return { platformTypes: [], contentTypes: [], playTime: { max: 2147483647, includeUnknown: true } };
     default:
       return undefined;
   }

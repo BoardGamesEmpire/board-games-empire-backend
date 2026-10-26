@@ -92,6 +92,8 @@ enum SearchFilterAxis {
   PlatformType
   ContentType
   PublishYear
+  PlayerCount
+  PlayTime
 
   @@map("search_filter_axes")
 }

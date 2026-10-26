@@ -57,6 +57,8 @@ const SEARCH_FILTER_AXES: ByProtoName<SearchFilterAxis> = {
   [proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLATFORM_TYPE]: SearchFilterAxis.PlatformType,
   [proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE]: SearchFilterAxis.ContentType,
   [proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR]: SearchFilterAxis.PublishYear,
+  [proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAYER_COUNT]: SearchFilterAxis.PlayerCount,
+  [proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAY_TIME]: SearchFilterAxis.PlayTime,
 };
 
 const LANGUAGE_CODE_FORMATS: ByProtoName<LanguageCodeFormat> = {

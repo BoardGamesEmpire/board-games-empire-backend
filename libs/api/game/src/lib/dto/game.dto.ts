@@ -1,5 +1,5 @@
 import type { Game } from '@bge/database';
-import { ContentType, Reach, TimeMeasure } from '@bge/database';
+import { ContentType, Reach } from '@bge/database';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class GameDto implements Pick<
@@ -14,9 +14,7 @@ export class GameDto implements Pick<
   | 'minPlayers'
   | 'maxPlayers'
   | 'minPlayTime'
-  | 'minPlayTimeMeasure'
   | 'maxPlayTime'
-  | 'maxPlayTimeMeasure'
   | 'minAge'
   | 'complexity'
   | 'averageRating'
@@ -58,17 +56,11 @@ export class GameDto implements Pick<
   @ApiPropertyOptional({ description: 'Maximum number of players', nullable: true })
   maxPlayers!: number | null;
 
-  @ApiPropertyOptional({ description: 'Minimum play time value', nullable: true })
+  @ApiPropertyOptional({ description: 'Minimum play time, in minutes', nullable: true })
   minPlayTime!: number | null;
 
-  @ApiPropertyOptional({ enum: TimeMeasure, description: 'Unit for minimum play time', nullable: true })
-  minPlayTimeMeasure!: TimeMeasure | null;
-
-  @ApiPropertyOptional({ description: 'Maximum play time value', nullable: true })
+  @ApiPropertyOptional({ description: 'Maximum play time, in minutes', nullable: true })
   maxPlayTime!: number | null;
-
-  @ApiPropertyOptional({ enum: TimeMeasure, description: 'Unit for maximum play time', nullable: true })
-  maxPlayTimeMeasure!: TimeMeasure | null;
 
   @ApiPropertyOptional({ description: 'Minimum recommended player age', nullable: true })
   minAge!: number | null;

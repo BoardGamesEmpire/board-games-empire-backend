@@ -1,5 +1,5 @@
 import type { Game } from '@bge/database';
-import { ContentType, Reach, TimeMeasure } from '@bge/database';
+import { ContentType, Reach } from '@bge/database';
 
 export function makeGame(overrides: Partial<Game> = {}): Game {
   return {
@@ -17,13 +17,10 @@ export function makeGame(overrides: Partial<Game> = {}): Game {
     image: null,
     maxPlayers: 4,
     maxPlayTime: 120,
-    maxPlayTimeMeasure: TimeMeasure.Minutes,
     minAge: 14,
     minPlayers: 1,
     minPlayTime: 60,
-    minPlayTimeMeasure: TimeMeasure.Minutes,
     ownedByCount: 0,
-    playingTime: 120,
     publishYear: 2017,
     ratingsCount: null,
     subtitle: null,

@@ -633,7 +633,7 @@ A way a game can be played on a platform, such as solo, local, online, asynchron
 _Avoid_: capability, platform feature
 
 **Play time**:
-How long a game is expected to take, as a range. A source may also give a typical play time.
+How long one sitting of a game is expected to take, as a range in minutes. A single time is a range whose ends are equal, and a typical time a source gives stands for both ends when it gives no range. It isn't the time to finish a game over many plays, such as a campaign.
 
 **Game length**:
 A named band of play time, such as short or long, that a user can pick as the length they prefer.

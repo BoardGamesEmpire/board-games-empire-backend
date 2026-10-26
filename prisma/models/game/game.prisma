@@ -8,15 +8,15 @@ model Game {
   thumbnail   String?
   publishYear Int?    @map("publish_year")
 
-  minPlayers  Int? @map("min_players")
-  maxPlayers  Int? @map("max_players")
-  playingTime Int? @map("playing_time")
+  minPlayers Int? @map("min_players")
+  maxPlayers Int? @map("max_players")
 
-  minPlayTime        Int?         @map("min_play_time")
-  minPlayTimeMeasure TimeMeasure? @map("min_play_time_measure")
-  maxPlayTime        Int?         @map("max_play_time")
-  maxPlayTimeMeasure TimeMeasure? @map("max_play_time_measure")
-  minAge             Int?         @map("min_age")
+  // play time is minutes (#869), and a single time is a range whose ends are
+  // equal; the client formats them for display
+  minPlayTime Int? @map("min_play_time")
+  maxPlayTime Int? @map("max_play_time")
+
+  minAge Int? @map("min_age")
 
   complexity Float?
 

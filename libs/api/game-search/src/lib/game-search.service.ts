@@ -122,6 +122,8 @@ export class GameSearchService {
         averageRating: true,
         minPlayers: true,
         maxPlayers: true,
+        minPlayTime: true,
+        maxPlayTime: true,
 
         gameSources: {
           select: { sourceUrl: true },
@@ -188,6 +190,8 @@ export class GameSearchService {
         averageRating: game.averageRating ?? undefined,
         minPlayers: game.minPlayers ?? undefined,
         maxPlayers: game.maxPlayers ?? undefined,
+        minPlayTime: game.minPlayTime ?? undefined,
+        maxPlayTime: game.maxPlayTime ?? undefined,
         inSystem: true,
         gameId: game.id,
 
@@ -256,6 +260,7 @@ export class GameSearchService {
     const errors: Record<string, { message: string }> = {};
     const rateLimitedSources: string[] = [];
     const unavailableSources: string[] = [];
+    const unfilterableSources: string[] = [];
 
     if (localResults.length > 0) {
       resultsBySource['local'] = localResults;
@@ -292,6 +297,14 @@ export class GameSearchService {
             unavailableSources.push(source);
             break;
           }
+
+          // A DataGateway the search's filter skipped (#869). Without a note
+          // of it, a player-count or play-time search would show each such
+          // DataGateway as having found nothing.
+          case ResultStatus.RESULT_STATUS_UNFILTERABLE: {
+            unfilterableSources.push(source);
+            break;
+          }
         }
       }
     }
@@ -302,6 +315,7 @@ export class GameSearchService {
       ...(Object.keys(errors).length > 0 && { errors }),
       ...(rateLimitedSources.length > 0 && { rateLimitedSources }),
       ...(unavailableSources.length > 0 && { unavailableSources }),
+      ...(unfilterableSources.length > 0 && { unfilterableSources }),
     };
   }
 
@@ -324,6 +338,8 @@ export class GameSearchService {
       averageRating: game.averageRating,
       minPlayers: game.minPlayers,
       maxPlayers: game.maxPlayers,
+      minPlayTime: game.minPlaytime,
+      maxPlayTime: game.maxPlaytime,
       baseGameExternalId: game.baseGameExternalId,
       inSystem: result.inSystem ?? false,
       gameId: result.gameId,

@@ -66,4 +66,13 @@ describe('stored enums', () => {
       SearchFilterAxis.PublishYear,
     );
   });
+
+  it('stores player count and play time as filterable axes (#869)', () => {
+    // Named by value: ts-jest doesn't typecheck here, so before the members
+    // exist both sides of a comparison with the enum would be undefined.
+    expect(toStoredSearchFilterAxis(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAYER_COUNT)).toBe('PlayerCount');
+    expect(toStoredSearchFilterAxis(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAY_TIME)).toBe('PlayTime');
+    expect(SearchFilterAxis.PlayerCount).toBe('PlayerCount');
+    expect(SearchFilterAxis.PlayTime).toBe('PlayTime');
+  });
 });

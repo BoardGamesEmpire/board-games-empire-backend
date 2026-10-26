@@ -17,7 +17,8 @@
     "not_found": "Game with ID {id} not found",
     "cannot_delete_in_collection": "Cannot delete game that is part of a collection",
     "server_owned_stays_public": "Game with ID {id} was imported and must stay public",
-    "description_too_long": "A game's description must be at most {max} characters"
+    "description_too_long": "A game's description must be at most {max} characters",
+    "range_reversed": "{minField} ({min}) must not be more than {maxField} ({max})"
   },
   "game_share": {
     "recipient_exactly_one": "Name exactly one recipient: a user id or a household id",
