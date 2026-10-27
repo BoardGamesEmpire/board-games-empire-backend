@@ -115,7 +115,7 @@
     "ajv": "8.18.0",
     "ajv-formats": "3.0.1",
     "argon2": "0.44.0",
-    "axios": "1.18.1",
+    "axios": "1.20.0",
     "better-auth": "1.6.23",
     "bgg-ts-client": "0.2.0",
     "bullmq": "5.76.6",
