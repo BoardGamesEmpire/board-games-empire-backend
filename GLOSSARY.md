@@ -602,7 +602,7 @@ What a game is played on: tabletop, or hardware such as PC, PlayStation 5 or Xbo
 _Avoid_: platform for a store
 
 **Store**:
-Where a digital copy of a game is sold, such as Steam or the PlayStation Store. A store is never a platform: Catan bought on Steam is a PC game.
+Where a digital copy of a game is sold, such as Steam or the PlayStation Store. A store is never a platform: Catan bought on Steam is a game on PC, Mac or Linux, not a Steam game.
 _Avoid_: storefront, shop
 
 **Platform game**:
@@ -634,6 +634,10 @@ _Avoid_: capability, platform feature
 
 **Play time**:
 How long one sitting of a game is expected to take, as a range in minutes. A single time is a range whose ends are equal, and a typical time a source gives stands for both ends when it gives no range. It isn't the time to finish a game over many plays, such as a campaign.
+
+**Time played**:
+How long a user has spent in a game, as their upstream account reports it. It belongs to their collection entry, not to any play.
+_Avoid_: play time, playtime (that is how long a game is expected to take)
 
 **Game length**:
 A named band of play time, such as short or long, that a user can pick as the length they prefer.
@@ -788,6 +792,10 @@ _Avoid_: alias, game source, gateway link, source
 **External ID**:
 An item's id at a DataGateway, exactly as the DataGateway gave it.
 _Avoid_: external ID for the server's own id
+
+**Cross-reference**:
+An item's id at another upstream, as one DataGateway reports it, such as IGDB naming a game's Steam app. An import links to a game the server already has only when a cross-reference matches; a game that merely looks the same is left for a game merge.
+_Avoid_: alias, store identifier, external ID (that is the id at the DataGateway itself)
 
 **Interview**:
 The server asking a DataGateway to describe itself: its capabilities, formats and the vocabularies it can list. Its sections load after it. It recurs over the DataGateway's life.
