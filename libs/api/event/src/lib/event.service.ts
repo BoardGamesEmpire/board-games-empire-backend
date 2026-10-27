@@ -5,6 +5,7 @@ import {
   Event,
   EventParticipationStatus,
   EventSchedulingMode,
+  EventStatus,
   isPrismaDependentRecordNotFoundError,
   normalizeClientRequestId,
   OccurrenceStatus,
@@ -15,7 +16,7 @@ import {
 import { lockExistingHousehold } from '@bge/household';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
-import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
+import { type PaginatedRows } from '@bge/shared';
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -32,8 +33,10 @@ import {
 import { NOT_REMOVED } from './constants/not-removed.constant';
 import { OCCURRENCE_ORDER } from './constants/occurrence-order.constant';
 import type { CreateEventDto } from './dto/create-event.dto';
+import type { ListEventsQueryDto } from './dto/list-events.query.dto';
 import type { UpdateEventDto } from './dto/update-event.dto';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
+import { EVENT_STATUS_DATE_SELECT, withEventStatus, type EventWithStatus } from './utils/event-status.util';
 import { pickSnapshot } from './utils/pick-snapshot.util';
 
 @Injectable()
@@ -72,6 +75,11 @@ export class EventService {
    *
    * `deletedAt: null` stays beside the scope. A soft delete keeps the attendee
    * rows, so the attendance clause alone still matches a deleted event.
+   * `archivedAt: null` joins it unless `includeArchived` asks otherwise: the
+   * host put the event away, and it stays readable by id (#795).
+   *
+   * Each row's `status` comes from its embedded occurrences, which are every
+   * date of the event, so the list needs no read of its own for it (#795).
    *
    * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
    * "the events I attend" has no meaning without a user, and the refusal must
@@ -81,11 +89,13 @@ export class EventService {
    * or soft-deleted between the two statements cannot make `total` describe a
    * list the caller was not served.
    */
-  async getEvents(pagination: PaginationQueryDto): Promise<PaginatedRows<Event>> {
+  async getEvents(query: ListEventsQueryDto): Promise<PaginatedRows<EventWithStatus>> {
+    const now = new Date();
     const userId = resolveScopeSubjectId(this.abilityService);
 
     const where = this.scopeComposer.compose(ResourceType.Event, Action.read, {
       deletedAt: null,
+      ...(query.includeArchived ? {} : { archivedAt: null }),
       attendees: { some: { userId, ...NOT_REMOVED } },
     });
 
@@ -103,8 +113,8 @@ export class EventService {
             },
             policy: true,
           },
-          skip: pagination.skip,
-          take: pagination.pageSize,
+          skip: query.skip,
+          take: query.pageSize,
           // `id` breaks ties on `createdAt` so page boundaries hold between requests.
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         }),
@@ -114,7 +124,7 @@ export class EventService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    return { rows, total };
+    return { rows: rows.map((row) => withEventStatus(row, row.occurrences, now)), total };
   }
 
   /**
@@ -128,7 +138,14 @@ export class EventService {
    * own read's top-level `where`, bound to this event. A caller with no read
    * on one of them gets `[]` for it, or `null` for the policy.
    *
-   * The four reads share one REPEATABLE READ snapshot, as the list's rows and
+   * The event's `status` is worked out from a fifth read, of every one of its
+   * dates, with no ceiling (#795). The status is a fact about the event, so
+   * whoever reads the event gets it, whatever their occurrence ceiling; a
+   * staff member or friend whose ceiling clips the dates would otherwise see
+   * a status the event doesn't have. Only the three columns it needs are
+   * read, and every occurrence read grant mirrors an event read grant today.
+   *
+   * The five reads share one REPEATABLE READ snapshot, as the list's rows and
    * count do, so the parts describe the event at one moment. They run whether
    * or not the caller can read the event; if not, the 404 discards them. Each
    * is an indexed lookup by event, so a 404 costs three small reads. Reading
@@ -139,7 +156,8 @@ export class EventService {
    * them is #404's.
    */
   async getEventById(id: string): Promise<EventDetail> {
-    const [event, occurrences, attendees, policy] = await this.db.$transaction(
+    const now = new Date();
+    const [event, occurrences, attendees, policy, statusDates] = await this.db.$transaction(
       [
         this.db.event.findUnique({
           where: {
@@ -168,15 +186,31 @@ export class EventService {
             AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.read),
           },
         }),
+
+        this.db.eventOccurrence.findMany({ where: { eventId: id }, select: EVENT_STATUS_DATE_SELECT }),
       ],
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
     assert(event, new NotFoundException(t('errors.event.not_found', { id })));
-    return { ...event, occurrences, attendees, policy };
+    return { ...withEventStatus(event, statusDates, now), occurrences, attendees, policy };
   }
 
-  async createEvent(dto: CreateEventDto): Promise<Event> {
+  /**
+   * `event` with the `status` its dates give it, read from every date of the
+   * event with no ceiling, as {@link getEventById} reads them (#795). For a
+   * write's response, which returns the event it wrote.
+   */
+  async statusOf<T extends Event>(event: T, now = new Date()): Promise<T & { status: EventStatus }> {
+    const dates = await this.db.eventOccurrence.findMany({
+      where: { eventId: event.id },
+      select: EVENT_STATUS_DATE_SELECT,
+    });
+
+    return withEventStatus(event, dates, now);
+  }
+
+  async createEvent(dto: CreateEventDto): Promise<CreatedEvent & { status: EventStatus }> {
     const initiatedAt = new Date();
     const userId = this.abilityService.getActingUserId();
     const {
@@ -327,7 +361,7 @@ export class EventService {
       // emits leaves its invitees unnotified, and the replay does not make up
       // for it. Emitting here would notify twice in the far commoner case
       // where the original's emits ran, and nothing records which case this is.
-      return event;
+      return this.statusOf(event);
     }
 
     // The creator's graph was cached by this request, before the host row
@@ -369,7 +403,7 @@ export class EventService {
     // create: a retried create made nothing, and must not log that it did.
     this.logger.log(`Event "${event.title}" (${event.id}) created by user ${event.createdById}`);
 
-    return event;
+    return this.statusOf(event);
   }
 
   /**
@@ -449,7 +483,7 @@ export class EventService {
     return { ...event, occurrences, attendees, policy };
   }
 
-  async updateEvent(id: string, dto: UpdateEventDto): Promise<Event> {
+  async updateEvent(id: string, dto: UpdateEventDto) {
     const initiatedAt = new Date();
     assert(Object.keys(dto).length > 0, new BadRequestException(t('common.at_least_one_field')));
 
@@ -506,7 +540,7 @@ export class EventService {
         }
       }
 
-      return updated;
+      return await this.statusOf(updated);
     } catch (error) {
       this.logger.error(`Error updating event with ID ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -517,7 +551,7 @@ export class EventService {
     }
   }
 
-  async deleteEvent(id: string): Promise<Event> {
+  async deleteEvent(id: string): Promise<EventWithStatus> {
     const initiatedAt = new Date();
     const userId = this.abilityService.getActingUserId();
     try {
@@ -559,7 +593,7 @@ export class EventService {
         }),
       );
 
-      return event;
+      return await this.statusOf(event);
     } catch (error) {
       this.logger.error(`Error deleting event with ID ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -598,4 +632,4 @@ export type EventDetail = Prisma.EventGetPayload<{
     attendees: { include: typeof ATTENDEE_USER_AND_ROLE_INCLUDE };
     policy: true;
   };
-}>;
+}> & { status: EventStatus };

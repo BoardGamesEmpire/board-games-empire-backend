@@ -1,4 +1,4 @@
-import { Event, ResourceType } from '@bge/database';
+import { Event, EventStatus, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import { ListScopeNotComposedError } from '@bge/shared';
@@ -10,6 +10,7 @@ import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { EventController } from './event.controller';
 import { EventService } from './event.service';
+import type { EventWithStatus } from './utils/event-status.util';
 
 describe('EventController', () => {
   let controller: EventController;
@@ -104,7 +105,12 @@ describe('EventController', () => {
 
   describe('createEvent', () => {
     it('delegates to EventService.createEvent with userId and abilities', async () => {
-      const created = stubEvent({ id: 'new-1', title: 'Game Night' });
+      const created = {
+        ...stubEvent({ id: 'new-1', title: 'Game Night' }),
+        occurrences: [],
+        attendees: [],
+        policy: null,
+      };
       service.createEvent.mockResolvedValue(created);
 
       const dto: CreateEventDto = { title: 'Game Night' } as CreateEventDto;
@@ -120,7 +126,7 @@ describe('EventController', () => {
 
   describe('updateEvent', () => {
     it('delegates to EventService.updateEvent and wraps response', async () => {
-      const updated = stubEvent({ id: 'ev-1', title: 'Updated' });
+      const updated = { ...stubEvent({ id: 'ev-1', title: 'Updated' }), occurrences: [], policy: null };
       service.updateEvent.mockResolvedValue(updated);
 
       const dto: UpdateEventDto = { title: 'Updated' };
@@ -150,10 +156,14 @@ describe('EventController', () => {
   });
 });
 
-function stubEvent(overrides: Partial<Event> = {}): Event {
-  return makeEvent({
-    householdId: 'household-1',
-    createdById: 'user-1',
-    ...overrides,
-  });
+/** An event as the service serves it, with its worked-out status (#795). */
+function stubEvent(overrides: Partial<Event> = {}): EventWithStatus {
+  return {
+    ...makeEvent({
+      householdId: 'household-1',
+      createdById: 'user-1',
+      ...overrides,
+    }),
+    status: EventStatus.Planning,
+  };
 }

@@ -2,6 +2,7 @@ import type { Event } from '@bge/database';
 import {
   Action,
   EventSchedulingMode,
+  EventStatus,
   FriendshipStatus,
   HUMAN_USER_WHERE,
   OccurrenceStatus,
@@ -20,7 +21,6 @@ import {
   makeEventOccurrence,
   makeEventPolicy,
   MOCK_ACTING_USER_ID,
-  paginationQuery,
   unwrapTransaction,
   type MockAbilityService,
   type MockDatabaseService,
@@ -28,12 +28,24 @@ import {
 import { WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { plainToInstance } from 'class-transformer';
 import { EVENT_CREATE_INCLUDE } from './constants/event-create-include.constant';
 import type { CreateEventDto } from './dto/create-event.dto';
+import { ListEventsQueryDto } from './dto/list-events.query.dto';
 import { EventService } from './event.service';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
+import { EVENT_STATUS_DATE_SELECT } from './utils/event-status.util';
 
 const COND = { id: 'sentinel-condition' };
+
+/** A confirmed date a day from now, which makes an event Scheduled (#795). */
+const futureDate = () =>
+  makeEventOccurrence({
+    eventId: 'event-1',
+    status: OccurrenceStatus.Confirmed,
+    startDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    endDate: null,
+  });
 
 describe('EventService', () => {
   let service: EventService;
@@ -70,6 +82,10 @@ describe('EventService', () => {
     // and no friendship.
     db.user.findUnique.mockImplementation(((args: { where: { id: string } }) =>
       Promise.resolve({ id: args.where.id })) as never);
+
+    // An event has no dates unless a test gives it some, so its status read
+    // finds none (#795).
+    db.eventOccurrence.findMany.mockResolvedValue([]);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -89,7 +105,10 @@ describe('EventService', () => {
    * is why the first test pins the composer call itself.
    */
   describe('getEvents, as a converted event list', () => {
-    const read = () => service.getEvents(paginationQuery({ limit: 20 }));
+    const read = (init: Record<string, unknown> = {}) =>
+      service.getEvents(
+        plainToInstance(ListEventsQueryDto, { limit: 20, ...init }, { enableImplicitConversion: true }),
+      );
 
     beforeEach(() => {
       db.event.findMany.mockResolvedValue([]);
@@ -100,10 +119,38 @@ describe('EventService', () => {
       await read();
 
       // A row a host removed keeps no role, so its event is not the caller's.
+      // An archived event is left out unless asked for (#795).
+      expect(compose).toHaveBeenCalledWith(ResourceType.Event, Action.read, {
+        deletedAt: null,
+        archivedAt: null,
+        attendees: { some: { userId: MOCK_ACTING_USER_ID, removedAt: null } },
+      });
+    });
+
+    it('lists archived events too when asked to (#795)', async () => {
+      await read({ includeArchived: 'true' });
+
       expect(compose).toHaveBeenCalledWith(ResourceType.Event, Action.read, {
         deletedAt: null,
         attendees: { some: { userId: MOCK_ACTING_USER_ID, removedAt: null } },
       });
+    });
+
+    // The list embeds every date of each event, unclipped, so each row's
+    // status comes from its own embed with no read of its own.
+    it('serves each row with the status its embedded dates give it (#795)', async () => {
+      db.event.findMany.mockResolvedValue([
+        { ...makeEvent({ id: 'event-1' }), occurrences: [futureDate()] },
+        { ...makeEvent({ id: 'event-2' }), occurrences: [] },
+      ] as never);
+
+      const { rows } = await read();
+
+      expect(rows.map(({ id, status }) => ({ id, status }))).toEqual([
+        { id: 'event-1', status: EventStatus.Scheduled },
+        { id: 'event-2', status: EventStatus.Planning },
+      ]);
+      expect(db.eventOccurrence.findMany).not.toHaveBeenCalled();
     });
 
     // Asking is not enough: the query has to use the answer. The ceiling stays
@@ -118,6 +165,7 @@ describe('EventService', () => {
         expect.objectContaining({
           where: {
             deletedAt: null,
+            archivedAt: null,
             attendees: { some: { userId: MOCK_ACTING_USER_ID, removedAt: null } },
             AND: [COND],
           },
@@ -233,22 +281,39 @@ describe('EventService', () => {
     it('serves each part as its own read returned it, under the keys the embed used', async () => {
       const occurrence = makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' });
       const policy = makeEventPolicy('event-1');
-      db.eventOccurrence.findMany.mockResolvedValue([occurrence]);
+      db.eventOccurrence.findMany.mockResolvedValueOnce([occurrence]);
       db.eventPolicy.findUnique.mockResolvedValue(policy);
 
       await expect(service.getEventById('event-1')).resolves.toEqual({
         ...event,
+        status: EventStatus.Planning,
         occurrences: [occurrence],
         attendees: [],
         policy,
       });
     });
 
-    it('takes the four reads from one REPEATABLE READ snapshot', async () => {
+    // A caller whose occurrence ceiling clips the dates still gets the
+    // event's own status: it is a fact about the event, not about the dates
+    // they may list.
+    it('works out the status from every date, not only the dates the caller may read (#795)', async () => {
+      db.eventOccurrence.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([futureDate()]);
+
+      const detail = await service.getEventById('event-1');
+
+      expect(db.eventOccurrence.findMany).toHaveBeenCalledWith({
+        where: { eventId: 'event-1' },
+        select: EVENT_STATUS_DATE_SELECT,
+      });
+      expect(detail.occurrences).toEqual([]);
+      expect(detail.status).toBe(EventStatus.Scheduled);
+    });
+
+    it('takes the five reads from one REPEATABLE READ snapshot', async () => {
       await service.getEventById('event-1');
 
       const { operations, options } = batchTransactionCall(db);
-      expect(operations).toHaveLength(4);
+      expect(operations).toHaveLength(5);
       expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     });
 
@@ -341,6 +406,20 @@ describe('EventService', () => {
     expect(emitter.emit).not.toHaveBeenCalledWith(WebhookEventType.EventUpdated, expect.anything());
   });
 
+  it('updateEvent serves the status worked out from every date of the event (#795)', async () => {
+    db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Old' }));
+    db.event.update.mockResolvedValue(makeEvent({ id: 'event-1', title: 'New' }));
+    db.eventOccurrence.findMany.mockResolvedValue([futureDate()]);
+
+    const updated = await service.updateEvent('event-1', { title: 'New' } as never);
+
+    expect(db.eventOccurrence.findMany).toHaveBeenCalledWith({
+      where: { eventId: 'event-1' },
+      select: EVENT_STATUS_DATE_SELECT,
+    });
+    expect(updated.status).toBe(EventStatus.Scheduled);
+  });
+
   it('rejects an empty update patch', async () => {
     await expect(service.updateEvent('event-1', {} as never)).rejects.toThrow(BadRequestException);
   });
@@ -387,6 +466,30 @@ describe('EventService', () => {
       occurrenceId: 'event-1',
       data: { eventId: 'event-1', householdId: null },
     });
+  });
+
+  it('deleteEvent serves the status the event had from its dates (#795)', async () => {
+    db.event.count.mockResolvedValue(1);
+    db.event.update.mockResolvedValue(makeEvent({ id: 'event-1' }));
+    db.eventOccurrence.findMany.mockResolvedValue([futureDate()]);
+
+    await expect(service.deleteEvent('event-1')).resolves.toEqual(
+      expect.objectContaining({ id: 'event-1', status: EventStatus.Scheduled }),
+    );
+  });
+
+  it('createEvent serves the status worked out from every date of the event (#795)', async () => {
+    db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
+    db.event.create.mockResolvedValue(makeEvent({ id: 'event-1' }));
+    db.eventOccurrence.findMany.mockResolvedValue([futureDate()]);
+
+    const created = await service.createEvent({ title: 'X' } as CreateEventDto);
+
+    expect(db.eventOccurrence.findMany).toHaveBeenCalledWith({
+      where: { eventId: 'event-1' },
+      select: EVENT_STATUS_DATE_SELECT,
+    });
+    expect(created.status).toBe(EventStatus.Scheduled);
   });
 
   it('createEvent does not filter by abilities', async () => {
@@ -736,8 +839,10 @@ describe('EventService', () => {
     it('replays the event already under the key, before any check, lock or write', async () => {
       db.event.findUnique.mockResolvedValue(original);
 
+      // Its one date, in 2024, has passed (#795).
       await expect(service.createEvent(retry)).resolves.toEqual({
         ...original,
+        status: EventStatus.Completed,
         occurrences: [occurrence],
         attendees: [],
         policy,

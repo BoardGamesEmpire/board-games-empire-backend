@@ -7,6 +7,7 @@ import type {
   EventGameVote,
   EventOccurrence,
   EventPolicy,
+  EventStatus,
   Game,
   Platform,
 } from '@bge/database';
@@ -19,7 +20,11 @@ import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescripti
  * against `undefined` that names neither the key nor the change.
  */
 
-export type EventWire = Wire<Event>;
+/**
+ * An event as every event route serves it: the row, plus the `status` worked
+ * out from its cancel, archive and confirmed dates, never stored (#795).
+ */
+export type EventWire = Wire<Event> & { readonly status: EventStatus };
 export type EventAttendeeWire = Wire<EventAttendee>;
 export type EventGameWire = Wire<EventGame>;
 
