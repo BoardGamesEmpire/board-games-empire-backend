@@ -50,6 +50,7 @@ function makeWebhookSub(overrides: Partial<WebhookWithEvents> = {}): WebhookWith
     disabledAt: null,
     deletedAt: null,
     createdById: ACTING_USER_ID,
+    apiKeyId: null,
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
     eventTypes: [],
@@ -162,6 +163,27 @@ describe('WebhookSubscriptionService', () => {
       // Returned secret is the plaintext, never the stored ciphertext.
       expect(result.secret).toMatch(/^whsec_/);
       expect(result.secret).not.toContain('enc(');
+    });
+
+    it('records the acting API key on a webhook subscription it makes (#723)', async () => {
+      ability.getActingApiKeyId.mockReturnValue('key-1');
+      db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
+
+      await service.create(baseDto());
+
+      expect(db.webhookSubscription.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ apiKeyId: 'key-1' }) }),
+      );
+    });
+
+    it('records no key on a webhook subscription the user’s session makes (#723)', async () => {
+      db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
+
+      await service.create(baseDto());
+
+      expect(db.webhookSubscription.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ apiKeyId: null }) }),
+      );
     });
 
     it('encrypts and reveals a caller-supplied secret', async () => {
@@ -454,6 +476,64 @@ describe('WebhookSubscriptionService', () => {
 
       await expect(write()).rejects.toBe(failure);
     });
+
+    it.each(writes)(
+      '%s through a key matches only that key’s own webhook subscriptions (#723)',
+      async (_name, action, write) => {
+        ability.getActingApiKeyId.mockReturnValue('key-1');
+        db.webhookSubscription.findFirst.mockResolvedValue(
+          makeWebhookSub({
+            apiKeyId: 'key-1',
+            eventTypes: [makeEventType({ eventType: WebhookEventType.EventCreated })],
+          }),
+        );
+
+        await write();
+
+        expect(db.webhookSubscription.update).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { id: 'sub-1', AND: [ceilingFor(action)], apiKeyId: 'key-1' } }),
+        );
+      },
+    );
+
+    // A refusal a ceiling's 403 would hide: the key may hold the permission,
+    // and the client is told which rule refused it.
+    it.each([
+      ['the user’s session', null],
+      ['another key', 'key-2'],
+    ])(
+      'refuses a key a write to a webhook subscription %s made, with its own message (#723)',
+      async (_maker, madeThrough) => {
+        ability.getActingApiKeyId.mockReturnValue('key-1');
+        db.webhookSubscription.findFirst.mockResolvedValue(
+          makeWebhookSub({
+            apiKeyId: madeThrough,
+            eventTypes: [makeEventType({ eventType: WebhookEventType.EventCreated })],
+          }),
+        );
+
+        for (const [, , write] of writes) {
+          const rejection: unknown = await write().catch((error: unknown) => error);
+
+          expect(rejection).toBeInstanceOf(ForbiddenException);
+          expect((rejection as ForbiddenException).getResponse()).toEqual(
+            t('errors.webhook_subscription.forbidden_other_key'),
+          );
+        }
+        expect(db.webhookSubscription.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(writes)(
+      '%s through the user’s session is not limited by key, and leaves the key alone (#723)',
+      async (_name, _action, write) => {
+        await write();
+
+        const [{ where, data }] = db.webhookSubscription.update.mock.calls[0];
+        expect(where).not.toHaveProperty('apiKeyId');
+        expect(data).not.toHaveProperty('apiKeyId');
+      },
+    );
   });
 
   describe('update', () => {

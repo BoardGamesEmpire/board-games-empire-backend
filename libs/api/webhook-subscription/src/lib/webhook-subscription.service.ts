@@ -59,6 +59,9 @@ export class WebhookSubscriptionService {
    *
    * The signing secret is stored encrypted (`EncryptionService`) and returned
    * in plaintext exactly once, here — the caller cannot retrieve it again.
+   *
+   * A webhook subscription made through an API key records that key, and
+   * dispatch holds it to the key's scope as well as its creator's (#723).
    */
   async create(dto: CreateWebhookSubscriptionDto): Promise<WebhookSubscriptionWithEventTypes> {
     const userId = this.abilityService.getActingUserId();
@@ -75,6 +78,7 @@ export class WebhookSubscriptionService {
       await this.assertCanReceiveFromInstance(dto.eventTypes, dto.resourceType, dto.resourceId, abilities);
     }
 
+    const apiKeyId = this.abilityService.getActingApiKeyId();
     const plaintextSecret = dto.secret ?? this.generateSecret();
     const secret = this.encryption.encrypt(plaintextSecret);
     const householdId = dto.householdId;
@@ -98,6 +102,7 @@ export class WebhookSubscriptionService {
           household: householdId ? { connect: { id: householdId } } : undefined,
           status: WebhookSubscriptionStatus.Active,
           createdBy: { connect: { id: userId } },
+          apiKeyId,
           eventTypes: {
             create: dto.eventTypes.map((eventType) => ({ eventType })),
           },
@@ -180,7 +185,7 @@ export class WebhookSubscriptionService {
       throw new BadRequestException(t('common.at_least_one_field'));
     }
 
-    const existing = await this.getById(id);
+    const existing = await this.getWritable(id);
 
     if (dto.eventTypes) {
       const abilities = this.requireAbilities(t('errors.webhook_subscription.forbidden_change_events'));
@@ -209,7 +214,7 @@ export class WebhookSubscriptionService {
    * Owner-initiated disable. Distinct status from failure auto-disable.
    */
   async disable(id: string): Promise<WebhookSubscriptionWithEventTypes> {
-    await this.getById(id);
+    await this.getWritable(id);
 
     const updated = await this.writeScoped(id, Action.update, {
       status: WebhookSubscriptionStatus.Disabled,
@@ -230,7 +235,7 @@ export class WebhookSubscriptionService {
   async reactivate(id: string): Promise<WebhookSubscriptionWithEventTypes> {
     const abilities = this.requireAbilities(t('errors.webhook_subscription.forbidden_reactivate'));
 
-    const existing = await this.getById(id);
+    const existing = await this.getWritable(id);
     const types = existing.eventTypes.map((row) => row.eventType as WebhookEventType);
 
     this.assertCanReceiveTypes(types, abilities);
@@ -254,7 +259,7 @@ export class WebhookSubscriptionService {
 
   /** Soft delete. */
   async remove(id: string): Promise<WebhookSubscriptionWithEventTypes> {
-    await this.getById(id);
+    await this.getWritable(id);
     const updated = await this.writeScoped(id, Action.delete, {
       deletedAt: new Date(),
       status: WebhookSubscriptionStatus.Disabled,
@@ -264,24 +269,50 @@ export class WebhookSubscriptionService {
   }
 
   /**
+   * {@link getById}, before a write. A write through an API key may change
+   * only a webhook subscription made through that key, not one the user's
+   * session or another key made (#723). Its refusal has its own message, so a
+   * client can tell it from a missing permission.
+   */
+  private async getWritable(id: string): Promise<WebhookSubscriptionWithEventTypes> {
+    const existing = await this.getById(id);
+    const apiKeyId = this.abilityService.getActingApiKeyId();
+
+    if (apiKeyId !== null && existing.apiKeyId !== apiKeyId) {
+      throw new ForbiddenException(t('errors.webhook_subscription.forbidden_other_key'));
+    }
+
+    return existing;
+  }
+
+  /**
    * Writes one subscription through `action`'s ceiling (#590). The type gate
    * on the route and the read in `getById` both pass for an actor who may read
    * the row but not change it, such as an API key with `read` on every
    * subscription and `manage` on one, so the write has to carry the ceiling
    * itself. A write it refuses matches no row, and that P2025 is a 403: the
    * read before it already showed the row exists.
+   *
+   * A write through an API key also matches only that key's own webhook
+   * subscriptions, as {@link getWritable} has already checked, so the reach a
+   * webhook subscription recorded at creation never changes (#723). A write
+   * through the user's session is not limited by key and leaves the recorded
+   * key alone.
    */
   private async writeScoped(
     id: string,
     action: typeof Action.update | typeof Action.delete,
     data: Prisma.WebhookSubscriptionUpdateInput,
   ): Promise<WebhookSubscriptionWithEventTypes> {
+    const apiKeyId = this.abilityService.getActingApiKeyId();
+
     try {
       return await this.db.webhookSubscription.update({
         where: {
           id,
           // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.WebhookSubscription, action),
+          ...(apiKeyId !== null && { apiKeyId }),
         },
         data,
         include: { eventTypes: true },

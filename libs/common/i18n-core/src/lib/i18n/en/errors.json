@@ -242,7 +242,8 @@
     "event_type_resource_mismatch": "Event type \"{type}\" does not belong to resource \"{resourceType}\"",
     "forbidden_subject_access": "You don't have {action} access to {subject} events",
     "forbidden_household": "You don't have access to household {householdId}",
-    "forbidden_instance": "You don't have access to {resourceType} {resourceId}"
+    "forbidden_instance": "You don't have access to {resourceType} {resourceId}",
+    "forbidden_other_key": "This API key can change only the webhook subscriptions it made"
   },
   "safe_http": {
     "no_policy": "No SafeHttp policy found. Run the seed script to create the default singleton row.",

@@ -60,6 +60,23 @@ describe('AbilityService', () => {
 
   afterEach(() => jest.clearAllMocks());
 
+  describe('getActingApiKeyId (#723)', () => {
+    it('names the acting key for an API key actor, and no key for any other', () => {
+      const actors: [Actor | null, string | null][] = [
+        [{ kind: 'apiKey', apiKeyId: 'key-1', userId: 'user-1' }, 'key-1'],
+        [{ kind: 'user', userId: 'user-1' }, null],
+        [{ kind: 'system', reason: 'test' }, null],
+        [null, null],
+      ];
+
+      for (const [actor, expected] of actors) {
+        auditContext.getActor.mockReturnValue(actor);
+
+        expect(service.getActingApiKeyId()).toBe(expected);
+      }
+    });
+  });
+
   describe('getCurrentAbilities', () => {
     it('returns the primed ability array', () => {
       const primed = [ability([])];

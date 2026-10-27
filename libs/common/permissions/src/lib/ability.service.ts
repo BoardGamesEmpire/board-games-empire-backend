@@ -73,6 +73,18 @@ export class AbilityService {
   }
 
   /**
+   * The API key the current actor acts through, or `null` for every other
+   * kind of actor and when there is none. Never throws: a caller asks it to
+   * record or limit by key, and a user signed in through a session has no key
+   * to record (#723).
+   */
+  getActingApiKeyId(): string | null {
+    const actor = this.auditContext.getActor();
+
+    return actor && isApiKeyActor(actor) ? actor.apiKeyId : null;
+  }
+
+  /**
    * The current actor's resolved ability array, primed once per request by
    * `AbilityContextMiddleware`. Synchronous by design — the single async
    * resolution happens at the transport boundary (Option A).
