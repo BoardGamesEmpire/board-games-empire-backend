@@ -243,7 +243,8 @@
     "forbidden_subject_access": "You don't have {action} access to {subject} events",
     "forbidden_household": "You don't have access to household {householdId}",
     "forbidden_instance": "You don't have access to {resourceType} {resourceId}",
-    "forbidden_other_key": "This API key can change only the webhook subscriptions it made"
+    "forbidden_other_key": "This API key can change only the webhook subscriptions it made",
+    "api_key_unusable": "This webhook subscription was made through an API key that is deleted, disabled or expired, so it can't receive events"
   },
   "safe_http": {
     "no_policy": "No SafeHttp policy found. Run the seed script to create the default singleton row.",

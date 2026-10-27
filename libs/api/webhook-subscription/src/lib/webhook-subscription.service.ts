@@ -8,7 +8,14 @@ import {
   WebhookSubscriptionStatus,
 } from '@bge/database';
 import { I18nMessage, t } from '@bge/i18n';
-import { AbilityService, resolveScopeSubjectId, ScopeComposer, type AppAbility } from '@bge/permissions';
+import {
+  AbilityFactory,
+  AbilityService,
+  PermissionsService,
+  resolveScopeSubjectId,
+  ScopeComposer,
+  type AppAbility,
+} from '@bge/permissions';
 import { EncryptionService } from '@bge/services';
 import {
   CreateWebhookSubscriptionDto,
@@ -18,7 +25,14 @@ import {
   type WebhookEventType,
 } from '@bge/webhooks';
 import { accessibleBy } from '@casl/prisma';
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 
 const SECRET_PREFIX = 'whsec_';
@@ -45,6 +59,8 @@ export class WebhookSubscriptionService {
     private readonly encryption: EncryptionService,
     private readonly abilityService: AbilityService,
     private readonly scopeComposer: ScopeComposer,
+    private readonly permissions: PermissionsService,
+    private readonly abilityFactory: AbilityFactory,
   ) {}
 
   /**
@@ -178,7 +194,8 @@ export class WebhookSubscriptionService {
    * check, and the instance check on a scoped subscription, because a new type
    * can require a stricter action than the ones it replaces. Rotating the
    * secret re-encrypts and reveals the new plaintext once (same contract as
-   * create); otherwise the secret is redacted on the way out.
+   * create); otherwise the secret is redacted on the way out. The checks run
+   * against the recorded key too ({@link withRecordedKey}).
    */
   async update(id: string, dto: UpdateWebhookSubscriptionDto): Promise<WebhookSubscriptionWithEventTypes> {
     if (Object.keys(dto).length === 0) {
@@ -188,7 +205,10 @@ export class WebhookSubscriptionService {
     const existing = await this.getWritable(id);
 
     if (dto.eventTypes) {
-      const abilities = this.requireAbilities(t('errors.webhook_subscription.forbidden_change_events'));
+      const abilities = await this.withRecordedKey(
+        existing,
+        this.requireAbilities(t('errors.webhook_subscription.forbidden_change_events')),
+      );
 
       this.assertTypesMatchResource(dto.eventTypes, existing.resourceType);
       this.assertCanReceiveTypes(dto.eventTypes, abilities);
@@ -230,12 +250,14 @@ export class WebhookSubscriptionService {
    * instance/household scope checks — since the creator's access may have
    * narrowed while the subscription was down. (Dispatch re-gates every subject
    * regardless, but re-activation should not silently restore a scope the
-   * creator can no longer reach.)
+   * creator can no longer reach.) The checks run against the recorded key too
+   * ({@link withRecordedKey}).
    */
   async reactivate(id: string): Promise<WebhookSubscriptionWithEventTypes> {
-    const abilities = this.requireAbilities(t('errors.webhook_subscription.forbidden_reactivate'));
+    const actorAbilities = this.requireAbilities(t('errors.webhook_subscription.forbidden_reactivate'));
 
     const existing = await this.getWritable(id);
+    const abilities = await this.withRecordedKey(existing, actorAbilities);
     const types = existing.eventTypes.map((row) => row.eventType as WebhookEventType);
 
     this.assertCanReceiveTypes(types, abilities);
@@ -283,6 +305,36 @@ export class WebhookSubscriptionService {
     }
 
     return existing;
+  }
+
+  /**
+   * The abilities a webhook subscription's checks run against: the actor's,
+   * and, when the user's session acts on one made through a key, that key's
+   * too, as dispatch judges it (#723). Without the key, the session could
+   * reactivate one whose key is gone, or add an event type the key can't
+   * reach, and get a 200 for a webhook subscription that never delivers. The
+   * key is read as dispatch reads it, so one that is deleted, disabled,
+   * expired or not the creator's own is refused.
+   */
+  private async withRecordedKey(
+    existing: WebhookSubscriptionWithEventTypes,
+    abilities: AppAbility[],
+  ): Promise<AppAbility[]> {
+    const { apiKeyId } = existing;
+    // A key acting on its own webhook subscription already holds its ability.
+    if (apiKeyId === null || apiKeyId === this.abilityService.getActingApiKeyId()) {
+      return abilities;
+    }
+
+    const key = (await this.permissions.loadApiKeyScopeGraphs([apiKeyId])).get(apiKeyId);
+    if (!key || key.referenceId !== existing.createdById) {
+      throw new ConflictException(t('errors.webhook_subscription.api_key_unusable'));
+    }
+
+    // The session's one ability is the key owner's: getById reads only the
+    // acting user's own webhook subscriptions.
+    const [ownerAbility] = abilities;
+    return this.abilityFactory.createForApiKeyActor(ownerAbility, key);
   }
 
   /**
@@ -385,14 +437,17 @@ export class WebhookSubscriptionService {
    * caller can see it at all.
    */
   private async assertCanReadHousehold(householdId: string, abilities: AppAbility[]): Promise<void> {
-    for (const ability of abilities) {
-      const count = await this.db.household.count({
-        where: { id: householdId, deletedAt: null, AND: [accessibleBy(ability).ofType(ResourceType.Household)] },
-      });
+    // One count with a clause per ability, as the instance check runs.
+    const count = await this.db.household.count({
+      where: {
+        id: householdId,
+        deletedAt: null,
+        AND: abilities.map((ability) => accessibleBy(ability).ofType(ResourceType.Household)),
+      },
+    });
 
-      if (count === 0) {
-        throw new ForbiddenException(t('errors.webhook_subscription.forbidden_household', { householdId }));
-      }
+    if (count === 0) {
+      throw new ForbiddenException(t('errors.webhook_subscription.forbidden_household', { householdId }));
     }
   }
 
@@ -412,13 +467,9 @@ export class WebhookSubscriptionService {
     const actions = new Set(types.map((type) => this.registry.require(type).requiredAction));
 
     for (const action of actions) {
-      for (const ability of abilities) {
-        const visible = await this.visibility.isVisibleTo(resourceType, resourceId, ability, { action });
-        if (!visible) {
-          throw new ForbiddenException(
-            t('errors.webhook_subscription.forbidden_instance', { resourceType, resourceId }),
-          );
-        }
+      const visible = await this.visibility.isVisibleTo(resourceType, resourceId, abilities, { action });
+      if (!visible) {
+        throw new ForbiddenException(t('errors.webhook_subscription.forbidden_instance', { resourceType, resourceId }));
       }
     }
   }

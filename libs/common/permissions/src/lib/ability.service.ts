@@ -16,7 +16,7 @@ import { ForbiddenException, Injectable, InternalServerErrorException, Logger } 
 import { AbilityFactory } from './ability.factory';
 import { AbilityContextNotPrimedError } from './errors/ability-context-not-primed.error';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
-import type { AppAbility, ModelResourceType, SubjectInstance } from './interfaces';
+import type { ApikeyWithScopes, AppAbility, ModelResourceType, SubjectInstance } from './interfaces';
 import { PermissionsService } from './permissions.service';
 import { AbilityContextInternalService } from './services/ability-context-internal.service';
 
@@ -327,7 +327,10 @@ export class AbilityService {
         return [await this.buildUserAbility(actor.userId)];
 
       case 'apiKey':
-        return [await this.buildUserAbility(actor.userId), await this.buildApiKeyAbility(actor.apiKeyId)];
+        return this.abilityFactory.createForApiKeyActor(
+          await this.buildUserAbility(actor.userId),
+          await this.requireApiKeyScopeGraph(actor.apiKeyId),
+        );
 
       case 'system':
         return [this.abilityFactory.createForSystem(actor.reason)];
@@ -371,7 +374,7 @@ export class AbilityService {
     return this.abilityFactory.createForUser(graph);
   }
 
-  private async buildApiKeyAbility(apiKeyId: string): Promise<AppAbility> {
+  private async requireApiKeyScopeGraph(apiKeyId: string): Promise<ApikeyWithScopes> {
     const apiKey = await this.permissionsService.getApiKeyScopeGraph(apiKeyId);
 
     if (!apiKey) {
@@ -379,7 +382,7 @@ export class AbilityService {
       throw new ForbiddenException(t('errors.api_key.not_found_or_revoked'));
     }
 
-    return this.abilityFactory.createForApiKey(apiKey);
+    return apiKey;
   }
 
   /**

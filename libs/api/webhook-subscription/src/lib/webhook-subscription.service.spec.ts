@@ -1,6 +1,13 @@
 import { Action, Prisma, ResourceType, WebhookSubscriptionEventType, WebhookSubscriptionStatus } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService, ScopeComposer, type AppAbility } from '@bge/permissions';
+import {
+  AbilityFactory,
+  AbilityService,
+  PermissionsService,
+  ScopeComposer,
+  type ApikeyWithScopes,
+  type AppAbility,
+} from '@bge/permissions';
 import { EncryptionService } from '@bge/services';
 import {
   createMockAbilityService,
@@ -18,7 +25,7 @@ import {
   WebhookVisibilityService,
 } from '@bge/webhooks';
 import { createPrismaAbility } from '@casl/prisma';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { WEBHOOK_SECRET_REDACTED, WebhookSubscriptionService } from './webhook-subscription.service';
 
@@ -65,6 +72,7 @@ describe('WebhookSubscriptionService', () => {
   let visibility: jest.Mocked<Pick<WebhookVisibilityService, 'isVisibleTo'>>;
   let encryption: jest.Mocked<Pick<EncryptionService, 'encrypt' | 'decrypt'>>;
   let ability: MockAbilityService;
+  let permissions: jest.Mocked<Pick<PermissionsService, 'loadApiKeyScopeGraphs'>>;
   let compose: jest.SpyInstance;
 
   const allowAll = createPrismaAbility([{ action: Action.manage, subject: 'all' }]) as AppAbility;
@@ -72,6 +80,17 @@ describe('WebhookSubscriptionService', () => {
 
   /** Sets the abilities the service will read from `getCurrentAbilities()`. */
   const primeAbilities = (...abilities: AppAbility[]) => ability.getCurrentAbilities.mockReturnValue(abilities);
+
+  /** A usable key of the acting user's, reaching only what `slugs` name, as the key read returns it. */
+  const usableKey = (slugs: [Action, ResourceType][], referenceId = ACTING_USER_ID) =>
+    ({
+      id: 'key-1',
+      referenceId,
+      scopes: slugs.map(([action, subject]) => ({
+        resourceId: null,
+        permission: { action, subject, inverted: false, fields: [] },
+      })),
+    }) as unknown as ApikeyWithScopes;
 
   beforeEach(async () => {
     visibility = { isVisibleTo: jest.fn().mockResolvedValue(true) };
@@ -86,6 +105,7 @@ describe('WebhookSubscriptionService', () => {
     ability = createMockAbilityService();
     ability.getActingUserId.mockReturnValue(ACTING_USER_ID);
     primeAbilities(allowAll);
+    permissions = { loadApiKeyScopeGraphs: jest.fn().mockResolvedValue(new Map()) };
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
       providers: [
@@ -97,6 +117,8 @@ describe('WebhookSubscriptionService', () => {
         { provide: WebhookVisibilityService, useValue: visibility },
         { provide: EncryptionService, useValue: encryption },
         { provide: AbilityService, useValue: ability },
+        { provide: PermissionsService, useValue: permissions },
+        AbilityFactory,
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('development-secret') } },
       ],
     });
@@ -226,9 +248,21 @@ describe('WebhookSubscriptionService', () => {
     it('checks instance visibility when resourceId is scoped', async () => {
       db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
       await service.create(baseDto({ resourceId: 'event-9' }));
-      expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-9', allowAll, {
+      expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-9', [allowAll], {
         action: Action.read,
       });
+    });
+
+    it('checks the scoped instance against every ability at once, as dispatch does (#723)', async () => {
+      const readEvents = createPrismaAbility([{ action: Action.read, subject: ResourceType.Event }]) as AppAbility;
+      primeAbilities(allowAll, readEvents);
+      db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
+
+      await service.create(baseDto({ resourceId: 'event-9' }));
+
+      expect(visibility.isVisibleTo.mock.calls).toEqual([
+        [ResourceType.Event, 'event-9', [allowAll, readEvents], { action: Action.read }],
+      ]);
     });
 
     it("checks the scoped instance with each requested type's action (#247)", async () => {
@@ -239,15 +273,15 @@ describe('WebhookSubscriptionService', () => {
 
       // One check per distinct action, not per type.
       expect(visibility.isVisibleTo.mock.calls).toEqual([
-        [ResourceType.Event, 'event-9', allowAll, { action: Action.read }],
-        [ResourceType.Event, 'event-9', allowAll, { action: Action.update }],
+        [ResourceType.Event, 'event-9', [allowAll], { action: Action.read }],
+        [ResourceType.Event, 'event-9', [allowAll], { action: Action.update }],
       ]);
     });
 
     it('refuses an instance the caller can read but not take the stricter action on', async () => {
       requireUpdateForEventUpdated();
       visibility.isVisibleTo.mockImplementation(
-        async (_subject, _id, _ability, options) => options?.action !== Action.update,
+        async (_subject, _id, _abilities, options) => options?.action !== Action.update,
       );
 
       await expect(service.create(baseDto({ resourceId: 'event-9' }))).rejects.toThrow(ForbiddenException);
@@ -271,6 +305,17 @@ describe('WebhookSubscriptionService', () => {
       // `{}` is the clause for an unconditioned rule. Checked for `update`, the
       // clause would be the deny-all `{ OR: [] }`.
       expect(db.household.count).toHaveBeenCalledWith({ where: { id: 'hh-1', deletedAt: null, AND: [{}] } });
+    });
+
+    it('checks the household against every ability in one count (#723)', async () => {
+      primeAbilities(allowAll, allowAll);
+      db.household.count.mockResolvedValue(1);
+      db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
+
+      await service.create(baseDto({ householdId: 'hh-1' }));
+
+      expect(db.household.count).toHaveBeenCalledTimes(1);
+      expect(db.household.count).toHaveBeenCalledWith({ where: { id: 'hh-1', deletedAt: null, AND: [{}, {}] } });
     });
 
     it('rejects when the scoped instance is not visible', async () => {
@@ -586,7 +631,7 @@ describe('WebhookSubscriptionService', () => {
       await expect(service.update('sub-1', { eventTypes: [WebhookEventType.EventUpdated] })).rejects.toThrow(
         ForbiddenException,
       );
-      expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-9', allowAll, {
+      expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-9', [allowAll], {
         action: Action.update,
       });
       expect(db.webhookSubscription.update).not.toHaveBeenCalled();
@@ -607,6 +652,56 @@ describe('WebhookSubscriptionService', () => {
       await expect(service.update('sub-1', { eventTypes: [WebhookEventType.EventCreated] })).rejects.toThrow(
         ForbiddenException,
       );
+    });
+
+    describe('by the user’s session, of a webhook subscription made through a key (#723)', () => {
+      beforeEach(() => {
+        db.webhookSubscription.findFirst.mockResolvedValue(makeWebhookSub({ apiKeyId: 'key-1' }));
+        db.webhookSubscription.update.mockResolvedValue(makeWebhookSub());
+      });
+
+      // Dispatch would drop every event of a type the key can't reach, so the
+      // change would answer 200 for nothing.
+      it('refuses an event type the key can’t reach', async () => {
+        permissions.loadApiKeyScopeGraphs.mockResolvedValue(
+          new Map([['key-1', usableKey([[Action.read, ResourceType.Household]])]]),
+        );
+
+        await expect(service.update('sub-1', { eventTypes: [WebhookEventType.EventCreated] })).rejects.toThrow(
+          ForbiddenException,
+        );
+        expect(permissions.loadApiKeyScopeGraphs).toHaveBeenCalledWith(['key-1']);
+        expect(db.webhookSubscription.update).not.toHaveBeenCalled();
+      });
+
+      it('accepts an event type the key reaches', async () => {
+        permissions.loadApiKeyScopeGraphs.mockResolvedValue(
+          new Map([['key-1', usableKey([[Action.read, ResourceType.Event]])]]),
+        );
+
+        await service.update('sub-1', { eventTypes: [WebhookEventType.EventCreated] });
+
+        expect(db.webhookSubscription.update).toHaveBeenCalled();
+      });
+
+      it('refuses an eventTypes change once the key is deleted, disabled or expired, with its own message', async () => {
+        const rejection: unknown = await service
+          .update('sub-1', { eventTypes: [WebhookEventType.EventCreated] })
+          .catch((error: unknown) => error);
+
+        expect(rejection).toBeInstanceOf(ConflictException);
+        expect((rejection as ConflictException).getResponse()).toEqual(
+          t('errors.webhook_subscription.api_key_unusable'),
+        );
+        expect(db.webhookSubscription.update).not.toHaveBeenCalled();
+      });
+
+      it('reads no key for a change that leaves the event types alone', async () => {
+        await service.update('sub-1', { url: 'https://new.example.com/hook' });
+
+        expect(permissions.loadApiKeyScopeGraphs).not.toHaveBeenCalled();
+        expect(db.webhookSubscription.update).toHaveBeenCalled();
+      });
     });
   });
 
@@ -671,7 +766,7 @@ describe('WebhookSubscriptionService', () => {
       visibility.isVisibleTo.mockResolvedValue(false);
 
       await expect(service.reactivate('sub-1')).rejects.toThrow(ForbiddenException);
-      expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-9', allowAll, {
+      expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-9', [allowAll], {
         action: Action.read,
       });
       expect(db.webhookSubscription.update).not.toHaveBeenCalled();
@@ -695,6 +790,60 @@ describe('WebhookSubscriptionService', () => {
     it('refuses with no abilities present', async () => {
       primeAbilities();
       await expect(service.reactivate('sub-1')).rejects.toThrow(ForbiddenException);
+    });
+
+    describe('a webhook subscription made through a key (#723)', () => {
+      const madeThroughKey = makeWebhookSub({
+        apiKeyId: 'key-1',
+        resourceId: 'event-9',
+        eventTypes: [makeEventType({ eventType: WebhookEventType.EventCreated })],
+      });
+
+      beforeEach(() => {
+        db.webhookSubscription.findFirst.mockResolvedValue(madeThroughKey);
+        db.webhookSubscription.update.mockResolvedValue(makeWebhookSub());
+      });
+
+      // Dispatch delivers nothing through a key that's gone, so reactivating
+      // would answer 200 for a webhook subscription that never delivers.
+      it.each([
+        ['deleted, disabled or expired', new Map<string, ApikeyWithScopes>()],
+        ['not its creator’s own', new Map([['key-1', usableKey([[Action.read, ResourceType.Event]], 'someone-else')]])],
+      ])('refuses the user’s session once its key is %s, with its own message', async (_state, keys) => {
+        permissions.loadApiKeyScopeGraphs.mockResolvedValue(keys);
+
+        const rejection: unknown = await service.reactivate('sub-1').catch((error: unknown) => error);
+
+        expect(rejection).toBeInstanceOf(ConflictException);
+        expect((rejection as ConflictException).getResponse()).toEqual(
+          t('errors.webhook_subscription.api_key_unusable'),
+        );
+        expect(db.webhookSubscription.update).not.toHaveBeenCalled();
+      });
+
+      it('re-checks the user’s session against the key too, as dispatch will judge it', async () => {
+        permissions.loadApiKeyScopeGraphs.mockResolvedValue(
+          new Map([['key-1', usableKey([[Action.read, ResourceType.Event]])]]),
+        );
+
+        await service.reactivate('sub-1');
+
+        const [, , abilities] = visibility.isVisibleTo.mock.calls[0];
+        expect(abilities).toHaveLength(2);
+        expect(abilities[0]).toBe(allowAll);
+        expect(db.webhookSubscription.update).toHaveBeenCalled();
+      });
+
+      it('reads no key when the key reactivates its own', async () => {
+        ability.getActingApiKeyId.mockReturnValue('key-1');
+
+        await service.reactivate('sub-1');
+
+        expect(permissions.loadApiKeyScopeGraphs).not.toHaveBeenCalled();
+        expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-9', [allowAll], {
+          action: Action.read,
+        });
+      });
     });
   });
 

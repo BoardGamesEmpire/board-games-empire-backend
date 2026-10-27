@@ -286,6 +286,33 @@ export class PermissionsService {
   }
 
   /**
+   * Several API keys' scope graphs as they have committed, never from the
+   * cache and never cached: for judging a webhook subscription made through a
+   * key at dispatch, as {@link loadUserRoleGraphs} judges its owner (#723). A
+   * key that is deleted, disabled or past its expiry is missing from the map.
+   * A key whose `enabled` is unset counts as enabled, as better-auth's own
+   * check counts it.
+   */
+  async loadApiKeyScopeGraphs(apiKeyIds: readonly string[]): Promise<Map<string, ApikeyWithScopes>> {
+    if (apiKeyIds.length === 0) {
+      return new Map();
+    }
+
+    const keys = await this.db.apikey.findMany({
+      where: {
+        id: { in: [...apiKeyIds] },
+        AND: [
+          { OR: [{ enabled: null }, { enabled: true }] },
+          { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+        ],
+      },
+      include: PermissionsService.apiKeyGraphInclude(),
+    });
+
+    return new Map(keys.map((key) => [key.id, key]));
+  }
+
+  /**
    * Cache-aside loader shared by the permission graphs: serve a cache hit,
    * otherwise run `loader` and cache only a non-null result. A missing row is
    * never negatively cached and surfaces as `null` for the caller to handle.
@@ -706,17 +733,22 @@ export class PermissionsService {
   private loadApiKeyGraph(apiKeyId: string) {
     return this.db.apikey.findUnique({
       where: { id: apiKeyId },
-      include: {
-        scopes: {
-          // A scope over a retired permission (#235) confers nothing.
-          where: { permission: { retiredAt: null } },
-          include: {
-            permission: {
-              select: { action: true, subject: true, inverted: true, fields: true },
-            },
+      include: PermissionsService.apiKeyGraphInclude(),
+    });
+  }
+
+  /** What an API key's scope graph is read with. */
+  private static apiKeyGraphInclude() {
+    return {
+      scopes: {
+        // A scope over a retired permission (#235) confers nothing.
+        where: { permission: { retiredAt: null } },
+        include: {
+          permission: {
+            select: { action: true, subject: true, inverted: true, fields: true },
           },
         },
       },
-    });
+    } satisfies Prisma.ApikeyInclude;
   }
 }

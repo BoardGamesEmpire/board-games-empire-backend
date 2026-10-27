@@ -5,7 +5,7 @@ import { Injectable } from '@nestjs/common';
 
 /** What a check asks beyond the row itself. */
 export interface WebhookVisibilityOptions {
-  /** The action the ability must hold on the row. `read` when omitted. */
+  /** The action every ability must hold on the row. `read` when omitted. */
   readonly action?: Action;
 
   /**
@@ -23,7 +23,7 @@ export interface WebhookVisibilityOptions {
  */
 type VisibilityCheck = (
   subjectId: string,
-  ability: AppAbility,
+  abilities: readonly AppAbility[],
   options: Required<WebhookVisibilityOptions>,
 ) => Promise<boolean>;
 
@@ -32,6 +32,10 @@ type VisibilityCheck = (
  * instance, by asking the exact same question the REST path asks: does a row
  * with this id exist that is `accessibleBy` the subscriber's ability, for the
  * action the event requires?
+ *
+ * A subscriber can hold several abilities, as a request through an API key
+ * holds its owner's and the key's, and the row must be reachable by every one
+ * of them (#723).
  *
  * This is the whole point of the CASL-at-dispatch design — webhook audience is
  * never a parallel rule set, it is live authorization. As the rules tighten
@@ -59,13 +63,13 @@ export class WebhookVisibilityService {
     // event that fires after its subject's delete (`subjectDeleted`).
     [
       ResourceType.Event,
-      (id, ability, options) =>
-        this.exists(this.db.event.count({ where: this.scope(ResourceType.Event, id, ability, true, options) })),
+      (id, abilities, options) =>
+        this.exists(this.db.event.count({ where: this.scope(ResourceType.Event, id, abilities, true, options) })),
     ],
     [
       ResourceType.Game,
-      (id, ability, options) =>
-        this.exists(this.db.game.count({ where: this.scope(ResourceType.Game, id, ability, true, options) })),
+      (id, abilities, options) =>
+        this.exists(this.db.game.count({ where: this.scope(ResourceType.Game, id, abilities, true, options) })),
     ],
     // The base User role's `read:job` reaches import jobs only (#479): they
     // describe public content (mirroring the ImportActivity feed), so a
@@ -76,8 +80,8 @@ export class WebhookVisibilityService {
     // `deletedAt` guard.
     [
       ResourceType.Job,
-      (id, ability, options) =>
-        this.exists(this.db.job.count({ where: this.scope(ResourceType.Job, id, ability, false, options) })),
+      (id, abilities, options) =>
+        this.exists(this.db.job.count({ where: this.scope(ResourceType.Job, id, abilities, false, options) })),
     ],
     // Required by `household.ownership.transferred.v1` (#158). Without an entry
     // here `isVisibleTo` throws for the subject, `fanOut` catches it per
@@ -86,27 +90,38 @@ export class WebhookVisibilityService {
     // tombstoned household is never visible.
     [
       ResourceType.Household,
-      (id, ability, options) =>
-        this.exists(this.db.household.count({ where: this.scope(ResourceType.Household, id, ability, true, options) })),
+      (id, abilities, options) =>
+        this.exists(
+          this.db.household.count({ where: this.scope(ResourceType.Household, id, abilities, true, options) }),
+        ),
     ],
   ]);
 
+  /**
+   * Whether every one of `abilities` can take the action on the subject row.
+   * An empty list throws rather than answer: a count over an empty `AND`
+   * matches every row, so it would pass a subscriber who holds nothing (#723).
+   */
   async isVisibleTo(
     subject: ResourceType,
     subjectId: string,
-    ability: AppAbility,
+    abilities: readonly AppAbility[],
     { action = Action.read, subjectDeleted = false }: WebhookVisibilityOptions = {},
   ): Promise<boolean> {
+    if (abilities.length === 0) {
+      throw new Error('isVisibleTo needs at least one ability');
+    }
+
     const check = this.checks.get(subject);
     if (!check) {
       throw new Error(`No webhook visibility check implemented for subject "${subject}"`);
     }
 
-    return check(subjectId, ability, { action, subjectDeleted });
+    return check(subjectId, abilities, { action, subjectDeleted });
   }
 
   /**
-   * The count `where` every subject shares: this id, `accessibleBy` the
+   * The count `where` every subject shares: this id, `accessibleBy` each
    * ability for the action, and — for soft-deletable subjects — not
    * tombstoned, unless the event fired after the delete. Built with the
    * concrete subject literal so `.ofType` types the CASL clause precisely.
@@ -114,14 +129,14 @@ export class WebhookVisibilityService {
   private scope<TResource extends ModelResourceType>(
     subject: TResource,
     id: string,
-    ability: AppAbility,
+    abilities: readonly AppAbility[],
     softDelete: boolean,
     { action, subjectDeleted }: Required<WebhookVisibilityOptions>,
   ) {
     return {
       id,
       ...(softDelete && !subjectDeleted ? { deletedAt: null } : {}),
-      AND: [accessibleBy(ability, action).ofType(subject)],
+      AND: abilities.map((ability) => accessibleBy(ability, action).ofType(subject)),
     };
   }
 

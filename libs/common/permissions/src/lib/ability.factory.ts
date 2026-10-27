@@ -109,6 +109,17 @@ export class AbilityFactory {
   }
 
   /**
+   * The abilities of an actor acting through an API key: the key owner's,
+   * then the key's own, which every check and query ANDs, so access is the
+   * floor of the two. A request through the key and a webhook subscription
+   * made through it are judged by the same pair (#723), so a change to how a
+   * key clamps its owner belongs here.
+   */
+  createForApiKeyActor(owner: AppAbility, apiKey: ApikeyWithScopes): [AppAbility, AppAbility] {
+    return [owner, this.createForApiKey(apiKey)];
+  }
+
+  /**
    * An API key's own ability, which `PoliciesGuard` and the ceilings AND with
    * its owner's. Each scope becomes one rule, pinned to `resourceId` when it
    * names one. The permission's conditions are dropped (#266), so the owner's
