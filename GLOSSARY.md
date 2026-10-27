@@ -493,6 +493,13 @@ One scheduled date of an event: its single date, one day of a multi-day event, o
 How an event's dates are settled: one fixed date, several fixed dates, or an availability poll.
 _Avoid_: event mode
 
+**Cancelled event**:
+An event its host has called off. Its dates are cancelled with it, and it can be reopened.
+_Avoid_: deleted event (deleting removes it)
+
+**Archived event**:
+A cancelled or past event its host has put away. It is left out of event lists but can still be opened.
+
 **Availability poll**:
 Settling an event's dates by proposing several and letting attendees answer available, maybe or unavailable for each, after which the host confirms or declines each proposal. One attendee's answer is an availability vote.
 _Avoid_: date poll, scheduling poll
