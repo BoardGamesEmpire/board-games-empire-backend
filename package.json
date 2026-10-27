@@ -166,7 +166,7 @@
     "surrogate": "1.9.2",
     "undici": "8.12.2",
     "unist-util-visit": "5.1.0",
-    "zod": "4.4.3"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@bufbuild/buf": "1.71.0",
