@@ -196,22 +196,6 @@ export class EventService {
     return { ...withEventStatus(event, statusDates, now), occurrences, attendees, policy };
   }
 
-  /**
-   * `event` with the `status` its dates give it, read from every date of the
-   * event with no ceiling, as {@link getEventById} reads them (#795). For a
-   * create's replay, which writes nothing. A write works its status out from
-   * dates it read with the write or before it, never after the commit, where
-   * a failed read would report a write that happened as one that didn't.
-   */
-  private async statusOf<T extends Event>(event: T, now = new Date()): Promise<T & { status: EventStatus }> {
-    const dates = await this.db.eventOccurrence.findMany({
-      where: { eventId: event.id },
-      select: EVENT_STATUS_DATE_SELECT,
-    });
-
-    return withEventStatus(event, dates, now);
-  }
-
   async createEvent(dto: CreateEventDto): Promise<CreatedEvent & { status: EventStatus }> {
     const initiatedAt = new Date();
     const userId = this.abilityService.getActingUserId();
@@ -230,7 +214,7 @@ export class EventService {
     // check below runs (#252). The checks judged the original; a household
     // deleted or an invitee who blocked the creator since must not turn the
     // retry of a create that succeeded into a 404 or a 403.
-    const { row: event, replayed } = await createOrReplay<CreatedEvent>({
+    const { row: event, replayed } = await createOrReplay<CreatedEvent & { status: EventStatus }>({
       clientRequestId,
       find: (key) => this.findReplayedEvent(userId, key),
       logger: this.logger,
@@ -247,7 +231,7 @@ export class EventService {
 
         this.validateOccurrencesForMode(dto.schedulingMode ?? EventSchedulingMode.Fixed, occurrences);
 
-        return this.db.$transaction(async (tx) => {
+        const created = await this.db.$transaction(async (tx) => {
           // The check above cannot settle whether the household is still live.
           // It read a graph that may predate a soft-delete, since the graph is
           // cached and eviction is best-effort, and a delete can commit after the
@@ -351,6 +335,9 @@ export class EventService {
             include: EVENT_CREATE_INCLUDE,
           });
         });
+
+        // The create read back every date it made, with no ceiling.
+        return withEventStatus(created, created.occurrences, initiatedAt);
       },
     });
 
@@ -363,7 +350,7 @@ export class EventService {
       // emits leaves its invitees unnotified, and the replay does not make up
       // for it. Emitting here would notify twice in the far commoner case
       // where the original's emits ran, and nothing records which case this is.
-      return this.statusOf(event);
+      return event;
     }
 
     // The creator's graph was cached by this request, before the host row
@@ -405,8 +392,7 @@ export class EventService {
     // create: a retried create made nothing, and must not log that it did.
     this.logger.log(`Event "${event.title}" (${event.id}) created by user ${event.createdById}`);
 
-    // The create read back every date it made, with no ceiling.
-    return withEventStatus(event, event.occurrences, initiatedAt);
+    return event;
   }
 
   /**
@@ -424,7 +410,10 @@ export class EventService {
    * A row found here is always a replay, so this is also where the replay
    * evicts, before the parts are read.
    */
-  private async findReplayedEvent(userId: string, clientRequestId: string): Promise<CreatedEvent | null> {
+  private async findReplayedEvent(
+    userId: string,
+    clientRequestId: string,
+  ): Promise<(CreatedEvent & { status: EventStatus }) | null> {
     const event = await this.db.event.findUnique({
       where: { createdById_clientRequestId: { createdById: userId, clientRequestId } },
     });
@@ -456,8 +445,15 @@ export class EventService {
     // restriction: the key's scope is resolved again with the user's graph.
     await this.abilityService.primeCurrentActor();
 
-    const [occurrences, attendees, policy] = await this.db.$transaction(
+    // The row is read again with its parts and its status dates, in one
+    // snapshot, as `getEventById` reads them (#795). The row read above came
+    // first, so a cancel committed since would pair its not-yet-cancelled row
+    // with the cancel's dates: a status the event had neither before nor after.
+    const now = new Date();
+    const [row, occurrences, attendees, policy, statusDates] = await this.db.$transaction(
       [
+        this.db.event.findUnique({ where: { id: event.id } }),
+
         this.db.eventOccurrence.findMany({
           where: this.scopeComposer.compose(ResourceType.EventOccurrence, Action.read, { eventId: event.id }),
           orderBy: OCCURRENCE_ORDER,
@@ -479,11 +475,15 @@ export class EventService {
             AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.read),
           },
         }),
+
+        this.db.eventOccurrence.findMany({ where: { eventId: event.id }, select: EVENT_STATUS_DATE_SELECT }),
       ],
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    return { ...event, occurrences, attendees, policy };
+    // `row` is gone only if a household delete cascaded to it since; its
+    // dates went with it, and the row read above still names the create.
+    return withEventStatus({ ...(row ?? event), occurrences, attendees, policy }, statusDates, now);
   }
 
   async updateEvent(id: string, dto: UpdateEventDto) {

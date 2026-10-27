@@ -236,14 +236,17 @@ describe('EventLifecycleService', () => {
         cancelReason: 'rain',
       });
 
-      // Keyed on the cancel's time, so a later cancel after a reopen is a
-      // delivery of its own. Ids only, as every Event webhook carries.
+      // No occurrenceId: nothing names one cancel apart from a later one after
+      // a reopen, so a key would drop that one's delivery. Ids only, as every
+      // Event webhook carries.
       expect(emitter.emit).toHaveBeenCalledWith(WebhookEventType.EventCancelled, {
         subjectId: EVENT_ID,
         householdId: 'hh-1',
-        occurrenceId: `${EVENT_ID}:cancelled:${domainEvent.after.cancelledAt.getTime()}`,
         data: { eventId: EVENT_ID, householdId: 'hh-1' },
       });
+      expect(
+        emitter.emit.mock.calls.find(([name]) => name === WebhookEventType.EventCancelled)?.[1],
+      ).not.toHaveProperty('occurrenceId', expect.anything());
     });
 
     it('answers with the event, its status Cancelled (#795)', async () => {
@@ -331,12 +334,16 @@ describe('EventLifecycleService', () => {
         expect.objectContaining({ cancelledAt: null, cancelledById: null, cancelReason: null }),
       );
 
+      // No occurrenceId, as for a cancel.
       expect(emitter.emit).toHaveBeenCalledWith(WebhookEventType.EventReopened, {
         subjectId: EVENT_ID,
         householdId: 'hh-1',
-        occurrenceId: `${EVENT_ID}:reopened:${domainEvent.initiatedAt.getTime()}`,
         data: { eventId: EVENT_ID, householdId: 'hh-1' },
       });
+      expect(emitter.emit.mock.calls.find(([name]) => name === WebhookEventType.EventReopened)?.[1]).not.toHaveProperty(
+        'occurrenceId',
+        expect.anything(),
+      );
     });
 
     it('answers with the event, its status from its dates again (#795)', async () => {

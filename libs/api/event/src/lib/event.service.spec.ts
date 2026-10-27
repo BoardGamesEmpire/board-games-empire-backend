@@ -867,6 +867,23 @@ describe('EventService', () => {
       expect(db.event.create).not.toHaveBeenCalled();
     });
 
+    // A cancel that commits between the key lookup and the parts must not
+    // pair the lookup's uncancelled row with the cancel's dates, which would
+    // read Planning: a status the event had neither before nor after (#795).
+    it("answers with the row read again in the parts' snapshot, its status from the same snapshot's dates", async () => {
+      const cancelled = { ...original, cancelledAt: new Date('2026-10-27T00:00:00Z') };
+      db.event.findUnique.mockResolvedValueOnce(original).mockResolvedValueOnce(cancelled);
+
+      await expect(service.createEvent(retry)).resolves.toEqual(
+        expect.objectContaining({ cancelledAt: cancelled.cancelledAt, status: EventStatus.Cancelled }),
+      );
+      expect(db.event.findUnique).toHaveBeenLastCalledWith({ where: { id: 'event-1' } });
+      expect(db.eventOccurrence.findMany).toHaveBeenCalledWith({
+        where: { eventId: 'event-1' },
+        select: { status: true, startDate: true, endDate: true },
+      });
+    });
+
     it('looks the key up under the creator, with no `deletedAt` filter and nothing embedded', async () => {
       db.event.findUnique.mockResolvedValue(original);
 

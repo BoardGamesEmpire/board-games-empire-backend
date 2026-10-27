@@ -127,14 +127,18 @@ export class EventLifecycleService {
         new EventCancelledEvent(cancelSnapshot(before), cancelSnapshot(event), userId, initiatedAt),
       );
 
-      // Keyed on the cancel's time, so an event cancelled again after a
-      // reopen is a delivery of its own.
+      // No `occurrenceId`: an event can be cancelled, reopened and cancelled
+      // again, and nothing here names one cancel apart from the next. The
+      // event id is shared by all of them, and the time is taken before the
+      // lock, so two requests started in the same millisecond can each commit
+      // a cancel under it. Either would dedup a later cancel against an
+      // earlier one and drop its delivery. Without one, each emit is its own
+      // delivery, which the envelope's contract allows.
       this.eventEmitter.emit(
         WebhookEventType.EventCancelled,
         webhookEnvelope({
           subjectId: event.id,
           householdId: event.householdId,
-          occurrenceId: `${event.id}:cancelled:${initiatedAt.getTime()}`,
           data: eventWebhookIds(event),
         }),
       );
@@ -174,12 +178,12 @@ export class EventLifecycleService {
         new EventReopenedEvent(cancelSnapshot(before), cancelSnapshot(event), userId, initiatedAt),
       );
 
+      // No `occurrenceId`, as for a cancel.
       this.eventEmitter.emit(
         WebhookEventType.EventReopened,
         webhookEnvelope({
           subjectId: event.id,
           householdId: event.householdId,
-          occurrenceId: `${event.id}:reopened:${initiatedAt.getTime()}`,
           data: eventWebhookIds(event),
         }),
       );
