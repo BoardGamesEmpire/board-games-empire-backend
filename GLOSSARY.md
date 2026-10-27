@@ -494,11 +494,11 @@ How an event's dates are settled: one fixed date, several fixed dates, or an ava
 _Avoid_: event mode
 
 **Cancelled event**:
-An event its host has called off. Its dates are cancelled with it, and it can be reopened.
+An event called off by its host or co-host, or by an owner or admin of its household. Its dates are cancelled with it, and it can be reopened.
 _Avoid_: deleted event (deleting removes it)
 
 **Archived event**:
-A cancelled or past event its host has put away. It is left out of event lists but can still be opened.
+A cancelled or past event its host or co-host has put away. It is left out of event lists but can still be opened.
 
 **Availability poll**:
 Settling an event's dates by proposing several and letting attendees answer available, maybe or unavailable for each, after which the host confirms or declines each proposal. One attendee's answer is an availability vote.

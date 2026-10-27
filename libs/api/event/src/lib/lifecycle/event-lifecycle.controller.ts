@@ -90,7 +90,7 @@ export class EventLifecycleController {
       'A repeat answers with the event as it is.',
   })
   @ApiResponse({ status: Http.Ok, description: 'Event reopened, or not cancelled' })
-  @ApiResponse({ status: Http.BadRequest, description: 'The event is archived; unarchive it first' })
+  @ApiResponse({ status: Http.BadRequest, description: 'The event is cancelled and archived; unarchive it first' })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: 'Event not found' })

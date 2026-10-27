@@ -15,8 +15,7 @@ import { WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EventEvents } from '../constants/event-events.constant';
-import { EventService } from '../event.service';
-import { EVENT_STATUS_DATE_SELECT, withEventStatus } from '../utils/event-status.util';
+import { EVENT_STATUS_DATE_SELECT } from '../utils/event-status.util';
 import { EventLifecycleService } from './event-lifecycle.service';
 import {
   EventArchivedEvent,
@@ -68,12 +67,6 @@ describe('EventLifecycleService', () => {
         EventLifecycleService,
         { provide: EventEmitter2, useValue: emitter },
         { provide: AbilityService, useValue: abilityService },
-        // The status as the real rule gives it, from no dates: the event's own
-        // decisions decide it in every case here.
-        {
-          provide: EventService,
-          useValue: { statusOf: jest.fn((event: Event) => withEventStatus(event, [], new Date())) },
-        },
       ],
     });
 
@@ -144,16 +137,25 @@ describe('EventLifecycleService', () => {
       expect(tx.event.update).not.toHaveBeenCalled();
     });
 
-    // An archived event is put away: unarchive it first.
-    it('answers 400 for an archived event that is not cancelled: unarchive it first (#795)', async () => {
-      row = { ...live(), archivedAt: ARCHIVED_AT };
+    // The status is worked out from dates read under the lock, so nothing
+    // is read after the commit, where a failed read would report a
+    // transition that happened as one that didn't.
+    it('answers with the status its dates give, read under the lock and not after the commit (#795)', async () => {
+      row = name === 'cancelEvent' ? live() : cancelled();
+      tx.eventOccurrence.findMany.mockResolvedValue([
+        { status: OccurrenceStatus.Confirmed, startDate: new Date(Date.now() + 60 * 60 * 1000), endDate: null },
+      ] as never);
 
-      const rejection: unknown = await run().catch((error: unknown) => error);
-
-      expect(rejection).toBeInstanceOf(BadRequestException);
-      expect((rejection as BadRequestException).getResponse()).toEqual(t('errors.event.archived'));
-      expect(tx.event.update).not.toHaveBeenCalled();
-      expect(emitter.emit).not.toHaveBeenCalled();
+      await expect(run()).resolves.toEqual(
+        expect.objectContaining({
+          status: name === 'cancelEvent' ? EventStatus.Cancelled : EventStatus.Scheduled,
+        }),
+      );
+      expect(tx.eventOccurrence.findMany).toHaveBeenCalledWith({
+        where: { eventId: EVENT_ID },
+        select: EVENT_STATUS_DATE_SELECT,
+      });
+      expect(db.eventOccurrence.findMany).not.toHaveBeenCalled();
     });
 
     it('answers 403 when the write finds the row outside the actor’s grant (#795)', async () => {
@@ -265,6 +267,18 @@ describe('EventLifecycleService', () => {
     });
 
     // Archived since, it is still where the cancel asks it to go: cancelled.
+    // An archived event is put away: unarchive it first.
+    it('answers 400 for an archived event that is not cancelled: unarchive it first (#795)', async () => {
+      row = { ...live(), archivedAt: ARCHIVED_AT };
+
+      const rejection: unknown = await service.cancelEvent(EVENT_ID, {}).catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(BadRequestException);
+      expect((rejection as BadRequestException).getResponse()).toEqual(t('errors.event.archived'));
+      expect(tx.event.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
     it('answers a repeat on a cancelled event archived since with the event as it is (#795)', async () => {
       row = cancelled({ archivedAt: ARCHIVED_AT });
 
@@ -347,6 +361,19 @@ describe('EventLifecycleService', () => {
       tx.event.count.mockResolvedValue(0);
 
       await expect(service.reopenEvent(EVENT_ID)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    // The reopen already happened, and the event, over by now, was archived
+    // since: a retry answers as a cancel's does on an event cancelled and
+    // archived since.
+    it('answers a repeat on an event archived since the reopen with the event as it is (#795)', async () => {
+      row = { ...live(), archivedAt: ARCHIVED_AT };
+
+      await expect(service.reopenEvent(EVENT_ID)).resolves.toEqual(
+        expect.objectContaining({ id: EVENT_ID, status: EventStatus.Archived }),
+      );
+      expect(tx.event.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
     });
 
     it('answers 400 for a cancelled event that is archived: unarchive it first (#795)', async () => {

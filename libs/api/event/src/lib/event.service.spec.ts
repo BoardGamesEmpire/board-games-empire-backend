@@ -47,6 +47,15 @@ const futureDate = () =>
     endDate: null,
   });
 
+/**
+ * An event as a create or an update reads it back: with every date of the
+ * event, which its status is worked out from (#795).
+ */
+const withDates = <T extends Event>(event: T, occurrences: ReturnType<typeof makeEventOccurrence>[] = []) => ({
+  ...event,
+  occurrences,
+});
+
 describe('EventService', () => {
   let service: EventService;
   let db: MockDatabaseService;
@@ -325,7 +334,7 @@ describe('EventService', () => {
 
   it('updateEvent → update', async () => {
     db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Old' }));
-    db.event.update.mockResolvedValue(makeEvent({ id: 'event-1', title: 'New' }));
+    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'New' })));
 
     await service.updateEvent('event-1', { title: 'New' } as never);
 
@@ -337,7 +346,7 @@ describe('EventService', () => {
 
   it('skips the update event when only relation-managed fields were patched', async () => {
     db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1' }));
-    db.event.update.mockResolvedValue(makeEvent({ id: 'event-1' }));
+    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1' })));
 
     // occurrences/policy/inviteUserIds change no Event columns — an
     // empty-diff "update" audit row would be noise.
@@ -348,7 +357,7 @@ describe('EventService', () => {
 
   it('updateEvent emits an EventUpdatedEvent carrying the changed subset', async () => {
     db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Old' }));
-    db.event.update.mockResolvedValue(makeEvent({ id: 'event-1', title: 'New' }));
+    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'New' })));
 
     await service.updateEvent('event-1', { title: 'New' } as never);
 
@@ -367,7 +376,7 @@ describe('EventService', () => {
   it('updateEvent sends event.event.updated.v1 naming the changed columns, never their values', async () => {
     db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Old', householdId: 'hh-1' }));
     db.event.update.mockResolvedValue(
-      makeEvent({ id: 'event-1', title: 'New', location: '12 Home Street', householdId: 'hh-1' }),
+      withDates(makeEvent({ id: 'event-1', title: 'New', location: '12 Home Street', householdId: 'hh-1' })),
     );
 
     await service.updateEvent('event-1', { title: 'New', location: '12 Home Street' } as never);
@@ -387,7 +396,7 @@ describe('EventService', () => {
 
   it('updateEvent names only the columns whose values changed, not every key the patch sent', async () => {
     db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Old', location: 'Same Hall' }));
-    db.event.update.mockResolvedValue(makeEvent({ id: 'event-1', title: 'New', location: 'Same Hall' }));
+    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'New', location: 'Same Hall' })));
 
     await service.updateEvent('event-1', { title: 'New', location: 'Same Hall' } as never);
 
@@ -399,24 +408,22 @@ describe('EventService', () => {
     // A form that re-sends what it loaded would otherwise post "updated" to
     // every subscriber for a change that never happened.
     db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Same' }));
-    db.event.update.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Same' }));
+    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'Same' })));
 
     await service.updateEvent('event-1', { title: 'Same' } as never);
 
     expect(emitter.emit).not.toHaveBeenCalledWith(WebhookEventType.EventUpdated, expect.anything());
   });
 
-  it('updateEvent serves the status worked out from every date of the event (#795)', async () => {
+  // From the dates the update reads back, with no read after the commit: a
+  // failed one would report a patch that happened as one that didn't.
+  it('updateEvent serves the status worked out from the dates it reads back (#795)', async () => {
     db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Old' }));
-    db.event.update.mockResolvedValue(makeEvent({ id: 'event-1', title: 'New' }));
-    db.eventOccurrence.findMany.mockResolvedValue([futureDate()]);
+    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'New' }), [futureDate()]));
 
     const updated = await service.updateEvent('event-1', { title: 'New' } as never);
 
-    expect(db.eventOccurrence.findMany).toHaveBeenCalledWith({
-      where: { eventId: 'event-1' },
-      select: EVENT_STATUS_DATE_SELECT,
-    });
+    expect(db.eventOccurrence.findMany).not.toHaveBeenCalled();
     expect(updated.status).toBe(EventStatus.Scheduled);
   });
 
@@ -468,7 +475,9 @@ describe('EventService', () => {
     });
   });
 
-  it('deleteEvent serves the status the event had from its dates (#795)', async () => {
+  // Read before the delete, so a failed read leaves the event as it was
+  // rather than reporting a delete that happened as one that didn't.
+  it('deleteEvent serves the status the event had from its dates, read before the delete (#795)', async () => {
     db.event.count.mockResolvedValue(1);
     db.event.update.mockResolvedValue(makeEvent({ id: 'event-1' }));
     db.eventOccurrence.findMany.mockResolvedValue([futureDate()]);
@@ -476,25 +485,29 @@ describe('EventService', () => {
     await expect(service.deleteEvent('event-1')).resolves.toEqual(
       expect.objectContaining({ id: 'event-1', status: EventStatus.Scheduled }),
     );
-  });
-
-  it('createEvent serves the status worked out from every date of the event (#795)', async () => {
-    db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
-    db.event.create.mockResolvedValue(makeEvent({ id: 'event-1' }));
-    db.eventOccurrence.findMany.mockResolvedValue([futureDate()]);
-
-    const created = await service.createEvent({ title: 'X' } as CreateEventDto);
-
     expect(db.eventOccurrence.findMany).toHaveBeenCalledWith({
       where: { eventId: 'event-1' },
       select: EVENT_STATUS_DATE_SELECT,
     });
+    expect(db.eventOccurrence.findMany.mock.invocationCallOrder[0]).toBeLessThan(
+      db.event.update.mock.invocationCallOrder[0],
+    );
+  });
+
+  // From the dates the create reads back, with no read after the commit.
+  it('createEvent serves the status worked out from the dates it reads back (#795)', async () => {
+    db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
+    db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-1' }), [futureDate()]));
+
+    const created = await service.createEvent({ title: 'X' } as CreateEventDto);
+
+    expect(db.eventOccurrence.findMany).not.toHaveBeenCalled();
     expect(created.status).toBe(EventStatus.Scheduled);
   });
 
   it('createEvent does not filter by abilities', async () => {
     db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
-    db.event.create.mockResolvedValue({ id: 'event-1', title: 'X' } as Event);
+    db.event.create.mockResolvedValue(withDates({ id: 'event-1', title: 'X' } as Event));
 
     await service.createEvent({ title: 'X' } as CreateEventDto);
 
@@ -507,7 +520,7 @@ describe('EventService', () => {
   it('createEvent checks the create against the household the event would join', async () => {
     db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
     db.$queryRaw.mockResolvedValue([{ id: 'hh-1' }] as never);
-    db.event.create.mockResolvedValue(makeEvent({ id: 'event-1', householdId: 'hh-1' }));
+    db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-1', householdId: 'hh-1' })));
 
     await service.createEvent({ title: 'X', householdId: 'hh-1' } as CreateEventDto);
 
@@ -534,7 +547,7 @@ describe('EventService', () => {
     // without it would pass as an event outside any household whatever the
     // write named.
     db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
-    db.event.create.mockResolvedValue(makeEvent({ id: 'event-1' }));
+    db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-1' })));
 
     await service.createEvent({ title: 'X' } as CreateEventDto);
 
@@ -559,7 +572,7 @@ describe('EventService', () => {
   describe('whom createEvent may invite (#546)', () => {
     beforeEach(() => {
       db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
-      db.event.create.mockResolvedValue(makeEvent({ id: 'event-1', createdById: 'user-1' }));
+      db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-1', createdById: 'user-1' })));
       abilityService.getActingUserId.mockReturnValue('user-1');
     });
 
@@ -649,7 +662,7 @@ describe('EventService', () => {
   // created until the cache expires. Each invitee gains a role the same way.
   it("createEvent evicts the creator's and every invitee's cached permission graph", async () => {
     db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
-    db.event.create.mockResolvedValue(makeEvent({ id: 'event-1', createdById: 'user-1' }));
+    db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-1', createdById: 'user-1' })));
     abilityService.getActingUserId.mockReturnValue('user-1');
 
     await service.createEvent({ title: 'X', inviteUserIds: ['user-2', 'user-3', 'user-1'] } as CreateEventDto);
@@ -660,7 +673,7 @@ describe('EventService', () => {
   it('createEvent sends event.event.created.v1 with ids only, keyed on the event', async () => {
     db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
     db.$queryRaw.mockResolvedValue([{ id: 'hh-1' }] as never);
-    db.event.create.mockResolvedValue(makeEvent({ id: 'event-1', title: 'X', householdId: 'hh-1' }));
+    db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'X', householdId: 'hh-1' })));
 
     await service.createEvent({ title: 'X', householdId: 'hh-1' } as CreateEventDto);
 
@@ -675,7 +688,7 @@ describe('EventService', () => {
 
   it('createEvent emits an EventCreatedEvent with the created row snapshot', async () => {
     db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
-    db.event.create.mockResolvedValue(makeEvent({ id: 'event-1', title: 'X', createdById: 'user-1' }));
+    db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'X', createdById: 'user-1' })));
     abilityService.getActingUserId.mockReturnValue('user-1');
 
     await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);
@@ -696,7 +709,7 @@ describe('EventService', () => {
 
     beforeEach(() => {
       db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
-      db.event.create.mockResolvedValue(makeEvent({ id: 'event-1', createdById: MOCK_ACTING_USER_ID }));
+      db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-1', createdById: MOCK_ACTING_USER_ID })));
     });
 
     /** What the `call`-th create wrote. */
@@ -943,7 +956,7 @@ describe('EventService', () => {
 
     it('primes the abilities again only on a replay', async () => {
       db.event.findUnique.mockResolvedValue(null);
-      db.event.create.mockResolvedValue(makeEvent({ id: 'event-2', createdById: 'user-1' }));
+      db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-2', createdById: 'user-1' })));
 
       await service.createEvent({ title: 'X', clientRequestId: 'k' } as CreateEventDto);
 
@@ -961,7 +974,7 @@ describe('EventService', () => {
     it('logs a create, and not a replay, which made nothing', async () => {
       const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
       db.event.findUnique.mockResolvedValueOnce(original).mockResolvedValueOnce(null);
-      db.event.create.mockResolvedValue(makeEvent({ id: 'event-2', title: 'Fresh', createdById: 'user-1' }));
+      db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-2', title: 'Fresh', createdById: 'user-1' })));
 
       await service.createEvent(retry);
       expect(log).not.toHaveBeenCalled();
@@ -986,7 +999,7 @@ describe('EventService', () => {
 
     it('stores the key on a fresh create, and emits each event once', async () => {
       db.event.findUnique.mockResolvedValue(null);
-      db.event.create.mockResolvedValue(makeEvent({ id: 'event-2', createdById: 'user-1' }));
+      db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-2', createdById: 'user-1' })));
 
       await service.createEvent({ title: 'X', clientRequestId: 'k' } as CreateEventDto);
 
@@ -1002,7 +1015,7 @@ describe('EventService', () => {
     // DTO validation never runs for an in-process caller, so the service
     // normalizes the key itself.
     it('reads a whitespace-only key as no key', async () => {
-      db.event.create.mockResolvedValue(makeEvent({ id: 'event-2', createdById: 'user-1' }));
+      db.event.create.mockResolvedValue(withDates(makeEvent({ id: 'event-2', createdById: 'user-1' })));
 
       await service.createEvent({ title: 'X', clientRequestId: '   ' } as CreateEventDto);
 

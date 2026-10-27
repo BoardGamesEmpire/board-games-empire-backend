@@ -199,9 +199,11 @@ export class EventService {
   /**
    * `event` with the `status` its dates give it, read from every date of the
    * event with no ceiling, as {@link getEventById} reads them (#795). For a
-   * write's response, which returns the event it wrote.
+   * create's replay, which writes nothing. A write works its status out from
+   * dates it read with the write or before it, never after the commit, where
+   * a failed read would report a write that happened as one that didn't.
    */
-  async statusOf<T extends Event>(event: T, now = new Date()): Promise<T & { status: EventStatus }> {
+  private async statusOf<T extends Event>(event: T, now = new Date()): Promise<T & { status: EventStatus }> {
     const dates = await this.db.eventOccurrence.findMany({
       where: { eventId: event.id },
       select: EVENT_STATUS_DATE_SELECT,
@@ -403,7 +405,8 @@ export class EventService {
     // create: a retried create made nothing, and must not log that it did.
     this.logger.log(`Event "${event.title}" (${event.id}) created by user ${event.createdById}`);
 
-    return this.statusOf(event);
+    // The create read back every date it made, with no ceiling.
+    return withEventStatus(event, event.occurrences, initiatedAt);
   }
 
   /**
@@ -540,7 +543,8 @@ export class EventService {
         }
       }
 
-      return await this.statusOf(updated);
+      // The update read back every date, with no ceiling.
+      return withEventStatus(updated, updated.occurrences, initiatedAt);
     } catch (error) {
       this.logger.error(`Error updating event with ID ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -559,6 +563,13 @@ export class EventService {
         where: { id, deletedAt: null },
       });
       assert(existing > 0, new NotFoundException(t('errors.event.not_found', { id })));
+
+      // Read before the delete, which changes none of them, so a failed read
+      // leaves the event as it was.
+      const dates = await this.db.eventOccurrence.findMany({
+        where: { eventId: id },
+        select: EVENT_STATUS_DATE_SELECT,
+      });
 
       const event = await this.db.event.update({
         where: {
@@ -593,7 +604,7 @@ export class EventService {
         }),
       );
 
-      return await this.statusOf(event);
+      return withEventStatus(event, dates, initiatedAt);
     } catch (error) {
       this.logger.error(`Error deleting event with ID ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {

@@ -309,6 +309,11 @@ describe('event cancel, reopen and archive (#795)', () => {
 
       // Over and put away: it is not cancelled, so a cancel waits for an unarchive.
       expect((await cancel(host, eventId).expect(400)).body.message).toBe(ARCHIVED);
+
+      // A reopen finds it already not cancelled, as a retry of one that
+      // landed before the archive would, and answers with it as it is.
+      const reopened = eventEnvelope(await transition(host, eventId, 'reopen').expect(200), 'POST reopen (archived)');
+      expect(reopened.status).toBe(EventStatus.Archived);
     });
 
     it('leaves an archived event out of the list unless asked for, and serves it by id', async () => {

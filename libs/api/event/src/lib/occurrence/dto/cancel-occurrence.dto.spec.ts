@@ -24,8 +24,16 @@ describe('CancelOccurrenceDto', () => {
     expect(dto.reason).toHaveLength(EVENT_CANCEL_MAX_REASON_LENGTH);
   });
 
+  it('trims the reason it takes (#795)', async () => {
+    const { dto, failed } = await parse({ reason: '  rain  ' });
+
+    expect(failed).toEqual([]);
+    expect(dto.reason).toBe('rain');
+  });
+
   it.each<[string, unknown]>([
     ['an empty reason', ''],
+    ['a reason of only spaces', ' \t '],
     ['a reason past its limit', 'x'.repeat(EVENT_CANCEL_MAX_REASON_LENGTH + 1)],
   ])('refuses %s (#795)', async (_, reason) => {
     await expect(parse({ reason })).resolves.toEqual(expect.objectContaining({ failed: ['reason'] }));
