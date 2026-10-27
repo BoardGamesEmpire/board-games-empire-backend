@@ -8,6 +8,7 @@ import type { AttendeeAddedEvent, AttendeeStatusUpdatedEvent } from '../attendee
 import { EventEvents } from '../constants/event-events.constant';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import type { EventCreatedEvent } from '../events/event.events';
+import type { EventCancelledEvent, EventReopenedEvent } from '../lifecycle/events/event-lifecycle.events';
 import { NominationEvent } from '../nomination/constants';
 import type {
   GameAddedToEventEvent,
@@ -335,6 +336,64 @@ export class EventNotificationListener {
     } catch (err) {
       this.logger.error(
         `Failed to notify on GameAddedToEvent eventId=${eventId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+  }
+
+  /**
+   * #795. One notice per attendee, with the host's reason, rather than one per
+   * cancelled date: a Fixed event's date has no voters, so the date notices
+   * would tell nobody.
+   */
+  @OnEvent(EventEvents.EventCancelled, { async: true })
+  async onEventCancelled(event: EventCancelledEvent): Promise<void> {
+    const { id: eventId, title, cancelReason } = event.after;
+
+    await this.notifyAttendeesOfEvent(eventId, event.actingUserId, (userId) => ({
+      userId,
+      type: NotificationType.EventCancelled,
+      payload: { eventId, eventTitle: title, reason: cancelReason },
+    }));
+  }
+
+  @OnEvent(EventEvents.EventReopened, { async: true })
+  async onEventReopened(event: EventReopenedEvent): Promise<void> {
+    const { id: eventId, title } = event.after;
+
+    await this.notifyAttendeesOfEvent(eventId, event.actingUserId, (userId) => ({
+      userId,
+      type: NotificationType.EventReopened,
+      payload: { eventId, eventTitle: title },
+    }));
+  }
+
+  /**
+   * Tells every attendee of the event who has an account and was not removed,
+   * whatever their RSVP, Invited and Declined included, except the person
+   * acting (#795). Each user once.
+   */
+  private async notifyAttendeesOfEvent(
+    eventId: string,
+    actingUserId: string,
+    notice: (userId: string) => CreateNotificationInput,
+  ): Promise<void> {
+    try {
+      const attendees = await this.db.eventAttendee.findMany({
+        where: { eventId, ...NOT_REMOVED, userId: { not: null } },
+        select: { userId: true },
+      });
+
+      const recipients = new Set(
+        attendees.flatMap(({ userId }) => (userId === null || userId === actingUserId ? [] : [userId])),
+      );
+
+      if (recipients.size > 0) {
+        await this.notifications.createMany([...recipients].map(notice));
+      }
+    } catch (err) {
+      this.logger.error(
+        `Failed to notify the attendees of event ${eventId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }
