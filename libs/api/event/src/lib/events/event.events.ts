@@ -12,9 +12,7 @@ import { EventEvents } from '../constants/event-events.constant';
  * reach the audit row, so context fields stay out of persistence.
  */
 
-type EventCreatedSnapshot = Readonly<
-  Pick<Event, 'id' | 'title' | 'status' | 'schedulingMode' | 'createdById' | 'householdId'>
->;
+type EventCreatedSnapshot = Readonly<Pick<Event, 'id' | 'title' | 'schedulingMode' | 'createdById' | 'householdId'>>;
 
 export class EventCreatedEvent extends MutationEvent<Event> {
   static readonly eventName = EventEvents.EventCreated;

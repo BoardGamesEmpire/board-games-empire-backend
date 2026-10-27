@@ -9,7 +9,6 @@ import type {
 import {
   EventParticipationStatus,
   EventSchedulingMode,
-  EventStatus,
   EventType,
   GameAdditionMode,
   InterestedWeight,
@@ -130,9 +129,10 @@ export function makeEvent(overrides: Partial<Event> = {}): Event {
   return {
     id: `event-${n}`,
     title: `Event ${n}`,
-    status: EventStatus.Planning,
     createdById: 'user-1',
+    cancelledAt: null,
     cancelReason: null,
+    archivedAt: null,
     image: null,
     householdId: null,
     description: null,

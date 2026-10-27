@@ -6,6 +6,8 @@ import { EventAttendeeController } from './attendee/event-attendee.controller';
 import { EventAttendeeService } from './attendee/event-attendee.service';
 import { EventController } from './event.controller';
 import { EventService } from './event.service';
+import { EventLifecycleController } from './lifecycle/event-lifecycle.controller';
+import { EventLifecycleService } from './lifecycle/event-lifecycle.service';
 import { EventNotificationListener } from './listeners/event-notification.listener';
 import { EventGameNominationController } from './nomination/event-game-nomination.controller';
 import { EventGameNominationService } from './nomination/event-game-nomination.service';
@@ -14,9 +16,16 @@ import { EventOccurrenceService } from './occurrence/event-occurrence.service';
 
 @Module({
   imports: [DatabaseModule, PermissionsModule, NotificationsServiceModule],
-  controllers: [EventController, EventAttendeeController, EventGameNominationController, EventOccurrenceController],
+  controllers: [
+    EventController,
+    EventLifecycleController,
+    EventAttendeeController,
+    EventGameNominationController,
+    EventOccurrenceController,
+  ],
   providers: [
     EventService,
+    EventLifecycleService,
     EventAttendeeService,
     EventGameNominationService,
     EventOccurrenceService,

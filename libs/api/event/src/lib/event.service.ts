@@ -16,7 +16,7 @@ import {
 import { lockExistingHousehold } from '@bge/household';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
-import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
+import { type PaginatedRows } from '@bge/shared';
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -33,8 +33,10 @@ import {
 import { NOT_REMOVED } from './constants/not-removed.constant';
 import { OCCURRENCE_ORDER } from './constants/occurrence-order.constant';
 import type { CreateEventDto } from './dto/create-event.dto';
+import type { ListEventsQueryDto } from './dto/list-events.query.dto';
 import type { UpdateEventDto } from './dto/update-event.dto';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
+import { EVENT_STATUS_DATE_SELECT, withEventStatus, type EventWithStatus } from './utils/event-status.util';
 import { pickSnapshot } from './utils/pick-snapshot.util';
 
 @Injectable()
@@ -73,6 +75,11 @@ export class EventService {
    *
    * `deletedAt: null` stays beside the scope. A soft delete keeps the attendee
    * rows, so the attendance clause alone still matches a deleted event.
+   * `archivedAt: null` joins it unless `includeArchived` asks otherwise: the
+   * host put the event away, and it stays readable by id (#795).
+   *
+   * Each row's `status` comes from its embedded occurrences, which are every
+   * date of the event, so the list needs no read of its own for it (#795).
    *
    * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
    * "the events I attend" has no meaning without a user, and the refusal must
@@ -82,11 +89,13 @@ export class EventService {
    * or soft-deleted between the two statements cannot make `total` describe a
    * list the caller was not served.
    */
-  async getEvents(pagination: PaginationQueryDto): Promise<PaginatedRows<Event>> {
+  async getEvents(query: ListEventsQueryDto): Promise<PaginatedRows<EventWithStatus>> {
+    const now = new Date();
     const userId = resolveScopeSubjectId(this.abilityService);
 
     const where = this.scopeComposer.compose(ResourceType.Event, Action.read, {
       deletedAt: null,
+      ...(query.includeArchived ? {} : { archivedAt: null }),
       attendees: { some: { userId, ...NOT_REMOVED } },
     });
 
@@ -104,8 +113,8 @@ export class EventService {
             },
             policy: true,
           },
-          skip: pagination.skip,
-          take: pagination.pageSize,
+          skip: query.skip,
+          take: query.pageSize,
           // `id` breaks ties on `createdAt` so page boundaries hold between requests.
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         }),
@@ -115,7 +124,7 @@ export class EventService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    return { rows, total };
+    return { rows: rows.map((row) => withEventStatus(row, row.occurrences, now)), total };
   }
 
   /**
@@ -129,7 +138,14 @@ export class EventService {
    * own read's top-level `where`, bound to this event. A caller with no read
    * on one of them gets `[]` for it, or `null` for the policy.
    *
-   * The four reads share one REPEATABLE READ snapshot, as the list's rows and
+   * The event's `status` is worked out from a fifth read, of every one of its
+   * dates, with no ceiling (#795). The status is a fact about the event, so
+   * whoever reads the event gets it, whatever their occurrence ceiling; a
+   * staff member or friend whose ceiling clips the dates would otherwise see
+   * a status the event doesn't have. Only the three columns it needs are
+   * read, and every occurrence read grant mirrors an event read grant today.
+   *
+   * The five reads share one REPEATABLE READ snapshot, as the list's rows and
    * count do, so the parts describe the event at one moment. They run whether
    * or not the caller can read the event; if not, the 404 discards them. Each
    * is an indexed lookup by event, so a 404 costs three small reads. Reading
@@ -140,7 +156,8 @@ export class EventService {
    * them is #404's.
    */
   async getEventById(id: string): Promise<EventDetail> {
-    const [event, occurrences, attendees, policy] = await this.db.$transaction(
+    const now = new Date();
+    const [event, occurrences, attendees, policy, statusDates] = await this.db.$transaction(
       [
         this.db.event.findUnique({
           where: {
@@ -169,15 +186,17 @@ export class EventService {
             AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.read),
           },
         }),
+
+        this.db.eventOccurrence.findMany({ where: { eventId: id }, select: EVENT_STATUS_DATE_SELECT }),
       ],
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
     assert(event, new NotFoundException(t('errors.event.not_found', { id })));
-    return { ...event, occurrences, attendees, policy };
+    return { ...withEventStatus(event, statusDates, now), occurrences, attendees, policy };
   }
 
-  async createEvent(dto: CreateEventDto): Promise<Event> {
+  async createEvent(dto: CreateEventDto): Promise<CreatedEvent & { status: EventStatus }> {
     const initiatedAt = new Date();
     const userId = this.abilityService.getActingUserId();
     const {
@@ -195,7 +214,7 @@ export class EventService {
     // check below runs (#252). The checks judged the original; a household
     // deleted or an invitee who blocked the creator since must not turn the
     // retry of a create that succeeded into a 404 or a 403.
-    const { row: event, replayed } = await createOrReplay<CreatedEvent>({
+    const { row: event, replayed } = await createOrReplay<CreatedEvent & { status: EventStatus }>({
       clientRequestId,
       find: (key) => this.findReplayedEvent(userId, key),
       logger: this.logger,
@@ -212,7 +231,7 @@ export class EventService {
 
         this.validateOccurrencesForMode(dto.schedulingMode ?? EventSchedulingMode.Fixed, occurrences);
 
-        return this.db.$transaction(async (tx) => {
+        const created = await this.db.$transaction(async (tx) => {
           // The check above cannot settle whether the household is still live.
           // It read a graph that may predate a soft-delete, since the graph is
           // cached and eviction is best-effort, and a delete can commit after the
@@ -231,7 +250,6 @@ export class EventService {
               clientRequestId,
 
               household: householdId !== null ? { connect: { id: householdId } } : undefined,
-              status: dto.schedulingMode === EventSchedulingMode.Poll ? EventStatus.Planning : EventStatus.Scheduled,
 
               createdBy: { connect: { id: userId } },
 
@@ -317,6 +335,9 @@ export class EventService {
             include: EVENT_CREATE_INCLUDE,
           });
         });
+
+        // The create read back every date it made, with no ceiling.
+        return withEventStatus(created, created.occurrences, initiatedAt);
       },
     });
 
@@ -347,7 +368,6 @@ export class EventService {
         {
           id: event.id,
           title: event.title,
-          status: event.status,
           schedulingMode: event.schedulingMode,
           createdById: event.createdById,
           householdId: event.householdId,
@@ -364,7 +384,7 @@ export class EventService {
         householdId: event.householdId,
         // An event is created once, so its id names this occurrence.
         occurrenceId: event.id,
-        data: this.webhookIds(event),
+        data: eventWebhookIds(event),
       }),
     );
 
@@ -390,7 +410,10 @@ export class EventService {
    * A row found here is always a replay, so this is also where the replay
    * evicts, before the parts are read.
    */
-  private async findReplayedEvent(userId: string, clientRequestId: string): Promise<CreatedEvent | null> {
+  private async findReplayedEvent(
+    userId: string,
+    clientRequestId: string,
+  ): Promise<(CreatedEvent & { status: EventStatus }) | null> {
     const event = await this.db.event.findUnique({
       where: { createdById_clientRequestId: { createdById: userId, clientRequestId } },
     });
@@ -422,8 +445,15 @@ export class EventService {
     // restriction: the key's scope is resolved again with the user's graph.
     await this.abilityService.primeCurrentActor();
 
-    const [occurrences, attendees, policy] = await this.db.$transaction(
+    // The row is read again with its parts and its status dates, in one
+    // snapshot, as `getEventById` reads them (#795). The row read above came
+    // first, so a cancel committed since would pair its not-yet-cancelled row
+    // with the cancel's dates: a status the event had neither before nor after.
+    const now = new Date();
+    const [row, occurrences, attendees, policy, statusDates] = await this.db.$transaction(
       [
+        this.db.event.findUnique({ where: { id: event.id } }),
+
         this.db.eventOccurrence.findMany({
           where: this.scopeComposer.compose(ResourceType.EventOccurrence, Action.read, { eventId: event.id }),
           orderBy: OCCURRENCE_ORDER,
@@ -445,14 +475,18 @@ export class EventService {
             AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.read),
           },
         }),
+
+        this.db.eventOccurrence.findMany({ where: { eventId: event.id }, select: EVENT_STATUS_DATE_SELECT }),
       ],
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    return { ...event, occurrences, attendees, policy };
+    // `row` is gone only if a household delete cascaded to it since; its
+    // dates went with it, and the row read above still names the create.
+    return withEventStatus({ ...(row ?? event), occurrences, attendees, policy }, statusDates, now);
   }
 
-  async updateEvent(id: string, dto: UpdateEventDto): Promise<Event> {
+  async updateEvent(id: string, dto: UpdateEventDto) {
     const initiatedAt = new Date();
     assert(Object.keys(dto).length > 0, new BadRequestException(t('common.at_least_one_field')));
 
@@ -503,13 +537,14 @@ export class EventService {
             webhookEnvelope({
               subjectId: updated.id,
               householdId: updated.householdId,
-              data: { ...this.webhookIds(updated), changedFields },
+              data: { ...eventWebhookIds(updated), changedFields },
             }),
           );
         }
       }
 
-      return updated;
+      // The update read back every date, with no ceiling.
+      return withEventStatus(updated, updated.occurrences, initiatedAt);
     } catch (error) {
       this.logger.error(`Error updating event with ID ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -520,7 +555,7 @@ export class EventService {
     }
   }
 
-  async deleteEvent(id: string): Promise<Event> {
+  async deleteEvent(id: string): Promise<EventWithStatus> {
     const initiatedAt = new Date();
     const userId = this.abilityService.getActingUserId();
     try {
@@ -529,7 +564,12 @@ export class EventService {
       });
       assert(existing > 0, new NotFoundException(t('errors.event.not_found', { id })));
 
-      const event = await this.db.event.update({
+      // The dates come back with the delete, in its own transaction: the update
+      // holds the event's row lock, which every write to its dates waits on, so
+      // none commits between the delete and this read. A failed read rolls the
+      // delete back rather than reporting a delete that happened as one that
+      // didn't (#795).
+      const { occurrences: dates, ...event } = await this.db.event.update({
         where: {
           id,
           // eslint-disable-next-line no-restricted-syntax -- single-row soft delete by id, not a collection read
@@ -539,6 +579,7 @@ export class EventService {
           deletedAt: new Date(),
           deletedById: userId,
         },
+        include: { occurrences: { select: EVENT_STATUS_DATE_SELECT } },
       });
 
       this.eventEmitter.emit(
@@ -558,11 +599,11 @@ export class EventService {
           subjectId: event.id,
           householdId: event.householdId,
           occurrenceId: event.id,
-          data: this.webhookIds(event),
+          data: eventWebhookIds(event),
         }),
       );
 
-      return event;
+      return withEventStatus(event, dates, initiatedAt);
     } catch (error) {
       this.logger.error(`Error deleting event with ID ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -573,22 +614,25 @@ export class EventService {
     }
   }
 
-  /**
-   * What every Event webhook carries: ids only. `data` is copied verbatim to a
-   * URL the subscriber controls, and an event's title, description and
-   * `location` (which may be a home address) are not the subscriber's to
-   * forward. A receiver that wants them reads the event with its own
-   * credentials and gets what that read allows.
-   */
-  private webhookIds(event: Pick<Event, 'id' | 'householdId'>): { eventId: string; householdId: string | null } {
-    return { eventId: event.id, householdId: event.householdId };
-  }
-
   private validateOccurrencesForMode(mode: EventSchedulingMode, occurrences?: CreateEventDto['occurrences']): void {
     if (mode === EventSchedulingMode.Fixed && occurrences && occurrences.length > 1) {
       throw new BadRequestException(t('errors.event.fixed_mode_single'));
     }
   }
+}
+
+/**
+ * What every Event webhook carries: ids only. `data` is copied verbatim to a
+ * URL the subscriber controls, and an event's title, description and
+ * `location` (which may be a home address) are not the subscriber's to
+ * forward. A receiver that wants them reads the event with its own
+ * credentials and gets what that read allows.
+ */
+export function eventWebhookIds(event: Pick<Event, 'id' | 'householdId'>): {
+  eventId: string;
+  householdId: string | null;
+} {
+  return { eventId: event.id, householdId: event.householdId };
 }
 
 /**
@@ -601,4 +645,4 @@ export type EventDetail = Prisma.EventGetPayload<{
     attendees: { include: typeof ATTENDEE_USER_AND_ROLE_INCLUDE };
     policy: true;
   };
-}>;
+}> & { status: EventStatus };

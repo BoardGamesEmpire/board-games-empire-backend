@@ -1,13 +1,14 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated } from '@bge/shared';
+import { ApiPaginatedEnvelope, paginated } from '@bge/shared';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
 import { CreateEventDto } from './dto/create-event.dto';
+import { ListEventsQueryDto } from './dto/list-events.query.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { EventService } from './event.service';
 
@@ -27,6 +28,8 @@ export class EventController {
       'Attendance-scoped: events the caller holds an attendee row for, hosts included, and nothing else — the ' +
       'same kind of result for every caller. The row counts whatever its RSVP status, so events the caller is ' +
       'only invited to, or has declined, are listed too. Newest first, soft-deleted events excluded. ' +
+      'Archived events are left out unless `?includeArchived=true`, and stay readable by id (#795). Each event ' +
+      'carries a `status` worked out from its cancel, archive and confirmed dates. ' +
       '**Breaking change (#512).** This route previously widened with the caller: a household member also received every event ' +
       'in their households, a friend received the events whose reach admits friends, and Owner/Admin/Moderator ' +
       'received every event on the server, with `pagination.total` scoped the same way (#365). Each of those ' +
@@ -45,9 +48,9 @@ export class EventController {
   })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Event))
   @Get()
-  getEvents(@Query() pagination: DefaultPaginationQueryDto) {
-    return from(this.eventService.getEvents(pagination)).pipe(
-      map((page) => paginated('events', page, pagination, ResourceType.Event)),
+  getEvents(@Query() query: ListEventsQueryDto) {
+    return from(this.eventService.getEvents(query)).pipe(
+      map((page) => paginated('events', page, query, ResourceType.Event)),
     );
   }
 

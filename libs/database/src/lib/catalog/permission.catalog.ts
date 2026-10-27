@@ -104,6 +104,24 @@ const attendingRoleInEvent = {
   role: { is: { role: { is: { name: { in: ['EventParticipant', 'EventGuest', 'EventSpectator'] } } } } },
 } satisfies Prisma.EventAttendeeWhereInput;
 
+// The Event columns `PATCH /events/:id` writes, which the edit grants are
+// bound to (#795). Leaving out the cancel columns and `archivedAt` is what
+// keeps those grants from passing the cancel and archive routes, whose checks
+// name those columns: an organizer edits an event but doesn't call it off.
+// `PATCH` itself still checks no field, so the list binds nothing there until
+// #589 names the columns a patch writes. Module-private for the reasons
+// `acceptedFriendOfActingUser` gives.
+const EVENT_PATCH_FIELDS = [
+  'title',
+  'description',
+  'image',
+  'location',
+  'url',
+  'type',
+  'reach',
+  'schedulingMode',
+] as const satisfies readonly Prisma.EventScalarFieldEnum[];
+
 // The acting user's membership row, holding `HouseholdOwner` or
 // `HouseholdAdmin`, in the household whose `members.some` it is spliced into.
 // Several permissions gate on it, and one fragment keeps an edit to who counts
@@ -1952,6 +1970,7 @@ export const PERMISSION_CATALOG = [
         },
       },
     },
+    fields: EVENT_PATCH_FIELDS,
     slug: 'update:event',
     riskLevel: RiskLevel.Medium,
     reason: 'Update an event',
@@ -1960,6 +1979,7 @@ export const PERMISSION_CATALOG = [
     action: Action.update,
     subject: ResourceType.Event,
     conditions: { householdId: '{{ householdId }}' },
+    fields: EVENT_PATCH_FIELDS,
     slug: 'update:event:household',
     riskLevel: RiskLevel.Medium,
     reason: "Update your household's events",
@@ -1993,11 +2013,20 @@ export const PERMISSION_CATALOG = [
     reason: 'Delete any event as moderator',
   }),
 
-  // TODO: this doesn't actually ensure the event is being cancelled...
+  // #795. Cancel and reopen write the event's cancel columns, archive and
+  // unarchive its `archivedAt`, and each route's check names that column, so
+  // only a grant bound to it passes. The host and co-host do all four on their
+  // event, bound to it and to their role read at the write, as `update:event`
+  // is. A household's owners and admins cancel and reopen its events, as they
+  // can cancel each of its dates (`update:event_occurrence:cancel:household`,
+  // whose risk level the household variant takes); archiving stays the host's.
+  // Organizers and moderators edit an event but do none of these, since the
+  // edit grants' `fields` leave these columns out. Which state each
+  // transition may start from is the service's to decide, not a condition's.
   permission({
     action: Action.update,
     subject: ResourceType.Event,
-    fields: ['status'],
+    fields: ['cancelledAt', 'cancelledById', 'cancelReason'],
     conditions: {
       id: '{{ eventId }}',
       attendees: {
@@ -2007,29 +2036,35 @@ export const PERMISSION_CATALOG = [
         },
       },
     },
-    slug: 'update:event:status:cancel-event',
+    slug: 'update:event:cancel',
     riskLevel: RiskLevel.Low,
-    reason: 'Cancel an event',
+    reason: 'Cancel or reopen an event you host',
   }),
-
-  // An event can be archived if it is cancelled and the user is the host
   permission({
     action: Action.update,
     subject: ResourceType.Event,
-    fields: ['status'],
+    fields: ['cancelledAt', 'cancelledById', 'cancelReason'],
+    conditions: { householdId: '{{ householdId }}' },
+    slug: 'update:event:cancel:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "Cancel or reopen your household's events",
+  }),
+  permission({
+    action: Action.update,
+    subject: ResourceType.Event,
+    fields: ['archivedAt'],
     conditions: {
       id: '{{ eventId }}',
-      status: 'Cancelled',
       attendees: {
         some: {
           userId: '{{ user.id }}',
-          role: { is: { role: { is: { name: 'EventHost' } } } },
+          role: { is: { role: { is: { name: { in: ['EventHost', 'EventCoHost'] } } } } },
         },
       },
     },
-    slug: 'update:event:status:archive-event',
+    slug: 'update:event:archive',
     riskLevel: RiskLevel.Low,
-    reason: 'Archive a cancelled event',
+    reason: 'Archive or unarchive an event you host',
   }),
 
   // `Medium`, both, as `create:household_invite` is. Neither has a route

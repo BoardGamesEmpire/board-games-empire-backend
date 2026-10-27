@@ -425,6 +425,18 @@ const HOUSEHOLD_ROLE_TABLE: readonly TableRow[] = [
     ask: (ability) => yesNo(ability.can(Action.update, householdEvent())),
   },
   {
+    action: 'Cancel or reopen any household event',
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },
+    ask: (ability) => yesNo(ability.can(Action.update, householdEvent(), 'cancelledAt')),
+  },
+  {
+    action: "Archive a household event they don't host",
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'No', HouseholdAdmin: 'No', HouseholdMember: 'No', HouseholdGuest: 'No' },
+    ask: (ability) => yesNo(ability.can(Action.update, householdEvent(), 'archivedAt')),
+  },
+  {
     action: 'Cancel an occurrence of any household event',
     grantedBy: 'Household role',
     cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },

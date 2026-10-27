@@ -28,7 +28,7 @@ describe('permission()', () => {
       slug: 'ok:relation-traversal',
       conditions: {
         id: '{{ eventId }}',
-        status: 'Cancelled',
+        schedulingMode: 'Poll',
         attendees: {
           some: { userId: '{{ user.id }}', role: { role: { name: { in: ['EventHost', 'EventCoHost'] } } } },
         },

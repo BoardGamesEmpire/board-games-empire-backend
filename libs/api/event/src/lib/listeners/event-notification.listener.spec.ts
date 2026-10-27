@@ -18,6 +18,7 @@ import {
 } from '@bge/testing';
 import { AttendeeAddedEvent } from '../attendee/events/attendee.events';
 import { EventCreatedEvent } from '../events/event.events';
+import { EventCancelledEvent, EventReopenedEvent } from '../lifecycle/events/event-lifecycle.events';
 import { NominationCreatedEvent, NominationResolvedEvent } from '../nomination/events/nomination.events';
 import { OccurrenceStatusChangedEvent } from '../occurrence/events/occurrence.events';
 import { EventNotificationListener } from './event-notification.listener';
@@ -28,6 +29,9 @@ const makeCreatedEvent = (overrides: Partial<Parameters<typeof makeEvent>[0]> = 
     invitedUserIds,
     new Date(),
   );
+
+/** The cancel snapshot's columns other than the cancel itself (#795). */
+const cancelColumns = { id: 'ev-1', title: 'Game Night', householdId: null };
 
 describe('EventNotificationListener', () => {
   let listener: EventNotificationListener;
@@ -373,6 +377,85 @@ describe('EventNotificationListener', () => {
           }),
         }),
       ]);
+    });
+  });
+
+  /**
+   * #795. A cancel or a reopen tells every attendee not removed, whatever
+   * their RSVP, Invited and Declined included, except the person acting.
+   * Guests without an account have nobody to tell.
+   */
+  describe.each([
+    {
+      name: 'onEventCancelled',
+      type: NotificationType.EventCancelled,
+      run: (actingUserId: string) =>
+        listener.onEventCancelled(
+          new EventCancelledEvent(
+            { ...cancelColumns, cancelledAt: null, cancelledById: null, cancelReason: null },
+            { ...cancelColumns, cancelledAt: new Date(), cancelledById: actingUserId, cancelReason: 'rain' },
+            actingUserId,
+            new Date(),
+          ),
+        ),
+      payload: { eventId: 'ev-1', eventTitle: 'Game Night', reason: 'rain' },
+    },
+    {
+      name: 'onEventReopened',
+      type: NotificationType.EventReopened,
+      run: (actingUserId: string) =>
+        listener.onEventReopened(
+          new EventReopenedEvent(
+            { ...cancelColumns, cancelledAt: new Date(), cancelledById: 'user-host', cancelReason: 'rain' },
+            { ...cancelColumns, cancelledAt: null, cancelledById: null, cancelReason: null },
+            actingUserId,
+            new Date(),
+          ),
+        ),
+      payload: { eventId: 'ev-1', eventTitle: 'Game Night' },
+    },
+  ])('$name', ({ type, run, payload }) => {
+    it('reads every attendee not removed who has an account, whatever their RSVP (#795)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([]);
+
+      await run('user-host');
+
+      expect(db.eventAttendee.findMany).toHaveBeenCalledWith({
+        where: { eventId: 'ev-1', removedAt: null, userId: { not: null } },
+        select: { userId: true },
+      });
+    });
+
+    it('tells each of them once, and not the person acting (#795)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([
+        { userId: 'user-host' },
+        { userId: 'user-invited' },
+        { userId: 'user-declined' },
+        { userId: 'user-invited' },
+      ] as never);
+
+      await run('user-host');
+
+      expect(notifications.createMany).toHaveBeenCalledTimes(1);
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        { userId: 'user-invited', type, payload },
+        { userId: 'user-declined', type, payload },
+      ]);
+    });
+
+    it('creates nothing when nobody else attends (#795)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'user-host' }] as never);
+
+      await run('user-host');
+
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+
+    it('logs a failed read rather than throwing it (#795)', async () => {
+      db.eventAttendee.findMany.mockRejectedValue(new Error('db down'));
+
+      await expect(run('user-host')).resolves.toBeUndefined();
+      expect(notifications.createMany).not.toHaveBeenCalled();
     });
   });
 

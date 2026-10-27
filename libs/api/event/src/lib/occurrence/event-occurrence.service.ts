@@ -21,6 +21,7 @@ import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
+import { assertEventNotCancelled } from '../lifecycle/event-lifecycle.helpers';
 import { pickSnapshot } from '../utils/pick-snapshot.util';
 import { OccurrenceEvents } from './constants';
 import { AddOccurrenceDto } from './dto/add-occurrence.dto';
@@ -208,8 +209,12 @@ export class EventOccurrenceService {
       (event.schedulingMode === EventSchedulingMode.Poll ? OccurrenceStatus.Proposed : OccurrenceStatus.Confirmed);
 
     const { written: occurrence, removedGames } = await this.db.$transaction((tx) =>
-      writeEventDates(tx, eventId, initiatedAt, () =>
-        tx.eventOccurrence.create({
+      writeEventDates(tx, eventId, initiatedAt, async () => {
+        // A cancelled event takes no new date (#795). Read under the date
+        // write's lock, which a cancel also takes.
+        await assertEventNotCancelled(tx, eventId);
+
+        return tx.eventOccurrence.create({
           data: {
             event: { connect: { id: eventId } },
             label: dto.label,
@@ -220,8 +225,8 @@ export class EventOccurrenceService {
             sortOrder: dto.sortOrder ?? 0,
           },
           include: { policy: true },
-        }),
-      ),
+        });
+      }),
     );
 
     this.eventEmitter.emit(
@@ -357,10 +362,16 @@ export class EventOccurrenceService {
     }
   }
 
+  /** A cancelled event takes no new Confirmed date: reopen it first (#795). */
   async confirmOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
-    return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Proposed], OccurrenceStatus.Confirmed, {
-      confirmedAt: new Date(),
-    });
+    return this.transitionStatus(
+      eventId,
+      occurrenceId,
+      [OccurrenceStatus.Proposed],
+      OccurrenceStatus.Confirmed,
+      { confirmedAt: new Date() },
+      { refuseOnCancelledEvent: true },
+    );
   }
 
   async declineOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
@@ -369,54 +380,82 @@ export class EventOccurrenceService {
     });
   }
 
-  async cancelOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
+  /**
+   * Cancels one date, with an optional reason, as cancelling its event
+   * writes one on each date (#795). The event itself stays on, however many
+   * of its dates are cancelled.
+   */
+  async cancelOccurrence(eventId: string, occurrenceId: string, reason?: string): Promise<OccurrenceDetail> {
     return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Confirmed], OccurrenceStatus.Cancelled, {
       cancelledAt: new Date(),
       cancelledById: this.abilityService.getActingUserId(),
+      cancelReason: reason ?? null,
     });
   }
 
+  /**
+   * Moves a date from a status in `allowedFrom` to `newStatus`.
+   *
+   * The write takes the event's row lock, `FOR NO KEY UPDATE`, as every
+   * write to its dates does, the event's cancel included, and reads the
+   * date's status again under it. The status read first answers the common
+   * case early; the one under the lock is what the write meets. A transition
+   * that loses a race answers as one arriving second would: a confirm of a
+   * date the event's cancel declined meanwhile answers 400, even once the
+   * event is reopened, rather than reviving the date (#795). The write
+   * repeats the status it read.
+   *
+   * With `refuseOnCancelledEvent`, it also reads the event's cancel under
+   * the lock ({@link assertEventNotCancelled}), so a confirm on a cancelled
+   * event answers 400.
+   */
   private async transitionStatus(
     eventId: string,
     occurrenceId: string,
     allowedFrom: OccurrenceStatus[],
     newStatus: OccurrenceStatus,
     extraData: Record<string, unknown> = {},
+    { refuseOnCancelledEvent = false }: { refuseOnCancelledEvent?: boolean } = {},
   ): Promise<OccurrenceDetail> {
     const initiatedAt = new Date();
-    const existing = await this.db.eventOccurrence.findUnique({
-      where: { id: occurrenceId, eventId },
-      select: { id: true, status: true },
-    });
+    const readStatus = (client: Prisma.TransactionClient) =>
+      client.eventOccurrence.findUnique({
+        where: { id: occurrenceId, eventId },
+        select: { id: true, status: true },
+      });
 
-    if (!existing) {
-      throw new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId }));
-    }
-
-    if (!allowedFrom.includes(existing.status)) {
-      throw new BadRequestException(
-        t('errors.occurrence.invalid_transition', {
-          from: existing.status,
-          to: newStatus,
-          allowed: allowedFrom.join(', '),
-        }),
-      );
-    }
+    const transition = { eventId, occurrenceId, allowedFrom, newStatus };
+    const existing = await readStatus(this.db);
+    assertTransitionAllowed(existing, transition);
 
     // Read before the write, which changes neither, so a failed read leaves
     // the occurrence as it was.
     const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
 
     try {
-      const updated = await this.db.eventOccurrence.update({
-        where: {
-          id: occurrenceId,
-          // Status transitions are mutations → filter by `update`, not `read`.
-          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
-        },
-        data: { status: newStatus, ...extraData },
-        include: { policy: true },
+      const { before, updated } = await this.db.$transaction(async (tx) => {
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${eventId} FOR NO KEY UPDATE`);
+
+        if (refuseOnCancelledEvent) {
+          await assertEventNotCancelled(tx, eventId);
+        }
+
+        const current = await readStatus(tx);
+        assertTransitionAllowed(current, transition);
+
+        const written = await tx.eventOccurrence.update({
+          where: {
+            id: occurrenceId,
+            status: current.status,
+            // Status transitions are mutations → filter by `update`, not `read`.
+            // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
+          },
+          data: { status: newStatus, ...extraData },
+          include: { policy: true },
+        });
+
+        return { before: current, updated: written };
       });
 
       const domainEvent =
@@ -429,7 +468,7 @@ export class EventOccurrenceService {
       this.eventEmitter.emit(
         domainEvent,
         new OccurrenceStatusChangedEvent(
-          { id: occurrenceId, eventId, status: existing.status },
+          { id: occurrenceId, eventId, status: before.status },
           { id: updated.id, eventId: updated.eventId, status: updated.status },
           initiatedAt,
         ),
@@ -756,4 +795,30 @@ function groupByOccurrence<TRow extends { occurrenceId: string | null }>(
   }
 
   return groups;
+}
+
+/** A date status transition: the date, the statuses it may start from, and the one it moves to. */
+interface StatusTransition {
+  eventId: string;
+  occurrenceId: string;
+  allowedFrom: OccurrenceStatus[];
+  newStatus: OccurrenceStatus;
+}
+
+/** 404 for a date not in the event, 400 for one whose status the transition can't start from. */
+function assertTransitionAllowed<TOccurrence extends { status: OccurrenceStatus }>(
+  occurrence: TOccurrence | null,
+  { eventId, occurrenceId, allowedFrom, newStatus }: StatusTransition,
+): asserts occurrence is TOccurrence {
+  assert(occurrence, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
+  assert(
+    allowedFrom.includes(occurrence.status),
+    new BadRequestException(
+      t('errors.occurrence.invalid_transition', {
+        from: occurrence.status,
+        to: newStatus,
+        allowed: allowedFrom.join(', '),
+      }),
+    ),
+  );
 }

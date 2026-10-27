@@ -10,6 +10,7 @@ import {
   ResourceType,
   ScheduledGameRole,
 } from '@bge/database';
+import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
@@ -17,6 +18,7 @@ import {
   createTestingModuleWithDb,
   makeEventAttendee,
   makeEventOccurrence,
+  MOCK_ACTING_USER_ID,
   paginationQuery,
   rawQueryText,
   unwrapTransaction,
@@ -37,6 +39,9 @@ import {
 } from './events/occurrence.events';
 
 const COND = { id: 'sentinel-condition' };
+
+/** Whether a raw query is the read of the event's cancel (#795). */
+const isCancelRead = (query: unknown) => /cancelled_at/.test(rawQueryText(query));
 
 /**
  * A vote as the vote read selects it, with the occurrence it is matched back
@@ -102,9 +107,17 @@ describe('EventOccurrenceService', () => {
 
     db.eventAvailabilityVote.findMany.mockResolvedValue([]);
     db.eventGame.findMany.mockResolvedValue([]);
+    // The row locks find their row, and the event is not cancelled (#795).
+    db.$queryRaw.mockImplementation(((query: unknown) =>
+      Promise.resolve(isCancelRead(query) ? [{ cancelledAt: null }] : [])) as never);
   });
 
   afterEach(() => jest.clearAllMocks());
+
+  /** The event the next cancel read finds is cancelled (#795). */
+  const eventIsCancelled = () =>
+    db.$queryRaw.mockImplementation(((query: unknown) =>
+      Promise.resolve(isCancelRead(query) ? [{ cancelledAt: new Date() }] : [])) as never);
 
   describe('getOccurrences', () => {
     beforeEach(() => {
@@ -488,6 +501,34 @@ describe('EventOccurrenceService', () => {
       await expect(service.addOccurrence('event-1', { label: 'Day 1' })).rejects.toThrow(ForbiddenException);
       expect(db.eventOccurrence.create).not.toHaveBeenCalled();
     });
+
+    // Read inside the date write, after its row lock: a cancel holds the same
+    // row, so whichever of the two comes second sees the first.
+    it("reads the event's cancel inside the date write, after its lock and before the create (#795)", async () => {
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', schedulingMode: EventSchedulingMode.MultiDay } as never);
+      db.eventOccurrence.create.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
+
+      await service.addOccurrence('event-1', { label: 'Day 1' });
+
+      const [[lock], [cancelRead]] = db.$queryRaw.mock.calls;
+      expect(rawQueryText(lock)).toMatch(/FOR NO KEY UPDATE$/);
+      expect(isCancelRead(cancelRead)).toBe(true);
+      expect(db.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+        db.eventOccurrence.create.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('refuses a new date on a cancelled event with 400, writing nothing (#795)', async () => {
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', schedulingMode: EventSchedulingMode.MultiDay } as never);
+      eventIsCancelled();
+
+      const rejection: unknown = await service.addOccurrence('event-1', { label: 'Day 1' }).catch((e: unknown) => e);
+
+      expect(rejection).toBeInstanceOf(BadRequestException);
+      expect((rejection as BadRequestException).getResponse()).toEqual(t('errors.event.cancelled'));
+      expect(db.eventOccurrence.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
   });
 
   describe('updateOccurrence', () => {
@@ -606,7 +647,8 @@ describe('EventOccurrenceService', () => {
       const [[lock]] = db.$queryRaw.mock.calls;
       expect(rawQueryText(lock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR NO KEY UPDATE$/);
       expect((lock as unknown as Prisma.Sql).values).toEqual(['event-1']);
-      expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+      // Adding a date also reads the event's cancel, after the lock (#795).
+      expect(db.$queryRaw).toHaveBeenCalledTimes(name === 'addOccurrence' ? 2 : 1);
       expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(db.eventOccurrence[op].mock.invocationCallOrder[0]);
       expect(db.$transaction).toHaveBeenCalledTimes(1);
     });
@@ -732,6 +774,127 @@ describe('EventOccurrenceService', () => {
         status: OccurrenceStatus.Confirmed,
       } as EventOccurrence);
       await expect(service.confirmOccurrence('event-1', 'occ-1')).rejects.toThrow(BadRequestException);
+    });
+
+    // A cancel holds the event's row and turns its Confirmed dates Cancelled.
+    // A confirm that comes second sees the cancel; one that comes first is
+    // caught by the cancel's update. Either way no date stays Confirmed.
+    it("confirms in a transaction that takes the event's lock, then reads its cancel (#795)", async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1', status: OccurrenceStatus.Proposed } as never);
+      db.eventOccurrence.update.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
+
+      await service.confirmOccurrence('event-1', 'occ-1');
+
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+      const [[lock], [cancelRead]] = db.$queryRaw.mock.calls;
+      expect(rawQueryText(lock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR NO KEY UPDATE$/);
+      expect(isCancelRead(cancelRead)).toBe(true);
+      expect(db.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+        db.eventOccurrence.update.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('refuses to confirm a date of a cancelled event with 400 (#795)', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1', status: OccurrenceStatus.Proposed } as never);
+      eventIsCancelled();
+
+      const rejection: unknown = await service.confirmOccurrence('event-1', 'occ-1').catch((e: unknown) => e);
+
+      expect(rejection).toBeInstanceOf(BadRequestException);
+      expect((rejection as BadRequestException).getResponse()).toEqual(t('errors.event.cancelled'));
+      expect(db.eventOccurrence.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // Declining or cancelling a date leaves nothing Confirmed, so neither
+    // reads the event's cancel. Each still takes the event's lock, as every
+    // write to its dates does, so it and the event's cancel take turns, and
+    // the date the cascade already declined or cancelled isn't written and
+    // announced a second time.
+    it.each([
+      ['declineOccurrence', OccurrenceStatus.Proposed, () => service.declineOccurrence('event-1', 'occ-1')],
+      ['cancelOccurrence', OccurrenceStatus.Confirmed, () => service.cancelOccurrence('event-1', 'occ-1')],
+    ])("%s takes the event's lock and reads no cancel (#795)", async (_, from, run) => {
+      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1', status: from } as never);
+      db.eventOccurrence.update.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
+
+      await run();
+
+      expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+      const [[lock]] = db.$queryRaw.mock.calls;
+      expect(rawQueryText(lock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR NO KEY UPDATE$/);
+    });
+
+    // Read first as Proposed; under the lock it is Declined, as the event's
+    // cancel left it, though the event has been reopened since. Confirming it
+    // would revive a date the cancel declined.
+    it.each([
+      ['confirmOccurrence', OccurrenceStatus.Proposed, () => service.confirmOccurrence('event-1', 'occ-1')],
+      ['declineOccurrence', OccurrenceStatus.Proposed, () => service.declineOccurrence('event-1', 'occ-1')],
+      ['cancelOccurrence', OccurrenceStatus.Confirmed, () => service.cancelOccurrence('event-1', 'occ-1')],
+    ])(
+      '%s answers 400 when the date has moved on by the time it holds the lock, writing nothing (#795)',
+      async (_, from, run) => {
+        const moved = from === OccurrenceStatus.Proposed ? OccurrenceStatus.Declined : OccurrenceStatus.Cancelled;
+        db.eventOccurrence.findUnique
+          .mockResolvedValueOnce({ id: 'occ-1', status: from } as never)
+          .mockResolvedValueOnce({ id: 'occ-1', status: moved } as never);
+
+        const rejection: unknown = await run().catch((e: unknown) => e);
+
+        expect(rejection).toBeInstanceOf(BadRequestException);
+        expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+          db.eventOccurrence.findUnique.mock.invocationCallOrder[1],
+        );
+        expect(db.eventOccurrence.update).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      },
+    );
+
+    it('writes only from the status it read under the lock, and reports that status as before (#795)', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1', status: OccurrenceStatus.Proposed } as never);
+      db.eventOccurrence.update.mockResolvedValue(
+        makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status: OccurrenceStatus.Declined }),
+      );
+
+      await service.declineOccurrence('event-1', 'occ-1');
+
+      expect(db.eventOccurrence.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'occ-1', status: OccurrenceStatus.Proposed, AND: [COND] },
+        }),
+      );
+      const [, emitted] = emitter.emit.mock.calls[0];
+      expect(emitted.before).toEqual({ id: 'occ-1', eventId: 'event-1', status: OccurrenceStatus.Proposed });
+    });
+
+    it('cancelOccurrence writes the reason given, with who cancelled and when (#795)', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1', status: OccurrenceStatus.Confirmed } as never);
+      db.eventOccurrence.update.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
+
+      await service.cancelOccurrence('event-1', 'occ-1', 'rain');
+
+      expect(db.eventOccurrence.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            status: OccurrenceStatus.Cancelled,
+            cancelledAt: expect.any(Date),
+            cancelledById: MOCK_ACTING_USER_ID,
+            cancelReason: 'rain',
+          },
+        }),
+      );
+    });
+
+    it('cancelOccurrence writes no reason when none is given (#795)', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1', status: OccurrenceStatus.Confirmed } as never);
+      db.eventOccurrence.update.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
+
+      await service.cancelOccurrence('event-1', 'occ-1');
+
+      expect(db.eventOccurrence.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ cancelReason: null }) }),
+      );
     });
   });
 

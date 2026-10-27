@@ -156,6 +156,7 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'update:event_occurrence:decline:household',
   'update:event_occurrence:household',
   'update:event_policy:household',
+  'update:event:cancel:household',
   'update:event:household',
   'update:game_play_session:household',
   'update:game_share:approve',
@@ -192,8 +193,8 @@ const EVENT_HOST: readonly PermissionSlug[] = [
   'read:event_attendee',
   'read:event:participant',
   'update:event_attendee:status',
-  'update:event:status:archive-event',
-  'update:event:status:cancel-event',
+  'update:event:archive',
+  'update:event:cancel',
   'update:event',
   'update:game_play_session',
 

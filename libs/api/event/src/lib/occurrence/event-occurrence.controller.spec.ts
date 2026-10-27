@@ -205,9 +205,10 @@ describe('EventOccurrenceController', () => {
       const cancelled = stubOccDetail({ status: OccurrenceStatus.Cancelled });
       service.cancelOccurrence.mockResolvedValue(cancelled);
 
-      const result = await firstValueFrom(controller.cancel('event-1', 'occ-1'));
+      const result = await firstValueFrom(controller.cancel('event-1', 'occ-1', { reason: 'rain' }));
 
-      expect(service.cancelOccurrence).toHaveBeenCalledWith('event-1', 'occ-1');
+      // The date's own reason (#795).
+      expect(service.cancelOccurrence).toHaveBeenCalledWith('event-1', 'occ-1', 'rain');
       expect(result).toEqual({
         message: t('success.occurrence.cancelled'),
         occurrence: cancelled,
