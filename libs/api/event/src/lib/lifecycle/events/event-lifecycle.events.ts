@@ -3,11 +3,12 @@ import { ResourceType, type Event } from '@bge/database';
 import { EventEvents } from '../../constants/event-events.constant';
 
 /**
- * Domain mutation events for an event's host decisions: cancel and reopen
- * (#795). Each carries the event's cancel columns before and after, plus the
- * title its notice names; the acting user rides along as a context field for
- * the notice's audience, which leaves them out. Audited by default; only
- * before/after reach the audit row.
+ * Domain mutation events for an event's host decisions: cancel, reopen,
+ * archive and unarchive (#795). Cancel and reopen carry the event's cancel
+ * columns before and after, plus the title their notice names; the acting
+ * user rides along as a context field for the notice's audience, which
+ * leaves them out. Archive and unarchive carry `archivedAt`. Audited by
+ * default; only before/after reach the audit row.
  */
 
 type EventCancelSnapshot = Readonly<
@@ -31,6 +32,40 @@ export class EventCancelledEvent extends MutationEvent<Event> {
     public readonly actingUserId: string,
     initiatedAt: Date,
   ) {
+    super(before, after, initiatedAt);
+    this.subjectId = after.id;
+  }
+}
+
+type EventArchiveSnapshot = Readonly<Pick<Event, 'id' | 'householdId' | 'archivedAt'>>;
+
+/** The host put a cancelled or finished event away. Audited; nobody is told. */
+export class EventArchivedEvent extends MutationEvent<Event> {
+  static readonly eventName = EventEvents.EventArchived;
+
+  declare readonly before: EventArchiveSnapshot;
+  declare readonly after: EventArchiveSnapshot;
+
+  readonly subject = ResourceType.Event;
+  readonly subjectId: string;
+
+  constructor(before: EventArchiveSnapshot, after: EventArchiveSnapshot, initiatedAt: Date) {
+    super(before, after, initiatedAt);
+    this.subjectId = after.id;
+  }
+}
+
+/** The host took an archived event out again. Audited; nobody is told. */
+export class EventUnarchivedEvent extends MutationEvent<Event> {
+  static readonly eventName = EventEvents.EventUnarchived;
+
+  declare readonly before: EventArchiveSnapshot;
+  declare readonly after: EventArchiveSnapshot;
+
+  readonly subject = ResourceType.Event;
+  readonly subjectId: string;
+
+  constructor(before: EventArchiveSnapshot, after: EventArchiveSnapshot, initiatedAt: Date) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }

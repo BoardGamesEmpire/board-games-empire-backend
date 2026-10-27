@@ -2,6 +2,7 @@ import {
   Action,
   DatabaseService,
   Event,
+  EventStatus,
   isPrismaDependentRecordNotFoundError,
   OccurrenceStatus,
   Prisma,
@@ -14,9 +15,14 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
 import { EventService, eventWebhookIds } from '../event.service';
-import type { EventWithStatus } from '../utils/event-status.util';
+import { deriveEventStatus, EVENT_STATUS_DATE_SELECT, type EventWithStatus } from '../utils/event-status.util';
 import type { CancelEventDto } from './dto/cancel-event.dto';
-import { EventCancelledEvent, EventReopenedEvent } from './events/event-lifecycle.events';
+import {
+  EventArchivedEvent,
+  EventCancelledEvent,
+  EventReopenedEvent,
+  EventUnarchivedEvent,
+} from './events/event-lifecycle.events';
 
 /** A transition's outcome: the event before and after, and whether this request changed it. */
 interface Transition {
@@ -32,10 +38,13 @@ interface Transition {
  */
 type TransitionWrite = (tx: Prisma.TransactionClient, existing: Event) => Promise<Event | null>;
 
+/** The statuses an event can be archived from: put away once it is over, one way or the other (#795). */
+const ARCHIVABLE: readonly EventStatus[] = [EventStatus.Cancelled, EventStatus.Completed];
+
 /**
- * An event's host decisions: cancel and reopen (#795). Each is its own route
- * and its own transition, so a transition's side effects stay with it rather
- * than in a `PATCH`.
+ * An event's host decisions: cancel, reopen, archive and unarchive (#795).
+ * Each is its own route and its own transition, so a transition's side
+ * effects stay with it rather than in a `PATCH`.
  */
 @Injectable()
 export class EventLifecycleService {
@@ -162,10 +171,81 @@ export class EventLifecycleService {
     return this.eventService.statusOf(event);
   }
 
+  /**
+   * Puts a cancelled or finished event away: it leaves `GET /events` unless
+   * asked for, and stays readable by id. A live event is cancelled first.
+   * Its dates are read under the event's lock, which a date write also
+   * takes, so the status judged is the one the write meets. Audited, and
+   * nobody is told: no notice and no webhook.
+   */
+  async archiveEvent(id: string): Promise<EventWithStatus> {
+    const initiatedAt = new Date();
+    const ceiling = this.archiveCeiling();
+
+    const { before, event, changed } = await this.transition(id, ceiling, async (tx, existing) => {
+      if (existing.archivedAt !== null) {
+        return null;
+      }
+
+      const dates = await tx.eventOccurrence.findMany({ where: { eventId: id }, select: EVENT_STATUS_DATE_SELECT });
+      assert(
+        ARCHIVABLE.includes(deriveEventStatus(existing, dates, initiatedAt)),
+        new BadRequestException(t('errors.event.not_archivable')),
+      );
+
+      return tx.event.update({
+        where: { id, archivedAt: null, AND: ceiling },
+        data: { archivedAt: initiatedAt },
+      });
+    });
+
+    if (changed) {
+      this.eventEmitter.emit(
+        EventArchivedEvent.eventName,
+        new EventArchivedEvent(archiveSnapshot(before), archiveSnapshot(event), initiatedAt),
+      );
+    }
+
+    return this.eventService.statusOf(event);
+  }
+
+  /**
+   * Takes an archived event out again. Its status is what it would be
+   * otherwise: Cancelled while it is still cancelled, else from its dates.
+   */
+  async unarchiveEvent(id: string): Promise<EventWithStatus> {
+    const initiatedAt = new Date();
+    const ceiling = this.archiveCeiling();
+
+    const { before, event, changed } = await this.transition(id, ceiling, (tx, existing) =>
+      existing.archivedAt === null
+        ? Promise.resolve(null)
+        : tx.event.update({
+            where: { id, archivedAt: { not: null }, AND: ceiling },
+            data: { archivedAt: null },
+          }),
+    );
+
+    if (changed) {
+      this.eventEmitter.emit(
+        EventUnarchivedEvent.eventName,
+        new EventUnarchivedEvent(archiveSnapshot(before), archiveSnapshot(event), initiatedAt),
+      );
+    }
+
+    return this.eventService.statusOf(event);
+  }
+
   /** The caller's ceiling for writing the cancel columns: only the grants bound to `cancelledAt` (#795). */
   private cancelCeiling(): Prisma.EventWhereInput[] {
     // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
     return this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update, 'cancelledAt');
+  }
+
+  /** The caller's ceiling for writing `archivedAt`: only the grants bound to it (#795). */
+  private archiveCeiling(): Prisma.EventWhereInput[] {
+    // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+    return this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update, 'archivedAt');
   }
 
   /**
@@ -214,6 +294,11 @@ export class EventLifecycleService {
 /** An archived event is put away; only unarchiving it changes it (#795). */
 function assertNotArchived(event: Event): void {
   assert(event.archivedAt === null, new BadRequestException(t('errors.event.archived')));
+}
+
+/** The archive column. */
+function archiveSnapshot(event: Event) {
+  return { id: event.id, householdId: event.householdId, archivedAt: event.archivedAt };
 }
 
 /** The cancel columns, and what a notice names the event by. */

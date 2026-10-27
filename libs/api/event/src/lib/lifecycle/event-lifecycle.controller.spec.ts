@@ -11,7 +11,9 @@ import { EventLifecycleService } from './event-lifecycle.service';
 
 describe('EventLifecycleController', () => {
   let controller: EventLifecycleController;
-  let service: jest.Mocked<Pick<EventLifecycleService, 'cancelEvent' | 'reopenEvent'>>;
+  let service: jest.Mocked<
+    Pick<EventLifecycleService, 'cancelEvent' | 'reopenEvent' | 'archiveEvent' | 'unarchiveEvent'>
+  >;
 
   const event = { ...makeEvent({ id: 'event-1' }), status: EventStatus.Cancelled };
 
@@ -19,6 +21,8 @@ describe('EventLifecycleController', () => {
     service = {
       cancelEvent: jest.fn().mockResolvedValue(event),
       reopenEvent: jest.fn().mockResolvedValue(event),
+      archiveEvent: jest.fn().mockResolvedValue(event),
+      unarchiveEvent: jest.fn().mockResolvedValue(event),
     };
 
     const { module } = await createTestingModuleWithDb({
@@ -44,9 +48,11 @@ describe('EventLifecycleController', () => {
   };
 
   describe.each([
-    ['cancel', EventLifecycleController.prototype.cancel],
-    ['reopen', EventLifecycleController.prototype.reopen],
-  ])('%s', (_, handler) => {
+    ['cancel', EventLifecycleController.prototype.cancel, 'cancelledAt'],
+    ['reopen', EventLifecycleController.prototype.reopen, 'cancelledAt'],
+    ['archive', EventLifecycleController.prototype.archive, 'archivedAt'],
+    ['unarchive', EventLifecycleController.prototype.unarchive, 'archivedAt'],
+  ])('%s', (_, handler, field) => {
     // An action, not a create: it answers 200 (#620).
     it('answers 200 (#795)', () => {
       expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(Http.Ok);
@@ -54,8 +60,8 @@ describe('EventLifecycleController', () => {
 
     // Naming the column is what keeps the edit grants out: they leave it out
     // of their fields, so an organizer passes PATCH and not this.
-    it('asks for update on the event’s cancelledAt (#795)', () => {
-      expect(askedBy(handler)).toEqual([[Action.update, ResourceType.Event, 'cancelledAt']]);
+    it(`asks for update on the event’s ${field} (#795)`, () => {
+      expect(askedBy(handler)).toEqual([[Action.update, ResourceType.Event, field]]);
     });
   });
 
@@ -64,6 +70,20 @@ describe('EventLifecycleController', () => {
 
     expect(service.cancelEvent).toHaveBeenCalledWith('event-1', { reason: 'rain' });
     expect(result).toEqual({ message: t('success.event.cancelled'), event });
+  });
+
+  it('archives and wraps the event (#795)', async () => {
+    const result = await firstValueFrom(controller.archive('event-1'));
+
+    expect(service.archiveEvent).toHaveBeenCalledWith('event-1');
+    expect(result).toEqual({ message: t('success.event.archived'), event });
+  });
+
+  it('unarchives and wraps the event (#795)', async () => {
+    const result = await firstValueFrom(controller.unarchive('event-1'));
+
+    expect(service.unarchiveEvent).toHaveBeenCalledWith('event-1');
+    expect(result).toEqual({ message: t('success.event.unarchived'), event });
   });
 
   it('reopens and wraps the event (#795)', async () => {

@@ -21,6 +21,7 @@ import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
+import { assertEventNotCancelled } from '../lifecycle/event-lifecycle.helpers';
 import { pickSnapshot } from '../utils/pick-snapshot.util';
 import { OccurrenceEvents } from './constants';
 import { AddOccurrenceDto } from './dto/add-occurrence.dto';
@@ -208,8 +209,12 @@ export class EventOccurrenceService {
       (event.schedulingMode === EventSchedulingMode.Poll ? OccurrenceStatus.Proposed : OccurrenceStatus.Confirmed);
 
     const { written: occurrence, removedGames } = await this.db.$transaction((tx) =>
-      writeEventDates(tx, eventId, initiatedAt, () =>
-        tx.eventOccurrence.create({
+      writeEventDates(tx, eventId, initiatedAt, async () => {
+        // A cancelled event takes no new date (#795). Read under the date
+        // write's lock, which a cancel also takes.
+        await assertEventNotCancelled(tx, eventId);
+
+        return tx.eventOccurrence.create({
           data: {
             event: { connect: { id: eventId } },
             label: dto.label,
@@ -220,8 +225,8 @@ export class EventOccurrenceService {
             sortOrder: dto.sortOrder ?? 0,
           },
           include: { policy: true },
-        }),
-      ),
+        });
+      }),
     );
 
     this.eventEmitter.emit(
@@ -357,10 +362,16 @@ export class EventOccurrenceService {
     }
   }
 
+  /** A cancelled event takes no new Confirmed date: reopen it first (#795). */
   async confirmOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
-    return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Proposed], OccurrenceStatus.Confirmed, {
-      confirmedAt: new Date(),
-    });
+    return this.transitionStatus(
+      eventId,
+      occurrenceId,
+      [OccurrenceStatus.Proposed],
+      OccurrenceStatus.Confirmed,
+      { confirmedAt: new Date() },
+      { refuseOnCancelledEvent: true },
+    );
   }
 
   async declineOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
@@ -369,19 +380,31 @@ export class EventOccurrenceService {
     });
   }
 
-  async cancelOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
+  /**
+   * Cancels one date, with an optional reason, as cancelling its event
+   * writes one on each date (#795). The event itself stays on, however many
+   * of its dates are cancelled.
+   */
+  async cancelOccurrence(eventId: string, occurrenceId: string, reason?: string): Promise<OccurrenceDetail> {
     return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Confirmed], OccurrenceStatus.Cancelled, {
       cancelledAt: new Date(),
       cancelledById: this.abilityService.getActingUserId(),
+      cancelReason: reason ?? null,
     });
   }
 
+  /**
+   * With `refuseOnCancelledEvent`, the update runs in a transaction that
+   * first reads the event's cancel ({@link assertEventNotCancelled}), so a
+   * confirm and a cancel of its event take turns (#795).
+   */
   private async transitionStatus(
     eventId: string,
     occurrenceId: string,
     allowedFrom: OccurrenceStatus[],
     newStatus: OccurrenceStatus,
     extraData: Record<string, unknown> = {},
+    { refuseOnCancelledEvent = false }: { refuseOnCancelledEvent?: boolean } = {},
   ): Promise<OccurrenceDetail> {
     const initiatedAt = new Date();
     const existing = await this.db.eventOccurrence.findUnique({
@@ -408,16 +431,25 @@ export class EventOccurrenceService {
     const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
 
     try {
-      const updated = await this.db.eventOccurrence.update({
-        where: {
-          id: occurrenceId,
-          // Status transitions are mutations → filter by `update`, not `read`.
-          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
-        },
-        data: { status: newStatus, ...extraData },
-        include: { policy: true },
-      });
+      const write = (client: Prisma.TransactionClient) =>
+        client.eventOccurrence.update({
+          where: {
+            id: occurrenceId,
+            // Status transitions are mutations → filter by `update`, not `read`.
+            // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
+          },
+          data: { status: newStatus, ...extraData },
+          include: { policy: true },
+        });
+
+      const updated = refuseOnCancelledEvent
+        ? await this.db.$transaction(async (tx) => {
+            await assertEventNotCancelled(tx, eventId);
+
+            return write(tx);
+          })
+        : await write(this.db);
 
       const domainEvent =
         newStatus === OccurrenceStatus.Confirmed

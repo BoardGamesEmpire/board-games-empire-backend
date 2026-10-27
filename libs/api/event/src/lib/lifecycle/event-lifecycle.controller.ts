@@ -46,6 +46,44 @@ export class EventLifecycleController {
   }
 
   @ApiOperation({
+    summary: 'Archive an event',
+    description:
+      'Puts a cancelled event, or one whose dates have all passed, away. It is left out of `GET /events` ' +
+      'unless `?includeArchived=true`, and stays readable by id. A live event is cancelled first. ' +
+      'Nobody is told. For its host and co-host.',
+  })
+  @ApiResponse({ status: Http.Ok, description: 'Event archived, or already archived' })
+  @ApiResponse({ status: Http.BadRequest, description: 'The event is neither cancelled nor finished' })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({ status: Http.NotFound, description: 'Event not found' })
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Event, 'archivedAt'))
+  @HttpCode(Http.Ok)
+  @Post(':id/archive')
+  archive(@Param('id') id: string) {
+    return from(this.lifecycle.archiveEvent(id)).pipe(
+      map((event) => ({ message: t('success.event.archived'), event })),
+    );
+  }
+
+  @ApiOperation({
+    summary: 'Unarchive an event',
+    description: 'Takes an archived event out again, still cancelled if it was. Nobody is told.',
+  })
+  @ApiResponse({ status: Http.Ok, description: 'Event unarchived, or not archived' })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({ status: Http.NotFound, description: 'Event not found' })
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Event, 'archivedAt'))
+  @HttpCode(Http.Ok)
+  @Post(':id/unarchive')
+  unarchive(@Param('id') id: string) {
+    return from(this.lifecycle.unarchiveEvent(id)).pipe(
+      map((event) => ({ message: t('success.event.unarchived'), event })),
+    );
+  }
+
+  @ApiOperation({
     summary: 'Reopen a cancelled event',
     description:
       'Clears the cancel, and every attendee is told. The dates stay as the cancel left them. ' +

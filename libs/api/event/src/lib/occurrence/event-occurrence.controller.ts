@@ -8,6 +8,7 @@ import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
 import { AddOccurrenceDto } from './dto/add-occurrence.dto';
+import { CancelOccurrenceDto } from './dto/cancel-occurrence.dto';
 import { SubmitAvailabilityDto } from './dto/submit-availability.dto';
 import { UpdateEventOccurrenceDto } from './dto/update-event-occurrence.dto';
 import { EventOccurrenceService } from './event-occurrence.service';
@@ -118,8 +119,12 @@ export class EventOccurrenceController {
   @ApiResponse({ status: Http.Ok, description: 'Occurrence cancelled' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence))
   @Post(':occurrenceId/cancel')
-  cancel(@Param('eventId') eventId: string, @Param('occurrenceId') occurrenceId: string) {
-    return from(this.occurrenceService.cancelOccurrence(eventId, occurrenceId)).pipe(
+  cancel(
+    @Param('eventId') eventId: string,
+    @Param('occurrenceId') occurrenceId: string,
+    @Body() dto: CancelOccurrenceDto,
+  ) {
+    return from(this.occurrenceService.cancelOccurrence(eventId, occurrenceId, dto.reason)).pipe(
       map((occurrence) => ({ message: t('success.occurrence.cancelled'), occurrence })),
     );
   }

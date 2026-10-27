@@ -16,9 +16,14 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EventEvents } from '../constants/event-events.constant';
 import { EventService } from '../event.service';
-import { withEventStatus } from '../utils/event-status.util';
+import { EVENT_STATUS_DATE_SELECT, withEventStatus } from '../utils/event-status.util';
 import { EventLifecycleService } from './event-lifecycle.service';
-import { EventCancelledEvent, EventReopenedEvent } from './events/event-lifecycle.events';
+import {
+  EventArchivedEvent,
+  EventCancelledEvent,
+  EventReopenedEvent,
+  EventUnarchivedEvent,
+} from './events/event-lifecycle.events';
 
 const COND = { id: 'sentinel-condition' };
 const EVENT_ID = 'event-1';
@@ -91,6 +96,7 @@ describe('EventLifecycleService', () => {
       Promise.resolve({ ...row, ...args.data })) as never);
     tx.event.count.mockResolvedValue(1);
     tx.eventOccurrence.updateMany.mockResolvedValue({ count: 0 });
+    tx.eventOccurrence.findMany.mockResolvedValue([]);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -332,6 +338,167 @@ describe('EventLifecycleService', () => {
       tx.event.count.mockResolvedValue(0);
 
       await expect(service.reopenEvent(EVENT_ID)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe.each([
+    ['archiveEvent', () => service.archiveEvent(EVENT_ID)],
+    ['unarchiveEvent', () => service.unarchiveEvent(EVENT_ID)],
+  ])('%s', (name, run) => {
+    /** A row the transition changes: a cancelled event, archived for an unarchive. */
+    const changeable = () =>
+      name === 'archiveEvent' ? cancelled() : cancelled({ archivedAt: new Date('2026-06-02T12:00:00.000Z') });
+
+    it('locks the event row before it reads the event (#795)', async () => {
+      row = changeable();
+      await run();
+
+      const [[lock]] = tx.$queryRaw.mock.calls;
+      expect(rawQueryText(lock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR NO KEY UPDATE$/);
+      expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.event.findUnique.mock.invocationCallOrder[0]);
+    });
+
+    it('binds its write to the archive grants (#795)', async () => {
+      row = changeable();
+      await run();
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+        ResourceType.Event,
+        Action.update,
+        'archivedAt',
+      );
+    });
+
+    it('answers 404 for a deleted event (#795)', async () => {
+      row = { ...changeable(), deletedAt: new Date() };
+
+      await expect(run()).rejects.toBeInstanceOf(NotFoundException);
+      expect(tx.event.update).not.toHaveBeenCalled();
+    });
+
+    it('answers 403 when the write finds the row outside the caller’s grant (#795)', async () => {
+      row = changeable();
+      tx.event.update.mockRejectedValue(dependentRecordNotFound());
+
+      await expect(run()).rejects.toBeInstanceOf(ForbiddenException);
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // Put away and taken out again by its host, audited, and nobody told:
+    // no notice and no webhook.
+    it('sends its domain event alone (#795)', async () => {
+      row = changeable();
+      await run();
+
+      expect(emitter.emit).toHaveBeenCalledTimes(1);
+      const [[emittedName, domainEvent]] = emitter.emit.mock.calls;
+      expect(emittedName).toBe(name === 'archiveEvent' ? EventEvents.EventArchived : EventEvents.EventUnarchived);
+      expect(domainEvent).toBeInstanceOf(name === 'archiveEvent' ? EventArchivedEvent : EventUnarchivedEvent);
+      expect(domainEvent.subjectId).toBe(EVENT_ID);
+      expect(Object.keys(domainEvent.before).sort()).toEqual(['archivedAt', 'householdId', 'id']);
+    });
+  });
+
+  describe('archiveEvent', () => {
+    const hoursFromNow = (hours: number) => new Date(Date.now() + hours * 60 * 60 * 1000);
+    const confirmed = (startDate: Date, endDate: Date | null = null) => ({
+      status: OccurrenceStatus.Confirmed,
+      startDate,
+      endDate,
+    });
+
+    it('archives a cancelled event, requiring the state it read (#795)', async () => {
+      row = cancelled();
+
+      await expect(service.archiveEvent(EVENT_ID)).resolves.toEqual(
+        expect.objectContaining({ id: EVENT_ID, archivedAt: expect.any(Date), status: EventStatus.Archived }),
+      );
+      expect(tx.event.update).toHaveBeenCalledWith({
+        where: { id: EVENT_ID, archivedAt: null, AND: [COND] },
+        data: { archivedAt: expect.any(Date) },
+      });
+    });
+
+    // Its dates are read under the event's lock, which a date write also
+    // takes, so the status judged is the one the write meets.
+    it('archives an event whose dates have all passed, reading them under the lock (#795)', async () => {
+      tx.eventOccurrence.findMany.mockResolvedValue([confirmed(hoursFromNow(-30), hoursFromNow(-24))] as never);
+
+      await service.archiveEvent(EVENT_ID);
+
+      expect(tx.eventOccurrence.findMany).toHaveBeenCalledWith({
+        where: { eventId: EVENT_ID },
+        select: EVENT_STATUS_DATE_SELECT,
+      });
+      expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        tx.eventOccurrence.findMany.mock.invocationCallOrder[0],
+      );
+      expect(tx.event.update).toHaveBeenCalled();
+    });
+
+    // A live event is cancelled first, then archived.
+    it.each<[string, () => unknown[]]>([
+      ['Planning, with no dates', () => []],
+      ['Scheduled', () => [confirmed(hoursFromNow(24))]],
+      ['Ongoing', () => [confirmed(hoursFromNow(-1), hoursFromNow(1))]],
+    ])('refuses an event that is %s with 400 (#795)', async (_, dates) => {
+      tx.eventOccurrence.findMany.mockResolvedValue(dates() as never);
+
+      const rejection: unknown = await service.archiveEvent(EVENT_ID).catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(BadRequestException);
+      expect((rejection as BadRequestException).getResponse()).toEqual(t('errors.event.not_archivable'));
+      expect(tx.event.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('answers a repeat with the event as it is, writing and sending nothing (#795)', async () => {
+      row = cancelled({ archivedAt: new Date('2026-06-02T12:00:00.000Z') });
+
+      await expect(service.archiveEvent(EVENT_ID)).resolves.toEqual(
+        expect.objectContaining({ status: EventStatus.Archived }),
+      );
+      expect(tx.event.count).toHaveBeenCalledWith({ where: { id: EVENT_ID, AND: [COND] } });
+      expect(tx.event.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('refuses a repeat from a caller whose grant does not reach the event (#795)', async () => {
+      row = cancelled({ archivedAt: new Date('2026-06-02T12:00:00.000Z') });
+      tx.event.count.mockResolvedValue(0);
+
+      await expect(service.archiveEvent(EVENT_ID)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe('unarchiveEvent', () => {
+    it('clears archivedAt, requiring the state it read (#795)', async () => {
+      row = cancelled({ archivedAt: new Date('2026-06-02T12:00:00.000Z') });
+
+      await service.unarchiveEvent(EVENT_ID);
+
+      expect(tx.event.update).toHaveBeenCalledWith({
+        where: { id: EVENT_ID, archivedAt: { not: null }, AND: [COND] },
+        data: { archivedAt: null },
+      });
+    });
+
+    it('returns a cancelled event to Cancelled (#795)', async () => {
+      row = cancelled({ archivedAt: new Date('2026-06-02T12:00:00.000Z') });
+
+      await expect(service.unarchiveEvent(EVENT_ID)).resolves.toEqual(
+        expect.objectContaining({ archivedAt: null, status: EventStatus.Cancelled }),
+      );
+    });
+
+    it('answers an unarchive of an event not archived with the event as it is, sending nothing (#795)', async () => {
+      row = cancelled();
+
+      await expect(service.unarchiveEvent(EVENT_ID)).resolves.toEqual(
+        expect.objectContaining({ status: EventStatus.Cancelled }),
+      );
+      expect(tx.event.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
     });
   });
 });

@@ -57,7 +57,8 @@
     "invitee_friends_of_friends_only": "This server only allows you to place your friends and friends of friends on an event",
     "invitee_refused": "You cannot place this user on an event",
     "archived": "This event is archived. Unarchive it first.",
-    "cancelled": "This event is cancelled. Reopen it first."
+    "cancelled": "This event is cancelled. Reopen it first.",
+    "not_archivable": "Only a cancelled event, or one whose dates have all passed, can be archived."
   },
   "occurrence": {
     "not_found": "Occurrence {occurrenceId} not found for event {eventId}",
