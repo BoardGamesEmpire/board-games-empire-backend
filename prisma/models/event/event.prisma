@@ -12,16 +12,22 @@ model Event {
   createdBy   User   @relation("EventsCreated", fields: [createdById], references: [id])
   createdById String @map("created_by_id")
 
+  // The event stores its host's decisions, cancel and archive, and no status
+  // (#795). The status a response carries is worked out on read: Archived,
+  // else Cancelled, else Planning, Scheduled, Ongoing or Completed from the
+  // event's confirmed dates. A stored status would drift from those dates.
   cancelledBy   User?   @relation("CancelledBy", fields: [cancelledById], references: [id])
   cancelledById String? @map("cancelled_by_id")
 
-  cancelReason String? @map("cancel_reason")
+  cancelledAt  DateTime? @map("cancelled_at") @db.Timestamptz(3)
+  cancelReason String?   @map("cancel_reason")
+
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(3)
 
   deletedBy   User?   @relation("DeletedBy", fields: [deletedById], references: [id])
   deletedById String? @map("deleted_by_id")
 
   title          String
-  status         EventStatus         @default(Planning)
   schedulingMode EventSchedulingMode @default(Fixed) @map("scheduling_mode")
 
   image       String?
@@ -72,15 +78,4 @@ enum EventSchedulingMode {
   MultiDay // multiple confirmed occurrences, each with own schedule
 
   @@map("event_scheduling_modes")
-}
-
-enum EventStatus {
-  Archived
-  Cancelled
-  Completed
-  Ongoing
-  Planning
-  Scheduled
-
-  @@map("event_statuses")
 }

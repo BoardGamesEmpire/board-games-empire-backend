@@ -5,7 +5,6 @@ import {
   Event,
   EventParticipationStatus,
   EventSchedulingMode,
-  EventStatus,
   isPrismaDependentRecordNotFoundError,
   normalizeClientRequestId,
   OccurrenceStatus,
@@ -231,7 +230,6 @@ export class EventService {
               clientRequestId,
 
               household: householdId !== null ? { connect: { id: householdId } } : undefined,
-              status: dto.schedulingMode === EventSchedulingMode.Poll ? EventStatus.Planning : EventStatus.Scheduled,
 
               createdBy: { connect: { id: userId } },
 
@@ -347,7 +345,6 @@ export class EventService {
         {
           id: event.id,
           title: event.title,
-          status: event.status,
           schedulingMode: event.schedulingMode,
           createdById: event.createdById,
           householdId: event.householdId,

@@ -1997,7 +1997,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.update,
     subject: ResourceType.Event,
-    fields: ['status'],
+    fields: ['cancelledAt', 'cancelledById', 'cancelReason'],
     conditions: {
       id: '{{ eventId }}',
       attendees: {
@@ -2016,10 +2016,9 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.update,
     subject: ResourceType.Event,
-    fields: ['status'],
+    fields: ['archivedAt'],
     conditions: {
       id: '{{ eventId }}',
-      status: 'Cancelled',
       attendees: {
         some: {
           userId: '{{ user.id }}',

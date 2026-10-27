@@ -128,6 +128,11 @@ export interface EventRefPayload {
   eventTitle: string;
 }
 
+/** An event the recipient attends was cancelled, with the host's reason if given (#795). */
+export interface EventCancelledPayload extends EventRefPayload {
+  reason: string | null;
+}
+
 /** Someone RSVP'd to an event the recipient hosts. */
 export interface EventRsvpReceivedPayload extends EventRefPayload {
   attendeeName: string;
@@ -262,6 +267,8 @@ export type NotificationPayloadMap = {
   [NotificationType.GameShareAwaitingApproval]: GameShareAwaitingApprovalPayload;
   [NotificationType.EventInviteReceived]: EventRefPayload;
   [NotificationType.EventCreated]: EventRefPayload;
+  [NotificationType.EventCancelled]: EventCancelledPayload;
+  [NotificationType.EventReopened]: EventRefPayload;
   [NotificationType.EventRsvpReceived]: EventRsvpReceivedPayload;
   [NotificationType.GameNominated]: GameNominatedPayload;
   [NotificationType.GameNominationApproved]: NominationOutcomePayload;

@@ -41,7 +41,7 @@ describe('SubjectInstance', () => {
   });
 
   it('rejects a value its column cannot hold', () => {
-    // @ts-expect-error -- `status` is an EventStatus
-    instance(ResourceType.Event, { status: 'Adjourned' });
+    // @ts-expect-error -- `schedulingMode` is an EventSchedulingMode
+    instance(ResourceType.Event, { schedulingMode: 'Adjourned' });
   });
 });

@@ -88,6 +88,14 @@ enum NotificationType {
   EventCreated
 
   /**
+   * An event called off or reopened by its host (#795). Both go to every
+   * attendee not removed, Invited and Declined included, except the person
+   * acting.
+   */
+  EventCancelled
+  EventReopened
+
+  /**
    * Nominations are created when a user nominates a game for an event, and resolved when a host approves/rejects it or it fails/passes a vote.
    * The same notification is sent to the nominator for all resolution outcomes, with the type indicating the outcome.
    */

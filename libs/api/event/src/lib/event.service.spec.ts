@@ -2,7 +2,6 @@ import type { Event } from '@bge/database';
 import {
   Action,
   EventSchedulingMode,
-  EventStatus,
   FriendshipStatus,
   HUMAN_USER_WHERE,
   OccurrenceStatus,
@@ -606,7 +605,6 @@ describe('EventService', () => {
         occurrences: [{ label: 'Night', startDate, endDate, location: 'Den' }],
       } as CreateEventDto);
 
-      expect(written().status).toBe(EventStatus.Scheduled);
       expect(written().occurrences).toEqual({
         create: [
           {
@@ -632,7 +630,6 @@ describe('EventService', () => {
         occurrences: [{ startDate, sortOrder: 5 }, { startDate: endDate }],
       } as CreateEventDto);
 
-      expect(written().status).toBe(EventStatus.Planning);
       expect(written()).toHaveProperty('occurrences.create', [
         expect.objectContaining({
           sortOrder: 5,
@@ -647,6 +644,14 @@ describe('EventService', () => {
           confirmedAt: null,
         }),
       ]);
+    });
+
+    it('writes no status: the event stores decisions, and the rest comes from its dates (#795)', async () => {
+      await service.createEvent({ title: 'X', schedulingMode: EventSchedulingMode.Poll } as CreateEventDto);
+      await service.createEvent({ title: 'X', occurrences: [{ startDate }] } as CreateEventDto);
+
+      expect(written(0)).not.toHaveProperty('status');
+      expect(written(1)).not.toHaveProperty('status');
     });
 
     it('writes no occurrences for an empty list', async () => {
