@@ -564,14 +564,12 @@ export class EventService {
       });
       assert(existing > 0, new NotFoundException(t('errors.event.not_found', { id })));
 
-      // Read before the delete, which changes none of them, so a failed read
-      // leaves the event as it was.
-      const dates = await this.db.eventOccurrence.findMany({
-        where: { eventId: id },
-        select: EVENT_STATUS_DATE_SELECT,
-      });
-
-      const event = await this.db.event.update({
+      // The dates come back with the delete, in its own transaction: the update
+      // holds the event's row lock, which every write to its dates waits on, so
+      // none commits between the delete and this read. A failed read rolls the
+      // delete back rather than reporting a delete that happened as one that
+      // didn't (#795).
+      const { occurrences: dates, ...event } = await this.db.event.update({
         where: {
           id,
           // eslint-disable-next-line no-restricted-syntax -- single-row soft delete by id, not a collection read
@@ -581,6 +579,7 @@ export class EventService {
           deletedAt: new Date(),
           deletedById: userId,
         },
+        include: { occurrences: { select: EVENT_STATUS_DATE_SELECT } },
       });
 
       this.eventEmitter.emit(

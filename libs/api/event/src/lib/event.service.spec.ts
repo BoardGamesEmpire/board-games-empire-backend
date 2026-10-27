@@ -433,7 +433,7 @@ describe('EventService', () => {
 
   it('deleteEvent → delete (soft)', async () => {
     db.event.count.mockResolvedValue(1);
-    db.event.update.mockResolvedValue({ id: 'event-1' } as Event);
+    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1' })));
 
     await service.deleteEvent('event-1');
 
@@ -445,7 +445,7 @@ describe('EventService', () => {
 
   it('deleteEvent emits an EventDeletedEvent (before-only)', async () => {
     db.event.count.mockResolvedValue(1);
-    db.event.update.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Doomed', createdById: 'user-1' }));
+    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'Doomed', createdById: 'user-1' })));
 
     await service.deleteEvent('event-1');
 
@@ -460,7 +460,7 @@ describe('EventService', () => {
 
   it('deleteEvent sends event.event.deleted.v1 with ids only, keyed on the event', async () => {
     db.event.count.mockResolvedValue(1);
-    db.event.update.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Doomed', householdId: null }));
+    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'Doomed', householdId: null })));
 
     await service.deleteEvent('event-1');
 
@@ -475,23 +475,21 @@ describe('EventService', () => {
     });
   });
 
-  // Read before the delete, so a failed read leaves the event as it was
-  // rather than reporting a delete that happened as one that didn't.
-  it('deleteEvent serves the status the event had from its dates, read before the delete (#795)', async () => {
+  // The dates ride on the delete's own update, which holds the event's row
+  // lock, so no date write commits between the delete and the read, and a
+  // failed read rolls the delete back.
+  it('deleteEvent serves the status the event had from the dates its update reads back (#795)', async () => {
     db.event.count.mockResolvedValue(1);
-    db.event.update.mockResolvedValue(makeEvent({ id: 'event-1' }));
-    db.eventOccurrence.findMany.mockResolvedValue([futureDate()]);
+    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1' }), [futureDate()]));
 
-    await expect(service.deleteEvent('event-1')).resolves.toEqual(
-      expect.objectContaining({ id: 'event-1', status: EventStatus.Scheduled }),
+    const deleted = await service.deleteEvent('event-1');
+
+    expect(deleted).toEqual(expect.objectContaining({ id: 'event-1', status: EventStatus.Scheduled }));
+    expect(deleted).not.toHaveProperty('occurrences');
+    expect(db.event.update).toHaveBeenCalledWith(
+      expect.objectContaining({ include: { occurrences: { select: EVENT_STATUS_DATE_SELECT } } }),
     );
-    expect(db.eventOccurrence.findMany).toHaveBeenCalledWith({
-      where: { eventId: 'event-1' },
-      select: EVENT_STATUS_DATE_SELECT,
-    });
-    expect(db.eventOccurrence.findMany.mock.invocationCallOrder[0]).toBeLessThan(
-      db.event.update.mock.invocationCallOrder[0],
-    );
+    expect(db.eventOccurrence.findMany).not.toHaveBeenCalled();
   });
 
   // From the dates the create reads back, with no read after the commit.
