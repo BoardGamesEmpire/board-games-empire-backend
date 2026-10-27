@@ -2019,7 +2019,7 @@ export const PERMISSION_CATALOG = [
   // event, bound to it and to their role read at the write, as `update:event`
   // is. A household's owners and admins cancel and reopen its events, as they
   // can cancel each of its dates (`update:event_occurrence:cancel:household`,
-  // whose rating the household variant takes); archiving stays the host's.
+  // whose risk level the household variant takes); archiving stays the host's.
   // Organizers and moderators edit an event but do none of these, since the
   // edit grants' `fields` leave these columns out. Which state each
   // transition may start from is the service's to decide, not a condition's.

@@ -342,9 +342,9 @@ export class EventNotificationListener {
   }
 
   /**
-   * #795. One notice per attendee, with the host's reason, rather than one per
-   * cancelled date: a Fixed event's date has no voters, so the date notices
-   * would tell nobody.
+   * #795. One notification per attendee, with the host's reason, rather than
+   * one per cancelled date: a Fixed event's date has no voters, so the date
+   * notifications would tell nobody.
    */
   @OnEvent(EventEvents.EventCancelled, { async: true })
   async onEventCancelled(event: EventCancelledEvent): Promise<void> {
@@ -376,7 +376,7 @@ export class EventNotificationListener {
   private async notifyAttendeesOfEvent(
     eventId: string,
     actingUserId: string,
-    notice: (userId: string) => CreateNotificationInput,
+    notificationFor: (userId: string) => CreateNotificationInput,
   ): Promise<void> {
     try {
       const attendees = await this.db.eventAttendee.findMany({
@@ -389,7 +389,7 @@ export class EventNotificationListener {
       );
 
       if (recipients.size > 0) {
-        await this.notifications.createMany([...recipients].map(notice));
+        await this.notifications.createMany([...recipients].map(notificationFor));
       }
     } catch (err) {
       this.logger.error(

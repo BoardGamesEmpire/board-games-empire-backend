@@ -71,7 +71,7 @@ describe('event cancel, reopen and archive (#795)', () => {
       })
     ).id;
 
-  /** `actor` answers their invitation, which tells the event's creator: a later notice to wait for. */
+  /** `actor` answers their invitation, which tells the event's creator: a later notification to wait for. */
   const rsvp = async (actor: AuthenticatedActor, eventId: string) =>
     request(baseUrl)
       .patch(`${EVENTS_PATH}/${eventId}/attendees/${await attendeeRowId(eventId, actor.user.id)}/status`)
@@ -79,12 +79,12 @@ describe('event cancel, reopen and archive (#795)', () => {
       .send({ status: 'Attending' })
       .expect(200);
 
-  const notices = (list: readonly UnreadNotificationWire[], type: NotificationType, eventId: string) =>
+  const notificationsOf = (list: readonly UnreadNotificationWire[], type: NotificationType, eventId: string) =>
     list.filter((notification) => notification.type === type && notification.payload['eventId'] === eventId);
 
-  /** `actor`'s unread list once it holds `count` notices of `type` for `eventId`. */
+  /** `actor`'s unread list once it holds `count` notifications of `type` for `eventId`. */
   const unreadOnceHolding = (actor: SessionActor, type: NotificationType, eventId: string, count = 1) =>
-    unreadWhen(baseUrl, actor, (list) => notices(list, type, eventId).length >= count);
+    unreadWhen(baseUrl, actor, (list) => notificationsOf(list, type, eventId).length >= count);
 
   const datesOf = (eventId: string) =>
     db.client.eventOccurrence.findMany({
@@ -111,15 +111,15 @@ describe('event cancel, reopen and archive (#795)', () => {
       ]);
 
       const inviteeList = await unreadOnceHolding(invitee, NotificationType.EventCancelled, eventId);
-      expect(notices(inviteeList, NotificationType.EventCancelled, eventId)).toEqual([
+      expect(notificationsOf(inviteeList, NotificationType.EventCancelled, eventId)).toEqual([
         expect.objectContaining({ payload: expect.objectContaining({ reason: 'Snowed in' }) }),
       ]);
 
       // The sentinel: the invitee's answer tells the host. Once it arrives,
-      // a cancel notice to the host would have too.
+      // a cancel notification to the host would have too.
       await rsvp(invitee, eventId);
       const hostList = await unreadOnceHolding(host, NotificationType.EventRsvpReceived, eventId);
-      expect(notices(hostList, NotificationType.EventCancelled, eventId)).toEqual([]);
+      expect(notificationsOf(hostList, NotificationType.EventCancelled, eventId)).toEqual([]);
     });
 
     it('answers a retry with another reason 200, keeping the first reason and telling nobody again', async () => {
@@ -137,7 +137,7 @@ describe('event cancel, reopen and archive (#795)', () => {
       // The sentinel: a reopen tells the invitee once more.
       await transition(host, eventId, 'reopen').expect(200);
       const list = await unreadOnceHolding(invitee, NotificationType.EventReopened, eventId);
-      expect(notices(list, NotificationType.EventCancelled, eventId)).toHaveLength(1);
+      expect(notificationsOf(list, NotificationType.EventCancelled, eventId)).toHaveLength(1);
     });
 
     it.each([SystemRole.EventOrganizer, SystemRole.EventModerator])(
@@ -161,10 +161,11 @@ describe('event cancel, reopen and archive (#795)', () => {
       },
     );
 
-    it("lets a household admin who doesn't attend cancel the household's event, and not archive it", async () => {
+    it("lets a household admin who doesn't attend cancel the household's event, and not its moderator", async () => {
       const owner = await actors.user();
       const admin = await actors.user();
       const member = await actors.user();
+      const moderator = await actors.user();
       const { household } = await actors.householdWithMembers({
         owner,
         members: [
@@ -173,13 +174,37 @@ describe('event cancel, reopen and archive (#795)', () => {
         ],
       });
       const eventId = await createdEventId(member, { householdId: household.id });
+      await addAttendee(member, eventId, moderator.user.id, SystemRole.EventModerator).expect(201);
+
+      const edit = (actor: AuthenticatedActor, title: string) =>
+        request(baseUrl).patch(`${EVENTS_PATH}/${eventId}`).set(actor.headers).send({ title }).expect(200);
+
+      // Control: both edit the event.
+      await edit(admin, 'Edited by a household admin');
+      await edit(moderator, 'Edited by a moderator');
 
       const cancelled = eventEnvelope(await cancel(admin, eventId).expect(200), 'POST cancel as a household admin');
       expect(cancelled.status).toBe(EventStatus.Cancelled);
+      await cancel(moderator, eventId).expect(403);
 
       // Cancelled, so archivable, and still not the admin's to archive.
       await transition(admin, eventId, 'archive').expect(403);
       await transition(member, eventId, 'archive').expect(200);
+    });
+
+    // The grant is checked against the event before its state, so someone it
+    // doesn't reach learns nothing of the event from the answer.
+    it("answers 403, not the event's state, to someone whose grant doesn't reach it", async () => {
+      const host = await actors.user();
+      const outsider = await actors.user();
+      const eventId = await createdEventId(host, { occurrences: [{ startDate: hoursFromNow(24) }] });
+      // The outsider hosts an event of their own, so the route's check passes them.
+      await createdEventId(outsider);
+
+      await transition(outsider, eventId, 'archive').expect(403);
+
+      // Control: the host learns the event isn't archivable yet.
+      expect((await transition(host, eventId, 'archive').expect(400)).body.message).toBe(NOT_ARCHIVABLE);
     });
 
     it('refuses a new date on a cancelled event until it is reopened', async () => {
@@ -244,7 +269,7 @@ describe('event cancel, reopen and archive (#795)', () => {
       expect(reopened.status).toBe(EventStatus.Planning);
       expect(reopened.cancelReason).toBeNull();
       const list = await unreadOnceHolding(invitee, NotificationType.EventReopened, eventId);
-      expect(notices(list, NotificationType.EventReopened, eventId)).toHaveLength(1);
+      expect(notificationsOf(list, NotificationType.EventReopened, eventId)).toHaveLength(1);
     });
   });
 
@@ -261,7 +286,13 @@ describe('event cancel, reopen and archive (#795)', () => {
       expect(archived.status).toBe(EventStatus.Archived);
 
       expect((await transition(host, eventId, 'reopen').expect(400)).body.message).toBe(ARCHIVED);
-      expect((await cancel(host, eventId).expect(400)).body.message).toBe(ARCHIVED);
+      // A cancel retry finds it still cancelled, and answers with it as it is.
+      const retried = eventEnvelope(
+        await cancel(host, eventId, 'Another reason').expect(200),
+        'POST cancel (archived)',
+      );
+      expect(retried.status).toBe(EventStatus.Archived);
+      expect(retried.cancelReason).toBeNull();
 
       const unarchived = eventEnvelope(await transition(host, eventId, 'unarchive').expect(200), 'POST unarchive');
       expect(unarchived.status).toBe(EventStatus.Cancelled);
@@ -275,6 +306,9 @@ describe('event cancel, reopen and archive (#795)', () => {
 
       const archived = eventEnvelope(await transition(host, eventId, 'archive').expect(200), 'POST archive');
       expect(archived.status).toBe(EventStatus.Archived);
+
+      // Over and put away: it is not cancelled, so a cancel waits for an unarchive.
+      expect((await cancel(host, eventId).expect(400)).body.message).toBe(ARCHIVED);
     });
 
     it('leaves an archived event out of the list unless asked for, and serves it by id', async () => {

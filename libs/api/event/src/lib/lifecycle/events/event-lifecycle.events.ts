@@ -5,10 +5,10 @@ import { EventEvents } from '../../constants/event-events.constant';
 /**
  * Domain mutation events for an event's host decisions: cancel, reopen,
  * archive and unarchive (#795). Cancel and reopen carry the event's cancel
- * columns before and after, plus the title their notice names; the acting
- * user rides along as a context field for the notice's audience, which
- * leaves them out. Archive and unarchive carry `archivedAt`. Audited by
- * default; only before/after reach the audit row.
+ * columns before and after, plus the title their notification names; the
+ * acting user rides along as a context field for the notification's
+ * audience, which leaves them out. Archive and unarchive carry `archivedAt`.
+ * Audited by default; only before/after reach the audit row.
  */
 
 type EventCancelSnapshot = Readonly<
@@ -28,7 +28,7 @@ export class EventCancelledEvent extends MutationEvent<Event> {
   constructor(
     before: EventCancelSnapshot,
     after: EventCancelSnapshot,
-    /** Who cancelled it — context for the notice's audience, not row state. */
+    /** Who cancelled it — context for the notification's audience, not row state. */
     public readonly actingUserId: string,
     initiatedAt: Date,
   ) {
@@ -84,7 +84,7 @@ export class EventReopenedEvent extends MutationEvent<Event> {
   constructor(
     before: EventCancelSnapshot,
     after: EventCancelSnapshot,
-    /** Who reopened it — context for the notice's audience, not row state. */
+    /** Who reopened it — context for the notification's audience, not row state. */
     public readonly actingUserId: string,
     initiatedAt: Date,
   ) {

@@ -27,6 +27,7 @@ import {
 
 const COND = { id: 'sentinel-condition' };
 const EVENT_ID = 'event-1';
+const ARCHIVED_AT = new Date('2026-06-02T12:00:00.000Z');
 
 const dependentRecordNotFound = () =>
   new Prisma.PrismaClientKnownRequestError('No record was found for an update.', {
@@ -107,7 +108,7 @@ describe('EventLifecycleService', () => {
   describe.each([
     ['cancelEvent', () => service.cancelEvent(EVENT_ID, {})],
     ['reopenEvent', () => service.reopenEvent(EVENT_ID)],
-  ])('%s', (_, run) => {
+  ])('%s', (name, run) => {
     // The cancel cascade and a date write each take this lock, so they take
     // turns, and the read below sees whichever committed first.
     it('locks the event row before it reads the event (#795)', async () => {
@@ -120,7 +121,7 @@ describe('EventLifecycleService', () => {
     });
 
     it('binds its write to the cancel column grants (#795)', async () => {
-      row = _ === 'cancelEvent' ? live() : cancelled();
+      row = name === 'cancelEvent' ? live() : cancelled();
       await run();
 
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
@@ -143,13 +144,9 @@ describe('EventLifecycleService', () => {
       expect(tx.event.update).not.toHaveBeenCalled();
     });
 
-    // An archived event is put away: undo that first. Cancelled or not, it
-    // answers the same.
-    it.each([
-      ['an archived event', () => live()],
-      ['an archived, cancelled event', () => cancelled()],
-    ])('answers 400 for %s: unarchive it first (#795)', async (__, base) => {
-      row = { ...base(), archivedAt: new Date('2026-06-02T12:00:00.000Z') };
+    // An archived event is put away: unarchive it first.
+    it('answers 400 for an archived event that is not cancelled: unarchive it first (#795)', async () => {
+      row = { ...live(), archivedAt: ARCHIVED_AT };
 
       const rejection: unknown = await run().catch((error: unknown) => error);
 
@@ -159,8 +156,8 @@ describe('EventLifecycleService', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
-    it('answers 403 when the write finds the row outside the caller’s grant (#795)', async () => {
-      row = _ === 'cancelEvent' ? live() : cancelled();
+    it('answers 403 when the write finds the row outside the actor’s grant (#795)', async () => {
+      row = name === 'cancelEvent' ? live() : cancelled();
       tx.event.update.mockRejectedValue(dependentRecordNotFound());
 
       const rejection: unknown = await run().catch((error: unknown) => error);
@@ -267,7 +264,19 @@ describe('EventLifecycleService', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
-    it('refuses a repeat from a caller whose grant does not reach the event (#795)', async () => {
+    // Archived since, it is still where the cancel asks it to go: cancelled.
+    it('answers a repeat on a cancelled event archived since with the event as it is (#795)', async () => {
+      row = cancelled({ archivedAt: ARCHIVED_AT });
+
+      await expect(service.cancelEvent(EVENT_ID, { reason: 'second reason' })).resolves.toEqual(
+        expect.objectContaining({ cancelReason: 'first reason', status: EventStatus.Archived }),
+      );
+      expect(tx.event.update).not.toHaveBeenCalled();
+      expect(tx.eventOccurrence.updateMany).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('refuses a repeat from someone whose grant does not reach the event (#795)', async () => {
       row = cancelled();
       tx.event.count.mockResolvedValue(0);
 
@@ -333,11 +342,21 @@ describe('EventLifecycleService', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
-    it('refuses that repeat from a caller whose grant does not reach the event (#795)', async () => {
+    it('refuses that repeat from someone whose grant does not reach the event (#795)', async () => {
       row = live();
       tx.event.count.mockResolvedValue(0);
 
       await expect(service.reopenEvent(EVENT_ID)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('answers 400 for a cancelled event that is archived: unarchive it first (#795)', async () => {
+      row = cancelled({ archivedAt: ARCHIVED_AT });
+
+      const rejection: unknown = await service.reopenEvent(EVENT_ID).catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(BadRequestException);
+      expect((rejection as BadRequestException).getResponse()).toEqual(t('errors.event.archived'));
+      expect(tx.event.update).not.toHaveBeenCalled();
     });
   });
 
@@ -376,7 +395,7 @@ describe('EventLifecycleService', () => {
       expect(tx.event.update).not.toHaveBeenCalled();
     });
 
-    it('answers 403 when the write finds the row outside the caller’s grant (#795)', async () => {
+    it('answers 403 when the write finds the row outside the actor’s grant (#795)', async () => {
       row = changeable();
       tx.event.update.mockRejectedValue(dependentRecordNotFound());
 
@@ -385,7 +404,7 @@ describe('EventLifecycleService', () => {
     });
 
     // Put away and taken out again by its host, audited, and nobody told:
-    // no notice and no webhook.
+    // no notification and no webhook.
     it('sends its domain event alone (#795)', async () => {
       row = changeable();
       await run();
@@ -463,8 +482,8 @@ describe('EventLifecycleService', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
-    it('refuses a repeat from a caller whose grant does not reach the event (#795)', async () => {
-      row = cancelled({ archivedAt: new Date('2026-06-02T12:00:00.000Z') });
+    it('refuses a repeat from someone whose grant does not reach the event (#795)', async () => {
+      row = cancelled({ archivedAt: ARCHIVED_AT });
       tx.event.count.mockResolvedValue(0);
 
       await expect(service.archiveEvent(EVENT_ID)).rejects.toBeInstanceOf(ForbiddenException);
@@ -497,6 +516,30 @@ describe('EventLifecycleService', () => {
       await expect(service.unarchiveEvent(EVENT_ID)).resolves.toEqual(
         expect.objectContaining({ status: EventStatus.Cancelled }),
       );
+      expect(tx.event.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+  });
+
+  // The grant is checked before the event's state is judged, so a 400 never
+  // tells someone the grant doesn't reach whether the event is cancelled,
+  // archived or over.
+  describe.each([
+    ['cancelEvent', () => service.cancelEvent(EVENT_ID, {}), () => ({ ...live(), archivedAt: ARCHIVED_AT })],
+    ['reopenEvent', () => service.reopenEvent(EVENT_ID), () => cancelled({ archivedAt: ARCHIVED_AT })],
+    ['archiveEvent', () => service.archiveEvent(EVENT_ID), () => live()],
+    ['unarchiveEvent', () => service.unarchiveEvent(EVENT_ID), () => cancelled({ archivedAt: ARCHIVED_AT })],
+  ])('%s by someone whose grant does not reach the event', (_, run, found) => {
+    it("answers 403 before judging the event's state, writing and sending nothing (#795)", async () => {
+      row = found();
+      tx.event.count.mockResolvedValue(0);
+
+      const rejection: unknown = await run().catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(ForbiddenException);
+      expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.update'));
+      expect(tx.event.count).toHaveBeenCalledWith({ where: { id: EVENT_ID, AND: [COND] } });
+      expect(tx.eventOccurrence.findMany).not.toHaveBeenCalled();
       expect(tx.event.update).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();
     });

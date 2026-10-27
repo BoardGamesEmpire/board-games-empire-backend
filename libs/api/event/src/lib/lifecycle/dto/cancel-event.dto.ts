@@ -7,7 +7,7 @@ import { EVENT_CANCEL_MAX_REASON_LENGTH } from '../../constants/event-cancel.con
 export class CancelEventDto {
   @ApiPropertyOptional({
     description:
-      "Why the event is called off. Every attendee's notice carries it, and its dates are cancelled with it.",
+      "Why the event is called off. Every attendee's notification carries it, and its dates are cancelled with it.",
     maxLength: EVENT_CANCEL_MAX_REASON_LENGTH,
   })
   @IsOptional()

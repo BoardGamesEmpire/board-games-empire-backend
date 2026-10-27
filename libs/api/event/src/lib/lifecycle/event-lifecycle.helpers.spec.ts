@@ -40,8 +40,8 @@ describe('assertEventNotCancelled', () => {
     expect((rejection as BadRequestException).getResponse()).toEqual(t('errors.event.cancelled'));
   });
 
-  // Whether the event exists is the caller's to answer, with its own 404.
-  it('leaves a missing event to the caller (#795)', async () => {
+  // Whether the event exists is the calling write's to answer, with its own 404.
+  it('leaves a missing event to the write that calls it (#795)', async () => {
     tx.$queryRaw.mockResolvedValue([]);
 
     await expect(assertEventNotCancelled(asTx(tx), 'event-1')).resolves.toBeUndefined();

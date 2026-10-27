@@ -68,7 +68,7 @@ export class EventLifecycleService {
    * event cancelled and answers 400. So no date is left Confirmed.
    *
    * One `EventCancelled` domain event goes out, not one per date: one audit
-   * row, one webhook, and one notice to each attendee.
+   * row, one webhook, and one notification to each attendee.
    */
   async cancelEvent(id: string, dto: CancelEventDto): Promise<EventWithStatus> {
     const initiatedAt = new Date();
@@ -77,11 +77,13 @@ export class EventLifecycleService {
     const reason = dto.reason ?? null;
 
     const { before, event, changed } = await this.transition(id, ceiling, async (tx, existing) => {
-      assertNotArchived(existing);
-
+      // Already cancelled, archived since or not: the event is where the
+      // cancel asks it to go, so a retry answers with it.
       if (existing.cancelledAt !== null) {
         return null;
       }
+
+      assertNotArchived(existing);
 
       const cancelled = await tx.event.update({
         where: { id, cancelledAt: null, AND: ceiling },
@@ -176,7 +178,7 @@ export class EventLifecycleService {
    * asked for, and stays readable by id. A live event is cancelled first.
    * Its dates are read under the event's lock, which a date write also
    * takes, so the status judged is the one the write meets. Audited, and
-   * nobody is told: no notice and no webhook.
+   * nobody is told: no notification and no webhook.
    */
   async archiveEvent(id: string): Promise<EventWithStatus> {
     const initiatedAt = new Date();
@@ -236,13 +238,13 @@ export class EventLifecycleService {
     return this.eventService.statusOf(event);
   }
 
-  /** The caller's ceiling for writing the cancel columns: only the grants bound to `cancelledAt` (#795). */
+  /** The actor's ceiling for writing the cancel columns: only the grants bound to `cancelledAt` (#795). */
   private cancelCeiling(): Prisma.EventWhereInput[] {
     // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
     return this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update, 'cancelledAt');
   }
 
-  /** The caller's ceiling for writing `archivedAt`: only the grants bound to it (#795). */
+  /** The actor's ceiling for writing `archivedAt`: only the grants bound to it (#795). */
   private archiveCeiling(): Prisma.EventWhereInput[] {
     // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
     return this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update, 'archivedAt');
@@ -256,11 +258,14 @@ export class EventLifecycleService {
    * judges is the state the write meets. A request that loses a race reads
    * the row the winner left and answers as one arriving second would.
    *
+   * The actor's grant is checked next, against the row, before the event's
+   * state is judged: someone the grant doesn't reach gets 403, never a 400
+   * that would tell them whether the event is cancelled, archived or over.
+   *
    * A transition that finds the event already where it asks to go answers
-   * with the event as it is and emits nothing (#252), for a caller whose
-   * grant reaches the event. Anyone else gets the 403 the write would have.
-   * The write itself requires the state it read, and a write the ceiling
-   * refuses finds no row, which answers 403 too.
+   * with the event as it is and emits nothing (#252). The write itself
+   * requires the state it read and is bound to the same grant, so a write
+   * that finds no row answers 403 too.
    */
   private async transition(id: string, ceiling: Prisma.EventWhereInput[], write: TransitionWrite): Promise<Transition> {
     try {
@@ -270,19 +275,18 @@ export class EventLifecycleService {
         const existing = await tx.event.findUnique({ where: { id } });
         assert(existing && existing.deletedAt === null, new NotFoundException(t('errors.event.not_found', { id })));
 
-        const written = await write(tx, existing);
-        if (written !== null) {
-          return { before: existing, event: written, changed: true };
-        }
-
         const entitled = (await tx.event.count({ where: { id, AND: ceiling } })) > 0;
         assert(entitled, new ForbiddenException(t('common.forbidden.update')));
 
-        return { before: existing, event: existing, changed: false };
+        const written = await write(tx, existing);
+
+        return written === null
+          ? { before: existing, event: existing, changed: false }
+          : { before: existing, event: written, changed: true };
       });
     } catch (error) {
       if (isPrismaDependentRecordNotFoundError(error)) {
-        this.logger.warn(`Event ${id}: the transition's write found no row the caller may write`);
+        this.logger.warn(`Event ${id}: the transition's write found no row the actor may write`);
         throw new ForbiddenException(t('common.forbidden.update'));
       }
 
@@ -301,7 +305,7 @@ function archiveSnapshot(event: Event) {
   return { id: event.id, householdId: event.householdId, archivedAt: event.archivedAt };
 }
 
-/** The cancel columns, and what a notice names the event by. */
+/** The cancel columns, and what a notification names the event by. */
 function cancelSnapshot(event: Event) {
   return {
     id: event.id,

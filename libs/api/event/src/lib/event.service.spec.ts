@@ -293,10 +293,10 @@ describe('EventService', () => {
       });
     });
 
-    // A caller whose occurrence ceiling clips the dates still gets the
+    // An actor whose occurrence ceiling clips the dates still gets the
     // event's own status: it is a fact about the event, not about the dates
     // they may list.
-    it('works out the status from every date, not only the dates the caller may read (#795)', async () => {
+    it('works out the status from every date, not only the dates the actor may read (#795)', async () => {
       db.eventOccurrence.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([futureDate()]);
 
       const detail = await service.getEventById('event-1');

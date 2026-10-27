@@ -14,7 +14,8 @@ import { BadRequestException } from '@nestjs/common';
  * cancel's update of Confirmed dates catches it. Run it in the write's own
  * transaction, before the write.
  *
- * A missing event is left to the caller, which answers it with its own 404.
+ * A missing event is left to the write that calls this, which answers it
+ * with its own 404.
  */
 export async function assertEventNotCancelled(tx: Prisma.TransactionClient, eventId: string): Promise<void> {
   const [event] = await tx.$queryRaw<{ cancelledAt: Date | null }[]>(
