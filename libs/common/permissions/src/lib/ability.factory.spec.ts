@@ -1047,6 +1047,42 @@ describe('AbilityFactory', () => {
       expect(ability.can(Action.update, asEntity('Event', { id: 'ev-3', householdId: null }))).toBe(false);
     });
 
+    // The cancel and archive grants bind to the column each pair writes, and
+    // the edit grants leave those columns out, so a route that names the
+    // column tells a host from an organizer, who can still edit the event.
+    it('lets a host cancel and archive, and an organizer still edit but do neither (#795)', () => {
+      const attendingAs = (roleName: string, slugs: PermissionSlug[]) =>
+        factory.createForUser(
+          makeUser({
+            id: 'user-1',
+            eventsAttended: [{ eventId: 'ev-1', role: makeRole(roleName, slugs.map(catalogPermission)) }],
+          }),
+        );
+      const host = attendingAs('EventHost', ['update:event', 'update:event:cancel', 'update:event:archive']);
+      const organizer = attendingAs('EventOrganizer', ['update:event']);
+
+      expect(host.can(Action.update, 'Event', 'cancelledAt')).toBe(true);
+      expect(host.can(Action.update, 'Event', 'archivedAt')).toBe(true);
+      expect(organizer.can(Action.update, 'Event')).toBe(true);
+      expect(organizer.can(Action.update, 'Event', 'cancelledAt')).toBe(false);
+      expect(organizer.can(Action.update, 'Event', 'archivedAt')).toBe(false);
+    });
+
+    it("lets a household owner cancel the household's events, but not archive them (#795)", () => {
+      const ability = factory.createForUser(
+        householdMemberOf('hh-1', 'HouseholdOwner', ['update:event:household', 'update:event:cancel:household']),
+      );
+
+      expect(ability.can(Action.update, 'Event', 'cancelledAt')).toBe(true);
+      expect(ability.can(Action.update, 'Event', 'archivedAt')).toBe(false);
+      expect(ability.can(Action.update, asEntity('Event', { id: 'ev-1', householdId: 'hh-1' }), 'cancelledAt')).toBe(
+        true,
+      );
+      expect(ability.can(Action.update, asEntity('Event', { id: 'ev-2', householdId: 'hh-2' }), 'cancelledAt')).toBe(
+        false,
+      );
+    });
+
     it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin])(
       "lets a %s read the household's own events without attending them (#436)",
       (roleName) => {

@@ -626,6 +626,29 @@ describe('the shipped catalogs', () => {
         expect(eventDeletes).toEqual([]);
         expect(held).toContain('update:event:household');
         expect(held).toContain('update:event_occurrence:cancel:household');
+        // They cancel and reopen the household's events, as they can each of
+        // its dates, and archiving stays the host's (#795).
+        expect(held).toContain('update:event:cancel:household');
+        expect(held).not.toContain('update:event:archive');
+      },
+    );
+
+    it.each([SystemRole.EventHost, SystemRole.EventCoHost])(
+      'give %s cancel and archive on its event (#795)',
+      (roleName) => {
+        expect(ROLE_PERMISSION_CATALOG[roleName]).toEqual(
+          expect.arrayContaining(['update:event:cancel', 'update:event:archive']),
+        );
+      },
+    );
+
+    it.each([SystemRole.EventOrganizer, SystemRole.EventModerator])(
+      'give %s neither cancel nor archive, though it edits the event (#795)',
+      (roleName) => {
+        const held = ROLE_PERMISSION_CATALOG[roleName];
+
+        expect(held).not.toContain('update:event:cancel');
+        expect(held).not.toContain('update:event:archive');
       },
     );
 
