@@ -53,6 +53,10 @@ export class WebhookSubscriptionController {
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Subscription updated' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not permitted to update this subscription' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description: 'Changes event types of a subscription whose API key is deleted, disabled or expired',
+  })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.WebhookSubscription))
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateWebhookSubscriptionDto) {
@@ -77,6 +81,10 @@ export class WebhookSubscriptionController {
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Subscription re-activated' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not permitted to update this subscription' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description: 'The API key it was made through is deleted, disabled or expired',
+  })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.WebhookSubscription))
   @Post(':id/reactivate')
   reactivate(@Param('id') id: string) {

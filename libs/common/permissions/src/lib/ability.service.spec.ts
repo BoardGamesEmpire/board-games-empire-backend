@@ -22,7 +22,10 @@ describe('AbilityService', () => {
     >
   >;
   let abilityFactory: jest.Mocked<
-    Pick<AbilityFactory, 'createForUser' | 'createForApiKey' | 'createForSystem' | 'createForPlugin' | 'createDenyAll'>
+    Pick<
+      AbilityFactory,
+      'createForUser' | 'createForApiKeyActor' | 'createForSystem' | 'createForPlugin' | 'createDenyAll'
+    >
   >;
 
   const ability = (rules: SubjectRawRule<Action, ExtractSubjectType<Subjects>, PrismaQuery>[]): AppAbility =>
@@ -39,7 +42,7 @@ describe('AbilityService', () => {
     };
     abilityFactory = {
       createForUser: jest.fn(),
-      createForApiKey: jest.fn(),
+      createForApiKeyActor: jest.fn(),
       createForSystem: jest.fn(),
       createForPlugin: jest.fn(),
       createDenyAll: jest.fn(),
@@ -59,6 +62,23 @@ describe('AbilityService', () => {
   });
 
   afterEach(() => jest.clearAllMocks());
+
+  describe('getActingApiKeyId (#723)', () => {
+    it('names the acting key for an API key actor, and no key for any other', () => {
+      const actors: [Actor | null, string | null][] = [
+        [{ kind: 'apiKey', apiKeyId: 'key-1', userId: 'user-1' }, 'key-1'],
+        [{ kind: 'user', userId: 'user-1' }, null],
+        [{ kind: 'system', reason: 'test' }, null],
+        [null, null],
+      ];
+
+      for (const [actor, expected] of actors) {
+        auditContext.getActor.mockReturnValue(actor);
+
+        expect(service.getActingApiKeyId()).toBe(expected);
+      }
+    });
+  });
 
   describe('getCurrentAbilities', () => {
     it('returns the primed ability array', () => {
@@ -344,22 +364,24 @@ describe('AbilityService', () => {
       expect(result).toEqual([userAbility]);
     });
 
-    it('apiKey → [ownerUserAbility, apiKeyAbility] in that order', async () => {
+    // The factory pairs them, as it does for a webhook subscription made
+    // through the key (#723), so the two can't drift apart.
+    it("apiKey → the factory's pair of the owner's ability and the key's", async () => {
       const ownerAbility = ability([{ action: Action.read, subject: 'Household' }]);
       const keyAbility = ability([{ action: Action.read, subject: 'Event' }]);
+      const keyGraph = { id: 'key-1' } as ApikeyWithScopes;
       permissionsService.getUserRoleGraph.mockResolvedValue({ id: 'owner-1' } as UserWithRoles);
       abilityFactory.createForUser.mockReturnValue(ownerAbility);
-      permissionsService.getApiKeyScopeGraph.mockResolvedValue({ id: 'key-1' } as ApikeyWithScopes);
-      abilityFactory.createForApiKey.mockReturnValue(keyAbility);
+      permissionsService.getApiKeyScopeGraph.mockResolvedValue(keyGraph);
+      abilityFactory.createForApiKeyActor.mockReturnValue([ownerAbility, keyAbility]);
 
       const actor: Actor = { kind: 'apiKey', apiKeyId: 'key-1', userId: 'owner-1' };
       const result = await service.resolveAbilitiesForActor(actor);
 
       expect(permissionsService.getUserRoleGraph).toHaveBeenCalledWith('owner-1');
       expect(permissionsService.getApiKeyScopeGraph).toHaveBeenCalledWith('key-1');
-      expect(result).toHaveLength(2);
-      expect(result[0]).toBe(ownerAbility);
-      expect(result[1]).toBe(keyAbility);
+      expect(abilityFactory.createForApiKeyActor).toHaveBeenCalledWith(ownerAbility, keyGraph);
+      expect(result).toEqual([ownerAbility, keyAbility]);
     });
 
     it('apiKey → ForbiddenException when the key cannot be loaded (revoked)', async () => {

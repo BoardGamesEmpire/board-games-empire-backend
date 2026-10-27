@@ -93,6 +93,12 @@ describe('webhook subscription scope for API keys', () => {
         resourceId: scoped,
       },
     ]);
+    // Made through this key, so the 403 below is the ceiling's and not the
+    // rule that a key changes only its own subscriptions (#723).
+    await db.client.webhookSubscription.updateMany({
+      where: { id: { in: [scoped, other] } },
+      data: { apiKeyId: key.id },
+    });
 
     await moveSubscription(key, other, 'https://hooks.example.com/moved').expect(403);
 

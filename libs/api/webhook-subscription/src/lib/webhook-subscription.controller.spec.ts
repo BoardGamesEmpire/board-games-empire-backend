@@ -1,5 +1,5 @@
 import { DatabaseModule } from '@bge/database';
-import { AbilityService, PoliciesGuard, ScopeComposer } from '@bge/permissions';
+import { AbilityFactory, AbilityService, PermissionsService, PoliciesGuard, ScopeComposer } from '@bge/permissions';
 import { EncryptionService } from '@bge/services';
 import { createMockAbilityService, createTestingModuleWithDb } from '@bge/testing';
 import { WebhooksModule } from '@bge/webhooks';
@@ -20,6 +20,8 @@ describe('WebhookSubscriptionController', () => {
           useValue: { encrypt: jest.fn(), decrypt: jest.fn() },
         },
         { provide: AbilityService, useValue: createMockAbilityService() },
+        { provide: PermissionsService, useValue: { loadApiKeyScopeGraphs: jest.fn() } },
+        AbilityFactory,
       ],
       controllers: [WebhookSubscriptionController],
       overrideGuards: [PoliciesGuard],

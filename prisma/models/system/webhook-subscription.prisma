@@ -4,7 +4,8 @@
 // (CASL intersection). Scoped to one `resourceType`, optionally narrowed by a
 // specific `resourceId` (an instance of that type) and/or a `householdId`
 // container. Both filters null ⇒ every instance of `resourceType` that passes
-// that check.
+// that check. A webhook subscription made through an API key is also held to
+// that key's scope (#723).
 //
 // Status is reason-encoded — no separate `disabledReason`:
 //   Active   delivering
@@ -44,6 +45,13 @@ model WebhookSubscription {
 
   createdBy   User   @relation("WebhookSubscriptionsCreated", fields: [createdById], references: [id])
   createdById String @map("created_by_id")
+
+  // The API key that made the webhook subscription, or null when its
+  // creator's session did (#723). No relation to `Apikey`, on purpose:
+  // deleting the key must stop deliveries, where `SetNull` would widen them to
+  // the creator's whole reach and `Cascade` would delete the creator's
+  // records. A missing key delivers nothing.
+  apiKeyId String? @map("api_key_id")
 
   consecutiveFailures Int       @default(0) @map("consecutive_failures")
   lastDeliveryAt      DateTime? @map("last_delivery_at") @db.Timestamptz(3)

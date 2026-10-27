@@ -37,6 +37,21 @@ describe('AbilityFactory', () => {
     factory = module.get(AbilityFactory);
   });
 
+  describe('createForApiKeyActor (#723)', () => {
+    it("pairs the key owner's ability, first and unchanged, with the key's own", () => {
+      const owner = factory.createForUser(null);
+
+      const [first, second] = factory.createForApiKeyActor(
+        owner,
+        makeApiKey([makeScope(Action.read, 'Household', 'hh-alpha')]),
+      );
+
+      expect(first).toBe(owner);
+      expect(second.can(Action.read, subject('Household', { id: 'hh-alpha' }))).toBe(true);
+      expect(second.can(Action.read, subject('Household', { id: 'hh-beta' }))).toBe(false);
+    });
+  });
+
   describe('createForApiKey', () => {
     describe('empty scopes', () => {
       it('produces no rules when the scopes array is empty', () => {

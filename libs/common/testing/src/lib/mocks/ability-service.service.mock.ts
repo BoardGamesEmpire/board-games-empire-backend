@@ -9,6 +9,7 @@ declare class AbilityService {
   getResourceConditionsForAbilities(abilities: unknown[], resourceType: string, action: string): unknown[];
   getCurrentAbilities(): unknown[];
   getActingUserId(): string;
+  getActingApiKeyId(): string | null;
   getTriggeringUserAbility(): unknown | null;
   primeCurrentActor(): Promise<void>;
   resolveAbilitiesForActor(actor: unknown): Promise<unknown[]>;
@@ -34,6 +35,7 @@ export type MockAbilityService = Mocked<
     | 'getResourceConditionsForAbilities'
     | 'getCurrentAbilities'
     | 'getActingUserId'
+    | 'getActingApiKeyId'
     | 'getTriggeringUserAbility'
     | 'primeCurrentActor'
     | 'resolveAbilitiesForActor'
@@ -45,7 +47,8 @@ export type MockAbilityService = Mocked<
  * Creates a typed AbilityService mock with sensible, non-throwing defaults:
  * condition resolvers return `[MOCK_RESOURCE_CONDITION]` (a non-empty filter,
  * never the dangerous `AND: []`), `resolveAbilitiesForActor` resolves
- * `[MOCK_ABILITY]`, `getActingUserId` returns `MOCK_ACTING_USER_ID`, and the
+ * `[MOCK_ABILITY]`, `getActingUserId` returns `MOCK_ACTING_USER_ID`,
+ * `getActingApiKeyId` returns `null` (a session, not a key), and the
  * instance check `assertCurrentActorCan`
  * allows (returns without throwing). Override per spec via the returned
  * jest.fns or the `overrides` argument.
@@ -65,6 +68,7 @@ export function createMockAbilityService(overrides: Partial<MockAbilityService> 
       .mockReturnValue([MOCK_RESOURCE_CONDITION]),
     getCurrentAbilities: jest.fn<AbilityService['getCurrentAbilities']>().mockReturnValue([]),
     getActingUserId: jest.fn<AbilityService['getActingUserId']>().mockReturnValue(MOCK_ACTING_USER_ID),
+    getActingApiKeyId: jest.fn<AbilityService['getActingApiKeyId']>().mockReturnValue(null),
     getTriggeringUserAbility: jest.fn<AbilityService['getTriggeringUserAbility']>().mockReturnValue(null),
     primeCurrentActor: jest.fn<AbilityService['primeCurrentActor']>().mockResolvedValue(undefined),
     resolveAbilitiesForActor: jest.fn<AbilityService['resolveAbilitiesForActor']>().mockResolvedValue([MOCK_ABILITY]),

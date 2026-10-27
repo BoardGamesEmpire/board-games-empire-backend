@@ -180,6 +180,65 @@ describe('PermissionsService', () => {
     });
   });
 
+  describe('loadApiKeyScopeGraphs (#723)', () => {
+    it('reads every key in one read, with the scopes a single read uses, past the cache and caching nothing', async () => {
+      const stale = makeApiKeyGraph();
+      db.apikey.findUnique.mockResolvedValue(stale);
+      await service.getApiKeyScopeGraph('key-1');
+      const set = jest.spyOn(cache, 'set');
+      const fresh = { ...makeApiKeyGraph(), name: 'Renamed since it was cached' };
+      db.apikey.findMany.mockResolvedValue([fresh]);
+
+      const graphs = await service.loadApiKeyScopeGraphs(['key-1']);
+
+      expect(graphs).toEqual(new Map([['key-1', fresh]]));
+      expect(db.apikey.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ include: db.apikey.findUnique.mock.calls[0][0].include }),
+      );
+      expect(set).not.toHaveBeenCalled();
+      // The cached graph is left alone.
+      await expect(service.getApiKeyScopeGraph('key-1')).resolves.toBe(stale);
+    });
+
+    it('reads only keys still usable: enabled or unset, and not past their expiry, as better-auth checks a key', async () => {
+      const now = new Date('2026-10-26T12:00:00Z');
+      jest.useFakeTimers({ now });
+
+      try {
+        db.apikey.findMany.mockResolvedValue([]);
+
+        await service.loadApiKeyScopeGraphs(['key-1', 'key-2']);
+
+        expect(db.apikey.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: {
+              id: { in: ['key-1', 'key-2'] },
+              AND: [
+                { OR: [{ enabled: null }, { enabled: true }] },
+                { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+              ],
+            },
+          }),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('leaves out a key the read does not return, as one deleted, disabled or expired', async () => {
+      db.apikey.findMany.mockResolvedValue([makeApiKeyGraph()]);
+
+      const graphs = await service.loadApiKeyScopeGraphs(['key-1', 'key-2']);
+
+      expect(graphs.has('key-2')).toBe(false);
+    });
+
+    it('reads nothing for no keys', async () => {
+      await expect(service.loadApiKeyScopeGraphs([])).resolves.toEqual(new Map());
+      expect(db.apikey.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getUserRoleGraph', () => {
     it('returns the cached graph without hitting the database on a cache hit', async () => {
       const graph = makeUserGraph();

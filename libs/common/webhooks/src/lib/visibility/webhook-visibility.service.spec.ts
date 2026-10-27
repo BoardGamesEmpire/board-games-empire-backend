@@ -23,7 +23,7 @@ describe('WebhookVisibilityService', () => {
   it('reports an Event visible when a matching non-deleted row exists', async () => {
     db.event.count.mockResolvedValue(1);
 
-    await expect(service.isVisibleTo(ResourceType.Event, 'event-1', ability)).resolves.toBe(true);
+    await expect(service.isVisibleTo(ResourceType.Event, 'event-1', [ability])).resolves.toBe(true);
     expect(db.event.count).toHaveBeenCalledWith({
       where: expect.objectContaining({ id: 'event-1', deletedAt: null, AND: [expect.anything()] }),
     });
@@ -32,13 +32,13 @@ describe('WebhookVisibilityService', () => {
   it('reports an Event not visible when no matching row exists', async () => {
     db.event.count.mockResolvedValue(0);
 
-    await expect(service.isVisibleTo(ResourceType.Event, 'event-1', ability)).resolves.toBe(false);
+    await expect(service.isVisibleTo(ResourceType.Event, 'event-1', [ability])).resolves.toBe(false);
   });
 
   it('filters soft-deleted rows for the Game subject too', async () => {
     db.game.count.mockResolvedValue(2);
 
-    await expect(service.isVisibleTo(ResourceType.Game, 'game-1', ability)).resolves.toBe(true);
+    await expect(service.isVisibleTo(ResourceType.Game, 'game-1', [ability])).resolves.toBe(true);
     expect(db.game.count).toHaveBeenCalledWith({
       where: expect.objectContaining({ id: 'game-1', deletedAt: null }),
     });
@@ -47,7 +47,7 @@ describe('WebhookVisibilityService', () => {
   it('does NOT apply a deletedAt guard for the Job subject (no soft-delete column)', async () => {
     db.job.count.mockResolvedValue(1);
 
-    await expect(service.isVisibleTo(ResourceType.Job, 'job-1', ability)).resolves.toBe(true);
+    await expect(service.isVisibleTo(ResourceType.Job, 'job-1', [ability])).resolves.toBe(true);
 
     const where = db.job.count.mock.calls[0][0]?.where as Record<string, unknown>;
     expect(where).toMatchObject({ id: 'job-1', AND: [expect.anything()] });
@@ -57,7 +57,7 @@ describe('WebhookVisibilityService', () => {
   it('filters soft-deleted rows for the Household subject (#158)', async () => {
     db.household.count.mockResolvedValue(1);
 
-    await expect(service.isVisibleTo(ResourceType.Household, 'hh-1', ability)).resolves.toBe(true);
+    await expect(service.isVisibleTo(ResourceType.Household, 'hh-1', [ability])).resolves.toBe(true);
     expect(db.household.count).toHaveBeenCalledWith({
       where: expect.objectContaining({ id: 'hh-1', deletedAt: null, AND: [expect.anything()] }),
     });
@@ -76,7 +76,7 @@ describe('WebhookVisibilityService', () => {
     it('checks read when no action is given', async () => {
       db.event.count.mockResolvedValue(1);
 
-      await service.isVisibleTo(ResourceType.Event, 'event-1', readOrUpdate);
+      await service.isVisibleTo(ResourceType.Event, 'event-1', [readOrUpdate]);
 
       expect(clauseChecked()).toEqual([{ OR: [{ householdId: 'hh-read' }] }]);
     });
@@ -84,9 +84,36 @@ describe('WebhookVisibilityService', () => {
     it('checks the action it is given', async () => {
       db.event.count.mockResolvedValue(1);
 
-      await service.isVisibleTo(ResourceType.Event, 'event-1', readOrUpdate, { action: Action.update });
+      await service.isVisibleTo(ResourceType.Event, 'event-1', [readOrUpdate], { action: Action.update });
 
       expect(clauseChecked()).toEqual([{ OR: [{ householdId: 'hh-update' }] }]);
+    });
+  });
+
+  describe('several abilities, as a user’s and their API key’s (#723)', () => {
+    it('requires every ability to reach the row', async () => {
+      const userAbility = createPrismaAbility([
+        { action: Action.read, subject: ResourceType.Event, conditions: { householdId: 'hh-owner' } },
+      ]) as AppAbility;
+      const keyAbility = createPrismaAbility([
+        { action: Action.read, subject: ResourceType.Event, conditions: { householdId: 'hh-key' } },
+      ]) as AppAbility;
+      db.event.count.mockResolvedValue(1);
+
+      await service.isVisibleTo(ResourceType.Event, 'event-1', [userAbility, keyAbility]);
+
+      expect((db.event.count.mock.calls[0][0]?.where as { AND: unknown[] }).AND).toEqual([
+        { OR: [{ householdId: 'hh-owner' }] },
+        { OR: [{ householdId: 'hh-key' }] },
+      ]);
+    });
+
+    // A count over an empty AND matches every row, so no abilities would pass (#723).
+    it('refuses an empty ability list rather than pass it', async () => {
+      await expect(service.isVisibleTo(ResourceType.Event, 'event-1', [])).rejects.toThrow(
+        'isVisibleTo needs at least one ability',
+      );
+      expect(db.event.count).not.toHaveBeenCalled();
     });
   });
 
@@ -94,9 +121,9 @@ describe('WebhookVisibilityService', () => {
     it('reads the deleted Event row instead of refusing it', async () => {
       db.event.count.mockResolvedValue(1);
 
-      await expect(service.isVisibleTo(ResourceType.Event, 'event-1', ability, { subjectDeleted: true })).resolves.toBe(
-        true,
-      );
+      await expect(
+        service.isVisibleTo(ResourceType.Event, 'event-1', [ability], { subjectDeleted: true }),
+      ).resolves.toBe(true);
 
       const where = db.event.count.mock.calls[0][0]?.where as Record<string, unknown>;
       expect(where).toMatchObject({ id: 'event-1', AND: [expect.anything()] });
@@ -109,7 +136,7 @@ describe('WebhookVisibilityService', () => {
       ]) as AppAbility;
       db.event.count.mockResolvedValue(1);
 
-      await service.isVisibleTo(ResourceType.Event, 'event-1', updateOnly, {
+      await service.isVisibleTo(ResourceType.Event, 'event-1', [updateOnly], {
         action: Action.update,
         subjectDeleted: true,
       });
@@ -120,7 +147,7 @@ describe('WebhookVisibilityService', () => {
     it('keeps the deletedAt guard for every other event', async () => {
       db.event.count.mockResolvedValue(1);
 
-      await service.isVisibleTo(ResourceType.Event, 'event-1', ability, { subjectDeleted: false });
+      await service.isVisibleTo(ResourceType.Event, 'event-1', [ability], { subjectDeleted: false });
 
       expect(db.event.count).toHaveBeenCalledWith({ where: expect.objectContaining({ deletedAt: null }) });
     });
@@ -139,7 +166,7 @@ describe('WebhookVisibilityService', () => {
     ]) as AppAbility;
     db.job.count.mockResolvedValue(0);
 
-    await service.isVisibleTo(ResourceType.Job, 'job-1', userAbility);
+    await service.isVisibleTo(ResourceType.Job, 'job-1', [userAbility]);
 
     expect(db.job.count.mock.calls[0][0]?.where).toMatchObject({
       AND: [{ OR: [{ type: JobType.GameImport }] }],
@@ -150,7 +177,7 @@ describe('WebhookVisibilityService', () => {
     // Previously used Household, which #158 mapped. Any subject with a
     // registered descriptor MUST have a check here or dispatch throws, so the
     // example has to be a subject no descriptor names.
-    await expect(service.isVisibleTo(ResourceType.Invite, 'invite-1', ability)).rejects.toThrow(
+    await expect(service.isVisibleTo(ResourceType.Invite, 'invite-1', [ability])).rejects.toThrow(
       /No webhook visibility check implemented for subject "Invite"/,
     );
     expect(db.invite.count).not.toHaveBeenCalled();
@@ -165,7 +192,7 @@ describe('WebhookVisibilityService', () => {
     const subjects = [...new Set(Object.values(WEBHOOK_EVENT_DESCRIPTORS).map((descriptor) => descriptor.subject))];
 
     for (const subject of subjects) {
-      await expect(service.isVisibleTo(subject, 'any-id', ability)).resolves.toBe(false);
+      await expect(service.isVisibleTo(subject, 'any-id', [ability])).resolves.toBe(false);
     }
   });
 });

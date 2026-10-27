@@ -1,6 +1,12 @@
 import { AuditContextService, type Actor } from '@bge/actor-context';
 import { DatabaseService, Prisma, ResourceType, WebhookSubscriptionStatus } from '@bge/database';
-import { AbilityFactory, PermissionsService, type UserWithRoles } from '@bge/permissions';
+import {
+  AbilityFactory,
+  PermissionsService,
+  type ApikeyWithScopes,
+  type AppAbility,
+  type UserWithRoles,
+} from '@bge/permissions';
 import {
   WebhookEventRegistry,
   WebhookVisibilityService,
@@ -24,6 +30,22 @@ import {
 } from '../constants/webhook-queue.constants';
 import type { WebhookDeliveryJob } from '../interfaces/webhook-delivery-job.interface';
 
+/** One matching webhook subscription, and the API key it was made through. */
+interface CandidateSubscription {
+  readonly id: string;
+  readonly apiKeyId: string | null;
+}
+
+/**
+ * One subscriber being judged: their graph, and their ability once a webhook
+ * subscription of theirs has needed it, so it is built once however many keys
+ * they made webhook subscriptions through.
+ */
+interface Subscriber {
+  readonly graph: UserWithRoles;
+  ability?: AppAbility;
+}
+
 /**
  * Bridges domain events to webhook deliveries — the queue *producer*. Runs in
  * every process that emits eligible events: the API (the Event domain and the
@@ -43,6 +65,11 @@ import type { WebhookDeliveryJob } from '../interfaces/webhook-delivery-job.inte
  * every emit must follow its write's commit. A subscriber under a ban has no
  * graph and receives nothing (#906). Subscribers' graphs are read a batch of
  * subscribers at a time (#921), and each ability is built once per subscriber.
+ *
+ * A webhook subscription made through an API key is judged by its creator's
+ * ability and the key's together, as a request through that key is, with the
+ * key read from the database too. Once the key is deleted, disabled or
+ * expired, that webhook subscription receives nothing (#723).
  *
  * The handler never throws into the emitter — a webhook failure must not break
  * the domain transaction that produced the event.
@@ -108,17 +135,17 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
 
     const actor = this.auditContext.getActor() ?? this.unattributedActor();
     // The descriptor and subjectId are loop-invariant, so visibility is a pure
-    // function of the owner — memoize per createdById so an owner with multiple
-    // matching subscriptions costs one ability build + one visibility query, not
-    // one each.
+    // function of the subscriber and the key — memoize per pair so a
+    // subscriber with several matching webhook subscriptions through one key,
+    // or none, costs one visibility query, not one each.
     const visibilityCache = new Map<string, boolean>();
-    const subscriptionsByOwner = new Map<string, string[]>();
-    for (const { id, createdById } of subscriptions) {
-      const ids = subscriptionsByOwner.get(createdById);
-      if (ids) {
-        ids.push(id);
+    const subscriptionsByOwner = new Map<string, CandidateSubscription[]>();
+    for (const { id, createdById, apiKeyId } of subscriptions) {
+      const candidates = subscriptionsByOwner.get(createdById);
+      if (candidates) {
+        candidates.push({ id, apiKeyId });
       } else {
-        subscriptionsByOwner.set(createdById, [id]);
+        subscriptionsByOwner.set(createdById, [{ id, apiKeyId }]);
       }
     }
     const owners = [...subscriptionsByOwner.entries()];
@@ -129,11 +156,16 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
     for (let start = 0; start < owners.length; start += WEBHOOK_GRAPH_READ_BATCH_SIZE) {
       const batch = owners.slice(start, start + WEBHOOK_GRAPH_READ_BATCH_SIZE);
 
-      let graphs: ReadonlyMap<string, UserWithRoles>;
-      try {
-        graphs = await this.permissions.loadUserRoleGraphs(batch.map(([ownerId]) => ownerId));
-      } catch (err) {
-        const dropped = batch.reduce((count, [, subscriptionIds]) => count + subscriptionIds.length, 0);
+      // The keys are read beside the graphs, but a failed key read drops only
+      // the webhook subscriptions made through a key (#723).
+      const [graphRead, keyRead] = await Promise.allSettled([
+        this.permissions.loadUserRoleGraphs(batch.map(([ownerId]) => ownerId)),
+        this.permissions.loadApiKeyScopeGraphs(this.apiKeyIdsOf(batch)),
+      ]);
+
+      if (graphRead.status === 'rejected') {
+        const err: unknown = graphRead.reason;
+        const dropped = batch.reduce((count, [, candidates]) => count + candidates.length, 0);
         failures += dropped;
         this.logger.error(
           `Failed to read the permissions of ${batch.length} webhook subscribers on "${eventType}" ` +
@@ -143,21 +175,51 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
         continue;
       }
 
-      for (const [ownerId, subscriptionIds] of batch) {
-        // A banned or deleted owner has no graph, so nothing to judge and no
-        // delivery (#906).
+      const graphs = graphRead.value;
+      const keyGraphs = keyRead.status === 'fulfilled' ? keyRead.value : null;
+      if (keyRead.status === 'rejected') {
+        const err: unknown = keyRead.reason;
+        this.logger.error(
+          `Failed to read the API keys of ${batch.length} webhook subscribers on "${eventType}" ` +
+            `(subject ${event.subjectId}), dropping the deliveries made through a key: ` +
+            `${err instanceof Error ? err.message : err}`,
+          err instanceof Error ? err.stack : undefined,
+        );
+      }
+
+      for (const [ownerId, candidates] of batch) {
+        // A banned or deleted subscriber has no graph, so nothing to judge and
+        // no delivery (#906).
         const graph = graphs.get(ownerId);
         if (!graph) {
           continue;
         }
 
-        for (const subscriptionId of subscriptionIds) {
+        const subscriber: Subscriber = { graph };
+        for (const { id: subscriptionId, apiKeyId } of candidates) {
+          let keyGraph: ApikeyWithScopes | null | undefined = null;
+          if (apiKeyId !== null) {
+            if (!keyGraphs) {
+              // Its batch's key read failed, and said so above.
+              failures += 1;
+              continue;
+            }
+            keyGraph = keyGraphs.get(apiKeyId);
+          }
+
           // Isolate each subscription: a single failed enqueue (e.g. a transient
           // Redis blip on queue.add) or visibility lookup must NOT abort the fan-out
           // and silently strip the event from every subscriber later in the list.
           // Log the one that failed and carry on so deliveries are independent.
           try {
-            const visible = await this.visibleTo(graph, descriptor, event.subjectId, visibilityCache);
+            const visible = await this.visibleTo(
+              subscriber,
+              apiKeyId,
+              keyGraph,
+              descriptor,
+              event.subjectId,
+              visibilityCache,
+            );
 
             if (!visible) {
               continue;
@@ -198,26 +260,63 @@ export class WebhookDispatcherService implements OnModuleInit, OnApplicationShut
         eventTypes: { some: { eventType } },
         AND: [{ OR: [{ resourceId: null }, { resourceId: event.subjectId }] }, householdFilter],
       },
-      select: { id: true, createdById: true },
+      select: { id: true, createdById: true, apiKeyId: true },
     });
   }
 
+  /** The distinct keys a batch's webhook subscriptions were made through. */
+  private apiKeyIdsOf(batch: readonly (readonly [string, CandidateSubscription[]])[]): string[] {
+    const keys = new Set<string>();
+    for (const [, candidates] of batch) {
+      for (const { apiKeyId } of candidates) {
+        if (apiKeyId !== null) {
+          keys.add(apiKeyId);
+        }
+      }
+    }
+
+    return [...keys];
+  }
+
+  /**
+   * Whether the subscriber, through the key when the webhook subscription was
+   * made through one, can take the descriptor's action on the subject.
+   * `keyGraph` is `null` for one the subscriber's session made, and
+   * `undefined` once its key is deleted, disabled or expired.
+   */
   private async visibleTo(
-    graph: UserWithRoles,
+    subscriber: Subscriber,
+    apiKeyId: string | null,
+    keyGraph: ApikeyWithScopes | null | undefined,
     descriptor: WebhookEventDescriptor,
     subjectId: string,
     cache: Map<string, boolean>,
   ): Promise<boolean> {
-    const cached = cache.get(graph.id);
+    // A subscriber's session and each of their keys reach different rows, so
+    // each pair is its own verdict (#723).
+    const memoKey = `${subscriber.graph.id}:${apiKeyId ?? ''}`;
+    const cached = cache.get(memoKey);
     if (cached !== undefined) {
       return cached;
     }
-    const ability = this.abilityFactory.createForUser(graph);
-    const visible = await this.visibility.isVisibleTo(descriptor.subject, subjectId, ability, {
+
+    // Nothing left to judge it by once the key is gone. A key that isn't its
+    // subscriber's own is refused too: a request through a key always acts as
+    // the key's owner, so no request could have made that pairing.
+    if (keyGraph === undefined || (keyGraph !== null && keyGraph.referenceId !== subscriber.graph.id)) {
+      cache.set(memoKey, false);
+      return false;
+    }
+
+    subscriber.ability ??= this.abilityFactory.createForUser(subscriber.graph);
+    const abilities =
+      keyGraph === null ? [subscriber.ability] : this.abilityFactory.createForApiKeyActor(subscriber.ability, keyGraph);
+
+    const visible = await this.visibility.isVisibleTo(descriptor.subject, subjectId, abilities, {
       action: descriptor.requiredAction,
       subjectDeleted: descriptor.subjectDeleted ?? false,
     });
-    cache.set(graph.id, visible);
+    cache.set(memoKey, visible);
     return visible;
   }
 
