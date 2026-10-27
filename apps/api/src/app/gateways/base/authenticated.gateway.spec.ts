@@ -1,6 +1,6 @@
 import { AuthService } from '@bge/auth';
-import type { I18nTranslations, LocaleResolutionService } from '@bge/i18n';
-import { Logger } from '@nestjs/common';
+import { t, type I18nTranslations, type LocaleResolutionService } from '@bge/i18n';
+import { Logger, ServiceUnavailableException } from '@nestjs/common';
 import type { I18nService } from 'nestjs-i18n';
 import type { Namespace, Socket } from 'socket.io';
 import { WsConnectionRefusal } from '../filters';
@@ -87,9 +87,11 @@ describe('AuthenticatedGateway', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
-  it('refuses a connection whose session cannot be looked up with a 500, and logs why', async () => {
+  it.each([
+    ['an error', new Error('connect ECONNREFUSED redis:6379')],
+    ['an HTTP exception with no catalog key', new ServiceUnavailableException('connect ECONNREFUSED redis:6379')],
+  ])('refuses a connection whose session cannot be looked up, by %s, with a 500, and logs why', async (_, outage) => {
     const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
-    const outage = new Error('connect ECONNREFUSED redis:6379');
     const authService = { getSessionFromHeaders: jest.fn().mockRejectedValue(outage) } as unknown as AuthService;
     const { namespace, middleware } = fakeNamespace();
 
@@ -250,6 +252,33 @@ describe('AuthenticatedGateway', () => {
         403,
         'errors.auth.impersonated_session',
       ],
+      [
+        'an HTTP exception whose body is a catalog key',
+        connection({ acceptLanguage: 'fr' }),
+        {
+          getSessionFromHeaders: jest
+            .fn()
+            .mockRejectedValue(new ServiceUnavailableException(t('errors.auth.session_unavailable'))),
+        } as unknown as AuthService,
+        503,
+        'errors.auth.session_unavailable',
+      ],
+      [
+        // `AuthService` answers a session store it cannot read with a 503
+        // rather than a missing session (#640).
+        'a session store that cannot be read',
+        connection({ acceptLanguage: 'fr' }),
+        {
+          getSessionFromHeaders: jest.fn().mockRejectedValue(
+            new ServiceUnavailableException({
+              code: 'SESSION_UNAVAILABLE',
+              message: t('errors.auth.session_unavailable'),
+            }),
+          ),
+        } as unknown as AuthService,
+        503,
+        'errors.auth.session_unavailable',
+      ],
     ])(
       "names why for %s, in the handshake's Accept-Language and no stored preference",
       async (_, client, authService, statusCode, key) => {
@@ -266,6 +295,28 @@ describe('AuthenticatedGateway', () => {
         expect(resolve).toHaveBeenCalledWith({ acceptLanguage: 'fr' });
       },
     );
+
+    it("carries a structured exception's code beside its rendered message, as over HTTP (#640)", async () => {
+      const { namespace, middleware } = fakeNamespace();
+      const authService = {
+        getSessionFromHeaders: jest.fn().mockRejectedValue(
+          new ServiceUnavailableException({
+            code: 'SESSION_UNAVAILABLE',
+            message: t('errors.auth.session_unavailable'),
+          }),
+        ),
+      } as unknown as AuthService;
+
+      new TestGateway(authService, frameScope, translator).afterInit(namespace);
+      const refusal = await handshake(middleware, connection({ acceptLanguage: 'fr' }));
+
+      expect((refusal as WsConnectionRefusal).data).toEqual({
+        statusCode: 503,
+        error: 'Service Unavailable',
+        message: 'fr:errors.auth.session_unavailable',
+        code: 'SESSION_UNAVAILABLE',
+      });
+    });
 
     it('is still sent, with its status, when its copy cannot be rendered, and logs why', async () => {
       const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);

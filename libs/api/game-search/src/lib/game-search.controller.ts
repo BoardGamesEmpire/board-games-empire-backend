@@ -22,7 +22,9 @@ export class GameSearchController {
       'REST fallback for the WebSocket search:start flow. ' +
       'Collects all results from local DB and coordinator unary gRPC into a single response. ' +
       'The local half matches titles within the set `GET /games` lists: the live Public games, the acting ' +
-      'user’s own and their friends’ that reach friends, by one rule for every role. ' +
+      'user’s own, their friends’ that reach friends, their friends of friends’ that reach friends of ' +
+      'friends, and the games shared with them or with a household they belong to once the share is in ' +
+      'effect, by one rule for every role. ' +
       '**Breaking change (#513).** Owner/Admin/Moderator ' +
       'previously also found every private game on the server; one they can read is still readable at ' +
       '`GET /games/:id`. An **API key** is additionally floored by its own permissions (effective access is ' +

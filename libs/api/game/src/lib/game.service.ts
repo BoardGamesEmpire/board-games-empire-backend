@@ -15,6 +15,14 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { CreateGameDto, GAME_DESCRIPTION_MAX_LENGTH, UpdateGameDto } from './dto';
 import { gameListScope } from './game-list-scope';
 
+/** A game's ranges, each as its minimum's field and its maximum's. */
+const GAME_RANGES = [
+  ['minPlayers', 'maxPlayers'],
+  ['minPlayTime', 'maxPlayTime'],
+] as const;
+
+type GameRangeField = (typeof GAME_RANGES)[number][number];
+
 @Injectable()
 export class GameService {
   private readonly logger = new Logger(GameService.name);
@@ -33,9 +41,9 @@ export class GameService {
    * create between them makes `total` — and the `hasMore` derived from it —
    * describe a catalog the caller was never served.
    *
-   * The scope is {@link gameListScope}, the live Public games, the acting
-   * user's own and a friend's that reach friends, and the ceiling only clips
-   * it (#513). For an `apiKey` actor it carries the key ∩ owner floor.
+   * The scope is the set {@link gameListScope} names, and the ceiling only
+   * clips it (#513).
+   * For an `apiKey` actor it carries the key ∩ owner floor.
    *
    * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
    * half the scope is the caller's own games, which has no meaning without a
@@ -247,7 +255,14 @@ export class GameService {
       // answer 400. The write binds the same conditions again.
       const existing = await this.db.game.findFirst({
         where: { id, AND: updateConditions },
-        select: { description: true, createdBy: { select: { isServiceAccount: true } } },
+        select: {
+          description: true,
+          minPlayers: true,
+          maxPlayers: true,
+          minPlayTime: true,
+          maxPlayTime: true,
+          createdBy: { select: { isServiceAccount: true } },
+        },
       });
       if (existing === null) {
         const exists = await this.db.game.count({ where: { id } });
@@ -260,11 +275,13 @@ export class GameService {
 
       // Only an import gives the service account a game, and imported games are
       // public. Re-import never rewrites reach, so one narrowed here, to
-      // Friends or Private, would stay narrowed for good.
+      // FriendsOfFriends, Friends or Private, would stay narrowed for good.
       const privatizes = updateGameDto.reach !== undefined && updateGameDto.reach !== Reach.Public;
       if (privatizes && existing.createdBy?.isServiceAccount === true) {
         throw new BadRequestException(t('errors.game.server_owned_stays_public', { id }));
       }
+
+      this.assertRangesInOrder(existing, updateGameDto);
 
       // The description the game already has is left as it is. An import may
       // have stored one longer than the cap, and it's Markdown the server
@@ -335,6 +352,30 @@ export class GameService {
       }
 
       throw error;
+    }
+  }
+
+  /**
+   * Refuses an update that would leave a range's minimum above its maximum.
+   * The DTO checks a range sent whole, but a PATCH may send one end alone,
+   * and that end has to be held to the one already stored (#869). A field
+   * left out keeps its stored value; one sent as null clears it, and a range
+   * with an end unknown can't be out of order.
+   */
+  private assertRangesInOrder(
+    existing: Partial<Record<GameRangeField, number | null>>,
+    updateGameDto: UpdateGameDto,
+  ): void {
+    const after = (field: GameRangeField) =>
+      (updateGameDto[field] !== undefined ? updateGameDto[field] : existing[field]) ?? null;
+
+    for (const [minField, maxField] of GAME_RANGES) {
+      const min = after(minField);
+      const max = after(maxField);
+
+      if (min !== null && max !== null && max < min) {
+        throw new BadRequestException(t('errors.game.range_reversed', { minField, min, maxField, max }));
+      }
     }
   }
 

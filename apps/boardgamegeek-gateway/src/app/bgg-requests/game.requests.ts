@@ -1,7 +1,9 @@
-import { defer, from } from 'rxjs';
-import { map, mergeMap, skip, take, toArray } from 'rxjs/operators';
+import type * as proto from '@boardgamesempire/proto-gateway';
+import { defer } from 'rxjs';
+import { map } from 'rxjs/operators';
 import type { BggRequest } from '../bgg/bgg.service';
 import { BggThingType, DEFAULT_BGG_SEARCH_TYPES, DEFAULT_SEARCH_LIMIT } from '../constants';
+import { toPublishYear } from '../mappers/game.mapper';
 import type { BggSearchItem, BggThing } from '../types';
 
 /**
@@ -28,10 +30,18 @@ export interface ThingFetchOptions {
 }
 
 /**
- * Search BGG for things matching a free-text query.
+ * Search BGG for things matching a free-text query, keeping the thing types
+ * in `keep`, and the games published within `publishYear` when it's given.
  *
- * BGG's `/search` endpoint does not paginate server-side; `limit` is
- * applied client-side after the response is received.
+ * BGG is always asked for base games and expansions together. Asked for base
+ * games alone, it returns expansions labelled as base games; asked for both,
+ * it answers an expansion twice, once under each label. So the items are
+ * collapsed to one per game, then filtered to `keep` and to the publish year,
+ * and only then paged, so that `offset` and `limit` count distinct games that
+ * match (#777, #719).
+ *
+ * BGG's `/search` endpoint does not paginate server-side; `offset` and
+ * `limit` are applied client-side after the response is received.
  *
  * The `defer` wrapper ensures the underlying HTTP call is re-issued on
  * each subscription — required so `BggService.call` can retry a 429
@@ -41,20 +51,71 @@ export function searchGamesRequest(
   query: string,
   limit: number = DEFAULT_SEARCH_LIMIT,
   offset = 0,
-  types: readonly BggThingType[] = DEFAULT_BGG_SEARCH_TYPES,
+  keep: readonly BggThingType[] = DEFAULT_BGG_SEARCH_TYPES,
+  publishYear?: proto.IntRange,
 ): BggRequest<BggSearchItem[]> {
+  const kept = new Set<string>(keep);
+  const inYearRange = publishYearMatcher(publishYear);
+
   return (client) =>
     defer(() =>
       client.search.query({
         query,
-        type: normalizeTypes(types),
+        type: [...DEFAULT_BGG_SEARCH_TYPES],
       }),
     ).pipe(
-      mergeMap((result) => from(result.flatMap((result) => result.items))),
-      skip(offset),
-      take(limit),
-      toArray(),
+      map((results) =>
+        collapseSearchItems(results.flatMap((result) => result.items))
+          .filter((item) => kept.has(item.type) && inYearRange(item))
+          .slice(offset, offset + limit),
+      ),
     );
+}
+
+/**
+ * Whether an item falls within a publish-year range, both bounds inclusive.
+ * An item with no year, which BGG writes as 0, matches only when the range
+ * includes unknown ones. A range with no bound matches every item, as the
+ * server reads it (#719).
+ */
+function publishYearMatcher(range: proto.IntRange | undefined): (item: BggSearchItem) => boolean {
+  const min = range?.min ?? undefined;
+  const max = range?.max ?? undefined;
+
+  if (min === undefined && max === undefined) {
+    return () => true;
+  }
+
+  return (item) => {
+    const year = toPublishYear(item.yearpublished);
+
+    if (year === undefined) {
+      return range?.includeUnknown === true;
+    }
+
+    return (min === undefined || year >= min) && (max === undefined || year <= max);
+  };
+}
+
+/**
+ * One entry per BGG id, at the position of that id's first copy. An id is an
+ * expansion when any copy is labelled one, since BGG also answers expansions
+ * as base games (#777). Otherwise it keeps its first copy's type.
+ */
+export function collapseSearchItems(items: readonly BggSearchItem[]): BggSearchItem[] {
+  const byId = new Map<number, BggSearchItem>();
+
+  for (const item of items) {
+    const first = byId.get(item.id);
+
+    if (!first) {
+      byId.set(item.id, item);
+    } else if (item.type === BggThingType.BoardGameExpansion && first.type !== BggThingType.BoardGameExpansion) {
+      byId.set(item.id, { ...first, type: BggThingType.BoardGameExpansion });
+    }
+  }
+
+  return [...byId.values()];
 }
 
 /**

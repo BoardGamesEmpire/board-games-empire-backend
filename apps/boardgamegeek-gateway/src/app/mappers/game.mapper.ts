@@ -1,7 +1,8 @@
 import { isTrue } from '@bge/env';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { BggLinkType, BggNameType, BggThingType, DEFAULT_EDITION_KEY } from '../constants';
-import type { BggLink, BggName, BggSearchItem, BggThing, BggVersion } from '../types';
+import type { BggLink, BggName, BggSearchItem, BggText, BggThing, BggVersion } from '../types';
+import { decodeDescription, decodeText } from './decode-text';
 import { toLanguageDataList } from './language.mapper';
 
 /**
@@ -39,7 +40,8 @@ export function toThingTypes(
 
 const COMPLEXITY_WEIGHT_SCALE = 1000;
 
-const TABLETOP_PLATFORM: proto.PlatformData = {
+/** BGG's one platform: every game it sends is on it, and its platform list names it alone (#718). */
+export const TABLETOP_PLATFORM: proto.PlatformData = {
   externalId: 'bgg-tabletop',
   name: 'Tabletop',
   abbreviation: 'TT',
@@ -48,9 +50,10 @@ const TABLETOP_PLATFORM: proto.PlatformData = {
 
 /**
  * Picks the primary display name from a thing's `names` array, falling
- * back to the first entry if no primary is flagged.
+ * back to the first entry if no primary is flagged. The value is as BGG sent
+ * it, still encoded (#716).
  */
-export function selectPrimaryName(names: readonly BggName[] | undefined): string | undefined {
+export function selectPrimaryName(names: readonly BggName[] | undefined): BggText | undefined {
   if (!names?.length) {
     return undefined;
   }
@@ -59,12 +62,13 @@ export function selectPrimaryName(names: readonly BggName[] | undefined): string
   return (primary ?? names[0]).value;
 }
 
-function normalizeTitle(value: string | undefined): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
+/**
+ * A name as trimmed, decoded text, or undefined when it's blank or absent. A
+ * name the client parsed as a number or a boolean, such as "2048", is kept as
+ * text (#716).
+ */
+function normalizeTitle(value: BggText | undefined): string | undefined {
+  const trimmed = decodeText(value).trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
@@ -73,7 +77,7 @@ function normalizeTitle(value: string | undefined): string | undefined {
  * - canonical `names: [{ type: 'primary', value: '...' }]`
  * - flattened `name: '...'` with optional `alternateNames: string[]`
  */
-function selectThingTitle(thing: Pick<BggThing, 'names'> & { name?: string; alternateNames?: string[] }): string {
+function selectThingTitle(thing: Pick<BggThing, 'names' | 'name' | 'alternateNames'>): string {
   const directName = normalizeTitle(thing.name);
   if (directName) {
     return directName;
@@ -134,48 +138,48 @@ function linksOfType(thing: Pick<BggThing, 'links'>, type: BggLinkType): BggLink
   return (thing.links ?? []).filter((link) => link.type === type && !isInbound(link.inbound));
 }
 
-function toPersonData(link: BggLink): proto.PersonData {
-  return {
-    externalId: String(link.id),
-    name: link.value,
-  } satisfies proto.PersonData;
+/** A designer, artist, publisher, mechanic, category or family link: BGG's id and its name. */
+interface NamedLink {
+  externalId: string;
+  name: string;
 }
 
-function toPublisherData(link: BggLink): proto.PublisherData {
-  return {
-    externalId: String(link.id),
-    name: link.value,
-  } satisfies proto.PublisherData;
-}
-
-function toMechanicData(link: BggLink): proto.MechanicData {
-  return {
-    externalId: String(link.id),
-    name: link.value,
-  } satisfies proto.MechanicData;
-}
-
-function toCategoryData(link: BggLink): proto.CategoryData {
-  return {
-    externalId: String(link.id),
-    name: link.value,
-  } satisfies proto.CategoryData;
+/**
+ * The outbound links of `type`, each with its name trimmed and decoded. A link
+ * whose name is blank or absent is skipped: the server matches people by name
+ * and vocabulary entries by slug, so nameless links would all merge into one
+ * record named "" (#716).
+ */
+function namedLinksOfType(thing: Pick<BggThing, 'links'>, type: BggLinkType): NamedLink[] {
+  return linksOfType(thing, type).flatMap((link) => {
+    const name = normalizeTitle(link.value);
+    return name ? [{ externalId: String(link.id), name }] : [];
+  });
 }
 
 /**
  * Maps a BGG family link to proto FamilyData. BGG encodes a sub-classification
  * in the value's "<Type>: <name>" prefix; the prefix is parsed into familyType.
+ * The name arrives decoded, so the split sees the text a person reads (#716).
  */
-function toFamilyData(link: BggLink): proto.FamilyData {
-  const colonIndex = link.value.indexOf(':');
-  const familyType = colonIndex > 0 ? link.value.slice(0, colonIndex).trim() : undefined;
-  const name = colonIndex > 0 ? link.value.slice(colonIndex + 1).trim() : link.value;
+function toFamilyData({ externalId, name: value }: NamedLink): proto.FamilyData {
+  const colonIndex = value.indexOf(':');
+  const familyType = colonIndex > 0 ? value.slice(0, colonIndex).trim() : undefined;
+  const name = colonIndex > 0 ? value.slice(colonIndex + 1).trim() : value;
 
   return {
-    externalId: String(link.id),
+    externalId,
     name,
     familyType,
   } satisfies proto.FamilyData;
+}
+
+/**
+ * An image URL as BGG meant it: the parser leaves an `&amp;` in its query
+ * encoded (#716). A blank one is left out.
+ */
+function decodeUrl(value: string | undefined): string | undefined {
+  return decodeText(value).trim() || undefined;
 }
 
 /**
@@ -183,6 +187,54 @@ function toFamilyData(link: BggLink): proto.FamilyData {
  */
 function coerceYear(year: number | undefined): number | undefined {
   return typeof year === 'number' && year > 0 ? year : undefined;
+}
+
+/**
+ * Coerces BGG's "0 means unknown" sentinel on a player count, play time or
+ * minimum age into undefined (#869).
+ */
+function coercePositive(value: number | undefined): number | undefined {
+  return typeof value === 'number' && value > 0 ? value : undefined;
+}
+
+/**
+ * Both ends of a range BGG sends, or neither when its minimum is above its
+ * maximum (#869). BGG's data holds such pairs, and there's no telling which
+ * end is wrong. Kept, a reversed play time fits filters the game can't, and
+ * the api refuses one from any other writer. Swapping the ends is the other
+ * reading, left for later.
+ */
+function orderedRange(min: number | undefined, max: number | undefined): [number | undefined, number | undefined] {
+  return min !== undefined && max !== undefined && min > max ? [undefined, undefined] : [min, max];
+}
+
+/** A thing's player counts, each end unknown when BGG doesn't know it. */
+function toPlayerCounts(thing: BggThing): Pick<proto.GameSearchData, 'minPlayers' | 'maxPlayers'> {
+  const [minPlayers, maxPlayers] = orderedRange(coercePositive(thing.minplayers), coercePositive(thing.maxplayers));
+  return { minPlayers, maxPlayers };
+}
+
+/**
+ * A thing's play time in minutes. playingtime stands in for an end BGG
+ * gives no minimum or maximum for.
+ */
+function toPlayTimes(thing: BggThing): Pick<proto.GameSearchData, 'minPlaytime' | 'maxPlaytime'> {
+  const playingTime = coercePositive(thing.playingtime);
+  const [minPlaytime, maxPlaytime] = orderedRange(
+    coercePositive(thing.minplaytime) ?? playingTime,
+    coercePositive(thing.maxplaytime) ?? playingTime,
+  );
+  return { minPlaytime, maxPlaytime };
+}
+
+/**
+ * A game's publish year as BGG sends it, with its "0 means unknown" sentinel
+ * unset. Unlike coerceYear it keeps negative years, which BGG uses for games
+ * from before the common era (#719). Sent as 0, an undated game would read as
+ * a year, fail every publish-year range, and be stored with it on import.
+ */
+export function toPublishYear(year: number | undefined): number | undefined {
+  return year === 0 ? undefined : year;
 }
 
 function toReleaseDate(year: number | undefined): string | undefined {
@@ -218,7 +270,7 @@ function toVersionRelease(version: BggVersion): proto.GameReleaseData {
     externalId: String(version.id),
     platform: TABLETOP_PLATFORM,
     status: proto.ReleaseStatus.RELEASE_STATUS_RELEASED,
-    editionName: version.name || undefined,
+    editionName: normalizeTitle(version.name),
     releaseYear: coerceYear(version.yearpublished),
     releaseDate: toReleaseDate(version.yearpublished),
     // BGG versions are flat — no edition hierarchy.
@@ -251,13 +303,14 @@ function toReleases(thing: BggThing): proto.GameReleaseData[] {
  * empty: search items have no platform/release data.
  */
 export function searchItemToGameSearchData(item: BggSearchItem): proto.GameSearchData {
-  const title = item.name ?? selectPrimaryName(item.names) ?? '';
+  // Trimmed, and a blank name falls back to `names`, as a fetched thing's title does (#716).
+  const title = normalizeTitle(item.name) ?? normalizeTitle(selectPrimaryName(item.names)) ?? '';
 
   return {
     externalId: String(item.id),
     title,
     contentType: BGG_CONTENT_TYPE_MAP[item.type] ?? proto.ContentType.CONTENT_TYPE_UNSPECIFIED,
-    yearPublished: item.yearpublished,
+    yearPublished: toPublishYear(item.yearpublished),
     sourceUrl: toSourceUrl({ id: item.id, type: item.type }),
     availablePlatforms: [TABLETOP_PLATFORM],
     availableReleases: [],
@@ -276,14 +329,14 @@ export function thingToGameSearchData(thing: BggThing): proto.GameSearchData {
     externalId: String(thing.id),
     title,
     contentType: toContentType(thing),
-    yearPublished: thing.yearpublished,
-    thumbnailUrl: thing.thumbnail,
+    yearPublished: toPublishYear(thing.yearpublished),
+    thumbnailUrl: decodeUrl(thing.thumbnail),
     sourceUrl: toSourceUrl(thing),
     averageRating: thing.statistics?.ratings?.average,
-    minPlayers: thing.minplayers,
-    maxPlayers: thing.maxplayers,
+    ...toPlayerCounts(thing),
+    ...toPlayTimes(thing),
     baseGameExternalId: toBaseGameExternalId(thing),
-    summary: thing.description,
+    summary: decodeDescription(thing.description),
     availablePlatforms: [TABLETOP_PLATFORM],
     availableReleases: [toSyntheticTabletopRelease(thing)],
   } satisfies proto.GameSearchData;
@@ -309,22 +362,22 @@ export function thingToGameData(thing: BggThing, locale?: string): proto.GameDat
       ? Math.round(ratings.averageweight * COMPLEXITY_WEIGHT_SCALE)
       : undefined;
 
-  const designers = linksOfType(thing, BggLinkType.BoardGameDesigner).map(toPersonData);
-  const artists = linksOfType(thing, BggLinkType.BoardGameArtist).map(toPersonData);
-  const publishers = linksOfType(thing, BggLinkType.BoardGamePublisher).map(toPublisherData);
-  const mechanics = linksOfType(thing, BggLinkType.BoardGameMechanic).map(toMechanicData);
-  const categories = linksOfType(thing, BggLinkType.BoardGameCategory).map(toCategoryData);
-  const families = linksOfType(thing, BggLinkType.BoardGameFamily).map(toFamilyData);
+  const designers: proto.PersonData[] = namedLinksOfType(thing, BggLinkType.BoardGameDesigner);
+  const artists: proto.PersonData[] = namedLinksOfType(thing, BggLinkType.BoardGameArtist);
+  const publishers: proto.PublisherData[] = namedLinksOfType(thing, BggLinkType.BoardGamePublisher);
+  const mechanics: proto.MechanicData[] = namedLinksOfType(thing, BggLinkType.BoardGameMechanic);
+  const categories: proto.CategoryData[] = namedLinksOfType(thing, BggLinkType.BoardGameCategory);
+  const families = namedLinksOfType(thing, BggLinkType.BoardGameFamily).map(toFamilyData);
 
   return {
     externalId: String(thing.id),
     title,
     contentType: toContentType(thing),
 
-    description: thing.description,
-    yearPublished: thing.yearpublished,
-    thumbnailUrl: thing.thumbnail,
-    imageUrl: thing.image,
+    description: decodeDescription(thing.description),
+    yearPublished: toPublishYear(thing.yearpublished),
+    thumbnailUrl: decodeUrl(thing.thumbnail),
+    imageUrl: decodeUrl(thing.image),
     sourceUrl: toSourceUrl(thing),
 
     designers,
@@ -337,11 +390,9 @@ export function thingToGameData(thing: BggThing, locale?: string): proto.GameDat
     averageRating: ratings?.average,
     bayesRating: ratings?.bayesaverage,
     ratingsCount: ratings?.usersrated,
-    minPlayers: thing.minplayers,
-    maxPlayers: thing.maxplayers,
-    minPlaytime: thing.minplaytime ?? thing.playingtime,
-    maxPlaytime: thing.maxplaytime ?? thing.playingtime,
-    minAge: thing.minage,
+    ...toPlayerCounts(thing),
+    ...toPlayTimes(thing),
+    minAge: coercePositive(thing.minage),
     complexityWeight,
 
     baseGameExternalId: toBaseGameExternalId(thing),

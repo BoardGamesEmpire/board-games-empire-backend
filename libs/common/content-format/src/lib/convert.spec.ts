@@ -349,19 +349,34 @@ Next`,
      * How many times longer converting takes when the text is four times as
      * long: about 4 when time grows in proportion to length, about 16 when it
      * grows with its square. A ratio rather than a time, so a slow or busy
-     * machine doesn't decide it; each side is the fastest of three runs.
+     * machine doesn't decide it.
+     *
+     * Each side is the fastest of five rounds, taken in turn with the other
+     * side's, and each round averages as many conversions as fill 10 ms. One
+     * conversion of the markup cases takes well under a millisecond, so three
+     * back-to-back runs fit inside one burst from another test worker: CI
+     * measured 8 and 9 for cases that measure 3 to 4 when the runner is idle.
      */
     function growth(convert: (length: number) => unknown, length: number): number {
-      const fastest = (n: number) =>
-        Math.min(
-          ...[1, 2, 3].map(() => {
-            const started = performance.now();
-            convert(n);
-            return performance.now() - started;
-          }),
-        );
+      const timeEach = (n: number) => {
+        const started = performance.now();
+        let runs = 0;
+        let elapsed: number;
+        do {
+          convert(n);
+          runs++;
+          elapsed = performance.now() - started;
+        } while (elapsed < 10);
+        return elapsed / runs;
+      };
 
-      return fastest(length * 4) / fastest(length);
+      let short = Infinity;
+      let long = Infinity;
+      for (let round = 0; round < 5; round++) {
+        short = Math.min(short, timeEach(length));
+        long = Math.min(long, timeEach(length * 4));
+      }
+      return long / short;
     }
 
     // Each case once took time in the square of its length. Writing a paragraph

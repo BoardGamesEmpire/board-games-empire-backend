@@ -14,10 +14,10 @@ export interface DataGatewayDriverContractContext {
   capabilities: proto.Capability[];
 
   /**
-   * The coverage axes its search narrows by. Its `describe` must declare
+   * The search filters its search narrows by. Its `describe` must declare
    * exactly these, and a search is filtered on each.
    */
-  filterableAxes: proto.CoverageAxis[];
+  filterableAxes: proto.SearchFilterAxis[];
 
   /** An externalId the driver can resolve via fetchGame. */
   knownExternalId: string;
@@ -31,21 +31,36 @@ export interface DataGatewayDriverContractContext {
 
 /**
  * A filter naming one value on `axis`: the first its coverage lists there,
- * or, when it lists none, tabletop or a base game. Undefined for an axis the
- * contract doesn't know.
+ * or, when it lists none, tabletop or a base game. On publish year, a range
+ * wide enough, unknown years included, that the search query's results still
+ * match it (#719). On play time, likewise: a maximum no play time exceeds,
+ * unknown times included (#869). On player count, one player, unknown
+ * counts included: a bound alone is one count, so no range matches every
+ * game, and this one may match none of the query's results. The case checks
+ * only that the search ends with SOURCE_DONE (#869). Undefined for an axis
+ * the contract doesn't know.
  */
-const filterOn = (axis: proto.CoverageAxis, coverage: proto.Coverage | undefined): proto.SearchFilter | undefined => {
+const filterOn = (
+  axis: proto.SearchFilterAxis,
+  coverage: proto.Coverage | undefined,
+): proto.SearchFilter | undefined => {
   switch (axis) {
-    case proto.CoverageAxis.COVERAGE_AXIS_PLATFORM_TYPE:
+    case proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLATFORM_TYPE:
       return {
         platformTypes: [coverage?.platformTypes[0] ?? proto.PlatformType.PLATFORM_TYPE_TABLETOP],
         contentTypes: [],
       };
-    case proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE:
+    case proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE:
       return {
         platformTypes: [],
         contentTypes: [coverage?.contentTypes[0] ?? proto.ContentType.CONTENT_TYPE_BASE_GAME],
       };
+    case proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR:
+      return { platformTypes: [], contentTypes: [], publishYear: { includeUnknown: true, min: -10000, max: 10000 } };
+    case proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAYER_COUNT:
+      return { platformTypes: [], contentTypes: [], playerCount: { min: 1, includeUnknown: true } };
+    case proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAY_TIME:
+      return { platformTypes: [], contentTypes: [], playTime: { max: 2147483647, includeUnknown: true } };
     default:
       return undefined;
   }
@@ -245,6 +260,42 @@ export function runDataGatewayDriverContract(description: string, setup: Setup, 
           const response = await firstValueFrom(ctx.driver.listLanguages({ correlationId: 'contract-langs' }));
 
           expect(Array.isArray(response.languages)).toBe(true);
+        },
+      );
+    });
+
+    describe('when it declares list platforms', () => {
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_LIST_PLATFORMS,
+        'listPlatforms resolves with a platform array',
+        async () => {
+          const response = await firstValueFrom(ctx.driver.listPlatforms({ correlationId: 'contract-platforms' }));
+
+          expect(Array.isArray(response.platforms)).toBe(true);
+        },
+      );
+    });
+
+    describe('when it declares list categories', () => {
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_LIST_CATEGORIES,
+        'listCategories resolves with a category array',
+        async () => {
+          const response = await firstValueFrom(ctx.driver.listCategories({ correlationId: 'contract-categories' }));
+
+          expect(Array.isArray(response.categories)).toBe(true);
+        },
+      );
+    });
+
+    describe('when it declares list mechanics', () => {
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_LIST_MECHANICS,
+        'listMechanics resolves with a mechanic array',
+        async () => {
+          const response = await firstValueFrom(ctx.driver.listMechanics({ correlationId: 'contract-mechanics' }));
+
+          expect(Array.isArray(response.mechanics)).toBe(true);
         },
       );
     });

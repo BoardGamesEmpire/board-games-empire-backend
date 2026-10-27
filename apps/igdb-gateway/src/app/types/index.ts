@@ -17,6 +17,13 @@ export interface IgdbSearchNarrowing {
 
   /** The platform types a game must have a platform of. */
   platformTypes?: readonly IgdbPlatformType[];
+
+  /**
+   * The first release dates to ask for, in Unix seconds: from `from`, and
+   * before `before`. A game with no first release date is asked for too when
+   * `orUnknown` (#719).
+   */
+  releasedBetween?: { readonly from?: number; readonly before?: number; readonly orUnknown: boolean };
 }
 
 export interface IgdbCover {

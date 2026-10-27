@@ -144,19 +144,45 @@ describe('the BGE images, run as the split profile', () => {
 
     // The filter crosses every hop as the server sends it: the api's stored
     // names, the coordinator's proto values, and the stub's own narrowing by
-    // content type, the axis it declares (#713).
-    it('narrows a search by content type, and answers one its coverage can’t match with nothing', async () => {
+    // content type, publish year and player count, the axes it declares
+    // (#713, #719, #869). It doesn't declare play time, so a play-time search
+    // doesn't ask it and names it unfilterable, unless the search keeps games
+    // with no known play time. Then the stub is asked, and the coordinator
+    // checks the play time each of its results carries (#869).
+    it('narrows a search by each filter, finds nothing off the stub’s coverage, and lists it unfilterable by play time', async () => {
       const id = required(gatewayId, 'gateway');
       const current = required(session, 'session');
 
       const expansions = await searchGateway(stack.baseUrl, current, id, STUB.query, { contentTypes: 'Expansion' });
+      const recent = await searchGateway(stack.baseUrl, current, id, STUB.query, { publishYearMin: '2021' });
       const onPc = await searchGateway(stack.baseUrl, current, id, STUB.query, { platformTypes: 'PC' });
+      const forFive = await searchGateway(stack.baseUrl, current, id, STUB.query, { playerCountMin: '5' });
+      const withinAnHour = await searchGateway(stack.baseUrl, current, id, STUB.query, { playTimeMax: '60' });
+      const withinAnHourOrUntimed = await searchGateway(stack.baseUrl, current, id, STUB.query, {
+        playTimeMax: '60',
+        playTimeIncludeUnknown: 'true',
+      });
 
       expect(expansions.errors).toBeUndefined();
       expect(expansions.resultsBySource[id]).toEqual([expect.objectContaining(STUB.expansion)]);
+      expect(recent.errors).toBeUndefined();
+      expect(recent.resultsBySource[id]).toEqual([expect.objectContaining(STUB.expansion)]);
       expect(onPc.resultsBySource).toEqual({});
       expect(onPc.errors).toBeUndefined();
       expect(onPc.unavailableSources).toBeUndefined();
+
+      // Stub Island plays 2 to 4, and Harbours 2 to 5.
+      expect(forFive.errors).toBeUndefined();
+      expect(forFive.resultsBySource[id]).toEqual([expect.objectContaining(STUB.expansion)]);
+      expect(forFive.unfilterableSources).toBeUndefined();
+      expect(withinAnHour.resultsBySource).toEqual({});
+      expect(withinAnHour.errors).toBeUndefined();
+      expect(withinAnHour.unavailableSources).toBeUndefined();
+      expect(withinAnHour.unfilterableSources).toEqual([id]);
+      // Stub Island takes 30 to 60 minutes, and Harbours 45 to 75.
+      expect(withinAnHourOrUntimed.errors).toBeUndefined();
+      expect(withinAnHourOrUntimed.resultsBySource[id]).toEqual([expect.objectContaining(STUB.baseGame)]);
+      expect(withinAnHourOrUntimed.unfilterableSources).toBeUndefined();
     });
 
     it('imports a game: gateway-fetch fetches it, and the worker stores it', async () => {

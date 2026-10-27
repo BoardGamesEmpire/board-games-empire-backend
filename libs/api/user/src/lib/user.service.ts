@@ -45,10 +45,11 @@ export class UserService {
    * `UserProfile` are composed, the second on the profile the row carries.
    * Every user's `User` ceiling is `read:user:searchable`, which repeats the
    * opt-in and ban clauses. Their `UserProfile` one is their own profile, a
-   * friend's that reaches friends, and every `Public` one, so a profile whose
-   * reach shuts them out is not found: a profile is found only where it can
-   * be read (#495). An API key scoped to
-   * one user or one profile narrows the page to that user.
+   * friend's that reaches friends, a friend of a friend's that reaches friends
+   * of friends (#496), and every `Public` one, so a profile whose reach shuts
+   * them out is not found: a profile is found only where it can be read
+   * (#495). An API key scoped to one user or one profile narrows the page to
+   * that user.
    */
   async searchUsers(requestingUserId: string, query: UserSearchQueryDto): Promise<PaginatedRows<UserSearchResult>> {
     const where = this.scopeComposer.compose(ResourceType.User, Action.read, {
@@ -75,7 +76,9 @@ export class UserService {
             username: true,
             firstName: true,
             lastName: true,
-            image: true,
+            // No `image`: the sign-in provider's picture only seeds the
+            // avatar at provisioning, and the avatar served is the profile's
+            // (#695).
             profile: {
               select: {
                 displayName: true,

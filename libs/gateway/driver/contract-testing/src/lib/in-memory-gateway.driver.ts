@@ -18,10 +18,10 @@ export interface InMemoryGatewayFixtures {
   coverage?: proto.Coverage;
 
   /**
-   * The coverage axes describe declares its search narrows by, none unless
+   * The search filters describe declares its search narrows by, none unless
    * set. searchGames narrows by a request's filter on these alone.
    */
-  filterableAxes?: proto.CoverageAxis[];
+  filterableAxes?: proto.SearchFilterAxis[];
 
   /** fetchGame resolves against these by `externalId`. */
   games?: proto.GameData[];
@@ -38,6 +38,15 @@ export interface InMemoryGatewayFixtures {
 
   /** listLanguages returns these. */
   languages?: proto.GatewayLanguageEntry[];
+
+  /** listPlatforms returns these. */
+  platforms?: proto.PlatformData[];
+
+  /** listCategories returns these. */
+  categories?: proto.CategoryData[];
+
+  /** listMechanics returns these. */
+  mechanics?: proto.MechanicData[];
 }
 
 /** gRPC's status code for an operation a DataGateway doesn't implement. */
@@ -50,6 +59,82 @@ const UNIMPLEMENTED = 12;
  */
 const listMatches = <T>(named: readonly T[] | undefined, values: readonly T[], unspecified: T): boolean =>
   !named?.length || values.some((value) => value !== unspecified && named.includes(value));
+
+/**
+ * Whether a year falls in a range, both bounds inclusive. A range with no
+ * bound narrows nothing, and an unknown year matches only when the range
+ * includes unknown ones (#719).
+ */
+const yearMatches = (range: proto.IntRange | undefined, year: number | undefined): boolean => {
+  const min = range?.min ?? undefined;
+  const max = range?.max ?? undefined;
+
+  if (min === undefined && max === undefined) {
+    return true;
+  }
+
+  return year === undefined
+    ? range?.includeUnknown === true
+    : (min === undefined || year >= min) && (max === undefined || year <= max);
+};
+
+/**
+ * Whether a game supports every player count in a range (#869). A bound alone
+ * is one count: a minimum of 5 means "supports 5", not "5 or more". A range
+ * with no bound narrows nothing, and a game missing either of its counts
+ * matches only when the range includes unknown ones.
+ */
+const playerCountMatches = (
+  range: proto.IntRange | undefined,
+  minPlayers: number | undefined,
+  maxPlayers: number | undefined,
+): boolean => {
+  const min = range?.min ?? undefined;
+  const max = range?.max ?? undefined;
+  const gameMin = minPlayers ?? undefined;
+  const gameMax = maxPlayers ?? undefined;
+
+  if (min === undefined && max === undefined) {
+    return true;
+  }
+
+  if (gameMin === undefined || gameMax === undefined) {
+    return range?.includeUnknown === true;
+  }
+
+  const lo = min ?? max;
+  const hi = max ?? min;
+
+  return (lo === undefined || gameMin <= lo) && (hi === undefined || hi <= gameMax);
+};
+
+/**
+ * Whether a game's whole play time, in minutes, fits a range (#869). A game
+ * with one play time plays that long, so it stands for both ends, and a bound
+ * left out doesn't narrow that side. A range with no bound narrows nothing,
+ * and a game with neither time matches only when the range includes unknown
+ * ones.
+ */
+const playTimeMatches = (
+  range: proto.IntRange | undefined,
+  minPlaytime: number | undefined,
+  maxPlaytime: number | undefined,
+): boolean => {
+  const min = range?.min ?? undefined;
+  const max = range?.max ?? undefined;
+  const gameMin = minPlaytime ?? maxPlaytime ?? undefined;
+  const gameMax = maxPlaytime ?? minPlaytime ?? undefined;
+
+  if (min === undefined && max === undefined) {
+    return true;
+  }
+
+  if (gameMin === undefined || gameMax === undefined) {
+    return range?.includeUnknown === true;
+  }
+
+  return (min === undefined || min <= gameMin) && (max === undefined || gameMax <= max);
+};
 
 /**
  * Fixture-backed in-process `DataGatewayDriver`.
@@ -197,6 +282,36 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
     );
   }
 
+  listPlatforms(request: proto.ListPlatformsRequest): Observable<proto.ListPlatformsResponse> {
+    return (
+      this.refused<proto.ListPlatformsResponse>(proto.Capability.CAPABILITY_LIST_PLATFORMS) ??
+      of<proto.ListPlatformsResponse>({
+        correlationId: request.correlationId ?? 'in-memory',
+        platforms: this.fixtures.platforms ?? [],
+      })
+    );
+  }
+
+  listCategories(request: proto.ListCategoriesRequest): Observable<proto.ListCategoriesResponse> {
+    return (
+      this.refused<proto.ListCategoriesResponse>(proto.Capability.CAPABILITY_LIST_CATEGORIES) ??
+      of<proto.ListCategoriesResponse>({
+        correlationId: request.correlationId ?? 'in-memory',
+        categories: this.fixtures.categories ?? [],
+      })
+    );
+  }
+
+  listMechanics(request: proto.ListMechanicsRequest): Observable<proto.ListMechanicsResponse> {
+    return (
+      this.refused<proto.ListMechanicsResponse>(proto.Capability.CAPABILITY_LIST_MECHANICS) ??
+      of<proto.ListMechanicsResponse>({
+        correlationId: request.correlationId ?? 'in-memory',
+        mechanics: this.fixtures.mechanics ?? [],
+      })
+    );
+  }
+
   dispose(): void {
     // Idempotent by contract.
     this.disposedFlag = true;
@@ -206,23 +321,29 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
     return this.fixtures.capabilities ?? OPERATIONS;
   }
 
-  private get filterableAxes(): readonly proto.CoverageAxis[] {
+  private get filterableAxes(): readonly proto.SearchFilterAxis[] {
     return this.fixtures.filterableAxes ?? [];
   }
 
   /** Whether a game matches a filter, judged on the axes this driver declares alone. */
   private matchesFilter(game: proto.GameSearchData, filter: proto.SearchFilter | undefined): boolean {
-    const declares = (axis: proto.CoverageAxis): boolean => this.filterableAxes.includes(axis);
+    const declares = (axis: proto.SearchFilterAxis): boolean => this.filterableAxes.includes(axis);
 
     return (
-      (!declares(proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE) ||
+      (!declares(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE) ||
         listMatches(filter?.contentTypes, [game.contentType], proto.ContentType.CONTENT_TYPE_UNSPECIFIED)) &&
-      (!declares(proto.CoverageAxis.COVERAGE_AXIS_PLATFORM_TYPE) ||
+      (!declares(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLATFORM_TYPE) ||
         listMatches(
           filter?.platformTypes,
           (game.availablePlatforms ?? []).map((platform) => platform.platformType),
           proto.PlatformType.PLATFORM_TYPE_UNSPECIFIED,
-        ))
+        )) &&
+      (!declares(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR) ||
+        yearMatches(filter?.publishYear, game.yearPublished)) &&
+      (!declares(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAYER_COUNT) ||
+        playerCountMatches(filter?.playerCount, game.minPlayers, game.maxPlayers)) &&
+      (!declares(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAY_TIME) ||
+        playTimeMatches(filter?.playTime, game.minPlaytime, game.maxPlaytime))
     );
   }
 

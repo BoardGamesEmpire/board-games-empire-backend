@@ -25,8 +25,9 @@ function resizeCoverUrl(url: string, size: string): string {
   return toAbsoluteUrl(url).replace(/t_[a-z0-9_]+/, size);
 }
 
+/** Read in UTC, as a release's year is, so the two never fall a day apart (#719). */
 function toIsoDate(unixSeconds: number): string {
-  return <string>DateTime.fromSeconds(unixSeconds).toISODate();
+  return <string>DateTime.fromSeconds(unixSeconds, { zone: 'utc' }).toISODate();
 }
 
 /**
@@ -82,7 +83,7 @@ const IGDB_PLATFORM_TYPE_MAP: Readonly<Record<number, proto.PlatformType>> = {
   [PlatformType.Computer]: proto.PlatformType.PLATFORM_TYPE_PC,
 };
 
-function toPlatformData(platform: IgdbPlatform): proto.PlatformData {
+export function toPlatformData(platform: IgdbPlatform): proto.PlatformData {
   const pcTypes: number[] = [PlatformType.OperatingSystem, PlatformType.Computer];
   const mobile = ['iOS', 'Android'];
   const platformType =
@@ -144,9 +145,45 @@ function toIgdbPlatformTypes(platformTypes: readonly proto.PlatformType[]): Plat
 }
 
 /**
+ * The first moment of `year` in UTC, in Unix seconds, or NaN for a year past
+ * what a Date holds. Built with setUTCFullYear, since Date.UTC reads a year
+ * from 0 to 99 as 1900 plus it (#719).
+ */
+export function utcYearStart(year: number): number {
+  const date = new Date(0);
+  date.setUTCFullYear(year, 0, 1);
+
+  return date.getTime() / 1000;
+}
+
+/** A Unix-seconds bound, or undefined for one no date can reach, which narrows nothing on its side. */
+const reachable = (seconds: number): number | undefined => (Number.isFinite(seconds) ? seconds : undefined);
+
+/**
+ * A publish-year range as first release dates: from 1 January of the
+ * minimum, up to but not including 1 January of the year after the maximum,
+ * in UTC so it agrees with the year each result is sent with (#719).
+ */
+function toReleasedBetween(range: proto.IntRange | undefined): IgdbSearchNarrowing['releasedBetween'] {
+  const from = typeof range?.min === 'number' ? reachable(utcYearStart(range.min)) : undefined;
+  const before = typeof range?.max === 'number' ? reachable(utcYearStart(range.max + 1)) : undefined;
+
+  if (from === undefined && before === undefined) {
+    return undefined;
+  }
+
+  return {
+    ...(from === undefined ? {} : { from }),
+    ...(before === undefined ? {} : { before }),
+    orUnknown: range?.includeUnknown === true,
+  };
+}
+
+/**
  * A search's filter in IGDB's terms, or null when nothing IGDB has can match
  * it, so IGDB needn't be asked. A content type asks for every game type that
- * maps to it, so a base game asks for main games and forks.
+ * maps to it, so a base game asks for main games and forks. A publish year
+ * asks for first release dates within it.
  */
 export function toSearchNarrowing(filter: proto.SearchFilter | undefined): IgdbSearchNarrowing | null {
   const contentTypes = filter?.contentTypes ?? [];
@@ -154,12 +191,17 @@ export function toSearchNarrowing(filter: proto.SearchFilter | undefined): IgdbS
 
   const gameTypes = contentTypes.length > 0 ? igdbKeysOf(IGDB_CONTENT_TYPE_MAP, contentTypes) : undefined;
   const igdbPlatformTypes = platformTypes.length > 0 ? toIgdbPlatformTypes(platformTypes) : undefined;
+  const releasedBetween = toReleasedBetween(filter?.publishYear);
 
   if (gameTypes?.length === 0 || igdbPlatformTypes?.length === 0) {
     return null;
   }
 
-  return { ...(gameTypes && { gameTypes }), ...(igdbPlatformTypes && { platformTypes: igdbPlatformTypes }) };
+  return {
+    ...(gameTypes && { gameTypes }),
+    ...(igdbPlatformTypes && { platformTypes: igdbPlatformTypes }),
+    ...(releasedBetween && { releasedBetween }),
+  };
 }
 
 /**
@@ -378,7 +420,7 @@ function toThemeData(entity: IgdbNamedEntity): proto.ThemeData {
   } satisfies proto.ThemeData;
 }
 
-function toCategoryData(entity: IgdbNamedEntity): proto.CategoryData {
+export function toCategoryData(entity: IgdbNamedEntity): proto.CategoryData {
   return {
     externalId: String(entity.id),
     name: entity.name,
@@ -390,8 +432,9 @@ function toBaseGameExternalId(game: IgdbGame): string | undefined {
   return typeof ref === 'number' ? String(ref) : undefined;
 }
 
+/** The year of a Unix-seconds date, in UTC, as IGDB's search narrowing reads it (#719). */
 function toYearPublished(unixSeconds: number | undefined): number | undefined {
-  return unixSeconds !== undefined ? new Date(unixSeconds * 1000).getFullYear() : undefined;
+  return unixSeconds !== undefined ? new Date(unixSeconds * 1000).getUTCFullYear() : undefined;
 }
 
 /**

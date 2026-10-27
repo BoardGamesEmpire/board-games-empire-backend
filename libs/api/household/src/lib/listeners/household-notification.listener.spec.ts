@@ -228,6 +228,30 @@ describe('HouseholdNotificationListener', () => {
       expect(notifications.create).toHaveBeenCalledTimes(1);
       expect(notifications.create).toHaveBeenCalledWith(RECEIVED);
     });
+
+    it('tells the user of each invite a lifted ban released that their inbox now lists, as of one just sent (#782)', async () => {
+      await listener.onInvitesReleased([
+        snapshot(BY_ADDRESS),
+        // Released, but still waiting for approval: their inbox doesn't list it.
+        snapshot({ ...BY_ADDRESS, id: 'invite-2', status: InviteStatus.AwaitingApproval }),
+      ]);
+
+      expect(db.invite.count).toHaveBeenCalledTimes(1);
+      expect(notifications.create).toHaveBeenCalledTimes(1);
+      expect(notifications.create).toHaveBeenCalledWith(RECEIVED);
+    });
+
+    it("keeps telling the user of the rest when one released invite's notice fails (#782)", async () => {
+      notifications.create.mockRejectedValueOnce(new Error('connection reset'));
+
+      await expect(
+        listener.onInvitesReleased([snapshot(BY_ADDRESS), snapshot({ ...BY_ADDRESS, id: 'invite-2' })]),
+      ).resolves.toBeUndefined();
+
+      expect(notifications.create).toHaveBeenCalledTimes(2);
+      expect(loggedError).toHaveBeenCalledTimes(1);
+      loggedError.mockClear();
+    });
   });
 
   describe('the approvers', () => {

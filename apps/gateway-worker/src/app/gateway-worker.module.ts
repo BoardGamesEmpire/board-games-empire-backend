@@ -2,13 +2,12 @@ import { AuditContextModule } from '@bge/actor-context';
 import { AuditLogModule } from '@bge/audit-log';
 import { DatabaseModule } from '@bge/database';
 import { GameImportFetchModule } from '@bge/game-import';
-import { GatewayRegistryModule } from '@bge/gateway-registry';
+import { GatewayRegistryModule, VocabularySectionConsumerModule } from '@bge/gateway-registry';
 import { BullMQQueueDepthRecorderModule, createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
 import { WebhookQueueProducerModule } from '@bge/queue-webhooks';
-import { CACHE_REDIS_CLIENT, createCacheStore, QUEUE_REDIS_CLIENT, Redis, RedisModule } from '@bge/redis';
+import { QUEUE_REDIS_CLIENT, RedisModule } from '@bge/redis';
 import { WebhooksModule } from '@bge/webhooks';
 import { BullModule } from '@nestjs/bullmq';
-import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
@@ -31,7 +30,8 @@ import { baseLogger } from './lib/logger';
     }),
 
     // Shared Redis clients (iovalkey via @bge/redis). Gateway-worker needs
-    // both connections — cache for gateway registry pub/sub, queue for
+    // both connections — cache for gateway registry pub/sub and the shared
+    // permission-graph store (#786), queue for
     // BullMQ workers consuming import-fetch jobs.
     RedisModule.forRootAsync({
       cache: {
@@ -42,14 +42,6 @@ import { baseLogger } from './lib/logger';
         inject: [ConfigService],
         useFactory: (config: ConfigService) => config.getOrThrow('redis.queue'),
       },
-    }),
-
-    CacheModule.registerAsync({
-      isGlobal: true,
-      inject: [CACHE_REDIS_CLIENT],
-      useFactory: (cacheClient: Redis) => ({
-        stores: [createCacheStore(cacheClient, 'gateway-worker:cache')],
-      }),
     }),
 
     // BullMQ telemetry attaches at the root so every Worker registered
@@ -112,6 +104,10 @@ import { baseLogger } from './lib/logger';
     DbPoolMetricsRecorderModule,
 
     GatewayRegistryModule,
+
+    // Runs the list jobs that load each DataGateway's vocabulary after its
+    // interview (#718). The coordinator only queues them.
+    VocabularySectionConsumerModule,
 
     GameImportFetchModule,
   ],

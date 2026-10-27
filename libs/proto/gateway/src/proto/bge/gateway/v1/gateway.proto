@@ -19,6 +19,9 @@ service GatewayService {
   rpc FetchGame(FetchGameRequest) returns (FetchGameResponse);
   rpc FetchExpansions(FetchExpansionsRequest) returns (stream GatewaySearchResult);
   rpc ListLanguages(ListLanguagesRequest) returns (ListLanguagesResponse);
+  rpc ListPlatforms(ListPlatformsRequest) returns (ListPlatformsResponse);
+  rpc ListCategories(ListCategoriesRequest) returns (ListCategoriesResponse);
+  rpc ListMechanics(ListMechanicsRequest) returns (ListMechanicsResponse);
 }
 
 message GatewayPingRequest {
@@ -60,12 +63,12 @@ message DescribeResponse {
   // The kinds of game it can return.
   Coverage coverage = 3;
 
-  // The coverage axes its search can narrow by. A search request's filter
+  // The search filters its search can narrow by. A search request's filter
   // carries only these, and declaring one means narrowing the upstream search
   // by it, so pages fill with games that match. The server removes games the
   // filter excludes from every DataGateway's results, so the narrowing may be
   // loose, but it must never leave out a game the filter matches.
-  repeated CoverageAxis filterable_axes = 4;
+  repeated SearchFilterAxis filterable_axes = 4;
 
   // How it writes language codes.
   LanguageCodeFormats language_code_formats = 5;
@@ -89,6 +92,15 @@ enum Capability {
 
   // ListLanguages.
   CAPABILITY_LIST_LANGUAGES = 4;
+
+  // ListPlatforms.
+  CAPABILITY_LIST_PLATFORMS = 5;
+
+  // ListCategories.
+  CAPABILITY_LIST_CATEGORIES = 6;
+
+  // ListMechanics.
+  CAPABILITY_LIST_MECHANICS = 7;
 }
 
 // The kinds of game a DataGateway can return: every combination of a
@@ -100,11 +112,24 @@ message Coverage {
   repeated ContentType content_types = 2;
 }
 
-// A coverage axis a search can be filtered by.
-enum CoverageAxis {
-  COVERAGE_AXIS_UNSPECIFIED = 0;
-  COVERAGE_AXIS_PLATFORM_TYPE = 1;
-  COVERAGE_AXIS_CONTENT_TYPE = 2;
+// A search filter a DataGateway's search can narrow by. Platform type and
+// content type are coverage axes too, so a filter on them also skips a
+// DataGateway that covers none of what it names. Publish year never skips
+// one: no DataGateway declares which years it covers (#719).
+//
+// For player count and play time, declaring one promises that the results
+// carry the value (GameSearchData's player counts and play times) and that the
+// search narrows by it. Without that promise the coordinator can't count on
+// any result passing, so a search that names the range, and doesn't keep
+// games with an unknown value, skips a DataGateway that doesn't declare it
+// (#869).
+enum SearchFilterAxis {
+  SEARCH_FILTER_AXIS_UNSPECIFIED = 0;
+  SEARCH_FILTER_AXIS_PLATFORM_TYPE = 1;
+  SEARCH_FILTER_AXIS_CONTENT_TYPE = 2;
+  SEARCH_FILTER_AXIS_PUBLISH_YEAR = 3;
+  SEARCH_FILTER_AXIS_PLAYER_COUNT = 4;
+  SEARCH_FILTER_AXIS_PLAY_TIME = 5;
 }
 
 // How a DataGateway writes language codes. Search and fetch requests carry
@@ -167,6 +192,42 @@ message GatewayLanguageEntry {
 message ListLanguagesResponse {
   string correlation_id = 1;
   repeated GatewayLanguageEntry languages = 2;
+}
+
+message ListPlatformsRequest {
+  optional string correlation_id = 1;
+}
+
+// Every platform the DataGateway may send in a game, as it sends them there.
+// The list is complete: the server loads it after each interview and never
+// asks for more.
+message ListPlatformsResponse {
+  string correlation_id = 1;
+  repeated PlatformData platforms = 2;
+}
+
+message ListCategoriesRequest {
+  optional string correlation_id = 1;
+}
+
+// Every category the DataGateway may send in a game, as it sends them there.
+// The list is complete: the server loads it after each interview and never
+// asks for more.
+message ListCategoriesResponse {
+  string correlation_id = 1;
+  repeated CategoryData categories = 2;
+}
+
+message ListMechanicsRequest {
+  optional string correlation_id = 1;
+}
+
+// Every mechanic the DataGateway may send in a game, as it sends them there.
+// The list is complete: the server loads it after each interview and never
+// asks for more.
+message ListMechanicsResponse {
+  string correlation_id = 1;
+  repeated MechanicData mechanics = 2;
 }
 
 message GatewaySearchRequest {

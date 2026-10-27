@@ -56,7 +56,7 @@ export interface PermissionSeedDefinition {
 
 /**
  * One entry in the seeded role catalog. Every seeded role is written as
- * `managedBy: System` (#235); custom roles (#169) are not catalog rows, and
+ * `managedBy: System` (#235); custom roles (#772) are not catalog rows, and
  * the reconciler leaves any role it does not own alone.
  */
 export interface RoleSeedDefinition {

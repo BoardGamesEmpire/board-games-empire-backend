@@ -1,7 +1,7 @@
 import { Reach } from '@bge/database';
+import { MAX_CLIENT_REQUEST_ID_LENGTH } from '@bge/shared';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { HOUSEHOLD_MAX_CLIENT_REQUEST_ID_LENGTH } from '../constants/household.constants';
 import { CreateHouseholdDto } from './create-household.dto';
 
 type PlainPayload = Record<string, unknown>;
@@ -42,7 +42,8 @@ describe('CreateHouseholdDto', () => {
   });
 
   // The rungs a household read rule serves, and no others. `Public` waits on
-  // #231 (#495), and null would reach a non-nullable column as a 500.
+  // #231 (#495), and so does `FriendsOfFriends` (#496). Null would reach a
+  // non-nullable column as a 500.
   it.each([['Public'], ['FriendsOfFriends'], ['Household'], [null]])('rejects reach %p', async (reach) => {
     await expect(propertiesWithErrors({ ...VALID_PAYLOAD, reach })).resolves.toEqual(['reach']);
   });
@@ -73,13 +74,13 @@ describe('CreateHouseholdDto', () => {
     });
 
     it('accepts a key at the length cap', async () => {
-      const key = 'k'.repeat(HOUSEHOLD_MAX_CLIENT_REQUEST_ID_LENGTH);
+      const key = 'k'.repeat(MAX_CLIENT_REQUEST_ID_LENGTH);
 
       await expect(propertiesWithErrors({ ...VALID_PAYLOAD, clientRequestId: key })).resolves.toEqual([]);
     });
 
     it('rejects a key over the length cap', async () => {
-      const key = 'k'.repeat(HOUSEHOLD_MAX_CLIENT_REQUEST_ID_LENGTH + 1);
+      const key = 'k'.repeat(MAX_CLIENT_REQUEST_ID_LENGTH + 1);
 
       await expect(propertiesWithErrors({ ...VALID_PAYLOAD, clientRequestId: key })).resolves.toEqual([
         'clientRequestId',
@@ -87,7 +88,7 @@ describe('CreateHouseholdDto', () => {
     });
 
     it('measures the cap after trimming', async () => {
-      const key = ` ${'k'.repeat(HOUSEHOLD_MAX_CLIENT_REQUEST_ID_LENGTH)} `;
+      const key = ` ${'k'.repeat(MAX_CLIENT_REQUEST_ID_LENGTH)} `;
 
       await expect(propertiesWithErrors({ ...VALID_PAYLOAD, clientRequestId: key })).resolves.toEqual([]);
     });

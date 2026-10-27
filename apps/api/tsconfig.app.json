@@ -26,13 +26,13 @@
       "path": "../../libs/api/web-client/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/logger/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/bootstrap/tsconfig.lib.json"
     },
     {
       "path": "../../libs/proto/gateway/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/common/testing/tsconfig.lib.json"
     },
     {
       "path": "../../libs/common/utils/tsconfig.lib.json"
@@ -41,7 +41,13 @@
       "path": "../../libs/common/shared/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/testing/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/storage/runtime/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/common/env/tsconfig.lib.json"
     },
     {
       "path": "../../libs/api/well-known/tsconfig.lib.json"
@@ -132,9 +138,6 @@
     },
     {
       "path": "../../libs/api/event/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/common/env/tsconfig.lib.json"
     },
     {
       "path": "../../libs/database/tsconfig.lib.json"

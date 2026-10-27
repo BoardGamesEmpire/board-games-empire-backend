@@ -8,8 +8,9 @@ import { registerShutdownHandlers } from '@bge/otel';
 import { bootstrapLogger, otel } from './app/lib/logger';
 
 // Imports below this line are instrumented by the OTel auto-instrumentations.
-import { nestLoggerFromPino, runBootstrap } from '@bge/bootstrap';
+import { runBootstrap } from '@bge/bootstrap';
 import { bootstrapGrpcMicroservice } from '@bge/gateway-host';
+import { nestLoggerFromPino } from '@bge/logger';
 import * as path from 'node:path';
 import { AppModule } from './app/app.module';
 import coordinatorConfig from './app/configuration/coordinator.config';

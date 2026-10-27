@@ -1,10 +1,10 @@
-import { Reach, TimeMeasure } from '@bge/database';
+import { Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
-import { ReachProperty } from '@bge/shared';
+import { NotLessThanProperty, ReachProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsPositive, IsString } from 'class-validator';
+import { IsInt, IsOptional, IsPositive, IsString, Max } from 'class-validator';
 
-const GAME_REACHES = [Reach.Public, Reach.Friends, Reach.Private] as const;
+const GAME_REACHES = [Reach.Public, Reach.FriendsOfFriends, Reach.Friends, Reach.Private] as const;
 
 /**
  * The longest new or changed description a game may be sent with. The
@@ -19,19 +19,21 @@ const GAME_REACHES = [Reach.Public, Reach.Friends, Reach.Private] as const;
 export const GAME_DESCRIPTION_MAX_LENGTH = 20_000;
 export type GameReach = (typeof GAME_REACHES)[number];
 
+/** The largest value an integer column holds; above it, Prisma's write fails as a 500, not a 400. */
+const INT32_MAX = 2 ** 31 - 1;
+
 /**
- * A game's reach: the rungs a game read rule serves. `FriendsOfFriends` names
- * readers no rule serves until #496 defines friends of friends, so a game
- * saved with it would claim readers it doesn't have. Shared with
- * `UpdateGameDto`, which names no default.
+ * A game's reach: every rung a game read rule serves, friends of friends
+ * included (#496). Shared with `UpdateGameDto`, which names no default.
  */
 export function GameReachProperty(defaultReach?: GameReach): PropertyDecorator {
   return ReachProperty({
     reaches: GAME_REACHES,
     default: defaultReach,
     description:
-      'Who may read the game besides its creator. `Public`: every signed-in user. `Friends`: the ' +
-      "creator's friends. `Private`: no one.",
+      'Who may read the game besides its creator. `Public`: every signed-in user. `FriendsOfFriends`: the ' +
+      "creator's friends and friends of friends, unless a block stands between the creator and the reader. " +
+      "`Friends`: the creator's friends. `Private`: no one.",
   });
 }
 
@@ -67,55 +69,50 @@ export class CreateGameDto {
 
   @ApiPropertyOptional({ description: 'Year the game was published' })
   @IsOptional()
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   publishYear?: number;
 
   @ApiPropertyOptional({ description: 'Minimum number of players for the game' })
   @IsOptional()
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   minPlayers?: number;
 
   @ApiPropertyOptional({ description: 'Maximum number of players for the game' })
   @IsOptional()
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
+  @NotLessThanProperty('minPlayers')
   maxPlayers?: number;
 
-  @ApiPropertyOptional({ description: 'Estimated play time for the game' })
+  @ApiPropertyOptional({
+    description: 'Minimum play time for the game, in minutes; a client shows it in hours and minutes',
+  })
   @IsOptional()
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
-  playingTime?: number;
-
-  @ApiPropertyOptional({ description: 'Minimum play time for the game' })
-  @IsOptional()
-  @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   minPlayTime?: number;
 
   @ApiPropertyOptional({
-    enum: TimeMeasure,
-    description: 'Unit of measure for minimum play time (e.g. minutes, hours)',
+    description: 'Maximum play time for the game, in minutes; a client shows it in hours and minutes',
   })
   @IsOptional()
-  @IsString({ message: i18nValidationMessage('validation.isString') })
-  @IsIn(Object.values(TimeMeasure), { message: i18nValidationMessage('validation.isIn') })
-  minPlayTimeMeasure?: TimeMeasure;
-
-  @ApiPropertyOptional({ description: 'Maximum play time for the game' })
-  @IsOptional()
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
+  @NotLessThanProperty('minPlayTime')
   maxPlayTime?: number;
-
-  @ApiPropertyOptional({
-    enum: TimeMeasure,
-    description: 'Unit of measure for maximum play time (e.g. minutes, hours)',
-  })
-  @IsOptional()
-  @IsString({ message: i18nValidationMessage('validation.isString') })
-  @IsIn(Object.values(TimeMeasure), { message: i18nValidationMessage('validation.isIn') })
-  maxPlayTimeMeasure?: TimeMeasure;
 
   @ApiPropertyOptional({ description: 'Minimum age recommended for the game' })
   @IsOptional()
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
+  @Max(INT32_MAX, { message: i18nValidationMessage('validation.max') })
   minAge?: number;
 
   @ApiPropertyOptional({ description: 'Complexity rating for the game (e.g. 1-5)' })

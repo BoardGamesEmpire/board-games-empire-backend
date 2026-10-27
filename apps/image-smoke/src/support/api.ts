@@ -127,12 +127,22 @@ export interface SearchResponse {
   readonly resultsBySource: Readonly<Record<string, readonly SearchHit[]>>;
   readonly errors?: Readonly<Record<string, { readonly message: string }>>;
   readonly unavailableSources?: readonly string[];
+  /** The DataGateways not asked, because they can't apply a player-count or play-time range the search gave (#869). */
+  readonly unfilterableSources?: readonly string[];
 }
 
-/** A search's filter as the HTTP route takes it: comma-separated stored names. */
+/**
+ * A search's filter as the HTTP route takes it: comma-separated stored names,
+ * the bounds of its ranges, and whether a range keeps games with no known
+ * value.
+ */
 export interface SearchFilterParams {
   readonly platformTypes?: string;
   readonly contentTypes?: string;
+  readonly publishYearMin?: string;
+  readonly playerCountMin?: string;
+  readonly playTimeMax?: string;
+  readonly playTimeIncludeUnknown?: string;
 }
 
 /** A search of one gateway only, over HTTP. The api caches the answer per URL for a few minutes. */

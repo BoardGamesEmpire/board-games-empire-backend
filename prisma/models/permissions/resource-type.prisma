@@ -37,7 +37,7 @@ enum ResourceType {
   DataGateway
   GamePlayResult
   GamePlaySession
-  GameSharing
+  GameShare
   Platform
   PlatformGame
   RuleVariant
@@ -47,6 +47,7 @@ enum ResourceType {
   Household
   HouseholdMember
   HouseholdRole
+  HouseholdBan
   Invite
 
   // ─── Event ──────────────────────────────────────────────

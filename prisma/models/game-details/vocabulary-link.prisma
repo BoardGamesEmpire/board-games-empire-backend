@@ -1,0 +1,23 @@
+// The review state of a DataGateway's link to a platform, category or
+// mechanic record (#718). A list job or an import writes it; an admin
+// settles a Pending one (#715).
+//   Resolved — linked to a record
+//   Pending  — matched nothing while that vocabulary's review was on, and
+//              waits for an admin to link, ignore or accept it
+//   Ignored  — dismissed: import leaves the entry out
+enum VocabularyLinkStatus {
+  Resolved
+  Pending
+  Ignored
+
+  @@map("vocabulary_link_statuses")
+}
+
+// What first wrote the link: a list job after an interview, or an import
+// that met an entry no list had covered (#718).
+enum VocabularyLinkOrigin {
+  Interview
+  Import
+
+  @@map("vocabulary_link_origins")
+}

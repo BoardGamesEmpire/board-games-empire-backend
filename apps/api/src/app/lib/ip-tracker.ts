@@ -9,6 +9,16 @@ import type { ThrottlerGetTrackerFunction } from '@nestjs/throttler';
 const UNKNOWN_PEER = 'unknown';
 
 /**
+ * An `X-Forwarded-For` entry's address, without the port some proxies append
+ * (`198.51.100.4:51000`, `[2001:db8::7]:51000`). Kept, each connection's source
+ * port would be a bucket of its own, and better-auth, which takes only a bare
+ * address, would put every such client in one shared bucket (#640). A bare IPv6
+ * address is all colons, so only these two shapes are read as carrying a port.
+ */
+const withoutPort = (entry: string): string =>
+  /^\[([^\]]+)\](?::\d+)?$/.exec(entry)?.[1] ?? /^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/.exec(entry)?.[1] ?? entry;
+
+/**
  * Node joins repeated request headers with `', '` before they reach
  * `req.headers` — `set-cookie` is the only one exposed as an array — so a real
  * HTTP request always lands here as a string. The array branch is defensiveness
@@ -18,7 +28,8 @@ const forwardedChain = (header: string | string[] | undefined): string[] =>
   (Array.isArray(header) ? header.join(',') : (header ?? ''))
     .split(',')
     .map((entry) => entry.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .map(withoutPort);
 
 /**
  * Builds the IP tier's tracker (#340).
@@ -63,15 +74,28 @@ const forwardedChain = (header: string | string[] | undefined): string[] =>
  * about network topology, and it is only as true as the topology: bind the app
  * to the proxy's network, or leave the setting at zero.
  */
-export const createIpTracker = (trustedHops: number): ThrottlerGetTrackerFunction => {
+export const createIpTracker = (trustedHops: number): ThrottlerGetTrackerFunction =>
+  createClientIpResolver(trustedHops);
+
+/** The parts of a request {@link createClientIpResolver} reads. */
+export interface ClientIpSource {
+  readonly socket?: { readonly remoteAddress?: string } | null;
+  readonly headers?: Readonly<Record<string, string | string[] | undefined>>;
+}
+
+/**
+ * Works out a request's client address by the rule {@link createIpTracker}
+ * describes. The Nest throttler keys on it, and so does better-auth's rate
+ * limiter, through the header `createAuthClientIpHandler` writes (#640), so one
+ * variable, `THROTTLE_TRUSTED_PROXY_HOPS`, governs both.
+ */
+export const createClientIpResolver = (trustedHops: number): ((req: ClientIpSource) => string) => {
   const logger = new Logger('ThrottleTracker');
   let warnedAboutProxy = false;
 
-  return (req: Record<string, unknown>) => {
-    const socket = req['socket'] as { remoteAddress?: string } | undefined;
-    const peer = socket?.remoteAddress || UNKNOWN_PEER;
-    const headers = (req['headers'] ?? {}) as Record<string, string | string[] | undefined>;
-    const forwarded = headers['x-forwarded-for'];
+  return (req) => {
+    const peer = req.socket?.remoteAddress || UNKNOWN_PEER;
+    const forwarded = req.headers?.['x-forwarded-for'];
 
     if (trustedHops <= 0) {
       // Zero is correct when nothing is in front, and a forwarded header is the

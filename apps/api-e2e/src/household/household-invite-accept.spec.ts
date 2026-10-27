@@ -1,5 +1,5 @@
-import { HouseholdMembershipOrigin, InviteStatus, InviteType, QuotaScope, SystemRole } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
+import { HouseholdMembershipOrigin, InviteStatus, QuotaScope, SystemRole } from '@bge/database';
+import { arrangeInvite, createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -54,24 +54,6 @@ describe('accepting a household invite', () => {
 
   const verify = (actor: SessionActor) =>
     db.client.user.update({ where: { id: actor.user.id }, data: { emailVerified: true } });
-
-  /** An invite written directly, for a state no route produces. */
-  const arrangeInvite = (
-    inviter: SessionActor,
-    householdId: string,
-    data: { inviteeId?: string; inviteeEmail?: string; status?: InviteStatus; expiresAt?: Date; withheld?: boolean },
-  ) =>
-    db.client.invite.create({
-      data: {
-        type: InviteType.Household,
-        inviterId: inviter.user.id,
-        householdId,
-        token: randomUUID(),
-        status: InviteStatus.Pending,
-        expiresAt: new Date(Date.now() + DAY_MS),
-        ...data,
-      },
-    });
 
   const ownedHousehold = async () => {
     const owner = await actors.user();
@@ -187,7 +169,12 @@ describe('accepting a household invite', () => {
       await verify(blocked);
 
       const toUnverified = await createdInvite(owner, household.id, { inviteeEmail: unverified.user.email });
-      const withheld = await arrangeInvite(owner, household.id, { inviteeEmail: blocked.user.email, withheld: true });
+      const withheld = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: household.id,
+        inviteeEmail: blocked.user.email,
+        withheld: true,
+      });
       const toInvitee = await createdInvite(owner, household.id, { inviteeId: invitee.user.id });
 
       await acceptById(unverified, toUnverified.id).expect(404);
@@ -211,15 +198,21 @@ describe('accepting a household invite', () => {
       const [owner, lapsed, declined, revoked] = await Promise.all(Array.from({ length: 4 }, () => actors.user()));
       const { household } = await actors.householdWithMembers({ owner });
 
-      const expiredInvite = await arrangeInvite(owner, household.id, {
+      const expiredInvite = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: household.id,
         inviteeId: lapsed.user.id,
         expiresAt: new Date(Date.now() - DAY_MS),
       });
-      const declinedInvite = await arrangeInvite(owner, household.id, {
+      const declinedInvite = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: household.id,
         inviteeId: declined.user.id,
         status: InviteStatus.Declined,
       });
-      const revokedInvite = await arrangeInvite(owner, household.id, {
+      const revokedInvite = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: household.id,
         inviteeId: revoked.user.id,
         status: InviteStatus.Revoked,
       });

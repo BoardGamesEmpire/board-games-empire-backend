@@ -1,9 +1,9 @@
 import { AuthService } from '@bge/auth';
-import { type I18nMessage, type I18nPath, t } from '@bge/i18n';
+import { type I18nMessage, type I18nPath, isI18nMessage, t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import type { BaseClientData } from '@bge/shared';
 import { buildWsClientData, type WsRefusalReason } from '@bge/utils';
-import { Logger, UseFilters, UseGuards } from '@nestjs/common';
+import { HttpException, Logger, UseFilters, UseGuards } from '@nestjs/common';
 import { OnGatewayConnection, OnGatewayInit } from '@nestjs/websockets';
 import { Http } from '@status/codes';
 import type { Namespace, Socket } from 'socket.io';
@@ -173,11 +173,14 @@ export abstract class AuthenticatedGateway implements OnGatewayInit, OnGatewayCo
   }
 
   /**
-   * A refusal goes to the client rendered in the handshake's locale. Anything
-   * else means the session could not be checked at all (the database or Redis
-   * briefly down): it is logged, and the client is refused with a 500 that
-   * says nothing about why. Like Nest's own 500 over HTTP, that one stays
-   * English.
+   * A refusal goes to the client rendered in the handshake's locale, and so
+   * does an HTTP exception carrying a catalog key, such as the 503
+   * `AuthService` answers when the session store cannot be read (#640). A
+   * structured exception's other fields, its stable `code` among them, go
+   * with it, as they do over HTTP.
+   * Anything else means the session could not be checked at all: it is
+   * logged, and the client is refused with a 500 that says nothing about why.
+   * Like Nest's own 500 over HTTP, that one stays English.
    */
   private async refusalFor(client: Socket, error: unknown): Promise<WsConnectionRefusal> {
     if (error instanceof HandshakeRefusal) {
@@ -186,7 +189,39 @@ export abstract class AuthenticatedGateway implements OnGatewayInit, OnGatewayCo
       return new WsConnectionRefusal(error.statusCode, this.translator.translate(locale, error.marker));
     }
 
+    const marked = error instanceof HttpException ? markedBody(error.getResponse()) : undefined;
+    if (error instanceof HttpException && marked) {
+      this.logger.warn(`WS connection refused (${error.getStatus()}): socketId=${client.id}`);
+      const locale = await this.translator.localeOf(client);
+
+      return new WsConnectionRefusal(
+        error.getStatus(),
+        this.translator.translate(locale, marked.marker),
+        marked.fields,
+      );
+    }
+
     this.logger.error(`WS connection failed: socketId=${client.id}`, error);
     return new WsConnectionRefusal(Http.InternalServerError, 'Internal server error');
   }
+}
+
+/**
+ * An exception body's catalog key and the fields beside it, in the two shapes
+ * `translateException` renders: the body is the marker, or an object whose
+ * `message` is one.
+ */
+function markedBody(body: unknown): { marker: I18nMessage; fields: Record<string, unknown> } | undefined {
+  if (isI18nMessage(body)) {
+    return { marker: body, fields: {} };
+  }
+
+  if (body !== null && typeof body === 'object') {
+    const { message, ...fields } = body as Record<string, unknown>;
+    if (isI18nMessage(message)) {
+      return { marker: message, fields };
+    }
+  }
+
+  return undefined;
 }

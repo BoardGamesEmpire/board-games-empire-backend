@@ -163,7 +163,7 @@ An offer to join a household, an event, a campaign or the server, which the invi
 _Avoid_: invitation; invite for an attendee's RSVP state (say invited)
 
 **Ban**:
-A user being barred from a server, for a time or for good. A qualified ban, such as a feedback ban, or a planned chat or game-creation ban, bars them from one activity only.
+A user being barred from a server, for a time or for good. A qualified ban, such as a feedback ban, or a planned chat or game-creation ban, bars them from one activity only. A household ban bars someone from one household: they can't be invited to it, and no admission lets them in.
 _Avoid_: banned for the service account's sign-in lock (say cannot sign in)
 
 ### Friends and sharing
@@ -181,7 +181,7 @@ One user asking to become another's friend, which the other accepts or declines 
 _Avoid_: invite (for friends); sender and recipient (say requester and addressee)
 
 **Friends of friends**:
-Planned: users two friendship steps away from you, as a reach between friends and everyone.
+Users two friendship steps away from you, with no block between you, as a reach between friends and everyone.
 _Avoid_: second degree
 
 **Block**:
@@ -193,7 +193,7 @@ How far from its owner an item can be seen: only the owner, friends, friends of 
 _Avoid_: visibility
 
 **Share**:
-A named user or household that an item is also shown to, whatever its reach.
+A record that also shows one item to a named user or household, whatever its reach. The user or household it names is its recipient.
 _Avoid_: visibility
 
 ### Roles and permissions
@@ -352,6 +352,14 @@ _Avoid_: key permission
 A staff member acting as another user through that user's own session. It is deliberately blocked, both to start and to use, until there is a decision on how it would be audited.
 _Avoid_: act as user (a different, superseded idea)
 
+**Client request id**:
+A key a client sends with a create so that, if it has to send the create again, the server returns the record it already made instead of making another. Each user's keys are their own.
+_Avoid_: idempotency key (reserved for a request header, #905), correlation id (request tracing)
+
+**Replay**:
+A repeated request that finds the record its first attempt made, and returns it without making another or notifying anyone again.
+_Avoid_: retry (the client's act, not the server's answer), dedup (that names matching taxonomy and platforms on import)
+
 ### Quotas and audit
 
 **Quota**:
@@ -395,6 +403,10 @@ _Avoid_: household permission level
 **Member role**:
 The household role for regular members, above a household guest and below a household admin.
 
+**Household role variant**:
+Planned: a named set of extra permissions a household puts on top of one of the household roles the server ships. Whoever holds one keeps that household role, and gains permissions for the household's activity, such as its events and plays, but never for running the household.
+_Avoid_: custom role, for a household (custom roles are defined by server admins); household-defined role
+
 **Founder**:
 The user who created a household. They start as its owner, but the title records history, not current authority.
 _Avoid_: creator, created by
@@ -424,6 +436,9 @@ Which ways into a household are open to people outside it.
 
 **Member invite policy**:
 A household setting that decides how holders of the member role may invite: directly, only once a household owner or admin approves each invite, or not at all. A household's owners and admins always invite directly, and its guests never do.
+
+**Member share policy**:
+A household setting that decides how holders of the member role may share games they created with the household: directly, only once a household owner or admin approves each share, or not at all. A household's owners and admins always share directly, and its guests never do. It does not govern collection sharing, which puts a member's games into the household's game pool.
 
 **Join request**:
 Planned: a user asking to join a household, which its owners or admins approve or deny.
@@ -618,7 +633,7 @@ A way a game can be played on a platform, such as solo, local, online, asynchron
 _Avoid_: capability, platform feature
 
 **Play time**:
-How long a game is expected to take, as a range. A source may also give a typical play time.
+How long one sitting of a game is expected to take, as a range in minutes. A single time is a range whose ends are equal, and a typical time a source gives stands for both ends when it gives no range. It isn't the time to finish a game over many plays, such as a campaign.
 
 **Game length**:
 A named band of play time, such as short or long, that a user can pick as the length they prefer.
@@ -775,7 +790,7 @@ An item's id at a DataGateway, exactly as the DataGateway gave it.
 _Avoid_: external ID for the server's own id
 
 **Interview**:
-The server asking a DataGateway to describe itself: its capabilities, formats and vocabularies. It recurs over the DataGateway's life.
+The server asking a DataGateway to describe itself: its capabilities, formats and the vocabularies it can list. Its sections load after it. It recurs over the DataGateway's life.
 _Avoid_: handshake, registration, discovery, sync, language sync
 
 **DataGateway onboarding**:
@@ -788,6 +803,10 @@ _Avoid_: curation, curate; curating, for staff changing games (say editing)
 
 **Vocabulary**:
 A set of things the server and each DataGateway name in their own terms, such as languages, platforms or regions.
+
+**Section**:
+One vocabulary as a DataGateway lists it, such as its platforms. After each interview, every section the DataGateway declares and no admin has switched off loads as its own job, and the server records when it last loaded or failed.
+_Avoid_: list sync, vocabulary sync
 
 **Language code format**:
 The scheme a DataGateway uses to identify languages: a BCP 47 tag, a two- or three-letter ISO 639 code, or a language's name in English or in the language itself.

@@ -18,16 +18,22 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
+      "path": "../../../api/vocabulary/tsconfig.lib.json"
+    },
+    {
+      "path": "../../../queue/actor-context/tsconfig.lib.json"
+    },
+    {
       "path": "../../../common/testing/tsconfig.lib.json"
     },
     {
       "path": "../../../common/notifications/tsconfig.lib.json"
     },
     {
-      "path": "../contract-testing/tsconfig.lib.json"
+      "path": "../../../api/language/tsconfig.lib.json"
     },
     {
-      "path": "../../../api/language/tsconfig.lib.json"
+      "path": "../contract-testing/tsconfig.lib.json"
     },
     {
       "path": "../../../common/redis/tsconfig.lib.json"

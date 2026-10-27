@@ -1,16 +1,21 @@
-import { AuthService } from '@bge/auth';
+import { AuthService, type AuthUser } from '@bge/auth';
 import { Action, ResourceType } from '@bge/database';
 import { AbilityService, CheckPolicies, PoliciesGuard, resolveScopeSubjectId } from '@bge/permissions';
 import { paginated, PaginatedResponseDto } from '@bge/shared';
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
-import { from } from 'rxjs';
+import { from, type Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { UserSearchQueryDto, UserSearchResultDto } from './dto';
 import { UserService } from './user.service';
 
 const PaginatedUsersResponse = PaginatedResponseDto(UserSearchResultDto, 'users');
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- `image` is destructured only to leave it out
+function withoutProviderPicture({ image: _image, ...user }: AuthUser): Omit<AuthUser, 'image'> {
+  return user;
+}
 
 @ApiTags('users')
 @Controller('users')
@@ -25,10 +30,17 @@ export class UserController {
    * The caller's own user: for a session, the user it belongs to, and for an
    * API key, the key's owner (#529). Read from the user's row, not the
    * session's copy of it, which is the row as it stood at sign-in.
+   *
+   * Without `image`, the sign-in provider's picture: it only seeds the avatar
+   * at provisioning, and the avatar is the profile's (#695). better-auth's own
+   * session routes still carry `image`, since they serve better-auth's user
+   * shape.
    */
   @Get('me')
-  me() {
-    return from(this.authService.findUserById(this.abilityService.getActingUserId())).pipe(map((user) => ({ user })));
+  me(): Observable<{ user: Omit<AuthUser, 'image'> | null }> {
+    return from(this.authService.findUserById(this.abilityService.getActingUserId())).pipe(
+      map((user) => ({ user: user === null ? null : withoutProviderPicture(user) })),
+    );
   }
 
   @ApiOperation({

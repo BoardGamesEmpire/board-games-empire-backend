@@ -1,5 +1,9 @@
-import type { TransportTargetOptions } from 'pino';
-import { buildBasePinoOptions, resolvePinoLevel } from './base-pino.options';
+import http from 'node:http';
+import { Writable } from 'node:stream';
+import pino, { type TransportTargetOptions } from 'pino';
+import pinoHttp from 'pino-http';
+import request from 'supertest';
+import { buildBasePinoOptions, resolvePinoLevel, type LogDestination } from './base-pino.options';
 
 /**
  * Narrows the loose `LoggerOptions['transport']` to the multi-target
@@ -15,6 +19,9 @@ const getTargets = (transport: unknown): TransportTargetOptions[] => {
   }
   throw new Error('expected transport to expose targets[]');
 };
+
+// Passed explicitly so no assertion depends on whether Jest itself runs on a terminal.
+const TERMINAL = { isTTY: true };
 
 describe('resolvePinoLevel', () => {
   it('uses LOG_LEVEL when set', () => {
@@ -40,32 +47,38 @@ describe('resolvePinoLevel', () => {
 
 describe('buildBasePinoOptions', () => {
   it('always configures at least one transport target', () => {
-    const options = buildBasePinoOptions({});
+    const options = buildBasePinoOptions({}, TERMINAL);
 
     expect(getTargets(options.transport)).toHaveLength(1);
   });
 
-  it('configures pino-pretty as the sole default target', () => {
-    const targets = getTargets(buildBasePinoOptions({}).transport);
+  it('pretty-prints with colour when stdout is a terminal', () => {
+    const targets = getTargets(buildBasePinoOptions({}, { isTTY: true }).transport);
 
-    expect(targets).toHaveLength(1);
-    expect(targets[0].target).toBe('pino-pretty');
+    expect(targets).toEqual([{ target: 'pino-pretty', level: 'debug', options: { colorize: true, singleLine: true } }]);
   });
 
-  it('configures pino-pretty with colorize and singleLine', () => {
-    const [target] = getTargets(buildBasePinoOptions({}).transport);
+  it('writes JSON lines to stdout when stdout is not a terminal (#627)', () => {
+    const targets = getTargets(buildBasePinoOptions({}, { isTTY: false }).transport);
 
-    expect(target.options).toEqual({ colorize: true, singleLine: true });
+    expect(targets).toEqual([{ target: 'pino/file', level: 'debug', options: { destination: 1 } }]);
+  });
+
+  it('treats a stream without isTTY as no terminal (#627)', () => {
+    // A piped process.stdout has no isTTY property at runtime, though its type declares one.
+    const targets = getTargets(buildBasePinoOptions({}, {} as LogDestination).transport);
+
+    expect(targets).toEqual([{ target: 'pino/file', level: 'debug', options: { destination: 1 } }]);
   });
 
   it('applies the resolved level to the top-level options', () => {
-    const options = buildBasePinoOptions({ LOG_LEVEL: 'warn' });
+    const options = buildBasePinoOptions({ LOG_LEVEL: 'warn' }, TERMINAL);
 
     expect(options.level).toBe('warn');
   });
 
   it('applies the resolved level to every transport target', () => {
-    const targets = getTargets(buildBasePinoOptions({ LOG_LEVEL: 'warn' }).transport);
+    const targets = getTargets(buildBasePinoOptions({ LOG_LEVEL: 'warn' }, TERMINAL).transport);
 
     for (const target of targets) {
       expect(target.level).toBe('warn');
@@ -80,16 +93,19 @@ describe('buildBasePinoOptions', () => {
 
   it('does NOT inject a pino-opentelemetry-transport target', () => {
     const targets = getTargets(
-      buildBasePinoOptions({
-        OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
-      }).transport,
+      buildBasePinoOptions(
+        {
+          OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
+        },
+        TERMINAL,
+      ).transport,
     );
 
     expect(targets.some((t) => t.target === 'pino-opentelemetry-transport')).toBe(false);
   });
 
   it('does NOT install a mixin (OTel correlation is layered by @bge/otel)', () => {
-    const options = buildBasePinoOptions({});
+    const options = buildBasePinoOptions({}, TERMINAL);
 
     expect(options.mixin).toBeUndefined();
   });
@@ -116,5 +132,114 @@ describe('buildBasePinoOptions', () => {
         process.env['NODE_ENV'] = originalNodeEnv;
       }
     }
+  });
+});
+
+describe('credential redaction (#748)', () => {
+  type LogRecord = Record<string, any>;
+
+  const CREDENTIAL_HEADERS = {
+    Authorization: 'Bearer bearer-secret',
+    Cookie: 'bge.session=cookie-secret',
+    'X-API-Key': 'key-secret',
+  };
+
+  let server: http.Server;
+  let lines: string[];
+
+  const records = (): LogRecord[] =>
+    lines
+      .join('')
+      .split('\n')
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line));
+
+  const findRecord = (msg: string): LogRecord => {
+    const record = records().find((r) => r['msg'] === msg);
+    if (!record) {
+      throw new Error(`no log record with msg "${msg}"`);
+    }
+    return record;
+  };
+
+  // pino-http writes the access line when the response finishes, which can
+  // land just after the client has read the response.
+  const waitForAccessLine = async (): Promise<void> => {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (records().some((r) => r['msg'] === 'request completed')) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('the access line was never logged');
+  };
+
+  beforeEach(() => {
+    // Strip the transport: pino refuses a destination stream alongside one.
+    const { transport: _transport, ...options } = buildBasePinoOptions({ LOG_LEVEL: 'debug' });
+    lines = [];
+    const sink = new Writable({
+      write(chunk, _encoding, done) {
+        lines.push(String(chunk));
+        done();
+      },
+    });
+    const httpLogger = pinoHttp({ logger: pino(options, sink) });
+
+    server = http.createServer((req, res) => {
+      httpLogger(req, res);
+      req.log.info('inside the handler');
+      res.setHeader('Set-Cookie', ['bge.session=cookie-secret', 'bge.other=second-secret']);
+      res.end();
+    });
+  });
+
+  afterEach(() => {
+    server.close();
+  });
+
+  it('logs no authorization, cookie or x-api-key value on the access line, at debug', async () => {
+    await request(server).get('/').set(CREDENTIAL_HEADERS);
+    await waitForAccessLine();
+
+    const { req } = findRecord('request completed');
+
+    expect(req.headers.authorization).toBe('[Redacted]');
+    expect(req.headers.cookie).toBe('[Redacted]');
+    expect(req.headers['x-api-key']).toBe('[Redacted]');
+    const output = lines.join('');
+    expect(output).not.toContain('bearer-secret');
+    expect(output).not.toContain('cookie-secret');
+    expect(output).not.toContain('key-secret');
+  });
+
+  it('logs no set-cookie value, however many cookies the response sets', async () => {
+    await request(server).get('/');
+    await waitForAccessLine();
+
+    const { res } = findRecord('request completed');
+
+    expect(res.headers['set-cookie']).toBe('[Redacted]');
+    expect(lines.join('')).not.toContain('second-secret');
+  });
+
+  it('redacts the request on a line the handler logs while the request is handled', async () => {
+    await request(server).get('/').set(CREDENTIAL_HEADERS);
+    await waitForAccessLine();
+
+    const { req } = findRecord('inside the handler');
+
+    expect(req.headers.authorization).toBe('[Redacted]');
+  });
+
+  it('adds no placeholder for a credential the request did not carry', async () => {
+    await request(server).get('/');
+    await waitForAccessLine();
+
+    const { req } = findRecord('request completed');
+
+    expect(req.headers).not.toHaveProperty('authorization');
+    expect(req.headers).not.toHaveProperty('cookie');
+    expect(req.headers).not.toHaveProperty('x-api-key');
   });
 });

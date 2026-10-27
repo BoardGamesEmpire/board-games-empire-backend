@@ -12,7 +12,8 @@ export class UpdateDataGatewayDto extends PartialType(CreateDataGatewayDto) {
     description:
       "The capabilities to switch off, as the whole list: `[]` switches every one back on. The server doesn't " +
       'route a switched-off capability, and no interview changes the list. It may name a capability the ' +
-      "DataGateway doesn't declare yet, which stays off if it's declared later (#715).",
+      "DataGateway doesn't declare yet, which stays off if it's declared later (#715). A list switched back on " +
+      'is loaded again straight away (#718).',
   })
   // Not IsOptional, which lets null through to a list column the database
   // won't set to null: send [] to switch every capability back on.

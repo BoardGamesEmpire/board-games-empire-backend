@@ -1,6 +1,7 @@
 import {
   Action,
   MemberInvitePolicy,
+  MemberSharePolicy,
   QuotaScope,
   ResourceType,
   ROLE_PERMISSION_CATALOG,
@@ -72,6 +73,14 @@ const memberRow = (actor: HouseholdRoleName, target: SystemRole, userId = OTHER)
 const managesA = (ability: AppAbility, actor: HouseholdRoleName, target: SystemRole) =>
   ability.can(Action.manage, memberRow(actor, target));
 
+/** A ban of `OTHER` from `hh-1`, as the ban routes ask about it (#782). */
+const banOf = (actor: HouseholdRoleName) =>
+  subject(ResourceType.HouseholdBan, { householdId: HOUSEHOLD, userId: OTHER, household: { members: roster(actor) } });
+
+/** Whether the actor may ban someone holding `target`: the ban, then removing them, which a ban of a member asks too. */
+const bansA = (ability: AppAbility, actor: HouseholdRoleName, target: SystemRole) =>
+  ability.can(Action.create, banOf(actor)) && managesA(ability, actor, target);
+
 /**
  * How an invite offering `offers` opens under `policy`, asked in the order the
  * create asks: directly, then awaiting approval.
@@ -104,6 +113,47 @@ const openInvite = (actor: HouseholdRoleName, offers: SystemRole) =>
     householdId: HOUSEHOLD,
     role: { name: offers },
     household: { members: roster(actor) },
+  });
+
+/**
+ * How the actor's share of a live game they created into `hh-1` opens under
+ * `policy`, asked in the order the create asks (#810): in effect at once, then
+ * waiting for approval.
+ */
+const shareOpens = (ability: AppAbility, actor: HouseholdRoleName, policy: MemberSharePolicy): Cell => {
+  const share = (approvedAt: Date | null) =>
+    subject(ResourceType.GameShare, {
+      householdId: HOUSEHOLD,
+      approvedAt,
+      game: { deletedAt: null, createdById: ACTOR },
+      household: { settings: { memberSharePolicy: policy }, members: roster(actor) },
+    });
+
+  if (ability.can(Action.create, share(new Date()))) {
+    return 'Yes';
+  }
+
+  return ability.can(Action.create, share(null)) ? 'For approval' : 'No';
+};
+
+const sharesAs = (policy: MemberSharePolicy) => (ability: AppAbility, actor: HouseholdRoleName) =>
+  shareOpens(ability, actor, policy);
+
+/**
+ * A share into `hh-1` that another member made of a game they created, as
+ * listing the household's shares, approving one and removing one ask about
+ * it. Another member's, because `User` lets the actor read and remove their
+ * own shares in any household, and these rows ask what the household role
+ * grants (#810).
+ */
+const othersShare = (actor: HouseholdRoleName, state: { approvedAt?: Date | null } = {}) =>
+  subject(ResourceType.GameShare, {
+    id: 'share-1',
+    householdId: HOUSEHOLD,
+    sharedById: OTHER,
+    game: { deletedAt: null, createdById: OTHER },
+    household: { members: roster(actor) },
+    ...state,
   });
 
 /** One of `hh-1`'s events, created by the actor, who holds no event role on it. */
@@ -187,6 +237,52 @@ const HOUSEHOLD_ROLE_TABLE: readonly TableRow[] = [
     ask: (ability, actor) => yesNo(managesA(ability, actor, SystemRole.HouseholdOwner)),
   },
   {
+    action: 'Ban someone with the member or guest role',
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },
+    ask: (ability, actor) =>
+      same(
+        yesNo(bansA(ability, actor, SystemRole.HouseholdMember)),
+        yesNo(bansA(ability, actor, SystemRole.HouseholdGuest)),
+      ),
+  },
+  {
+    action: 'Ban a household admin',
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'No', HouseholdMember: 'No', HouseholdGuest: 'No' },
+    ask: (ability, actor) => yesNo(bansA(ability, actor, SystemRole.HouseholdAdmin)),
+  },
+  {
+    action: 'Ban another household owner, unless they are the last',
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'No', HouseholdMember: 'No', HouseholdGuest: 'No' },
+    ask: (ability, actor) => yesNo(bansA(ability, actor, SystemRole.HouseholdOwner)),
+  },
+  {
+    action: "Ban someone who isn't a member",
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },
+    ask: (ability, actor) => yesNo(ability.can(Action.create, banOf(actor))),
+  },
+  {
+    action: "See the household's bans",
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },
+    ask: (ability, actor) => yesNo(ability.can(Action.read, banOf(actor))),
+  },
+  {
+    action: 'Change the reason for a ban',
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },
+    ask: (ability, actor) => yesNo(ability.can(Action.update, banOf(actor))),
+  },
+  {
+    action: 'Lift a ban',
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },
+    ask: (ability, actor) => yesNo(ability.can(Action.delete, banOf(actor))),
+  },
+  {
     action: 'Transfer ownership',
     grantedBy: 'Household role',
     cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'No', HouseholdMember: 'No', HouseholdGuest: 'No' },
@@ -262,6 +358,42 @@ const HOUSEHOLD_ROLE_TABLE: readonly TableRow[] = [
     grantedBy: 'Household role',
     cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'No', HouseholdMember: 'No', HouseholdGuest: 'No' },
     ask: (ability, actor) => yesNo(ability.can(Action.update, openInvite(actor, SystemRole.HouseholdAdmin), 'status')),
+  },
+  {
+    action: 'Share a game they created with the household, when the member share policy is Direct',
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'Yes', HouseholdGuest: 'No' },
+    ask: sharesAs(MemberSharePolicy.Direct),
+  },
+  {
+    action: 'Share a game they created with the household, when the member share policy is NeedsApproval',
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'For approval', HouseholdGuest: 'No' },
+    ask: sharesAs(MemberSharePolicy.NeedsApproval),
+  },
+  {
+    action: 'Share a game they created with the household, when the member share policy is Off',
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },
+    ask: sharesAs(MemberSharePolicy.Off),
+  },
+  {
+    action: "See the household's game shares",
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },
+    ask: (ability, actor) => yesNo(ability.can(Action.read, othersShare(actor))),
+  },
+  {
+    action: 'Approve a game share sent for approval',
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },
+    ask: (ability, actor) => yesNo(ability.can(Action.update, othersShare(actor, { approvedAt: null }), 'approvedAt')),
+  },
+  {
+    action: 'Remove a game share from the household',
+    grantedBy: 'Household role',
+    cells: { HouseholdOwner: 'Yes', HouseholdAdmin: 'Yes', HouseholdMember: 'No', HouseholdGuest: 'No' },
+    ask: (ability, actor) => yesNo(ability.can(Action.delete, othersShare(actor))),
   },
   {
     action: 'Create a household event',

@@ -11,7 +11,7 @@ import { submitEnvelope } from './feedback-wire';
 const FEEDBACK_CREATE_PERMISSION_SLUG = 'create:feedback_report';
 
 /**
- * A feedback ban must not be bypassable by supplying an idempotency key.
+ * A feedback ban must not be bypassable by supplying a client request id.
  *
  * The mechanism is a `UserPermission` row inverting `create:feedback_report`, so
  * the denial happens in `PoliciesGuard` — ahead of `FeedbackService` and

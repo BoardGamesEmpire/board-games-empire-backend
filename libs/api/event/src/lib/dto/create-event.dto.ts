@@ -1,6 +1,6 @@
 import { EventSchedulingMode, EventType, Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
-import { ReachProperty } from '@bge/shared';
+import { ClientRequestIdProperty, ReachProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
@@ -23,13 +23,12 @@ import { CreateEventPolicyDto } from './create-event-policy.dto';
  */
 export const MAX_INVITE_USER_IDS = 50;
 
-const EVENT_REACHES = [Reach.Private, Reach.Friends, Reach.Public] as const;
+const EVENT_REACHES = [Reach.Private, Reach.Friends, Reach.FriendsOfFriends, Reach.Public] as const;
 export type EventReach = (typeof EVENT_REACHES)[number];
 
 /**
- * An event's reach: the rungs an event read rule serves. `FriendsOfFriends`
- * waits on #496, which defines friends of friends. Shared with
- * `UpdateEventDto`, which names no default.
+ * An event's reach: every rung an event read rule serves, friends of friends
+ * included (#496). Shared with `UpdateEventDto`, which names no default.
  */
 export function EventReachProperty(defaultReach?: EventReach): PropertyDecorator {
   return ReachProperty({
@@ -37,7 +36,8 @@ export function EventReachProperty(defaultReach?: EventReach): PropertyDecorator
     default: defaultReach,
     description:
       "Who may read the event besides its attendees and its household's members. `Friends`: also its " +
-      "creator's friends. `Public`: every signed-in user. `Private`: no one else.",
+      "creator's friends. `FriendsOfFriends`: also its creator's friends and friends of friends, unless " +
+      'a block stands between the creator and the reader. `Public`: every signed-in user. `Private`: no one else.',
   });
 }
 
@@ -124,4 +124,7 @@ export class CreateEventDto {
   @Type(() => CreateEventPolicyDto)
   @IsOptional()
   policy?: CreateEventPolicyDto;
+
+  @ClientRequestIdProperty('event', 'A repeat does not notify its invitees or fire its webhook again.')
+  clientRequestId?: string;
 }

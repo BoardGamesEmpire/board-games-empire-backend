@@ -11,4 +11,8 @@
  */
 export enum HouseholdEvents {
   OwnershipTransferred = 'household.ownership.transferred',
+  /** A member's waiting game share approved by a household owner or admin (#810). */
+  GameShareApproved = 'household.game_share.approved',
+  /** A member's game share into the household ended by their leaving or removal (#810). */
+  GameShareEnded = 'household.game_share.ended',
 }

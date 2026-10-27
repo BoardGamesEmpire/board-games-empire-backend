@@ -1,5 +1,5 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { Action, DataGateway, ResourceType } from '@bge/database';
+import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
@@ -31,7 +31,7 @@ import { Http } from '@status/codes';
 import { from, of } from 'rxjs';
 import { catchError, concatMap, map, tap } from 'rxjs/operators';
 import { DataGatewayService } from './data-gateway.service';
-import { toDataGatewayView } from './data-gateway.view';
+import { toDataGatewayView, type DataGatewayWithSections } from './data-gateway.view';
 import {
   CreateDataGatewayDto,
   DataGatewayConnectAnswerDto,
@@ -99,7 +99,7 @@ export class DataGatewayController {
   @Post()
   create(@Body() createDataGatewayDto: CreateDataGatewayDto) {
     return from(this.dataGatewayService.create(createDataGatewayDto)).pipe(
-      tap((gateway: DataGateway) => this.logger.log(`Created DataGateway with name: ${gateway.name}`)),
+      tap((gateway: DataGatewayWithSections) => this.logger.log(`Created DataGateway with name: ${gateway.name}`)),
       concatMap((gateway) =>
         gateway.enabled
           ? this.connectToGateway(gateway, Action.create)
@@ -130,7 +130,7 @@ export class DataGatewayController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateDataGatewayDto: UpdateDataGatewayDto) {
     return from(this.dataGatewayService.update(id, updateDataGatewayDto)).pipe(
-      tap((gateway: DataGateway) => this.logger.log(`Updated DataGateway with ID: ${gateway.id}`)),
+      tap((gateway: DataGatewayWithSections) => this.logger.log(`Updated DataGateway with ID: ${gateway.id}`)),
       concatMap((gateway) => {
         if (updateDataGatewayDto.enabled === undefined) {
           return of({
@@ -154,7 +154,7 @@ export class DataGatewayController {
   @Delete(':id')
   delete(@Param('id') id: string) {
     return from(this.dataGatewayService.delete(id)).pipe(
-      tap((gateway: DataGateway) => this.logger.log(`Deleted DataGateway with ID: ${gateway.id}`)),
+      tap((gateway: DataGatewayWithSections) => this.logger.log(`Deleted DataGateway with ID: ${gateway.id}`)),
       concatMap((gateway) =>
         gateway.enabled
           ? this.disconnectFromGateway(gateway)
@@ -174,7 +174,7 @@ export class DataGatewayController {
   @Post(':id/connect')
   connect(@Param('id') id: string) {
     return from(this.dataGatewayService.update(id, { enabled: true })).pipe(
-      concatMap((gateway: DataGateway) => this.connectToGateway(gateway, Action.update)),
+      concatMap((gateway: DataGatewayWithSections) => this.connectToGateway(gateway, Action.update)),
     );
   }
 
@@ -240,7 +240,7 @@ export class DataGatewayController {
     );
   }
 
-  private connectToGateway(gateway: DataGateway, write: Action) {
+  private connectToGateway(gateway: DataGatewayWithSections, write: Action) {
     const request: ConnectGatewayRequest = {
       gatewayId: gateway.id,
       connectionUrl: gateway.connectionUrl,
@@ -288,11 +288,11 @@ export class DataGatewayController {
   @Post(':id/disconnect')
   disconnect(@Param('id') id: string) {
     return from(this.dataGatewayService.update(id, { enabled: false })).pipe(
-      concatMap((gateway: DataGateway) => this.disconnectFromGateway(gateway)),
+      concatMap((gateway: DataGatewayWithSections) => this.disconnectFromGateway(gateway)),
     );
   }
 
-  private disconnectFromGateway(gateway: DataGateway) {
+  private disconnectFromGateway(gateway: DataGatewayWithSections) {
     const request: DisconnectGatewayRequest = {
       gatewayId: gateway.id,
     };

@@ -2,16 +2,18 @@ import {
   AuthType,
   ContentFormat,
   ContentType,
-  CoverageAxis,
   DataGatewayCapability,
   DataGatewayInterviewFailure,
+  DataGatewaySectionFailure,
   LanguageCodeFormat,
   PlatformType,
+  SearchFilterAxis,
 } from '@bge/database';
 import { ApiProperty } from '@nestjs/swagger';
 import type {
   DataGatewayInterviewFailureView,
   DataGatewayInterviewStatus,
+  DataGatewaySectionView,
   DataGatewayView,
 } from '../data-gateway.view';
 
@@ -44,10 +46,45 @@ class DataGatewayInterviewStatusDto implements DataGatewayInterviewStatus {
     type: DataGatewayInterviewFailureDto,
     nullable: true,
     description:
-      'The last failure, only while it is current: null once a later interview succeeded. A failed section ' +
-      '(LanguageSectionFailed) stays current beside the success it came with. The raw error is only logged.',
+      'The last failure, only while it is current: null once a later interview succeeded. The raw error is ' +
+      'only logged.',
   })
   failure!: DataGatewayInterviewFailureDto | null;
+}
+
+class DataGatewaySectionFailureDto implements NonNullable<DataGatewaySectionView['failure']> {
+  @ApiProperty({
+    enum: DataGatewaySectionFailure,
+    enumName: 'DataGatewaySectionFailure',
+    description:
+      'ListUnsupported: the DataGateway answered that it does not serve the list. ListFailed: the list call failed ' +
+      'in some other way. LinkFailed: the server could not write the links.',
+  })
+  code!: DataGatewaySectionFailure;
+
+  @ApiProperty({ description: "When the section's job failed its last attempt" })
+  at!: Date;
+}
+
+/** One list job's section: a vocabulary the DataGateway lists, loaded after each interview (#718). */
+class DataGatewaySectionDto implements DataGatewaySectionView {
+  @ApiProperty({
+    enum: DataGatewayCapability,
+    enumName: 'DataGatewayCapability',
+    description: 'The list the section loads: ListLanguages, ListPlatforms, ListCategories or ListMechanics',
+  })
+  capability!: DataGatewayCapability;
+
+  @ApiProperty({ type: Date, nullable: true, description: 'The last time the section loaded' })
+  lastLoadedAt!: Date | null;
+
+  @ApiProperty({
+    type: DataGatewaySectionFailureDto,
+    nullable: true,
+    description:
+      'The last failure, only while it is current: null once a later load succeeded. The raw error is only logged.',
+  })
+  failure!: DataGatewaySectionFailureDto | null;
 }
 
 export class DataGatewayResponseDto implements DataGatewayView {
@@ -118,8 +155,8 @@ export class DataGatewayResponseDto implements DataGatewayView {
   @ApiProperty({ enum: ContentType, enumName: 'ContentType', isArray: true })
   coverageContentTypes!: ContentType[];
 
-  @ApiProperty({ enum: CoverageAxis, enumName: 'CoverageAxis', isArray: true })
-  filterableAxes!: CoverageAxis[];
+  @ApiProperty({ enum: SearchFilterAxis, enumName: 'SearchFilterAxis', isArray: true })
+  filterableAxes!: SearchFilterAxis[];
 
   @ApiProperty({
     enum: LanguageCodeFormat,
@@ -168,6 +205,15 @@ export class DataGatewayResponseDto implements DataGatewayView {
 
   @ApiProperty({ type: DataGatewayInterviewStatusDto })
   interview!: DataGatewayInterviewStatusDto;
+
+  @ApiProperty({
+    type: DataGatewaySectionDto,
+    isArray: true,
+    description:
+      'Each list job that has run since an interview, one per list the DataGateway declares and no admin ' +
+      'switched off, in the order they run',
+  })
+  sections!: DataGatewaySectionDto[];
 
   @ApiProperty({ type: String, nullable: true })
   createdById!: string | null;

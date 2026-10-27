@@ -6,16 +6,17 @@ import {
   loadPluginUnitEnablement,
   PluginGrantScope,
   PluginGrantStatus,
+  Prisma,
   riskCovers,
   type RiskLevel,
 } from '@bge/database';
 import { isPluginPermissionSlug, parsePluginPermissionSlug } from '@boardgamesempire/plugin-manifest';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
 import { randomUUID } from 'node:crypto';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type { ApikeyWithScopes, PluginGrantSnapshot, UserWithRoles } from './interfaces';
+import { PERMISSIONS_CACHE } from './permissions-cache';
 
 /**
  * What {@link PermissionsService.getOrLoad} caches: the loaded value, tagged
@@ -55,7 +56,7 @@ export class PermissionsService {
 
   constructor(
     private readonly db: DatabaseService,
-    @Inject(CACHE_MANAGER) private readonly cache: Cache,
+    @Inject(PERMISSIONS_CACHE) private readonly cache: Cache,
   ) {}
 
   /**
@@ -90,7 +91,7 @@ export class PermissionsService {
     const userGraph = await this.getOrLoad(
       PermissionsService.userGraphCacheKey(userId),
       `user role graph for user ${userId}`,
-      () => this.loadUserGraph(userId),
+      () => this.loadUserGraph(this.db, userId),
       (graph) => this.cacheTtlForGraph(graph),
       // A graph holding no global role was read before its user's provisioning
       // committed (#490): every provisioned user holds one, and provisioning
@@ -104,6 +105,49 @@ export class PermissionsService {
     );
 
     return userGraph as UserWithRoles | null;
+  }
+
+  /**
+   * A user's permission graph as `tx` reads it, never from the cache and
+   * never cached: for asking about a user other than the actor at the moment
+   * a decision is made, when their roles may have changed a moment ago (#747).
+   * A role change evicts the cached graph only after it commits, so a cached
+   * read can still hold the role it replaced. Inside a transaction holding a
+   * lock the change also takes, this read sees exactly what committed.
+   *
+   * A user under a ban in force reads as no graph, as a deleted one does: they
+   * can neither sign in nor use a key, so they could do nothing now. The rule
+   * is the one better-auth applies at sign-in and the API key middleware
+   * applies per request: banned with no expiry, or with one still to come.
+   */
+  async loadUserRoleGraphWithin(tx: Prisma.TransactionClient, userId: string): Promise<UserWithRoles | null> {
+    return (await this.loadUserGraph(tx, userId, PermissionsService.notBannedNow())) as UserWithRoles | null;
+  }
+
+  /**
+   * Several users' graphs as they have committed, read as
+   * {@link loadUserRoleGraphWithin} reads one but in a single read for them
+   * all: for judging many users at once, as the webhook dispatcher judges
+   * every subscriber to an event (#732). A user under a ban in force, or one
+   * deleted, is missing from the map. Every graph read is held at once, and a
+   * graph is large (#921), so a caller with many users passes a batch at a time.
+   */
+  async loadUserRoleGraphs(userIds: readonly string[]): Promise<Map<string, UserWithRoles>> {
+    if (userIds.length === 0) {
+      return new Map();
+    }
+
+    const graphs = (await this.db.user.findMany({
+      where: { id: { in: [...userIds] }, AND: PermissionsService.notBannedNow() },
+      select: PermissionsService.userGraphSelect(),
+    })) as UserWithRoles[];
+
+    return new Map(graphs.map((graph) => [graph.id, graph]));
+  }
+
+  /** Not banned, or banned with an expiry already past. */
+  private static notBannedNow(): Prisma.UserWhereInput {
+    return { OR: [{ banned: null }, { banned: false }, { banExpires: { lte: new Date() } }] };
   }
 
   /**
@@ -328,103 +372,114 @@ export class PermissionsService {
     return Math.max(MIN_CACHE_TTL_IN_MILLISECONDS, Math.min(CACHE_TTL_IN_MILLISECONDS, Math.min(...upcoming)));
   }
 
-  private loadUserGraph(userId: string) {
-    return this.db.user.findUnique({
-      where: { id: userId },
-      // Every role → permission hop below filters `permission.retiredAt: null`
-      // (#235): a retired catalog row keeps whatever grants still reference it
-      // and confers nothing through any of them.
-      select: {
-        id: true,
-        roles: {
-          select: {
-            role: {
-              select: {
-                name: true,
-                permissions: {
-                  where: { permission: { retiredAt: null } },
-                  select: {
-                    permission: true,
-                  },
-                },
-              },
-            },
-          },
-        },
+  private loadUserGraph(
+    client: DatabaseService | Prisma.TransactionClient,
+    userId: string,
+    standing?: Prisma.UserWhereInput,
+  ) {
+    return client.user.findUnique({
+      where: { id: userId, ...(standing && { AND: standing }) },
+      select: PermissionsService.userGraphSelect(),
+    });
+  }
 
-        householdMember: {
-          // A soft-deleted household must not contribute household-scoped grants:
-          // the row survives the (soft) delete, so exclude memberships whose
-          // household is gone or abilities would linger past a cache refresh.
-          where: { household: { deletedAt: null } },
-          select: {
-            householdId: true,
-            role: {
-              select: {
-                role: {
-                  select: {
-                    name: true,
-                    permissions: {
-                      where: { permission: { retiredAt: null } },
-                      select: {
-                        permission: true,
-                      },
-                    },
-                  },
+  /**
+   * What a user's permission graph is read with. Every role → permission hop
+   * filters `permission.retiredAt: null` (#235): a retired catalog row keeps
+   * whatever grants still reference it and confers nothing through any of
+   * them.
+   */
+  private static userGraphSelect() {
+    return {
+      id: true,
+      roles: {
+        select: {
+          role: {
+            select: {
+              name: true,
+              permissions: {
+                where: { permission: { retiredAt: null } },
+                select: {
+                  permission: true,
                 },
-              },
-            },
-          },
-        },
-
-        eventsAttended: {
-          select: {
-            eventId: true,
-            role: {
-              select: {
-                role: {
-                  select: {
-                    name: true,
-                    permissions: {
-                      where: { permission: { retiredAt: null } },
-                      select: {
-                        permission: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-
-        // Direct per-user overrides (grants + inverse denials). Already-expired
-        // rows are excluded at query time; the factory re-checks `expiresAt` at
-        // build time as the backstop. An override of a retired permission is
-        // excluded the same way (#235).
-        permissions: {
-          where: {
-            OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-            permission: { retiredAt: null },
-          },
-          select: {
-            inverted: true,
-            resourceType: true,
-            resourceId: true,
-            expiresAt: true,
-            permission: {
-              select: {
-                action: true,
-                subject: true,
-                conditions: true,
-                fields: true,
-                inverted: true,
               },
             },
           },
         },
       },
-    });
+
+      householdMember: {
+        // A soft-deleted household must not contribute household-scoped grants:
+        // the row survives the (soft) delete, so exclude memberships whose
+        // household is gone or abilities would linger past a cache refresh.
+        where: { household: { deletedAt: null } },
+        select: {
+          householdId: true,
+          role: {
+            select: {
+              role: {
+                select: {
+                  name: true,
+                  permissions: {
+                    where: { permission: { retiredAt: null } },
+                    select: {
+                      permission: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      eventsAttended: {
+        select: {
+          eventId: true,
+          role: {
+            select: {
+              role: {
+                select: {
+                  name: true,
+                  permissions: {
+                    where: { permission: { retiredAt: null } },
+                    select: {
+                      permission: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      // Direct per-user overrides (grants + inverse denials). Already-expired
+      // rows are excluded at query time; the factory re-checks `expiresAt` at
+      // build time as the backstop. An override of a retired permission is
+      // excluded the same way (#235).
+      permissions: {
+        where: {
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+          permission: { retiredAt: null },
+        },
+        select: {
+          inverted: true,
+          resourceType: true,
+          resourceId: true,
+          expiresAt: true,
+          permission: {
+            select: {
+              action: true,
+              subject: true,
+              conditions: true,
+              fields: true,
+              inverted: true,
+            },
+          },
+        },
+      },
+    } satisfies Prisma.UserSelect;
   }
 
   /**

@@ -24,6 +24,12 @@ enum ResultStatus {
   RESULT_STATUS_ERROR = 3;
   RESULT_STATUS_RATE_LIMITED = 4;
   RESULT_STATUS_UNAVAILABLE = 5;
+
+  // The coordinator's alone: a DataGateway never sends it. The coordinator
+  // answers it for a DataGateway it didn't ask, because the search names a
+  // filter that DataGateway doesn't declare and the search keeps no games
+  // with an unknown value (#869).
+  RESULT_STATUS_UNFILTERABLE = 6;
 }
 
 // Broad classification of a platform — used by clients to render
@@ -50,6 +56,32 @@ message SearchFilter {
 
   // Matched against a game's content type.
   repeated ContentType content_types = 2;
+
+  // Matched against a game's publish year. A game with no known year is kept
+  // only when the range includes unknown ones. Unset doesn't narrow.
+  optional IntRange publish_year = 3;
+
+  // Matched against a game's player counts, which must span the whole range. A
+  // range with one bound is that one count: a minimum of 5 alone means
+  // "supports 5". A game missing either of its counts is kept only when the
+  // range includes unknown ones. Unset doesn't narrow.
+  optional IntRange player_count = 4;
+
+  // Matched against a game's play time in minutes, which must lie within the
+  // range. A bound left out doesn't narrow that side. A game with one play
+  // time has it for both ends, and one with neither is kept only when the
+  // range includes unknown ones. Unset doesn't narrow.
+  optional IntRange play_time = 5;
+}
+
+// An inclusive range a search filter narrows by (#719). Either bound may be
+// left out, and a range with neither doesn't narrow. A game with no known
+// value never matches one unless include_unknown is set. Optional throughout,
+// since the gRPC loader leaves an unset scalar undefined rather than zero.
+message IntRange {
+  optional int32 min = 1;
+  optional int32 max = 2;
+  optional bool include_unknown = 3;
 }
 
 enum AgeRatingAuthority {
@@ -295,6 +327,11 @@ message GameSearchData {
   // Platform-specific releases at search granularity. DataGateways populate
   // identity and availability fields only — edition fields stay absent.
   repeated GameReleaseData available_releases = 13;
+
+  // Play time in minutes. A game may carry just one of the two, and that one
+  // is then its whole play time (#869).
+  optional int32 min_playtime = 14;
+  optional int32 max_playtime = 15;
 }
 
 message GameData {

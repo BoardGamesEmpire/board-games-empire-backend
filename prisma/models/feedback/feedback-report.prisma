@@ -29,7 +29,7 @@ model FeedbackReport {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId String @map("user_id")
 
-  // Client-supplied idempotency key for the offline submission queue. A repeat
+  // Client request id for the offline submission queue. A repeat
   // submission of the same key returns the ORIGINAL report instead of inserting
   // a duplicate, and deliberately does not re-emit the submitted event (#251).
   // Named to match `Household.clientRequestId`; not `correlationKey`, which

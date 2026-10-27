@@ -84,7 +84,7 @@ export type SubjectWhereInput = ForEverySubject<{
   DataGateway: Prisma.DataGatewayWhereInput;
   GamePlayResult: Prisma.GamePlayResultWhereInput;
   GamePlaySession: Prisma.GamePlaySessionWhereInput;
-  GameSharing: never; // no model
+  GameShare: Prisma.GameShareWhereInput;
   Platform: Prisma.PlatformWhereInput;
   PlatformGame: Prisma.PlatformGameWhereInput;
   RuleVariant: Prisma.RuleVariantWhereInput;
@@ -93,6 +93,7 @@ export type SubjectWhereInput = ForEverySubject<{
   Household: Prisma.HouseholdWhereInput;
   HouseholdMember: Prisma.HouseholdMemberWhereInput;
   HouseholdRole: Prisma.HouseholdRoleWhereInput;
+  HouseholdBan: Prisma.HouseholdBanWhereInput;
   Invite: Prisma.InviteWhereInput;
   // Event
   Event: Prisma.EventWhereInput;
@@ -143,7 +144,7 @@ export type SubjectScalarField = ForEverySubject<{
   DataGateway: Prisma.DataGatewayScalarFieldEnum;
   GamePlayResult: Prisma.GamePlayResultScalarFieldEnum;
   GamePlaySession: Prisma.GamePlaySessionScalarFieldEnum;
-  GameSharing: never; // no model
+  GameShare: Prisma.GameShareScalarFieldEnum;
   Platform: Prisma.PlatformScalarFieldEnum;
   PlatformGame: Prisma.PlatformGameScalarFieldEnum;
   RuleVariant: Prisma.RuleVariantScalarFieldEnum;
@@ -152,6 +153,7 @@ export type SubjectScalarField = ForEverySubject<{
   Household: Prisma.HouseholdScalarFieldEnum;
   HouseholdMember: Prisma.HouseholdMemberScalarFieldEnum;
   HouseholdRole: Prisma.HouseholdRoleScalarFieldEnum;
+  HouseholdBan: Prisma.HouseholdBanScalarFieldEnum;
   Invite: Prisma.InviteScalarFieldEnum;
   // Event
   Event: Prisma.EventScalarFieldEnum;

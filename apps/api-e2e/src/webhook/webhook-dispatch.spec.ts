@@ -1,10 +1,12 @@
 import { ResourceType, SystemRole } from '@bge/database';
+import { PermissionsService } from '@bge/permissions';
 import { WEBHOOK_QUEUE_NAME, type WebhookDeliveryJob } from '@bge/queue-webhooks';
 import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { WebhookEventType } from '@bge/webhooks';
 import request from 'supertest';
 import { createEventClient, EVENTS_PATH } from '../event/event-request';
 import { createMemberClient } from '../household/household-request';
+import { permissionsCacheHas } from '../support/api-cache';
 import { requireBaseUrl } from '../support/e2e-env';
 import { isolateQueue } from '../support/queue-isolation';
 import { waitForStableJobCount } from '../support/queues';
@@ -74,13 +76,16 @@ describe('webhook dispatch from the API (#538)', () => {
     return { id: job.id, data: job.data as WebhookDeliveryJob };
   };
 
-  it('enqueues a delivery when a household changes owners', async () => {
+  /**
+   * A household whose owner is about to hand it to the heir, with a watcher
+   * who is a member too. Arranged before any of them makes a request: the
+   * fixture writes the roster directly, and a graph a request cached earlier
+   * would not see it, so the owner's transfer would be refused (#538).
+   */
+  const householdToTransfer = async () => {
     const owner = await actors.user();
     const heir = await actors.user();
     const watcher = await actors.user();
-
-    // Arranged before any of them makes a request: the fixture writes the
-    // roster directly, and a graph cached earlier would not see it.
     const fixture = await actors.householdWithMembers({
       owner,
       members: [
@@ -91,13 +96,26 @@ describe('webhook dispatch from the API (#538)', () => {
     const householdId = fixture.household.id;
     const [heirMember] = fixture.members;
 
-    const subscriptionId = await subscribe(watcher, {
-      resourceType: ResourceType.Household,
-      resourceId: householdId,
-      eventTypes: [WebhookEventType.HouseholdOwnershipTransferred],
-    });
+    return {
+      owner,
+      heir,
+      watcher,
+      householdId,
+      subscribeToTransfers: (actor: AuthenticatedActor) =>
+        subscribe(actor, {
+          resourceType: ResourceType.Household,
+          resourceId: householdId,
+          eventTypes: [WebhookEventType.HouseholdOwnershipTransferred],
+        }),
+      transfer: () => transferOwnership(owner, householdId, heirMember.member.id).expect(200),
+    };
+  };
 
-    await transferOwnership(owner, householdId, heirMember.member.id).expect(200);
+  it('enqueues a delivery when a household changes owners', async () => {
+    const { owner, heir, watcher, householdId, subscribeToTransfers, transfer } = await householdToTransfer();
+    const subscriptionId = await subscribeToTransfers(watcher);
+
+    await transfer();
 
     const delivery = await onlyDelivery();
 
@@ -109,10 +127,64 @@ describe('webhook dispatch from the API (#538)', () => {
     });
   });
 
+  it('enqueues a delivery for a subscriber whose only read arrived after their graph was cached (#732)', async () => {
+    const owner = await actors.user();
+    const watcher = await actors.user();
+    // The request caches the watcher's graph, holding no membership.
+    const subscriptionId = await subscribe(watcher, {
+      resourceType: ResourceType.Event,
+      eventTypes: [WebhookEventType.EventCreated],
+    });
+    expect(await permissionsCacheHas(PermissionsService.userGraphCacheKey(watcher.user.id))).toBe(true);
+
+    // The fixture writes the roster directly and creating the event evicts
+    // only its creator's graph, so nothing evicts the watcher's. A member
+    // reads a household's events only through the membership their graph
+    // carries: the household read itself is matched against live rows, and
+    // would pass with the cached graph too.
+    const fixture = await actors.householdWithMembers({
+      owner,
+      members: [{ actor: watcher, role: SystemRole.HouseholdMember }],
+    });
+    const eventId = await events.createdEventId(owner, { householdId: fixture.household.id });
+
+    expect((await onlyDelivery()).data).toMatchObject({ subscriptionId, subjectId: eventId });
+  });
+
+  it('enqueues nothing for a subscriber banned since subscribing, beside one who is not (#906)', async () => {
+    const { heir, watcher, subscribeToTransfers, transfer } = await householdToTransfer();
+    const heirSubscriptionId = await subscribeToTransfers(heir);
+    await subscribeToTransfers(watcher);
+
+    // A ban changes no role, so nothing evicts the watcher's graph: the one
+    // cached when they subscribed still holds their membership.
+    await db.client.user.update({ where: { id: watcher.user.id }, data: { banned: true } });
+    await transfer();
+
+    await waitForStableJobCount(webhookQueue(), 1);
+    const waiting = await webhookQueue().getJobs(['waiting']);
+
+    expect(waiting.map((job) => (job.data as WebhookDeliveryJob).subscriptionId)).toEqual([heirSubscriptionId]);
+  });
+
+  it('enqueues a delivery to a subscriber whose ban has expired (#906)', async () => {
+    const { watcher, householdId, subscribeToTransfers, transfer } = await householdToTransfer();
+    const subscriptionId = await subscribeToTransfers(watcher);
+
+    await db.client.user.update({
+      where: { id: watcher.user.id },
+      data: { banned: true, banExpires: new Date(Date.now() - 60_000) },
+    });
+    await transfer();
+
+    expect((await onlyDelivery()).data).toMatchObject({ subscriptionId, subjectId: householdId });
+  });
+
   it('enqueues a delivery when an event is created, for its creator', async () => {
     // Outside a household the creator reads the event through their host role
-    // alone, which their graph holds only once createEvent has evicted it. A
-    // dispatch that read the graph cached before the event would refuse them.
+    // alone, which their graph holds only once the event exists. A dispatch
+    // that read the graph this request cached before the event would refuse
+    // them unless createEvent had evicted it first (#732).
     const host = await actors.user();
     const subscriptionId = await subscribe(host, {
       resourceType: ResourceType.Event,

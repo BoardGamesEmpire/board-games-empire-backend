@@ -28,10 +28,10 @@ const MAX_NAME_LENGTH = 100;
 
 /**
  * The levels the server's invitee policies take, for households (#278) and
- * events (#546). `FriendsOfFriends` waits on #496, which defines friends of
- * friends, and `Private` would turn every invite of that kind off.
+ * events (#546): everyone, friends of friends (#496), or friends. `Private`
+ * would turn every invite of that kind off.
  */
-const INVITEE_POLICIES = [Reach.Public, Reach.Friends] as const;
+const INVITEE_POLICIES = [Reach.Public, Reach.FriendsOfFriends, Reach.Friends] as const;
 
 /**
  * Partial update for the `SystemSetting` singleton row. A property the body
@@ -139,7 +139,31 @@ export class UpdateSystemSettingsDto {
 
   @ApiPropertyOptional({
     description:
-      "Who may be invited to a household. Public: anyone. Friends: only the inviter's friends, invited from their account; every invite by email address is refused. A user's own preference can narrow this, never widen it.",
+      'Whether a platform a DataGateway lists that matches no record waits for review instead of being added.',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
+  reviewGatewayPlatforms?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Whether a category a DataGateway lists that matches no record waits for review instead of being added.',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
+  reviewGatewayCategories?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Whether a mechanic a DataGateway lists that matches no record waits for review instead of being added.',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
+  reviewGatewayMechanics?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      "Who may be invited to a household. Public: anyone. FriendsOfFriends: the inviter's friends and friends of friends, unless a block stands between them. Friends: only the inviter's friends. Under FriendsOfFriends and Friends, each is invited from their account, and every invite by email address is refused. Under FriendsOfFriends, whether an invite goes through shows the inviter whether that user shares a friend with them. A user's own preference can narrow this, never widen it.",
     enum: INVITEE_POLICIES,
   })
   @ValidateIf((_, value) => value !== undefined)
@@ -148,7 +172,7 @@ export class UpdateSystemSettingsDto {
 
   @ApiPropertyOptional({
     description:
-      "Who may be placed on an event by id, at its creation or later. Public: anyone. Friends: only the inviter's friends. A user's own preference can narrow this, never widen it.",
+      "Who may be placed on an event by id, at its creation or later. Public: anyone. FriendsOfFriends: the inviter's friends and friends of friends, unless a block stands between them. Friends: only the inviter's friends. Under FriendsOfFriends, whether a placement goes through shows the inviter whether that user shares a friend with them. A user's own preference can narrow this, never widen it.",
     enum: INVITEE_POLICIES,
   })
   @ValidateIf((_, value) => value !== undefined)

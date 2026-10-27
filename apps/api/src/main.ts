@@ -6,8 +6,9 @@ import { registerShutdownHandlers } from '@bge/otel';
 import { bootstrapLogger, otel } from './app/lib/logger';
 
 // Imports below this line are instrumented by the OTel auto-instrumentations.
-import { AUTH_INSTANCE } from '@bge/auth';
-import { createPrismaCliMigrator, nestLoggerFromPino, runBootstrap } from '@bge/bootstrap';
+import { AUTH_INSTANCE, AUTH_REQUEST_HANDLER } from '@bge/auth';
+import { createPrismaCliMigrator, runBootstrap } from '@bge/bootstrap';
+import { nestLoggerFromPino } from '@bge/logger';
 import { createWebClient } from '@bge/web-client';
 import { Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -24,6 +25,7 @@ import { RedisIoAdapter } from './app/adapters/redis-io.adapter';
 import { AppModule } from './app/app.module';
 import { bootstrapCacheFlushPatterns } from './app/configuration/cache-flush';
 import redisConfig, { redisConfigValidationSchema } from './app/configuration/redis.config';
+import { createAuthClientIpHandler } from './app/lib/auth-client-ip';
 
 async function bootstrap() {
   const LOGGER_CONTEXT = 'Bootstrap';
@@ -56,6 +58,7 @@ async function bootstrap() {
     // flow through nestjs-pino (and therefore through the OTel pipeline)
     // rather than going to stdout via Nest's default ConsoleLogger.
     bufferLogs: true,
+    logger: nestLoggerFromPino(bootstrapLogger),
   });
 
   app.useLogger(app.get(PinoLogger));
@@ -187,7 +190,14 @@ async function bootstrap() {
   app.useWebSocketAdapter(redisAdapter);
 
   const server = app.getHttpAdapter().getInstance();
-  server.all(`/${globalPrefix}/auth/*any`, toNodeHandler(authInstance));
+  // better-auth reads a client's IP only from the header the first handler
+  // writes, by the same rule and configuration as the Nest throttler. Its
+  // handler is served with a code on the answers it gives without one (#640).
+  server.all(
+    `/${globalPrefix}/auth/*any`,
+    createAuthClientIpHandler(configService.getOrThrow<number>('throttle.trustedProxyHops')),
+    toNodeHandler(app.get(AUTH_REQUEST_HANDLER)),
+  );
 
   registerShutdownHandlers(app, otel, bootstrapLogger);
 

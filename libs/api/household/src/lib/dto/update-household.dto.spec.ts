@@ -1,4 +1,4 @@
-import { MemberInvitePolicy, Reach } from '@bge/database';
+import { MemberInvitePolicy, MemberSharePolicy, Reach } from '@bge/database';
 import { DECORATORS } from '@nestjs/swagger';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
@@ -28,7 +28,8 @@ describe('UpdateHouseholdDto', () => {
   });
 
   // The rungs a household read rule serves, and no others. `Public` waits on
-  // #231 (#495), and null would reach a non-nullable column as a 500.
+  // #231 (#495), and so does `FriendsOfFriends` (#496). Null would reach a
+  // non-nullable column as a 500.
   it.each([['Public'], ['FriendsOfFriends'], ['Household'], [null]])('rejects reach %p', async (reach) => {
     await expect(propertiesWithErrors({ reach })).resolves.toEqual(['reach']);
   });
@@ -75,6 +76,31 @@ describe('UpdateHouseholdDto', () => {
       // The column has no null, so one let through would fail at the write
       // instead of answering 400.
       await expect(propertiesWithErrors({ settings: { memberInvitePolicy: null } })).resolves.toEqual(['settings']);
+    });
+
+    it.each([MemberSharePolicy.Off, MemberSharePolicy.NeedsApproval, MemberSharePolicy.Direct])(
+      'accepts the member share policy %s (#810)',
+      async (memberSharePolicy) => {
+        await expect(propertiesWithErrors({ settings: { memberSharePolicy } })).resolves.toEqual([]);
+      },
+    );
+
+    it('refuses a share policy that does not exist (#810)', async () => {
+      await expect(propertiesWithErrors({ settings: { memberSharePolicy: 'Sometimes' } })).resolves.toEqual([
+        'settings',
+      ]);
+    });
+
+    it('refuses a null share policy, since no setting can be unset (#810)', async () => {
+      await expect(propertiesWithErrors({ settings: { memberSharePolicy: null } })).resolves.toEqual(['settings']);
+    });
+
+    it('accepts both policies in one patch (#810)', async () => {
+      await expect(
+        propertiesWithErrors({
+          settings: { memberInvitePolicy: MemberInvitePolicy.Off, memberSharePolicy: MemberSharePolicy.Direct },
+        }),
+      ).resolves.toEqual([]);
     });
 
     it('accepts settings that leave the policy out', async () => {

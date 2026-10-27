@@ -4,6 +4,10 @@ import { InvitesModule } from '@bge/invites';
 import { NotificationsServiceModule } from '@bge/notifications-service';
 import { QuotaModule } from '@bge/quota';
 import { Module } from '@nestjs/common';
+import { HouseholdBanController } from './ban/household-ban.controller';
+import { HouseholdBanService } from './ban/household-ban.service';
+import { HouseholdGameShareController } from './game-share/household-game-share.controller';
+import { HouseholdGameShareService } from './game-share/household-game-share.service';
 import { HouseholdController } from './household.controller';
 import { HouseholdService } from './household.service';
 import { HouseholdInviteController } from './invite/household-invite.controller';
@@ -36,13 +40,17 @@ import { HouseholdQuotaController } from './quota/household-quota.controller';
     HouseholdInviteController,
     PartyInviteController,
     HouseholdQuotaController,
+    HouseholdBanController,
+    HouseholdGameShareController,
   ],
   providers: [
     HouseholdService,
     HouseholdMemberService,
     HouseholdInviteService,
     PartyInviteService,
+    HouseholdGameShareService,
     HouseholdNotificationListener,
+    HouseholdBanService,
   ],
   exports: [HouseholdService, HouseholdMemberService],
 })

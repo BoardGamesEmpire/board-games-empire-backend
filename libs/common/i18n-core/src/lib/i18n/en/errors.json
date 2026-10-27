@@ -8,11 +8,28 @@
     "not_pending": "Only a Pending language link can be accepted.",
     "not_acceptable": "Language link {id} names no registered language, so it can't be accepted. Link it to a language tag instead."
   },
+  "vocabulary_link": {
+    "not_found": "Link with ID {id} not found.",
+    "record_not_found": "No record with ID {recordId} to link to.",
+    "not_pending": "Only a Pending link can be accepted."
+  },
   "game": {
     "not_found": "Game with ID {id} not found",
     "cannot_delete_in_collection": "Cannot delete game that is part of a collection",
     "server_owned_stays_public": "Game with ID {id} was imported and must stay public",
-    "description_too_long": "A game's description must be at most {max} characters"
+    "description_too_long": "A game's description must be at most {max} characters",
+    "range_reversed": "{minField} ({min}) must not be more than {maxField} ({max})"
+  },
+  "game_share": {
+    "recipient_exactly_one": "Name exactly one recipient: a user id or a household id",
+    "self_share": "You cannot share a game with yourself",
+    "recipient_refused": "You cannot share a game with this user",
+    "not_owner": "Only the person who created game {gameId} can share it",
+    "already_shared": "Game {gameId} is already shared with this recipient",
+    "not_found": "Share with ID {id} not found for game {gameId}",
+    "not_found_in_household": "Share with ID {id} not found in household {householdId}",
+    "not_awaiting_approval": "Share {id} is already in effect, so there is nothing to approve",
+    "sharer_cannot_share": "The person who made share {id} can no longer share that game here, so it cannot be approved. Remove it instead."
   },
   "game_collection": {
     "not_found": "Collection entry with ID {id} not found",
@@ -37,6 +54,7 @@
     "not_attendee": "You are not an attendee of this event.",
     "fixed_mode_single": "Fixed scheduling mode allows at most one occurrence.",
     "invitee_friends_only": "This server only allows you to place your friends on an event",
+    "invitee_friends_of_friends_only": "This server only allows you to place your friends and friends of friends on an event",
     "invitee_refused": "You cannot place this user on an event"
   },
   "occurrence": {
@@ -128,7 +146,8 @@
     "forbidden_modify": "You don't have permission to modify this friendship"
   },
   "user": {
-    "not_found": "User with ID {id} not found"
+    "not_found": "User with ID {id} not found",
+    "profile_not_found": "Profile for user with ID {id} not found"
   },
   "api_key": {
     "not_found_or_revoked": "API key not found or has been revoked.",
@@ -145,7 +164,11 @@
     "unauthenticated": "Unauthorized",
     "registration_disabled": "This server is not accepting new accounts",
     "password_reset_disabled": "Password resets are turned off on this server",
-    "username_change_disabled": "Username changes are turned off on this server"
+    "username_change_disabled": "Username changes are turned off on this server",
+    "sign_out_failed": "Your session could not be ended, so you are still signed in. Try again in a moment",
+    "session_unavailable": "Your session could not be checked just now. Try again in a moment",
+    "unavailable": "Sign-in and accounts are unavailable just now. Try again in a moment",
+    "rate_limited": "Too many attempts in a short time. Wait a minute, then try again"
   },
   "household": {
     "not_found": "Household with ID {id} not found",
@@ -167,7 +190,14 @@
     "invitee_exactly_one": "Name exactly one invitee: a user id or an email address",
     "invitee_already_member": "The invitee is already a member of household {householdId}",
     "invitee_friends_only": "This server only allows household invites to your friends, invited from their account rather than by email address",
-    "invitee_refused": "You cannot invite this user to a household"
+    "invitee_friends_of_friends_only": "This server only allows household invites to your friends and friends of friends, invited from their account rather than by email address",
+    "invitee_refused": "You cannot invite this user to a household",
+    "invitee_banned": "This user is banned from the household. Lift the ban to invite them.",
+    "banned_from_household": "You can't become a member of this household because you are banned from it.",
+    "ban_self": "You can't ban yourself from a household",
+    "ban_forbidden": "Only a household owner can ban a household admin or another owner",
+    "already_banned": "This user is already banned from household {householdId}",
+    "ban_not_found": "User {userId} is not banned from household {householdId}"
   },
   "invite": {
     "not_found": "Invite with ID {id} not found",
@@ -185,6 +215,7 @@
     "revoke_own_invite": "You sent invite {id}: withdraw it instead, while signed in",
     "awaiting_approval": "Invite {id} is awaiting approval and cannot be accepted yet",
     "not_awaiting_approval": "Invite {id} is not awaiting approval",
+    "sender_cannot_send": "The person who sent invite {id} can no longer send it, so it cannot be approved. Revoke it instead.",
     "not_outstanding": "Invite {id} is {status} and can no longer be changed",
     "expired": "Invite {id} has expired",
     "changed_concurrently": "Invite {id} changed while it was being updated; try again"
@@ -305,5 +336,8 @@
   },
   "actor_context": {
     "not_user_attributable": "Actor kind '{kind}' cannot perform user-attributed writes."
+  },
+  "permission": {
+    "condition_unevaluable": "The server could not check a permission this needs, so nothing was changed. Try again later, and tell the server's operator if it keeps happening."
   }
 }

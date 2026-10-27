@@ -9,10 +9,10 @@ import {
   User,
 } from '@bge/database';
 import { createTestingModuleWithDb, makePermission, type MockDatabaseService } from '@bge/testing';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Logger } from '@nestjs/common';
 import { createCache, type Cache } from 'cache-manager';
 import type { ApikeyWithScopes, UserPermissionWithPermission, UserWithRoles } from './interfaces';
+import { PERMISSIONS_CACHE } from './permissions-cache';
 import { PermissionsService } from './permissions.service';
 
 describe('PermissionsService', () => {
@@ -26,8 +26,7 @@ describe('PermissionsService', () => {
     cache = createCache();
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
-      providers: [PermissionsService],
-      overrideProviders: [{ provide: CACHE_MANAGER, useValue: cache }],
+      providers: [PermissionsService, { provide: PERMISSIONS_CACHE, useValue: cache }],
     });
 
     service = module.get(PermissionsService);
@@ -81,6 +80,103 @@ describe('PermissionsService', () => {
 
       expect(result).toBeNull();
       expect(await cache.get('bge:apikey:scopes:gone')).toBeUndefined();
+    });
+  });
+
+  describe('loadUserRoleGraphWithin', () => {
+    it("reads on the caller's transaction, past a cached graph, and caches nothing (#747)", async () => {
+      // Both reads stamp their own expiry cutoff; a frozen clock keeps the two
+      // queries comparable when they straddle a millisecond.
+      jest.useFakeTimers({ now: new Date('2026-10-22T12:00:00Z') });
+
+      try {
+        const stale = makeUserGraph();
+        db.user.findUnique.mockResolvedValue(stale as unknown as User);
+        await service.getUserRoleGraph('user-1');
+        const set = jest.spyOn(cache, 'set');
+
+        const tx = { user: { findUnique: jest.fn().mockResolvedValue({ ...stale, roles: [] }) } };
+        const result = await service.loadUserRoleGraphWithin(tx as never, 'user-1');
+
+        expect(result).toEqual({ ...stale, roles: [] });
+        // The same graph the cached read loads, asked of the transaction.
+        const cachedRead = db.user.findUnique.mock.calls[0][0];
+        expect(tx.user.findUnique).toHaveBeenCalledWith({
+          ...cachedRead,
+          where: { ...cachedRead.where, AND: { OR: expect.any(Array) } },
+        });
+        expect(db.user.findUnique).toHaveBeenCalledTimes(1);
+        expect(set).not.toHaveBeenCalled();
+        // The cached graph is left alone.
+        await expect(service.getUserRoleGraph('user-1')).resolves.toBe(stale);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('reads a user under a ban in force as no graph, as better-auth refuses them a sign-in (#747)', async () => {
+      const now = new Date('2026-10-22T12:00:00Z');
+      jest.useFakeTimers({ now });
+
+      try {
+        const tx = { user: { findUnique: jest.fn().mockResolvedValue(null) } };
+        await expect(service.loadUserRoleGraphWithin(tx as never, 'user-1')).resolves.toBeNull();
+
+        // Not banned, or banned with an expiry already past.
+        expect(tx.user.findUnique).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: 'user-1', AND: { OR: [{ banned: null }, { banned: false }, { banExpires: { lte: now } }] } },
+          }),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+  });
+
+  describe('loadUserRoleGraphs', () => {
+    it('reads every user in one read, with the graph and ban rule a single read uses, and caches nothing (#732)', async () => {
+      const now = new Date('2026-10-22T12:00:00Z');
+      jest.useFakeTimers({ now });
+
+      try {
+        const tx = { user: { findUnique: jest.fn().mockResolvedValue(null) } };
+        await service.loadUserRoleGraphWithin(tx as never, 'user-1');
+        const set = jest.spyOn(cache, 'set');
+        const first = makeUserGraph({ id: 'user-1' });
+        const second = makeUserGraph({ id: 'user-2' });
+        db.user.findMany.mockResolvedValue([first, second] as unknown as User[]);
+
+        const graphs = await service.loadUserRoleGraphs(['user-1', 'user-2']);
+
+        expect(graphs).toEqual(
+          new Map([
+            ['user-1', first],
+            ['user-2', second],
+          ]),
+        );
+        const single = tx.user.findUnique.mock.calls[0][0];
+        expect(db.user.findMany).toHaveBeenCalledWith({
+          select: single.select,
+          where: { id: { in: ['user-1', 'user-2'] }, AND: single.where.AND },
+        });
+        expect(set).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('leaves out a user the read does not return, as one banned or deleted (#906)', async () => {
+      db.user.findMany.mockResolvedValue([makeUserGraph({ id: 'user-1' })] as unknown as User[]);
+
+      const graphs = await service.loadUserRoleGraphs(['user-1', 'user-2']);
+
+      expect(graphs.has('user-2')).toBe(false);
+    });
+
+    it('reads nothing for no users', async () => {
+      await expect(service.loadUserRoleGraphs([])).resolves.toEqual(new Map());
+      expect(db.user.findMany).not.toHaveBeenCalled();
     });
   });
 

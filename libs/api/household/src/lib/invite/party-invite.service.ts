@@ -1,5 +1,12 @@
 import { AuditContextService, requireSessionUserId } from '@bge/actor-context';
-import { DatabaseService, HouseholdMembershipOrigin, InviteStatus, InviteType, Prisma } from '@bge/database';
+import {
+  DatabaseService,
+  HouseholdMembershipOrigin,
+  InviteStatus,
+  InviteType,
+  Prisma,
+  SystemRole,
+} from '@bge/database';
 import { t } from '@bge/i18n';
 import {
   effectiveInviteStatusWhere,
@@ -12,13 +19,14 @@ import {
   type InviteTarget,
   type RespondToInviteParams,
 } from '@bge/invites';
-import { PermissionsService } from '@bge/permissions';
+import { AbilityService, PermissionsService } from '@bge/permissions';
 import { QuotaService } from '@bge/quota';
 import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { ConflictException, Injectable } from '@nestjs/common';
-import { isAssignableHouseholdRole, ListSentInvitesQueryDto, type AssignableHouseholdRole } from '../dto';
+import { ListSentInvitesQueryDto } from '../dto';
 import { lockExistingHousehold } from '../household-access.helpers';
 import { HouseholdMemberService, type HouseholdMemberWithRelations } from '../member/household-member.service';
+import { offeredRole, readInviteAuthority, senderCouldStillSend } from './household-authority';
 import { receivedHouseholdInviteWhere, vouchedEmailOf } from './received-invites';
 
 /**
@@ -54,10 +62,12 @@ export interface HouseholdInviteAcceptance {
  * and withdrawing one (#164). The household's side, creating, listing,
  * revoking and approving a household's invites, is `HouseholdInviteService`.
  *
- * No CASL rule stands behind any of them: a party holds no grant on `Invite`,
- * and needs none, because `@bge/invites` binds every party read to the acting
- * user in the query (#161). That is why an inviter withdraws whatever their
- * role in the household is now, demoted or gone. What this service adds is
+ * No CASL rule of the acting user's stands behind any of them: a party holds
+ * no grant on `Invite`, and needs none, because `@bge/invites` binds every
+ * party read to the acting user in the query (#161). That is why an inviter
+ * withdraws whatever their role in the household is now. The accept does ask
+ * one question of a grant, of the invite's sender rather than the acting
+ * user: whether they could still send it (#747). What this service adds is
  * whose address may stand in for that binding, and who the acting user may
  * be: only a person signed in as themself, since joining a household, or
  * turning down or taking back an invite, is that person's own act (#276). An
@@ -71,6 +81,7 @@ export class PartyInviteService {
     private readonly auditContext: AuditContextService,
     private readonly invites: InviteService,
     private readonly members: HouseholdMemberService,
+    private readonly abilities: AbilityService,
     private readonly permissions: PermissionsService,
     private readonly quotas: QuotaService,
   ) {}
@@ -97,11 +108,13 @@ export class PartyInviteService {
    * row reports its status as it stands now, so an outstanding row past its
    * date reads `Expired`.
    *
-   * Into a household the inviter no longer belongs to, only the invites they
+   * Into a household the inviter is not a member of, only the invites they
    * can still withdraw are listed, outstanding and unexpired, whatever the
-   * filter asks: a settled invite there would go on telling a former member
-   * who joined. An invite into a deleted household is never listed, as the
-   * inbox lists none; the delete revoked it.
+   * filter asks: a server owner may invite into any household without a seat
+   * in it. A former member has nothing left to withdraw there, since leaving
+   * or being removed revoked it (#747), and a settled invite there would go on
+   * telling them who joined. An invite into a deleted household is never
+   * listed, as the inbox lists none; the delete revoked it.
    *
    * Bound to the acting user by `inviterId`, as the lib binds a party, so no
    * grant on `Invite` is asked; only a person signed in as themself reads it.
@@ -175,19 +188,26 @@ export class PartyInviteService {
    * 2. The household row is share-locked. A soft delete locks it before it
    *    revokes the household's invites; accepting first and locking second
    *    would take the two in the other order, and Postgres would abort one.
-   *    The admission in step 4 takes the same lock again, as it must for a
+   *    The admission in step 6 takes the same lock again, as it must for a
    *    caller that has not; held already, it costs a round-trip and no wait.
-   * 3. The lib accepts: 403 for the inviter, 410 once expired, 409 once
-   *    settled or still awaiting approval.
-   * 4. The member is admitted with the role the invite offers, as invited by
+   * 3. The lib reads the invite as it would accept it: 403 for the inviter,
+   *    410 once expired, 409 once settled or still awaiting approval.
+   * 4. Its sender must still be able to send it ({@link senderCouldStillSend},
+   *    on the roster and policy read under the lock). If not, it is revoked
+   *    instead, and the answer is the 409 a revoked invite gets (#747). Unless
+   *    the acting user is already a member: then the answer is step 7's, and
+   *    nothing is revoked, for step 7's reason.
+   * 5. The lib accepts.
+   * 6. The member is admitted with the role the invite offers, as invited by
    *    its inviter. Past the household's member cap the answer is 402.
-   * 5. Someone already a member joins nobody, so the answer is 409 and the
+   * 7. Someone already a member joins nobody, so the answer is 409 and the
    *    rollback leaves the invite outstanding. Settling it would tell its
    *    inviter whose address it was, and no settled status would be true.
    *
    * After commit the new member's ability cache is evicted, so their grants on
    * the household hold from their next request, and then the accepted invite
-   * and any soft cap the admission passed are announced.
+   * and any soft cap the admission passed are announced. An invite revoked at
+   * step 4 is committed and announced before the 409 goes out.
    *
    * By token, the token is the credential: whoever holds the link is bound to
    * the invite (#161), whatever their address.
@@ -195,11 +215,29 @@ export class PartyInviteService {
   async accept(target: InviteTarget): Promise<HouseholdInviteAcceptance> {
     const inviteeId = requireSessionUserId(this.auditContext.getActor());
 
-    const { invite, member, event, softOverages } = await this.db.$transaction(async (tx) => {
+    const outcome = await this.db.$transaction(async (tx) => {
       const lookup = await this.inviteeLookup(tx, target, inviteeId);
 
       const { householdId } = await this.invites.findPartyScopeWithin(tx, lookup, InviteType.Household);
       await lockExistingHousehold(tx, householdId);
+
+      const offer = await this.invites.findAcceptableWithin(tx, lookup);
+      const authority = await readInviteAuthority(tx, householdId);
+      const sender = { ...offer, role: offeredRole(offer) ?? SystemRole.HouseholdMember };
+
+      if (!(await senderCouldStillSend(this.abilities, tx, householdId, sender, authority))) {
+        if (authority.members.some((member) => member.userId === inviteeId)) {
+          throw new ConflictException(t('errors.household.already_a_member', { householdId }));
+        }
+
+        const { event } = await this.invites.revokeWithin(tx, {
+          inviteId: offer.id,
+          revokerId: inviteeId,
+          scope: { householdId },
+        });
+
+        return { accepted: false as const, revoked: event };
+      }
 
       const accepted = await this.invites.acceptWithin(tx, lookup);
 
@@ -215,8 +253,19 @@ export class PartyInviteService {
         throw new ConflictException(t('errors.household.already_a_member', { householdId }));
       }
 
-      return { ...accepted, ...admission };
+      return { accepted: true as const, ...accepted, ...admission };
     });
+
+    if (!outcome.accepted) {
+      this.invites.emit([outcome.revoked]);
+
+      // The answer a revoked invite gets, so the invitee learns nothing of why.
+      throw new ConflictException(
+        t('errors.invite.not_outstanding', { id: outcome.revoked.subjectId, status: InviteStatus.Revoked }),
+      );
+    }
+
+    const { invite, member, event, softOverages } = outcome;
 
     await this.permissions.invalidateUser(inviteeId);
     this.invites.emit([event]);
@@ -252,9 +301,11 @@ export class PartyInviteService {
   /**
    * The acting user takes back an invite they sent (#164), from either
    * outstanding status. It is theirs whatever their role in the household
-   * now, so nothing about the household is asked: a demoted or departed
-   * inviter withdraws as an Owner does. Revoking someone else's invite is
-   * `HouseholdInviteService.revokeInvite`, and never stands in for this.
+   * now, so nothing about the household is asked: a demoted inviter
+   * withdraws as an Owner does. A departed one has nothing left to withdraw,
+   * since leaving revoked it (#747), and meets the 409 a settled invite gets.
+   * Revoking someone else's invite is `HouseholdInviteService.revokeInvite`,
+   * and never stands in for this.
    *
    * Bound to a household invite as {@link decline} is, and for the same
    * reason no lock is taken. The lib answers 404 to anyone who is not a party,
@@ -286,24 +337,4 @@ export class PartyInviteService {
       type: InviteType.Household,
     };
   }
-}
-
-/**
- * The role an invite offers, as the admission takes it. The create stores
- * only an assignable role, so another is drift in the data: a server error,
- * and nothing the invitee did. No role is the seam's default, the least of
- * them.
- */
-function offeredRole(invite: InvitePartyView): AssignableHouseholdRole | undefined {
-  const name = invite.role?.name;
-
-  if (name === undefined) {
-    return undefined;
-  }
-
-  if (!isAssignableHouseholdRole(name)) {
-    throw new Error(`Invite ${invite.id} offers the role '${name}', which no household admission grants`);
-  }
-
-  return name;
 }

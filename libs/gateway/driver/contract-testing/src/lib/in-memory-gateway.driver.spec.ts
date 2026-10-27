@@ -4,8 +4,13 @@ import { firstValueFrom, lastValueFrom, toArray } from 'rxjs';
 import { InMemoryGatewayDriver } from './in-memory-gateway.driver.js';
 import { runDataGatewayDriverContract } from './run-data-gateway-driver-contract.js';
 
-const { COVERAGE_AXIS_PLATFORM_TYPE: PLATFORM_TYPE_AXIS, COVERAGE_AXIS_CONTENT_TYPE: CONTENT_TYPE_AXIS } =
-  proto.CoverageAxis;
+const {
+  SEARCH_FILTER_AXIS_PLATFORM_TYPE: PLATFORM_TYPE_AXIS,
+  SEARCH_FILTER_AXIS_CONTENT_TYPE: CONTENT_TYPE_AXIS,
+  SEARCH_FILTER_AXIS_PUBLISH_YEAR: PUBLISH_YEAR_AXIS,
+  SEARCH_FILTER_AXIS_PLAYER_COUNT: PLAYER_COUNT_AXIS,
+  SEARCH_FILTER_AXIS_PLAY_TIME: PLAY_TIME_AXIS,
+} = proto.SearchFilterAxis;
 const { PLATFORM_TYPE_TABLETOP: TABLETOP, PLATFORM_TYPE_PC: PC } = proto.PlatformType;
 const {
   CONTENT_TYPE_BASE_GAME: BASE_GAME,
@@ -44,16 +49,22 @@ runDataGatewayDriverContract('InMemoryGatewayDriver', () => ({
     searchResults: [searchHit],
     expansionsByBaseExternalId: { 'bgg-13': [searchHit] },
     languages: [{ value: 'en-US', format: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47 }],
+    platforms: [{ externalId: 'tabletop', name: 'Tabletop', platformType: TABLETOP }],
+    categories: [{ externalId: '1009', name: 'Abstract Strategy' }],
+    mechanics: [{ externalId: '2082', name: 'Worker Placement' }],
     coverage: { platformTypes: [TABLETOP], contentTypes: [BASE_GAME, EXPANSION] },
-    filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS],
+    filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS, PUBLISH_YEAR_AXIS, PLAYER_COUNT_AXIS, PLAY_TIME_AXIS],
   }),
   capabilities: [
     proto.Capability.CAPABILITY_SEARCH,
     proto.Capability.CAPABILITY_FETCH,
     proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
     proto.Capability.CAPABILITY_LIST_LANGUAGES,
+    proto.Capability.CAPABILITY_LIST_PLATFORMS,
+    proto.Capability.CAPABILITY_LIST_CATEGORIES,
+    proto.Capability.CAPABILITY_LIST_MECHANICS,
   ],
-  filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS],
+  filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS, PUBLISH_YEAR_AXIS, PLAYER_COUNT_AXIS, PLAY_TIME_AXIS],
   knownExternalId: 'bgg-13',
   unknownExternalId: 'no-such-id',
   searchQuery: 'catan',
@@ -120,6 +131,99 @@ describe('InMemoryGatewayDriver search filter', () => {
     );
   });
 
+  it('applies a publish-year range on the axis it declares (#719)', async () => {
+    const dated = (externalId: string, yearPublished?: number) => ({ ...catan, externalId, yearPublished });
+    const searchResults = [dated('old', 1995), dated('new', 2010), dated('undated')];
+    const declaring = new InMemoryGatewayDriver({ searchResults, filterableAxes: [PUBLISH_YEAR_AXIS] });
+    const ignoring = new InMemoryGatewayDriver({ searchResults, filterableAxes: [CONTENT_TYPE_AXIS] });
+    const byYear = (publishYear: proto.IntRange) => ({ platformTypes: [], contentTypes: [], publishYear });
+
+    await expect(search(declaring, byYear({ min: 2000 })).then(externalIds)).resolves.toEqual(['new']);
+    await expect(search(declaring, byYear({ max: 1995, includeUnknown: true })).then(externalIds)).resolves.toEqual([
+      'old',
+      'undated',
+    ]);
+    await expect(search(declaring, byYear({ includeUnknown: false })).then(externalIds)).resolves.toEqual([
+      'old',
+      'new',
+      'undated',
+    ]);
+    await expect(search(ignoring, byYear({ min: 2000 })).then(externalIds)).resolves.toEqual(['old', 'new', 'undated']);
+  });
+
+  // A bound alone is one count, and a game missing either count is unknown (#869).
+  it('applies a player-count range on the axis it declares (#869)', async () => {
+    const counted = (externalId: string, minPlayers?: number | null, maxPlayers?: number | null) =>
+      ({ ...catan, externalId, minPlayers, maxPlayers }) as proto.GameSearchData;
+    const searchResults = [counted('two-four', 2, 4), counted('two-six', 2, 6), counted('two-unknown', 2, null)];
+    const declaring = new InMemoryGatewayDriver({ searchResults, filterableAxes: [PLAYER_COUNT_AXIS] });
+    const ignoring = new InMemoryGatewayDriver({ searchResults, filterableAxes: [PLAY_TIME_AXIS] });
+    const byCount = (playerCount: proto.IntRange) => ({ platformTypes: [], contentTypes: [], playerCount });
+
+    await expect(search(declaring, byCount({ min: 5 })).then(externalIds)).resolves.toEqual(['two-six']);
+    await expect(search(declaring, byCount({ min: 3, max: 4 })).then(externalIds)).resolves.toEqual([
+      'two-four',
+      'two-six',
+    ]);
+    await expect(search(declaring, byCount({ max: 6, includeUnknown: true })).then(externalIds)).resolves.toEqual([
+      'two-six',
+      'two-unknown',
+    ]);
+    await expect(search(declaring, byCount({ includeUnknown: false })).then(externalIds)).resolves.toEqual([
+      'two-four',
+      'two-six',
+      'two-unknown',
+    ]);
+    await expect(search(ignoring, byCount({ min: 5 })).then(externalIds)).resolves.toEqual([
+      'two-four',
+      'two-six',
+      'two-unknown',
+    ]);
+  });
+
+  // A game with one play time plays that long, and a bound left out doesn't narrow that side (#869).
+  it('applies a play-time range on the axis it declares (#869)', async () => {
+    const timed = (externalId: string, minPlaytime?: number | null, maxPlaytime?: number | null) =>
+      ({ ...catan, externalId, minPlaytime, maxPlaytime }) as proto.GameSearchData;
+    const searchResults = [
+      timed('short', 30, 60),
+      timed('long', 30, 120),
+      timed('one-time', 60),
+      timed('untimed', null),
+    ];
+    const declaring = new InMemoryGatewayDriver({ searchResults, filterableAxes: [PLAY_TIME_AXIS] });
+    const ignoring = new InMemoryGatewayDriver({ searchResults, filterableAxes: [PLAYER_COUNT_AXIS] });
+    const byTime = (playTime: proto.IntRange) => ({ platformTypes: [], contentTypes: [], playTime });
+
+    await expect(search(declaring, byTime({ max: 90 })).then(externalIds)).resolves.toEqual(['short', 'one-time']);
+    await expect(search(declaring, byTime({ min: 45 })).then(externalIds)).resolves.toEqual(['one-time']);
+    await expect(search(declaring, byTime({ min: 45, includeUnknown: true })).then(externalIds)).resolves.toEqual([
+      'one-time',
+      'untimed',
+    ]);
+    await expect(search(declaring, byTime({ includeUnknown: false })).then(externalIds)).resolves.toEqual([
+      'short',
+      'long',
+      'one-time',
+      'untimed',
+    ]);
+    await expect(search(ignoring, byTime({ max: 90 })).then(externalIds)).resolves.toEqual([
+      'short',
+      'long',
+      'one-time',
+      'untimed',
+    ]);
+
+    // A game with only a maximum plays that long too: it stands for the missing minimum.
+    const maxOnly = new InMemoryGatewayDriver({
+      searchResults: [timed('max-only', undefined, 60)],
+      filterableAxes: [PLAY_TIME_AXIS],
+    });
+
+    await expect(search(maxOnly, byTime({ min: 45 })).then(externalIds)).resolves.toEqual(['max-only']);
+    await expect(search(maxOnly, byTime({ min: 75 })).then(externalIds)).resolves.toEqual([]);
+  });
+
   it('declares the coverage and filterable axes it is given', async () => {
     const coverage = { platformTypes: [TABLETOP], contentTypes: [BASE_GAME] };
     const driver = new InMemoryGatewayDriver({ coverage, filterableAxes: [CONTENT_TYPE_AXIS] });
@@ -159,6 +263,22 @@ describe('InMemoryGatewayDriver capabilities', () => {
     await expect(firstValueFrom(driver.fetchGame({ correlationId: 'x', externalId: 'bgg-13' }))).resolves.toMatchObject(
       { game: knownGame },
     );
+  });
+  it('answers UNIMPLEMENTED for a list it does not declare', async () => {
+    const driver = new InMemoryGatewayDriver({
+      platforms: [{ externalId: 'tabletop', name: 'Tabletop', platformType: TABLETOP }],
+      capabilities: [proto.Capability.CAPABILITY_FETCH],
+    });
+
+    await expect(firstValueFrom(driver.listPlatforms({ correlationId: 'x' }))).rejects.toMatchObject({
+      code: status.UNIMPLEMENTED,
+    });
+    await expect(firstValueFrom(driver.listCategories({ correlationId: 'x' }))).rejects.toMatchObject({
+      code: status.UNIMPLEMENTED,
+    });
+    await expect(firstValueFrom(driver.listMechanics({ correlationId: 'x' }))).rejects.toMatchObject({
+      code: status.UNIMPLEMENTED,
+    });
   });
 });
 

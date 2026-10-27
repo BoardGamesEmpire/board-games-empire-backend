@@ -1,6 +1,7 @@
 import * as proto from '@boardgamesempire/proto-gateway';
 import { BggLinkType } from '../constants';
 import type { BggLink } from '../types';
+import { decodeText } from './decode-text';
 
 /**
  * Internal mapping from BGG language display names to canonical ISO
@@ -11,9 +12,9 @@ import type { BggLink } from '../types';
  *
  * This map is gateway-internal: it powers request-side locale translation
  * (resolveLocaleLanguageNames) and seeds the host's LanguageGatewayLink
- * rows via the ListLanguages capabilities interview. Host-side resolution
- * of response languages happens against those link rows — unknown names
- * are no longer dropped here silently; they surface as Unresolved links.
+ * rows via the ListLanguages capabilities interview. A name the map lacks
+ * still goes on, as a name with no ISO codes, and the server holds it as an
+ * Unresolved link for review (#717).
  */
 interface BggLanguage {
   readonly iso6393: string;
@@ -72,17 +73,25 @@ const BY_ISO_639_1: ReadonlyMap<string, BggLanguage> = new Map(
 );
 
 /**
- * Resolve a single BGG language link to proto LanguageData.
- * Returns null when the language name is not in the internal map.
+ * Resolve a single BGG language link to proto LanguageData. A name the map
+ * lacks comes back as a name alone, for the server to hold for review (#717).
+ * Returns null for a link that isn't a language, or has a blank value.
  */
 export function toLanguageData(link: BggLink): proto.LanguageData | null {
   if (link.type !== BggLinkType.Language) {
     return null;
   }
 
-  const known = BGG_LANGUAGE_MAP[link.value];
-  if (!known) {
+  // Decoded before the lookup, so an encoded name still finds its entry (#716).
+  const name = decodeText(link.value).trim();
+  if (!name) {
     return null;
+  }
+
+  // An own-key check, so a name such as "constructor" isn't read off the prototype (#717).
+  const known = Object.hasOwn(BGG_LANGUAGE_MAP, name) ? BGG_LANGUAGE_MAP[name] : undefined;
+  if (!known) {
+    return { name } satisfies proto.LanguageData;
   }
 
   return {
@@ -93,9 +102,9 @@ export function toLanguageData(link: BggLink): proto.LanguageData | null {
 }
 
 /**
- * Filter and dedupe a link array down to recognized language entries.
- * Deduplication happens on the display name (BGG's native identity) —
- * multilingual editions sometimes carry duplicate language links.
+ * Filter a link array down to its language entries, known or not, each name
+ * once. The display name is BGG's identity for a language, and multilingual
+ * editions sometimes carry the same language link twice.
  */
 export function toLanguageDataList(links: readonly BggLink[]): proto.LanguageData[] {
   const seen = new Set<string>();

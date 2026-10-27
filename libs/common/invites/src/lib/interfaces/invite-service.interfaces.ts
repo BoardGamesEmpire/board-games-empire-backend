@@ -121,9 +121,10 @@ export type InviteScopeOf<Type extends ContextualInviteType> = Type extends type
  * The revoker is named so the lib can refuse the invite's own inviter (#164).
  * An inviter takes their invite back by withdrawing it, whatever authority
  * they hold over the context, so `invite.withdrawn` always means its sender
- * took it back and `invite.revoked` means someone else cancelled it, or the
+ * took it back and `invite.revoked` means someone else cancelled it, the
  * context closed (`revokeOutstandingWithin`, which revokes the closer's own
- * invites with the rest).
+ * invites with the rest), or someone left it (`revokeOutstandingOfUserWithin`,
+ * which revokes the invites they sent).
  */
 export interface RevokeInviteParams {
   readonly inviteId: string;
@@ -177,10 +178,37 @@ export type InviteWithdrawal = InviteOutcome<InvitePartyView, InviteWithdrawnEve
 export type InviteRevocation = InviteOutcome<InviteContextView, InviteRevokedEvent>;
 export type InviteApproval = InviteOutcome<InviteContextView, InviteApprovedEvent>;
 
+/**
+ * An invite its invitee may accept, as `InviteService.findAcceptableWithin`
+ * hands it to a consumer that asks something of it before accepting: who sent
+ * it, offering which role, and whether it was sent to wait for an approver
+ * (#747). Internal to the consumer; never a client shape.
+ */
+export interface InviteOffer {
+  readonly id: string;
+  readonly inviterId: string;
+  readonly role: { readonly id: string; readonly name: string } | null;
+  /**
+   * Whether it was sent to wait for an approver (#166), as the row stores it.
+   * An invite the accept may take has left `AwaitingApproval`, so one with
+   * this set has been approved.
+   */
+  readonly needsApproval: boolean;
+}
+
 /** A bulk revoke: how many rows moved, and one domain event per row for the caller to emit after commit. */
 export interface OutstandingInviteRevocation {
   readonly count: number;
   readonly events: readonly InviteRevokedEvent[];
+}
+
+/**
+ * A bulk withholding (#782): how many rows were marked. No events: the
+ * invites' status doesn't change, and announcing them would tell each inviter
+ * whose address it was.
+ */
+export interface OutstandingInviteWithholding {
+  readonly count: number;
 }
 
 export interface ExpireOutstandingInvitesParams {

@@ -16,21 +16,15 @@ describe.each([
       forbidNonWhitelisted: true,
     });
 
-  it.each([Reach.Public, Reach.Friends, Reach.Private])('accepts %s', async (reach) => {
+  // Every rung a game read rule serves, friends of friends included (#496).
+  it.each([Reach.Public, Reach.FriendsOfFriends, Reach.Friends, Reach.Private])('accepts %s', async (reach) => {
     await expect(errorsFor({ reach })).resolves.toHaveLength(0);
   });
 
-  it.each([Reach.FriendsOfFriends])(
-    'refuses %s — no read rule would honour it until #496, so the game would claim readers it doesn’t have',
-    async (reach) => {
-      const errors = await errorsFor({ reach });
-
-      expect(errors.map((error) => error.property)).toEqual(['reach']);
-    },
-  );
-
-  it('refuses Household, which is no longer a reach (#808)', async () => {
-    const errors = await errorsFor({ reach: 'Household' });
+  // `Household` is no longer a reach (#808), and null would reach a
+  // non-nullable column as a 500.
+  it.each([['Household'], [null]])('refuses %p', async (reach) => {
+    const errors = await errorsFor({ reach });
 
     expect(errors.map((error) => error.property)).toEqual(['reach']);
   });
@@ -58,6 +52,21 @@ describe.each([
 
     expect(errors.map((error) => error.property)).toEqual(['visibility']);
   });
+
+  it.each(['minPlayTimeMeasure', 'maxPlayTimeMeasure'])(
+    'refuses %s: play time is always minutes (#869)',
+    async (field) => {
+      const errors = await errorsFor({ [field]: 'Hours' });
+
+      expect(errors.map((error) => error.property)).toEqual([field]);
+    },
+  );
+
+  it('refuses playingTime: a single play time is a minimum and maximum that are equal (#869)', async () => {
+    const errors = await errorsFor({ playingTime: 45 });
+
+    expect(errors.map((error) => error.property)).toEqual(['playingTime']);
+  });
 });
 
 describe.each([
@@ -69,5 +78,37 @@ describe.each([
   // The cap is the game service's, since only a new or changed description is held to it.
   it('accepts a description longer than the cap', async () => {
     await expect(errorsFor('a'.repeat(GAME_DESCRIPTION_MAX_LENGTH + 1))).resolves.toHaveLength(0);
+  });
+});
+
+describe.each([
+  ['CreateGameDto', CreateGameDto],
+  ['UpdateGameDto', UpdateGameDto],
+])('%s counts and play times', (_name, Dto) => {
+  const errorsFor = (plain: Record<string, unknown>) =>
+    validate(plainToInstance(Dto, { title: 'Brass', ...plain }, { enableImplicitConversion: true }));
+  const refused = async (plain: Record<string, unknown>) => (await errorsFor(plain)).map((error) => error.property);
+
+  // Each is an integer column: a fraction or a value past int32 would fail
+  // in Prisma as a 500, so validation refuses it as a 400 (#869).
+  it.each(['publishYear', 'minPlayers', 'maxPlayers', 'minPlayTime', 'maxPlayTime', 'minAge'])(
+    'refuses a fraction or a value past int32 for %s',
+    async (field) => {
+      await expect(refused({ [field]: 90.5 })).resolves.toEqual([field]);
+      await expect(refused({ [field]: 3_000_000_000 })).resolves.toEqual([field]);
+    },
+  );
+
+  // The search filters read a game's range as min to max (#869), so one sent
+  // reversed is refused, as a reversed search range is.
+  it.each([
+    ['maxPlayers', { minPlayers: 5, maxPlayers: 2 }],
+    ['maxPlayTime', { minPlayTime: 120, maxPlayTime: 30 }],
+  ])('refuses %s below its minimum', async (field, plain) => {
+    await expect(refused(plain)).resolves.toEqual([field]);
+  });
+
+  it('accepts a range whose ends are equal', async () => {
+    await expect(refused({ minPlayers: 4, maxPlayers: 4, minPlayTime: 60, maxPlayTime: 60 })).resolves.toEqual([]);
   });
 });

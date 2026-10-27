@@ -1,10 +1,10 @@
 import {
   ContentFormat,
   ContentType,
-  CoverageAxis,
   DataGatewayCapability,
   LanguageCodeFormat,
   PlatformType,
+  SearchFilterAxis,
 } from '@bge/database';
 import * as proto from '@boardgamesempire/proto-gateway';
 
@@ -24,6 +24,9 @@ const CAPABILITIES: ByProtoName<DataGatewayCapability> = {
   [proto.Capability.CAPABILITY_FETCH]: DataGatewayCapability.Fetch,
   [proto.Capability.CAPABILITY_FETCH_EXPANSIONS]: DataGatewayCapability.FetchExpansions,
   [proto.Capability.CAPABILITY_LIST_LANGUAGES]: DataGatewayCapability.ListLanguages,
+  [proto.Capability.CAPABILITY_LIST_PLATFORMS]: DataGatewayCapability.ListPlatforms,
+  [proto.Capability.CAPABILITY_LIST_CATEGORIES]: DataGatewayCapability.ListCategories,
+  [proto.Capability.CAPABILITY_LIST_MECHANICS]: DataGatewayCapability.ListMechanics,
 };
 
 const PLATFORM_TYPES: ByProtoName<PlatformType> = {
@@ -50,9 +53,12 @@ const CONTENT_TYPES: ByProtoName<ContentType> = {
   [proto.ContentType.CONTENT_TYPE_MOD]: ContentType.Mod,
 };
 
-const COVERAGE_AXES: ByProtoName<CoverageAxis> = {
-  [proto.CoverageAxis.COVERAGE_AXIS_PLATFORM_TYPE]: CoverageAxis.PlatformType,
-  [proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE]: CoverageAxis.ContentType,
+const SEARCH_FILTER_AXES: ByProtoName<SearchFilterAxis> = {
+  [proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLATFORM_TYPE]: SearchFilterAxis.PlatformType,
+  [proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE]: SearchFilterAxis.ContentType,
+  [proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR]: SearchFilterAxis.PublishYear,
+  [proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAYER_COUNT]: SearchFilterAxis.PlayerCount,
+  [proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAY_TIME]: SearchFilterAxis.PlayTime,
 };
 
 const LANGUAGE_CODE_FORMATS: ByProtoName<LanguageCodeFormat> = {
@@ -81,7 +87,8 @@ export const toStoredPlatformType = (value: unknown): PlatformType | undefined =
 
 export const toStoredContentType = (value: unknown): ContentType | undefined => lookup(CONTENT_TYPES, value);
 
-export const toStoredCoverageAxis = (value: unknown): CoverageAxis | undefined => lookup(COVERAGE_AXES, value);
+export const toStoredSearchFilterAxis = (value: unknown): SearchFilterAxis | undefined =>
+  lookup(SEARCH_FILTER_AXES, value);
 
 export const toStoredLanguageCodeFormat = (value: unknown): LanguageCodeFormat | undefined =>
   lookup(LANGUAGE_CODE_FORMATS, value);

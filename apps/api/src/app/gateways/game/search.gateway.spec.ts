@@ -9,6 +9,7 @@ import type {
   WsSearchErrorPayload,
   WsSearchResultPayload,
   WsSourceDonePayload,
+  WsSourceUnfilterablePayload,
 } from '@bge/game-search';
 import { GameSearchService, SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
 import {
@@ -666,6 +667,52 @@ describe('GameSearchGateway', () => {
           correlationId: 'corr-1',
           source: 'bgg-gw-1',
         });
+      });
+
+      it('emits search:unfilterable for RESULT_STATUS_UNFILTERABLE (#869)', async () => {
+        const client = makeSocket(gateway);
+        coordinator.searchGames.mockReturnValue(
+          of({
+            correlationId: 'corr-1',
+            gatewayId: 'bgg-gw-1',
+            status: ResultStatus.RESULT_STATUS_UNFILTERABLE,
+          } satisfies SearchGameResult),
+        );
+
+        await gateway.handleSearchStart(client, makeStartDto());
+
+        const payload = assertEmitted<WsSourceUnfilterablePayload>(room('corr-1'), SearchEvents.SearchUnfilterable, {
+          correlationId: 'corr-1',
+          source: 'bgg-gw-1',
+        });
+        expect(payload).toEqual({ correlationId: 'corr-1', source: 'bgg-gw-1' });
+      });
+
+      // The coordinator answers a skipped DataGateway with this one frame and
+      // no SOURCE_DONE. The search ends when the stream does, so the frame is
+      // that DataGateway's last word: nothing waits on a source_done that
+      // never comes, and none is made up for it.
+      it('still ends the search with search:done when UNFILTERABLE is a DataGateway’s only frame (#869)', async () => {
+        const client = makeSocket(gateway);
+        coordinator.searchGames.mockReturnValue(
+          of(
+            {
+              correlationId: 'corr-1',
+              gatewayId: 'bgg-gw-1',
+              status: ResultStatus.RESULT_STATUS_UNFILTERABLE,
+            } satisfies SearchGameResult,
+            makeSourceDone('corr-1', 'igdb-gw-1'),
+          ),
+        );
+
+        await gateway.handleSearchStart(client, makeStartDto({ gatewayIds: ['bgg-gw-1', 'igdb-gw-1'] }));
+
+        expect(mockEmit.mock.calls).toEqual([
+          [SearchEvents.SearchUnfilterable, { correlationId: 'corr-1', source: 'bgg-gw-1' }],
+          [SearchEvents.SearchSourceDone, { correlationId: 'corr-1', source: 'igdb-gw-1' }],
+          [SearchEvents.SearchDone, { correlationId: 'corr-1' }],
+        ]);
+        expect(clientData(gateway, client).activeSearches.has('corr-1')).toBe(false);
       });
 
       it('emits search:error for RESULT_STATUS_ERROR frames, including the message', async () => {

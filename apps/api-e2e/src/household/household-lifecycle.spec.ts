@@ -1,5 +1,5 @@
-import { InviteStatus, InviteType, Reach, SystemRole } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import { InviteStatus, Reach, SystemRole } from '@bge/database';
+import { arrangeInvite, befriend, createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -35,35 +35,10 @@ describe('household lifecycle', () => {
   const readHousehold = (actor: SessionActor, id: string) =>
     request(baseUrl).get(`${HOUSEHOLDS_PATH}/${id}`).set(actor.headers);
 
-  const { removeMember, leave, transferOwnership } = createMemberClient(baseUrl);
+  const { removeMember, leave, transferOwnership, changeRole } = createMemberClient(baseUrl);
 
-  /**
-   * Arranges an invite directly (#257): inline rather than as a
-   * `@bge/testing-e2e` factory. Each invite suite keeps a copy of its own for
-   * now. Extracting one shared factory falls to #747, whose e2e arranges
-   * invites for a removed member, by id and by address.
-   *
-   * `token` is random rather than sequential for the same reason
-   * `prepareSignup` is — it is unique-constrained, and predictable identifiers
-   * are what let state survive a truncate and collide with a later test (#268).
-   */
-  const arrangeInvite = async (
-    inviter: SessionActor,
-    householdId: string,
-    status: InviteStatus,
-  ): Promise<{ id: string }> =>
-    db.client.invite.create({
-      data: {
-        type: InviteType.Household,
-        status,
-        inviterId: inviter.user.id,
-        householdId,
-        inviteeEmail: `invitee-${randomUUID()}@e2e.invalid`,
-        token: randomUUID(),
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1_000),
-      },
-      select: { id: true },
-    });
+  /** An address no account has, so an invite to it reaches nobody the suite signs in as. */
+  const unknownAddress = () => `invitee-${randomUUID()}@e2e.invalid`;
 
   describe('creating a household', () => {
     it('persists the creator as its HouseholdOwner and returns the row', async () => {
@@ -116,41 +91,50 @@ describe('household lifecycle', () => {
     });
 
     /**
-     * The end-to-end half of #297. `read-shapes.spec.ts` pins the select
-     * CONSTANT and the service specs pin that the query uses it; neither reads
-     * a response. This one does, over HTTP, against a real row — so a shape
-     * that is correct in source and wrong by the time it reaches a client
-     * still fails.
+     * #665. The detail reaches every reader of the household, a member's
+     * friends included, and only the household's owners and admins, and staff,
+     * read its invites. With an invite pending, no reader's detail carries one,
+     * the owner's included: they list them at
+     * `GET /households/:householdId/invites`.
+     *
+     * `readEnvelope` refuses an `invites` key too, so every detail read in the
+     * suite checks it; this one names the readers it was about. The members
+     * array is asserted first, so a body that never carried the household
+     * cannot pass the absence.
      */
-    it('publishes a pending invite without its accept token or invitee email', async () => {
-      const owner = await actors.user();
-      const fixture = await actors.householdWithMembers({ owner, name: 'Household with a pending invite' });
+    it("embeds none of the household's invites, for any reader", async () => {
+      const [owner, member, guest, friend] = await Promise.all([
+        actors.user(),
+        actors.user(),
+        actors.user(),
+        actors.user(),
+      ]);
+      const fixture = await actors.householdWithMembers({
+        owner,
+        name: 'Household with a pending invite',
+        members: [
+          { actor: member, role: SystemRole.HouseholdMember },
+          { actor: guest, role: SystemRole.HouseholdGuest },
+        ],
+      });
+      await db.client.household.update({ where: { id: fixture.household.id }, data: { reach: Reach.Friends } });
+      await befriend(db.client, friend, member);
 
-      const pending = await arrangeInvite(owner, fixture.household.id, InviteStatus.Pending);
+      await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: fixture.household.id,
+        status: InviteStatus.Pending,
+        inviteeEmail: unknownAddress(),
+      });
 
-      const detail = readEnvelope(
-        await readHousehold(owner, fixture.household.id).expect(200),
-        'GET /api/households/:id',
+      const responses = await Promise.all(
+        [owner, member, guest, friend].map((reader) => readHousehold(reader, fixture.household.id).expect(200)),
       );
 
-      const invite = detail.household.invites.find((entry) => entry.id === pending.id);
-
-      // Asserted BEFORE the absences below, which an invite the read never
-      // returned would satisfy just as well.
-      expect(invite).toBeDefined();
-      expect(invite?.status).toBe(InviteStatus.Pending);
-
-      // Named one at a time rather than left to the key set, so a regression
-      // says WHICH credential came back instead of printing two sorted lists.
-      expect(invite).not.toHaveProperty('token');
-      expect(invite).not.toHaveProperty('inviteeEmail');
-
-      // And the whole key set, because naming the two known leaks only catches
-      // the two known leaks — the defect class is a column nobody chose to
-      // publish, which by definition is not on any list written today.
-      expect(Object.keys(invite ?? {}).sort()).toEqual(
-        ['createdAt', 'expiresAt', 'id', 'inviteeName', 'inviter', 'role', 'status', 'type'].sort(),
-      );
+      for (const response of responses) {
+        expect(response.body.household.members).toHaveLength(3);
+        expect(response.body.household).not.toHaveProperty('invites');
+      }
     });
   });
 
@@ -260,9 +244,24 @@ describe('household lifecycle', () => {
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner, name: 'Household with invites' });
 
-      const pending = await arrangeInvite(owner, fixture.household.id, InviteStatus.Pending);
-      const awaiting = await arrangeInvite(owner, fixture.household.id, InviteStatus.AwaitingApproval);
-      const declined = await arrangeInvite(owner, fixture.household.id, InviteStatus.Declined);
+      const pending = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: fixture.household.id,
+        status: InviteStatus.Pending,
+        inviteeEmail: unknownAddress(),
+      });
+      const awaiting = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: fixture.household.id,
+        status: InviteStatus.AwaitingApproval,
+        inviteeEmail: unknownAddress(),
+      });
+      const declined = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: fixture.household.id,
+        status: InviteStatus.Declined,
+        inviteeEmail: unknownAddress(),
+      });
 
       await request(baseUrl).delete(`${HOUSEHOLDS_PATH}/${fixture.household.id}`).set(owner.headers).expect(200);
 
@@ -283,7 +282,12 @@ describe('household lifecycle', () => {
       const doomed = await actors.householdWithMembers({ owner, name: 'Doomed' });
       const survivor = await actors.householdWithMembers({ owner, name: 'Survivor' });
 
-      const bystander = await arrangeInvite(owner, survivor.household.id, InviteStatus.Pending);
+      const bystander = await arrangeInvite(db.client, {
+        inviter: owner,
+        householdId: survivor.household.id,
+        status: InviteStatus.Pending,
+        inviteeEmail: unknownAddress(),
+      });
 
       await request(baseUrl).delete(`${HOUSEHOLDS_PATH}/${doomed.household.id}`).set(owner.headers).expect(200);
 
@@ -373,11 +377,7 @@ describe('household lifecycle', () => {
 
       await request(baseUrl).get(rosterPath).set(owner.headers).expect(404);
       await request(baseUrl).get(`${rosterPath}/${memberId}`).set(owner.headers).expect(404);
-      await request(baseUrl)
-        .patch(`${rosterPath}/${memberId}/role`)
-        .set(owner.headers)
-        .send({ role: SystemRole.HouseholdAdmin })
-        .expect(404);
+      await changeRole(owner, householdId, memberId, SystemRole.HouseholdAdmin).expect(404);
       await transferOwnership(owner, householdId, memberId).expect(404);
       await removeMember(owner, householdId, memberId).expect(404);
       await leave(member, householdId).expect(404);

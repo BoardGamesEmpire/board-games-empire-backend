@@ -1,6 +1,13 @@
-import { ContentType, PlatformType } from '@bge/database';
+import { ContentType, DataGatewayCapability, PlatformType, SearchFilterAxis } from '@bge/database';
 import * as proto from '@boardgamesempire/proto-gateway';
-import { toProtoContentType, toProtoPlatformType, toStoredContentType, toStoredPlatformType } from './stored-enums';
+import {
+  toProtoContentType,
+  toProtoPlatformType,
+  toStoredCapability,
+  toStoredContentType,
+  toStoredPlatformType,
+  toStoredSearchFilterAxis,
+} from './stored-enums';
 
 describe('stored enums', () => {
   it('sends every stored platform type as a proto value that is stored as it again', () => {
@@ -46,5 +53,26 @@ describe('stored enums', () => {
 
   it('has no proto value for an unknown content type', () => {
     expect(toProtoContentType(ContentType.Unknown)).toBeUndefined();
+  });
+
+  it('stores each list capability (#718)', () => {
+    expect(toStoredCapability(proto.Capability.CAPABILITY_LIST_PLATFORMS)).toBe(DataGatewayCapability.ListPlatforms);
+    expect(toStoredCapability(proto.Capability.CAPABILITY_LIST_CATEGORIES)).toBe(DataGatewayCapability.ListCategories);
+    expect(toStoredCapability(proto.Capability.CAPABILITY_LIST_MECHANICS)).toBe(DataGatewayCapability.ListMechanics);
+  });
+
+  it('stores publish year as a filterable axis (#719)', () => {
+    expect(toStoredSearchFilterAxis(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR)).toBe(
+      SearchFilterAxis.PublishYear,
+    );
+  });
+
+  it('stores player count and play time as filterable axes (#869)', () => {
+    // Named by value: ts-jest doesn't typecheck here, so before the members
+    // exist both sides of a comparison with the enum would be undefined.
+    expect(toStoredSearchFilterAxis(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAYER_COUNT)).toBe('PlayerCount');
+    expect(toStoredSearchFilterAxis(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAY_TIME)).toBe('PlayTime');
+    expect(SearchFilterAxis.PlayerCount).toBe('PlayerCount');
+    expect(SearchFilterAxis.PlayTime).toBe('PlayTime');
   });
 });

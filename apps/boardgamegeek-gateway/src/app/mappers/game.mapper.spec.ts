@@ -144,6 +144,14 @@ describe('searchItemToGameSearchData', () => {
     expect(result.yearPublished).toBe(2017);
   });
 
+  it('decodes the title, and sends one the client parsed as a number as text (#716)', () => {
+    const encoded = makeBggSearchItem({ name: 'Tzolk&#039;in: The Mayan Calendar' });
+    const digits = makeBggSearchItem({ name: 2048 });
+
+    expect(searchItemToGameSearchData(encoded).title).toBe(`Tzolk'in: The Mayan Calendar`);
+    expect(searchItemToGameSearchData(digits).title).toBe('2048');
+  });
+
   it('maps boardgame type to BASE_GAME content type', () => {
     const result = searchItemToGameSearchData({ id: 1, type: BggThingType.BoardGame, name: 'Catan' });
 
@@ -184,6 +192,16 @@ describe('searchItemToGameSearchData', () => {
     expect(result.title).toBe('From Names');
   });
 
+  it('trims the title, as fetching the same game does (#716)', () => {
+    expect(searchItemToGameSearchData(makeBggSearchItem({ name: '  Catan ' })).title).toBe('Catan');
+  });
+
+  it('uses the names array when name is blank (#716)', () => {
+    const item = makeBggSearchItem({ name: ' ', names: [makeBggName({ value: 'From Names' })] });
+
+    expect(searchItemToGameSearchData(item).title).toBe('From Names');
+  });
+
   it('returns an empty title when no name is available', () => {
     const result = searchItemToGameSearchData({ id: 1, type: BggThingType.BoardGame });
 
@@ -201,6 +219,98 @@ describe('searchItemToGameSearchData', () => {
     const result = searchItemToGameSearchData({ id: 1, type: BggThingType.BoardGame, name: 'Catan' });
 
     expect(result.availableReleases).toEqual([]);
+  });
+});
+
+// BGG writes 0 for a game whose year it doesn't know. Sent on, it would read
+// as a year, fail every publish-year range, and be stored on import (#719).
+describe('publish year (#719)', () => {
+  it("sends BGG's year 0 as no publish year, and keeps negative years", () => {
+    const cases: [number | undefined, number | undefined][] = [
+      [0, undefined],
+      [-2200, -2200],
+      [2017, 2017],
+      [undefined, undefined],
+    ];
+
+    for (const [yearpublished, expected] of cases) {
+      expect(searchItemToGameSearchData(makeBggSearchItem({ yearpublished })).yearPublished).toBe(expected);
+      expect(thingToGameSearchData(makeBggThing({ yearpublished })).yearPublished).toBe(expected);
+      expect(thingToGameData(makeBggThing({ yearpublished })).yearPublished).toBe(expected);
+    }
+  });
+});
+
+// BGG writes 0 for a player count or play time it doesn't know, as it does for
+// a year. Sent on, a 0-minute game would fit every play-time maximum, and a
+// 0–0 game would read as known, dropped where an unknown one is kept, on BGG's
+// results and on the games imported from it (#869).
+describe('player counts and play times (#869)', () => {
+  const mapped = (thing: BggThing) => [thingToGameSearchData(thing), thingToGameData(thing)];
+
+  it('reads playingtime as both ends of a play time BGG gives no range for, on an expansion search result too', () => {
+    for (const game of mapped(makeBggThing({ playingtime: 120 }))) {
+      expect([game.minPlaytime, game.maxPlaytime]).toEqual([120, 120]);
+    }
+  });
+
+  it('prefers the minimum and maximum play time to playingtime', () => {
+    for (const game of mapped(makeBggThing({ minplayers: 2, maxplayers: 5, minplaytime: 45, maxplaytime: 75 }))) {
+      expect([game.minPlayers, game.maxPlayers, game.minPlaytime, game.maxPlaytime]).toEqual([2, 5, 45, 75]);
+    }
+  });
+
+  it("sends BGG's 0 as no player count or play time", () => {
+    for (const game of mapped(
+      makeBggThing({ minplayers: 0, maxplayers: 0, minplaytime: 0, maxplaytime: 0, playingtime: 0 }),
+    )) {
+      expect([game.minPlayers, game.maxPlayers, game.minPlaytime, game.maxPlaytime]).toEqual([
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+      ]);
+    }
+  });
+
+  // BGG's 0 here is the same sentinel, and POST /games refuses a minimum age
+  // of 0, so import doesn't store one either.
+  it("imports BGG's 0 as no minimum age", () => {
+    expect(thingToGameData(makeBggThing({ minage: 0 })).minAge).toBeUndefined();
+  });
+
+  it('falls back on playingtime when the minimum play time is 0', () => {
+    for (const game of mapped(makeBggThing({ minplaytime: 0, playingtime: 90 }))) {
+      expect([game.minPlaytime, game.maxPlaytime]).toEqual([90, 90]);
+    }
+  });
+
+  // BGG holds some pairs with the minimum above the maximum, and there's no
+  // telling which end is wrong. Both ends go unknown rather than reversed,
+  // which would fit play-time filters the game can't (#869).
+  it('sends a reversed player count or play time as unknown at both ends', () => {
+    for (const game of mapped(makeBggThing({ minplayers: 5, maxplayers: 2, minplaytime: 120, maxplaytime: 60 }))) {
+      expect([game.minPlayers, game.maxPlayers, game.minPlaytime, game.maxPlaytime]).toEqual([
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+      ]);
+    }
+  });
+
+  it('checks the order after playingtime stands in for a missing end', () => {
+    for (const game of mapped(makeBggThing({ minplaytime: 120, maxplaytime: 0, playingtime: 60 }))) {
+      expect([game.minPlaytime, game.maxPlaytime]).toEqual([undefined, undefined]);
+    }
+  });
+
+  it('keeps a range with equal ends, or with one end unknown', () => {
+    for (const game of mapped(
+      makeBggThing({ minplayers: 4, maxplayers: 4, minplaytime: 30, maxplaytime: 0, playingtime: 0 }),
+    )) {
+      expect([game.minPlayers, game.maxPlayers, game.minPlaytime, game.maxPlaytime]).toEqual([4, 4, 30, undefined]);
+    }
   });
 });
 
@@ -295,6 +405,14 @@ describe('thingToGameData — version-driven releases', () => {
     expect(result.releases[1].editionName).toBe('Afrikaans edition');
   });
 
+  it('decodes an edition name (#716)', () => {
+    const thing = makeBggThing({
+      versions: [makeBggVersion({ id: 1, name: 'Collector&#039;s &amp; Deluxe Edition' })],
+    });
+
+    expect(thingToGameData(thing).releases[0].editionName).toBe(`Collector's & Deluxe Edition`);
+  });
+
   it('coerces BGG sentinel zero on yearpublished to undefined releaseYear', () => {
     const thing = makeBggThing({
       versions: [makeBggVersion({ id: 1, yearpublished: 0 })],
@@ -323,12 +441,15 @@ describe('thingToGameData — version-driven releases', () => {
     expect(release.languages.map((l) => l.iso6393)).toEqual(['eng', 'deu']);
   });
 
-  it('drops unrecognized language link values', () => {
+  it('passes an unrecognized language on by name, with no ISO codes (#717)', () => {
     const thing = makeBggThing({
       versions: [makeBggVersion({ id: 1, languageNames: ['English', 'Klingon'] })],
     });
 
-    expect(thingToGameData(thing).releases[0].languages.map((l) => l.iso6393)).toEqual(['eng']);
+    expect(thingToGameData(thing).releases[0].languages).toEqual([
+      { iso6393: 'eng', iso6391: 'en', name: 'English' },
+      { name: 'Klingon' },
+    ]);
   });
 
   it('leaves parentEditionExternalId undefined for all BGG releases', () => {
@@ -357,6 +478,61 @@ describe('thingToGameData — version-driven releases', () => {
     const releases = thingToGameData(thing).releases;
     expect(releases).toHaveLength(1);
     expect(releases[0].externalId).toBe(DEFAULT_EDITION_KEY);
+  });
+});
+
+describe('thingToGameData — links and image URLs (#716)', () => {
+  const nameless: BggLink[] = [
+    { type: BggLinkType.BoardGameDesigner, id: 1 } as BggLink,
+    { type: BggLinkType.BoardGameArtist, id: 2, value: ' ' },
+    { type: BggLinkType.BoardGamePublisher, id: 3, value: '' },
+    { type: BggLinkType.BoardGameMechanic, id: 4 } as BggLink,
+    { type: BggLinkType.BoardGameCategory, id: 5, value: '  ' },
+    { type: BggLinkType.BoardGameFamily, id: 6 } as BggLink,
+  ];
+
+  it('skips a link with a blank or absent name, so nameless links never merge into one record named ""', () => {
+    const game = thingToGameData(makeBggThing({ links: nameless }));
+
+    expect([game.designers, game.artists, game.publishers, game.mechanics, game.categories, game.families]).toEqual([
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+    ]);
+  });
+
+  it('trims and decodes a link name', () => {
+    const links: BggLink[] = [
+      { type: BggLinkType.BoardGameDesigner, id: 7, value: ' Daniele Tascini &amp; Simone Luciani ' },
+    ];
+
+    expect(thingToGameData(makeBggThing({ links })).designers).toEqual([
+      { externalId: '7', name: 'Daniele Tascini & Simone Luciani' },
+    ]);
+  });
+
+  it('decodes an image URL, so an `&amp;` in its query reaches the server as `&`', () => {
+    const thing = makeBggThing({
+      thumbnail: 'https://cf.geekdo-images.com/t.jpg?a=1&amp;b=2',
+      image: 'https://cf.geekdo-images.com/i.jpg?a=1&amp;b=2',
+    });
+
+    const game = thingToGameData(thing);
+
+    expect([game.thumbnailUrl, game.imageUrl]).toEqual([
+      'https://cf.geekdo-images.com/t.jpg?a=1&b=2',
+      'https://cf.geekdo-images.com/i.jpg?a=1&b=2',
+    ]);
+    expect(thingToGameSearchData(thing).thumbnailUrl).toBe('https://cf.geekdo-images.com/t.jpg?a=1&b=2');
+  });
+
+  it('leaves out a blank image URL', () => {
+    const game = thingToGameData(makeBggThing({ thumbnail: ' ', image: '' }));
+
+    expect([game.thumbnailUrl, game.imageUrl]).toEqual([undefined, undefined]);
   });
 });
 

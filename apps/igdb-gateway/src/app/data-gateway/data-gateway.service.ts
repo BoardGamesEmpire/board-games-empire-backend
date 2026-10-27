@@ -1,27 +1,32 @@
-import type { GatewayServiceHost } from '@bge/gateway-host';
+import { GatewayServiceHost } from '@bge/gateway-host';
 import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
-import { Observable, from, merge, of } from 'rxjs';
-import { catchError, endWith, filter, map, mergeMap, shareReplay, tap } from 'rxjs/operators';
+import { EMPTY, Observable, from, merge, of } from 'rxjs';
+import { catchError, endWith, expand, filter, map, mergeMap, reduce, shareReplay, tap } from 'rxjs/operators';
 import { fetchExpansionsRequest, fetchGameRequest, searchGamesRequest } from '../igdb-requests/game.requests';
-import { IGDBService } from '../igdb/igdb.service';
+import { IGDB_LIST_PAGE_SIZE, listGenresRequest, listPlatformsRequest } from '../igdb-requests/vocabulary.requests';
+import { IGDBService, type IgdbRequest } from '../igdb/igdb.service';
 import {
   IGDB_CONTENT_TYPES,
   IGDB_PLATFORM_TYPES,
+  toCategoryData,
   toGameData,
   toGameSearchData,
+  toPlatformData,
   toSearchNarrowing,
 } from '../mappers/game.mapper';
 import { toGatewayLanguageEntries } from '../mappers/language.mapper';
 import { IgdbGame } from '../types';
 
 @Injectable()
-export class DataGatewayService implements GatewayServiceHost {
+export class DataGatewayService extends GatewayServiceHost {
   private readonly logger = new Logger(DataGatewayService.name);
 
-  constructor(private readonly igdbService: IGDBService) {}
+  constructor(private readonly igdbService: IGDBService) {
+    super();
+  }
 
   ping(request: proto.GatewayPingRequest): proto.GatewayPingResponse {
     return {
@@ -40,12 +45,23 @@ export class DataGatewayService implements GatewayServiceHost {
         proto.Capability.CAPABILITY_FETCH,
         proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
         proto.Capability.CAPABILITY_LIST_LANGUAGES,
+        // Its genres are the server's categories. IGDB has no mechanics (#718).
+        proto.Capability.CAPABILITY_LIST_PLATFORMS,
+        proto.Capability.CAPABILITY_LIST_CATEGORIES,
       ],
 
       coverage: { platformTypes: [...IGDB_PLATFORM_TYPES], contentTypes: [...IGDB_CONTENT_TYPES] },
 
-      /** Search narrows by both, through IGDB's game types and platform types (see toSearchNarrowing). */
-      filterableAxes: [proto.CoverageAxis.COVERAGE_AXIS_PLATFORM_TYPE, proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE],
+      /**
+       * Search narrows by both coverage axes, through IGDB's game types and
+       * platform types, and by publish year, through each game's first
+       * release date, its year read in UTC (see toSearchNarrowing).
+       */
+      filterableAxes: [
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLATFORM_TYPE,
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE,
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR,
+      ],
       languageCodeFormats: {
         acceptedRequestFormats: [
           proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
@@ -65,6 +81,26 @@ export class DataGatewayService implements GatewayServiceHost {
       correlationId: request.correlationId ?? crypto.randomUUID(),
       languages: toGatewayLanguageEntries(),
     };
+  }
+
+  /** Every platform IGDB has, mapped as a game's platforms are, so import finds each one linked (#718). */
+  override listPlatforms(request: proto.ListPlatformsRequest): Observable<proto.ListPlatformsResponse> {
+    return this.listAll(listPlatformsRequest).pipe(
+      map((platforms) => ({
+        correlationId: request.correlationId ?? crypto.randomUUID(),
+        platforms: platforms.map(toPlatformData),
+      })),
+    );
+  }
+
+  /** Every genre IGDB has, which the server stores as categories (#718). */
+  override listCategories(request: proto.ListCategoriesRequest): Observable<proto.ListCategoriesResponse> {
+    return this.listAll(listGenresRequest).pipe(
+      map((genres) => ({
+        correlationId: request.correlationId ?? crypto.randomUUID(),
+        categories: genres.map(toCategoryData),
+      })),
+    );
   }
 
   healthCheck(request: proto.HealthCheckRequest): proto.HealthCheckResponse {
@@ -193,6 +229,20 @@ export class DataGatewayService implements GatewayServiceHost {
           } satisfies proto.GatewaySearchResult,
         ];
       }),
+    );
+  }
+
+  /**
+   * Every row of an IGDB list, asked a page at a time until a page comes back
+   * short. The proto requires a list to be complete, so a page that fails
+   * fails the whole list rather than answering part of it (#718).
+   */
+  private listAll<T>(page: (offset: number) => IgdbRequest<T[]>): Observable<T[]> {
+    const ask = (offset: number) => this.igdbService.call(page(offset)).pipe(map((rows) => ({ offset, rows })));
+
+    return ask(0).pipe(
+      expand(({ offset, rows }) => (rows.length < IGDB_LIST_PAGE_SIZE ? EMPTY : ask(offset + IGDB_LIST_PAGE_SIZE))),
+      reduce((all: T[], { rows }) => all.concat(rows), []),
     );
   }
 }

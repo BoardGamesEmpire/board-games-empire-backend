@@ -13,7 +13,8 @@ import { INVITE_SNAPSHOT_FIELDS, type InviteSnapshotField } from './events/invit
  * `include:` every column added to the model is an implicit API change. That
  * is how `Invite.token`, a live accept credential, reached every holder of
  * `read:household` and every friend of a member on a `Friends`-visible
- * household (#297).
+ * household, through the household detail (#297). The detail embeds no
+ * invites now (#665).
  *
  * A `select` shape inverts the default: a new column is invisible until someone
  * names it here. `read-shapes.spec.ts` enforces that by reading the model's
@@ -23,8 +24,8 @@ import { INVITE_SNAPSHOT_FIELDS, type InviteSnapshotField } from './events/invit
  *
  * ## Two audiences, two shapes
  *
- * {@link CONTEXT_INVITE_SELECT} is what a context reader sees: the household
- * detail embed, and the base of what a household owner or admin sees. {@link
+ * {@link CONTEXT_INVITE_SELECT} is what a context reader sees: staff listing a
+ * household's invites, and the base of what a household owner or admin sees. {@link
  * PARTY_INVITE_SELECT} is that plus the two columns that belong to the people
  * on the invite, `inviteeEmail` and `message`, rendered only on rows whose
  * inviter or invitee is the acting user (#459, option c). The lib's own
@@ -52,12 +53,12 @@ const INVITE_ACTOR_SELECT = {
 } as const satisfies Prisma.UserSelect;
 
 /**
- * An invite as a context reader sees it (#297): the household detail embed, a
- * revoke or approve result.
+ * An invite as a context reader sees it (#297): a row of a household's invite
+ * list, a revoke or approve result.
  *
  * `role` is rendered as an object rather than the bare `roleId` the model
- * carries, so "invited as Admin" reads the same way a roster beside it renders
- * a member's role.
+ * carries, so "invited as Admin" reads the same way the household's roster
+ * renders a member's role.
  */
 export const CONTEXT_INVITE_SELECT = {
   id: true,
@@ -97,7 +98,7 @@ export const PARTY_INVITE_SELECT = {
  */
 export const INVITE_SCALARS_OMITTED = {
   token:
-    'THE accept credential (`@unique`, "email confirmation token"). The context shape is reached by every holder of read:household — which includes non-members, via read:households:friends — and a party shape by the invitee it is meant for. Publishing it anywhere is an authorization bypass once accept is token-reachable (#163). Never select this.',
+    'THE accept credential (`@unique`, "email confirmation token"). The context shape reaches every reader of the invites in a context, and the party shape the invitee it is meant for. Under the old household detail embed that meant every holder of read:household, non-members included (#297). Publishing it anywhere is an authorization bypass once accept is token-reachable (#163). Never select this.',
   inviterId: 'Superseded by the `inviter` relation above, which renders the user rather than an opaque id.',
   roleId: 'Superseded by the `role` relation above (#297).',
   inviteeId: 'Internal linkage. The invitee is identified to clients by `inviteeName`.',

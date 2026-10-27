@@ -1,9 +1,9 @@
-import type { GatewayServiceHost } from '@bge/gateway-host';
+import { GatewayServiceHost } from '@bge/gateway-host';
 import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
-import { EMPTY, Observable, defer, from, of } from 'rxjs';
+import { defer, EMPTY, from, Observable, of } from 'rxjs';
 import { catchError, endWith, map, mergeMap, tap } from 'rxjs/operators';
 import {
   chunk,
@@ -17,22 +17,26 @@ import { BggThingType, DEFAULT_BGG_SEARCH_TYPES, MAX_THINGS_PER_BATCH } from '..
 import {
   getOutboundExpansionIds,
   searchItemToGameSearchData,
+  TABLETOP_PLATFORM,
   thingToGameData,
   thingToGameSearchData,
   toContentTypes,
   toThingTypes,
 } from '../mappers/game.mapper';
 import { toGatewayLanguageEntries } from '../mappers/language.mapper';
+import { toCategoryList, toMechanicList } from '../mappers/taxonomy.mapper';
 import type { BggThing } from '../types';
 
 const FETCH_GAME_TYPES = [BggThingType.BoardGame, BggThingType.BoardGameExpansion] as const;
 const EXPANSION_BATCH_TYPES = [BggThingType.BoardGameExpansion] as const;
 
 @Injectable()
-export class DataGatewayService implements GatewayServiceHost {
+export class DataGatewayService extends GatewayServiceHost {
   private readonly logger = new Logger(DataGatewayService.name);
 
-  constructor(private readonly bggService: BggService) {}
+  constructor(private readonly bggService: BggService) {
+    super();
+  }
 
   ping(request: proto.GatewayPingRequest): proto.GatewayPingResponse {
     return {
@@ -51,6 +55,9 @@ export class DataGatewayService implements GatewayServiceHost {
         proto.Capability.CAPABILITY_FETCH,
         proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
         proto.Capability.CAPABILITY_LIST_LANGUAGES,
+        proto.Capability.CAPABILITY_LIST_PLATFORMS,
+        proto.Capability.CAPABILITY_LIST_CATEGORIES,
+        proto.Capability.CAPABILITY_LIST_MECHANICS,
       ],
 
       /** The kinds of thing search and fetch ask BGG for, as the game mapper types them. */
@@ -61,9 +68,14 @@ export class DataGatewayService implements GatewayServiceHost {
 
       /**
        * Search narrows by content type through the thing types it asks BGG
-       * for. Its coverage is tabletop alone, which settles platform type.
+       * for. Its coverage is tabletop alone, which settles platform type. It
+       * narrows by publish year too: BGG pages in memory, so the range applies
+       * before paging and pages fill with games in it (#719).
        */
-      filterableAxes: [proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE],
+      filterableAxes: [
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE,
+        proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR,
+      ],
 
       /**
        * BGG accepts and emits English language display names ("English",
@@ -75,7 +87,7 @@ export class DataGatewayService implements GatewayServiceHost {
         passthroughSearchLanguage: false,
       },
 
-      /** BGG's descriptions carry no markup. Their entities still arrive encoded; #716 decodes them. */
+      /** BGG's descriptions carry no markup. */
       contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
     } satisfies proto.DescribeResponse;
   }
@@ -85,6 +97,30 @@ export class DataGatewayService implements GatewayServiceHost {
       correlationId: request.correlationId ?? crypto.randomUUID(),
       languages: toGatewayLanguageEntries(),
     } satisfies proto.ListLanguagesResponse;
+  }
+
+  /** Its one platform, Tabletop, which every game it sends is on (#718). */
+  override listPlatforms(request: proto.ListPlatformsRequest): Observable<proto.ListPlatformsResponse> {
+    return of({
+      correlationId: request.correlationId ?? crypto.randomUUID(),
+      platforms: [TABLETOP_PLATFORM],
+    } satisfies proto.ListPlatformsResponse);
+  }
+
+  /** Its categories, from the table copied from BGG's browse page, since its API lists none (#839). */
+  override listCategories(request: proto.ListCategoriesRequest): Observable<proto.ListCategoriesResponse> {
+    return of({
+      correlationId: request.correlationId ?? crypto.randomUUID(),
+      categories: toCategoryList(),
+    } satisfies proto.ListCategoriesResponse);
+  }
+
+  /** Its mechanics, from the table copied from BGG's browse page, since its API lists none (#839). */
+  override listMechanics(request: proto.ListMechanicsRequest): Observable<proto.ListMechanicsResponse> {
+    return of({
+      correlationId: request.correlationId ?? crypto.randomUUID(),
+      mechanics: toMechanicList(),
+    } satisfies proto.ListMechanicsResponse);
   }
 
   healthCheck(request: proto.HealthCheckRequest): proto.HealthCheckResponse {
@@ -97,9 +133,10 @@ export class DataGatewayService implements GatewayServiceHost {
 
   /**
    * Searches BGG for the request's query. A filter on content types narrows
-   * the thing types asked for. One naming nothing BGG has ends the search at
-   * once, without asking BGG, since an empty type list would ask it for
-   * every type.
+   * the thing types search keeps; BGG itself is always asked for both, since
+   * it labels expansions as base games in a base-game search (#777). A filter
+   * naming nothing BGG has ends the search at once, without asking BGG. A
+   * publish-year range narrows the games it keeps before they're paged (#719).
    */
   searchGames(request: proto.GatewaySearchRequest): Observable<proto.GatewaySearchResult> {
     const limit = request.limit ?? undefined;
@@ -115,7 +152,9 @@ export class DataGatewayService implements GatewayServiceHost {
       } satisfies proto.GatewaySearchResult);
     }
 
-    return this.bggService.call(searchGamesRequest(request.query, limit, offset, types)).pipe(
+    const search = searchGamesRequest(request.query, limit, offset, types, request.filter?.publishYear);
+
+    return this.bggService.call(search).pipe(
       tap((items) => this.logger.log(`searchGames found ${items.length} results for query '${request.query}'`)),
 
       mergeMap((items) => items),

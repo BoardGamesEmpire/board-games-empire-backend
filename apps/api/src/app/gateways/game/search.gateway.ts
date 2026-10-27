@@ -10,6 +10,7 @@ import type {
   WsSearchResultPayload,
   WsSourceDonePayload,
   WsSourceUnavailablePayload,
+  WsSourceUnfilterablePayload,
 } from '@bge/game-search';
 import {
   GameSearchService,
@@ -281,6 +282,19 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
 
             case ResultStatus.RESULT_STATUS_UNAVAILABLE: {
               this.emit<WsSourceUnavailablePayload>(client, dto.correlationId, SearchEvents.SearchUnavailable, {
+                correlationId: dto.correlationId,
+                source,
+              });
+              break;
+            }
+
+            // The coordinator answers a DataGateway the search's filter
+            // skipped with this one frame and no SOURCE_DONE (#869). The
+            // search ends when the stream does, so nothing waits on that
+            // DataGateway's SOURCE_DONE and none is made up here: the frame
+            // is its last word.
+            case ResultStatus.RESULT_STATUS_UNFILTERABLE: {
+              this.emit<WsSourceUnfilterablePayload>(client, dto.correlationId, SearchEvents.SearchUnfilterable, {
                 correlationId: dto.correlationId,
                 source,
               });

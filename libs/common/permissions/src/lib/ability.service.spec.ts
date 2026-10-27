@@ -1,8 +1,8 @@
 import { type Actor, AuditContextService } from '@bge/actor-context';
-import { Action, ResourceType } from '@bge/database';
+import { Action, type Prisma, ResourceType } from '@bge/database';
 import { ExtractSubjectType, SubjectRawRule } from '@casl/ability';
 import { createPrismaAbility, PrismaQuery } from '@casl/prisma';
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, InternalServerErrorException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { AbilityFactory } from './ability.factory';
 import { AbilityService } from './ability.service';
@@ -16,7 +16,10 @@ describe('AbilityService', () => {
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getActor'>>;
   let abilityContext: jest.Mocked<Pick<AbilityContextInternalService, 'prime' | 'peek'>>;
   let permissionsService: jest.Mocked<
-    Pick<PermissionsService, 'getUserRoleGraph' | 'getApiKeyScopeGraph' | 'getPluginGrantSnapshot'>
+    Pick<
+      PermissionsService,
+      'getUserRoleGraph' | 'loadUserRoleGraphWithin' | 'getApiKeyScopeGraph' | 'getPluginGrantSnapshot'
+    >
   >;
   let abilityFactory: jest.Mocked<
     Pick<AbilityFactory, 'createForUser' | 'createForApiKey' | 'createForSystem' | 'createForPlugin' | 'createDenyAll'>
@@ -30,6 +33,7 @@ describe('AbilityService', () => {
     abilityContext = { prime: jest.fn(), peek: jest.fn() };
     permissionsService = {
       getUserRoleGraph: jest.fn(),
+      loadUserRoleGraphWithin: jest.fn(),
       getApiKeyScopeGraph: jest.fn(),
       getPluginGrantSnapshot: jest.fn(),
     };
@@ -663,6 +667,55 @@ describe('AbilityService', () => {
       expect(() =>
         service.currentActorCan(Action.create, ResourceType.Invite, { household: { deletedAt: null } }),
       ).toThrow(ForbiddenException);
+    });
+  });
+
+  describe('userAbilityWithin', () => {
+    const tx = {} as Prisma.TransactionClient;
+    const graph = { id: 'user-sender' } as UserWithRoles;
+
+    beforeEach(() => {
+      permissionsService.loadUserRoleGraphWithin.mockResolvedValue(graph);
+      abilityFactory.createForUser.mockReturnValue(
+        ability([{ action: Action.create, subject: 'Invite', conditions: { householdId: 'hh-1' } }]),
+      );
+    });
+
+    it("asks the named user's own ability, built once from the graph the transaction reads, not the actor's (#747)", async () => {
+      const senderCan = await service.userAbilityWithin(tx, 'user-sender');
+
+      expect(senderCan(Action.create, ResourceType.Invite, { householdId: 'hh-1' })).toBe(true);
+      expect(senderCan(Action.create, ResourceType.Invite, { householdId: 'hh-2' })).toBe(false);
+
+      expect(permissionsService.loadUserRoleGraphWithin).toHaveBeenCalledTimes(1);
+      expect(permissionsService.loadUserRoleGraphWithin).toHaveBeenCalledWith(tx, 'user-sender');
+      expect(permissionsService.getUserRoleGraph).not.toHaveBeenCalled();
+      expect(abilityFactory.createForUser).toHaveBeenCalledTimes(1);
+      expect(abilityFactory.createForUser).toHaveBeenCalledWith(graph);
+      // The current actor's primed abilities play no part.
+      expect(abilityContext.peek).not.toHaveBeenCalled();
+    });
+
+    it('answers a condition the matcher cannot evaluate with 500, not the 403 the acting user was never owed (#747)', async () => {
+      abilityFactory.createForUser.mockReturnValue(
+        ability([{ action: Action.create, subject: 'Invite', conditions: { household: { deletedAt: null } } }]),
+      );
+      const senderCan = await service.userAbilityWithin(tx, 'user-sender');
+
+      const refusal = (() => {
+        try {
+          senderCan(Action.create, ResourceType.Invite, { household: { deletedAt: null } });
+        } catch (error) {
+          return error;
+        }
+
+        return undefined;
+      })();
+
+      expect(refusal).toBeInstanceOf(InternalServerErrorException);
+      expect(refusal).toMatchObject({
+        response: expect.objectContaining({ key: 'errors.permission.condition_unevaluable' }),
+      });
     });
   });
 });

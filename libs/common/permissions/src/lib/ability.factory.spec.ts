@@ -874,10 +874,11 @@ describe('AbilityFactory', () => {
     });
   });
 
-  // No route reads a profile yet (#819), so this rendering is the proof that a
-  // friend reads a profile whose reach admits friends. User search composes it.
+  // The profile route (#819) and user search both read through this rule. The
+  // friendship test sits behind the ban test, so a banned user's profile is
+  // left out (#840).
   describe('read:user:profile:friends — relation-scoped rendering', () => {
-    it("renders the acting user id into both friendship directions of the profile's owner", () => {
+    it("renders the acting user id into both friendship directions of the profile's owner, behind the owner's ban test", () => {
       const user = makeUser({
         id: 'user-42',
         roles: [makeRole('User', [catalogPermission('read:user:profile:friends')])],
@@ -889,13 +890,105 @@ describe('AbilityFactory', () => {
         reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
         user: {
           is: {
-            OR: [
-              { friendshipsRequested: { some: { addresseeId: 'user-42', status: 'Accepted' } } },
-              { friendshipsReceived: { some: { requesterId: 'user-42', status: 'Accepted' } } },
+            AND: [
+              { banned: false },
+              {
+                OR: [
+                  { friendshipsRequested: { some: { addresseeId: 'user-42', status: 'Accepted' } } },
+                  { friendshipsReceived: { some: { requesterId: 'user-42', status: 'Accepted' } } },
+                ],
+              },
             ],
           },
         },
       });
+    });
+  });
+
+  // The second step nests the first, and the block veto sits beside them, so
+  // the acting user's id is rendered into six clauses (#496).
+  describe('read:game:friends-of-friends — relation-scoped rendering', () => {
+    const friendOfFriendReader = () =>
+      makeUser({ id: 'user-42', roles: [makeRole('User', [catalogPermission('read:game:friends-of-friends')])] });
+
+    it("renders the acting user id into every friendship clause and both block clauses of the game's creator", () => {
+      const acceptedFriendOfUser42 = {
+        OR: [
+          { friendshipsRequested: { some: { addresseeId: 'user-42', status: 'Accepted' } } },
+          { friendshipsReceived: { some: { requesterId: 'user-42', status: 'Accepted' } } },
+        ],
+      };
+
+      expect(factory.createForUser(friendOfFriendReader()).rules.at(-1)?.conditions).toEqual({
+        deletedAt: null,
+        AND: [
+          { reach: 'FriendsOfFriends' },
+          {
+            createdBy: {
+              is: {
+                OR: [
+                  { friendshipsRequested: { some: { status: 'Accepted', addressee: { is: acceptedFriendOfUser42 } } } },
+                  { friendshipsReceived: { some: { status: 'Accepted', requester: { is: acceptedFriendOfUser42 } } } },
+                ],
+                NOT: {
+                  OR: [
+                    { friendshipsRequested: { some: { addresseeId: 'user-42', status: 'Blocked' } } },
+                    { friendshipsReceived: { some: { requesterId: 'user-42', status: 'Blocked' } } },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      });
+    });
+
+    it('renders every template variable to a non-empty value', () => {
+      const conditions = factory.createForUser(friendOfFriendReader()).rules.at(-1)?.conditions;
+
+      // An out-of-context variable renders as an empty string, as the
+      // household member rule's test explains.
+      expect(stringLeaves(conditions)).not.toContain('');
+    });
+
+    // The in-memory matcher throws on the relation shorthand, so these prove it
+    // reads the operator form, and that it applies the veto. A blocked row's
+    // requester is the user who placed the block (#496).
+    const sharedFriend = {
+      friendshipsRequested: [{ addresseeId: 'user-42', status: 'Accepted' }],
+      friendshipsReceived: [],
+    };
+    const throughSharedFriend = { status: 'Accepted', addressee: sharedFriend };
+
+    it.each([
+      ['no friendship at all', { friendshipsRequested: [], friendshipsReceived: [] }, false],
+      [
+        'a friend shared with the reader',
+        { friendshipsRequested: [throughSharedFriend], friendshipsReceived: [] },
+        true,
+      ],
+      [
+        'a friend shared with a reader they have blocked',
+        {
+          friendshipsRequested: [throughSharedFriend, { addresseeId: 'user-42', status: 'Blocked' }],
+          friendshipsReceived: [],
+        },
+        false,
+      ],
+      [
+        'a friend shared with a reader who has blocked them',
+        {
+          friendshipsRequested: [throughSharedFriend],
+          friendshipsReceived: [{ requesterId: 'user-42', status: 'Blocked' }],
+        },
+        false,
+      ],
+    ])('checks a game whose creator has %s in memory without throwing', (_case, createdBy, expected) => {
+      const ability = factory.createForUser(friendOfFriendReader());
+
+      expect(
+        ability.can(Action.read, asEntity('Game', { deletedAt: null, reach: 'FriendsOfFriends', createdBy })),
+      ).toBe(expected);
     });
   });
 
@@ -1539,9 +1632,9 @@ describe('AbilityFactory', () => {
         expect(ability.can(Action.update, awaiting(roleName), 'status')).toBe(false);
       });
 
-      // A role holding one permission and not the other, as a custom role
-      // could (#169): each is asked about its own column, so neither passes for
-      // the other.
+      // A role holding one permission and not the other, as a role a server
+      // admin edits (#772) or a household restricts (#845) could: each is
+      // asked about its own column, so neither passes for the other.
       it('keeps a holder of approve alone from revoking, and a holder of revoke alone from approving', () => {
         const approver = holding(SystemRole.HouseholdAdmin, ['update:household_invite:approve']);
         const revoker = holding(SystemRole.HouseholdAdmin, ['update:household_invite:revoke:as-admin']);
@@ -1552,6 +1645,45 @@ describe('AbilityFactory', () => {
         expect(revoker.can(Action.update, awaiting(SystemRole.HouseholdAdmin), 'approvedById')).toBe(false);
       });
     });
+  });
+
+  describe("approving a member's game share (#810)", () => {
+    // The approval is bound to `approvedAt`, the column only an approval
+    // writes, so it passes no other update on a share: a household owner or
+    // admin can't move another member's share to another household or game on
+    // the strength of it.
+    const holding = (roleName: SystemRole) =>
+      factory.createForUser(
+        makeUser({
+          id: 'user-1',
+          householdMember: [
+            {
+              householdId: 'hh-1',
+              role: makeRole(roleName, [...ROLE_PERMISSION_CATALOG[roleName]].map(catalogPermission)),
+            },
+          ],
+        }),
+      );
+    const waiting = (roleName: SystemRole) =>
+      subject(ResourceType.GameShare, {
+        id: 'share-1',
+        householdId: 'hh-1',
+        sharedById: 'user-2',
+        approvedAt: null,
+        game: { deletedAt: null, createdById: 'user-2' },
+        household: { members: [{ userId: 'user-1', role: { role: { name: roleName } } }] },
+      });
+
+    it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin])(
+      "lets a %s approve another member's waiting share, and change no other column of it",
+      (roleName) => {
+        const ability = holding(roleName);
+
+        expect(ability.can(Action.update, waiting(roleName), 'approvedAt')).toBe(true);
+        expect(ability.can(Action.update, waiting(roleName), 'householdId')).toBe(false);
+        expect(ability.can(Action.update, waiting(roleName), 'gameId')).toBe(false);
+      },
+    );
   });
 
   describe('acting on the household admin role (#168)', () => {
@@ -1833,20 +1965,75 @@ describe('AbilityFactory', () => {
       expect(user.can(Action.delete, asEntity('Game', { createdById: 'someone-else' }))).toBe(false);
     });
 
-    it('lets an ordinary User read the games it created, a friend’s that reach friends and every Public one, and no others', () => {
+    it('lets an ordinary User read the games it created, a friend’s that reach friends, a friend of a friend’s that reach friends of friends, every Public one and the ones shared with it, and no others', () => {
       // The clause the game list, the by-id read and search all put in their
       // `where` (#472). Before, `read:game` carried no condition, so this was
-      // `{}`: every signed-in user read every private game.
+      // `{}`: every signed-in user read every private game. A friend of a
+      // friend whom a block separates from the creator is not let in (#496).
+      // A share reaches its recipient once it is in effect, and a block
+      // between the game's creator and a named recipient vetoes it (#810).
       const user = factory.createForUser(
         makeUser({
           id: 'user-1',
           roles: [makeRole(SystemRole.User, [...ROLE_PERMISSION_CATALOG[SystemRole.User]].map(catalogPermission))],
         }),
       );
+      const acceptedFriendOfUser1 = {
+        OR: [
+          { friendshipsRequested: { some: { addresseeId: 'user-1', status: 'Accepted' } } },
+          { friendshipsReceived: { some: { requesterId: 'user-1', status: 'Accepted' } } },
+        ],
+      };
+      const blockWithUser1 = {
+        OR: [
+          { friendshipsRequested: { some: { addresseeId: 'user-1', status: 'Blocked' } } },
+          { friendshipsReceived: { some: { requesterId: 'user-1', status: 'Blocked' } } },
+        ],
+      };
 
       expect(accessibleBy(user, Action.read).ofType('Game')).toEqual({
         OR: [
+          {
+            deletedAt: null,
+            OR: [
+              {
+                shares: { some: { userId: 'user-1', approvedAt: { not: null } } },
+                createdBy: { is: { NOT: blockWithUser1 } },
+              },
+              {
+                shares: {
+                  some: {
+                    approvedAt: { not: null },
+                    household: { is: { deletedAt: null, members: { some: { userId: 'user-1' } } } },
+                  },
+                },
+              },
+            ],
+          },
           { deletedAt: null, reach: 'Public' },
+          {
+            deletedAt: null,
+            AND: [
+              { reach: 'FriendsOfFriends' },
+              {
+                createdBy: {
+                  is: {
+                    OR: [
+                      {
+                        friendshipsRequested: {
+                          some: { status: 'Accepted', addressee: { is: acceptedFriendOfUser1 } },
+                        },
+                      },
+                      {
+                        friendshipsReceived: { some: { status: 'Accepted', requester: { is: acceptedFriendOfUser1 } } },
+                      },
+                    ],
+                    NOT: blockWithUser1,
+                  },
+                },
+              },
+            ],
+          },
           {
             deletedAt: null,
             reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },

@@ -1,3 +1,4 @@
+import { DECORATORS } from '@nestjs/swagger';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { UpdateEventDto } from './update-event.dto';
@@ -17,13 +18,13 @@ describe('UpdateEventDto', () => {
     await expect(propertiesWithErrors({ title: 'Renamed', reach: 'Private' })).resolves.toEqual([]);
   });
 
-  // The rungs an event read rule serves, and no others. `FriendsOfFriends`
-  // waits on #496, which defines friends of friends.
-  it.each([['Public'], ['Friends'], ['Private']])('accepts reach %p', async (reach) => {
+  // The rungs an event read rule serves, friends of friends included (#496),
+  // and no others.
+  it.each([['Public'], ['FriendsOfFriends'], ['Friends'], ['Private']])('accepts reach %p', async (reach) => {
     await expect(propertiesWithErrors({ reach })).resolves.toEqual([]);
   });
 
-  it.each([['FriendsOfFriends'], ['Household'], [null]])('rejects reach %p', async (reach) => {
+  it.each([['Household'], [null]])('rejects reach %p', async (reach) => {
     await expect(propertiesWithErrors({ reach })).resolves.toEqual(['reach']);
   });
 
@@ -36,4 +37,23 @@ describe('UpdateEventDto', () => {
       await expect(propertiesWithErrors({ householdId })).resolves.toEqual(['householdId']);
     },
   );
+
+  it('rejects clientRequestId, which belongs to the create it keys (#252, #534)', async () => {
+    // The key is how a retried create finds the event it already made. An edit
+    // that rewrites it strands that retry, which then makes a second event; one
+    // that copies another of the creator's keys trips the unique. Refused rather
+    // than stripped, so a client sending it learns the field is not editable.
+    await expect(propertiesWithErrors({ title: 'Renamed', clientRequestId: 'key-1' })).resolves.toEqual([
+      'clientRequestId',
+    ]);
+  });
+
+  it('leaves clientRequestId out of the published update schema', () => {
+    // What the generated client is built from. A field the server refuses must
+    // not appear in the schema it publishes for the request.
+    const published: string[] = Reflect.getMetadata(DECORATORS.API_MODEL_PROPERTIES_ARRAY, UpdateEventDto.prototype);
+
+    expect(published).toEqual(expect.arrayContaining([':title', ':reach']));
+    expect(published).not.toContain(':clientRequestId');
+  });
 });

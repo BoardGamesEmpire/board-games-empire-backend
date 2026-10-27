@@ -2,15 +2,15 @@ import type { Household } from '@bge/database';
 import {
   Action,
   HouseholdMembershipOrigin,
-  InviteStatus,
   MemberInvitePolicy,
+  MemberSharePolicy,
   Prisma,
   ResourceType,
   SystemRole,
 } from '@bge/database';
-import { uniqueViolation as sharedUniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
+import { uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
-import { CONTEXT_INVITE_SELECT, InviteService, type InviteRevokedEvent } from '@bge/invites';
+import { InviteService, type InviteRevokedEvent } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
@@ -27,7 +27,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Http, PrismaError } from '@status/codes';
-import { HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT } from './constants/household.constants';
 import { HouseholdService } from './household.service';
 import { MEMBER_SELECT } from './read-shapes';
 
@@ -86,24 +85,19 @@ describe('HouseholdService', () => {
     );
   });
 
-  // #297 / #296. The shapes themselves are pinned in `read-shapes.spec.ts`;
-  // these pin that the reads actually USE them. Without this, the service could
-  // regress to an inline `include:` — republishing `Invite.token` and the
-  // membership provenance columns — while every shape spec still passed.
-  it('shapes the pending-invite embed with CONTEXT_INVITE_SELECT, never the raw row', async () => {
+  // #665. The detail read reaches every reader of the household, a member's
+  // friends included, and a read on its invites belongs to the household's
+  // owners and admins, and to staff. A household's invites are listed at
+  // `GET /households/:householdId/invites` under that read, and an inviter's
+  // own at `GET /invites/sent`; the detail embeds none.
+  it("embeds none of the household's invites", async () => {
     db.household.findUnique.mockResolvedValue({ id: 'hh-1', members: [] } as unknown as HouseholdWithMembers);
 
     await service.getHouseholdById('hh-1');
 
     const [{ include }] = db.household.findUnique.mock.calls[0] as [{ include: Record<string, unknown> }];
 
-    // Pending and still inside its window: expiry is lazy, so a Pending row
-    // past its date is not a pending invite and is left out here as it is
-    // everywhere else (#161).
-    expect(include.invites).toEqual({
-      where: { AND: [{ status: InviteStatus.Pending }, { expiresAt: { gt: expect.any(Date) } }] },
-      select: CONTEXT_INVITE_SELECT,
-    });
+    expect(include).not.toHaveProperty('invites');
   });
 
   it("returns the household's settings to every reader of it, and only the settings it publishes (#166)", async () => {
@@ -113,24 +107,24 @@ describe('HouseholdService', () => {
 
     const [{ include }] = db.household.findUnique.mock.calls[0] as [{ include: Record<string, unknown> }];
 
-    // A member's client needs the invite policy to know whether to offer an
-    // invite, so it rides on the read every member already makes.
-    expect(include.settings).toEqual({ select: { memberInvitePolicy: true } });
+    // A member's client needs the invite and share policies to know whether to
+    // offer an invite or a share (#810), so they ride on the read every member
+    // already makes.
+    expect(include.settings).toEqual({ select: { memberInvitePolicy: true, memberSharePolicy: true } });
   });
 
-  it('shapes the detail roster with MEMBER_SELECT plus the exclusion join this read alone needs', async () => {
+  // #868. The detail roster used to select each member's excluded games beside
+  // MEMBER_SELECT, and the response handed them on to every reader, guests and
+  // a member's friends too. Telling them which games a member held back
+  // defeats holding them back; the sample filters them in its own query.
+  it('shapes the detail roster with MEMBER_SELECT and nothing beside it', async () => {
     db.household.findUnique.mockResolvedValue({ id: 'hh-1', members: [] } as unknown as HouseholdWithMembers);
 
     await service.getHouseholdById('hh-1');
 
     const [{ include }] = db.household.findUnique.mock.calls[0] as [{ include: Record<string, unknown> }];
 
-    expect(include.members).toEqual({
-      select: {
-        ...MEMBER_SELECT,
-        excludedFromHouseholds: { select: { gameCollectionId: true } },
-      },
-    });
+    expect(include.members).toEqual({ select: MEMBER_SELECT });
   });
 
   it('shapes the list roster with MEMBER_SELECT', async () => {
@@ -168,17 +162,14 @@ describe('HouseholdService', () => {
    * entry in the sample only if they could read that entry by id.
    */
   describe('getHouseholdById, the member game sample', () => {
-    const household = (excluded: string[] = []) =>
+    const household = () =>
       ({
         id: 'hh-1',
-        members: [
-          {
-            userId: 'member-1',
-            user: { id: 'member-1', username: 'm1' },
-            excludedFromHouseholds: excluded.map((gameCollectionId) => ({ gameCollectionId })),
-          },
-        ],
+        members: [{ id: 'hm-1', userId: 'member-1', user: { id: 'member-1', username: 'm1' } }],
       }) as unknown as HouseholdWithMembers;
+
+    /** The games the member excluded from this household, by their membership. */
+    const notExcluded = { excludedFromHouseholds: { none: { householdMemberId: 'hm-1' } } };
 
     const ids = (count: number) => Array.from({ length: count }, (_, index) => ({ id: `gc-${index + 1}` }));
 
@@ -200,30 +191,18 @@ describe('HouseholdService', () => {
       });
     });
 
-    // The exclusions are this household's, carried on the member row, so they
-    // sit beside the composed clause rather than inside it.
-    it("reads the candidate ids with the composed clause, this household's exclusions beside it", async () => {
-      db.household.findUnique.mockResolvedValue(household(['excluded-1']));
-      db.gameCollection.findMany.mockResolvedValueOnce([]);
-
-      await service.getHouseholdById('hh-1');
-
-      expect(db.gameCollection.findMany).toHaveBeenCalledWith({
-        where: {
-          AND: [{ userId: 'member-1', deletedAt: null, AND: [COND] }, { id: { notIn: ['excluded-1'] } }],
-        },
-        select: { id: true },
-      });
-    });
-
-    it('adds no exclusion filter when the member excludes nothing', async () => {
+    // The excluded games are this household's, held against the membership, so
+    // they sit beside the composed clause rather than inside it. The filter
+    // reads them through the entry's relation, which keeps them off the roster
+    // read (#868).
+    it('reads the candidate ids with the composed clause, the excluded games of this membership beside it', async () => {
       db.household.findUnique.mockResolvedValue(household());
       db.gameCollection.findMany.mockResolvedValueOnce([]);
 
       await service.getHouseholdById('hh-1');
 
       expect(db.gameCollection.findMany).toHaveBeenCalledWith({
-        where: { AND: [{ userId: 'member-1', deletedAt: null, AND: [COND] }] },
+        where: { AND: [{ userId: 'member-1', deletedAt: null, AND: [COND] }, notExcluded] },
         select: { id: true },
       });
     });
@@ -241,11 +220,11 @@ describe('HouseholdService', () => {
       expect(visible.map(({ id }) => id)).toEqual(expect.arrayContaining(sampled));
     });
 
-    // The rich fetch carries the same scope, exclusions and ceiling, so an
-    // entry deleted or made Private between the two reads is not served from
-    // the second one.
-    it('loads the sampled rows through the same scope, exclusions and ceiling', async () => {
-      db.household.findUnique.mockResolvedValue(household(['excluded-1']));
+    // The rich fetch carries the same scope, excluded-game filter and ceiling,
+    // so an entry deleted, made Private or excluded between the two reads is
+    // not served from the second one.
+    it('loads the sampled rows through the same scope, excluded-game filter and ceiling', async () => {
+      db.household.findUnique.mockResolvedValue(household());
       db.gameCollection.findMany.mockResolvedValueOnce(ids(2) as never).mockResolvedValueOnce([
         { id: 'gc-1', platformGame: { id: 'pg-1', game: { id: 'g-1', title: 'A' } } },
         { id: 'gc-2', platformGame: { id: 'pg-2', game: { id: 'g-2', title: 'B' } } },
@@ -257,10 +236,7 @@ describe('HouseholdService', () => {
       expect(db.gameCollection.findMany).toHaveBeenLastCalledWith(
         expect.objectContaining({
           where: {
-            AND: [
-              { userId: 'member-1', deletedAt: null, id: { in: sampledIds() }, AND: [COND] },
-              { id: { notIn: ['excluded-1'] } },
-            ],
+            AND: [{ userId: 'member-1', deletedAt: null, id: { in: sampledIds() }, AND: [COND] }, notExcluded],
           },
         }),
       );
@@ -309,22 +285,28 @@ describe('HouseholdService', () => {
     expect(permissions.invalidateUser).toHaveBeenCalledWith('user-1');
   });
 
-  describe('create idempotency (#210)', () => {
-    /**
-     * A P2002 in the shape Prisma actually raises, via `@bge/database`'s shared
-     * factory. `target` is OPTIONAL and absent by default: omitting it reproduces
-     * what `@prisma/client@7.8.0` + `@prisma/adapter-pg` reports, and every case in
-     * this block used to pass one — which is why the shape-sniffing discriminator
-     * this replaced was never once tested against reality.
-     *
-     * Fabricated centrally rather than here (#298). Four specs previously invented
-     * their own payload, so each discriminator was only ever tested against the
-     * mock that fed it, and no single place could be compared against a real
-     * database. `apps/api-e2e/src/database/p2002-shape.spec.ts` is what keeps the
-     * shared factory honest.
-     */
-    const uniqueViolation = (target?: string | string[]) =>
-      target === undefined ? uniqueViolationWithoutMeta() : sharedUniqueViolation({ target });
+  it('create links the language tag the request names, by its canonical form', async () => {
+    db.languageTag.findUnique.mockResolvedValue({ id: 'tag-en-us' } as never);
+    db.household.create.mockResolvedValue({ id: 'hh-1', createdById: 'user-1' } as Household);
+
+    await service.create({ name: 'Home', language: 'en-us' });
+
+    expect(db.languageTag.findUnique).toHaveBeenCalledWith({ where: { tag: 'en-US' }, select: { id: true } });
+    expect(db.household.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ languageTag: { connect: { id: 'tag-en-us' } } }),
+      }),
+    );
+  });
+
+  /**
+   * Through `createOrReplay` (#252), whose own spec covers the order of its
+   * lookups and which errors it rethrows. What is left here is the household's
+   * part: the lookup it passes, the checks a replay skips, and the eviction it
+   * still runs.
+   */
+  describe('create idempotency (#210, #252)', () => {
+    const original = { id: 'hh-original', createdById: 'user-1', clientRequestId: 'key-1' } as Household;
 
     it('persists the client-supplied key on the row', async () => {
       db.household.create.mockResolvedValue({ id: 'hh-1' } as Household);
@@ -336,102 +318,43 @@ describe('HouseholdService', () => {
       );
     });
 
-    it('replays: returns the ORIGINAL row on a key conflict instead of surfacing it', async () => {
-      const original = { id: 'hh-original', createdById: 'user-1', clientRequestId: 'key-1' } as Household;
-      db.household.create.mockRejectedValue(uniqueViolation(HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT));
+    it('replays the household already under the key, before resolving its language or writing', async () => {
+      // The lookup comes first, so a language tag the server no longer
+      // supports cannot turn the retry of a create that succeeded into a 400.
       db.household.findUnique.mockResolvedValue(original);
 
-      await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).resolves.toBe(original);
+      await expect(service.create({ name: 'Home', language: 'en', clientRequestId: 'key-1' })).resolves.toBe(original);
 
       // The lookup omits `deletedAt: null` — the keyed create semantically
       // succeeded; that row is its canonical outcome even if since deleted.
       expect(db.household.findUnique).toHaveBeenCalledWith({
         where: { createdById_clientRequestId: { createdById: 'user-1', clientRequestId: 'key-1' } },
       });
+      expect(db.languageTag.findUnique).not.toHaveBeenCalled();
+      expect(db.household.create).not.toHaveBeenCalled();
       // Eviction runs on replay too: heals the committed-then-crashed-before-
       // eviction window of the original request. Idempotent and cheap.
       expect(permissions.invalidateUser).toHaveBeenCalledWith('user-1');
     });
 
-    it('replays when the P2002 carries NO meta at all', async () => {
-      // THE REGRESSION TEST. This is what Prisma 7 + PrismaPg actually raises,
-      // and what the previous `meta.target` discriminator could never match: it
-      // rethrew, so every keyed retry answered 500 — inverting #210's guarantee
-      // on precisely the request it exists to make safe. Confirmed end-to-end in
-      // apps/api-e2e/src/household/household-idempotency.spec.ts (#257).
-      const original = { id: 'hh-original' } as Household;
-      db.household.create.mockRejectedValue(uniqueViolation());
-      db.household.findUnique.mockResolvedValue(original);
+    it('replays the household a concurrent duplicate committed when the create trips the unique', async () => {
+      // Both requests missed the first lookup. The P2002 carries no usable
+      // `meta`, as Prisma 7 with PrismaPg raises it (#257): the row decides.
+      db.household.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(original);
+      db.household.create.mockRejectedValue(uniqueViolationWithoutMeta());
 
       await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).resolves.toBe(original);
-    });
-
-    it.each([
-      ['the mapped constraint name', HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT],
-      ['the Prisma field-name array', ['createdById', 'clientRequestId']],
-      ['the raw column names', ['created_by_id', 'client_request_id']],
-      ['an unrecognized string', 'some_future_prisma_spelling'],
-    ])('replays regardless of the reported target shape: %s', async (_label, target) => {
-      // Recovery keys off the ROW, not the error shape, so none of these are
-      // special-cased any more. Kept as a set because the shape is exactly what
-      // drifts across Prisma versions, and the point is that drift no longer
-      // changes the outcome.
-      const original = { id: 'hh-original' } as Household;
-      db.household.create.mockRejectedValue(uniqueViolation(target));
-      db.household.findUnique.mockResolvedValue(original);
-
-      await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).resolves.toBe(original);
+      expect(permissions.invalidateUser).toHaveBeenCalledWith('user-1');
     });
 
     it('returns a soft-deleted original as-is (deletedAt visible for client reconciliation)', async () => {
       const tombstoned = { id: 'hh-original', deletedAt: new Date('2026-08-01T00:00:00Z') } as Household;
-      db.household.create.mockRejectedValue(uniqueViolation(HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT));
       db.household.findUnique.mockResolvedValue(tombstoned);
 
       const result = await service.create({ name: 'Home', clientRequestId: 'key-1' });
 
       expect(result).toBe(tombstoned);
       expect(result.deletedAt).toEqual(new Date('2026-08-01T00:00:00Z'));
-    });
-
-    it('rethrows a P2002 from a different unique, because no row exists under the key', async () => {
-      // The nested member insert tripping `(householdId, userId)` is the genuine
-      // case. It is now declined by the LOOKUP rather than by inspecting the
-      // error: no row under this key means nothing committed, so there is no
-      // replay to serve. The lookup IS reached, unlike before — that extra query
-      // on the error path is the cost of not depending on `meta`.
-      const error = uniqueViolation(['householdId', 'userId']);
-      db.household.create.mockRejectedValue(error);
-      db.household.findUnique.mockResolvedValue(null);
-
-      await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).rejects.toBe(error);
-      expect(db.household.findUnique).toHaveBeenCalled();
-      expect(permissions.invalidateUser).not.toHaveBeenCalled();
-    });
-
-    it('rethrows a matching P2002 when no key was supplied (keyless creates never replay)', async () => {
-      const error = uniqueViolation(HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT);
-      db.household.create.mockRejectedValue(error);
-
-      await expect(service.create({ name: 'Home' })).rejects.toBe(error);
-      expect(db.household.findUnique).not.toHaveBeenCalled();
-    });
-
-    it('rethrows the original error when the replay lookup finds nothing', async () => {
-      const error = uniqueViolation(HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT);
-      db.household.create.mockRejectedValue(error);
-      db.household.findUnique.mockResolvedValue(null);
-
-      await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).rejects.toBe(error);
-      expect(permissions.invalidateUser).not.toHaveBeenCalled();
-    });
-
-    it('rethrows non-unique-constraint failures untouched', async () => {
-      const error = new Error('connection reset');
-      db.household.create.mockRejectedValue(error);
-
-      await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).rejects.toBe(error);
-      expect(db.household.findUnique).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -444,22 +367,13 @@ describe('HouseholdService', () => {
 
       // Persisting '' would put every blank-key create by this user into one
       // shared bucket, silently replaying unrelated creates.
+      expect(db.household.findUnique).not.toHaveBeenCalled();
       expect(db.household.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ clientRequestId: undefined }) }),
       );
     });
 
-    it('never replays a blank key, even on an idempotency-unique conflict', async () => {
-      const error = uniqueViolation(HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT);
-      db.household.create.mockRejectedValue(error);
-
-      await expect(service.create({ name: 'Home', clientRequestId: '' })).rejects.toBe(error);
-      expect(db.household.findUnique).not.toHaveBeenCalled();
-    });
-
     it('trims a padded key so the DTO and in-process paths share one bucket', async () => {
-      const original = { id: 'hh-original' } as Household;
-      db.household.create.mockRejectedValue(uniqueViolation(HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT));
       db.household.findUnique.mockResolvedValue(original);
 
       await expect(service.create({ name: 'Home', clientRequestId: '  key-1  ' })).resolves.toBe(original);
@@ -512,6 +426,18 @@ describe('HouseholdService', () => {
       });
     });
 
+    it('writes the member share policy beside the invite policy in the same upsert (#810)', async () => {
+      await service.updateHousehold('hh-1', {
+        settings: { memberInvitePolicy: MemberInvitePolicy.Off, memberSharePolicy: MemberSharePolicy.Direct },
+      });
+
+      const settings = {
+        memberInvitePolicy: MemberInvitePolicy.Off,
+        memberSharePolicy: MemberSharePolicy.Direct,
+      };
+      expect(written()).toEqual({ settings: { upsert: { create: settings, update: settings } } });
+    });
+
     it('writes no settings when the patch names none', async () => {
       await service.updateHousehold('hh-1', { name: 'New' });
 
@@ -522,13 +448,15 @@ describe('HouseholdService', () => {
       await service.updateHousehold('hh-1', { name: 'New' });
 
       expect(db.household.update).toHaveBeenCalledWith(
-        expect.objectContaining({ include: { settings: { select: { memberInvitePolicy: true } } } }),
+        expect.objectContaining({
+          include: { settings: { select: { memberInvitePolicy: true, memberSharePolicy: true } } },
+        }),
       );
     });
 
     it.each([
       ['empty settings', { settings: {} }],
-      ['settings naming nothing', { settings: { memberInvitePolicy: undefined } }],
+      ['settings naming nothing', { settings: { memberInvitePolicy: undefined, memberSharePolicy: undefined } }],
       ['a household field naming nothing', { name: undefined }],
     ])('rejects %s as an empty patch', async (_label, dto) => {
       await expect(service.updateHousehold('hh-1', dto)).rejects.toThrow(BadRequestException);

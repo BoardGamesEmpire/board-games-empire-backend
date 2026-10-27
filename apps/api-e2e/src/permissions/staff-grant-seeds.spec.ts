@@ -299,7 +299,7 @@ describe('staff floor over the wire', () => {
     return { fixture, owner, admin, outsider, target: fixture.members[0] };
   };
 
-  const { removeMember, leave, transferOwnership } = createMemberClient(baseUrl);
+  const { removeMember, leave, transferOwnership, changeRole } = createMemberClient(baseUrl);
 
   /** Every membership id in a household, so "unchanged" is a comparison rather than a count. */
   const rosterIds = async (householdId: string): Promise<string[]> =>
@@ -322,10 +322,7 @@ describe('staff floor over the wire', () => {
 
   it("lets staff change a foreign member's role, and refuses an outsider the same write", async () => {
     const { fixture, admin, outsider, target } = await foreignHousehold();
-    const path = `${membersPath(fixture.household.id)}/${target.member.id}/role`;
-    const payload = { role: SystemRole.HouseholdAdmin };
-
-    await request(baseUrl).patch(path).set(admin.headers).send(payload).expect(200);
+    await changeRole(admin, fixture.household.id, target.member.id, SystemRole.HouseholdAdmin).expect(200);
 
     await expect(
       db.client.householdRole.findUniqueOrThrow({
@@ -334,7 +331,7 @@ describe('staff floor over the wire', () => {
       }),
     ).resolves.toEqual({ role: { name: SystemRole.HouseholdAdmin } });
 
-    await request(baseUrl).patch(path).set(outsider.headers).send(payload).expect(403);
+    await changeRole(outsider, fixture.household.id, target.member.id, SystemRole.HouseholdAdmin).expect(403);
   });
 
   it('lets staff remove a member of a household they are no member of, and refuses an outsider the same request', async () => {

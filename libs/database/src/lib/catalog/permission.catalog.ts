@@ -1,6 +1,7 @@
 import type { EnumReachFilter, Prisma } from '../client';
 import { Action, ResourceType, RiskLevel } from '../client';
-import { acceptedFriendOf, REACHES_ADMITTING_FRIENDS } from '../utils/friendship-conditions';
+import { acceptedFriendOf, friendOfFriendOf, REACHES_ADMITTING_FRIENDS } from '../utils/friendship-conditions';
+import { gameSharedWith } from '../utils/share-conditions';
 import { assertJsonConditions, assertUniqueSlugs, assertValidSubjects } from './catalog-integrity';
 import type { CatalogSubject, DefinedPermission } from './permission-entry';
 import { permission } from './permission-entry';
@@ -23,6 +24,48 @@ const acceptedFriendOfActingUser = acceptedFriendOf('{{ user.id }}');
 const reachAdmittingFriends = {
   in: [...REACHES_ADMITTING_FRIENDS],
 } satisfies EnumReachFilter;
+
+// Relational clause meaning "this User node is a friend of a friend of the
+// acting user, with no block between them" (#496). Its shape is
+// `friendOfFriendOf`'s, which the game list scope and the invite gate share.
+// Module-private for the reasons `acceptedFriendOfActingUser` gives.
+//
+// Every friends-of-friends rule writes `{ AND: [{ reach: 'FriendsOfFriends' },
+// <relation> ] }`, unlike the friends rules, and for one reason: cost. The
+// first friendship step is a subquery Postgres builds once per statement. The
+// second runs again for every row that reaches it. Measured on #496, it made
+// a list three to ten times slower wherever it ran on rows a reach test would
+// have turned away.
+// - The rule admits `FriendsOfFriends` alone. A `Public` item reaches a friend
+//   of a friend through the public rule beside it, so an arm that also passed
+//   `Public` rows would run the second step on them for nothing. The ceiling's
+//   arms come in the order the grants load, which nothing fixes.
+// - The reach test comes first in an `AND`, which Prisma emits in order.
+//   Written as sibling keys, a relation nested in a to-one filter is emitted
+//   ahead of the scalar beside it.
+const friendOfFriendOfActingUser = friendOfFriendOf('{{ user.id }}');
+
+// The games shared with the acting user, by name or through a household they
+// belong to, once each share is in effect (#810). Its shape is
+// `gameSharedWith`'s, which the game list scope shares, so a read by id and
+// the list agree on what is shared with a user. Module-private for the reasons
+// `acceptedFriendOfActingUser` gives.
+const gameSharedWithActingUser = gameSharedWith('{{ user.id }}');
+
+// The owner's preference for showing their collection to friends. An absent
+// preferences row reads as the schema default, `true`, as FriendshipService
+// reads it. The friends-of-friends rule carries it too, so a wider circle never
+// sees what the narrower one can't (#496). Module-private for the reasons
+// `acceptedFriendOfActingUser` gives.
+const showsCollectionToFriends = {
+  OR: [{ preferences: null }, { preferences: { is: { showCollectionToFriends: true } } }],
+} satisfies Prisma.UserWhereInput;
+
+// A user who isn't banned, by the test user search applies
+// (`read:user:searchable`): `banned` alone, not its expiry, so a lapsed ban
+// still counts until better-auth lifts it at the user's next sign-in (#840).
+// Module-private for the reasons `acceptedFriendOfActingUser` gives.
+const unbannedUser = { banned: false } satisfies Prisma.UserWhereInput;
 
 // An EventGame hangs off the event itself or off one of its occurrences
 // (exactly one FK is set), so a grant bound to an event has to name both
@@ -82,6 +125,16 @@ const ownerMembershipOfActingUser = {
   role: { is: { role: { is: { name: 'HouseholdOwner' } } } },
 } satisfies Prisma.HouseholdMemberWhereInput;
 
+// The acting user's membership row holding `HouseholdMember`, in the household
+// whose `members.some` it is spliced into: what a member's invite and share
+// permissions gate on, beside the household's policy (#166, #810). One
+// fragment keeps an edit to who counts from missing a copy. Typed and
+// module-private for the reasons `acceptedFriendOfActingUser` gives.
+const memberRoleMembershipOfActingUser = {
+  userId: '{{ user.id }}',
+  role: { is: { role: { is: { name: 'HouseholdMember' } } } },
+} satisfies Prisma.HouseholdMemberWhereInput;
+
 // The household roles a household admin acts on: the member and guest roles.
 // Only a household owner acts on the household admin role (#168), so the
 // household admin's copies of the member, invite and revoke permissions match
@@ -101,10 +154,45 @@ const memberInviteUnder = (memberInvitePolicy: 'Direct' | 'NeedsApproval') =>
     household: {
       is: {
         settings: { is: { memberInvitePolicy } },
-        members: { some: { userId: '{{ user.id }}', role: { is: { role: { is: { name: 'HouseholdMember' } } } } } },
+        members: { some: memberRoleMembershipOfActingUser },
       },
     },
   }) satisfies Prisma.InviteWhereInput;
+
+// A ban from a household the acting user is an owner or admin of, as the four
+// household ban permissions condition on it (#782). Typed and module-private
+// for the reasons `acceptedFriendOfActingUser` gives.
+const ownerOrAdminHouseholdBan = {
+  householdId: '{{ householdId }}',
+  household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+} satisfies Prisma.HouseholdBanWhereInput;
+
+// A live game the acting user created, in the share whose `game` it is spliced
+// into: every create of a share names one (#810). One fragment keeps an edit to
+// which games may be shared from missing a copy. Typed and module-private for
+// the reasons `acceptedFriendOfActingUser` gives.
+const liveGameOfActingUser = {
+  deletedAt: null,
+  createdById: '{{ user.id }}',
+} satisfies Prisma.GameWhereInput;
+
+// A member's share of a game into their own household (#810): the acting user
+// holds the member role there, the household's settings let members share in
+// this way, and the game is a live one the acting user created. A household
+// owner or admin shares directly, whatever the policy, and a guest never
+// shares with the household.
+// Typed and module-private for the reasons `acceptedFriendOfActingUser` gives.
+const memberShareUnder = (memberSharePolicy: 'Direct' | 'NeedsApproval') =>
+  ({
+    householdId: '{{ householdId }}',
+    game: { is: liveGameOfActingUser },
+    household: {
+      is: {
+        settings: { is: { memberSharePolicy } },
+        members: { some: memberRoleMembershipOfActingUser },
+      },
+    },
+  }) satisfies Prisma.GameShareWhereInput;
 
 /**
  * The complete seeded permission catalog — the manifest of every permission
@@ -251,13 +339,17 @@ export const PERMISSION_CATALOG = [
   // --- App Level / User ---
   //
   // A profile has a reach, split like the Game family: your own, whatever its
-  // reach, a friend's that reaches their friends, and everyone's `Public`
-  // ones. The unconditioned read these replace served every profile to every
-  // user, whatever its owner chose (#495). User search composes this read, so
-  // a profile is found only where it can be read. The friends and public reads
-  // rate `Medium`, as `read:user:searchable` does: they are other users'
-  // personal details, such as accessibility needs, that their owners chose to
-  // show.
+  // reach, a friend's that reaches their friends, a friend of a friend's that
+  // reaches friends of friends (#496), and everyone's `Public` ones. The
+  // unconditioned read these replace served every profile to every user,
+  // whatever its owner chose (#495). User search composes this read, so a
+  // profile is found only where it can be read. The friends, friends-of-friends
+  // and public reads rate `Medium`, as `read:user:searchable` does: they are
+  // other users' personal details, such as accessibility needs, that their
+  // owners chose to show. The friends, friends-of-friends and public reads
+  // leave out a banned user's profile, as user search leaves them out; the
+  // user's own read, staff and the Owner still reach it. What else a ban hides
+  // is #887 (#840).
   // TODO: consider the ability to block other users from viewing your profile, etc.
   permission({
     action: Action.read,
@@ -270,7 +362,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.read,
     subject: ResourceType.UserProfile,
-    conditions: { reach: reachAdmittingFriends, user: { is: acceptedFriendOfActingUser } },
+    conditions: { reach: reachAdmittingFriends, user: { is: { AND: [unbannedUser, acceptedFriendOfActingUser] } } },
     slug: 'read:user:profile:friends',
     riskLevel: RiskLevel.Medium,
     reason: "View a friend's profile that reaches their friends",
@@ -278,7 +370,17 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.read,
     subject: ResourceType.UserProfile,
-    conditions: { reach: 'Public' },
+    conditions: {
+      AND: [{ reach: 'FriendsOfFriends' }, { user: { is: { AND: [unbannedUser, friendOfFriendOfActingUser] } } }],
+    },
+    slug: 'read:user:profile:friends-of-friends',
+    riskLevel: RiskLevel.Medium,
+    reason: "View a friend of a friend's profile that reaches friends of friends",
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.UserProfile,
+    conditions: { reach: 'Public', user: { is: unbannedUser } },
     slug: 'read:user:profile:public',
     riskLevel: RiskLevel.Medium,
     reason: 'View public user profiles',
@@ -288,11 +390,13 @@ export const PERMISSION_CATALOG = [
   // takes the operator form the in-memory matcher accepts. `fields` is the
   // columns search serves: no route checks `read User` yet, and without them a
   // later one that served `email` would serve it to every user on this grant.
+  // `image`, the sign-in provider's picture, isn't among them: the avatar is
+  // the profile's (#695).
   permission({
     action: Action.read,
     subject: ResourceType.User,
     conditions: { banned: false, profile: { is: { isSearchable: true } } },
-    fields: ['id', 'username', 'firstName', 'lastName', 'image'],
+    fields: ['id', 'username', 'firstName', 'lastName'],
     slug: 'read:user:searchable',
     riskLevel: RiskLevel.Medium,
     reason: 'Find other users who have made their profile searchable',
@@ -350,6 +454,18 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: "View a friend's events that reach their friends",
   }),
+  // Friends-of-friends reach: read what reaches a friend of a friend, unless a
+  // block stands between them and the owner (#496). Each of these adds to its
+  // friends rule, which keeps serving direct friends, and leaves `Public` to
+  // the public rule. Shaped as `friendOfFriendOfActingUser` explains.
+  permission({
+    action: Action.read,
+    subject: ResourceType.Event,
+    conditions: { AND: [{ reach: 'FriendsOfFriends' }, { createdBy: { is: friendOfFriendOfActingUser } }] },
+    slug: 'read:event:friends-of-friends',
+    riskLevel: RiskLevel.Medium,
+    reason: "View a friend of a friend's events that reach friends of friends",
+  }),
   // Public reach: every signed-in user on the server reads a `Public` event,
   // its dates and its policy, capacity included. No attendee read comes with
   // it, as none comes with the friends rules, so who attends stays with the
@@ -379,9 +495,11 @@ export const PERMISSION_CATALOG = [
   // rows, `:friends` is a friend's games that reach their friends, and
   // `:public` is everyone else's view. A game carries a reach its creator
   // chooses, and `User` is held by every signed-in actor, so an unconditioned
-  // read here would hand every private game to everyone (#472).
+  // read here would hand every private game to everyone (#472). `:shared` is
+  // the games their owners shared with the acting user, on top of each game's
+  // reach (#810).
   // `:public` is static — no render variable — so a plugin can hold it; the
-  // other two bind `user.id`, which is outside a plugin's render context.
+  // rest bind `user.id`, which is outside a plugin's render context.
   // Staff read everything through `read:public_content`.
   permission({
     action: Action.read,
@@ -406,6 +524,28 @@ export const PERMISSION_CATALOG = [
     slug: 'read:game:friends',
     riskLevel: RiskLevel.Low,
     reason: "View a friend's games that reach their friends",
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.Game,
+    conditions: {
+      deletedAt: null,
+      AND: [{ reach: 'FriendsOfFriends' }, { createdBy: { is: friendOfFriendOfActingUser } }],
+    },
+    slug: 'read:game:friends-of-friends',
+    riskLevel: RiskLevel.Low,
+    reason: "View a friend of a friend's games that reach friends of friends",
+  }),
+  // A share waiting for approval grants nothing, and a block between the
+  // game's owner and a named recipient vetoes the user share (#810). Shaped
+  // as `gameSharedWithActingUser` explains.
+  permission({
+    action: Action.read,
+    subject: ResourceType.Game,
+    conditions: { deletedAt: null, ...gameSharedWithActingUser },
+    slug: 'read:game:shared',
+    riskLevel: RiskLevel.Low,
+    reason: 'View the games shared with you or with a household you belong to',
   }),
   // Import jobs only (#479). An import job describes public content, so every
   // user may watch every import, as the import status route and the import
@@ -457,6 +597,133 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Low,
     reason: 'Delete own games',
     conditions: { createdById: '{{ user.id }}' },
+  }),
+
+  // --- Game Shares ---
+  //
+  // A game's owner shows it to one named user or one household, on top of its
+  // reach (#810). A share is in effect once `approvedAt` is set, and only then
+  // does `read:game:shared` admit anyone through it. Every create names the
+  // game as a live one the acting user created.
+  //
+  // The grants `User` holds rate `Low`: each acts on the actor's own game, or
+  // a share they made, toward someone they chose. The household ones rate
+  // `Medium`: a household share shows the game to the whole roster, and the
+  // household owner's and admin's grants act on shares other members made.
+  //
+  // A share to a named user. It names no household, so no household's member
+  // share policy has a say in it.
+  permission({
+    action: Action.create,
+    subject: ResourceType.GameShare,
+    conditions: { householdId: null, game: { is: liveGameOfActingUser } },
+    slug: 'create:game_share',
+    riskLevel: RiskLevel.Low,
+    reason: 'Share a game you created with another user',
+  }),
+  // A game's owner lists its shares, to users and households alike, waiting
+  // ones included.
+  permission({
+    action: Action.read,
+    subject: ResourceType.GameShare,
+    conditions: { game: { is: { createdById: '{{ user.id }}' } } },
+    slug: 'read:game_share:own',
+    riskLevel: RiskLevel.Low,
+    reason: 'View the shares of the games you created',
+  }),
+  // The sharer removes a share they made, to a user or to a household.
+  permission({
+    action: Action.delete,
+    subject: ResourceType.GameShare,
+    conditions: { sharedById: '{{ user.id }}' },
+    slug: 'delete:game_share',
+    riskLevel: RiskLevel.Low,
+    reason: 'Remove a share you made',
+  }),
+  // A household owner or admin shares a game they created into the household
+  // directly, whatever its member share policy, as they always invite
+  // directly. The instance must carry the household's members with their
+  // roles, or the role clause denies it.
+  permission({
+    action: Action.create,
+    subject: ResourceType.GameShare,
+    conditions: {
+      householdId: '{{ householdId }}',
+      game: { is: liveGameOfActingUser },
+      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+    },
+    slug: 'create:game_share:household',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Share a game you created with your household',
+  }),
+  // A member shares under the household's own policy, as two permissions the
+  // service asks about in turn, as a member's invite does (#166): first
+  // whether the share may take effect at once, then whether it may wait for
+  // approval. Whichever passes decides `approvedAt`; the client never says.
+  // Under `Off` neither does. The instance carries the household's settings
+  // beside its roster.
+  //
+  // Which household role shares how, under each policy, is the table in
+  // `libs/api/household/README.md`.
+  permission({
+    action: Action.create,
+    subject: ResourceType.GameShare,
+    conditions: memberShareUnder('Direct'),
+    slug: 'create:game_share:household:member-direct',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Share a game you created with your household, when its members may share directly',
+  }),
+  permission({
+    action: Action.create,
+    subject: ResourceType.GameShare,
+    conditions: { ...memberShareUnder('NeedsApproval'), approvedAt: null },
+    slug: 'create:game_share:household:member-approval',
+    riskLevel: RiskLevel.Medium,
+    reason: "Share a game you created with your household for an owner's or admin's approval",
+  }),
+  // A household's shares, waiting and in effect, are its owners' and admins'
+  // to list, as its invites are. A member lists the shares of the games they
+  // created through `read:game_share:own`.
+  permission({
+    action: Action.read,
+    subject: ResourceType.GameShare,
+    conditions: {
+      householdId: '{{ householdId }}',
+      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+    },
+    slug: 'read:game_share:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "View a household's game shares",
+  }),
+  // Approving puts a member's waiting share in effect. The audience is the
+  // list's. A type-only check passes any household's owner or admin, so the
+  // route asks about a share of THIS household. Bound to `approvedAt`, the
+  // column only an approval writes, as `update:household_invite:approve` is
+  // bound to its own, and the approve route asks about that column.
+  permission({
+    action: Action.update,
+    subject: ResourceType.GameShare,
+    fields: ['approvedAt'],
+    conditions: {
+      householdId: '{{ householdId }}',
+      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+    },
+    slug: 'update:game_share:approve',
+    riskLevel: RiskLevel.Medium,
+    reason: "Approve a member's game share to the household",
+  }),
+  // A household owner or admin removes a share from the household, whoever
+  // made it, waiting or in effect.
+  permission({
+    action: Action.delete,
+    subject: ResourceType.GameShare,
+    conditions: {
+      householdId: '{{ householdId }}',
+      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+    },
+    slug: 'delete:game_share:household',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Remove a game share from the household',
   }),
 
   // --- PlatformGame ---
@@ -568,6 +835,17 @@ export const PERMISSION_CATALOG = [
     slug: 'read:event_occurrence:friends',
     riskLevel: RiskLevel.Medium,
     reason: "View the occurrences of a friend's events that reach their friends",
+  }),
+  // Bound and rated as `read:event:friends-of-friends` is.
+  permission({
+    action: Action.read,
+    subject: ResourceType.EventOccurrence,
+    conditions: {
+      event: { is: { AND: [{ reach: 'FriendsOfFriends' }, { createdBy: { is: friendOfFriendOfActingUser } }] } },
+    },
+    slug: 'read:event_occurrence:friends-of-friends',
+    riskLevel: RiskLevel.Medium,
+    reason: "View the occurrences of a friend of a friend's events that reach friends of friends",
   }),
   // Bound and rated as `read:event:public` is.
   permission({
@@ -968,6 +1246,17 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: "View the policy configuration of a friend's events that reach their friends",
   }),
+  // Bound and rated as `read:event:friends-of-friends` is.
+  permission({
+    action: Action.read,
+    subject: ResourceType.EventPolicy,
+    conditions: {
+      event: { is: { AND: [{ reach: 'FriendsOfFriends' }, { createdBy: { is: friendOfFriendOfActingUser } }] } },
+    },
+    slug: 'read:event_policy:friends-of-friends',
+    riskLevel: RiskLevel.Medium,
+    reason: "View the policy configuration of a friend of a friend's events that reach friends of friends",
+  }),
   // Bound and rated as `read:event:public` is.
   permission({
     action: Action.read,
@@ -1057,28 +1346,35 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: 'View collections shared with your household',
   }),
-  // Row visible to accepted friends of the owner when the owner's
-  // preferences allow it (absent preferences row → schema default `true`,
-  // mirroring FriendshipService). FriendsOfFriends currently grants to
-  // direct friends only — 2-hop traversal is #496.
+  // An entry reaches the owner's accepted friends at every rung from
+  // `Friends` up, and friends of friends at `FriendsOfFriends`, each only while
+  // the owner's preferences show the collection to friends (#496). A `Public`
+  // entry reaches everyone through the public rule.
   permission({
     action: Action.read,
     subject: ResourceType.GameCollection,
     conditions: {
       deletedAt: null,
       reach: reachAdmittingFriends,
-      user: {
-        is: {
-          AND: [
-            { OR: [{ preferences: null }, { preferences: { is: { showCollectionToFriends: true } } }] },
-            acceptedFriendOfActingUser,
-          ],
-        },
-      },
+      user: { is: { AND: [showsCollectionToFriends, acceptedFriendOfActingUser] } },
     },
     slug: 'read:game_collection:friends',
     riskLevel: RiskLevel.Medium,
     reason: "View your friends' collections",
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.GameCollection,
+    conditions: {
+      deletedAt: null,
+      AND: [
+        { reach: 'FriendsOfFriends' },
+        { user: { is: { AND: [showsCollectionToFriends, friendOfFriendOfActingUser] } } },
+      ],
+    },
+    slug: 'read:game_collection:friends-of-friends',
+    riskLevel: RiskLevel.Medium,
+    reason: "View a friend of a friend's collections that reach friends of friends",
   }),
   permission({
     action: Action.read,
@@ -1317,6 +1613,47 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Low,
     reason: 'Leave a household you belong to',
   }),
+  // Household bans (#782), held by household owners and admins alike. A ban
+  // of a current member removes them, and the service asks about removing
+  // them through the actor's `manage` scope on the member, which keeps a household
+  // admin to the member and guest roles (#168). The ban row itself carries no
+  // role for a copy limited to admins to read.
+  //
+  // `create` is `High`: it removes a member and keeps someone out of the
+  // household for good. Lifting one is `Medium`, since it reopens the household
+  // to invites; changing the reason touches only text its owners and admins read.
+  permission({
+    action: Action.read,
+    subject: ResourceType.HouseholdBan,
+    conditions: ownerOrAdminHouseholdBan,
+    slug: 'read:household_ban',
+    riskLevel: RiskLevel.Low,
+    reason: "See your household's bans",
+  }),
+  permission({
+    action: Action.create,
+    subject: ResourceType.HouseholdBan,
+    conditions: ownerOrAdminHouseholdBan,
+    slug: 'create:household_ban',
+    riskLevel: RiskLevel.High,
+    reason: 'Ban someone from your household',
+  }),
+  permission({
+    action: Action.update,
+    subject: ResourceType.HouseholdBan,
+    conditions: ownerOrAdminHouseholdBan,
+    slug: 'update:household_ban',
+    riskLevel: RiskLevel.Low,
+    reason: 'Change the reason for a ban from your household',
+  }),
+  permission({
+    action: Action.delete,
+    subject: ResourceType.HouseholdBan,
+    conditions: ownerOrAdminHouseholdBan,
+    slug: 'delete:household_ban',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Lift a ban from your household',
+  }),
   // No permission creates a HouseholdRole row. Adding a member writes its role
   // row in the same transaction (`addMemberWithin`), and no route asks
   // `create` on the type (#168).
@@ -1431,8 +1768,10 @@ export const PERMISSION_CATALOG = [
   // list's ceiling is empty for everyone below staff: the composer ANDs it in,
   // and an Owner would page through nothing (#162).
   //
-  // Not the household detail's embed, which reads through the household and
-  // is #665's question, for members, guests and friends.
+  // The household detail embeds no invites (#665): every reader of the
+  // household reaches it, a member's friends included, and this is the only
+  // grant to read a household's invites below staff. An invite's own inviter
+  // and invitee read it without one, at `/invites/sent` and in their inbox.
   permission({
     action: Action.read,
     subject: ResourceType.Invite,
@@ -1493,7 +1832,9 @@ export const PERMISSION_CATALOG = [
   // The audience is revoke's, read off an instance for the same reason. It is
   // a permission of its own, bound to `approvedById`, the column only an
   // approval writes, and the approve route asks about that column: a role that
-  // may approve may not revoke on the strength of it, nor the reverse (#169).
+  // may approve may not revoke on the strength of it, nor the reverse. Every
+  // shipped role holds both or neither, but a server admin editing a role
+  // (#772), or a household restricting one (#845), can leave it just one.
   //
   // An approver may approve an invite they sent themselves, as a member
   // promoted since: refusing would block nothing, since they could withdraw it

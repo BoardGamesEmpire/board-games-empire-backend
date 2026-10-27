@@ -3,7 +3,7 @@ import { PermissionsService } from '@bge/permissions';
 import { createActors, type Actors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { createMemberClient } from '../household/household-request';
-import { apiCacheReadRaw, apiCacheWriteRaw } from '../support/api-cache';
+import { permissionsCacheReadRaw, permissionsCacheWriteRaw } from '../support/api-cache';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 
@@ -56,14 +56,14 @@ describe('a permission graph written to the cache after its eviction', () => {
     const graphKey = PermissionsService.userGraphCacheKey(member.user.id);
 
     await request(baseUrl).get(householdPath).set(member.headers).expect(200);
-    const loadedAsMember = await apiCacheReadRaw(graphKey);
+    const loadedAsMember = await permissionsCacheReadRaw(graphKey);
 
     await removeMember(owner, fixture.household.id, membership.member.id).expect(200);
 
     // A key this spec spelled wrong reads null, and the replay below would
     // then write a value the api never reads.
     expect(loadedAsMember).not.toBeNull();
-    await apiCacheWriteRaw(graphKey, loadedAsMember as string, PermissionsService.CACHE_TTL_IN_MILLISECONDS);
+    await permissionsCacheWriteRaw(graphKey, loadedAsMember as string, PermissionsService.CACHE_TTL_IN_MILLISECONDS);
 
     // 403, not 404: the household still exists, and this caller may no longer
     // see it, the same answer any non-member gets (household-authorization).

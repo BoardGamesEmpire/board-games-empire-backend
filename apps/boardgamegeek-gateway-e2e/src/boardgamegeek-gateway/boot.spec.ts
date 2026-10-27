@@ -42,8 +42,11 @@ describe('the BoardGameGeek gateway over gRPC', () => {
         'CAPABILITY_FETCH',
         'CAPABILITY_FETCH_EXPANSIONS',
         'CAPABILITY_LIST_LANGUAGES',
+        'CAPABILITY_LIST_PLATFORMS',
+        'CAPABILITY_LIST_CATEGORIES',
+        'CAPABILITY_LIST_MECHANICS',
       ],
-      filterableAxes: ['COVERAGE_AXIS_CONTENT_TYPE'],
+      filterableAxes: ['SEARCH_FILTER_AXIS_CONTENT_TYPE', 'SEARCH_FILTER_AXIS_PUBLISH_YEAR'],
       languageCodeFormats: {
         acceptedRequestFormats: ['LANGUAGE_CODE_FORMAT_NAME'],
         responseFormat: 'LANGUAGE_CODE_FORMAT_NAME',
@@ -67,5 +70,33 @@ describe('the BoardGameGeek gateway over gRPC', () => {
       expect.objectContaining({ value: 'English', format: 'LANGUAGE_CODE_FORMAT_NAME', iso6393: 'eng', iso6391: 'en' }),
     );
     expect(reply.languages.filter((language) => language.format !== 'LANGUAGE_CODE_FORMAT_NAME')).toEqual([]);
+  });
+
+  // Every game it sends is on this one platform (#718).
+  it('lists its one platform, Tabletop, on ListPlatforms', async () => {
+    const reply = await gateway().listPlatforms('e2e-platforms');
+
+    expect(reply).toEqual({
+      correlationId: 'e2e-platforms',
+      platforms: [
+        { externalId: 'bgg-tabletop', name: 'Tabletop', abbreviation: 'TT', platformType: 'PLATFORM_TYPE_TABLETOP' },
+      ],
+    });
+  });
+
+  it('lists its categories on ListCategories, from its table (#839)', async () => {
+    const reply = await gateway().listCategories('e2e-categories');
+
+    expect(reply.correlationId).toBe('e2e-categories');
+    expect(reply.categories).toHaveLength(85);
+    expect(reply.categories).toContainEqual({ externalId: '1009', name: 'Abstract Strategy' });
+  });
+
+  it('lists its mechanics on ListMechanics, from its table (#839)', async () => {
+    const reply = await gateway().listMechanics('e2e-mechanics');
+
+    expect(reply.correlationId).toBe('e2e-mechanics');
+    expect(reply.mechanics).toHaveLength(200);
+    expect(reply.mechanics).toContainEqual({ externalId: '2082', name: 'Worker Placement' });
   });
 });

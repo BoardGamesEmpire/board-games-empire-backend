@@ -1,5 +1,5 @@
 import { MutationEvent } from '@bge/actor-context';
-import { ResourceType } from '@bge/database';
+import { ResourceType, type GameShareSnapshot } from '@bge/database';
 import { HouseholdEvents } from '../constants/household-events.constant';
 
 /**
@@ -52,5 +52,54 @@ export class HouseholdOwnershipTransferredEvent extends MutationEvent<HouseholdO
   constructor(before: HouseholdOwnershipSnapshot, after: HouseholdOwnershipSnapshot, initiatedAt: Date) {
     super(before, after, initiatedAt);
     this.subjectId = after.householdId;
+  }
+}
+
+/**
+ * Emitted once, after commit, when a household owner or admin approves a
+ * member's waiting game share (#810), which puts it in effect.
+ *
+ * `subject`/`subjectId` are the share, the row the approval changed: its
+ * `approvedAt` and `approvedById` go from null to set. Both snapshots are
+ * populated, so `action` derives to `update`. They are `GameShareSnapshot`s,
+ * the shape the share's created and deleted events in `@bge/game` carry.
+ */
+export class HouseholdGameShareApprovedEvent extends MutationEvent<GameShareSnapshot> {
+  static readonly eventName = HouseholdEvents.GameShareApproved;
+
+  declare readonly before: GameShareSnapshot;
+  declare readonly after: GameShareSnapshot;
+
+  readonly subject = ResourceType.GameShare;
+  readonly subjectId: string;
+
+  constructor(before: GameShareSnapshot, after: GameShareSnapshot, initiatedAt: Date) {
+    super(before, after, initiatedAt);
+    this.subjectId = after.id;
+  }
+}
+
+/**
+ * Emitted once per share, after commit, when a member leaves the household or
+ * is removed from it and their game shares into it end with the membership
+ * (#810), waiting and in effect alike.
+ *
+ * `subject`/`subjectId` are the share, the row the departure deleted. Only
+ * `before` is populated, so `action` derives to `delete`, as it does for the
+ * share's deleted event in `@bge/game`, whose `GameShareSnapshot` it carries.
+ * Without it, a share's audit trail would show its creation and never its end.
+ */
+export class HouseholdGameShareEndedEvent extends MutationEvent<GameShareSnapshot> {
+  static readonly eventName = HouseholdEvents.GameShareEnded;
+
+  declare readonly before: GameShareSnapshot;
+  declare readonly after: null;
+
+  readonly subject = ResourceType.GameShare;
+  readonly subjectId: string;
+
+  constructor(before: GameShareSnapshot, initiatedAt: Date) {
+    super(before, null, initiatedAt);
+    this.subjectId = before.id;
   }
 }

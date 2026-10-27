@@ -1,5 +1,5 @@
-import { constraintIdentity, InviteStatus, InviteType, isPrismaUniqueConstraintError, Prisma } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import { constraintIdentity, InviteStatus, isPrismaUniqueConstraintError, Prisma } from '@bge/database';
+import { arrangeInvite, createActors, type Actors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import { inspect } from 'node:util';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -83,44 +83,6 @@ describe('outstanding invite uniqueness (#161)', () => {
     await db.close();
   });
 
-  interface InviteArrangement {
-    readonly inviter: SessionActor;
-    /** One context or the other; the invite's type follows from which is given. */
-    readonly householdId?: string | null;
-    readonly eventId?: string | null;
-    readonly inviteeId?: string | null;
-    readonly inviteeEmail?: string | null;
-    readonly status?: InviteStatus;
-  }
-
-  /**
-   * Arranges an invite directly, as `household-lifecycle.spec.ts` does. The
-   * token is random because it is unique-constrained and the between-test
-   * sweep must not let one test's row collide with the next (#268).
-   */
-  const arrangeInvite = ({
-    inviter,
-    householdId = null,
-    eventId = null,
-    inviteeId = null,
-    inviteeEmail = null,
-    status = InviteStatus.Pending,
-  }: InviteArrangement) =>
-    db.client.invite.create({
-      data: {
-        type: eventId === null ? InviteType.Household : InviteType.Event,
-        status,
-        inviterId: inviter.user.id,
-        householdId,
-        eventId,
-        inviteeId,
-        inviteeEmail,
-        token: randomUUID(),
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1_000),
-      },
-      select: { id: true },
-    });
-
   const settle = (id: string, status: InviteStatus) =>
     db.client.invite.update({ where: { id }, data: { status, respondedAt: new Date() }, select: { id: true } });
 
@@ -147,10 +109,10 @@ describe('outstanding invite uniqueness (#161)', () => {
     it('refuses a second outstanding invite to the same user, naming the household and invitee columns', async () => {
       const { inviter, inviteeId, householdId } = await arrange();
 
-      await arrangeInvite({ inviter, householdId, inviteeId });
+      await arrangeInvite(db.client, { inviter, householdId, inviteeId });
 
       const error = await captureUniqueViolation(
-        () => arrangeInvite({ inviter, householdId, inviteeId }),
+        () => arrangeInvite(db.client, { inviter, householdId, inviteeId }),
         'a second Pending invite to the same user for the same household',
       );
 
@@ -166,10 +128,10 @@ describe('outstanding invite uniqueness (#161)', () => {
     it('counts an AwaitingApproval invite as outstanding', async () => {
       const { inviter, inviteeId, householdId } = await arrange();
 
-      await arrangeInvite({ inviter, householdId, inviteeId, status: InviteStatus.AwaitingApproval });
+      await arrangeInvite(db.client, { inviter, householdId, inviteeId, status: InviteStatus.AwaitingApproval });
 
       await captureUniqueViolation(
-        () => arrangeInvite({ inviter, householdId, inviteeId }),
+        () => arrangeInvite(db.client, { inviter, householdId, inviteeId }),
         'a Pending invite beside an AwaitingApproval one to the same user',
       );
     });
@@ -177,10 +139,10 @@ describe('outstanding invite uniqueness (#161)', () => {
     it('allows a re-invite once the first was declined, as a new row', async () => {
       const { inviter, inviteeId, householdId } = await arrange();
 
-      const first = await arrangeInvite({ inviter, householdId, inviteeId });
+      const first = await arrangeInvite(db.client, { inviter, householdId, inviteeId });
       await settle(first.id, InviteStatus.Declined);
 
-      const second = await arrangeInvite({ inviter, householdId, inviteeId });
+      const second = await arrangeInvite(db.client, { inviter, householdId, inviteeId });
 
       expect(second.id).not.toBe(first.id);
       await expect(db.client.invite.count({ where: { householdId, inviteeId } })).resolves.toBe(2);
@@ -191,10 +153,12 @@ describe('outstanding invite uniqueness (#161)', () => {
       async (status) => {
         const { inviter, inviteeId, householdId } = await arrange();
 
-        const first = await arrangeInvite({ inviter, householdId, inviteeId });
+        const first = await arrangeInvite(db.client, { inviter, householdId, inviteeId });
         await settle(first.id, status);
 
-        await expect(arrangeInvite({ inviter, householdId, inviteeId })).resolves.toEqual({ id: expect.any(String) });
+        await expect(arrangeInvite(db.client, { inviter, householdId, inviteeId })).resolves.toMatchObject({
+          id: expect.any(String),
+        });
       },
     );
 
@@ -202,11 +166,11 @@ describe('outstanding invite uniqueness (#161)', () => {
       const { inviter, inviteeId, householdId } = await arrange();
       const other = await actors.householdWithMembers({ owner: inviter, name: 'Another household' });
 
-      await arrangeInvite({ inviter, householdId, inviteeId });
+      await arrangeInvite(db.client, { inviter, householdId, inviteeId });
 
-      await expect(arrangeInvite({ inviter, householdId: other.household.id, inviteeId })).resolves.toEqual({
-        id: expect.any(String),
-      });
+      await expect(
+        arrangeInvite(db.client, { inviter, householdId: other.household.id, inviteeId }),
+      ).resolves.toMatchObject({ id: expect.any(String) });
     });
   });
 
@@ -215,10 +179,10 @@ describe('outstanding invite uniqueness (#161)', () => {
       const { inviter, householdId } = await arrange();
       const inviteeEmail = `invitee-${randomUUID()}@e2e.invalid`;
 
-      await arrangeInvite({ inviter, householdId, inviteeEmail });
+      await arrangeInvite(db.client, { inviter, householdId, inviteeEmail });
 
       const error = await captureUniqueViolation(
-        () => arrangeInvite({ inviter, householdId, inviteeEmail }),
+        () => arrangeInvite(db.client, { inviter, householdId, inviteeEmail }),
         'a second Pending invite to the same address for the same household',
       );
 
@@ -233,10 +197,12 @@ describe('outstanding invite uniqueness (#161)', () => {
       const { inviter, householdId } = await arrange();
       const inviteeEmail = `invitee-${randomUUID()}@e2e.invalid`;
 
-      const first = await arrangeInvite({ inviter, householdId, inviteeEmail });
+      const first = await arrangeInvite(db.client, { inviter, householdId, inviteeEmail });
       await settle(first.id, InviteStatus.Expired);
 
-      await expect(arrangeInvite({ inviter, householdId, inviteeEmail })).resolves.toEqual({ id: expect.any(String) });
+      await expect(arrangeInvite(db.client, { inviter, householdId, inviteeEmail })).resolves.toMatchObject({
+        id: expect.any(String),
+      });
     });
 
     it('does not collide with a user-bound invite: NULLs are distinct under both indexes', async () => {
@@ -245,11 +211,11 @@ describe('outstanding invite uniqueness (#161)', () => {
       // two NULLs, so the two kinds of invite cannot block each other.
       const { inviter, inviteeId, householdId } = await arrange();
 
-      await arrangeInvite({ inviter, householdId, inviteeId });
+      await arrangeInvite(db.client, { inviter, householdId, inviteeId });
 
       await expect(
-        arrangeInvite({ inviter, householdId, inviteeEmail: `invitee-${randomUUID()}@e2e.invalid` }),
-      ).resolves.toEqual({ id: expect.any(String) });
+        arrangeInvite(db.client, { inviter, householdId, inviteeEmail: `invitee-${randomUUID()}@e2e.invalid` }),
+      ).resolves.toMatchObject({ id: expect.any(String) });
     });
   });
 
@@ -261,10 +227,10 @@ describe('outstanding invite uniqueness (#161)', () => {
     it('refuses a second outstanding invite to the same user, naming the event and invitee columns', async () => {
       const { inviter, inviteeId, eventId } = await arrangeEvent();
 
-      await arrangeInvite({ inviter, eventId, inviteeId });
+      await arrangeInvite(db.client, { inviter, eventId, inviteeId });
 
       const error = await captureUniqueViolation(
-        () => arrangeInvite({ inviter, eventId, inviteeId }),
+        () => arrangeInvite(db.client, { inviter, eventId, inviteeId }),
         'a second Pending invite to the same user for the same event',
       );
 
@@ -279,10 +245,10 @@ describe('outstanding invite uniqueness (#161)', () => {
       const { inviter, eventId } = await arrangeEvent();
       const inviteeEmail = `invitee-${randomUUID()}@e2e.invalid`;
 
-      await arrangeInvite({ inviter, eventId, inviteeEmail });
+      await arrangeInvite(db.client, { inviter, eventId, inviteeEmail });
 
       const error = await captureUniqueViolation(
-        () => arrangeInvite({ inviter, eventId, inviteeEmail }),
+        () => arrangeInvite(db.client, { inviter, eventId, inviteeEmail }),
         'a second Pending invite to the same address for the same event',
       );
 

@@ -1,4 +1,4 @@
-import { MemberInvitePolicy } from '@bge/database';
+import { MemberInvitePolicy, MemberSharePolicy } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -19,15 +19,28 @@ export class UpdateHouseholdSettingsDto {
     description:
       'Whether members may invite. `Direct`: their invites go straight to the invitee. `NeedsApproval` (the ' +
       'default): their invites wait for an owner or admin to approve them. `Off`: members cannot invite. Owners ' +
-      'and admins always invite directly, and guests never invite. A change applies to invites sent after it.',
+      'and admins always invite directly, and guests never invite. A change applies to invites sent after it, and ' +
+      'a switch to `Off` also stops a waiting invite from being approved and an outstanding one from being accepted.',
   })
   @ValidateIf((_, value) => value !== undefined)
   @IsEnum(MemberInvitePolicy, { message: i18nValidationMessage('validation.isEnum') })
   memberInvitePolicy?: MemberInvitePolicy;
+
+  @ApiPropertyOptional({
+    enum: MemberSharePolicy,
+    description:
+      'Whether members may share games they created with the household. `Direct`: their shares take effect at ' +
+      'once. `NeedsApproval` (the default): their shares wait for an owner or admin to approve them. `Off`: ' +
+      'members cannot share. Owners and admins always share directly, and guests never share. A change applies ' +
+      'to shares made after it, and a switch to `Off` also stops a waiting share from being approved.',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsEnum(MemberSharePolicy, { message: i18nValidationMessage('validation.isEnum') })
+  memberSharePolicy?: MemberSharePolicy;
 }
 
 /**
- * Everything a create sets, less the create's own idempotency key, plus the
+ * Everything a create sets, less the create's own client request id, plus the
  * household's settings.
  *
  * `clientRequestId` is how a retried create finds the row it already made

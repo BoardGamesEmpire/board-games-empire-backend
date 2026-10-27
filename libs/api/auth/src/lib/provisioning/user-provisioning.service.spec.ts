@@ -1,4 +1,4 @@
-import { SystemRole } from '@bge/database';
+import { SystemRole, type User } from '@bge/database';
 import { PermissionsService } from '@bge/permissions';
 import { ServiceAccountService } from '@bge/services';
 import { createMockDatabaseService, createTestingModuleWithDb, makeUser, MockDatabaseService } from '@bge/testing';
@@ -219,6 +219,65 @@ describe('UserProvisioningService', () => {
     // Rejected before the catalog is queried: a malformed role set is the
     // caller's bug, not something to spend a round trip discovering.
     expect(db.role.findMany).not.toHaveBeenCalled();
+  });
+
+  describe('the profile it creates', () => {
+    /** A later signup, as in the base-role test: the seat is taken, so only the base role is resolved. */
+    const provisionLaterSignup = async (overrides: Partial<User>) => {
+      db.user.findUniqueOrThrow.mockResolvedValue(makeUser({ id: 'u2', username: 'ada', ...overrides }));
+      db.user.findFirst.mockResolvedValue({ id: 'u1' } as never);
+      db.role.findMany.mockResolvedValue([{ id: 'role-user', name: SystemRole.User }] as never);
+      db.$transaction.mockImplementation((cb) => cb(db));
+
+      await service.provisionNewUser('u2');
+    };
+
+    it.each<[string, Pick<User, 'firstName' | 'lastName'>, string]>([
+      ['first and last name', { firstName: 'Ada', lastName: 'Lovelace' }, 'Ada Lovelace'],
+      ['padded parts', { firstName: '  Ada ', lastName: ' Lovelace  ' }, 'Ada Lovelace'],
+      ['a first name of only spaces (#818)', { firstName: '   ', lastName: null }, 'ada'],
+      ['both parts blank', { firstName: ' ', lastName: ' ' }, 'ada'],
+      ['a last name alone', { firstName: null, lastName: 'Lovelace' }, 'Lovelace'],
+      ['no name at all', { firstName: null, lastName: null }, 'ada'],
+    ])('names the profile from %s', async (_case, names, expected) => {
+      await provisionLaterSignup(names);
+
+      expect(db.userProfile.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ userId: 'u2', displayName: expected }),
+      });
+    });
+
+    // Nothing caps the names at sign-up, and the profile edit refuses a display
+    // name over 64 characters, so a longer starting name couldn't be sent back
+    // unchanged (#819).
+    it('cuts a starting display name to 64 characters, by code point and without a trailing space', async () => {
+      await provisionLaterSignup({ firstName: 'A'.repeat(63), lastName: 'Lovelace' });
+      expect(db.userProfile.create).toHaveBeenLastCalledWith({
+        data: expect.objectContaining({ displayName: 'A'.repeat(63) }),
+      });
+
+      await provisionLaterSignup({ firstName: '🎲'.repeat(70), lastName: null });
+      expect(db.userProfile.create).toHaveBeenLastCalledWith({
+        data: expect.objectContaining({ displayName: '🎲'.repeat(64) }),
+      });
+    });
+
+    it("seeds the avatar from the sign-in provider's picture (#695)", async () => {
+      await provisionLaterSignup({ image: 'https://provider.example/a.png' });
+
+      expect(db.userProfile.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ avatarUrl: 'https://provider.example/a.png' }),
+      });
+    });
+
+    it.each<[string, string | null]>([
+      ['no picture', null],
+      ['a blank picture', '  '],
+    ])('seeds no avatar when the provider gave %s', async (_case, image) => {
+      await provisionLaterSignup({ image });
+
+      expect(db.userProfile.create).toHaveBeenCalledWith({ data: expect.objectContaining({ avatarUrl: null }) });
+    });
   });
 
   it('refuses to provision against an unseeded catalog rather than granting a partial role set', async () => {

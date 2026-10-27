@@ -9,6 +9,17 @@ import type { BggLinkType, BggNameType, BggThingType } from '../constants';
  */
 
 /**
+ * Text as the client's parser hands it over: still entity-encoded, a number
+ * when the value looks like one (a game titled "2048", a publisher named
+ * "1830"), and a boolean when it is "true" or "false". The mappers pass it
+ * through `decodeText` or `decodeDescription` before sending it (#716).
+ *
+ * The parser's numbers can't always be turned back into what BGG sent: "007"
+ * arrives as 7, and "1e3" as 1000.
+ */
+export type BggText = string | number | boolean;
+
+/**
  * `name` element. A thing carries one primary name and zero or more
  * alternate names (translations / regional editions).
  */
@@ -21,7 +32,7 @@ export interface BggName {
    */
   sortindex?: number;
 
-  value: string;
+  value: BggText;
 }
 
 /**
@@ -31,7 +42,9 @@ export interface BggName {
 export interface BggLink {
   type: BggLinkType | string;
   id: number;
-  value: string;
+
+  /** Absent when BGG sends a link with no `value` attribute. */
+  value?: BggText;
 
   /**
    * BGG returns `inbound="true"` when the link points back at this thing
@@ -93,7 +106,7 @@ export interface BggThing {
 
   thumbnail?: string;
   image?: string;
-  description?: string;
+  description?: BggText;
 
   yearpublished?: number;
   minplayers?: number;
@@ -118,10 +131,11 @@ export interface BggThing {
 
   /**
    * Some BGG client adapters flatten names into a direct title string
-   * with alternates split out separately.
+   * with alternates split out separately. bgg-ts-client puts every name's
+   * value, primary first, in `alternateNames`, and the first of them in `name`.
    */
-  name?: string;
-  alternateNames?: string[];
+  name?: BggText;
+  alternateNames?: BggText[];
 
   /**
    * Relational links — categories, mechanics, designers, expansions, etc.
@@ -156,7 +170,7 @@ export interface BggSearchItem {
   /**
    * Search results carry a single `name` element rather than an array.
    */
-  name?: string;
+  name?: BggText;
 
   /**
    * Some client libraries surface search results with a `names` array
@@ -186,8 +200,9 @@ export interface BggVersion {
   id: number;
   length: number;
   links: BggLink[];
-  name: string;
-  productcode: string;
+  name: BggText;
+  /** No mapper reads it yet. BggText, since a code made of digits arrives as a number (#716). */
+  productcode: BggText;
   type: BggThingType | string;
   weight: number;
   width: number;

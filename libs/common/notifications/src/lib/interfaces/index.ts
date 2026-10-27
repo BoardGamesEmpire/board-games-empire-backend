@@ -212,6 +212,31 @@ export interface HouseholdOwnershipTransferredPayload extends HouseholdRefPayloa
 }
 
 /**
+ * A game was shared with the recipient by name; sent to them when the share
+ * takes effect, which a share to a user does on create (#810). `sharerName`
+ * is the sharer's name as it is shown, so the recipient is told who, and never
+ * an address.
+ */
+export interface GameShareReceivedPayload {
+  shareId: string;
+  gameId: string;
+  gameTitle: string;
+  sharerName: string;
+}
+
+/**
+ * A member's share of a game into a household waits for approval; sent to the
+ * household owners and admins, who answer for what the household shares (#810).
+ * A household share that takes effect on create tells nobody.
+ */
+export interface GameShareAwaitingApprovalPayload extends HouseholdRefPayload {
+  shareId: string;
+  gameId: string;
+  gameTitle: string;
+  sharerName: string;
+}
+
+/**
  * The single source of truth mapping every `NotificationType` to its payload
  * shape. Keyed by the enum value, so `NotificationPayloadMap[T]` resolves a
  * type's payload and the discriminated `UnreadNotificationDto` / typed
@@ -233,6 +258,8 @@ export type NotificationPayloadMap = {
   [NotificationType.HouseholdInviteAccepted]: HouseholdInviteAcceptedPayload;
   [NotificationType.HouseholdInviteDeclined]: HouseholdInviteDeclinedPayload;
   [NotificationType.HouseholdOwnershipTransferred]: HouseholdOwnershipTransferredPayload;
+  [NotificationType.GameShareReceived]: GameShareReceivedPayload;
+  [NotificationType.GameShareAwaitingApproval]: GameShareAwaitingApprovalPayload;
   [NotificationType.EventInviteReceived]: EventRefPayload;
   [NotificationType.EventCreated]: EventRefPayload;
   [NotificationType.EventRsvpReceived]: EventRsvpReceivedPayload;

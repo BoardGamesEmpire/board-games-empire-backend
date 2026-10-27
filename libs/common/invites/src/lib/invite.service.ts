@@ -41,6 +41,7 @@ import {
   InviteWithdrawnEvent,
   toInviteSnapshot,
   type InviteDomainEvent,
+  type InviteSnapshot,
   type InviteTransitionEvent,
   type InviteTransitionEventClass,
 } from './events/invite.events';
@@ -54,6 +55,7 @@ import type {
   InviteContextScope,
   InviteCreation,
   InviteDeclination,
+  InviteOffer,
   InviteOutcome,
   InvitePartyLookup,
   InviteRevocation,
@@ -62,6 +64,7 @@ import type {
   InviteWithdrawal,
   OutstandingInviteExpiry,
   OutstandingInviteRevocation,
+  OutstandingInviteWithholding,
   RespondToInviteParams,
   RevokeInviteParams,
   WithdrawInviteParams,
@@ -98,6 +101,13 @@ export function normalizeInviteeEmail(value: string | null | undefined): string 
 
   return normalized ? normalized : null;
 }
+
+/**
+ * What {@link InviteService.findAcceptableWithin} reads: the row a transition
+ * reads, plus whether it was sent to wait for an approver. Internal to the
+ * lib, like the transition's own select.
+ */
+const ACCEPTABLE_SELECT = { ...TRANSITION_SELECT, needsApproval: true } as const satisfies Prisma.InviteSelect;
 
 /** The column each invite type that names a context names it by. */
 const CONTEXT_COLUMN = {
@@ -400,13 +410,7 @@ export class InviteService {
   acceptWithin(tx: Prisma.TransactionClient, params: RespondToInviteParams): Promise<InviteAcceptance> {
     return this.transitionWithin(tx, {
       ...this.asInvitee(params),
-      assertStatus: (row) => {
-        if (row.status === InviteStatus.AwaitingApproval) {
-          throw new ConflictException(t('errors.invite.awaiting_approval', { id: row.id }));
-        }
-
-        this.assertFrom(row, [InviteStatus.Pending]);
-      },
+      assertStatus: (row) => this.assertAcceptable(row),
       data: (now) => ({
         status: InviteStatus.Accepted,
         respondedAt: now,
@@ -417,6 +421,40 @@ export class InviteService {
       view: PARTY_INVITE_SELECT,
       event: InviteAcceptedEvent,
     });
+  }
+
+  /**
+   * The invite an invitee is about to accept, refused exactly as
+   * {@link acceptWithin} refuses it, for a consumer that asks something of the
+   * invite before accepting it: whether its inviter could still send it, for a
+   * household (#747). Nothing is written but the expiry stamp a 410 leaves, as
+   * the accept leaves it.
+   *
+   * Asked before the accept, never after: an accept that went through has
+   * already bound an invite by address to the acting user, and no later write
+   * in the transaction could take that back without a trace. A consumer whose
+   * answer is no revokes the invite instead, through {@link revokeWithin}; one
+   * whose answer is yes calls {@link acceptWithin}, which reads the row again
+   * and guards its write on what it read.
+   */
+  async findAcceptableWithin(tx: Prisma.TransactionClient, params: RespondToInviteParams): Promise<InviteOffer> {
+    const now = new Date();
+    const { target, partyOf, vouchedEmail, type, assertRole } = this.asInvitee(params);
+
+    const row = await tx.invite.findFirst({
+      where: { ...this.partyWhere(target, partyOf, vouchedEmail), type },
+      select: ACCEPTABLE_SELECT,
+    });
+
+    if (!row) {
+      return this.refuseMissing(target);
+    }
+
+    assertRole(row);
+    this.refuseIfExpired(row, now);
+    this.assertAcceptable(row);
+
+    return { id: row.id, inviterId: row.inviterId, role: row.role, needsApproval: row.needsApproval };
   }
 
   /**
@@ -537,6 +575,137 @@ export class InviteService {
     );
 
     return { count: events.length, events };
+  }
+
+  /**
+   * Closes the outstanding invites into a context that one user sent, or that
+   * name them by id, as their leaving it does (#747). Their invites end with
+   * the authority that sent them, and an invite to them would let them back
+   * in.
+   *
+   * Invites to their address are left open. Revoking those would tell each
+   * inviter whose address it was; keeping someone out for good is a household
+   * ban's (#782).
+   *
+   * The caller locks its context row first, as for
+   * {@link revokeOutstandingWithin}. The user's own invites are revoked with
+   * the rest, so `invite.revoked` here is never a withdraw: the user did not
+   * take them back, their leaving ended them.
+   */
+  async revokeOutstandingOfUserWithin(
+    tx: Prisma.TransactionClient,
+    scope: InviteContextScope,
+    userId: string,
+  ): Promise<OutstandingInviteRevocation> {
+    const now = new Date();
+    const { events } = await this.settleOutstandingWithin(
+      tx,
+      { ...scope, OR: [{ inviterId: userId }, { inviteeId: userId }] },
+      { status: InviteStatus.Revoked, respondedAt: now },
+      InviteRevokedEvent,
+      now,
+    );
+
+    return { count: events.length, events };
+  }
+
+  /**
+   * Withholds the outstanding invites into a context that name no user and
+   * go to one address, as a household ban does to the banned user's address
+   * (#782). A withheld invite is unreachable by id, by address and by its
+   * link, and its inviter sees no change: it still reads as sent.
+   *
+   * Never revoked: revoking would tell each inviter whose address it was. Nor
+   * announced, for the same reason, so no events come back.
+   *
+   * One guarded update, with no limit. The caller locks its context row
+   * first, as for {@link revokeOutstandingWithin}.
+   */
+  async withholdOutstandingToAddressWithin(
+    tx: Prisma.TransactionClient,
+    scope: InviteContextScope,
+    email: string,
+  ): Promise<OutstandingInviteWithholding> {
+    const inviteeEmail = normalizeInviteeEmail(email);
+
+    // A consumer's mistake, so a bare 500. A blank address normalises to
+    // null, which would match the invites that name no address at all.
+    if (inviteeEmail === null) {
+      throw new Error('An address to withhold invites to must not be blank');
+    }
+
+    const { count } = await tx.invite.updateMany({
+      where: {
+        ...scope,
+        inviteeId: null,
+        inviteeEmail,
+        withheld: false,
+        status: { in: [...OUTSTANDING_INVITE_STATUSES] },
+      },
+      data: { withheld: true },
+    });
+
+    return { count };
+  }
+
+  /**
+   * Releases the withheld outstanding invites into a context to one address,
+   * as lifting a household ban does (#782), all but those `keepWithheld`
+   * answers true for: the caller asks there whatever else still withholds an
+   * invite, such as #278's gate. A released invite is reachable by its
+   * address again, as if it had never been withheld. Its inviter sees no
+   * change, since a withheld invite already read as sent.
+   *
+   * Not announced: a released invite's status doesn't change, and an event
+   * would carry a withheld invite to the audit log. The caller tells the
+   * invitee, if anyone, from the snapshots it gets back.
+   *
+   * The caller locks its context row first, against every write that reads
+   * or withholds these invites, so the read and the update see one set. The
+   * update restates the guard, so a row the expiry sweep stamped in between
+   * stays as it was.
+   */
+  async releaseWithheldToAddressWithin(
+    tx: Prisma.TransactionClient,
+    scope: InviteContextScope,
+    email: string,
+    keepWithheld: (invite: InviteSnapshot) => Promise<boolean>,
+  ): Promise<InviteSnapshot[]> {
+    const inviteeEmail = normalizeInviteeEmail(email);
+
+    // A consumer's mistake, so a bare 500, as for the withhold.
+    if (inviteeEmail === null) {
+      throw new Error('An address to release invites to must not be blank');
+    }
+
+    const guard: Prisma.InviteWhereInput = {
+      ...scope,
+      inviteeId: null,
+      inviteeEmail,
+      withheld: true,
+      status: { in: [...OUTSTANDING_INVITE_STATUSES] },
+    };
+
+    const withheld = await tx.invite.findMany({ where: guard, select: INVITE_SNAPSHOT_SELECT });
+    const releasing: string[] = [];
+
+    for (const row of withheld) {
+      if (!(await keepWithheld(toInviteSnapshot(row)))) {
+        releasing.push(row.id);
+      }
+    }
+
+    if (releasing.length === 0) {
+      return [];
+    }
+
+    const released = await tx.invite.updateManyAndReturn({
+      where: { ...guard, id: { in: releasing } },
+      data: { withheld: false },
+      select: INVITE_SNAPSHOT_SELECT,
+    });
+
+    return released.map(toInviteSnapshot);
   }
 
   /**
@@ -1022,6 +1191,15 @@ export class InviteService {
     if (current.inviterId === actingUserId) {
       throw new ForbiddenException(t('errors.invite.revoke_own_invite', { id: current.id }));
     }
+  }
+
+  /** Accept starts only from `Pending`; one still awaiting approval says so rather than "settled". */
+  private assertAcceptable(current: InviteTransitionRow): void {
+    if (current.status === InviteStatus.AwaitingApproval) {
+      throw new ConflictException(t('errors.invite.awaiting_approval', { id: current.id }));
+    }
+
+    this.assertFrom(current, [InviteStatus.Pending]);
   }
 
   private assertFrom(current: InviteTransitionRow, allowed: readonly InviteStatus[]): void {

@@ -1,9 +1,9 @@
 import { FeedbackCategory, FeedbackContext, FeedbackSeverity } from '@bge/database';
+import { MAX_CLIENT_REQUEST_ID_LENGTH } from '@bge/shared';
 import { plainToInstance } from 'class-transformer';
 import { validate, ValidationError } from 'class-validator';
 import { FEEDBACK_BREADCRUMBS_MAX_BYTES, FEEDBACK_MAX_STACK_TRACE_LENGTH } from '../constants/feedback.constants';
 import {
-  FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH,
   FEEDBACK_MAX_MESSAGE_LENGTH,
   FEEDBACK_MAX_REDACTED_FIELDS,
   FEEDBACK_MAX_TITLE_LENGTH,
@@ -240,7 +240,7 @@ describe('CreateFeedbackReportDto', () => {
     it('accepts a key exactly at the length cap', async () => {
       const errors = await validatePayload({
         ...VALID_BUG_PAYLOAD,
-        clientRequestId: 'x'.repeat(FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH),
+        clientRequestId: 'x'.repeat(MAX_CLIENT_REQUEST_ID_LENGTH),
       });
 
       expect(errors).toHaveLength(0);
@@ -249,7 +249,7 @@ describe('CreateFeedbackReportDto', () => {
     it('rejects a key exceeding the length cap', async () => {
       const errors = await validatePayload({
         ...VALID_BUG_PAYLOAD,
-        clientRequestId: 'x'.repeat(FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH + 1),
+        clientRequestId: 'x'.repeat(MAX_CLIENT_REQUEST_ID_LENGTH + 1),
       });
 
       expect(hasErrorFor(errors, 'clientRequestId')).toBe(true);
@@ -258,7 +258,7 @@ describe('CreateFeedbackReportDto', () => {
     it('measures the cap after trimming', async () => {
       const errors = await validatePayload({
         ...VALID_BUG_PAYLOAD,
-        clientRequestId: `  ${'x'.repeat(FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH)}  `,
+        clientRequestId: `  ${'x'.repeat(MAX_CLIENT_REQUEST_ID_LENGTH)}  `,
       });
 
       expect(errors).toHaveLength(0);

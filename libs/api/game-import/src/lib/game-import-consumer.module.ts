@@ -3,6 +3,7 @@ import { DatabaseModule } from '@bge/database';
 import { LanguageLinkModule } from '@bge/language';
 import { NotificationsServiceModule } from '@bge/notifications-service';
 import { ServicesModule } from '@bge/services';
+import { VocabularyLinkModule } from '@bge/vocabulary';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { FlowProducerNames, QueueNames } from './constants/queue.constants';
@@ -16,7 +17,6 @@ import { GameUpsertService } from './services/game.service';
 import { PersonUpsertService } from './services/person.service';
 import { PlatformUpsertService } from './services/platform.service';
 import { ReleaseGraphResolver } from './services/release-graph.resolver';
-import { TaxonomyUpsertService } from './services/taxonomy.service';
 
 @Module({
   imports: [
@@ -26,6 +26,8 @@ import { TaxonomyUpsertService } from './services/taxonomy.service';
     NotificationsServiceModule,
     // ServiceAccountService: imported games are owned by the service account.
     ServicesModule,
+    // Platforms, categories, mechanics and families resolve through their links (#718).
+    VocabularyLinkModule,
     // GamesImport: consumed here (GameImportProcessor) and produced (spawner).
     // GatewayFetch: producer only — the spawner enqueues expansion fetch jobs,
     // but this app registers NO fetch @Processor, so the worker never calls a
@@ -44,7 +46,6 @@ import { TaxonomyUpsertService } from './services/taxonomy.service';
     PersonUpsertService,
     PlatformUpsertService,
     ReleaseGraphResolver,
-    TaxonomyUpsertService,
   ],
 })
 export class GameImportConsumerModule {}

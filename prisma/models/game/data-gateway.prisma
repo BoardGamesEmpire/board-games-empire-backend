@@ -32,7 +32,7 @@ model DataGateway {
   capabilities                DataGatewayCapability[] @default([])
   coveragePlatformTypes       PlatformType[]          @default([]) @map("coverage_platform_types")
   coverageContentTypes        ContentType[]           @default([]) @map("coverage_content_types")
-  filterableAxes              CoverageAxis[]          @default([]) @map("filterable_axes")
+  filterableAxes              SearchFilterAxis[]      @default([]) @map("filterable_axes")
   acceptedLanguageCodeFormats LanguageCodeFormat[]    @default([]) @map("accepted_language_code_formats")
   responseLanguageCodeFormat  LanguageCodeFormat?     @map("response_language_code_format")
   passthroughSearchLanguage   Boolean?                @map("passthrough_search_language")
@@ -49,16 +49,17 @@ model DataGateway {
   firstInterviewedAt    DateTime?                    @map("first_interviewed_at") @db.Timestamptz(3)
   // The last interview that succeeded: its answers are the ones in use.
   lastInterviewedAt     DateTime?                    @map("last_interviewed_at") @db.Timestamptz(3)
-  // The last interview that failed, or that succeeded with a section failing,
-  // and a coarse code for why. The admin routes return these columns, so the
-  // raw error is only logged. A later success leaves both in place: the
-  // failure is current while lastInterviewFailedAt isn't before
-  // lastInterviewedAt.
+  // The last interview that failed, and a coarse code for why. The admin
+  // routes return these columns, so the raw error is only logged. A later
+  // success leaves both in place: the failure is current while
+  // lastInterviewFailedAt isn't before lastInterviewedAt. Each list job
+  // records its own outcome in sections (#718).
   lastInterviewFailedAt DateTime?                    @map("last_interview_failed_at") @db.Timestamptz(3)
   lastInterviewFailure  DataGatewayInterviewFailure? @map("last_interview_failure")
 
   gameSources            GameSource[]
   importActivities       ImportActivity[]
+  sections               DataGatewaySection[]
   userGatewayConnections UserGatewayConnection[]
 
   createdBy   User?   @relation("DataGatewayCreator", fields: [createdById], references: [id])
@@ -78,17 +79,23 @@ enum DataGatewayCapability {
   Fetch
   FetchExpansions
   ListLanguages
+  ListPlatforms
+  ListCategories
+  ListMechanics
 
   @@map("data_gateway_capabilities")
 }
 
-// A coverage axis a DataGateway's search can filter by. Mirrors proto
-// CoverageAxis (bge.gateway.v1).
-enum CoverageAxis {
+// A search filter a DataGateway's search can narrow by. Mirrors proto
+// SearchFilterAxis (bge.gateway.v1).
+enum SearchFilterAxis {
   PlatformType
   ContentType
+  PublishYear
+  PlayerCount
+  PlayTime
 
-  @@map("coverage_axes")
+  @@map("search_filter_axes")
 }
 
 // The form a DataGateway's free text arrives in. Mirrors proto ContentFormat
@@ -102,7 +109,7 @@ enum ContentFormat {
   @@map("content_formats")
 }
 
-// Why an interview, or a section of one, failed.
+// Why an interview failed.
 enum DataGatewayInterviewFailure {
   // The interview's ping went unanswered.
   PingFailed
@@ -110,8 +117,30 @@ enum DataGatewayInterviewFailure {
   DescribeUnsupported
   // Describe failed in some other way.
   DescribeFailed
-  // ListLanguages failed. The interview still succeeded with the rest.
-  LanguageSectionFailed
 
   @@map("data_gateway_interview_failures")
+}
+
+// One list job's outcome for one DataGateway (#718). A failure is recorded
+// after the job's last attempt, and is current while lastFailedAt isn't
+// before lastLoadedAt, as on the interview.
+model DataGatewaySection {
+  dataGateway  DataGateway                @relation(fields: [gatewayId], references: [id], onDelete: Cascade)
+  gatewayId    String                     @map("gateway_id")
+  capability   DataGatewayCapability
+  lastLoadedAt DateTime?                  @map("last_loaded_at") @db.Timestamptz(3)
+  lastFailedAt DateTime?                  @map("last_failed_at") @db.Timestamptz(3)
+  lastFailure  DataGatewaySectionFailure? @map("last_failure")
+
+  @@id([gatewayId, capability])
+  @@map("data_gateway_sections")
+}
+
+// Why a list job failed (#718).
+enum DataGatewaySectionFailure {
+  ListUnsupported // the DataGateway answered UNIMPLEMENTED
+  ListFailed // the list call failed in some other way
+  LinkFailed // the server couldn't write the links
+
+  @@map("data_gateway_section_failures")
 }

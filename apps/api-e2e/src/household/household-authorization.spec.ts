@@ -170,8 +170,8 @@ describe('household authorization', () => {
         await readHousehold(viewer, householdId).expect(403);
       });
 
-      // `FriendsOfFriends` admits direct friends only until #496 defines a
-      // friend of a friend.
+      // `FriendsOfFriends` admits direct friends only until #231 decides what a
+      // household opens beyond its members' friends (#496).
       it('refuses a friend of a friend, at FriendsOfFriends', async () => {
         const { viewer, acceptedFriend, householdId } = await arrangeFriendsHousehold();
         await db.client.household.update({ where: { id: householdId }, data: { reach: Reach.FriendsOfFriends } });

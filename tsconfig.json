@@ -236,6 +236,9 @@
     },
     {
       "path": "./libs/common/content-format"
+    },
+    {
+      "path": "./libs/api/vocabulary"
     }
   ]
 }
