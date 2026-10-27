@@ -31,7 +31,9 @@
   "event": {
     "created": "Event created successfully",
     "updated": "Event with ID {id} updated successfully",
-    "deleted": "Event with ID {id} deleted successfully"
+    "deleted": "Event with ID {id} deleted successfully",
+    "cancelled": "Event cancelled",
+    "reopened": "Event reopened"
   },
   "occurrence": {
     "added": "Occurrence added",

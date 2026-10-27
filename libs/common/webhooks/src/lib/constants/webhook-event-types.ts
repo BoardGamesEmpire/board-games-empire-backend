@@ -25,6 +25,10 @@ export const WebhookEventType = {
   EventCreated: 'event.event.created.v1',
   EventUpdated: 'event.event.updated.v1',
   EventDeleted: 'event.event.deleted.v1',
+  /** The host called an event off, and its dates with it (#795). */
+  EventCancelled: 'event.event.cancelled.v1',
+  /** The host reopened a cancelled event (#795). */
+  EventReopened: 'event.event.reopened.v1',
   /** A game (base or expansion) was persisted by an import job. */
   GameImported: 'game.game.imported.v1',
   /** An import job began fetching from its gateway. */
@@ -88,6 +92,8 @@ export const WEBHOOK_EVENT_DESCRIPTORS: Record<WebhookEventType, WebhookEventMet
   // Emitted after the soft delete commits, so a live-row check would refuse
   // every subscriber.
   [WebhookEventType.EventDeleted]: { subject: ResourceType.Event, requiredAction: Action.read, subjectDeleted: true },
+  [WebhookEventType.EventCancelled]: { subject: ResourceType.Event, requiredAction: Action.read },
+  [WebhookEventType.EventReopened]: { subject: ResourceType.Event, requiredAction: Action.read },
   [WebhookEventType.GameImported]: { subject: ResourceType.Game, requiredAction: Action.read },
   [WebhookEventType.ImportJobStarted]: { subject: ResourceType.Job, requiredAction: Action.read },
   [WebhookEventType.ImportJobFailed]: { subject: ResourceType.Job, requiredAction: Action.read },

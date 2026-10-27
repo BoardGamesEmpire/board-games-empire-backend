@@ -395,7 +395,7 @@ export class EventService {
         householdId: event.householdId,
         // An event is created once, so its id names this occurrence.
         occurrenceId: event.id,
-        data: this.webhookIds(event),
+        data: eventWebhookIds(event),
       }),
     );
 
@@ -534,7 +534,7 @@ export class EventService {
             webhookEnvelope({
               subjectId: updated.id,
               householdId: updated.householdId,
-              data: { ...this.webhookIds(updated), changedFields },
+              data: { ...eventWebhookIds(updated), changedFields },
             }),
           );
         }
@@ -589,7 +589,7 @@ export class EventService {
           subjectId: event.id,
           householdId: event.householdId,
           occurrenceId: event.id,
-          data: this.webhookIds(event),
+          data: eventWebhookIds(event),
         }),
       );
 
@@ -604,22 +604,25 @@ export class EventService {
     }
   }
 
-  /**
-   * What every Event webhook carries: ids only. `data` is copied verbatim to a
-   * URL the subscriber controls, and an event's title, description and
-   * `location` (which may be a home address) are not the subscriber's to
-   * forward. A receiver that wants them reads the event with its own
-   * credentials and gets what that read allows.
-   */
-  private webhookIds(event: Pick<Event, 'id' | 'householdId'>): { eventId: string; householdId: string | null } {
-    return { eventId: event.id, householdId: event.householdId };
-  }
-
   private validateOccurrencesForMode(mode: EventSchedulingMode, occurrences?: CreateEventDto['occurrences']): void {
     if (mode === EventSchedulingMode.Fixed && occurrences && occurrences.length > 1) {
       throw new BadRequestException(t('errors.event.fixed_mode_single'));
     }
   }
+}
+
+/**
+ * What every Event webhook carries: ids only. `data` is copied verbatim to a
+ * URL the subscriber controls, and an event's title, description and
+ * `location` (which may be a home address) are not the subscriber's to
+ * forward. A receiver that wants them reads the event with its own
+ * credentials and gets what that read allows.
+ */
+export function eventWebhookIds(event: Pick<Event, 'id' | 'householdId'>): {
+  eventId: string;
+  householdId: string | null;
+} {
+  return { eventId: event.id, householdId: event.householdId };
 }
 
 /**

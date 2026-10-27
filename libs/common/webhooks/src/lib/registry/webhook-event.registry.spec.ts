@@ -63,6 +63,8 @@ describe('WebhookEventRegistry', () => {
         WebhookEventType.EventCreated,
         WebhookEventType.EventUpdated,
         WebhookEventType.EventDeleted,
+        WebhookEventType.EventCancelled,
+        WebhookEventType.EventReopened,
       ]);
 
       expect(subjects).toEqual([ResourceType.Event]);
@@ -102,6 +104,8 @@ describe('WebhookEventRegistry', () => {
         WebhookEventType.EventCreated,
         WebhookEventType.EventDeleted,
         WebhookEventType.EventUpdated,
+        WebhookEventType.EventCancelled,
+        WebhookEventType.EventReopened,
         WebhookEventType.GameImported,
         WebhookEventType.ImportJobStarted,
         WebhookEventType.ImportJobFailed,
