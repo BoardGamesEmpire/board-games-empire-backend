@@ -164,7 +164,7 @@
     "socket.io": "4.8.3",
     "socket.io-redis-adapter": "8.4.6",
     "surrogate": "1.9.2",
-    "undici": "8.5.0",
+    "undici": "8.12.2",
     "unist-util-visit": "5.1.0",
     "zod": "4.4.3"
   },
