@@ -23,6 +23,11 @@ export interface RandomGamesEnvelope {
   readonly games: readonly GameWire[];
 }
 
+export interface GamePoolSampleEnvelope {
+  readonly games: readonly GameWire[];
+  readonly gameCount: number;
+}
+
 const fail = envelopeFailure('apps/api-e2e/src/game/game-wire.ts');
 
 /** Only `id` is checked: it is the field every assertion keys on. */
@@ -102,6 +107,28 @@ export function randomGamesEnvelope(response: HttpResponseLike, request: Request
   }
 
   return { games: gameSummaries(response.body, request, response) };
+}
+
+/**
+ * `GET /api/households/game-pool/random`: `{ games, gameCount }` (#960). The
+ * count is checked against the sample because both cover the same game pool:
+ * a count below the games on screen means the two disagree about it.
+ */
+export function gamePoolSampleEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): GamePoolSampleEnvelope {
+  if (!isRecord(response.body)) {
+    return fail('the body is not an object', request, response);
+  }
+
+  const games = gameSummaries(response.body, request, response);
+  const gameCount = response.body['gameCount'];
+  if (typeof gameCount !== 'number' || !Number.isInteger(gameCount) || gameCount < games.length) {
+    return fail("it carried no integer 'gameCount' at least as large as its sample", request, response);
+  }
+
+  return { games, gameCount };
 }
 
 /** `GET /api/games/:id`, `POST /api/games`, `PATCH /api/games/:id`: `{ game }`. */
