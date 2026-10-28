@@ -1,5 +1,5 @@
 import { ResourceType } from '@bge/database';
-import { ListScopeNotComposedError } from '@bge/shared';
+import { ListScopeNotComposedError, RandomSampleQueryDto } from '@bge/shared';
 import { boundPageQuery, createTestingModuleWithDb, type PageQueryInit } from '@bge/testing';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
@@ -22,6 +22,7 @@ describe('GameController', () => {
           provide: GameService,
           useValue: {
             getGames: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
+            getRandomGames: jest.fn().mockResolvedValue([]),
             getGame: jest.fn().mockResolvedValue({ id: 'game-1' }),
             createGame: jest.fn().mockResolvedValue({ id: 'game-1' }),
             updateGame: jest.fn().mockResolvedValue({ id: 'game-1' }),
@@ -71,6 +72,43 @@ describe('GameController', () => {
 
     await expect(envelope).rejects.toThrow(ListScopeNotComposedError);
     await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.Game}'`);
+  });
+
+  describe('getRandomGames (#961)', () => {
+    const SAMPLE = Object.assign(new RandomSampleQueryDto(), { size: 3 });
+
+    // Routes match in the order they are declared, so below `:id` the word
+    // `random` would reach getGameById as a game id.
+    it('declares random above :id, so random is never read as a game id', () => {
+      const methods = Object.getOwnPropertyNames(GameController.prototype);
+
+      expect(methods.indexOf('getRandomGames')).toBeGreaterThan(-1);
+      expect(methods.indexOf('getRandomGames')).toBeLessThan(methods.indexOf('getGameById'));
+    });
+
+    it('forwards only the query', async () => {
+      await firstValueFrom(controller.getRandomGames(SAMPLE));
+
+      expect(gameService.getRandomGames).toHaveBeenCalledWith(SAMPLE);
+    });
+
+    it('wraps the sample as { games }', async () => {
+      const games = [{ id: 'game-1', title: 'Catan', thumbnail: null, description: null }];
+      (gameService.getRandomGames as jest.Mock).mockResolvedValue(games);
+
+      await expect(firstValueFrom(controller.getRandomGames(SAMPLE))).resolves.toEqual({ games });
+    });
+
+    // The service composes the `Game` scope; the response is where the guard
+    // checks for it, as the list's envelope does.
+    it('builds the sample under the Game scope guard', async () => {
+      const response = ClsServiceManager.getClsService().runWith({}, () =>
+        firstValueFrom(controller.getRandomGames(SAMPLE)),
+      );
+
+      await expect(response).rejects.toThrow(ListScopeNotComposedError);
+      await expect(response).rejects.toThrow(`intrinsic scope for '${ResourceType.Game}'`);
+    });
   });
 
   it('getGame forwards only the id', async () => {

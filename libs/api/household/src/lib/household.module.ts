@@ -6,6 +6,7 @@ import { QuotaModule } from '@bge/quota';
 import { Module } from '@nestjs/common';
 import { HouseholdBanController } from './ban/household-ban.controller';
 import { HouseholdBanService } from './ban/household-ban.service';
+import { HouseholdGamePoolService } from './game-pool/household-game-pool.service';
 import { HouseholdGameShareController } from './game-share/household-game-share.controller';
 import { HouseholdGameShareService } from './game-share/household-game-share.service';
 import { HouseholdController } from './household.controller';
@@ -51,6 +52,7 @@ import { HouseholdQuotaController } from './quota/household-quota.controller';
     HouseholdGameShareService,
     HouseholdNotificationListener,
     HouseholdBanService,
+    HouseholdGamePoolService,
   ],
   exports: [HouseholdService, HouseholdMemberService],
 })

@@ -1,11 +1,13 @@
 import type { Game } from '@bge/database';
-import { Action, Prisma, Reach, ResourceType } from '@bge/database';
+import { Action, GAME_SUMMARY_SELECT, Prisma, Reach, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
+import { RandomSampleQueryDto } from '@bge/shared';
 import {
   batchTransactionCall,
   boundPageQuery,
   createMockAbilityService,
+  createMockDatabaseService,
   createTestingModuleWithDb,
   MOCK_ACTING_USER_ID,
   type MockAbilityService,
@@ -165,6 +167,122 @@ describe('GameService', () => {
       expect(rejection).toBeInstanceOf(ForbiddenException);
       expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.access'));
       expect(db.game.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * #961. What a new member's home page shows: a uniform sample of the set
+   * `GET /games` lists, read one game per random offset so nothing loads the
+   * whole game catalog.
+   */
+  describe('getRandomGames (#961)', () => {
+    // The transaction's own client, apart from `db`, so a read that escaped
+    // the snapshot would land on `db` and show.
+    let tx: MockDatabaseService;
+
+    const sampleOf = (size: number) => service.getRandomGames(Object.assign(new RandomSampleQueryDto(), { size }));
+    const gameIds = (count: number) =>
+      Array.from({ length: count }, (_, index) => `g-${String(index).padStart(2, '0')}`);
+
+    // Reads as Prisma's cursor does: `skip` games on from the cursor's game,
+    // or from the first game without one.
+    const walkOver = (ids: string[]) =>
+      (async (args: { skip: number; cursor?: { id: string } }) => {
+        const id = ids[(args.cursor ? ids.indexOf(args.cursor.id) : 0) + args.skip];
+
+        return id === undefined ? null : { id };
+      }) as never;
+
+    beforeEach(() => {
+      tx = createMockDatabaseService();
+      db.$transaction.mockImplementation(((fn: (client: MockDatabaseService) => Promise<unknown>) => fn(tx)) as never);
+      tx.game.count.mockResolvedValue(30);
+      tx.game.findFirst.mockImplementation(walkOver(gameIds(30)));
+    });
+
+    it("asks the composer for the game list's intrinsic scope for the acting user", async () => {
+      await sampleOf(10);
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.Game, Action.read, gameListScope(MOCK_ACTING_USER_ID));
+    });
+
+    // The offsets index the counted set, so the count and every read must see
+    // one set: the same where, in one snapshot.
+    it('counts and reads through the same where, in one REPEATABLE READ transaction', async () => {
+      await sampleOf(10);
+
+      expect(db.$transaction.mock.calls[0][1 as never]).toEqual({
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      });
+
+      const [[countArgs]] = tx.game.count.mock.calls as [[{ where: unknown }]];
+      expect(countArgs.where).toEqual({ ...gameListScope(MOCK_ACTING_USER_ID), AND: [COND] });
+      for (const [args] of tx.game.findFirst.mock.calls as [{ where: unknown }][]) {
+        expect(args.where).toBe(countArgs.where);
+      }
+
+      expect(db.game.count).not.toHaveBeenCalled();
+      expect(db.game.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('reads min(size, count) distinct offsets, each ordered by id with the summary select', async () => {
+      const games = await sampleOf(10);
+
+      expect(tx.game.findFirst).toHaveBeenCalledTimes(10);
+      for (const [args] of tx.game.findFirst.mock.calls) {
+        expect(args).toEqual(expect.objectContaining({ orderBy: { id: 'asc' }, select: GAME_SUMMARY_SELECT }));
+      }
+
+      expect(games).toHaveLength(10);
+      expect(new Set(games.map((game) => game.id)).size).toBe(10);
+      expect(games.every((game) => gameIds(30).includes(game.id))).toBe(true);
+    });
+
+    // A read at offset k walks k games, so each read starts from the game the
+    // last one found and the sample walks the set once.
+    it('walks the offsets in id order, each read starting from the game the last one found', async () => {
+      await sampleOf(10);
+
+      const calls = tx.game.findFirst.mock.calls as [{ skip: number; cursor?: { id: string } }][];
+      const found = (await Promise.all(tx.game.findFirst.mock.results.map((result) => result.value))) as {
+        id: string;
+      }[];
+      expect(calls[0][0].cursor).toBeUndefined();
+      for (const [index, [args]] of calls.slice(1).entries()) {
+        expect(args.cursor).toEqual({ id: found[index].id });
+        expect(args.skip).toBeGreaterThan(0);
+      }
+    });
+
+    // Fewer games than size: each comes back once, none twice.
+    it('reads every game once when the set is smaller than size', async () => {
+      tx.game.count.mockResolvedValue(3);
+      tx.game.findFirst.mockImplementation(walkOver(gameIds(3)));
+
+      const games = await sampleOf(10);
+
+      expect(games.map((game) => game.id).sort()).toEqual(gameIds(3));
+    });
+
+    it('reads no game when the set is empty', async () => {
+      tx.game.count.mockResolvedValue(0);
+
+      expect(await sampleOf(10)).toEqual([]);
+      expect(tx.game.findFirst).not.toHaveBeenCalled();
+    });
+
+    // PROVISIONAL (#395), as for the list: half the set is the caller's own
+    // games, which has no meaning without a user behind the actor.
+    it('refuses an actor kind with no user behind it rather than sampling the Public games', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
+
+      const rejection: unknown = await sampleOf(10).catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(ForbiddenException);
+      expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.access'));
+      expect(db.$transaction).not.toHaveBeenCalled();
     });
   });
 

@@ -1,6 +1,7 @@
 export * from './constraint-identity';
 export * from './deadlock';
 export * from './friendship-conditions';
+export * from './game-summary';
 export * from './household-share-lock';
 export * from './human-user';
 export * from './keyed-create';

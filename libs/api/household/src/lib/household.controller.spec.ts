@@ -1,6 +1,6 @@
 import { Action, ResourceType } from '@bge/database';
 import { CHECK_POLICIES_KEY, type AppAbility } from '@bge/permissions';
-import { ListScopeNotComposedError } from '@bge/shared';
+import { ListScopeNotComposedError, RandomSampleQueryDto } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
 import { RequestMethod } from '@nestjs/common';
 import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
@@ -8,6 +8,7 @@ import { Http } from '@status/codes';
 import { ClsServiceManager } from 'nestjs-cls';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
+import type { HouseholdGamePoolService } from './game-pool/household-game-pool.service';
 import { ALLOWS_DELETED_HOUSEHOLD_KEY } from './guards/household-liveness.guard';
 import { HouseholdController } from './household.controller';
 import { HouseholdService } from './household.service';
@@ -28,6 +29,7 @@ describe('HouseholdController (no-Session delegation)', () => {
       | 'restoreHousehold'
     >
   >;
+  let gamePool: jest.Mocked<Pick<HouseholdGamePoolService, 'sampleGamePool'>>;
   beforeEach(() => {
     service = {
       getHouseholdsForUser: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
@@ -38,7 +40,8 @@ describe('HouseholdController (no-Session delegation)', () => {
       deleteHousehold: jest.fn().mockResolvedValue({ household: { id: 'hh-1' }, restorableUntil: null }),
       restoreHousehold: jest.fn().mockResolvedValue({ id: 'hh-1' }),
     };
-    controller = new HouseholdController(service as never);
+    gamePool = { sampleGamePool: jest.fn().mockResolvedValue({ games: [], gameCount: 0 }) };
+    controller = new HouseholdController(service as never, gamePool as never);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -166,6 +169,54 @@ describe('HouseholdController (no-Session delegation)', () => {
 
       expect(can).toHaveBeenCalledTimes(1);
       expect(can).toHaveBeenCalledWith(Action.read, ResourceType.Household);
+    });
+  });
+
+  describe('sampleGamePool (#960)', () => {
+    const SAMPLE = Object.assign(new RandomSampleQueryDto(), { size: 3 });
+
+    it('sampleGamePool forwards only the query', async () => {
+      await firstValueFrom(controller.sampleGamePool(SAMPLE));
+
+      expect(gamePool.sampleGamePool).toHaveBeenCalledWith(SAMPLE);
+    });
+
+    it('returns { games, gameCount } as the service gave it', async () => {
+      const sample = { games: [{ id: 'game-1', title: 'Catan', thumbnail: null, description: null }], gameCount: 4 };
+      gamePool.sampleGamePool.mockResolvedValue(sample);
+
+      await expect(firstValueFrom(controller.sampleGamePool(SAMPLE))).resolves.toEqual(sample);
+    });
+
+    // The service composes the `Game` scope, the type it serves; the response
+    // is where the guard checks for it.
+    it('builds the sample under the Game scope guard', async () => {
+      const response = ClsServiceManager.getClsService().runWith({}, () =>
+        firstValueFrom(controller.sampleGamePool(SAMPLE)),
+      );
+
+      await expect(response).rejects.toThrow(ListScopeNotComposedError);
+      await expect(response).rejects.toThrow(`intrinsic scope for '${ResourceType.Game}'`);
+    });
+
+    it('binds GET /households/game-pool/random', () => {
+      const handler = HouseholdController.prototype.sampleGamePool;
+
+      expect(Reflect.getMetadata('path', handler)).toBe('game-pool/random');
+      expect(Reflect.getMetadata('method', handler)).toBe(RequestMethod.GET);
+    });
+
+    it('asks the guard for read on the two types it serves, game collections and games', () => {
+      const handlers = Reflect.getMetadata(CHECK_POLICIES_KEY, HouseholdController.prototype.sampleGamePool) as Array<
+        (ability: AppAbility) => boolean
+      >;
+      const can = jest.fn().mockReturnValue(true);
+
+      expect(handlers).toHaveLength(1);
+      expect(handlers[0]({ can } as unknown as AppAbility)).toBe(true);
+
+      expect(can).toHaveBeenCalledWith(Action.read, ResourceType.GameCollection);
+      expect(can).toHaveBeenCalledWith(Action.read, ResourceType.Game);
     });
   });
 

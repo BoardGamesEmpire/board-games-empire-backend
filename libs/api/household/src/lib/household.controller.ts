@@ -1,7 +1,13 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated } from '@bge/shared';
+import {
+  ApiPaginatedEnvelope,
+  assertListScopeComposed,
+  DefaultPaginationQueryDto,
+  paginated,
+  RandomSampleQueryDto,
+} from '@bge/shared';
 import { Body, Controller, Delete, Get, HttpCode, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -9,6 +15,7 @@ import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { HOUSEHOLD_RESTORE_WINDOW_DAYS } from './constants/household.constants';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
+import { HouseholdGamePoolService } from './game-pool/household-game-pool.service';
 import { AllowsDeletedHousehold, HouseholdLivenessGuard, HouseholdPathParam } from './guards/household-liveness.guard';
 import { HouseholdService } from './household.service';
 
@@ -28,7 +35,10 @@ import { HouseholdService } from './household.service';
 export class HouseholdController {
   private readonly logger = new Logger(HouseholdController.name);
 
-  constructor(private readonly householdService: HouseholdService) {}
+  constructor(
+    private readonly householdService: HouseholdService,
+    private readonly gamePool: HouseholdGamePoolService,
+  ) {}
 
   @ApiOperation({
     summary: 'List households the caller is a member of',
@@ -109,6 +119,52 @@ export class HouseholdController {
   getRestorableHouseholdsForUser(@Query() pagination: DefaultPaginationQueryDto) {
     return from(this.householdService.getRestorableHouseholdsForUser(pagination)).pipe(
       map((page) => paginated('households', page, pagination, ResourceType.Household)),
+    );
+  }
+
+  @ApiOperation({
+    summary: 'Random games from the game pool of every household the caller belongs to',
+    description:
+      'Up to `size` games picked uniformly at random from the game pool across every live household the ' +
+      'caller belongs to, plus `gameCount`, the number of distinct games in it. The game pool is the games ' +
+      'members share with their household: an entry is in it when its owner has collection sharing on in that ' +
+      'household and hasn\u2019t excluded it there. The caller\u2019s own shared entries count. A game several ' +
+      'members own appears once and counts once. A game the caller can\u2019t open at `GET /games/:id` is left ' +
+      'out. With no household, `games` is empty and `gameCount` is 0. Ask again for a different sample; ' +
+      'responses are never cached. `size` is 1–50 and defaults to 10. See #960.',
+  })
+  @ApiResponse({
+    status: Http.Ok,
+    // The household lib models no row DTOs (#376).
+    schema: {
+      type: 'object',
+      required: ['games', 'gameCount'],
+      properties: {
+        games: { type: 'array', items: { type: 'object', additionalProperties: true } },
+        gameCount: { type: 'integer', minimum: 0 },
+      },
+    },
+  })
+  @ApiResponse({ status: Http.BadRequest, description: '`size` is not a whole number from 1 to 50' })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description:
+      'Insufficient permissions, or an actor kind with no memberships of its own (plugin, system, external) ' +
+      '— provisional: see #395',
+  })
+  // The two types it serves: the game pool's entries, and their games.
+  @CheckPolicies(
+    (ability) => ability.can(Action.read, ResourceType.GameCollection) && ability.can(Action.read, ResourceType.Game),
+  )
+  @Get('game-pool/random')
+  sampleGamePool(@Query() query: RandomSampleQueryDto) {
+    return from(this.gamePool.sampleGamePool(query)).pipe(
+      map((sample) => {
+        assertListScopeComposed('games', ResourceType.Game);
+
+        return sample;
+      }),
     );
   }
 
