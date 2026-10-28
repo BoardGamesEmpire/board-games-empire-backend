@@ -3,6 +3,7 @@ import {
   Action,
   createOrReplay,
   DatabaseService,
+  GAME_SUMMARY_SELECT,
   HouseholdMembershipOrigin,
   isPrismaDependentRecordNotFoundError,
   normalizeClientRequestId,
@@ -20,7 +21,7 @@ import {
   resolveScopeSubjectId,
   ScopeComposer,
 } from '@bge/permissions';
-import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
+import { PaginatedRows, PaginationQueryDto, pickDefined, sampleWithoutReplacement } from '@bge/shared';
 import {
   BadRequestException,
   ConflictException,
@@ -86,22 +87,6 @@ function householdPageArgs(where: Prisma.HouseholdWhereInput, pagination: Pagina
 
 /** How many of each member's entries the household detail embeds. */
 const MEMBER_GAME_SAMPLE_SIZE = 5;
-
-/**
- * Up to `size` distinct items, uniformly at random: a partial Fisher-Yates
- * over a copy, so the input is untouched and each item is equally likely.
- */
-function sampleWithoutReplacement<T>(items: readonly T[], size: number): T[] {
-  const pool = [...items];
-  const count = Math.min(size, pool.length);
-
-  for (let index = 0; index < count; index++) {
-    const pick = index + Math.floor(Math.random() * (pool.length - index));
-    [pool[index], pool[pick]] = [pool[pick], pool[index]];
-  }
-
-  return pool.slice(0, count);
-}
 
 /**
  * What a soft delete returns: the tombstoned row, and when the actor's window
@@ -252,14 +237,7 @@ export class HouseholdService {
           select: {
             id: true,
 
-            game: {
-              select: {
-                id: true,
-                title: true,
-                thumbnail: true,
-                description: true,
-              },
-            },
+            game: { select: GAME_SUMMARY_SELECT },
           },
         },
       },
