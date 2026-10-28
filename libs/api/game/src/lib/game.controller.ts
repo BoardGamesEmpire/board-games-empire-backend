@@ -1,13 +1,13 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
+import { paginated, PaginatedResponseDto } from '@bge/shared';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
-import { CreateGameDto, GameDto, GameResponseDto, UpdateGameDto } from './dto';
+import { CreateGameDto, GameDto, GameResponseDto, ListGamesQueryDto, UpdateGameDto } from './dto';
 import { GameService } from './game.service';
 
 const PaginatedGamesResponse = PaginatedResponseDto(GameDto, 'games');
@@ -32,8 +32,12 @@ export class GameController {
       '**Breaking change (#513).** Owner/Admin/Moderator previously also received every private game on the ' +
       'server, with `pagination.total` counting them. A private game they can read is still readable at ' +
       '`GET /games/:id`. An **API key** is additionally floored by its own permissions (effective access is ' +
-      'key ∩ owner). Alphabetical by title. Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` ' +
-      'envelope carrying `total`, `totalPages` and `hasMore`; `total` counts the same set. See #230.',
+      'key ∩ owner). Alphabetical by title, or with `?sort=newest` the games most recently added to the game ' +
+      'catalog first. Either order ends in the game id, so a repeated request answers the same page while the ' +
+      'list is unchanged. Pages are offsets: a game added or removed between two requests shifts the pages after ' +
+      'it, and under `?sort=newest` an added game lands on page 1. Paginated: `?page=` (1-based) and `?limit=`, ' +
+      'with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` counts the same set. ' +
+      'See #230.',
   })
   @ApiResponse({ status: Http.Ok, type: PaginatedGamesResponse })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
@@ -45,9 +49,9 @@ export class GameController {
   })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Game))
   @Get()
-  getGames(@Query() paginationQuery: DefaultPaginationQueryDto) {
-    return from(this.gameService.getGames(paginationQuery)).pipe(
-      map((page) => paginated('games', page, paginationQuery, ResourceType.Game)),
+  getGames(@Query() query: ListGamesQueryDto) {
+    return from(this.gameService.getGames(query)).pipe(
+      map((page) => paginated('games', page, query, ResourceType.Game)),
     );
   }
 

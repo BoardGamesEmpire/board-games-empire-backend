@@ -1,13 +1,15 @@
 import { ResourceType } from '@bge/database';
-import { ListScopeNotComposedError, type PaginationQueryDto } from '@bge/shared';
-import { createTestingModuleWithDb, paginationQuery } from '@bge/testing';
+import { ListScopeNotComposedError } from '@bge/shared';
+import { boundPageQuery, createTestingModuleWithDb, type PageQueryInit } from '@bge/testing';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
-import type { CreateGameDto, UpdateGameDto } from './dto';
+import { ListGamesQueryDto, type CreateGameDto, type UpdateGameDto } from './dto';
 import { GameController } from './game.controller';
 import { GameService } from './game.service';
 
-const PAGINATION: PaginationQueryDto = paginationQuery({ limit: 20 });
+const listQuery = (init: PageQueryInit<ListGamesQueryDto> = {}) => boundPageQuery(ListGamesQueryDto, init);
+
+const QUERY = listQuery({ limit: 20 });
 
 describe('GameController', () => {
   let controller: GameController;
@@ -36,9 +38,12 @@ describe('GameController', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  it('getGames forwards only pagination', async () => {
-    await firstValueFrom(controller.getGames(PAGINATION));
-    expect(gameService.getGames).toHaveBeenCalledWith(PAGINATION);
+  // #959: the sort travels inside the query, so the service reads the page and
+  // the order from the one object the pipe validated.
+  it('getGames forwards the query, sort included', async () => {
+    const query = listQuery({ limit: 20, sort: 'newest' });
+    await firstValueFrom(controller.getGames(query));
+    expect(gameService.getGames).toHaveBeenCalledWith(query);
   });
 
   // #372: the controller is where the rows the service read become the wire
@@ -47,7 +52,7 @@ describe('GameController', () => {
   it('wraps the rows in the paginated envelope, echoing the requested page', async () => {
     (gameService.getGames as jest.Mock).mockResolvedValue({ rows: [{ id: 'game-1' }], total: 31 });
 
-    const response = await firstValueFrom(controller.getGames(paginationQuery({ page: 2, limit: 10 })));
+    const response = await firstValueFrom(controller.getGames(listQuery({ page: 2, limit: 10 })));
 
     expect(response).toEqual({
       games: [{ id: 'game-1' }],
@@ -62,9 +67,7 @@ describe('GameController', () => {
   // The name is asserted too: an envelope naming another swept type would also
   // fail, for the wrong reason.
   it('builds its envelope under the Game scope guard', async () => {
-    const envelope = ClsServiceManager.getClsService().runWith({}, () =>
-      firstValueFrom(controller.getGames(PAGINATION)),
-    );
+    const envelope = ClsServiceManager.getClsService().runWith({}, () => firstValueFrom(controller.getGames(QUERY)));
 
     await expect(envelope).rejects.toThrow(ListScopeNotComposedError);
     await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.Game}'`);
