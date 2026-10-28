@@ -4,15 +4,16 @@ import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
+  boundPageQuery,
   createMockAbilityService,
   createTestingModuleWithDb,
   MOCK_ACTING_USER_ID,
-  paginationQuery,
   type MockAbilityService,
   type MockDatabaseService,
+  type PageQueryInit,
 } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { GAME_DESCRIPTION_MAX_LENGTH, type CreateGameDto, type UpdateGameDto } from './dto';
+import { GAME_DESCRIPTION_MAX_LENGTH, ListGamesQueryDto, type CreateGameDto, type UpdateGameDto } from './dto';
 import { gameListScope } from './game-list-scope';
 import { GameService } from './game.service';
 
@@ -72,7 +73,9 @@ describe('GameService', () => {
    * is why the first test pins the composer call itself.
    */
   describe('getGames, as a converted game list', () => {
-    const read = () => service.getGames(paginationQuery({ limit: 20 }));
+    // Built as the global pipe builds it, so the DTO's own defaults apply.
+    const listQuery = (init: PageQueryInit<ListGamesQueryDto>) => boundPageQuery(ListGamesQueryDto, init);
+    const read = () => service.getGames(listQuery({ limit: 20 }));
 
     beforeEach(() => {
       db.game.findMany.mockResolvedValue([]);
@@ -116,6 +119,35 @@ describe('GameService', () => {
       const { operations, options } = batchTransactionCall(db);
       expect(operations).toHaveLength(2);
       expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
+
+    // #959: a client that names no sort keeps today's order. The query DTO
+    // supplies the title default; the service has no fallback of its own.
+    it('orders by title, then id, when no sort is named', async () => {
+      await read();
+
+      expect(db.game.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ orderBy: [{ title: 'asc' }, { id: 'asc' }] }),
+      );
+    });
+
+    // #959: newest first, the id deciding between games added in the same millisecond.
+    it('orders newest first, then id descending, for the newest sort', async () => {
+      await service.getGames(listQuery({ limit: 20, sort: 'newest' }));
+
+      expect(db.game.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] }),
+      );
+    });
+
+    // #959: a sort reorders the list and never widens it.
+    it('reads the same set under either sort', async () => {
+      await service.getGames(listQuery({ limit: 20, sort: 'title' }));
+      await service.getGames(listQuery({ limit: 20, sort: 'newest' }));
+
+      const [[byTitle], [byNewest]] = db.game.findMany.mock.calls as [[{ where: unknown }], [{ where: unknown }]];
+      expect(byNewest.where).toEqual(byTitle.where);
+      expect(db.game.count).toHaveBeenNthCalledWith(2, { where: byTitle.where });
     });
 
     // PROVISIONAL (#395). Half of the scope is the caller's own games, which

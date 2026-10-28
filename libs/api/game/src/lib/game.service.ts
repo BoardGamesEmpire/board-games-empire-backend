@@ -10,9 +10,9 @@ import {
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
-import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
+import type { PaginatedRows } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { CreateGameDto, GAME_DESCRIPTION_MAX_LENGTH, UpdateGameDto } from './dto';
+import { CreateGameDto, GAME_DESCRIPTION_MAX_LENGTH, ListGamesQueryDto, UpdateGameDto, type GameSort } from './dto';
 import { gameListScope } from './game-list-scope';
 
 /** A game's ranges, each as its minimum's field and its maximum's. */
@@ -22,6 +22,16 @@ const GAME_RANGES = [
 ] as const;
 
 type GameRangeField = (typeof GAME_RANGES)[number][number];
+
+/** The order each sort on `GET /games` names (#959). */
+const GAME_ORDERS: Record<GameSort, Prisma.GameOrderByWithRelationInput[]> = {
+  // A game catalog reads best alphabetically, and `title` is not unique — two
+  // editions of the same game share one — so `id` completes the order.
+  // Without a total order the database may return page 2 overlapping page 1.
+  title: [{ title: 'asc' }, { id: 'asc' }],
+  // The games most recently added to the game catalog first (#959). The id breaks a tie, as it does for title.
+  newest: [{ createdAt: 'desc' }, { id: 'desc' }],
+};
 
 @Injectable()
 export class GameService {
@@ -44,13 +54,14 @@ export class GameService {
    * The scope is the set {@link gameListScope} names, and the ceiling only
    * clips it (#513).
    * For an `apiKey` actor it carries the key ∩ owner floor.
+   * `sort` picks the order and never the set (#959).
    *
    * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
    * half the scope is the caller's own games, which has no meaning without a
    * user, and the refusal must never soften into a page of Public games.
    * PROVISIONAL — #395.
    */
-  async getGames(pagination: PaginationQueryDto): Promise<PaginatedRows<Game>> {
+  async getGames(query: ListGamesQueryDto): Promise<PaginatedRows<Game>> {
     const userId = resolveScopeSubjectId(this.abilityService);
     const where = this.scopeComposer.compose(ResourceType.Game, Action.read, gameListScope(userId));
 
@@ -58,12 +69,9 @@ export class GameService {
       [
         this.db.game.findMany({
           where,
-          // A catalog reads best alphabetically, and `title` is not unique — two
-          // editions of the same game share one — so `id` completes the order.
-          // Without a total order the database may return page 2 overlapping page 1.
-          orderBy: [{ title: 'asc' }, { id: 'asc' }],
-          skip: pagination.skip,
-          take: pagination.pageSize,
+          orderBy: GAME_ORDERS[query.sort],
+          skip: query.skip,
+          take: query.pageSize,
         }),
 
         this.db.game.count({ where }),
