@@ -1,13 +1,20 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { paginated, PaginatedResponseDto } from '@bge/shared';
+import { assertListScopeComposed, paginated, PaginatedResponseDto, RandomSampleQueryDto } from '@bge/shared';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
-import { CreateGameDto, GameDto, GameResponseDto, ListGamesQueryDto, UpdateGameDto } from './dto';
+import {
+  CreateGameDto,
+  GameDto,
+  GameResponseDto,
+  ListGamesQueryDto,
+  RandomGamesResponseDto,
+  UpdateGameDto,
+} from './dto';
 import { GameService } from './game.service';
 
 const PaginatedGamesResponse = PaginatedResponseDto(GameDto, 'games');
@@ -52,6 +59,36 @@ export class GameController {
   getGames(@Query() query: ListGamesQueryDto) {
     return from(this.gameService.getGames(query)).pipe(
       map((page) => paginated('games', page, query, ResourceType.Game)),
+    );
+  }
+
+  @ApiOperation({
+    summary: 'Random games',
+    description:
+      'Up to `size` games picked uniformly at random from the games `GET /games` lists for the caller, in ' +
+      'random order. Each is the game summary: id, title, thumbnail, description. Ask again for a different ' +
+      'sample; responses are never cached. `size` is 1–50 and defaults to 10. See #961.',
+  })
+  @ApiResponse({ status: Http.Ok, type: RandomGamesResponseDto })
+  @ApiResponse({ status: Http.BadRequest, description: '`size` is not a whole number from 1 to 50' })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description:
+      'Insufficient permissions, or an actor kind with no games of its own (plugin, system, external) ' +
+      '— provisional: see #395',
+  })
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Game))
+  // Above `GET :id`: routes match in the order they are declared, so below
+  // it `random` would reach `getGameById` as an id.
+  @Get('random')
+  getRandomGames(@Query() query: RandomSampleQueryDto) {
+    return from(this.gameService.getRandomGames(query)).pipe(
+      map((games) => {
+        assertListScopeComposed('games', ResourceType.Game);
+
+        return { games };
+      }),
     );
   }
 

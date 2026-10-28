@@ -19,6 +19,10 @@ export interface GameEnvelope {
   readonly game: GameWire;
 }
 
+export interface RandomGamesEnvelope {
+  readonly games: readonly GameWire[];
+}
+
 const fail = envelopeFailure('apps/api-e2e/src/game/game-wire.ts');
 
 /** Only `id` is checked: it is the field every assertion keys on. */
@@ -64,6 +68,40 @@ export function listGamesEnvelope(response: HttpResponseLike, request: RequestDe
   }
 
   return { games: rows, total };
+}
+
+/**
+ * The `games` array of a random sample (#960, #961): every entry a game with a
+ * string id. Shared by the two sample envelopes, which differ only in what
+ * travels beside it.
+ */
+export function gameSummaries(
+  body: Record<string, unknown>,
+  request: RequestDescription,
+  response: HttpResponseLike,
+): GameWire[] {
+  const games = body['games'];
+  if (!Array.isArray(games)) {
+    return fail("it carried no 'games' array", request, response);
+  }
+
+  return games.map((entry) => {
+    const game = asGame(entry);
+    if (game === undefined) {
+      return fail('one of its games is not an object with a string id', request, response);
+    }
+
+    return game;
+  });
+}
+
+/** `GET /api/games/random`: `{ games }` (#961). */
+export function randomGamesEnvelope(response: HttpResponseLike, request: RequestDescription): RandomGamesEnvelope {
+  if (!isRecord(response.body)) {
+    return fail('the body is not an object', request, response);
+  }
+
+  return { games: gameSummaries(response.body, request, response) };
 }
 
 /** `GET /api/games/:id`, `POST /api/games`, `PATCH /api/games/:id`: `{ game }`. */

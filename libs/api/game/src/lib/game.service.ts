@@ -2,15 +2,17 @@ import { sanitizeMarkdown } from '@bge/content-format';
 import {
   Action,
   DatabaseService,
+  gameSummaryReader,
   isPrismaDependentRecordNotFoundError,
   Prisma,
   Reach,
   ResourceType,
   type Game,
+  type GameSummary,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
-import type { PaginatedRows } from '@bge/shared';
+import { sampleByOffsets, type PaginatedRows, type RandomSampleQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { CreateGameDto, GAME_DESCRIPTION_MAX_LENGTH, ListGamesQueryDto, UpdateGameDto, type GameSort } from './dto';
 import { gameListScope } from './game-list-scope';
@@ -80,6 +82,36 @@ export class GameService {
     );
 
     return { rows, total };
+  }
+
+  /**
+   * Up to `size` games picked uniformly at random from the set `GET /games`
+   * lists for the caller, in random order, each as the game summary (#961).
+   * A new member's home page falls back to it, so it never shows a game
+   * the caller could not open.
+   *
+   * The set may be the whole game catalog, so the sample is read one game per
+   * random offset, walking the offsets in order, rather than by loading every
+   * id. The count and the reads
+   * share one REPEATABLE READ transaction: the offsets index the counted set,
+   * and under the database default a game deleted between them would shift
+   * every offset after it.
+   *
+   * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors,
+   * as for {@link getGames}. PROVISIONAL — #395.
+   */
+  async getRandomGames(query: RandomSampleQueryDto): Promise<GameSummary[]> {
+    const userId = resolveScopeSubjectId(this.abilityService);
+    const where = this.scopeComposer.compose(ResourceType.Game, Action.read, gameListScope(userId));
+
+    return this.db.$transaction(
+      async (tx) => {
+        const count = await tx.game.count({ where });
+
+        return sampleByOffsets(count, query.size, gameSummaryReader(tx, where));
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
   }
 
   async getGame(id: string) {

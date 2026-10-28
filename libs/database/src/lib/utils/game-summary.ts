@@ -14,3 +14,20 @@ export const GAME_SUMMARY_SELECT = {
 } as const satisfies Prisma.GameSelect;
 
 export type GameSummary = Prisma.GameGetPayload<{ select: typeof GAME_SUMMARY_SELECT }>;
+
+/**
+ * The game summary `skip` games past `after` in id order over `where`, or
+ * `skip` games in without one: the read `sampleByOffsets` walks for
+ * `GET /games/random` and the game pool sample (#960, #961). Prisma's cursor
+ * is the row itself, so `skip` counts on from it.
+ */
+export function gameSummaryReader(tx: Prisma.TransactionClient, where: Prisma.GameWhereInput) {
+  return (skip: number, after: GameSummary | undefined) =>
+    tx.game.findFirst({
+      where,
+      orderBy: { id: 'asc' },
+      cursor: after && { id: after.id },
+      skip,
+      select: GAME_SUMMARY_SELECT,
+    });
+}
