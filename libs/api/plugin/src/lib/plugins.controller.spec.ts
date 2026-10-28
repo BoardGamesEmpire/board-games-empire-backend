@@ -24,7 +24,9 @@ import type {
 import {
   PluginConsentPresentationNotFoundError,
   PluginFeatureStateNotFoundError,
+  PluginGrantPluginNotFoundError,
   PluginInventoryNotFoundError,
+  PluginLifecycleNotFoundError,
   PluginUpdateNoPendingError,
   PluginUpdatePluginNotFoundError,
 } from '@bge/plugin';
@@ -547,6 +549,95 @@ describe('PluginsController (delegation)', () => {
         );
       },
     );
+  });
+
+  // The write gate is type-level too, and the service seam checks only that
+  // the acting user is a server admin: it never sees the key. So an Admin's
+  // key pinned to one plugin wrote every other until each write resolved its
+  // slug under the `manage` ceiling first, as the reads do under `read`.
+  describe("the writes resolve their slug under the actor's manage ceiling (#978)", () => {
+    const writes = [
+      {
+        route: 'decideGrant',
+        call: (): Observable<unknown> =>
+          controller.decideGrant('demo-sink', {
+            permissionSlug: 'plugin|demo-sink|manage:digest',
+            status: PluginGrantStatus.Granted,
+          }),
+        service: () => grants.decide,
+        notFound: PluginGrantPluginNotFoundError,
+        slugField: 'pluginSlug',
+      },
+      {
+        route: 'enable',
+        call: (): Observable<unknown> => controller.enable('demo-sink'),
+        service: () => lifecycle.enable,
+        notFound: PluginLifecycleNotFoundError,
+        slugField: 'slug',
+      },
+      {
+        route: 'disable',
+        call: (): Observable<unknown> => controller.disable('demo-sink'),
+        service: () => lifecycle.disable,
+        notFound: PluginLifecycleNotFoundError,
+        slugField: 'slug',
+      },
+      {
+        route: 'updateConfig',
+        call: (): Observable<unknown> => controller.updateConfig('demo-sink', { config: {} }),
+        service: () => lifecycle.updateConfig,
+        notFound: PluginLifecycleNotFoundError,
+        slugField: 'slug',
+      },
+      {
+        route: 'uninstall',
+        call: (): Observable<unknown> => controller.uninstall('demo-sink', {}),
+        service: () => lifecycle.uninstall,
+        notFound: PluginLifecycleNotFoundError,
+        slugField: 'slug',
+      },
+      {
+        route: 'approveUpdate',
+        call: (): Observable<unknown> => controller.approveUpdate('demo-sink', {}),
+        service: () => updates.approve,
+        notFound: PluginUpdatePluginNotFoundError,
+        slugField: 'slug',
+      },
+      {
+        route: 'rejectUpdate',
+        call: (): Observable<unknown> => controller.rejectUpdate('demo-sink'),
+        service: () => updates.reject,
+        notFound: PluginUpdatePluginNotFoundError,
+        slugField: 'slug',
+      },
+    ];
+
+    it.each(writes)(
+      'answers $route outside the ceiling with its own not-found error, before its service',
+      async ({ call, service, notFound, slugField }) => {
+        inventory.existsUnderCeiling.mockResolvedValue(false);
+
+        const refused = firstValueFrom(call());
+
+        await expect(refused).rejects.toBeInstanceOf(notFound);
+        await expect(refused).rejects.toMatchObject({ [slugField]: 'demo-sink' });
+        expect(service()).not.toHaveBeenCalled();
+      },
+    );
+
+    // A write serves no column, so its ceiling is built from every `manage`
+    // rule, with no column to narrow it by.
+    it.each(writes)("composes $route's ceiling under manage, with the slug as its scope", async ({ call }) => {
+      const compose = jest.spyOn(scopeComposer, 'compose');
+      abilityService.getCurrentResourceConditions.mockReturnValue([{ id: 'p-1' }]);
+
+      await firstValueFrom(call());
+      const [slug, ceiling] = inventory.existsUnderCeiling.mock.calls[0] ?? [];
+
+      expect(slug).toBe('demo-sink');
+      expect(ceiling?.({ slug: 'demo-sink' })).toEqual({ slug: 'demo-sink', AND: [{ id: 'p-1' }] });
+      expect(compose).toHaveBeenCalledWith(ResourceType.Plugin, Action.manage, { slug: 'demo-sink' }, undefined);
+    });
   });
 
   // The controller specs instantiate the class directly, so a dropped
