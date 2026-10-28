@@ -295,6 +295,46 @@ describe('PluginInventoryService', () => {
     });
   });
 
+  describe('existsUnderCeiling (#789)', () => {
+    it('reads the slug under the ceiling it is handed', async () => {
+      db.plugin.findFirst.mockResolvedValue({ id: 'plugin-1' } as never);
+
+      await service.existsUnderCeiling('demo-sink', unitCeiling);
+
+      expect(unitCeiling).toHaveBeenCalledWith({ slug: 'demo-sink' });
+      expect(db.plugin.findFirst).toHaveBeenCalledWith({
+        where: { AND: [{ slug: 'demo-sink' }, { AND: [{ slug: 'demo-sink' }, CEILING] }] },
+        select: { id: true },
+      });
+    });
+
+    // As the lists do, the lookup runs its own scope beside what the ceiling
+    // returns, so a ceiling that drops the slug cannot answer for another
+    // plugin.
+    it('keeps the slug when the ceiling drops it', async () => {
+      db.plugin.findFirst.mockResolvedValue(null as never);
+
+      await service.existsUnderCeiling('demo-sink', () => CEILING);
+
+      expect(db.plugin.findFirst).toHaveBeenCalledWith({
+        where: { AND: [{ slug: 'demo-sink' }, CEILING] },
+        select: { id: true },
+      });
+    });
+
+    it('is true when a row comes back', async () => {
+      db.plugin.findFirst.mockResolvedValue({ id: 'plugin-1' } as never);
+
+      await expect(service.existsUnderCeiling('demo-sink', unitCeiling)).resolves.toBe(true);
+    });
+
+    it('is false when none does', async () => {
+      db.plugin.findFirst.mockResolvedValue(null as never);
+
+      await expect(service.existsUnderCeiling('demo-sink', unitCeiling)).resolves.toBe(false);
+    });
+  });
+
   describe('listForHousehold', () => {
     const householdRow = (overrides: Record<string, unknown> = {}, unit: unknown[] = []) => ({
       ...row(overrides),

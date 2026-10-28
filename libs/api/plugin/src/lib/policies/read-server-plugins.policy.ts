@@ -24,6 +24,11 @@ export const SERVER_PLUGIN_COLUMN = 'installedAt';
  * key and its owner both. So a key passes only on a slug that reads every
  * column, and only when its owner passes too: a key holding
  * `read:plugin:installed` is refused whoever owns it.
+ *
+ * The check is type-level, so a key whose `read:plugin` is pinned to one
+ * plugin passes it on every slug. The routes that address one plugin then
+ * resolve their slug under the actor's ceiling, and answer a slug outside
+ * it as not installed (#789).
  */
 export const canReadServerPlugins = (ability: AppAbility): boolean =>
   ability.can(Action.read, ResourceType.Plugin, SERVER_PLUGIN_COLUMN);

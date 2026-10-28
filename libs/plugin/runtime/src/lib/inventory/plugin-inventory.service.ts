@@ -519,6 +519,28 @@ export class PluginInventoryService {
     };
   }
 
+  /**
+   * Whether the plugin with this slug lies under the actor's ceiling.
+   *
+   * It answers for the edge's key-scope check on the routes that address one
+   * plugin by slug (#789) and serves nothing. A type-level gate passes a key
+   * whatever plugin its scope names, and the services behind those routes read
+   * by slug alone, so without it a key scoped to one plugin reads and writes
+   * every other. The edge composes the ceiling with the slug as its scope; the
+   * slug also goes beside what comes back, as the lists run their scope, so a
+   * ceiling that dropped it could not answer for another plugin.
+   *
+   * It does not tell an unknown slug from one outside the ceiling. The edge
+   * answers both with the route's own not-found error, so a key cannot tell
+   * which plugins are installed beyond its scope.
+   */
+  async existsUnderCeiling(slug: string, ceiling: PluginInventoryCeiling): Promise<boolean> {
+    const scope: Prisma.PluginWhereInput = { slug };
+    const row = await this.db.plugin.findFirst({ where: { AND: [scope, ceiling(scope)] }, select: { id: true } });
+
+    return row !== null;
+  }
+
   /** D-CH: tombstones are excluded unless the SERVER caller asks for them. */
   private tombstoneFilter({ includeUninstalled }: PluginServerInventoryOptions): Prisma.PluginWhereInput {
     return includeUninstalled === true ? {} : { uninstalledAt: null };
