@@ -68,9 +68,10 @@ const PaginatedHouseholdPluginsResponse = PaginatedResponseDto(PluginHouseholdIn
  * takes no lock; the writes re-check under the household's share lock inside
  * their transactions (#548), and the exception filter answers that re-check's
  * refusal by the guard's rule, so losing the race tells no one more than the
- * guard would. The list has no write to re-check in, so it checks liveness
- * itself for an actor the guard let through, after its instance check, and
- * answers 403.
+ * guard would. The reads (the list, the consent surface and the feature
+ * states) have no write to re-check in, so each checks liveness itself for an
+ * actor the guard let through, after its instance check, and answers 403
+ * (#790).
  */
 @ApiBearerAuth()
 @ApiSecurity('api_key')
@@ -202,9 +203,11 @@ export class HouseholdPluginsController {
 
     const unit: HouseholdPluginUnit = { scopeType: 'Household', householdId };
 
-    return from(this.presentation.presentForUnitBySlug(slug, unit, this.auditContext.getLocale() ?? undefined)).pipe(
-      map((presentation) => ({ presentation })),
-    );
+    return from(
+      this.assertLiveForUnguardedActor(householdId).then(() =>
+        this.presentation.presentForUnitBySlug(slug, unit, this.auditContext.getLocale() ?? undefined),
+      ),
+    ).pipe(map((presentation) => ({ presentation })));
   }
 
   // ─── Unit enablement (#323): the admin's switch and config ────────────────
@@ -354,35 +357,43 @@ export class HouseholdPluginsController {
 
     const unit: HouseholdPluginUnit = { scopeType: 'Household', householdId };
 
-    return from(this.featureState.resolveForUnitBySlug(slug, unit, this.auditContext.getLocale() ?? undefined)).pipe(
-      map((featureState) => ({ featureState })),
-    );
+    return from(
+      this.assertLiveForUnguardedActor(householdId).then(() =>
+        this.featureState.resolveForUnitBySlug(slug, unit, this.auditContext.getLocale() ?? undefined),
+      ),
+    ).pipe(map((featureState) => ({ featureState })));
   }
 
   /**
-   * The household's plugins, once it is known to be live.
+   * Refuses a deleted household to an actor the liveness guard let through.
    *
    * The guard answers liveness only for an actor every one of whose abilities
    * reads households, and lets anyone else through untouched, such as a staff
    * member's API key scoped to the plugin routes. Its owner reads every
    * household's plugins, and a soft delete leaves them in place, so without a
-   * check here the key would list a deleted household's plugins. The list
-   * checks for that actor alone, so one the guard answered is not probed
-   * twice. It runs after the instance check, so only an actor who may read the
-   * list is answered at all.
+   * check here the key would read a deleted household's plugins, its consent
+   * decisions and its feature states (#790). The reads check for that actor
+   * alone, so one the guard answered is not probed twice. Each runs it after
+   * its instance check, so only an actor who may read the route is answered
+   * at all.
    *
-   * The answer is the instance check's 403, the one this route gives any
-   * actor it refuses: a 404 would tell a key scoped away from households which
+   * The answer is the instance check's 403, the one these routes give any
+   * actor they refuse: a 404 would tell a key scoped away from households which
    * household was deleted, or that an id never existed. The writes answer by
    * the same rule (`PluginExceptionFilter.asTheActorSeesIt`).
    */
-  private async listInventory(householdId: string, query: DefaultPaginationQueryDto) {
+  private async assertLiveForUnguardedActor(householdId: string): Promise<void> {
     if (
       !alreadyTellsHouseholdsApart(this.abilityService.getCurrentAbilities()) &&
       !(await householdExists(this.db, householdId))
     ) {
       throw new ForbiddenException(t('common.forbidden.action'));
     }
+  }
+
+  /** The household's plugins, once it is known to be live. */
+  private async listInventory(householdId: string, query: DefaultPaginationQueryDto) {
+    await this.assertLiveForUnguardedActor(householdId);
 
     return this.inventory.listForHousehold(
       householdId,

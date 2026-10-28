@@ -23,7 +23,7 @@ import { ForbiddenException, NotFoundException, RequestMethod, type ExecutionCon
 import { Reflector } from '@nestjs/core';
 import { ClsServiceManager } from 'nestjs-cls';
 import 'reflect-metadata';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, type Observable } from 'rxjs';
 import { HouseholdPluginsController } from './household-plugins.controller';
 
 const PRESENTATION = {
@@ -72,7 +72,7 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
     inventory = { listForHousehold: jest.fn().mockResolvedValue(INVENTORY_PAGE as never) };
     auditContext = { getLocale: jest.fn().mockReturnValue(null) };
     abilityService = createMockAbilityService();
-    // The list's liveness probe; every household here is live unless a test
+    // The reads' liveness probe; every household here is live unless a test
     // says otherwise.
     householdCount = jest.fn().mockResolvedValue(1);
     // The REAL composer over the mocked ability service, so the list's ceiling
@@ -350,6 +350,69 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
       expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.read, ResourceType.HouseholdPlugin, {
         householdId: 'hh-1',
       });
+    });
+  });
+
+  // The consent and feature-state reads have no write to re-check liveness in
+  // either, so a staff member's key scoped to the plugin routes would read a
+  // deleted household's decisions through them. They check it as the list
+  // does, for the actor the guard let through, and answer the same 403 (#790).
+  describe('household liveness on the single reads (#790)', () => {
+    const reads = [
+      {
+        route: 'consentPresentation',
+        call: (householdId: string): Observable<unknown> => controller.consentPresentation(householdId, 'demo-sink'),
+        service: () => presentation.presentForUnitBySlug,
+      },
+      {
+        route: 'featureStates',
+        call: (householdId: string): Observable<unknown> => controller.featureStates(householdId, 'demo-sink'),
+        service: () => featureState.resolveForUnitBySlug,
+      },
+    ];
+
+    it.each(reads)(
+      '$route answers 403 for a household that is gone to an actor who does not read households',
+      async ({ call, service }) => {
+        householdCount.mockResolvedValue(0);
+        abilityService.getCurrentAbilities.mockReturnValue([{ can: () => true }, { can: () => false }] as never);
+
+        await expect(firstValueFrom(call('hh-gone'))).rejects.toBeInstanceOf(ForbiddenException);
+        expect(householdCount).toHaveBeenCalledWith({ where: { id: 'hh-gone', deletedAt: null } });
+        expect(service()).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(reads)(
+      '$route renders a live household for an actor who does not read households',
+      async ({ call, service }) => {
+        abilityService.getCurrentAbilities.mockReturnValue([{ can: () => false }] as never);
+
+        await firstValueFrom(call('hh-1'));
+
+        expect(householdCount).toHaveBeenCalledTimes(1);
+        expect(service()).toHaveBeenCalled();
+      },
+    );
+
+    it.each(reads)('$route leaves an actor who reads households to the liveness guard', async ({ call, service }) => {
+      abilityService.getCurrentAbilities.mockReturnValue([{ can: () => true }] as never);
+
+      await firstValueFrom(call('hh-1'));
+
+      expect(householdCount).not.toHaveBeenCalled();
+      expect(service()).toHaveBeenCalled();
+    });
+
+    // Liveness comes second, so an actor the instance check refuses learns
+    // nothing about whether the household exists.
+    it.each(reads)('$route checks the instance before liveness', ({ call }) => {
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+
+      expect(() => call('hh-gone')).toThrow(ForbiddenException);
+      expect(householdCount).not.toHaveBeenCalled();
     });
   });
 

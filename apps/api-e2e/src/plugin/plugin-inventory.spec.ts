@@ -487,6 +487,26 @@ describe('installed-plugin inventory (#354)', () => {
         await listHousehold(key, household.id).expect(403);
       });
 
+      // The single reads have no write to re-check liveness in either, so they
+      // check it as the list does, and answer the same 403.
+      it('refuses the consent and feature-state reads once the household is deleted (#790)', async () => {
+        const admin = await actors.admin();
+        const { household } = await actors.householdWithMembers({ owner: await actors.user() });
+        const plugin = await arrangePlugin({ scope: PluginScope.Household });
+        const key = await keyOf(admin);
+        const reads = (path: string) =>
+          request(baseUrl).get(`/api/households/${household.id}/plugins/${plugin.slug}/${path}`).set(key.headers);
+
+        // The control: the household is live, so the key reads both.
+        await reads('consent').expect(200);
+        await reads('features').expect(200);
+
+        await db.client.household.update({ where: { id: household.id }, data: { deletedAt: new Date() } });
+
+        await reads('consent').expect(403);
+        await reads('features').expect(403);
+      });
+
       // The rows are plugins. A key with no rule on them is refused, not served
       // an empty page.
       it('refuses a key that reads household plugins but not plugins', async () => {
