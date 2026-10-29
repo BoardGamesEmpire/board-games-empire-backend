@@ -2,6 +2,7 @@ import type { PluginUnit } from '@bge/actor-context';
 import {
   DatabaseService,
   grantScopeCoordinatesForUnit,
+  PERMISSION_CATALOG,
   PluginGrantScope,
   PluginGrantStatus,
   RiskLevel,
@@ -227,6 +228,69 @@ describe('PluginConsentCheckClassifier', () => {
       decidedRiskLevel: RiskLevel.Low,
       staleRisk: false,
     });
+  });
+
+  describe('a Granted unit-scope row over a FIXED-CONDITION permission reports pending — fixed conditions bind no unit (#591)', () => {
+    // A fixed filter reaches every matching row install-wide, so the read
+    // path confers nothing, and re-consent cannot fix that: not stale.
+    const USER_UNIT: PluginUnit = { scopeType: 'User', userId: 'u-1' };
+
+    it.each([
+      ['update:household:restore', 'household'],
+      ['update:household:restore', 'user'],
+      ['update:household:restore:administer', 'household'],
+      ['update:household:restore:administer', 'user'],
+      ['create:event', 'household'],
+      ['create:event', 'user'],
+    ] as const)('%s at %s scope', async (slug, consentScope) => {
+      await expect(classifyGranted(slug, consentScope)).resolves.toEqual({
+        decision: 'pending',
+        decidedRiskLevel: RiskLevel.Low,
+        staleRisk: false,
+      });
+    });
+
+    it.each(['household', 'user'] as const)(
+      'the same Granted row over an allowlisted public read confers at %s scope',
+      async (consentScope) => {
+        await expect(classifyGranted('read:game:public', consentScope)).resolves.toEqual({
+          decision: 'granted',
+          decidedRiskLevel: RiskLevel.Low,
+          staleRisk: false,
+        });
+      },
+    );
+
+    /** One Granted Low row at the unit's own scope over `slug`, carrying its real catalog rule. */
+    async function classifyGranted(slug: string, consentScope: 'household' | 'user') {
+      const entry = PERMISSION_CATALOG.find((permission) => permission.slug === slug);
+      expect(entry).toBeDefined();
+      db.permission.findMany.mockResolvedValue([
+        {
+          slug,
+          riskLevel: RiskLevel.Low,
+          action: entry?.action,
+          subject: entry?.subject,
+          fields: entry?.fields ?? [],
+          conditions: entry?.conditions,
+          inverted: false,
+        },
+      ] as never);
+      db.pluginGrant.findMany.mockResolvedValue([
+        {
+          permissionSlug: slug,
+          scopeType: consentScope === 'household' ? PluginGrantScope.Household : PluginGrantScope.User,
+          status: PluginGrantStatus.Granted,
+          decidedRiskLevel: RiskLevel.Low,
+        },
+      ] as never);
+
+      const result = await classifier.classify('plg_1', consentScope === 'household' ? HOUSEHOLD_UNIT : USER_UNIT, [
+        check(slug, { consentScope }),
+      ]);
+
+      return result.decisions.get(slug);
+    }
   });
 
   it('a subject drifted to the all wildcard demotes a Granted row to pending, NOT stale (the wildcard re-check)', async () => {

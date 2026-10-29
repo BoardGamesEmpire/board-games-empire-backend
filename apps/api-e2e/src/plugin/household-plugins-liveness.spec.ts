@@ -31,10 +31,11 @@ import { householdPluginKey } from './plugin-api-key';
 describe('household plugin routes for a missing or deleted household (#553)', () => {
   const baseUrl = requireBaseUrl(process.env);
 
+  /** An allowlisted public read, which a household-scope consent may hold (#591). */
   const HOUSEHOLD_CHECK: Check = {
-    slug: 'read:household_member',
+    slug: 'read:game:public',
     required: false,
-    reason: { en: 'Addresses the digest to the household roster.' },
+    reason: { en: 'Lists the public games the household digest features.' },
     consentScope: 'household',
   };
 

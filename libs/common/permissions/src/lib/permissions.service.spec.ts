@@ -1,16 +1,20 @@
 import type { PluginUnit } from '@bge/actor-context';
 import {
   Action,
+  PERMISSION_CATALOG,
+  PLUGIN_REQUESTED_PERMISSIONS_READER,
   PluginGrantScope,
   PluginGrantStatus,
   ResourceType,
   RiskLevel,
   SERVER_SCOPE_SENTINEL,
   User,
+  type PluginRequestedPermissions,
 } from '@bge/database';
 import { createTestingModuleWithDb, makePermission, type MockDatabaseService } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { createCache, type Cache } from 'cache-manager';
+import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type { ApikeyWithScopes, UserPermissionWithPermission, UserWithRoles } from './interfaces';
 import { PERMISSIONS_CACHE } from './permissions-cache';
 import { PermissionsService } from './permissions.service';
@@ -19,14 +23,20 @@ describe('PermissionsService', () => {
   let service: PermissionsService;
   let db: MockDatabaseService;
   let cache: Cache;
+  let reader: { read: jest.Mock<PluginRequestedPermissions, [unknown]> };
 
   beforeEach(async () => {
     // A real in-memory cache, not a stub: whether a cached graph still counts
     // as a hit depends on what an eviction wrote since it was cached.
     cache = createCache();
+    reader = { read: jest.fn().mockReturnValue({ valid: true, requested: [] }) };
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
-      providers: [PermissionsService, { provide: PERMISSIONS_CACHE, useValue: cache }],
+      providers: [
+        PermissionsService,
+        { provide: PERMISSIONS_CACHE, useValue: cache },
+        { provide: PLUGIN_REQUESTED_PERMISSIONS_READER, useValue: reader },
+      ],
     });
 
     service = module.get(PermissionsService);
@@ -640,6 +650,8 @@ describe('PermissionsService', () => {
     const pluginRow = (overrides: Partial<{ enabled: boolean; uninstalledAt: Date | null }> = {}) => ({
       id: 'plugin-1',
       slug: 'demo-plugin',
+      version: '1.0.0',
+      manifestJson: {},
       enabled: true,
       uninstalledAt: null,
       ...overrides,
@@ -658,13 +670,26 @@ describe('PermissionsService', () => {
       scopeType,
     });
 
+    /**
+     * Seeds the grant read, and has the active manifest request every row's
+     * permission at the row's scope, so a case about another guard is not
+     * also decided by the manifest bound (#577).
+     */
+    const grantRows = (rows: readonly ReturnType<typeof grantRow>[]) => {
+      db.pluginGrant.findMany.mockResolvedValue(rows as never);
+      reader.read.mockReturnValue({
+        valid: true,
+        requested: rows.map(({ permissionSlug, scopeType }) => ({ slug: permissionSlug, scopeType })),
+      });
+    };
+
     const servedUnitRow = { enabled: true, suspendedForConsent: false };
 
     beforeEach(() => {
       db.plugin.findUnique.mockResolvedValue(pluginRow() as never);
       db.householdPlugin.findUnique.mockResolvedValue(servedUnitRow as never);
       db.userPlugin.findUnique.mockResolvedValue(servedUnitRow as never);
-      db.pluginGrant.findMany.mockResolvedValue([] as never);
+      grantRows([]);
       db.permission.findMany.mockResolvedValue([] as never);
       db.pluginPermission.findMany.mockResolvedValue([] as never);
     });
@@ -768,10 +793,7 @@ describe('PermissionsService', () => {
 
     describe('grant → snapshot split and guards', () => {
       it('splits surviving grants into core permissions and own-namespace slugs', async () => {
-        db.pluginGrant.findMany.mockResolvedValue([
-          grantRow('read:game', RiskLevel.Medium),
-          grantRow('plugin|demo-plugin|manage:digest'),
-        ] as never);
+        grantRows([grantRow('read:game', RiskLevel.Medium), grantRow('plugin|demo-plugin|manage:digest')]);
         db.permission.findMany.mockResolvedValue([
           makePermission({ slug: 'read:game', riskLevel: RiskLevel.Medium }),
         ] as never);
@@ -791,7 +813,7 @@ describe('PermissionsService', () => {
       });
 
       it('excludes a grant whose decidedRiskLevel no longer covers the current risk', async () => {
-        db.pluginGrant.findMany.mockResolvedValue([grantRow('read:game', RiskLevel.Low)] as never);
+        grantRows([grantRow('read:game', RiskLevel.Low)]);
         db.permission.findMany.mockResolvedValue([
           makePermission({ slug: 'read:game', riskLevel: RiskLevel.High }),
         ] as never);
@@ -802,7 +824,7 @@ describe('PermissionsService', () => {
       });
 
       it('keeps a grant decided at or above the current risk', async () => {
-        db.pluginGrant.findMany.mockResolvedValue([grantRow('read:game', RiskLevel.Critical)] as never);
+        grantRows([grantRow('read:game', RiskLevel.Critical)]);
         db.permission.findMany.mockResolvedValue([
           makePermission({ slug: 'read:game', riskLevel: RiskLevel.High }),
         ] as never);
@@ -813,7 +835,7 @@ describe('PermissionsService', () => {
       });
 
       it('confers nothing for a grant whose catalog row is gone', async () => {
-        db.pluginGrant.findMany.mockResolvedValue([grantRow('read:vanished')] as never);
+        grantRows([grantRow('read:vanished')]);
         db.permission.findMany.mockResolvedValue([] as never);
 
         const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
@@ -822,6 +844,9 @@ describe('PermissionsService', () => {
       });
 
       it('throws the typed rejection for a grant row naming another plugin’s namespace — corruption, not drift', async () => {
+        // Not through grantRows: no valid manifest can request another
+        // plugin's namespace, so the corruption must be caught before the
+        // manifest bound would quietly drop the row (#577).
         db.pluginGrant.findMany.mockResolvedValue([grantRow('plugin|other-plugin|manage:digest')] as never);
 
         await expect(service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT)).rejects.toThrow(
@@ -841,10 +866,8 @@ describe('PermissionsService', () => {
         );
       });
 
-      it('a household-scope grant confers a core permission only when its row carries bounding conditions', async () => {
-        db.pluginGrant.findMany.mockResolvedValue([
-          grantRow('update:calendar', RiskLevel.Low, PluginGrantScope.Household),
-        ] as never);
+      it("a household-scope grant confers a core permission when its row names the household's own id (#591)", async () => {
+        grantRows([grantRow('update:calendar', RiskLevel.Low, PluginGrantScope.Household)]);
         db.permission.findMany.mockResolvedValue([
           makePermission({ slug: 'update:calendar', conditions: { householdId: '{{ unit.householdId }}' } }),
         ] as never);
@@ -858,9 +881,7 @@ describe('PermissionsService', () => {
         // The sharp case: a condition-free High-risk seed consented at
         // household scope would otherwise become an unscoped type-level
         // rule — one unit's consent reading as server-wide authority.
-        db.pluginGrant.findMany.mockResolvedValue([
-          grantRow('read:event', RiskLevel.High, PluginGrantScope.Household),
-        ] as never);
+        grantRows([grantRow('read:event', RiskLevel.High, PluginGrantScope.Household)]);
         db.permission.findMany.mockResolvedValue([
           makePermission({ slug: 'read:event', riskLevel: RiskLevel.High, conditions: null }),
         ] as never);
@@ -870,8 +891,55 @@ describe('PermissionsService', () => {
         expect(snapshot?.corePermissions).toEqual([]);
       });
 
+      describe('a unit-scope decision confers only a permission that binds the consenting unit (#591)', () => {
+        const USER_UNIT: PluginUnit = { scopeType: 'User', userId: 'u-1' };
+
+        /** One Granted decision at the unit's own scope over `slug`, carrying its real catalog conditions. */
+        const conferredAt = async (
+          slug: string,
+          scopeType: typeof PluginGrantScope.Household | typeof PluginGrantScope.User,
+        ) => {
+          const entry = PERMISSION_CATALOG.find((permission) => permission.slug === slug);
+          expect(entry).toBeDefined();
+          grantRows([grantRow(slug, RiskLevel.Low, scopeType)]);
+          db.permission.findMany.mockResolvedValue([
+            makePermission({ slug, conditions: entry?.conditions as never }),
+          ] as never);
+
+          const snapshot = await service.getPluginGrantSnapshot(
+            'plugin-1',
+            scopeType === PluginGrantScope.Household ? HOUSEHOLD_UNIT : USER_UNIT,
+          );
+
+          return snapshot?.corePermissions.map((permission) => permission.slug);
+        };
+
+        // A fixed filter binds no unit: one household's consent to the
+        // restore permissions would reach every deleted household.
+        it.each([
+          ['update:household:restore', PluginGrantScope.Household],
+          ['update:household:restore', PluginGrantScope.User],
+          ['update:household:restore:administer', PluginGrantScope.Household],
+          ['update:household:restore:administer', PluginGrantScope.User],
+          ['create:event', PluginGrantScope.Household],
+          ['create:event', PluginGrantScope.User],
+        ] as const)(
+          'confers nothing for %s, whose fixed conditions bind no unit, at %s scope',
+          async (slug, scopeType) => {
+            await expect(conferredAt(slug, scopeType)).resolves.toEqual([]);
+          },
+        );
+
+        it.each([PluginGrantScope.Household, PluginGrantScope.User] as const)(
+          'confers an allowlisted public read at %s scope',
+          async (scopeType) => {
+            await expect(conferredAt('read:game:public', scopeType)).resolves.toEqual(['read:game:public']);
+          },
+        );
+      });
+
       it('excludes a granted core permission whose subject drifted to the all wildcard (the wildcard re-check)', async () => {
-        db.pluginGrant.findMany.mockResolvedValue([grantRow('read:everything', RiskLevel.Critical)] as never);
+        grantRows([grantRow('read:everything', RiskLevel.Critical)]);
         db.permission.findMany.mockResolvedValue([
           makePermission({ slug: 'read:everything', subject: 'all', riskLevel: RiskLevel.Low }),
         ] as never);
@@ -887,6 +955,91 @@ describe('PermissionsService', () => {
         expect(snapshot).toMatchObject({ servable: true, corePermissions: [], ownGrantSlugs: [] });
         expect(db.permission.findMany).not.toHaveBeenCalled();
         expect(db.pluginPermission.findMany).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('bounded by the active manifest (#577)', () => {
+      it('confers nothing for a granted decision on a permission the active manifest no longer requests', async () => {
+        db.pluginGrant.findMany.mockResolvedValue([grantRow('read:game')] as never);
+        db.permission.findMany.mockResolvedValue([makePermission({ slug: 'read:game' })] as never);
+        reader.read.mockReturnValue({ valid: true, requested: [] });
+
+        const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+
+        expect(snapshot).toMatchObject({ servable: true, corePermissions: [], ownGrantSlugs: [] });
+        expect(reader.read).toHaveBeenCalledWith({ slug: 'demo-plugin', version: '1.0.0', manifestJson: {} });
+      });
+
+      it('confers nothing for a decision at a scope the manifest no longer requests the permission at', async () => {
+        db.pluginGrant.findMany.mockResolvedValue([
+          grantRow('update:calendar', RiskLevel.Low, PluginGrantScope.Household),
+        ] as never);
+        db.permission.findMany.mockResolvedValue([
+          makePermission({ slug: 'update:calendar', conditions: { householdId: '{{ unit.householdId }}' } }),
+        ] as never);
+        reader.read.mockReturnValue({
+          valid: true,
+          requested: [{ slug: 'update:calendar', scopeType: PluginGrantScope.Server }],
+        });
+
+        const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+
+        expect(snapshot).toMatchObject({ servable: true, corePermissions: [], ownGrantSlugs: [] });
+      });
+
+      it('confers a decision on a declared permission only while the active manifest requests it', async () => {
+        db.pluginGrant.findMany.mockResolvedValue([
+          grantRow('plugin|demo-plugin|manage:digest'),
+          grantRow('plugin|demo-plugin|manage:archive'),
+        ] as never);
+        db.pluginPermission.findMany.mockResolvedValue([
+          { slug: 'plugin|demo-plugin|manage:digest', riskLevel: RiskLevel.Low },
+          { slug: 'plugin|demo-plugin|manage:archive', riskLevel: RiskLevel.Low },
+        ] as never);
+        reader.read.mockReturnValue({
+          valid: true,
+          requested: [{ slug: 'plugin|demo-plugin|manage:digest', scopeType: PluginGrantScope.Server }],
+        });
+
+        const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+
+        expect(snapshot?.ownGrantSlugs).toEqual(['plugin|demo-plugin|manage:digest']);
+      });
+
+      it('rejects when the stored manifest fails re-validation', async () => {
+        db.pluginGrant.findMany.mockResolvedValue([grantRow('read:game')] as never);
+        reader.read.mockReturnValue({ valid: false, detail: 'x' });
+
+        const failure = await service
+          .getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT)
+          .catch((error: unknown) => error);
+
+        expect(failure).toBeInstanceOf(PluginAbilityRenderRejectionError);
+        expect(failure).toMatchObject({
+          reason: 'invalid-stored-manifest',
+          permissionSlug: null,
+          pluginSlug: 'demo-plugin',
+          detail: 'x',
+        });
+      });
+
+      it('never reads the manifest when the plugin holds no decisions', async () => {
+        grantRows([]);
+
+        await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+
+        expect(reader.read).not.toHaveBeenCalled();
+      });
+
+      it('confers nothing on a plugin actor when no reader is registered', async () => {
+        jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+        const withoutReader = new PermissionsService(db as never, cache);
+        db.pluginGrant.findMany.mockResolvedValue([grantRow('read:game')] as never);
+        db.permission.findMany.mockResolvedValue([makePermission({ slug: 'read:game' })] as never);
+
+        const snapshot = await withoutReader.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+
+        expect(snapshot).toMatchObject({ servable: true, corePermissions: [], ownGrantSlugs: [] });
       });
     });
   });

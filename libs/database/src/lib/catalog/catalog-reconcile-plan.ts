@@ -415,10 +415,35 @@ function diffPermission(wanted: PermissionSeedDefinition, row: PermissionSnapsho
   return changes;
 }
 
+/**
+ * The `Permission` columns a rule is built from, which decide what the row
+ * allows. `reason` and `riskLevel` describe a permission without changing that.
+ */
+const RULE_FIELDS = [
+  'action',
+  'subject',
+  'fields',
+  'conditions',
+  'inverted',
+] as const satisfies readonly PermissionField[];
+
+export type PermissionRuleColumns = Pick<PermissionSnapshotRow, (typeof RULE_FIELDS)[number]>;
+
+/**
+ * Whether `row` allows exactly what the catalog's `wanted` does, compared the
+ * way the planner compares drift (#591).
+ */
+export function matchesCatalogRule(wanted: PermissionSeedDefinition, row: PermissionRuleColumns): boolean {
+  // The labels come from `wanted` because they are not compared.
+  const labelled = { ...row, reason: wanted.reason, riskLevel: wanted.riskLevel };
+
+  return RULE_FIELDS.every((field) => comparePermissionField(field, wanted, labelled)[2]);
+}
+
 function comparePermissionField(
   field: PermissionField,
   wanted: PermissionSeedDefinition,
-  row: PermissionSnapshotRow,
+  row: Pick<PermissionSnapshotRow, PermissionField>,
 ): [from: unknown, to: unknown, same: boolean] {
   switch (field) {
     case 'action':

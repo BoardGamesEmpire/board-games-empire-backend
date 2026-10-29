@@ -73,17 +73,19 @@ describe('the pre-row races (#360)', () => {
     await db.close();
   });
 
+  /** An allowlisted public read, which a household-scope consent may hold (#591). */
   const HOUSEHOLD_CHECK: Check = {
-    slug: 'read:household_member',
+    slug: 'read:game:public',
     required: false,
-    reason: { en: 'Addresses the digest to the household roster.' },
+    reason: { en: 'Lists the public games the household digest features.' },
     consentScope: 'household',
   };
 
+  /** An allowlisted public read, which a user-scope consent may hold (#591). */
   const USER_CHECK: Check = {
-    slug: 'update:user:profile:own',
+    slug: 'read:game_collection:public',
     required: false,
-    reason: { en: 'Records a delivery preference on the profile.' },
+    reason: { en: 'Shows public collections in the digest.' },
     consentScope: 'user',
   };
 

@@ -488,6 +488,8 @@ export type PluginGrantRevocationReason =
   | 'household-deleted'
   /** The declaring plugin's update removed the permission from `declares[]` — the catalog diff deleted its grants. */
   | 'permission-removed'
+  /** The plugin's update stopped requesting the permission, so every decision on it was deleted (#577). */
+  | 'permission-no-longer-requested'
   /**
    * An update moved the permission to a different consent scope, so the
    * decision recorded at the OLD scope no longer authorizes anything — the

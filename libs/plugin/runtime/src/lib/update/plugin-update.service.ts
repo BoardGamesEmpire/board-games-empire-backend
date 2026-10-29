@@ -121,6 +121,31 @@ function declaredSlugDiff(
 }
 
 /**
+ * The requested permissions the next manifest stops requesting at any
+ * consent scope (#577). A permission still requested at another scope is a
+ * scope move, which the comparison owns. One whose declaration the update
+ * also drops is left to the declares diff, so its decisions revoke once,
+ * as `'permission-removed'`. The approval screen and activation both use it,
+ * so the screen cannot show less than approving deletes.
+ */
+function requestedSlugsDropped(
+  active: PluginManifestValidationResult,
+  next: PluginManifestValidationResult,
+  removedDeclares: readonly string[],
+): string[] {
+  const stillRequested = new Set(next.permissionChecks.map((check) => check.canonicalSlug));
+  const removed = new Set(removedDeclares);
+
+  return [
+    ...new Set(
+      active.permissionChecks
+        .map((check) => check.canonicalSlug)
+        .filter((slug) => !stillRequested.has(slug) && !removed.has(slug)),
+    ),
+  ];
+}
+
+/**
  * Typed update provenance, mirroring install's shape: `bundled = false
  * ⇒ pendingSha256` is unrepresentable-when-violated. URL/registry
  * provenance columns keep describing the INSTALL; #84 extends this when its
@@ -221,6 +246,14 @@ export interface PluginUpdatePendingDescription {
   /** `Plugin.pendingSince` verbatim — nullable because the column is; every staging write this service makes sets it. */
   readonly pendingSince: Date | null;
   readonly declares: PluginUpdateDeclaresDiff;
+  /**
+   * The requested permissions the update stops requesting (#577), from the
+   * function activation applies. Approving deletes every decision on them,
+   * granted and denied, at every scope, so this is destructive too. A
+   * permission whose declaration the update removes is in `declares.removed`
+   * instead.
+   */
+  readonly noLongerRequested: readonly string[];
 }
 
 /** One unit activation decided to suspend, with the slugs that forced it. */
@@ -236,6 +269,8 @@ interface ActivationOutcome {
   readonly seededChecks: readonly NormalizedPermissionRequest[];
   readonly seededGrants: readonly PluginGrant[];
   readonly revokedGrants: readonly PluginGrant[];
+  /** Decisions deleted because the next manifest stopped requesting their permission (#577). */
+  readonly unrequestedGrants: readonly PluginGrant[];
   /** Grants deleted because their permission moved consent scope. */
   readonly scopeMovedGrants: readonly PluginGrant[];
   /** Server-scope grants whose `decidedRiskLevel` this approval refreshed (#59). */
@@ -273,7 +308,9 @@ interface ActivationOutcome {
  *
  * ACTIVATION never hot-swaps running code: the transaction promotes
  * the DB state — version, manifest, the `declares[]` catalog diff with
- * `'permission-removed'` grant revocation, per-unit suspension for
+ * `'permission-removed'` grant revocation, `'permission-no-longer-requested'`
+ * revocation of decisions on permissions the new manifest stops requesting
+ * (#577), per-unit suspension for
  * required-at-household-scope escalations — and sets
  * `restartRequired`; the running instance continues on the prior code until
  * the next boot, where the loader clears the flag. No forced restart:
@@ -510,7 +547,7 @@ export class PluginUpdateService {
     this.logger.log(
       `Plugin '${plugin.slug}' update approved: ${plugin.version} → ${next.manifest.version}, ` +
         `${outcome.seededGrants.length} server grant(s) seeded, ${outcome.reStampedGrants.length} re-stamped, ` +
-        `${outcome.revokedGrants.length + outcome.scopeMovedGrants.length} revoked, ` +
+        `${outcome.revokedGrants.length + outcome.unrequestedGrants.length + outcome.scopeMovedGrants.length} revoked, ` +
         `${outcome.suspendedHouseholdUnits.length} household and ${outcome.suspendedUserUnits.length} user ` +
         `unit(s) suspended pending consent; restart required`,
     );
@@ -547,12 +584,14 @@ export class PluginUpdateService {
    */
   async describePending(slug: string): Promise<PluginUpdatePendingDescription> {
     const { plugin, active, next, comparison } = await this.resolvePendingUpdate(slug);
+    const declares = declaredSlugDiff(active, next);
 
     return {
       plugin,
       comparison,
       pendingSince: plugin.pendingSince,
-      declares: declaredSlugDiff(active, next),
+      declares,
+      noLongerRequested: requestedSlugsDropped(active, next, declares.removed),
     };
   }
 
@@ -992,6 +1031,8 @@ export class PluginUpdateService {
    * `approve()`: promote the pending state, apply the `declares[]`
    * catalog diff (insert added rows, revoke and delete grants on removed
    * declares with `'permission-removed'` provenance, delete the rows),
+   * revoke and delete decisions on permissions the next manifest stops
+   * requesting with `'permission-no-longer-requested'` provenance (#577),
    * seed the approval's server grants, suspend household AND user units
    * lacking consent on their scope's re-consent escalations (#225),
    * and set `restartRequired`. Events are collected inside and
@@ -1207,6 +1248,24 @@ export class PluginUpdateService {
         await tx.pluginPermission.deleteMany({ where: { pluginId: plugin.id, slug: { in: removed } } });
       }
 
+      // Decisions on a permission the next manifest stops requesting are
+      // deleted, granted and denied alike, with 'permission-no-longer-requested'
+      // provenance (#577). Left in place, a later version that requests the
+      // permission again would inherit a consent decision nobody made for
+      // it. Read before the delete, for the same reason as the declares diff.
+      // This does not reach a decide() that judged against the outgoing
+      // manifest and commits after this transaction; refusing that write is
+      // #361's.
+      const droppedRequests = requestedSlugsDropped(active, next, removedDeclares);
+      let unrequestedGrants: PluginGrant[] = [];
+
+      if (droppedRequests.length > 0) {
+        unrequestedGrants = await tx.pluginGrant.findMany({
+          where: { pluginId: plugin.id, permissionSlug: { in: droppedRequests } },
+        });
+        await tx.pluginGrant.deleteMany({ where: { pluginId: plugin.id, permissionSlug: { in: droppedRequests } } });
+      }
+
       for (const slug of addedDeclares) {
         await tx.pluginPermission.create({
           // Explicit Low, never the manifest and never a schema default (#59).
@@ -1413,6 +1472,7 @@ export class PluginUpdateService {
         seededChecks,
         seededGrants,
         revokedGrants,
+        unrequestedGrants,
         scopeMovedGrants,
         reStampedGrants,
         suspendedHouseholdUnits,
@@ -1455,6 +1515,7 @@ export class PluginUpdateService {
 
     const revocations: readonly { grant: PluginGrant; reason: PluginGrantRevocationReason }[] = [
       ...outcome.revokedGrants.map((grant) => ({ grant, reason: 'permission-removed' as const })),
+      ...outcome.unrequestedGrants.map((grant) => ({ grant, reason: 'permission-no-longer-requested' as const })),
       ...outcome.scopeMovedGrants.map((grant) => ({ grant, reason: 'consent-scope-changed' as const })),
     ];
 

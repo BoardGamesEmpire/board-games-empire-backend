@@ -1120,7 +1120,7 @@ A grant given when the permission carried a lower risk level than it does now. I
 _Avoid_: stale risk, risk-stale grant
 
 **Revocation**:
-A consent decision undone without anyone choosing to undo it. Either whoever gave it lost the authority to, for example by leaving the household, or an update removed the permission or moved it to another consent scope. The permission goes back to awaiting an answer, and the reason is kept.
+A consent decision undone without anyone choosing to undo it. Either whoever gave it lost the authority to, for example by leaving the household, or an update removed the permission, stopped requesting it, or moved it to another consent scope. The permission goes back to awaiting an answer, and the reason is kept.
 _Avoid_: invalidation; durable denial (a refusal someone chose)
 
 **Categorical exclusion**:

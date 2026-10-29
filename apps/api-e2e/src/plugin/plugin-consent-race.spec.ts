@@ -65,11 +65,14 @@ describe('consent decisions under concurrency (#360)', () => {
     consentScope: 'server',
   };
 
-  /** REQUIRED at household scope: denying it must suspend the unit. */
+  /**
+   * REQUIRED at household scope: denying it must suspend the unit. An
+   * allowlisted public read, which a household-scope consent may hold (#591).
+   */
   const HOUSEHOLD_CHECK: Check = {
-    slug: 'read:household_member',
+    slug: 'read:game:public',
     required: true,
-    reason: { en: 'Addresses the digest to the household roster.' },
+    reason: { en: 'Lists the public games the household digest features.' },
     consentScope: 'household',
   };
 

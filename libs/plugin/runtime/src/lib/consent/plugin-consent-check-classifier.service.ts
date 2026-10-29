@@ -1,10 +1,13 @@
 import type { PluginUnit } from '@bge/actor-context';
 import {
+  bindsConsentUnit,
+  CONSENT_UNIT_BINDING_REFUSAL,
   DatabaseService,
   grantScopeCoordinatesForUnit,
-  hasBoundingConditions,
+  PluginGrantScope,
   PluginGrantStatus,
   riskCovers,
+  type Permission,
   type RiskLevel,
 } from '@bge/database';
 import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
@@ -79,13 +82,16 @@ export class PluginConsentCheckClassifier {
       const grant = grantByScopeAndSlug.get(`${decidingScope}|${check.canonicalSlug}`);
       const currentRiskLevel = catalog.riskBySlug.get(check.canonicalSlug) ?? null;
       const wildcardSubject = catalog.wildcardSlugs.has(check.canonicalSlug);
-      // Unit-boundedness (#60): a condition-free core permission consented
-      // at household/user scope confers nothing — mirrors the ability read
-      // path exactly. Server-consented checks are exempt.
+      // Unit-boundedness (#60, #591): a core permission consented at
+      // household/user scope confers nothing unless it binds the consenting
+      // unit — mirrors the ability read path exactly. Server-consented
+      // checks are exempt.
+      const corePermission = catalog.corePermissionsBySlug.get(check.canonicalSlug);
       const unboundedUnitScope =
         check.origin === 'core' &&
-        check.consentScope !== 'server' &&
-        catalog.unconditionedCoreSlugs.has(check.canonicalSlug);
+        decidingScope !== PluginGrantScope.Server &&
+        corePermission !== undefined &&
+        !bindsConsentUnit(corePermission, decidingScope);
 
       decisions.set(check.canonicalSlug, {
         decision: this.decide(
@@ -145,9 +151,8 @@ export class PluginConsentCheckClassifier {
 
     if (unboundedUnitScope) {
       this.logger.warn(
-        `Plugin ${pluginId} check '${canonicalSlug}' names a condition-free permission consented at unit ` +
-          'scope; nothing bounds that authority to the consenting unit — reporting pending (the ability ' +
-          'confers nothing)',
+        `Plugin ${pluginId} requested permission '${canonicalSlug}' is consented at unit scope, but ` +
+          `${CONSENT_UNIT_BINDING_REFUSAL} — reporting pending (the ability confers nothing, #591)`,
       );
 
       return 'pending';
@@ -164,14 +169,22 @@ export class PluginConsentCheckClassifier {
 
   /**
    * Catalog state per canonical slug: current risk (core and own-namespace
-   * rows from their respective catalogs) plus the core slugs whose subject
+   * rows from their respective catalogs), the core slugs whose subject
    * drifted to the `all` wildcard — grant-time forbids wildcard subjects
-   * (#59), so their grants confer nothing at consumption.
+   * (#59), so their grants confer nothing at consumption — and the core rows
+   * themselves, for the unit-binding rule (#591).
    */
   private async loadCatalogState(
     pluginId: string,
     checks: readonly NormalizedPermissionRequest[],
-  ): Promise<{ riskBySlug: Map<string, RiskLevel>; wildcardSlugs: Set<string>; unconditionedCoreSlugs: Set<string> }> {
+  ): Promise<{
+    riskBySlug: Map<string, RiskLevel>;
+    wildcardSlugs: Set<string>;
+    corePermissionsBySlug: Map<
+      string,
+      Pick<Permission, 'slug' | 'action' | 'subject' | 'fields' | 'conditions' | 'inverted'>
+    >;
+  }> {
     const coreSlugs = checks.filter((check) => check.origin === 'core').map((check) => check.canonicalSlug);
     const ownSlugs = checks.filter((check) => check.origin === 'plugin').map((check) => check.canonicalSlug);
 
@@ -181,7 +194,15 @@ export class PluginConsentCheckClassifier {
             // A retired row (#235) reads as vanished, exactly as the ability
             // path reads it: the grant confers nothing, so the check is pending.
             where: { slug: { in: coreSlugs }, retiredAt: null },
-            select: { slug: true, riskLevel: true, subject: true, conditions: true },
+            select: {
+              slug: true,
+              riskLevel: true,
+              action: true,
+              subject: true,
+              fields: true,
+              conditions: true,
+              inverted: true,
+            },
           })
         : [],
       ownSlugs.length > 0
@@ -199,11 +220,7 @@ export class PluginConsentCheckClassifier {
       wildcardSlugs: new Set(
         corePermissions.filter((permission) => permission.subject === 'all').map((permission) => permission.slug),
       ),
-      unconditionedCoreSlugs: new Set(
-        corePermissions
-          .filter((permission) => !hasBoundingConditions(permission.conditions))
-          .map((permission) => permission.slug),
-      ),
+      corePermissionsBySlug: new Map(corePermissions.map((permission) => [permission.slug, permission] as const)),
     };
   }
 }

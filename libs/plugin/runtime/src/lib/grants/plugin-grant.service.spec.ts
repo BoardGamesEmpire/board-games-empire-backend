@@ -1,5 +1,5 @@
 import type { Permission, Plugin, PluginGrant, PluginPermission } from '@bge/database';
-import { DatabaseService, PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
+import { DatabaseService, PERMISSION_CATALOG, PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
 import { deadlock } from '@bge/database/testing';
 import { createMockDatabaseService, rawQueryText, type MockDatabaseService } from '@bge/testing';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
@@ -115,14 +115,20 @@ describe('PluginGrantService', () => {
 
       throw new Error(`Unrouted $queryRaw in test: ${sql}`);
     }) as never);
-    db.permission.findUnique.mockResolvedValue({
-      slug: 'feedback:read',
-      subject: 'FeedbackSubmission',
-      riskLevel: RiskLevel.Medium,
-      // Bounding clause so unit-scope decisions pass the unit-boundedness
-      // gate (#60); the condition-free refusal has its own explicit specs.
-      conditions: { householdId: '{{ unit.householdId }}' },
-    } as unknown as Permission);
+    db.permission.findUnique.mockImplementation((({ where }: { where: { slug: string } }) =>
+      Promise.resolve({
+        slug: 'feedback:read',
+        subject: 'FeedbackSubmission',
+        riskLevel: RiskLevel.Medium,
+        // A clause naming the consenting unit's own id, so unit-scope
+        // decisions pass the unit-binding gate (#60, #591): the user's id for
+        // the one permission the manifest requests at user scope, the
+        // household's otherwise. The refusals have their own explicit specs.
+        conditions:
+          where.slug === 'read:public_content'
+            ? { ownerId: '{{ unit.userId }}' }
+            : { householdId: '{{ unit.householdId }}' },
+      })) as never);
     db.pluginPermission.findUnique.mockResolvedValue({
       id: 'plgperm_1',
       pluginId: 'plg_1',
@@ -704,6 +710,105 @@ describe('PluginGrantService', () => {
         service.decide({ ...serverDecision, permissionSlug: 'plugin|demo-sink|manage:all' }),
       ).rejects.toThrow(PluginGrantExclusionError);
       expect(db.pluginPermission.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('decide — a unit-scope decision must bind the consenting unit (#591)', () => {
+    /** The catalog entry as its `Permission` row would carry it, real conditions included. */
+    const catalogPermission = (slug: string): Permission => {
+      const entry = PERMISSION_CATALOG.find((permission) => permission.slug === slug);
+
+      if (!entry) {
+        throw new Error(`'${slug}' is not in the permission catalog`);
+      }
+
+      const { action, subject, fields = [], conditions, riskLevel } = entry;
+
+      return { slug, action, subject, fields, conditions, inverted: false, riskLevel } as unknown as Permission;
+    };
+
+    /** The spec's manifest, also requesting `slug` at `consentScope`. */
+    const requesting = (slug: string, consentScope: 'server' | 'household' | 'user') => {
+      const extended = buildPluginManifest({ scope: 'household' });
+      extended.permissions.checks = [
+        ...manifest.permissions.checks,
+        { slug, required: false, reason: { en: 'Reads what the digest summarises.' }, consentScope },
+      ];
+
+      return { ...plugin, manifestJson: extended } as unknown as Plugin;
+    };
+
+    /** A decision at `scopeType`, made by whoever owns that unit's consent. */
+    const unitDecision = (
+      permissionSlug: string,
+      scopeType: typeof PluginGrantScope.Household | typeof PluginGrantScope.User,
+    ) =>
+      scopeType === PluginGrantScope.Household
+        ? { ...serverDecision, permissionSlug, scopeType, scopeId: 'hh_1' }
+        : { ...serverDecision, permissionSlug, scopeType, scopeId: 'user-a', deciderId: 'user-a' };
+
+    it.each([
+      ['update:household:restore', 'household'],
+      ['update:household:restore', 'user'],
+      ['update:household:restore:administer', 'household'],
+      ['update:household:restore:administer', 'user'],
+      ['create:event', 'household'],
+      ['create:event', 'user'],
+    ] as const)('refuses %s, whose fixed conditions bind no unit, at %s scope', async (slug, consentScope) => {
+      db.plugin.findUnique.mockResolvedValue(requesting(slug, consentScope));
+      db.permission.findUnique.mockResolvedValue(catalogPermission(slug));
+
+      await expect(
+        service.decide(
+          unitDecision(slug, consentScope === 'household' ? PluginGrantScope.Household : PluginGrantScope.User),
+        ),
+      ).rejects.toThrow(PluginGrantExclusionError);
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+    });
+
+    it('refuses a template naming the acting user at user scope', async () => {
+      db.permission.findUnique.mockResolvedValue({
+        slug: 'read:public_content',
+        subject: 'public_content',
+        riskLevel: RiskLevel.Low,
+        conditions: { userId: '{{ user.id }}' },
+      } as unknown as Permission);
+
+      await expect(
+        service.decide({
+          ...serverDecision,
+          permissionSlug: 'read:public_content',
+          scopeType: PluginGrantScope.User,
+          scopeId: 'user-a',
+          deciderId: 'user-a',
+        }),
+      ).rejects.toThrow(PluginGrantExclusionError);
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+    });
+
+    it.each(['household', 'user'] as const)('records an allowlisted public read at %s scope', async (consentScope) => {
+      db.plugin.findUnique.mockResolvedValue(requesting('read:game:public', consentScope));
+      db.permission.findUnique.mockResolvedValue(catalogPermission('read:game:public'));
+
+      await expect(
+        service.decide(
+          unitDecision(
+            'read:game:public',
+            consentScope === 'household' ? PluginGrantScope.Household : PluginGrantScope.User,
+          ),
+        ),
+      ).resolves.toMatchObject({ changed: true });
+      expect(db.pluginGrant.upsert).toHaveBeenCalled();
+    });
+
+    it('still records update:household:restore:administer at server scope — server consent is server-wide authority', async () => {
+      db.plugin.findUnique.mockResolvedValue(requesting('update:household:restore:administer', 'server'));
+      db.permission.findUnique.mockResolvedValue(catalogPermission('update:household:restore:administer'));
+
+      await expect(
+        service.decide({ ...serverDecision, permissionSlug: 'update:household:restore:administer' }),
+      ).resolves.toMatchObject({ changed: true });
+      expect(db.pluginGrant.upsert).toHaveBeenCalled();
     });
   });
 

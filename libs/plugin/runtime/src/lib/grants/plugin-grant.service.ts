@@ -1,7 +1,8 @@
 import type { Plugin, PluginGrant, Prisma } from '@bge/database';
 import {
+  bindsConsentUnit,
+  CONSENT_UNIT_BINDING_REFUSAL,
   DatabaseService,
-  hasBoundingConditions,
   lockLiveHousehold,
   PluginGrantScope,
   PluginGrantStatus,
@@ -1323,17 +1324,19 @@ export class PluginGrantService {
       );
     }
 
-    // Unit-boundedness (#60): a condition-free core permission is
-    // subject-wide authority, and a household/user cannot consent to more
-    // than its own slice. Refused here rather than recorded as a grant the
-    // read path would ignore — a decision that can never confer is not a
-    // decision, it is a trap for whoever reads the consent screen.
-    if (check.consentScope !== 'server' && !hasBoundingConditions(permission.conditions)) {
+    // Unit-boundedness (#60, #591): a household/user cannot consent to more
+    // than its own slice, so below server scope the permission must bind
+    // the consenting unit — restrict it to its own id, or be an allowlisted
+    // public read. Refused here rather than recorded as a grant the read path
+    // would ignore — a decision that can never confer is not a decision, it
+    // is a trap for whoever reads the consent screen.
+    const scope = CONSENT_SCOPE_TO_GRANT_SCOPE[check.consentScope];
+
+    if (scope !== PluginGrantScope.Server && !bindsConsentUnit(permission, scope)) {
       throw new PluginGrantExclusionError(
         check.canonicalSlug,
-        'a condition-free core permission cannot be consented at household/user scope — nothing bounds the ' +
-          'conferred authority to the consenting unit; only server consent can confer it (or seed a ' +
-          'unit-conditioned variant, #315)',
+        `consented at ${check.consentScope} scope, ${CONSENT_UNIT_BINDING_REFUSAL}; request it at server ` +
+          'scope or seed a unit-conditioned variant (#315)',
       );
     }
 

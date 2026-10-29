@@ -1,9 +1,12 @@
-import type { Permission, PermissionSlug, RoleScope } from '@bge/database';
+import type { PluginUnit } from '@bge/actor-context';
+import type { Permission, PermissionSlug, PluginUnitGrantScope, RoleScope } from '@bge/database';
 import {
   Action,
   MemberInvitePolicy,
   PERMISSION_CATALOG,
   PermissionOwner,
+  PLUGIN_UNIT_RENDER_VARIABLES,
+  PluginGrantScope,
   RENDER_CONTEXT_VARIABLES,
   ResourceType,
   RiskLevel,
@@ -2457,6 +2460,58 @@ describe('AbilityFactory', () => {
         );
 
         expect(ability.can(Action.read, 'Game')).toBe(true);
+      });
+    });
+
+    describe('the render context the consent rule assumes (#591)', () => {
+      // `PLUGIN_UNIT_RENDER_VARIABLES` in @bge/database is the unit-binding
+      // rule's statement of what this context supplies. Each candidate is one
+      // template variable, which the factory either renders or refuses; the
+      // rendered set must equal the map's, so a coordinate dropped or added on
+      // one side fails here rather than as consent the ability then refuses.
+      // The literals are keyed by the types the context is built from, so a
+      // new unit coordinate or plugin field is a compile error until it is
+      // a candidate.
+      type UnitKey = PluginUnit extends infer U ? (U extends unknown ? keyof U : never) : never;
+      const unitVariables: { readonly [K in UnitKey]: `unit.${K}` } = {
+        scopeType: 'unit.scopeType',
+        householdId: 'unit.householdId',
+        userId: 'unit.userId',
+      };
+      const pluginVariables: { readonly [K in keyof PluginGrantSnapshot['plugin']]: `plugin.${K}` } = {
+        id: 'plugin.id',
+        slug: 'plugin.slug',
+      };
+      const candidates = [...Object.values(pluginVariables), ...Object.values(unitVariables)];
+
+      const renderedAt = (unit: PluginUnit) =>
+        candidates
+          .filter((variable) => {
+            const snapshot = makeSnapshot({
+              unit,
+              corePermissions: [
+                makePermission({ action: Action.read, subject: 'Game', conditions: { name: `{{ ${variable} }}` } }),
+              ],
+            });
+
+            try {
+              factory.createForPlugin(snapshot);
+              return true;
+            } catch (error) {
+              if (error instanceof PluginAbilityRenderRejectionError) {
+                return false;
+              }
+
+              throw error;
+            }
+          })
+          .sort();
+
+      it.each<[PluginUnitGrantScope, PluginUnit]>([
+        [PluginGrantScope.Household, { scopeType: 'Household', householdId: 'hh-x' }],
+        [PluginGrantScope.User, { scopeType: 'User', userId: 'user-x' }],
+      ])('supplies exactly the variables the rule admits at %s scope', (scope, unit) => {
+        expect(renderedAt(unit)).toEqual([...PLUGIN_UNIT_RENDER_VARIABLES[scope]].sort());
       });
     });
 

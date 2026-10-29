@@ -1,4 +1,4 @@
-import { RiskLevel, type Permission } from '@bge/database';
+import { PERMISSION_CATALOG, RiskLevel, type Permission } from '@bge/database';
 import { buildPluginManifest, validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import {
   collectForbiddenPermissionViolations,
@@ -152,6 +152,95 @@ describe('consent-gates', () => {
       ];
 
       expect(collectUnboundedUnitConsentViolations(validate(manifest), new Map())).toEqual([]);
+    });
+
+    describe('a core permission requested at unit scope must bind the consenting unit (#591)', () => {
+      const withUnitRequest = (slug: string, consentScope: 'household' | 'user') => {
+        const manifest = buildPluginManifest({ scope: 'household' });
+        manifest.permissions.checks = [
+          ...manifest.permissions.checks,
+          { slug, required: false, reason: { en: 'Reads what the digest summarises.' }, consentScope },
+        ];
+
+        return validate(manifest);
+      };
+
+      const permissionsWith = (slug: string, conditions: unknown) =>
+        new Map<string, Permission>([
+          [slug, { slug, subject: 'household', riskLevel: RiskLevel.Low, conditions } as unknown as Permission],
+        ]);
+
+      const catalogEntry = (slug: string) => {
+        const entry = PERMISSION_CATALOG.find((permission) => permission.slug === slug);
+
+        if (!entry) {
+          throw new Error(`'${slug}' is not in the permission catalog`);
+        }
+
+        return entry;
+      };
+
+      /** `slug`'s row as the catalog seeds it: a public read binds only while its row holds the catalog's rule. */
+      const seededPermissions = (slug: string) => {
+        const { action, subject, fields = [], conditions, riskLevel } = catalogEntry(slug);
+
+        return new Map<string, Permission>([
+          [
+            slug,
+            {
+              slug,
+              action,
+              subject,
+              fields: [...fields],
+              conditions,
+              inverted: false,
+              riskLevel,
+            } as unknown as Permission,
+          ],
+        ]);
+      };
+
+      it.each([
+        ['update:household:restore', 'household'],
+        ['update:household:restore', 'user'],
+        ['update:household:restore:administer', 'household'],
+        ['update:household:restore:administer', 'user'],
+        ['create:event', 'household'],
+        ['create:event', 'user'],
+      ] as const)('flags %s, whose fixed conditions bind no unit, at %s scope', (slug, consentScope) => {
+        expect(
+          collectUnboundedUnitConsentViolations(
+            withUnitRequest(slug, consentScope),
+            permissionsWith(slug, catalogEntry(slug).conditions),
+          ),
+        ).toEqual([expect.objectContaining({ permissionSlug: slug })]);
+      });
+
+      it.each([
+        [{ householdId: '{{ householdId }}' }, 'household'],
+        [{ householdId: '{{ householdId }}' }, 'user'],
+        [{ userId: '{{ user.id }}' }, 'household'],
+        [{ userId: '{{ user.id }}' }, 'user'],
+      ] as const)(
+        'flags a template naming %j, outside the plugin render context, at %s scope',
+        (conditions, consentScope) => {
+          expect(
+            collectUnboundedUnitConsentViolations(
+              withUnitRequest('read:household_member', consentScope),
+              permissionsWith('read:household_member', conditions),
+            ),
+          ).toEqual([expect.objectContaining({ permissionSlug: 'read:household_member' })]);
+        },
+      );
+
+      it.each(['household', 'user'] as const)('accepts an allowlisted public read at %s scope', (consentScope) => {
+        expect(
+          collectUnboundedUnitConsentViolations(
+            withUnitRequest('read:game:public', consentScope),
+            seededPermissions('read:game:public'),
+          ),
+        ).toEqual([]);
+      });
     });
   });
 

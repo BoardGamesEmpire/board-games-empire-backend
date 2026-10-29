@@ -145,9 +145,11 @@ describe('PluginFeatureStateService', () => {
     slug,
     riskLevel,
     subject,
-    // Unit-consented rows confer only when they carry a bounding clause
-    // (#60); a realistic template keeps these fixtures conferring.
-    conditions: { householdId: '{{ unit.householdId }}' },
+    // Unit-consented rows confer only when they name the consenting unit's
+    // own id (#60, #591): the user's for the one permission the manifest
+    // requests at user scope, the household's otherwise.
+    conditions:
+      slug === 'read:public_content' ? { ownerId: '{{ unit.userId }}' } : { householdId: '{{ unit.householdId }}' },
   });
 
   /** Every bound core slug at Low — the catalog state the happy paths assume. */

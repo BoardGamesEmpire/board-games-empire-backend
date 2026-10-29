@@ -24,13 +24,18 @@ import type { PluginUnit } from '@bge/actor-context';
  * - `malformed-slug` — a grant row whose slug carries the `plugin|` envelope
  *   prefix but is not a parseable canonical slug. Same corruption class:
  *   only canonical forms exist at rest.
+ * - `invalid-stored-manifest` — the plugin holds consent decisions, but its
+ *   stored active manifest fails re-validation, so nothing says which of
+ *   them the manifest still requests (#577). Names no permission: the whole
+ *   ability is refused, not one grant.
  */
 export type PluginAbilityRejectionReason =
   | 'out-of-context-variable'
   | 'malformed-template'
   | 'unsupported-token-type'
   | 'foreign-namespace-slug'
-  | 'malformed-slug';
+  | 'malformed-slug'
+  | 'invalid-stored-manifest';
 
 const REASON_DETAIL: Readonly<
   Record<PluginAbilityRejectionReason, (input: { variable?: string; tokenType?: string }) => string>
@@ -43,6 +48,7 @@ const REASON_DETAIL: Readonly<
     'only interpolations and sections can render authority',
   'foreign-namespace-slug': () => 'canonical slug names a different plugin’s namespace',
   'malformed-slug': () => 'slug carries the plugin| envelope but is not a parseable canonical form',
+  'invalid-stored-manifest': () => 'stored manifest failed re-validation',
 };
 
 /**
@@ -67,7 +73,10 @@ export class PluginAbilityRenderRejectionError extends Error {
   readonly reason: PluginAbilityRejectionReason;
   readonly pluginId: string;
   readonly pluginSlug: string;
-  readonly permissionSlug: string;
+  /** Null only for `invalid-stored-manifest`, which refuses the whole ability rather than one grant. */
+  readonly permissionSlug: string | null;
+  /** What failed, for `invalid-stored-manifest`; absent otherwise. */
+  readonly detail?: string;
   /** The offending template variable for `out-of-context-variable`; absent otherwise. */
   readonly variable?: string;
   /** The offending Mustache token type for `unsupported-token-type`; absent otherwise. */
@@ -78,20 +87,26 @@ export class PluginAbilityRenderRejectionError extends Error {
     reason: PluginAbilityRejectionReason;
     pluginId: string;
     pluginSlug: string;
-    permissionSlug: string;
+    permissionSlug: string | null;
+    detail?: string;
     variable?: string;
     tokenType?: string;
     unit: PluginUnit;
   }) {
     super(
-      `Cannot render granted permission '${input.permissionSlug}' for plugin '${input.pluginSlug}': ` +
-        REASON_DETAIL[input.reason](input),
+      input.permissionSlug === null
+        ? `Cannot resolve the ability of plugin '${input.pluginSlug}': ` +
+            REASON_DETAIL[input.reason](input) +
+            (input.detail ? ` (${input.detail})` : '')
+        : `Cannot render granted permission '${input.permissionSlug}' for plugin '${input.pluginSlug}': ` +
+            REASON_DETAIL[input.reason](input),
     );
 
     this.reason = input.reason;
     this.pluginId = input.pluginId;
     this.pluginSlug = input.pluginSlug;
     this.permissionSlug = input.permissionSlug;
+    this.detail = input.detail;
     this.variable = input.variable;
     this.tokenType = input.tokenType;
     this.unit = input.unit;

@@ -6,6 +6,7 @@ export * from './catalog-reconcile-plan';
 export * from './catalog-reconciler';
 export * from './permission-entry';
 export * from './permission.catalog';
+export * from './plugin-consent-unit-binding';
 export * from './role-permission.catalog';
 export * from './role.catalog';
 export * from './seed-definitions';
