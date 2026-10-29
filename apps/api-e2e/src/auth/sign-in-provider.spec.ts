@@ -1,7 +1,7 @@
 import { createActors, pollUntil, type Actors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { FAKE_PROVIDER_ID, fakeProviderEnv, requireBaseUrl } from '../support/e2e-env';
+import { FAKE_PROVIDER_ID, fakeProviderEnv, LENIENT_FAKE_PROVIDER_ID, requireBaseUrl } from '../support/e2e-env';
 import { useSettingSwitch } from '../support/setting-switch';
 import { fakeProviderUrl, signInThroughProvider } from '../support/sign-in-provider';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
@@ -72,7 +72,7 @@ describe('signing in through a sign-in provider', () => {
    * a client reads, not the DTO's camelCase ones. The client id and secret are
    * the ones the API booted with.
    */
-  it('lists the sign-in provider in discovery under its label, without its client id or secret (#912)', async () => {
+  it('lists each sign-in provider in discovery under its label, without its client id or secret (#912)', async () => {
     const providerEnv = fakeProviderEnv(fakeProviderUrl());
 
     const response = await request(baseUrl).get(DISCOVERY_PATH).expect(200);
@@ -87,15 +87,29 @@ describe('signing in through a sign-in provider', () => {
         authorization_endpoint: '/api/auth/sign-in/oauth2',
         sign_up_disabled: false,
       },
+      {
+        type: 'oidc',
+        provider_id: LENIENT_FAKE_PROVIDER_ID,
+        display_name: 'Lenient fake provider',
+        discovery_url: providerEnv.OIDC_FAKE_LENIENT_DISCOVERY_URL,
+        authorization_endpoint: '/api/auth/sign-in/oauth2',
+        sign_up_disabled: false,
+      },
     ]);
-    expect(response.text).not.toContain(providerEnv.OIDC_FAKE_CLIENT_ID);
-    expect(response.text).not.toContain(providerEnv.OIDC_FAKE_CLIENT_SECRET);
+    for (const secret of [
+      providerEnv.OIDC_FAKE_CLIENT_ID,
+      providerEnv.OIDC_FAKE_CLIENT_SECRET,
+      providerEnv.OIDC_FAKE_LENIENT_CLIENT_ID,
+      providerEnv.OIDC_FAKE_LENIENT_CLIENT_SECRET,
+    ]) {
+      expect(response.text).not.toContain(secret);
+    }
   });
 
   it('asks the provider for openid, profile and email (#912)', async () => {
     const { sub, email } = freshIdentity();
 
-    const { ticket } = await signInThroughProvider(baseUrl, { sub, email });
+    const { ticket } = await signInThroughProvider(baseUrl, { sub, email, email_verified: true });
 
     const response = await request(fakeProviderUrl()).get(`/tickets/${ticket}`).expect(200);
     expect(response.body.scope.split(' ')).toEqual(['openid', 'profile', 'email']);
@@ -119,11 +133,48 @@ describe('signing in through a sign-in provider', () => {
     await expect(sessionUserId(result.cookie)).resolves.toBe(created.id);
   });
 
+  // A provider that lets someone enrol under an address they don't hold would
+  // otherwise let them register that address here before its owner.
+  it.each([
+    ['false', { email_verified: false }],
+    ['missing', {}],
+  ])('refuses a first sign-in whose email_verified is %s, creating nothing (#912)', async (_state, verification) => {
+    const { sub, email, username } = freshIdentity();
+
+    const result = await signInThroughProvider(baseUrl, { sub, email, preferred_username: username, ...verification });
+
+    expect(result.location.searchParams.get('error')).toBe('SIGN_IN_PROVIDER_EMAIL_UNVERIFIED');
+    expect(result.cookie).toBe('');
+    await expect(db.client.user.count({ where: { email } })).resolves.toBe(0);
+  });
+
+  // The user is created, but the row says what the provider said: nothing
+  // that trusts an address, such as a household invite, trusts this one.
+  it('creates an unverified user through a provider allowed unverified emails (#912)', async () => {
+    const { sub, email, username } = freshIdentity();
+
+    const result = await signInThroughProvider(
+      baseUrl,
+      { sub, email, preferred_username: username },
+      { providerId: LENIENT_FAKE_PROVIDER_ID },
+    );
+
+    expect(result.location.href).toBe(new URL('/', baseUrl).href);
+    const created = await userByEmail(email);
+    expect(created).toMatchObject({ username, emailVerified: false });
+    await expect(sessionUserId(result.cookie)).resolves.toBe(created.id);
+  });
+
   it('gives a taken username its first free variant and tells the user (#912)', async () => {
     const existing = await actors.user();
     const { sub, email } = freshIdentity();
 
-    const result = await signInThroughProvider(baseUrl, { sub, email, preferred_username: existing.user.username });
+    const result = await signInThroughProvider(baseUrl, {
+      sub,
+      email,
+      email_verified: true,
+      preferred_username: existing.user.username,
+    });
 
     // On the error page instead, the variant never reached the row and the
     // unique index on username refused it.
@@ -152,7 +203,12 @@ describe('signing in through a sign-in provider', () => {
       const { sub, email } = freshIdentity();
       await setUsernameChange(false);
 
-      const result = await signInThroughProvider(baseUrl, { sub, email, preferred_username: existing.user.username });
+      const result = await signInThroughProvider(baseUrl, {
+        sub,
+        email,
+        email_verified: true,
+        preferred_username: existing.user.username,
+      });
 
       expect(result.location.href).toBe(new URL('/', baseUrl).href);
       const created = await userByEmail(email);
@@ -173,7 +229,7 @@ describe('signing in through a sign-in provider', () => {
   it('keeps a renamed profile on the next sign-in, and sends no second notification (#912)', async () => {
     const existing = await actors.user();
     const { sub, email, username: renamed } = freshIdentity();
-    const claims = { sub, email, preferred_username: existing.user.username, given_name: 'Ada' };
+    const claims = { sub, email, email_verified: true, preferred_username: existing.user.username, given_name: 'Ada' };
 
     const first = await signInThroughProvider(baseUrl, claims);
     expect(first.location.href).toBe(new URL('/', baseUrl).href);

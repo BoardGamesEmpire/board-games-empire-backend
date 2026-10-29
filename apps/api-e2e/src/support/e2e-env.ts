@@ -195,19 +195,32 @@ export const E2E_FAKE_PROVIDER_URL_VAR = 'BGE_E2E_FAKE_PROVIDER_URL';
 export const FAKE_PROVIDER_ID = 'fake';
 
 /**
- * The sign-in provider variables the API child boots with: the fake alone
- * (#912). The API reads its providers once, at boot, so the fake is listed for
- * every spec, and discovery shows it to all of them. `OIDC_PROVIDERS` is
+ * The same fake listed a second time, with `ALLOW_UNVERIFIED_EMAIL` on, so a
+ * spec can sign up through a provider that doesn't vouch for the email (#912).
+ */
+export const LENIENT_FAKE_PROVIDER_ID = 'fake-lenient';
+
+/**
+ * The sign-in provider variables the API child boots with: the fake, twice
+ * (#912). The API reads its providers once, at boot, so both are listed for
+ * every spec, and discovery shows them to all of them. `OIDC_PROVIDERS` is
  * pinned like everything in {@link apiEnvOverrides}: a developer's `.env` may
  * list real providers, which a spec must never reach.
  */
 export function fakeProviderEnv(providerUrl: string): Record<string, string> {
+  const discoveryUrl = `${providerUrl}/.well-known/openid-configuration`;
+
   return {
-    OIDC_PROVIDERS: FAKE_PROVIDER_ID,
-    OIDC_FAKE_DISCOVERY_URL: `${providerUrl}/.well-known/openid-configuration`,
+    OIDC_PROVIDERS: `${FAKE_PROVIDER_ID},${LENIENT_FAKE_PROVIDER_ID}`,
+    OIDC_FAKE_DISCOVERY_URL: discoveryUrl,
     OIDC_FAKE_CLIENT_ID: 'e2e-client',
     OIDC_FAKE_CLIENT_SECRET: 'e2e-secret',
     OIDC_FAKE_DISPLAY_NAME: 'Fake provider',
+    OIDC_FAKE_LENIENT_DISCOVERY_URL: discoveryUrl,
+    OIDC_FAKE_LENIENT_CLIENT_ID: 'e2e-lenient-client',
+    OIDC_FAKE_LENIENT_CLIENT_SECRET: 'e2e-lenient-secret',
+    OIDC_FAKE_LENIENT_DISPLAY_NAME: 'Lenient fake provider',
+    OIDC_FAKE_LENIENT_ALLOW_UNVERIFIED_EMAIL: 'true',
   };
 }
 

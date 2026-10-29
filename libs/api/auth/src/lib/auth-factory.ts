@@ -32,6 +32,7 @@ import { type OidcProviderConfig, readOidcProviders, unlistedOidcVariables } fro
 import { AUTH_BASE_PATH, AUTH_CLIENT_IP_HEADER, AUTH_COOKIE_PREFIX } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
 import { mapOidcProfile, OIDC_SCOPES } from './oidc-profile';
+import { createProviderEmailGate } from './provider-email-gate';
 import { providerPictureOnly } from './provider-picture';
 import { createSettingGates, settingGateDeps } from './setting-gates';
 import { createSignOutHook } from './sign-out-hook';
@@ -155,6 +156,7 @@ export function authFactory(
   const settingGates = createSettingGates(gateDeps);
   const signOutHook = createSignOutHook({ render: gateDeps.render });
   const usernameVariants = createUsernameVariants(prisma);
+  const providerEmailGate = createProviderEmailGate(providers, gateDeps.render);
 
   const usingSwagger = configService?.get<boolean>('swagger.enabled');
   if (usingSwagger) {
@@ -254,10 +256,13 @@ export function authFactory(
     databaseHooks: {
       user: {
         create: {
-          // The registration gate first: a refused sign-up writes nothing,
-          // so there is no username to vary and no picture to keep or drop.
+          // The gates first: a refused sign-up writes nothing, so there is
+          // no username to vary and no picture to keep or drop. Registration
+          // before the provider's email, since a closed server is the answer
+          // whatever the email.
           before: async (user, context) => {
             await settingGates.beforeUserCreate(user, context);
+            providerEmailGate(user, context);
 
             const variant = await usernameVariants.beforeUserCreate(user, context);
             const picture = providerPictureOnly(user, context);

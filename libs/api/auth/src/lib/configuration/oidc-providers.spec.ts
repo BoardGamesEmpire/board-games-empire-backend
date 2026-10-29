@@ -49,7 +49,30 @@ describe('readOidcProviders', () => {
       clientId: 'authentik-id',
       clientSecret: 'authentik-secret',
       displayName: 'Authentik',
+      allowUnverifiedEmail: false,
     });
+  });
+
+  it.each([
+    ['true', true],
+    ['TRUE', true],
+    ['false', false],
+  ])('reads ALLOW_UNVERIFIED_EMAIL=%p as %p (#912)', (value, expected) => {
+    const [provider] = withEnvironment(
+      { NODE_ENV: 'test', OIDC_PROVIDERS: 'a', ...full('a', 'A'), OIDC_A_ALLOW_UNVERIFIED_EMAIL: value },
+      readOidcProviders,
+    );
+
+    expect(provider.allowUnverifiedEmail).toBe(expected);
+  });
+
+  // A typo must not quietly leave the provider strict, refusing sign-ins the
+  // operator meant to allow, with nothing at boot to say why.
+  it('refuses an ALLOW_UNVERIFIED_EMAIL that is neither true nor false, and names it (#912)', () => {
+    const error = configError({ OIDC_PROVIDERS: 'a', ...full('a', 'A'), OIDC_A_ALLOW_UNVERIFIED_EMAIL: 'yes please' });
+
+    expect(error.malformedKeys).toEqual(['OIDC_A_ALLOW_UNVERIFIED_EMAIL']);
+    expect(error.message).toContain('OIDC_A_ALLOW_UNVERIFIED_EMAIL is neither true nor false');
   });
 
   it('turns a hyphen in the id into an underscore in its variables (#912)', () => {
@@ -207,10 +230,12 @@ describe('unlistedOidcVariables', () => {
           OIDC_GOOGLE_CLIENT_ID: 'x',
           OIDC_GOGLE_CLIENT_ID: 'y',
           OIDC_GOOGLE_WORK_DISPLAY_NAME: 'z',
+          OIDC_GOOGLE_WORK_ALLOW_UNVERIFIED_EMAIL: 'true',
+          OIDC_GOOGLE_ALLOW_UNVERIFIED_EMAIL: 'true',
           OIDC_CLIENT_ID: 'old',
         },
         ['google'],
       ),
-    ).toEqual(['OIDC_GOGLE_CLIENT_ID', 'OIDC_GOOGLE_WORK_DISPLAY_NAME']);
+    ).toEqual(['OIDC_GOGLE_CLIENT_ID', 'OIDC_GOOGLE_WORK_ALLOW_UNVERIFIED_EMAIL', 'OIDC_GOOGLE_WORK_DISPLAY_NAME']);
   });
 });

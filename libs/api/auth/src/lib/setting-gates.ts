@@ -76,7 +76,7 @@ const ADMIN_CREATE_USER_PATH = '/admin/create-user';
  * refusal there carries its code as its message: the client gets
  * `error=REGISTRATION_DISABLED` to match, as it gets `code` in a body.
  */
-const OAUTH_CALLBACK_PATHS: ReadonlySet<string> = new Set(['/oauth2/callback/:providerId', '/callback/:id']);
+export const OAUTH_CALLBACK_PATHS: ReadonlySet<string> = new Set(['/oauth2/callback/:providerId', '/callback/:id']);
 
 /**
  * The route through which users edit their own profile. better-auth maps its

@@ -9,6 +9,12 @@ export interface OidcProviderConfig {
   readonly clientId: string;
   readonly clientSecret: string;
   readonly displayName: string;
+  /**
+   * Whether a first sign-in may create a user from an email this provider
+   * does not vouch for (`email_verified` false or missing). Off unless the
+   * operator turns it on: such an email may not be the user's own.
+   */
+  readonly allowUnverifiedEmail: boolean;
 }
 
 /**
@@ -26,11 +32,25 @@ const PROVIDER_VARIABLE_SUFFIXES = ['DISCOVERY_URL', 'CLIENT_ID', 'CLIENT_SECRET
 
 type ProviderVariableSuffix = (typeof PROVIDER_VARIABLE_SUFFIXES)[number];
 
-const PROVIDER_VARIABLE_PATTERN = new RegExp(`^OIDC_([A-Z0-9_]+)_(?:${PROVIDER_VARIABLE_SUFFIXES.join('|')})$`);
+/** The provider's optional variable: `true` or `false`, and unset means `false`. */
+const ALLOW_UNVERIFIED_EMAIL_SUFFIX = 'ALLOW_UNVERIFIED_EMAIL';
+
+const PROVIDER_VARIABLE_PATTERN = new RegExp(
+  `^OIDC_([A-Z0-9_]+)_(?:${[...PROVIDER_VARIABLE_SUFFIXES, ALLOW_UNVERIFIED_EMAIL_SUFFIX].join('|')})$`,
+);
 
 // http(s) only: the api fetches it at sign-in and publishes it in discovery
 // for clients to fetch, so `file:` or `javascript:` would boot and fail later.
 const DISCOVERY_URL_RULE = Joi.string().uri({ scheme: ['http', 'https'] });
+
+const FLAG_RULE = Joi.boolean();
+
+/** Why a set variable was refused, by what it is meant to hold. */
+function malformedReason(key: string): string {
+  return key.endsWith(`_${ALLOW_UNVERIFIED_EMAIL_SUFFIX}`)
+    ? 'is neither true nor false'
+    : 'is not an http or https URL';
+}
 
 /** `google-work` becomes `GOOGLE_WORK`, the middle of that provider's variable names. */
 export function oidcVariableSegment(id: string): string {
@@ -38,8 +58,8 @@ export function oidcVariableSegment(id: string): string {
 }
 
 /**
- * Thrown when `OIDC_PROVIDERS` holds a bad id or a listed provider's discovery
- * URL is malformed, together with any variable a valid id lacks, so the
+ * Thrown when `OIDC_PROVIDERS` holds a bad id or a listed provider's variable
+ * is malformed, together with any variable a valid id lacks, so the
  * operator fixes everything in one pass. A boot with only missing variables
  * throws envirator's own `MissingEnvironmentError` instead.
  */
@@ -57,15 +77,16 @@ export class OidcProvidersConfigError extends EnviratorError {
         ),
         ...duplicateIds.map((id) => `OIDC_PROVIDERS: ${JSON.stringify(id)} is listed more than once`),
         ...missingKeys.map((key) => `Missing environment variable: '${key}'`),
-        ...malformedKeys.map((key) => `${key} is not an http or https URL`),
+        ...malformedKeys.map((key) => `${key} ${malformedReason(key)}`),
       ].join('\n'),
     );
   }
 }
 
 /**
- * Reads `OIDC_PROVIDERS` and each listed provider's four variables, in list
- * order. Unset or empty means no providers (#912).
+ * Reads `OIDC_PROVIDERS` and each listed provider's four variables, and its
+ * optional `ALLOW_UNVERIFIED_EMAIL`, in list order. Unset or empty means no
+ * providers (#912).
  *
  * `@bge/env` reads an empty value as unset, so `defaultValue: ''` hands back
  * `''` for both without a warning, and this collects every missing key itself
@@ -73,10 +94,11 @@ export class OidcProvidersConfigError extends EnviratorError {
  * mounted from a file often ends in a newline, which the provider would
  * refuse as part of the secret.
  *
- * A listed provider's discovery URL must be an http or https URL. That check
- * is here rather than in the api's root schema, which can't tell a listed
- * provider's variable from an unlisted one, and an unlisted one only warns.
- * It therefore runs only once the root schema passes.
+ * A listed provider's discovery URL must be an http or https URL, and its
+ * `ALLOW_UNVERIFIED_EMAIL`, when set, `true` or `false`. Those checks are here
+ * rather than in the api's root schema, which can't tell a listed provider's
+ * variable from an unlisted one, and an unlisted one only warns. They
+ * therefore run only once the root schema passes.
  */
 export function readOidcProviders(): OidcProviderConfig[] {
   // Split without filtering: an empty entry, as a trailing comma leaves, is a
@@ -111,12 +133,23 @@ export function readOidcProviders(): OidcProviderConfig[] {
       malformedKeys.push(key('DISCOVERY_URL'));
     }
 
+    // A mistyped value refuses the boot rather than falling back to off, so a
+    // provider the operator meant to trust doesn't refuse sign-ins unexplained.
+    const allowKey = `OIDC_${segment}_${ALLOW_UNVERIFIED_EMAIL_SUFFIX}`;
+    const allowValue = env.provide<string>(allowKey, { defaultValue: '' }).trim();
+    const allow = FLAG_RULE.validate(allowValue.length === 0 ? false : allowValue);
+
+    if (allow.error !== undefined) {
+      malformedKeys.push(allowKey);
+    }
+
     providers.push({
       id,
       discoveryUrl: values.DISCOVERY_URL,
       clientId: values.CLIENT_ID,
       clientSecret: values.CLIENT_SECRET,
       displayName: values.DISPLAY_NAME,
+      allowUnverifiedEmail: allow.value === true,
     });
   }
 

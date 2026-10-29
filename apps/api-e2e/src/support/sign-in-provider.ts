@@ -40,6 +40,9 @@ export interface ProviderSignInOptions {
    * user (`/oauth2/link`) instead of signing in with it.
    */
   readonly linkWith?: Record<string, string>;
+
+  /** The listed provider to sign in through; the strict fake unless set. */
+  readonly providerId?: string;
 }
 
 /** Each `Set-Cookie` header as the `name=value` pair a `Cookie` header sends back. */
@@ -78,7 +81,7 @@ export async function signInThroughProvider(
   claims: Record<string, unknown>,
   options: ProviderSignInOptions = {},
 ): Promise<ProviderSignInResult> {
-  const body = { providerId: FAKE_PROVIDER_ID, callbackURL: '/' };
+  const body = { providerId: options.providerId ?? FAKE_PROVIDER_ID, callbackURL: '/' };
 
   const start = options.linkWith
     ? await postToAuth(baseUrl, LINK_PATH).set(options.linkWith).send(body)

@@ -249,13 +249,18 @@ describe('e2e-env (pure logic)', () => {
   describe('fakeProviderEnv', () => {
     const providerUrl = 'http://127.0.0.1:41235';
 
-    it('lists the fake as the only sign-in provider, with its four variables (#912)', () => {
+    it('lists the fake twice, the second allowing unverified emails (#912)', () => {
       expect(fakeProviderEnv(providerUrl)).toEqual({
-        OIDC_PROVIDERS: 'fake',
+        OIDC_PROVIDERS: 'fake,fake-lenient',
         OIDC_FAKE_DISCOVERY_URL: 'http://127.0.0.1:41235/.well-known/openid-configuration',
         OIDC_FAKE_CLIENT_ID: 'e2e-client',
         OIDC_FAKE_CLIENT_SECRET: 'e2e-secret',
         OIDC_FAKE_DISPLAY_NAME: 'Fake provider',
+        OIDC_FAKE_LENIENT_DISCOVERY_URL: 'http://127.0.0.1:41235/.well-known/openid-configuration',
+        OIDC_FAKE_LENIENT_CLIENT_ID: 'e2e-lenient-client',
+        OIDC_FAKE_LENIENT_CLIENT_SECRET: 'e2e-lenient-secret',
+        OIDC_FAKE_LENIENT_DISPLAY_NAME: 'Lenient fake provider',
+        OIDC_FAKE_LENIENT_ALLOW_UNVERIFIED_EMAIL: 'true',
       });
     });
   });
