@@ -1,5 +1,6 @@
 import type { Prisma } from '../client';
 import { blockWith } from './friendship-conditions';
+import { liveHouseholdOf } from './household-conditions';
 
 /**
  * The games shared with `userId` (#810): a share names one user, or one
@@ -28,7 +29,7 @@ export function gameSharedWith(userId: string): Prisma.GameWhereInput {
         shares: {
           some: {
             approvedAt: { not: null },
-            household: { is: { deletedAt: null, members: { some: { userId } } } },
+            household: { is: liveHouseholdOf(userId) },
           },
         },
       },

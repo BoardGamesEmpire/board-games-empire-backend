@@ -1,6 +1,7 @@
 import type { EnumReachFilter, Prisma } from '../client';
 import { Action, ResourceType, RiskLevel } from '../client';
 import { acceptedFriendOf, friendOfFriendOf, REACHES_ADMITTING_FRIENDS } from '../utils/friendship-conditions';
+import { liveHouseholdOf } from '../utils/household-conditions';
 import { gameSharedWith } from '../utils/share-conditions';
 import { assertJsonConditions, assertUniqueSlugs, assertValidSubjects } from './catalog-integrity';
 import type { CatalogSubject, DefinedPermission } from './permission-entry';
@@ -1349,7 +1350,7 @@ export const PERMISSION_CATALOG = [
           householdMember: {
             some: {
               showAllGames: true,
-              household: { is: { deletedAt: null, members: { some: { userId: '{{ user.id }}' } } } },
+              household: { is: liveHouseholdOf('{{ user.id }}') },
             },
           },
         },

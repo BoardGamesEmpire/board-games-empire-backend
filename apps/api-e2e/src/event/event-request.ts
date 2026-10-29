@@ -15,6 +15,9 @@ import { eventEnvelope } from './event-wire';
 
 export const EVENTS_PATH = '/api/events';
 
+/** `GET /api/events/browse`: the upcoming events the acting user can read but doesn't attend (#962). */
+export const BROWSE_PATH = `${EVENTS_PATH}/browse`;
+
 export interface EventClient {
   /**
    * `POST /api/events` as `actor`, under a fresh title, with `body` merged
