@@ -26,8 +26,9 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
  *
  * Plugin state is arranged directly on the rows (the install ingress is
  * #84's), same as the other C4 suites. Core checks reference SEEDED
- * permissions only: `read:household_member` (Low, household-conditioned)
- * and `update:user:profile:own` (Low, user-conditioned).
+ * permissions only: `read:game:public` and `read:game_collection:public`
+ * (both Low), allowlisted public reads a household and a user may consent
+ * to (#591).
  */
 describe('plugin unit enablement + feature state (#323)', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -53,19 +54,23 @@ describe('plugin unit enablement + feature state (#323)', () => {
     consentScope: 'server',
   };
 
-  /** REQUIRED household check bound to the fixture feature — the feature read and the born-suspended probe both key on it. */
+  /**
+   * REQUIRED household check bound to the fixture feature — the feature read and the born-suspended probe both key on it.
+   * An allowlisted public read, which a household-scope consent may hold (#591).
+   */
   const HOUSEHOLD_CHECK: Check = {
-    slug: 'read:household_member',
+    slug: 'read:game:public',
     required: true,
-    reason: { en: 'Addresses the digest to the household roster.' },
+    reason: { en: 'Lists the public games the household digest features.' },
     consentScope: 'household',
     feature: 'weekly-digest',
   };
 
+  /** An allowlisted public read, which a user-scope consent may hold (#591). */
   const USER_CHECK: Check = {
-    slug: 'update:user:profile:own',
+    slug: 'read:game_collection:public',
     required: false,
-    reason: { en: 'Records each member’s digest delivery preference on their profile.' },
+    reason: { en: 'Shows public collections in each member’s digest.' },
     consentScope: 'user',
   };
 
@@ -269,7 +274,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
 
       // The durable refusal lands first — rowless, so nothing suspends yet.
       await decideHousehold(owner, household.id, plugin.slug, {
-        permissionSlug: 'read:household_member',
+        permissionSlug: 'read:game:public',
         status: PluginGrantStatus.Denied,
       }).expect(200);
 
@@ -283,7 +288,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
 
       // Late acceptance is the heal — the admin switch never was.
       await decideHousehold(owner, household.id, plugin.slug, {
-        permissionSlug: 'read:household_member',
+        permissionSlug: 'read:game:public',
         status: PluginGrantStatus.Granted,
       }).expect(200);
 
@@ -433,7 +438,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
       expect(missing.body.scopeType).toBe('User');
 
       await decideUser(user, plugin.slug, {
-        permissionSlug: 'update:user:profile:own',
+        permissionSlug: 'read:game_collection:public',
         status: PluginGrantStatus.Granted,
       }).expect(200);
 
@@ -464,7 +469,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
       });
 
       await decideUser(user, plugin.slug, {
-        permissionSlug: 'update:user:profile:own',
+        permissionSlug: 'read:game_collection:public',
         status: PluginGrantStatus.Granted,
       }).expect(200);
 
@@ -497,12 +502,12 @@ describe('plugin unit enablement + feature state (#323)', () => {
       expect(digest).toMatchObject({
         state: 'disabled',
         reason: 'pending',
-        blockingSlugs: ['read:household_member'],
+        blockingSlugs: ['read:game:public'],
       });
 
       // A durable denial upgrades the reason — same pairing, actionable why.
       await decideHousehold(owner, household.id, plugin.slug, {
-        permissionSlug: 'read:household_member',
+        permissionSlug: 'read:game:public',
         status: PluginGrantStatus.Denied,
       }).expect(200);
 
@@ -510,7 +515,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
       const deniedDigest = denied.body.featureState.features.find(
         (feature: { name: string }) => feature.name === 'weekly-digest',
       );
-      expect(deniedDigest).toMatchObject({ reason: 'denied', blockingSlugs: ['read:household_member'] });
+      expect(deniedDigest).toMatchObject({ reason: 'denied', blockingSlugs: ['read:game:public'] });
       // The required denial also suspended the unit — reported at the
       // unit level while the per-feature slot keeps the actionable reason.
       expect(denied.body.featureState).toMatchObject({ served: false, suspendedForConsent: true });
@@ -520,7 +525,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
       const user = await actors.user();
       const plugin = await arrangePlugin();
       await decideUser(user, plugin.slug, {
-        permissionSlug: 'update:user:profile:own',
+        permissionSlug: 'read:game_collection:public',
         status: PluginGrantStatus.Granted,
       }).expect(200);
 
@@ -529,7 +534,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
         (feature: { name: string }) => feature.name === 'weekly-digest',
       );
 
-      expect(digest).toMatchObject({ state: 'active', blockingSlugs: [], perUnitSlugs: ['read:household_member'] });
+      expect(digest).toMatchObject({ state: 'active', blockingSlugs: [], perUnitSlugs: ['read:game:public'] });
     });
 
     it('the read carries the status contract: 403 for an admin of another household, 404 unknown, 410 tombstone', async () => {

@@ -1,6 +1,7 @@
 import type { PluginUnit } from '@bge/actor-context';
 import {
   Action,
+  PERMISSION_CATALOG,
   PLUGIN_REQUESTED_PERMISSIONS_READER,
   PluginGrantScope,
   PluginGrantStatus,
@@ -865,7 +866,7 @@ describe('PermissionsService', () => {
         );
       });
 
-      it('a household-scope grant confers a core permission only when its row carries bounding conditions', async () => {
+      it("a household-scope grant confers a core permission when its row names the household's own id (#591)", async () => {
         grantRows([grantRow('update:calendar', RiskLevel.Low, PluginGrantScope.Household)]);
         db.permission.findMany.mockResolvedValue([
           makePermission({ slug: 'update:calendar', conditions: { householdId: '{{ unit.householdId }}' } }),
@@ -888,6 +889,53 @@ describe('PermissionsService', () => {
         const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
 
         expect(snapshot?.corePermissions).toEqual([]);
+      });
+
+      describe('a unit-scope decision confers only a permission that binds the consenting unit (#591)', () => {
+        const USER_UNIT: PluginUnit = { scopeType: 'User', userId: 'u-1' };
+
+        /** One Granted decision at the unit's own scope over `slug`, carrying its real catalog conditions. */
+        const conferredAt = async (
+          slug: string,
+          scopeType: typeof PluginGrantScope.Household | typeof PluginGrantScope.User,
+        ) => {
+          const entry = PERMISSION_CATALOG.find((permission) => permission.slug === slug);
+          expect(entry).toBeDefined();
+          grantRows([grantRow(slug, RiskLevel.Low, scopeType)]);
+          db.permission.findMany.mockResolvedValue([
+            makePermission({ slug, conditions: entry?.conditions as never }),
+          ] as never);
+
+          const snapshot = await service.getPluginGrantSnapshot(
+            'plugin-1',
+            scopeType === PluginGrantScope.Household ? HOUSEHOLD_UNIT : USER_UNIT,
+          );
+
+          return snapshot?.corePermissions.map((permission) => permission.slug);
+        };
+
+        // A fixed filter binds no unit: one household's consent to the
+        // restore permissions would reach every deleted household.
+        it.each([
+          ['update:household:restore', PluginGrantScope.Household],
+          ['update:household:restore', PluginGrantScope.User],
+          ['update:household:restore:administer', PluginGrantScope.Household],
+          ['update:household:restore:administer', PluginGrantScope.User],
+          ['create:event', PluginGrantScope.Household],
+          ['create:event', PluginGrantScope.User],
+        ] as const)(
+          'confers nothing for %s, whose fixed conditions bind no unit, at %s scope',
+          async (slug, scopeType) => {
+            await expect(conferredAt(slug, scopeType)).resolves.toEqual([]);
+          },
+        );
+
+        it.each([PluginGrantScope.Household, PluginGrantScope.User] as const)(
+          'confers an allowlisted public read at %s scope',
+          async (scopeType) => {
+            await expect(conferredAt('read:game:public', scopeType)).resolves.toEqual(['read:game:public']);
+          },
+        );
       });
 
       it('excludes a granted core permission whose subject drifted to the all wildcard (the wildcard re-check)', async () => {

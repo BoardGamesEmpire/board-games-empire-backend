@@ -1,8 +1,9 @@
 import type { PluginUnit } from '@bge/actor-context';
 import {
+  bindsConsentUnit,
+  CONSENT_UNIT_BINDING_REFUSAL,
   DatabaseService,
   grantScopeCoordinatesForUnit,
-  hasBoundingConditions,
   loadPluginUnitEnablement,
   PLUGIN_REQUESTED_PERMISSIONS_READER,
   PluginGrantScope,
@@ -538,12 +539,14 @@ export class PermissionsService {
    *   confer nothing; both exclusions are logged at debug, not silently
    *   swallowed.
    * - **Unit-bounded conferral.** A Household/User-scope grant confers a
-   *   core permission only when the row carries bounding conditions
-   *   (`hasBoundingConditions`): a condition-free row is subject-wide
-   *   authority that only SERVER consent can confer. Warned, not debug —
-   *   the install/update gates and `decide()` refuse to create such
-   *   grants, so one existing can only mean the catalog drifted under a
-   *   recorded decision.
+   *   core permission only when the row binds the consenting unit
+   *   (`bindsConsentUnit`, #591): its conditions restrict it to that unit's
+   *   own id, or it is an allowlisted public read. A condition-free row is
+   *   subject-wide authority, and a fixed-condition one reaches every
+   *   matching row install-wide; only SERVER consent can confer either.
+   *   Warned, not debug — the install/update gates and `decide()` refuse to
+   *   create such grants, so one existing can only mean the catalog drifted
+   *   under a recorded decision.
    * - **Bounded by the active manifest.** A decision confers only while
    *   the active manifest requests that permission at that decision's
    *   scope (#577). Activation deletes decisions on a permission an update
@@ -675,17 +678,17 @@ export class PermissionsService {
     }
 
     // Unit-boundedness: a Household/User-scope grant confers a core
-    // permission only when the catalog row carries SOME bounding clause. A
-    // condition-free permission is an unscoped type-level rule — subject-wide
-    // authority — and nothing a unit consents to can bound subject-wide reach
-    // to that unit's slice, so one user's consent must never read as
-    // server-wide access (#60). Server-scope grants are exempt: server
-    // consent IS server-wide authority, exactly what install/approval
-    // seeding records. Own-namespace slugs never appear in this set — their
-    // subjects are enveloped per plugin, scoped by construction.
-    const unconditionedCoreSlugs = new Set(
-      corePermissions.filter((permission) => !hasBoundingConditions(permission.conditions)).map((p) => p.slug),
-    );
+    // permission only when the catalog row binds the consenting unit — its
+    // conditions restrict it to that unit's own id, or it is an allowlisted
+    // public read (#591). A condition-free permission is subject-wide authority and
+    // a fixed-condition one reaches every matching row install-wide; nothing
+    // a unit consents to can bound either to that unit's slice, so one
+    // user's consent must never read as server-wide access (#60).
+    // Server-scope grants are exempt: server consent IS server-wide
+    // authority, exactly what install/approval seeding records. Declared
+    // permissions never reach this check — their subjects are enveloped per
+    // plugin, scoped by construction.
+    const corePermissionsBySlug = new Map(corePermissions.map((permission) => [permission.slug, permission] as const));
 
     // A slug can be granted at more than one scope (e.g. Server and the
     // unit); it confers when ANY of its grants still covers current risk.
@@ -695,11 +698,16 @@ export class PermissionsService {
         continue;
       }
 
-      if (grant.scopeType !== PluginGrantScope.Server && unconditionedCoreSlugs.has(grant.permissionSlug)) {
+      const corePermission = corePermissionsBySlug.get(grant.permissionSlug);
+
+      if (
+        grant.scopeType !== PluginGrantScope.Server &&
+        corePermission !== undefined &&
+        !bindsConsentUnit(corePermission, grant.scopeType)
+      ) {
         this.logger.warn(
-          `Plugin ${pluginId} grant over '${grant.permissionSlug}' at ${grant.scopeType} scope names a ` +
-            'condition-free permission; nothing bounds that authority to the consenting unit — conferring ' +
-            'nothing (seed a unit-conditioned variant instead, #315)',
+          `Plugin ${pluginId} grant over '${grant.permissionSlug}' at ${grant.scopeType} scope: ` +
+            `${CONSENT_UNIT_BINDING_REFUSAL} — conferring nothing (seed a unit-conditioned variant instead, #315)`,
         );
         continue;
       }

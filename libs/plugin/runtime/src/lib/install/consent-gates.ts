@@ -1,9 +1,16 @@
-import { hasBoundingConditions, RiskLevel, type Permission } from '@bge/database';
+import {
+  bindsConsentUnit,
+  CONSENT_UNIT_BINDING_REFUSAL,
+  PluginGrantScope,
+  RiskLevel,
+  type Permission,
+} from '@bge/database';
 import {
   parsePluginPermissionSlug,
   type NormalizedPermissionRequest,
   type PluginManifestValidationResult,
 } from '@boardgamesempire/plugin-manifest';
+import { CONSENT_SCOPE_TO_GRANT_SCOPE } from '../grants/consent-scope.map';
 import { isPluginAdministrationSlug } from '../grants/plugin-admin-permissions';
 import type { StaticAnalysisFinding } from './static-analysis.types';
 
@@ -96,14 +103,15 @@ export const collectWildcardSubjectViolations = (
 };
 
 /**
- * Unit-boundedness on the CORE side (#60), resolvable only once the
+ * Unit-boundedness on the CORE side (#60, #591), resolvable only once the
  * `Permission` rows are loaded: a core check consented at household/user
- * scope must name a row that carries SOME bounding clause. A condition-free
- * row is subject-wide authority — nothing a unit consents to can bound
- * subject-wide reach to its own slice, so the read path refuses to confer
- * such grants and `decide()` refuses to record them. A manifest declaring
- * one would create a consent surface that is undecidable by design, and
- * the install must not create it.
+ * scope must name a row that binds the consenting unit (`bindsConsentUnit`):
+ * its conditions restrict it to that unit's own id, or it is one of the
+ * allowlisted public reads. Anything else reaches past the unit's own slice — subject-wide
+ * for a condition-free row, install-wide for fixed conditions — so the read
+ * path refuses to confer such grants and `decide()` refuses to record them. A
+ * manifest declaring one would create a consent surface that is undecidable
+ * by design, and the install must not create it.
  */
 export const collectUnboundedUnitConsentViolations = (
   validated: PluginManifestValidationResult,
@@ -112,18 +120,20 @@ export const collectUnboundedUnitConsentViolations = (
   const violations: ForbiddenPermissionViolation[] = [];
 
   for (const check of validated.permissionChecks) {
-    if (check.origin !== 'core' || check.consentScope === 'server') {
+    const scope = CONSENT_SCOPE_TO_GRANT_SCOPE[check.consentScope];
+
+    if (check.origin !== 'core' || scope === PluginGrantScope.Server) {
       continue;
     }
 
     const permission = corePermissions.get(check.canonicalSlug);
 
-    if (permission !== undefined && !hasBoundingConditions(permission.conditions)) {
+    if (permission !== undefined && !bindsConsentUnit(permission, scope)) {
       violations.push({
         permissionSlug: check.canonicalSlug,
         detail:
-          `is condition-free but consented at ${check.consentScope} scope — nothing bounds the conferred ` +
-          'authority to the consenting unit; request it at server scope or seed a unit-conditioned variant',
+          `is consented at ${check.consentScope} scope, but ${CONSENT_UNIT_BINDING_REFUSAL}; request it at ` +
+          'server scope or seed a unit-conditioned variant (#315)',
       });
     }
   }

@@ -12,7 +12,7 @@ import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
  *
  * Only what is genuinely identical lives here. The household and user checks
  * stay local to their specs, and that is the point rather than an oversight:
- * `read:household_member` is REQUIRED in the consent race, where denying it
+ * `read:game:public` is REQUIRED in the consent race, where denying it
  * must suspend the unit, and OPTIONAL in the pre-row race, where a required one
  * would make the enable born-suspended and that case is about waiting. A shared
  * constant would have to pick one, and whichever it picked would quietly change

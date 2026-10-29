@@ -1,18 +1,13 @@
 /**
- * Does a `Permission.conditions` value carry ANY bounding clause? The
- * consent model's unit-boundedness rule (#60) keys on this: a Household- or
- * User-scope grant confers a core permission only when the catalog row
- * carries SOME condition — a condition-free permission is subject-wide
- * authority, and nothing a unit consents to can bound subject-wide reach to
- * that unit's slice. Server-scope consent is exempt (server consent IS
- * server-wide authority).
+ * Does a `Permission.conditions` value carry ANY clause? Deliberately
+ * shape-only (non-null object with at least one key): whether the clause is
+ * a Mustache template or a static filter is the caller's business, not this
+ * predicate's. The catalog guards and the read-ceiling builder use it to
+ * tell a condition-free permission from a conditioned one.
  *
- * Shared from here because four seams must agree on what "condition-free"
- * means or the gate leaks between them: the install/update consent gates,
- * the decide() write path, the ability read path, and the consent
- * classification. Deliberately shape-only (non-null object with at least
- * one key) — whether the clause is a Mustache template or a static filter
- * is the ability factory's business, not this predicate's.
+ * It is not the plugin consent model's unit-boundedness rule. Some clause is
+ * not enough there, since a fixed filter binds no unit; the consent seams
+ * use `bindsConsentUnit` instead (#591).
  */
 export const hasBoundingConditions = (conditions: unknown): boolean =>
   conditions !== null && typeof conditions === 'object' && Object.keys(conditions).length > 0;

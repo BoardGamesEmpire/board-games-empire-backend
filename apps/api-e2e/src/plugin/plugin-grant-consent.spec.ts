@@ -28,9 +28,10 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
  * #84's; no endpoint exists), including the `PluginPermission` catalog rows
  * the install pipeline would have created for declared permissions. Core
  * checks reference SEEDED permissions only: `read:safe_http_policy`
- * (Medium, condition-free) at server scope, `read:household_member` (Low,
- * household-conditioned), `update:user:profile:own` (Low, user-conditioned),
- * and `read:platform_game` (Low, condition-free) as the D60-7 trap.
+ * (Medium, condition-free) at server scope, `read:game:public` and
+ * `read:game_collection:public` (both Low, allowlisted public reads a
+ * household and a user may consent to, #591), and `read:platform_game`
+ * (Low, condition-free) as the trap a household decision must refuse.
  */
 describe('plugin grant decisions + consent presentation (#322)', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -66,17 +67,19 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
     consentScope: 'server',
   };
 
+  /** An allowlisted public read, which a household-scope consent may hold (#591). */
   const HOUSEHOLD_CHECK: Check = {
-    slug: 'read:household_member',
+    slug: 'read:game:public',
     required: true,
-    reason: { en: 'Addresses the digest to the household roster.' },
+    reason: { en: 'Lists the public games the household digest features.' },
     consentScope: 'household',
   };
 
+  /** An allowlisted public read, which a user-scope consent may hold (#591). */
   const USER_CHECK: Check = {
-    slug: 'update:user:profile:own',
+    slug: 'read:game_collection:public',
     required: false,
-    reason: { en: 'Records each member’s digest delivery preference on their profile.' },
+    reason: { en: 'Shows public collections in each member’s digest.' },
     consentScope: 'user',
   };
 
@@ -251,12 +254,9 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       await actors.householdWithMembers({ owner: ownerB });
       const plugin = await arrangePlugin();
 
-      const ok = await decideHousehold(
-        ownerA,
-        fixtureA.household.id,
-        plugin.slug,
-        granted('read:household_member'),
-      ).expect(200);
+      const ok = await decideHousehold(ownerA, fixtureA.household.id, plugin.slug, granted('read:game:public')).expect(
+        200,
+      );
       expect(ok.body.grant).toMatchObject({
         scopeType: PluginGrantScope.Household,
         scopeId: fixtureA.household.id,
@@ -265,21 +265,21 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
 
       // A plain member holds no manage:plugin:household rule — the coarse
       // gate refuses before anything else runs.
-      await decideHousehold(memberA, fixtureA.household.id, plugin.slug, granted('read:household_member')).expect(403);
+      await decideHousehold(memberA, fixtureA.household.id, plugin.slug, granted('read:game:public')).expect(403);
 
       // Owner of B addressing A: the type-level gate passes (they hold the
       // permission SOMEWHERE), so this pins the per-household instance gate.
-      await decideHousehold(ownerB, fixtureA.household.id, plugin.slug, granted('read:household_member')).expect(403);
+      await decideHousehold(ownerB, fixtureA.household.id, plugin.slug, granted('read:game:public')).expect(403);
     });
 
     it('user decide: any authenticated user, for their own unit only — Granted creates the #225 anchor, Denied creates nothing', async () => {
       const user = await actors.user();
       const plugin = await arrangePlugin();
 
-      await decideUser(user, plugin.slug, denied('update:user:profile:own')).expect(200);
+      await decideUser(user, plugin.slug, denied('read:game_collection:public')).expect(200);
       expect(await db.client.userPlugin.count({ where: { pluginId: plugin.id } })).toBe(0);
 
-      await decideUser(user, plugin.slug, granted('update:user:profile:own')).expect(200);
+      await decideUser(user, plugin.slug, granted('read:game_collection:public')).expect(200);
       const units = await db.client.userPlugin.findMany({ where: { pluginId: plugin.id } });
       expect(units).toHaveLength(1);
       expect(units[0].suspendedForConsent).toBe(false);
@@ -320,8 +320,8 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
 
       const server = await decideServer(admin, plugin.slug, granted('read:safe_http_policy')).expect(410);
       expect(server.body.code).toBe('PluginGrantPluginTombstonedError');
-      await decideHousehold(owner, fixture.household.id, plugin.slug, granted('read:household_member')).expect(410);
-      await decideUser(owner, plugin.slug, granted('update:user:profile:own')).expect(410);
+      await decideHousehold(owner, fixture.household.id, plugin.slug, granted('read:game:public')).expect(410);
+      await decideUser(owner, plugin.slug, granted('read:game_collection:public')).expect(410);
     });
 
     it('does NOT gate on Plugin.enabled — consent-before-enable is a legitimate ordering', async () => {
@@ -344,7 +344,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
 
       // A household-consented check decided at server scope: the manifest
       // owns the scope, and the decision must address it there.
-      const mismatched = await decideServer(admin, plugin.slug, granted('read:household_member')).expect(422);
+      const mismatched = await decideServer(admin, plugin.slug, granted('read:game:public')).expect(422);
       expect(mismatched.body.code).toBe('PluginGrantConsentScopeMismatchError');
     });
   });
@@ -364,7 +364,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
         },
       });
 
-      await decideHousehold(owner, fixture.household.id, plugin.slug, granted('read:household_member')).expect(200);
+      await decideHousehold(owner, fixture.household.id, plugin.slug, granted('read:game:public')).expect(200);
 
       // The re-enable pass is awaited inside decide(), so the flip is
       // visible as soon as the response is — no polling needed.
@@ -382,7 +382,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
         data: { householdId: fixture.household.id, pluginId: plugin.id, enabled: true },
       });
 
-      await decideHousehold(owner, fixture.household.id, plugin.slug, denied('read:household_member')).expect(200);
+      await decideHousehold(owner, fixture.household.id, plugin.slug, denied('read:game:public')).expect(200);
 
       const unit = await db.client.householdPlugin.findFirstOrThrow({ where: { pluginId: plugin.id } });
       expect(unit.suspendedForConsent).toBe(true);
@@ -393,16 +393,17 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
     });
 
     it('an anchor created after a required denial is born suspended — decision order cannot put the unit in service (#359)', async () => {
-      // Two required user checks, both against seeded user-conditioned
-      // permissions, so the deny-then-grant order is exercisable.
-      const RSVP_CHECK = {
-        slug: 'update:event_attendee:status:self',
+      // Two required permissions at user scope, both allowlisted public reads
+      // a user may consent to (#591), so the deny-then-grant order is
+      // exercisable.
+      const MEDIA_CHECK = {
+        slug: 'read:media_object:public',
         required: true,
-        reason: { en: 'Marks digest attendance suggestions on each member’s RSVP.' },
+        reason: { en: 'Shows public game images in each member’s digest.' },
         consentScope: 'user',
       } as const;
       const user = await actors.user();
-      const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK, { ...USER_CHECK, required: true }, RSVP_CHECK]);
+      const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK, { ...USER_CHECK, required: true }, MEDIA_CHECK]);
 
       // Deny required P first: no row exists yet, so there is nothing to
       // suspend — the absence of the row is what keeps the unit unserved.
@@ -412,7 +413,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       // Granting required Q creates the anchor (#225) — born suspended,
       // because P's refusal stands. Unsuspended, this unit would serve the
       // moment the row appeared, without the denial ever being consulted.
-      await decideUser(user, plugin.slug, granted(RSVP_CHECK.slug)).expect(200);
+      await decideUser(user, plugin.slug, granted(MEDIA_CHECK.slug)).expect(200);
       const unit = await db.client.userPlugin.findFirstOrThrow({ where: { pluginId: plugin.id } });
       expect(unit.suspendedForConsent).toBe(true);
       expect(unit.suspendedAt).not.toBeNull();
@@ -472,8 +473,8 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       });
       // Unit-scope checks from the Server viewpoint: each unit decides for
       // itself, so no single state exists here.
-      expect(bySlug.get('read:household_member')).toMatchObject({ decision: 'per-unit', decidableByUnit: false });
-      expect(bySlug.get('update:user:profile:own')).toMatchObject({ decision: 'per-unit', decidableByUnit: false });
+      expect(bySlug.get('read:game:public')).toMatchObject({ decision: 'per-unit', decidableByUnit: false });
+      expect(bySlug.get('read:game_collection:public')).toMatchObject({ decision: 'per-unit', decidableByUnit: false });
       // Localized values resolve with provenance the renderer can trust.
       const reason = (bySlug.get('read:safe_http_policy') as { reason: { value: string } }).reason;
       expect(reason.value).toContain('outbound policy');
@@ -490,11 +491,11 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       await actors.householdWithMembers({ owner: ownerB });
       const plugin = await arrangePlugin();
 
-      await decideHousehold(ownerA, fixtureA.household.id, plugin.slug, denied('read:household_member')).expect(200);
+      await decideHousehold(ownerA, fixtureA.household.id, plugin.slug, denied('read:game:public')).expect(200);
 
       const response = await readHouseholdConsent(ownerA, fixtureA.household.id, plugin.slug).expect(200);
       const checks: { slug: string; decision: string; decidableByUnit: boolean }[] = response.body.presentation.checks;
-      const household = checks.find((check) => check.slug === 'read:household_member');
+      const household = checks.find((check) => check.slug === 'read:game:public');
       expect(household).toMatchObject({ decision: 'denied', decidableByUnit: true });
       // A SERVER check from the household viewpoint is not per-unit: the
       // Server sentinel row is one addressable decider, so its concrete
@@ -505,7 +506,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       });
       // The USER axis from the household viewpoint IS per-unit: every user
       // decides for themself, so no single state exists from here.
-      expect(checks.find((check) => check.slug === 'update:user:profile:own')).toMatchObject({
+      expect(checks.find((check) => check.slug === 'read:game_collection:public')).toMatchObject({
         decision: 'per-unit',
         decidableByUnit: false,
       });
@@ -519,11 +520,11 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       const user = await actors.user();
       const plugin = await arrangePlugin();
 
-      await decideUser(user, plugin.slug, granted('update:user:profile:own')).expect(200);
+      await decideUser(user, plugin.slug, granted('read:game_collection:public')).expect(200);
 
       const response = await readUserConsent(user, plugin.slug).expect(200);
       const checks: { slug: string; decision: string }[] = response.body.presentation.checks;
-      expect(checks.find((check) => check.slug === 'update:user:profile:own')).toMatchObject({
+      expect(checks.find((check) => check.slug === 'read:game_collection:public')).toMatchObject({
         decision: 'granted',
         decidableByUnit: true,
       });

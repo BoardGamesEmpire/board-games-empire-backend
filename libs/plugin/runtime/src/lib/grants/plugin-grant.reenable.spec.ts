@@ -130,22 +130,27 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
     { id, enabled: true, suspended_for_consent: suspendedForConsent },
   ];
 
-  // Bounding clauses so unit-scope decisions pass the unit-boundedness gate
-  // (#60); the condition-free refusal is specced in the main service suite.
+  // Clauses naming the consenting unit's own id, so unit-scope decisions pass
+  // the unit-binding gate (#60, #591); the refusals are specced in the main
+  // service suite.
+  const BINDS_HOUSEHOLD = { householdId: '{{ unit.householdId }}' };
+  const BINDS_USER = { ownerId: '{{ unit.userId }}' };
+
   const calendarRead = {
     slug: 'calendar:read',
     subject: 'calendar',
     riskLevel: RiskLevel.Low,
-    conditions: { householdId: '{{ unit.householdId }}' },
+    conditions: BINDS_HOUSEHOLD,
   } as unknown as Permission;
 
   /**
    * The re-enable predicate reads `select: { slug, riskLevel }`, but the
    * delegate mock is typed against the full row — so the projection is
-   * asserted, matching how `calendarRead` above is built.
+   * asserted, matching how `calendarRead` above is built. User-consented
+   * slugs pass `BINDS_USER`.
    */
-  const corePermission = (slug: string, riskLevel: RiskLevel): Permission =>
-    ({ slug, riskLevel, conditions: { householdId: '{{ unit.householdId }}' } }) as unknown as Permission;
+  const corePermission = (slug: string, riskLevel: RiskLevel, conditions: object = BINDS_HOUSEHOLD): Permission =>
+    ({ slug, riskLevel, conditions }) as unknown as Permission;
 
   let db: MockDatabaseService;
   let emitter: { emit: jest.Mock };
@@ -400,8 +405,8 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       });
 
     beforeEach(() => {
-      db.permission.findUnique.mockResolvedValue(corePermission('read:user_digest', RiskLevel.Low));
-      db.permission.findMany.mockResolvedValue([corePermission('read:user_digest', RiskLevel.Low)]);
+      db.permission.findUnique.mockResolvedValue(corePermission('read:user_digest', RiskLevel.Low, BINDS_USER));
+      db.permission.findMany.mockResolvedValue([corePermission('read:user_digest', RiskLevel.Low, BINDS_USER)]);
       db.pluginGrant.upsert.mockResolvedValue(userGrant());
       db.pluginGrant.findMany.mockResolvedValue([userGrant()]);
       db.$queryRaw.mockResolvedValue(lockedUnit('up-1', true));
@@ -445,7 +450,7 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
 
     it('leaves the suspension in place when a granted slug no longer covers the catalog risk', async () => {
       db.pluginGrant.findMany.mockResolvedValue([userGrant({ decidedRiskLevel: RiskLevel.Low })]);
-      db.permission.findMany.mockResolvedValue([corePermission('read:user_digest', RiskLevel.High)]);
+      db.permission.findMany.mockResolvedValue([corePermission('read:user_digest', RiskLevel.High, BINDS_USER)]);
 
       await service.decide(userDecision());
 
@@ -619,8 +624,8 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
     });
 
     it('suspends the USER unit through the mirrored pass and emits the user-scope unit_disabled', async () => {
-      db.permission.findUnique.mockResolvedValue(corePermission('read:user_digest', RiskLevel.Low));
-      db.permission.findMany.mockResolvedValue([corePermission('read:user_digest', RiskLevel.Low)]);
+      db.permission.findUnique.mockResolvedValue(corePermission('read:user_digest', RiskLevel.Low, BINDS_USER));
+      db.permission.findMany.mockResolvedValue([corePermission('read:user_digest', RiskLevel.Low, BINDS_USER)]);
       db.$queryRaw.mockResolvedValue(lockedUnit('up-1', false));
       db.userPlugin.updateMany.mockResolvedValue({ count: 1 });
 
@@ -764,8 +769,8 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       expect(householdSql).toContain('FOR UPDATE');
 
       db.$queryRaw.mockClear();
-      db.permission.findUnique.mockResolvedValue(corePermission('read:user_digest', RiskLevel.Low));
-      db.permission.findMany.mockResolvedValue([corePermission('read:user_digest', RiskLevel.Low)]);
+      db.permission.findUnique.mockResolvedValue(corePermission('read:user_digest', RiskLevel.Low, BINDS_USER));
+      db.permission.findMany.mockResolvedValue([corePermission('read:user_digest', RiskLevel.Low, BINDS_USER)]);
       db.pluginGrant.upsert.mockResolvedValue(
         makeGrant({ scopeType: PluginGrantScope.User, scopeId: 'user-1', permissionSlug: 'read:user_digest' }),
       );
@@ -846,11 +851,11 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       db.plugin.findUnique.mockResolvedValue(
         makePlugin({ manifestJson: anchorManifest as unknown as Prisma.JsonValue }),
       );
-      db.permission.findUnique.mockResolvedValue(corePermission('read:public_content', RiskLevel.Low));
+      db.permission.findUnique.mockResolvedValue(corePermission('read:public_content', RiskLevel.Low, BINDS_USER));
       db.permission.findMany.mockResolvedValue([
-        corePermission('read:user_digest', RiskLevel.Low),
-        corePermission('read:public_content', RiskLevel.Low),
-        corePermission('notify:send', RiskLevel.Low),
+        corePermission('read:user_digest', RiskLevel.Low, BINDS_USER),
+        corePermission('read:public_content', RiskLevel.Low, BINDS_USER),
+        corePermission('notify:send', RiskLevel.Low, BINDS_USER),
       ]);
       db.pluginGrant.upsert.mockResolvedValue(grantQ());
       db.pluginGrant.findMany.mockResolvedValue([grantQ()]);
@@ -899,7 +904,7 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       // uncommitted denial — each commits believing the other absent. The
       // advisory key is the one lockable thing that exists before the row,
       // so the SAME key on both sides is the entire mechanism.
-      db.permission.findUnique.mockResolvedValue(corePermission('read:user_digest', RiskLevel.Low));
+      db.permission.findUnique.mockResolvedValue(corePermission('read:user_digest', RiskLevel.Low, BINDS_USER));
       db.pluginGrant.upsert.mockResolvedValue(
         makeGrant({
           id: 'grant-p',
@@ -930,7 +935,7 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       // Taken before the (empty) unit-row lock, so the order is total.
       expect(db.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(unitLockOrder());
 
-      db.permission.findUnique.mockResolvedValue(corePermission('read:public_content', RiskLevel.Low));
+      db.permission.findUnique.mockResolvedValue(corePermission('read:public_content', RiskLevel.Low, BINDS_USER));
       db.pluginGrant.upsert.mockResolvedValue(grantQ());
       db.pluginGrant.count.mockResolvedValue(1);
       db.pluginGrant.findMany.mockResolvedValue([grantQ()]);

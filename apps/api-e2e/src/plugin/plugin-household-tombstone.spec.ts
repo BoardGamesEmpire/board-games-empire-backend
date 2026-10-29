@@ -44,10 +44,11 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
   /** Generous for the reason `plugin-prerow-race.spec.ts` gives: a cold request clears several guards first. */
   const REQUEST_REACHES_LOCK_MS = 20_000;
 
+  /** An allowlisted public read, which a household-scope consent may hold (#591). */
   const HOUSEHOLD_CHECK: Check = {
-    slug: 'read:household_member',
+    slug: 'read:game:public',
     required: false,
-    reason: { en: 'Addresses the digest to the household roster.' },
+    reason: { en: 'Lists the public games the household digest features.' },
     consentScope: 'household',
   };
 

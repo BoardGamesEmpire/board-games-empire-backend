@@ -68,11 +68,11 @@ describe('plugin update consent (approve/reject/pending)', () => {
     consentScope: 'server' as const,
   };
 
-  /** Seeded with `conditions: { userId: ... }`, so a user-scope check passes the unit-boundedness gate. */
+  /** An allowlisted public read, which a user-scope consent may hold (#591). */
   const USER_SCOPE_CHECK = {
-    slug: 'update:user:profile:own',
+    slug: 'read:game_collection:public',
     required: true,
-    reason: { en: 'Records each member’s digest delivery preference on their profile.' },
+    reason: { en: 'Shows public collections in each member’s digest.' },
     consentScope: 'user' as const,
   };
 
@@ -417,7 +417,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
       const response = await approve(admin, plugin.slug).expect(200);
 
       expect(response.body.suspendedUserUnits).toEqual([
-        { userId: admin.user.id, outstanding: ['update:user:profile:own'] },
+        { userId: admin.user.id, outstanding: ['read:game_collection:public'] },
       ]);
       expect(response.body.suspendedHouseholdUnits).toEqual([]);
 
