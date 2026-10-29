@@ -150,7 +150,10 @@ describe('signing in through a sign-in provider', () => {
 
   // The user is created, but the row says what the provider said: nothing
   // that trusts an address, such as a household invite, trusts this one.
+  // The Owner seat is filled first: on the swept install this user would be
+  // the first human, whom provisioning marks verified after the callback.
   it('creates an unverified user through a provider allowed unverified emails (#912)', async () => {
+    await actors.owner();
     const { sub, email, username } = freshIdentity();
 
     const result = await signInThroughProvider(

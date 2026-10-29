@@ -205,7 +205,10 @@ export const LENIENT_FAKE_PROVIDER_ID = 'fake-lenient';
  * (#912). The API reads its providers once, at boot, so both are listed for
  * every spec, and discovery shows them to all of them. `OIDC_PROVIDERS` is
  * pinned like everything in {@link apiEnvOverrides}: a developer's `.env` may
- * list real providers, which a spec must never reach.
+ * list real providers, which a spec must never reach. The strict fake's
+ * `ALLOW_UNVERIFIED_EMAIL` is pinned off for the same reason: inherited as
+ * `true`, the refusal specs would sign up instead. `false`, not empty, since
+ * an empty value is unset and the `.env` would fill it again.
  */
 export function fakeProviderEnv(providerUrl: string): Record<string, string> {
   const discoveryUrl = `${providerUrl}/.well-known/openid-configuration`;
@@ -216,6 +219,7 @@ export function fakeProviderEnv(providerUrl: string): Record<string, string> {
     OIDC_FAKE_CLIENT_ID: 'e2e-client',
     OIDC_FAKE_CLIENT_SECRET: 'e2e-secret',
     OIDC_FAKE_DISPLAY_NAME: 'Fake provider',
+    OIDC_FAKE_ALLOW_UNVERIFIED_EMAIL: 'false',
     OIDC_FAKE_LENIENT_DISCOVERY_URL: discoveryUrl,
     OIDC_FAKE_LENIENT_CLIENT_ID: 'e2e-lenient-client',
     OIDC_FAKE_LENIENT_CLIENT_SECRET: 'e2e-lenient-secret',
