@@ -722,9 +722,9 @@ describe('PluginGrantService', () => {
         throw new Error(`'${slug}' is not in the permission catalog`);
       }
 
-      const { action, subject, conditions, riskLevel } = entry;
+      const { action, subject, fields = [], conditions, riskLevel } = entry;
 
-      return { slug, action, subject, conditions, riskLevel } as unknown as Permission;
+      return { slug, action, subject, fields, conditions, inverted: false, riskLevel } as unknown as Permission;
     };
 
     /** The spec's manifest, also requesting `slug` at `consentScope`. */

@@ -170,14 +170,34 @@ describe('consent-gates', () => {
           [slug, { slug, subject: 'household', riskLevel: RiskLevel.Low, conditions } as unknown as Permission],
         ]);
 
-      const catalogConditions = (slug: string) => {
+      const catalogEntry = (slug: string) => {
         const entry = PERMISSION_CATALOG.find((permission) => permission.slug === slug);
 
         if (!entry) {
           throw new Error(`'${slug}' is not in the permission catalog`);
         }
 
-        return entry.conditions;
+        return entry;
+      };
+
+      /** `slug`'s row as the catalog seeds it: a public read binds only while its row holds the catalog's rule. */
+      const seededPermissions = (slug: string) => {
+        const { action, subject, fields = [], conditions, riskLevel } = catalogEntry(slug);
+
+        return new Map<string, Permission>([
+          [
+            slug,
+            {
+              slug,
+              action,
+              subject,
+              fields: [...fields],
+              conditions,
+              inverted: false,
+              riskLevel,
+            } as unknown as Permission,
+          ],
+        ]);
       };
 
       it.each([
@@ -191,7 +211,7 @@ describe('consent-gates', () => {
         expect(
           collectUnboundedUnitConsentViolations(
             withUnitRequest(slug, consentScope),
-            permissionsWith(slug, catalogConditions(slug)),
+            permissionsWith(slug, catalogEntry(slug).conditions),
           ),
         ).toEqual([expect.objectContaining({ permissionSlug: slug })]);
       });
@@ -217,7 +237,7 @@ describe('consent-gates', () => {
         expect(
           collectUnboundedUnitConsentViolations(
             withUnitRequest('read:game:public', consentScope),
-            permissionsWith('read:game:public', catalogConditions('read:game:public')),
+            seededPermissions('read:game:public'),
           ),
         ).toEqual([]);
       });

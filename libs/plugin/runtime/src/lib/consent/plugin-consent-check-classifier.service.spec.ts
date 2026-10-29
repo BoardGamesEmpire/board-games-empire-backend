@@ -261,12 +261,20 @@ describe('PluginConsentCheckClassifier', () => {
       },
     );
 
-    /** One Granted Low row at the unit's own scope over `slug`, carrying its real catalog conditions. */
+    /** One Granted Low row at the unit's own scope over `slug`, carrying its real catalog rule. */
     async function classifyGranted(slug: string, consentScope: 'household' | 'user') {
       const entry = PERMISSION_CATALOG.find((permission) => permission.slug === slug);
       expect(entry).toBeDefined();
       db.permission.findMany.mockResolvedValue([
-        { slug, riskLevel: RiskLevel.Low, subject: entry?.subject, conditions: entry?.conditions },
+        {
+          slug,
+          riskLevel: RiskLevel.Low,
+          action: entry?.action,
+          subject: entry?.subject,
+          fields: entry?.fields ?? [],
+          conditions: entry?.conditions,
+          inverted: false,
+        },
       ] as never);
       db.pluginGrant.findMany.mockResolvedValue([
         {

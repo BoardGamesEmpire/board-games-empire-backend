@@ -180,7 +180,10 @@ export class PluginConsentCheckClassifier {
   ): Promise<{
     riskBySlug: Map<string, RiskLevel>;
     wildcardSlugs: Set<string>;
-    corePermissionsBySlug: Map<string, Pick<Permission, 'slug' | 'conditions'>>;
+    corePermissionsBySlug: Map<
+      string,
+      Pick<Permission, 'slug' | 'action' | 'subject' | 'fields' | 'conditions' | 'inverted'>
+    >;
   }> {
     const coreSlugs = checks.filter((check) => check.origin === 'core').map((check) => check.canonicalSlug);
     const ownSlugs = checks.filter((check) => check.origin === 'plugin').map((check) => check.canonicalSlug);
@@ -191,7 +194,15 @@ export class PluginConsentCheckClassifier {
             // A retired row (#235) reads as vanished, exactly as the ability
             // path reads it: the grant confers nothing, so the check is pending.
             where: { slug: { in: coreSlugs }, retiredAt: null },
-            select: { slug: true, riskLevel: true, subject: true, conditions: true },
+            select: {
+              slug: true,
+              riskLevel: true,
+              action: true,
+              subject: true,
+              fields: true,
+              conditions: true,
+              inverted: true,
+            },
           })
         : [],
       ownSlugs.length > 0

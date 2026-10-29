@@ -1,4 +1,6 @@
-import { Action, PluginGrantScope } from '../client';
+import type { Prisma } from '../client';
+import { Action, PluginGrantScope, ResourceType } from '../client';
+import { hasBoundingConditions } from '../utils/permission-conditions';
 import { parseTemplate } from './catalog-guards';
 import { PERMISSION_CATALOG } from './permission.catalog';
 import {
@@ -16,6 +18,30 @@ const catalogEntry = (slug: string) => {
 
   return entry;
 };
+
+/** A row with the catalog's rule for `slug`, as the consent seams load it. */
+const catalogRow = (slug: string) => {
+  const entry = catalogEntry(slug);
+
+  return {
+    slug,
+    action: entry.action,
+    subject: entry.subject,
+    fields: entry.fields ?? [],
+    inverted: false,
+    conditions: (entry.conditions ?? null) as Prisma.JsonValue,
+  };
+};
+
+/** A row off the allowlist, judged by its conditions alone. */
+const ruleRow = (conditions: unknown) => ({
+  slug: 'test:slug',
+  action: Action.read,
+  subject: ResourceType.Household,
+  fields: [],
+  inverted: false,
+  conditions: conditions as Prisma.JsonValue,
+});
 
 const UNIT_SCOPES: readonly PluginUnitGrantScope[] = [PluginGrantScope.Household, PluginGrantScope.User];
 
@@ -124,6 +150,26 @@ describe('bindsConsentUnit (#591)', () => {
       PluginGrantScope.Household,
       false,
     ],
+    // Keys render too, and JSON.parse keeps the last of two equal keys, so a
+    // rendered key can replace the id equality or pick the field it binds.
+    [
+      'carries a templated key that renders over the id equality',
+      { householdId: '{{ unit.householdId }}', '{{ plugin.slug }}Id': 'hh-other' },
+      PluginGrantScope.Household,
+      false,
+    ],
+    [
+      'carries a templated key inside the relation filter that binds the id',
+      { household: { is: { id: '{{ unit.householdId }}', '{{ plugin.slug }}': 'hh-other' } } },
+      PluginGrantScope.Household,
+      false,
+    ],
+    [
+      'binds the id under a templated key',
+      { '{{ plugin.slug }}Id': '{{ unit.householdId }}' },
+      PluginGrantScope.Household,
+      false,
+    ],
     [
       'embeds the id in surrounding text',
       { householdId: 'prefix-{{ unit.householdId }}' },
@@ -156,15 +202,13 @@ describe('bindsConsentUnit (#591)', () => {
       false,
     ],
   ])('%s', (_label, conditions, scope, expected) => {
-    expect(bindsConsentUnit({ slug: 'test:slug', conditions }, scope)).toBe(expected);
+    expect(bindsConsentUnit(ruleRow(conditions), scope)).toBe(expected);
   });
 
   it('admits every allowlisted public read at both unit scopes', () => {
     for (const slug of PLUGIN_UNIT_CONSENT_PUBLIC_READS) {
-      const { conditions } = catalogEntry(slug);
-
       for (const scope of UNIT_SCOPES) {
-        expect({ slug, scope, binds: bindsConsentUnit({ slug, conditions }, scope) }).toEqual({
+        expect({ slug, scope, binds: bindsConsentUnit(catalogRow(slug), scope) }).toEqual({
           slug,
           scope,
           binds: true,
@@ -181,26 +225,41 @@ describe('bindsConsentUnit (#591)', () => {
       // consent to it must fail here instead.
       const conditions = { ...(catalogEntry(slug).conditions as object), createdById: '{{ user.id }}' };
 
-      expect(bindsConsentUnit({ slug, conditions }, PluginGrantScope.Household)).toBe(false);
+      expect(bindsConsentUnit({ ...catalogRow(slug), conditions }, PluginGrantScope.Household)).toBe(false);
     });
 
     it('admits one that gained a clause binding the consenting unit', () => {
       const conditions = { ...(catalogEntry(slug).conditions as object), householdId: '{{ unit.householdId }}' };
 
-      expect(bindsConsentUnit({ slug, conditions }, PluginGrantScope.Household)).toBe(true);
+      expect(bindsConsentUnit({ ...catalogRow(slug), conditions }, PluginGrantScope.Household)).toBe(true);
     });
 
     it.each([null, {}])('refuses one that lost its conditions (%p): it would read every row', (conditions) => {
-      expect(bindsConsentUnit({ slug, conditions }, PluginGrantScope.Household)).toBe(false);
+      expect(bindsConsentUnit({ ...catalogRow(slug), conditions }, PluginGrantScope.Household)).toBe(false);
+    });
+
+    // An Admin-owned row keeps its drift, and the plugin ability applies the
+    // row as stored, so the slug alone does not make it a public read.
+    it.each<[string, Partial<ReturnType<typeof catalogRow>>]>([
+      ['a write action', { action: Action.delete }],
+      ['another subject', { subject: ResourceType.Household }],
+      ['a field restriction', { fields: ['name'] }],
+      ['an inversion', { inverted: true }],
+      ['other fixed conditions', { conditions: { deletedAt: { not: null } } }],
+    ])('refuses one that drifted to %s', (_label, drift) => {
+      for (const scope of UNIT_SCOPES) {
+        expect({ scope, binds: bindsConsentUnit({ ...catalogRow(slug), ...drift }, scope) }).toEqual({
+          scope,
+          binds: false,
+        });
+      }
     });
   });
 
   it('refuses the three fixed-condition slugs left off the allowlist', () => {
     for (const slug of ['update:household:restore', 'update:household:restore:administer', 'create:event']) {
-      const { conditions } = catalogEntry(slug);
-
       for (const scope of UNIT_SCOPES) {
-        expect({ slug, scope, binds: bindsConsentUnit({ slug, conditions }, scope) }).toEqual({
+        expect({ slug, scope, binds: bindsConsentUnit(catalogRow(slug), scope) }).toEqual({
           slug,
           scope,
           binds: false,
@@ -228,10 +287,16 @@ describe('bindsConsentUnit (#591)', () => {
     for (const slug of PLUGIN_UNIT_CONSENT_PUBLIC_READS) {
       const entry = catalogEntry(slug);
 
-      expect({ slug, action: entry.action, variables: parseTemplate(entry.conditions).variables }).toEqual({
+      expect({
+        slug,
+        action: entry.action,
+        variables: parseTemplate(entry.conditions).variables,
+        bounding: hasBoundingConditions(entry.conditions),
+      }).toEqual({
         slug,
         action: Action.read,
         variables: [],
+        bounding: true,
       });
     }
   });

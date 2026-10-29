@@ -1,7 +1,9 @@
 import * as Mustache from 'mustache';
 import { PluginGrantScope } from '../client';
-import { hasBoundingConditions } from '../utils/permission-conditions';
 import { parseTemplate } from './catalog-guards';
+import { matchesCatalogRule, type PermissionRuleColumns } from './catalog-reconcile-plan';
+import { PERMISSION_CATALOG } from './permission.catalog';
+import type { PermissionSeedDefinition } from './seed-definitions';
 
 /** The decision scopes below server, where a single unit's consent decides. */
 export type PluginUnitGrantScope = typeof PluginGrantScope.Household | typeof PluginGrantScope.User;
@@ -26,6 +28,13 @@ export const PLUGIN_UNIT_CONSENT_PUBLIC_READS: ReadonlySet<string> = new Set([
   'read:event_occurrence:public',
   'read:event_policy:public',
 ]);
+
+/** The catalog's rule for each allowlisted read, which its row must still hold. */
+const PUBLIC_READ_RULES = new Map<string, PermissionSeedDefinition>(
+  PERMISSION_CATALOG.filter(({ slug }) => PLUGIN_UNIT_CONSENT_PUBLIC_READS.has(slug)).map(
+    (definition) => [definition.slug, definition] as const,
+  ),
+);
 
 /** The scope's own id, which a unit-scope template must name. */
 const UNIT_ID_VARIABLE: Readonly<Record<PluginUnitGrantScope, string>> = {
@@ -76,17 +85,23 @@ export const CONSENT_UNIT_BINDING_REFUSAL =
  *   variable is there, but rows outside the unit still match.
  * - A section anywhere in the conditions, even one that leaves the id alone:
  *   a section can span fields or keys, and rendering it can drop the equality.
+ * - A tag in any key. Keys render too, and `JSON.parse` keeps the last of two
+ *   equal keys, so a rendered key can replace the id equality or choose the
+ *   field the id is compared to.
  * - Another unit's id, a variable the context does not supply, or a template
  *   that does not parse: the rule would bind to the wrong unit, or the
  *   factory would refuse the plugin's whole ability.
  *
  * The {@link PLUGIN_UNIT_CONSENT_PUBLIC_READS} are the one exception, and
- * only while their row's conditions stay fixed. A template added to one later
- * is judged by the rule above, so a row the factory would refuse fails here,
- * for that permission alone.
+ * only while their row still holds the catalog's rule for the slug: the same
+ * action, subject, fields, inversion and fixed conditions. An Admin-owned row
+ * keeps its drift, and the plugin ability applies the row as stored, so the
+ * slug alone proves nothing. A template added to one later is judged by the
+ * rule above, so a row the factory would refuse fails here, for that
+ * permission alone.
  */
 export function bindsConsentUnit(
-  permission: { readonly slug: string; readonly conditions: unknown },
+  permission: PermissionRuleColumns & { readonly slug: string },
   scope: PluginUnitGrantScope,
 ): boolean {
   const { variables, problems } = parseTemplate(permission.conditions);
@@ -96,7 +111,9 @@ export function bindsConsentUnit(
   }
 
   if (variables.length === 0) {
-    return hasBoundingConditions(permission.conditions) && PLUGIN_UNIT_CONSENT_PUBLIC_READS.has(permission.slug);
+    const catalogRule = PUBLIC_READ_RULES.get(permission.slug);
+
+    return catalogRule !== undefined && matchesCatalogRule(catalogRule, permission);
   }
 
   const context = PLUGIN_UNIT_RENDER_VARIABLES[scope];
@@ -104,6 +121,7 @@ export function bindsConsentUnit(
   return (
     variables.every((variable) => context.has(variable)) &&
     !hasSection(permission.conditions) &&
+    !hasTemplatedKey(permission.conditions) &&
     restrictsToUnit(permission.conditions, UNIT_ID_VARIABLE[scope])
   );
 }
@@ -121,6 +139,22 @@ const hasSection = (conditions: unknown): boolean =>
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/**
+ * Whether a key at any depth opens a tag. `parseTemplate` refuses a delimiter
+ * change, so every tag opens with `{{`. A tag that opens in a value and closes
+ * in a key names JSON punctuation, which no render context supplies, so the
+ * variable check has already refused it.
+ */
+const hasTemplatedKey = (value: unknown): boolean => {
+  if (Array.isArray(value)) {
+    return value.some(hasTemplatedKey);
+  }
+
+  return (
+    isRecord(value) && Object.entries(value).some(([key, nested]) => key.includes('{{') || hasTemplatedKey(nested))
+  );
+};
 
 /** A string that is the unit id tag and nothing else: no section, no surrounding text. */
 const isUnitIdTag = (value: unknown, variable: string): boolean => {
