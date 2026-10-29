@@ -1,5 +1,6 @@
 import type { AuditContextService, SystemActorScope } from '@bge/actor-context';
 import type { PrismaClient } from '@bge/database';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import type { User } from 'better-auth/types';
@@ -9,6 +10,7 @@ import { authFactory, createUserCreatedHook } from './auth-factory';
 import { createAuthStorage } from './auth-storage';
 import { AUTH_CLIENT_IP_HEADER } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
+import { mapOidcProfile } from './oidc-profile';
 import { createSettingGates } from './setting-gates';
 
 /** The secret the instance signs cookies with. */
@@ -361,5 +363,73 @@ describe("authFactory's sign-out", () => {
     const response = await signOut(auth, {});
 
     expect(response.status).toBe(200);
+  });
+});
+
+describe("authFactory's sign-in providers", () => {
+  const providers = [
+    {
+      id: 'google',
+      discoveryUrl: 'https://g.example/.well-known/openid-configuration',
+      clientId: 'g',
+      clientSecret: 's',
+      displayName: 'Google',
+    },
+    {
+      id: 'authentik',
+      discoveryUrl: 'https://a.example/.well-known/openid-configuration',
+      clientId: 'a',
+      clientSecret: 's',
+      displayName: 'Authentik',
+    },
+  ];
+
+  const withProviders = (list: readonly unknown[]) =>
+    new ConfigService({
+      auth: {
+        url: 'http://localhost:33333',
+        secret: SECRET,
+        trustedOrigins: [],
+        useEmailPasswordAuth: true,
+        oidcProviders: list,
+      },
+    });
+
+  const genericOAuthOf = (auth: ReturnType<typeof authFactory>) =>
+    auth.options.plugins?.find((plugin) => plugin.id === 'generic-oauth') as
+      | { options: { config: Array<Record<string, unknown>> } }
+      | undefined;
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('turns implicit linking off and lets a link use a different email (#912)', () => {
+    const auth = authFactory({} as PrismaClient, withProviders(providers));
+
+    expect(auth.options.account?.accountLinking).toEqual({ disableImplicitLinking: true, allowDifferentEmails: true });
+  });
+
+  it('hands each provider to genericOAuth, in order, with fixed scopes and the profile mapping (#912)', () => {
+    const plugin = genericOAuthOf(authFactory({} as PrismaClient, withProviders(providers)));
+
+    expect(plugin?.options.config.map((entry) => entry['providerId'])).toEqual(['google', 'authentik']);
+    for (const entry of plugin?.options.config ?? []) {
+      expect(entry['scopes']).toEqual(['openid', 'profile', 'email']);
+      expect(entry['mapProfileToUser']).toBe(mapOidcProfile);
+      expect(entry['overrideUserInfo']).toBeUndefined();
+    }
+  });
+
+  it('adds no genericOAuth plugin without providers (#912)', () => {
+    expect(genericOAuthOf(authFactory({} as PrismaClient, withProviders([])))).toBeUndefined();
+  });
+
+  it('warns once for a provider variable that OIDC_PROVIDERS does not list (#912)', () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    jest.replaceProperty(process, 'env', { ...process.env, OIDC_GOGLE_CLIENT_ID: 'x' });
+
+    authFactory({} as PrismaClient, withProviders(providers));
+
+    const messages = warn.mock.calls.map(([message]) => String(message)).filter((m) => m.includes('OIDC_GOGLE'));
+    expect(messages).toEqual(['OIDC_GOGLE_CLIENT_ID names a sign-in provider that OIDC_PROVIDERS does not list']);
   });
 });

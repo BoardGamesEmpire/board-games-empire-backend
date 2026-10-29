@@ -28,8 +28,10 @@ import process from 'node:process';
 import { ADMIN_PLUGIN_OPTIONS } from './access/admin-roles';
 import type { AuthStorage } from './auth-storage';
 import { betterAuthLogger } from './better-auth-logger';
+import { type OidcProviderConfig, readOidcProviders, unlistedOidcVariables } from './configuration/oidc-providers';
 import { AUTH_BASE_PATH, AUTH_CLIENT_IP_HEADER, AUTH_COOKIE_PREFIX } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
+import { mapOidcProfile, OIDC_SCOPES } from './oidc-profile';
 import { providerPictureOnly } from './provider-picture';
 import { createSettingGates, settingGateDeps } from './setting-gates';
 import { createSignOutHook } from './sign-out-hook';
@@ -124,12 +126,16 @@ export function authFactory(
 
   logger.log(`Trusted origins set to: ${trustedOrigins.join(', ')}`);
 
-  // Only build the OIDC config when it is actually configured. `buildOIDC`
-  // calls `getOrThrow` on the ConfigService path, so calling it
-  // unconditionally would crash startup for deployments without OIDC.
-  const oidcConfig = hasOIDC(configService) ? buildOIDC(configService) : null;
-  if (oidcConfig) {
-    logger.log(`Enabling OIDC provider: ${oidcConfig.providerId}`);
+  const providers = oidcProvidersFor(configService);
+  for (const provider of providers) {
+    logger.log(`Enabling sign-in provider: ${provider.id}`);
+  }
+
+  // A variable for an id OIDC_PROVIDERS does not list is most often a typo in
+  // the id, which would leave that provider silently off (#912).
+  const providerIds = providers.map((provider) => provider.id);
+  for (const key of unlistedOidcVariables(process.env, providerIds)) {
+    logger.warn(`${key} names a sign-in provider that OIDC_PROVIDERS does not list`);
   }
 
   if (options.useEmailPass) {
@@ -169,17 +175,7 @@ export function authFactory(
     passkey(),
     twoFactor(),
 
-    ...(oidcConfig
-      ? [
-          genericOAuth({
-            config: [
-              {
-                ...oidcConfig,
-              },
-            ],
-          }),
-        ]
-      : []),
+    ...(providers.length > 0 ? [genericOAuth({ config: providers.map(toGenericOAuthConfig) })] : []),
 
     ...(usingSwagger ? [openAPI()] : []),
 
@@ -219,6 +215,14 @@ export function authFactory(
           required: false,
         },
       },
+    },
+    account: {
+      // A provider never attaches to an existing account on its own (#912):
+      // that would let a provider's email claim take over an account. A link
+      // is made from a signed-in session instead, and may use a different
+      // email because people often hold different addresses at the provider
+      // and on this server.
+      accountLinking: { disableImplicitLinking: true, allowDifferentEmails: true },
     },
     hooks: {
       before: createAuthMiddleware(async (context) => {
@@ -287,36 +291,26 @@ function buildOptions(configService?: ConfigService) {
   return { hostUrl: envUrl, secret: envSecret, trusted: envOrigins, useEmailPass: envEmailPass, disableOriginCheck };
 }
 
-function hasOIDC(configService?: ConfigService) {
+/**
+ * The sign-in providers to enable (#912). Without a `ConfigService`, as when
+ * the better-auth command-line tool builds the instance, the same parser reads
+ * the environment.
+ */
+function oidcProvidersFor(configService?: ConfigService): readonly OidcProviderConfig[] {
   if (configService instanceof ConfigService) {
-    const wellKnownUrl = configService.get<string>('auth.oidcWellKnownUrl');
-    const clientId = configService.get<string>('auth.oidcClientId');
-    const clientSecret = configService.get<string>('auth.oidcClientSecret');
-    return Boolean(wellKnownUrl && clientId && clientSecret);
+    return configService.get<readonly OidcProviderConfig[]>('auth.oidcProviders') ?? [];
   }
 
-  const wellKnownUrl = process.env.OIDC_WELL_KNOWN_URL;
-  const clientId = process.env.OIDC_CLIENT_ID;
-  const clientSecret = process.env.OIDC_CLIENT_SECRET;
-  return Boolean(wellKnownUrl && clientId && clientSecret);
+  return readOidcProviders();
 }
 
-function buildOIDC(configService?: ConfigService) {
-  const defaultProviderId = 'default-oidc-provider';
-
-  if (configService instanceof ConfigService) {
-    const discoveryUrl = configService.getOrThrow<string>('auth.oidcWellKnownUrl');
-    const clientId = configService.getOrThrow<string>('auth.oidcClientId');
-    const clientSecret = configService.getOrThrow<string>('auth.oidcClientSecret');
-    const providerId = configService.get<string>('auth.oidcProviderId') || defaultProviderId;
-
-    return { discoveryUrl, clientId, clientSecret, providerId };
-  }
-
-  const discoveryUrl = process.env.OIDC_WELL_KNOWN_URL;
-  const clientId = process.env.OIDC_CLIENT_ID || '';
-  const clientSecret = process.env.OIDC_CLIENT_SECRET;
-  const providerId = process.env.OIDC_PROVIDER_ID || defaultProviderId;
-
-  return { discoveryUrl, clientId, clientSecret, providerId };
+function toGenericOAuthConfig(provider: OidcProviderConfig) {
+  return {
+    providerId: provider.id,
+    discoveryUrl: provider.discoveryUrl,
+    clientId: provider.clientId,
+    clientSecret: provider.clientSecret,
+    scopes: [...OIDC_SCOPES],
+    mapProfileToUser: mapOidcProfile,
+  };
 }
