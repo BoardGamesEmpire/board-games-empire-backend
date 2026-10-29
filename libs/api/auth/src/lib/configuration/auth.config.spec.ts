@@ -17,4 +17,17 @@ describe('the auth config', () => {
       ]);
     },
   );
+
+  // Proves the config calls the provider reader: a listed provider with no
+  // variables stops the boot and names its four (#912).
+  it('requires the variables of every listed sign-in provider (#912)', () => {
+    expect(
+      missingVariables(authConfig, {
+        NODE_ENV: 'staging',
+        BETTER_AUTH_SECRET: 'a-long-enough-secret',
+        BETTER_AUTH_URL: 'http://localhost',
+        OIDC_PROVIDERS: 'a',
+      }),
+    ).toEqual(['OIDC_A_DISCOVERY_URL', 'OIDC_A_CLIENT_ID', 'OIDC_A_CLIENT_SECRET', 'OIDC_A_DISPLAY_NAME']);
+  });
 });

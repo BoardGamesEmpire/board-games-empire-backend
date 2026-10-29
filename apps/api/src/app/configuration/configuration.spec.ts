@@ -103,3 +103,15 @@ describe("the api's configuration schema", () => {
     expect(error?.details.map(({ path }) => path.join('.')) ?? []).not.toContain(variable);
   });
 });
+
+describe("the api's sign-in provider variables", () => {
+  // The schema can't tell a listed provider's variable from an unlisted one,
+  // so it leaves them all to auth's config, which checks the listed ones. An
+  // unlisted provider's variable only warns, so it must not stop the api here
+  // (#912).
+  it("lets an unlisted provider's malformed discovery URL through (#912)", () => {
+    const { error } = validate({ OIDC_OLD_DISCOVERY_URL: 'not a url' });
+
+    expect(error?.details.map(({ path }) => path.join('.')) ?? []).not.toContain('OIDC_OLD_DISCOVERY_URL');
+  });
+});

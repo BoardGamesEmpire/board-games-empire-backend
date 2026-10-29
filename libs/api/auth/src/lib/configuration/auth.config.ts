@@ -1,21 +1,19 @@
 import { env, isTrue, splitTrimFilter } from '@bge/env';
 import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
+import { readOidcProviders, type OidcProviderConfig } from './oidc-providers';
 
 export interface AuthConfig {
   disableOriginCheck: boolean;
-  oidcClientId: string;
-  oidcClientSecret: string;
-  oidcProviderId: string;
-  oidcWellKnownUrl: string;
+  oidcProviders: readonly OidcProviderConfig[];
   secret: string;
   trustedOrigins: string[];
   url: string;
   useEmailPasswordAuth: boolean;
 }
 
-export default registerAs('auth', () =>
-  env.provideMany<AuthConfig>([
+export default registerAs('auth', (): AuthConfig => {
+  const config = env.provideMany<Omit<AuthConfig, 'oidcProviders'>>([
     {
       keyTo: 'secret',
       key: 'BETTER_AUTH_SECRET',
@@ -52,32 +50,12 @@ export default registerAs('auth', () =>
       defaultValue: true,
       mutators: isTrue,
     },
-    {
-      keyTo: 'oidcWellKnownUrl',
-      key: 'OIDC_WELL_KNOWN_URL',
-      defaultValue: '',
-      allowEmptyString: true,
-    },
-    {
-      keyTo: 'oidcClientId',
-      key: 'OIDC_CLIENT_ID',
-      defaultValue: '',
-      allowEmptyString: true,
-    },
-    {
-      keyTo: 'oidcClientSecret',
-      key: 'OIDC_CLIENT_SECRET',
-      defaultValue: '',
-      allowEmptyString: true,
-    },
-    {
-      keyTo: 'oidcProviderId',
-      key: 'OIDC_PROVIDER_ID',
-      defaultValue: '',
-      allowEmptyString: true,
-    },
-  ]),
-);
+  ]);
+
+  // The providers' variables depend on the ids listed, so they are read
+  // beside the fixed ones rather than through `provideMany`'s list (#912).
+  return { ...config, oidcProviders: readOidcProviders() };
+});
 
 /**
  * For the api's root schema: the auth module loads this config with
@@ -91,10 +69,7 @@ export default registerAs('auth', () =>
 export const authConfigValidationSchema = {
   BETTER_AUTH_SECRET: Joi.string().min(10).allow(''),
   BETTER_AUTH_URL: Joi.string().uri().allow(''),
-  OIDC_CLIENT_ID: Joi.string().optional().allow(''),
-  OIDC_CLIENT_SECRET: Joi.string().optional().allow(''),
-  OIDC_PROVIDER_ID: Joi.string().optional().allow(''),
-  OIDC_WELL_KNOWN_URL: Joi.string().uri().optional().allow(''),
+  OIDC_PROVIDERS: Joi.string().optional().allow(''),
   TRUSTED_ORIGINS: Joi.string().optional().allow(''),
   DISABLE_ORIGIN_CHECK: Joi.boolean().optional().allow(''),
   USE_EMAIL_PASSWORD_AUTH: Joi.boolean().optional().allow(''),

@@ -54,7 +54,7 @@ export default registerAs('plugins', () =>
  * Joi runs first, though, and a bare `Joi.string()` rejects `''` outright —
  * boot dies on validation before the provider ever sees the key. `.allow('')`
  * hands the empty value through to the layer that knows what to do with it,
- * as auth's schema does for its OIDC variables.
+ * as auth's schema does for `OIDC_PROVIDERS`.
  */
 export const pluginsConfigValidationSchema = {
   PLUGINS_ROOT: Joi.string().optional().allow(''),
