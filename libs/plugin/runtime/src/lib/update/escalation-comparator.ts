@@ -78,8 +78,9 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
   }
 
   // Risk escalation: only decisions that EXIST can be escalated
-  // against, and only for permissions the next manifest still requests —
-  // a grant on a dropped check is dormant, not escalated.
+  // against, and only for permissions the next manifest still requests.
+  // Activation deletes a decision on a permission the next manifest stops
+  // requesting (#577), so it has nothing to escalate.
   const nextSlugs = new Set(input.next.checks.map((check) => check.canonicalSlug));
 
   for (const grant of input.grants) {

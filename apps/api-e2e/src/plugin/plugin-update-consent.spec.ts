@@ -97,7 +97,8 @@ describe('plugin update consent (approve/reject/pending)', () => {
       permissions: { checks: [...checks], ...(declares === undefined ? {} : { declares: [...declares] }) },
     });
 
-  const activeManifest = (): PluginManifest => manifestWithChecks('1.2.0', [MANAGE_DIGEST_CHECK]);
+  const activeManifest = (checks: readonly Check[] = [MANAGE_DIGEST_CHECK]): PluginManifest =>
+    manifestWithChecks('1.2.0', checks);
 
   const arrangeStagedPlugin = async (
     pendingChecks: readonly Check[],
@@ -105,6 +106,8 @@ describe('plugin update consent (approve/reject/pending)', () => {
     overrides: {
       /** Defaults to 'server' — every existing caller's plugin. */
       readonly scope?: PluginManifest['scope'];
+      /** The ACTIVE manifest's requested permissions. Defaults to `[MANAGE_DIGEST_CHECK]`. */
+      readonly activeChecks?: readonly Check[];
       /** The ACTIVE row's retained config, pre-activation. Defaults to `{}`. */
       readonly activeConfig?: Record<string, unknown>;
       /** Merged onto the pending manifest's `config` section (D-CN, #370). */
@@ -112,7 +115,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
     } = {},
   ): Promise<{ plugin: Plugin; pending: PluginManifest }> => {
     const scope = overrides.scope ?? 'server';
-    const active: PluginManifest = { ...activeManifest(), scope };
+    const active: PluginManifest = { ...activeManifest(overrides.activeChecks), scope };
     const pendingBase = manifestWithChecks('1.3.0', pendingChecks, pendingDeclares);
     const pending: PluginManifest = {
       ...pendingBase,
@@ -337,6 +340,30 @@ describe('plugin update consent (approve/reject/pending)', () => {
       expect(reStamped.decidedRiskLevel).toBe(RiskLevel.Medium);
       expect(reStamped.manifestVersion).toBe('1.3.0');
       expect(reStamped.decidedById).toBe(admin.user.id);
+    });
+
+    it('revokes the decision on a permission the update stops requesting, and records why (#577)', async () => {
+      const admin = await actors.admin();
+      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK], undefined, {
+        activeChecks: [MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK],
+      });
+      await seedPolicyGrant(plugin, { status: PluginGrantStatus.Granted });
+
+      await approve(admin, plugin.slug).expect(200);
+
+      await expect(
+        db.client.pluginGrant.count({ where: { pluginId: plugin.id, permissionSlug: 'read:safe_http_policy' } }),
+      ).resolves.toBe(0);
+
+      const rows = await awaitLifecycleRow(plugin, PluginLifecycleEventType.GrantRevoked);
+      expect(rows).toEqual([
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            permissionSlug: 'read:safe_http_policy',
+            reason: 'permission-no-longer-requested',
+          }),
+        }),
+      ]);
     });
 
     it('round-trips the Critical challenge from the 409 body — the client re-submits, never recomputes', async () => {

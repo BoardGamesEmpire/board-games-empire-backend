@@ -7,6 +7,7 @@ export * from './human-user';
 export * from './keyed-create';
 export * from './permission-conditions';
 export * from './plugin-grant.constants';
+export * from './plugin-requested-permissions-reader';
 export * from './plugin-unit-enablement';
 export * from './prisma-errors';
 export * from './risk-ordering';

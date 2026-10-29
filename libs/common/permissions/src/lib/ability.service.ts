@@ -417,9 +417,11 @@ export class AbilityService {
     } catch (error) {
       if (error instanceof PluginAbilityRenderRejectionError) {
         this.logger.warn(
-          `Plugin ability rejected (${error.reason}): permission '${error.permissionSlug}' for plugin ` +
-            `'${error.pluginSlug}' (${error.pluginId})` +
+          `Plugin ability rejected (${error.reason}): ` +
+            (error.permissionSlug === null ? '' : `permission '${error.permissionSlug}' for `) +
+            `plugin '${error.pluginSlug}' (${error.pluginId})` +
             (error.variable ? ` references out-of-context template variable '${error.variable}'` : '') +
+            (error.detail ? `: ${error.detail}` : '') +
             ` while operating as unit ${JSON.stringify(error.unit)}`,
         );
 

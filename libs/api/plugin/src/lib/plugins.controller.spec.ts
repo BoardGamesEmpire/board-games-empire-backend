@@ -63,6 +63,7 @@ const PENDING_PLUGIN = {
   pendingVersion: '1.3.0',
 } as never;
 const DECLARES = { added: ['plugin|demo-sink|manage:digest'], removed: ['plugin|demo-sink|read:legacy'] };
+const NO_LONGER_REQUESTED = ['feedback:read'];
 const PRESENTATION = {
   plugin: { id: 'plugin-1', slug: 'demo-sink', enabled: true },
   manifestVersion: '1.3.0',
@@ -134,6 +135,7 @@ describe('PluginsController (delegation)', () => {
         comparison: COMPARISON,
         pendingSince: new Date('2026-07-29T00:00:00Z'),
         declares: DECLARES,
+        noLongerRequested: NO_LONGER_REQUESTED,
       }),
     };
     presentation = {
@@ -291,6 +293,9 @@ describe('PluginsController (delegation)', () => {
         // The catalog diff rides the body: no escalation kind describes a
         // declaration change, so a client cannot reconstruct it.
         declares: DECLARES,
+        // So does the other destructive half: approving deletes every
+        // decision on a permission the update stops requesting (#577).
+        noLongerRequested: NO_LONGER_REQUESTED,
         presentation: PRESENTATION,
       });
     });

@@ -493,6 +493,52 @@ describe('PluginUpdateService', () => {
         PluginGrantRevokedEvent.eventName,
         expect.objectContaining({ reason: 'permission-removed' }),
       );
+      // The dropped declaration is also a dropped requested permission; it
+      // revokes once, under the declares diff, never a second time (#577).
+      expect(db.pluginGrant.deleteMany).toHaveBeenCalledTimes(1);
+      expect(emitter.emit).not.toHaveBeenCalledWith(
+        PluginGrantRevokedEvent.eventName,
+        expect.objectContaining({ reason: 'permission-no-longer-requested' }),
+      );
+    });
+
+    it('deletes every decision on a core permission the next manifest stops requesting, granted and denied, with permission-no-longer-requested (#577)', async () => {
+      // v1.3.0 stops requesting feedback:read and leaves declares[] alone.
+      // Both decisions go: a decision on a permission nothing requests must
+      // not confer if a later version requests it again (#577).
+      const granted = makeGrant();
+      const denied = makeGrant({
+        id: 'grant-hh',
+        scopeType: PluginGrantScope.Household,
+        scopeId: 'household-1',
+        status: PluginGrantStatus.Denied,
+      });
+      db.pluginGrant.findMany
+        .mockResolvedValueOnce([granted, denied]) // comparison load
+        .mockResolvedValueOnce([granted, denied]); // decisions on permissions no longer requested
+      await writeManifest(
+        nextManifest({
+          permissions: {
+            ...activeManifest.permissions,
+            checks: activeManifest.permissions.checks.filter((check) => check.slug !== 'feedback:read'),
+          },
+        }),
+      );
+
+      const result = await service.stage(input());
+
+      expect(result.activated).toBe(true);
+      expect(db.pluginGrant.deleteMany).toHaveBeenCalledWith({
+        where: { pluginId: 'plugin-1', permissionSlug: { in: ['feedback:read'] } },
+      });
+      expect(db.pluginPermission.deleteMany).not.toHaveBeenCalled();
+      const revocations = emitter.emit.mock.calls.filter(
+        ([eventName]) => eventName === PluginGrantRevokedEvent.eventName,
+      );
+      expect(revocations.map(([, event]) => (event as PluginGrantRevokedEvent).reason)).toEqual([
+        'permission-no-longer-requested',
+        'permission-no-longer-requested',
+      ]);
     });
   });
 
@@ -1598,6 +1644,12 @@ describe('PluginUpdateService', () => {
         PluginGrantRevokedEvent.eventName,
         expect.objectContaining({ reason: 'consent-scope-changed' }),
       );
+      // Still requested, at another consent scope: a scope move, not a
+      // permission the update stopped requesting (#577).
+      expect(emitter.emit).not.toHaveBeenCalledWith(
+        PluginGrantRevokedEvent.eventName,
+        expect.objectContaining({ reason: 'permission-no-longer-requested' }),
+      );
     });
 
     it('suspends a unit holding a STALE Granted row — presence of a grant is not consent at the new risk', async () => {
@@ -2144,6 +2196,46 @@ describe('PluginUpdateService', () => {
       // Empty, not absent: a client rendering "no catalog changes" should not
       // have to distinguish an omitted field from an unchanged catalog.
       expect(description.declares).toEqual({ added: [], removed: [] });
+      expect(description.noLongerRequested).toEqual([]);
+    });
+
+    it('reports the requested permissions approving stops requesting, whose decisions it deletes (#577)', async () => {
+      // The same drop the activation test applies: feedback:read leaves the
+      // checks while declares[] stays put. Approving deletes every decision
+      // on it, so the screen has to say so before the admin approves.
+      db.plugin.findUnique.mockResolvedValue(
+        stagedPlugin(
+          nextManifest({
+            permissions: {
+              ...activeManifest.permissions,
+              checks: activeManifest.permissions.checks.filter((check) => check.slug !== 'feedback:read'),
+            },
+          }),
+        ),
+      );
+
+      const description = await service.describePending('demo-sink');
+
+      expect(description.noLongerRequested).toEqual(['feedback:read']);
+      expect(description.declares).toEqual({ added: [], removed: [] });
+    });
+
+    it('leaves a dropped declaration to the declares diff, never listing it twice (#577)', async () => {
+      db.plugin.findUnique.mockResolvedValue(
+        stagedPlugin(
+          nextManifest({
+            permissions: {
+              declares: ['manage:archive'],
+              checks: activeManifest.permissions.checks.filter((check) => check.slug !== 'manage:digest'),
+            },
+          }),
+        ),
+      );
+
+      const description = await service.describePending('demo-sink');
+
+      expect(description.declares.removed).toEqual(['plugin|demo-sink|manage:digest']);
+      expect(description.noLongerRequested).toEqual([]);
     });
 
     it('renders a durable denial as blockedByDenial STATE — the read never throws the approve-time block', async () => {

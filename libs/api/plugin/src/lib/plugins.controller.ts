@@ -365,7 +365,9 @@ export class PluginsController {
     description:
       "The approval screen's data source: the escalation comparison recomputed against today's decisions " +
       '(escalations, serverGating, blockedByDenial), pendingSince, the declares[] catalog diff approving would ' +
-      "apply (added/removed plugin-namespaced permissions — removed takes their grants), and the staged manifest's " +
+      'apply (added/removed plugin-namespaced permissions — removed takes their grants), noLongerRequested (the ' +
+      'requested permissions the update stops requesting, whose decisions approving deletes at every scope), ' +
+      "and the staged manifest's " +
       'consent surface localized for the requester. A durable denial renders as blockedByDenial state here; only ' +
       'approve refuses over it.',
   })
@@ -545,6 +547,10 @@ export class PluginsController {
       // nor the escalations — `removed` is the destructive half of approving,
       // and the screen has to be able to say so.
       declares: description.declares,
+      // The requested permissions approving stops requesting, whose decisions
+      // it deletes at every scope (#577). The staged consent surface only
+      // omits them, and an omission is not a warning.
+      noLongerRequested: description.noLongerRequested,
       // The plugin envelope ({id, slug, enabled}) rides inside — one wire
       // name for one fact.
       presentation,

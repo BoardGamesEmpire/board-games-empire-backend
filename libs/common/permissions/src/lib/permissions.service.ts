@@ -4,14 +4,16 @@ import {
   grantScopeCoordinatesForUnit,
   hasBoundingConditions,
   loadPluginUnitEnablement,
+  PLUGIN_REQUESTED_PERMISSIONS_READER,
   PluginGrantScope,
   PluginGrantStatus,
   Prisma,
   riskCovers,
+  type PluginRequestedPermissionsReader,
   type RiskLevel,
 } from '@bge/database';
 import { isPluginPermissionSlug, parsePluginPermissionSlug } from '@boardgamesempire/plugin-manifest';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
 import { randomUUID } from 'node:crypto';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
@@ -57,6 +59,14 @@ export class PermissionsService {
   constructor(
     private readonly db: DatabaseService,
     @Inject(PERMISSIONS_CACHE) private readonly cache: Cache,
+    /**
+     * Provided by the plugin runtime (#577). Optional because this lib cannot
+     * import the runtime, and a process without it confers nothing on plugin
+     * actors rather than every decision on file.
+     */
+    @Optional()
+    @Inject(PLUGIN_REQUESTED_PERMISSIONS_READER)
+    private readonly requestedPermissionsReader?: PluginRequestedPermissionsReader,
   ) {}
 
   /**
@@ -534,6 +544,13 @@ export class PermissionsService {
    *   the install/update gates and `decide()` refuse to create such
    *   grants, so one existing can only mean the catalog drifted under a
    *   recorded decision.
+   * - **Bounded by the active manifest.** A decision confers only while
+   *   the active manifest requests that permission at that decision's
+   *   scope (#577). Activation deletes decisions on a permission an update
+   *   stops requesting, but the bound is applied here as well: a
+   *   pre-consent decision, recorded against a pending manifest, must not
+   *   confer before its update lands. The manifest is re-validated, never
+   *   trusted; one that fails rejects the whole ability.
    *
    * Returns `null` when no `Plugin` row exists for the id — the caller
    * decides what a dangling plugin actor means. Deliberately uncached: a
@@ -556,7 +573,7 @@ export class PermissionsService {
     const [plugin, unitServed] = await Promise.all([
       this.db.plugin.findUnique({
         where: { id: pluginId },
-        select: { id: true, slug: true, enabled: true, uninstalledAt: true },
+        select: { id: true, slug: true, version: true, manifestJson: true, enabled: true, uninstalledAt: true },
       }),
       this.isUnitServed(pluginId, unit),
     ]);
@@ -585,16 +602,15 @@ export class PermissionsService {
       return { ...base, servable: true, corePermissions: [], ownGrantSlugs: [] };
     }
 
-    const ownSlugs = new Set(grants.map((grant) => grant.permissionSlug).filter(isPluginPermissionSlug));
-    const coreSlugs = grants.map((grant) => grant.permissionSlug).filter((slug) => !ownSlugs.has(slug));
-
     // Corruption check BEFORE the catalog read: a grant row keyed to this
     // plugin whose canonical slug names another plugin's namespace would
     // otherwise vanish here — the pluginId-filtered catalog query finds no
     // row, and the "no catalog row" debug below reads as a benign deleted
     // permission. That is grant-table corruption, not drift, and it takes
-    // the same loud typed path the factory uses, not a debug line.
-    for (const slug of ownSlugs) {
+    // the same loud typed path the factory uses, not a debug line. It also
+    // runs before the manifest bound below, which would otherwise drop such
+    // a row quietly: no valid manifest requests another plugin's namespace.
+    for (const slug of new Set(grants.map((grant) => grant.permissionSlug).filter(isPluginPermissionSlug))) {
       const rejection = (reason: 'foreign-namespace-slug' | 'malformed-slug') =>
         new PluginAbilityRenderRejectionError({
           reason,
@@ -622,6 +638,10 @@ export class PermissionsService {
         throw rejection('foreign-namespace-slug');
       }
     }
+
+    const requestedGrants = this.grantsRequestedByActiveManifest(plugin, unit, grants);
+    const ownSlugs = new Set(requestedGrants.map((grant) => grant.permissionSlug).filter(isPluginPermissionSlug));
+    const coreSlugs = requestedGrants.map((grant) => grant.permissionSlug).filter((slug) => !ownSlugs.has(slug));
 
     const [corePermissions, ownPermissions] = await Promise.all([
       // A retired row (#235) is read as missing: the grant survives, confers nothing.
@@ -670,7 +690,7 @@ export class PermissionsService {
     // A slug can be granted at more than one scope (e.g. Server and the
     // unit); it confers when ANY of its grants still covers current risk.
     const conferringSlugs = new Set<string>();
-    for (const grant of grants) {
+    for (const grant of requestedGrants) {
       if (wildcardSlugs.has(grant.permissionSlug)) {
         continue;
       }
@@ -710,6 +730,59 @@ export class PermissionsService {
       corePermissions: corePermissions.filter((permission) => conferringSlugs.has(permission.slug)),
       ownGrantSlugs: [...ownSlugs].filter((slug) => conferringSlugs.has(slug)),
     };
+  }
+
+  /**
+   * The snapshot's manifest bound (#577): keeps only the decisions whose
+   * permission the plugin's active manifest requests at that decision's
+   * scope. Throws the typed rejection when the stored manifest fails
+   * re-validation, and keeps nothing when no reader is registered.
+   */
+  private grantsRequestedByActiveManifest<TGrant extends { permissionSlug: string; scopeType: PluginGrantScope }>(
+    plugin: { id: string; slug: string; version: string; manifestJson: unknown },
+    unit: PluginUnit,
+    grants: readonly TGrant[],
+  ): TGrant[] {
+    if (!this.requestedPermissionsReader) {
+      this.logger.warn(
+        `Plugin ${plugin.id} holds consent decisions, but this process registers no reader for its active ` +
+          'manifest; conferring nothing (#577)',
+      );
+
+      return [];
+    }
+
+    const result = this.requestedPermissionsReader.read({
+      slug: plugin.slug,
+      version: plugin.version,
+      manifestJson: plugin.manifestJson,
+    });
+
+    if (!result.valid) {
+      throw new PluginAbilityRenderRejectionError({
+        reason: 'invalid-stored-manifest',
+        pluginId: plugin.id,
+        pluginSlug: plugin.slug,
+        permissionSlug: null,
+        detail: result.detail,
+        unit,
+      });
+    }
+
+    const requested = new Set(result.requested.map(({ slug, scopeType }) => `${scopeType}|${slug}`));
+
+    return grants.filter((grant) => {
+      if (requested.has(`${grant.scopeType}|${grant.permissionSlug}`)) {
+        return true;
+      }
+
+      this.logger.debug(
+        `Plugin ${plugin.id} decision on '${grant.permissionSlug}' at ${grant.scopeType} scope is not requested ` +
+          'by the active manifest; conferring nothing',
+      );
+
+      return false;
+    });
   }
 
   /**
