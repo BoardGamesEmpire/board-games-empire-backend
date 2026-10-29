@@ -35,11 +35,17 @@ import { mapOidcProfile, OIDC_SCOPES } from './oidc-profile';
 import { providerPictureOnly } from './provider-picture';
 import { createSettingGates, settingGateDeps } from './setting-gates';
 import { createSignOutHook } from './sign-out-hook';
+import { createUsernameVariants } from './username-variant';
 
 interface UserCreatedHookDeps {
   eventEmitter?: EventEmitter2;
   auditContext?: AuditContextService;
   systemActorScope?: SystemActorScope;
+  /**
+   * The username a sign-in asked for when it was replaced by a variant (#912),
+   * read with the endpoint context `user.create.before` saw.
+   */
+  requestedUsername?: (context: object | null) => string | null;
 }
 
 /**
@@ -59,10 +65,12 @@ interface UserCreatedHookDeps {
  *
  * Exported for unit tests; `authFactory` wires it into `databaseHooks`.
  */
-export function createUserCreatedHook(deps: UserCreatedHookDeps): (user: User) => Promise<void> {
-  const { eventEmitter, auditContext, systemActorScope } = deps;
+export function createUserCreatedHook(
+  deps: UserCreatedHookDeps,
+): (user: User, context?: object | null) => Promise<void> {
+  const { eventEmitter, auditContext, systemActorScope, requestedUsername } = deps;
 
-  return async (user: User): Promise<void> => {
+  return async (user: User, context?: object | null): Promise<void> => {
     if (!eventEmitter) {
       throw new Error('EventEmitter2 not provided to authFactory');
     }
@@ -84,6 +92,7 @@ export function createUserCreatedHook(deps: UserCreatedHookDeps): (user: User) =
         isAnonymous: record.isAnonymous ?? false,
       },
       initiatedAt,
+      requestedUsername?.(context ?? null) ?? null,
     );
 
     const emit = (): void => {
@@ -145,6 +154,7 @@ export function authFactory(
   const gateDeps = settingGateDeps(prisma, i18n);
   const settingGates = createSettingGates(gateDeps);
   const signOutHook = createSignOutHook({ render: gateDeps.render });
+  const usernameVariants = createUsernameVariants(prisma);
 
   const usingSwagger = configService?.get<boolean>('swagger.enabled');
   if (usingSwagger) {
@@ -245,12 +255,22 @@ export function authFactory(
       user: {
         create: {
           // The registration gate first: a refused sign-up writes nothing,
-          // so there is no picture to keep or drop.
+          // so there is no username to vary and no picture to keep or drop.
           before: async (user, context) => {
             await settingGates.beforeUserCreate(user, context);
-            return providerPictureOnly(user, context);
+
+            const variant = await usernameVariants.beforeUserCreate(user, context);
+            const picture = providerPictureOnly(user, context);
+
+            // better-auth merges `data` into the row; the two touch different fields.
+            return variant || picture ? { data: { ...variant?.data, ...picture?.data } } : undefined;
           },
-          after: createUserCreatedHook({ eventEmitter, auditContext, systemActorScope }),
+          after: createUserCreatedHook({
+            eventEmitter,
+            auditContext,
+            systemActorScope,
+            requestedUsername: usernameVariants.requestedUsername,
+          }),
         },
         update: {
           before: settingGates.beforeUserUpdate,

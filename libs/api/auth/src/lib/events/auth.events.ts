@@ -30,8 +30,16 @@ export class UserCreatedEvent extends MutationEvent<User> {
   readonly subject = ResourceType.User;
   readonly subjectId: string;
 
-  constructor(after: UserCreatedSnapshot, initiatedAt: Date) {
+  /**
+   * The username the sign-in asked for, when it was taken and `after.username`
+   * is its first free variant (#912); else null. Listener-facing context, not
+   * row state.
+   */
+  readonly requestedUsername: string | null;
+
+  constructor(after: UserCreatedSnapshot, initiatedAt: Date, requestedUsername: string | null = null) {
     super(null, after, initiatedAt);
+    this.requestedUsername = requestedUsername;
     this.subjectId = after.id;
   }
 }

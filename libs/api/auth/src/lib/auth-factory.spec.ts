@@ -69,6 +69,26 @@ describe('createUserCreatedHook', () => {
     expect(emitted.initiatedAt).toEqual(new Date('2026-01-01T00:00:00Z'));
   });
 
+  it('carries the username the sign-in asked for from the create hook to the event (#912)', async () => {
+    const context = { path: '/oauth2/callback/:providerId' };
+    const requestedUsername = jest.fn().mockReturnValue('jason');
+    const withRequested = createUserCreatedHook({
+      eventEmitter: emitter as unknown as EventEmitter2,
+      requestedUsername,
+    });
+
+    await withRequested(makeAuthUser({ name: 'jason-2' }), context);
+
+    expect(requestedUsername).toHaveBeenCalledWith(context);
+    expect(emitter.emit.mock.calls[0][1].requestedUsername).toBe('jason');
+  });
+
+  it('has no requested username unless the hook was given one (#912)', async () => {
+    await hook()(makeAuthUser());
+
+    expect(emitter.emit.mock.calls[0][1].requestedUsername).toBeNull();
+  });
+
   it('wraps the emission in a system actor scope when the CLS actor is null (self-signup)', async () => {
     await hook()(makeAuthUser());
 

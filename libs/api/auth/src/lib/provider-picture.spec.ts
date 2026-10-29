@@ -1,4 +1,4 @@
-import { providerPictureOnly } from './provider-picture';
+import { isProviderSignInPath, providerPictureOnly } from './provider-picture';
 
 const PICTURE = 'https://provider.example/a.png';
 
@@ -29,5 +29,18 @@ describe('providerPictureOnly (databaseHooks.user.create.before)', () => {
   it('changes nothing when there is no picture to drop', () => {
     expect(providerPictureOnly({ image: null }, { path: '/sign-up/email' })).toBeUndefined();
     expect(providerPictureOnly({}, { path: '/sign-up/email' })).toBeUndefined();
+  });
+});
+
+describe('isProviderSignInPath', () => {
+  it.each(['/callback/:id', '/oauth2/callback/:providerId', '/sign-in/social', '/one-tap/callback'])(
+    'is true for %s, which a sign-in provider vouches for (#912)',
+    (path) => {
+      expect(isProviderSignInPath({ path })).toBe(true);
+    },
+  );
+
+  it.each([{ path: '/sign-up/email' }, {}, null])('is false for %p (#912)', (context) => {
+    expect(isProviderSignInPath(context)).toBe(false);
   });
 });
