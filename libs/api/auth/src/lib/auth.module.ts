@@ -1,6 +1,7 @@
 import { AuditContextModule, AuditContextService, SystemActorScope } from '@bge/actor-context';
 import { DatabaseModule, DatabaseService } from '@bge/database';
 import type { I18nTranslations } from '@bge/i18n';
+import { NotificationsServiceModule } from '@bge/notifications-service';
 import { CACHE_REDIS_CLIENT, type Redis } from '@bge/redis';
 import { ServicesModule } from '@bge/services';
 import { Module } from '@nestjs/common';
@@ -15,6 +16,7 @@ import { AuthService } from './auth.service';
 import authConfig from './configuration/auth.config';
 import { AUTH_INSTANCE, AUTH_REQUEST_HANDLER, MAX_REQUEST_BODY_BYTES } from './constants';
 import type { AuthType } from './interfaces';
+import { UsernameVariantNotificationListener } from './listeners/username-variant-notification.listener';
 import { UserProvisioningListener } from './provisioning/user-provisioning.listener';
 import { UserProvisioningService } from './provisioning/user-provisioning.service';
 import { fallbackLocaleRenderer } from './setting-gates';
@@ -24,6 +26,7 @@ import { fallbackLocaleRenderer } from './setting-gates';
     ConfigModule.forFeature(authConfig),
     DatabaseModule,
     ServicesModule,
+    NotificationsServiceModule,
     // AuditContextModule supplies the CLS reader + SystemActorScope used by
     // the user-created database hook (#57 emit-site migration).
     AuditContextModule,
@@ -91,6 +94,7 @@ import { fallbackLocaleRenderer } from './setting-gates';
     AuthService,
     UserProvisioningService,
     UserProvisioningListener,
+    UsernameVariantNotificationListener,
   ],
   exports: [AuthService, AUTH_INSTANCE, AUTH_REQUEST_HANDLER],
 })

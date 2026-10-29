@@ -186,6 +186,49 @@ export function workerEnvOverrides(): Record<string, string> {
 }
 
 /**
+ * Where the fake sign-in provider `global-setup` starts is listening, so a
+ * spec can read back what the API asked it for (#912).
+ */
+export const E2E_FAKE_PROVIDER_URL_VAR = 'BGE_E2E_FAKE_PROVIDER_URL';
+
+/** The id the API knows the fake sign-in provider by: its callback is `/api/auth/oauth2/callback/fake`. */
+export const FAKE_PROVIDER_ID = 'fake';
+
+/**
+ * The same fake listed a second time, with `ALLOW_UNVERIFIED_EMAIL` on, so a
+ * spec can sign up through a provider that doesn't vouch for the email (#912).
+ */
+export const LENIENT_FAKE_PROVIDER_ID = 'fake-lenient';
+
+/**
+ * The sign-in provider variables the API child boots with: the fake, twice
+ * (#912). The API reads its providers once, at boot, so both are listed for
+ * every spec, and discovery shows them to all of them. `OIDC_PROVIDERS` is
+ * pinned like everything in {@link apiEnvOverrides}: a developer's `.env` may
+ * list real providers, which a spec must never reach. The strict fake's
+ * `ALLOW_UNVERIFIED_EMAIL` is pinned off for the same reason: inherited as
+ * `true`, the refusal specs would sign up instead. `false`, not empty, since
+ * an empty value is unset and the `.env` would fill it again.
+ */
+export function fakeProviderEnv(providerUrl: string): Record<string, string> {
+  const discoveryUrl = `${providerUrl}/.well-known/openid-configuration`;
+
+  return {
+    OIDC_PROVIDERS: `${FAKE_PROVIDER_ID},${LENIENT_FAKE_PROVIDER_ID}`,
+    OIDC_FAKE_DISCOVERY_URL: discoveryUrl,
+    OIDC_FAKE_CLIENT_ID: 'e2e-client',
+    OIDC_FAKE_CLIENT_SECRET: 'e2e-secret',
+    OIDC_FAKE_DISPLAY_NAME: 'Fake provider',
+    OIDC_FAKE_ALLOW_UNVERIFIED_EMAIL: 'false',
+    OIDC_FAKE_LENIENT_DISCOVERY_URL: discoveryUrl,
+    OIDC_FAKE_LENIENT_CLIENT_ID: 'e2e-lenient-client',
+    OIDC_FAKE_LENIENT_CLIENT_SECRET: 'e2e-lenient-secret',
+    OIDC_FAKE_LENIENT_DISPLAY_NAME: 'Lenient fake provider',
+    OIDC_FAKE_LENIENT_ALLOW_UNVERIFIED_EMAIL: 'true',
+  };
+}
+
+/**
  * The three logical Redis connections the API configures via
  * `makeRedisConfig` (see `apps/api/src/app/configuration`). The harness
  * points all three at the same ephemeral server; the per-connection

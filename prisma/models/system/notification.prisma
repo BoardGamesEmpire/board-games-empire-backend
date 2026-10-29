@@ -118,5 +118,16 @@ enum NotificationType {
   GameShareReceived
   GameShareAwaitingApproval
 
+  /**
+   * Username notification (#912), sent to the new user alone. A first sign-in
+   * through a sign-in provider asked for a username another user already
+   * holds, so the new user got the first free variant ("jason-2"). Sent once,
+   * when the user is created, and never to an email sign-up, which is
+   * refused a taken username instead. The payload names the username the
+   * user got, the one they asked for, and whether they can change it, read
+   * from the server settings when the notification is sent.
+   */
+  UsernameVariantAssigned
+
   @@map("notification_types")
 }

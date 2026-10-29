@@ -36,13 +36,19 @@ const BASE_ISSUER = 'https://api.example.com';
 // endpoint assertions is the path itself, independent of the issuer.
 const AUTH_BASE = AUTH_BASE_PATH;
 
+/** A sign-in provider as the auth config holds it, secret included, as discovery receives it (#912). */
+interface ProviderConfig {
+  id: string;
+  discoveryUrl: string;
+  clientId: string;
+  clientSecret: string;
+  displayName: string;
+}
+
 interface MockAuthConfig {
   url?: string;
   useEmailPasswordAuth?: boolean;
-  oidcWellKnownUrl?: string;
-  oidcClientId?: string;
-  oidcClientSecret?: string;
-  oidcProviderId?: string;
+  oidcProviders?: ProviderConfig[];
   minClientVersion?: string;
   maxClientVersion?: string;
 }
@@ -51,10 +57,7 @@ function buildMockConfigService(config: MockAuthConfig): Pick<ConfigService, 'ge
   const configMap: Record<string, unknown> = {
     'auth.url': config.url ?? BASE_ISSUER,
     'auth.useEmailPasswordAuth': config.useEmailPasswordAuth ?? false,
-    'auth.oidcWellKnownUrl': config.oidcWellKnownUrl ?? '',
-    'auth.oidcClientId': config.oidcClientId ?? '',
-    'auth.oidcClientSecret': config.oidcClientSecret ?? '',
-    'auth.oidcProviderId': config.oidcProviderId ?? '',
+    'auth.oidcProviders': config.oidcProviders ?? [],
     bgeIdentity: {
       minClientVersion: config.minClientVersion ?? '',
       maxClientVersion: config.maxClientVersion ?? '',
@@ -83,11 +86,23 @@ const MOCK_SYSTEM_SETTING = {
 
 const REGISTRATION_CLOSED = { ...MOCK_SYSTEM_SETTING, allowUserRegistration: false };
 
-const OIDC_CONFIG: Pick<MockAuthConfig, 'oidcWellKnownUrl' | 'oidcClientId' | 'oidcClientSecret'> = {
-  oidcWellKnownUrl: 'https://auth.example.com/.well-known/openid-configuration',
-  oidcClientId: 'test-client-id',
-  oidcClientSecret: 'test-client-secret',
+const GOOGLE: ProviderConfig = {
+  id: 'google',
+  discoveryUrl: 'https://accounts.google.com/.well-known/openid-configuration',
+  clientId: 'google-client-id',
+  clientSecret: 'google-client-secret',
+  displayName: 'Google',
 };
+
+const AUTHENTIK: ProviderConfig = {
+  id: 'authentik',
+  discoveryUrl: 'https://auth.example.com/application/o/bge/.well-known/openid-configuration',
+  clientId: 'authentik-client-id',
+  clientSecret: 'authentik-client-secret',
+  displayName: 'Authentik',
+};
+
+const OIDC_CONFIG: Pick<MockAuthConfig, 'oidcProviders'> = { oidcProviders: [AUTHENTIK] };
 
 async function createService(
   config: MockAuthConfig,
@@ -383,127 +398,50 @@ describe('StrategyService', () => {
         });
       });
 
-      describe('OIDC strategy', () => {
-        it('includes the strategy when all three OIDC vars are present', async () => {
-          const service = await createService({ ...OIDC_CONFIG });
+      describe('OIDC strategies, one per sign-in provider', () => {
+        it('lists one oidc strategy per sign-in provider, in list order, after email and password (#912)', async () => {
+          const service = await createService({ useEmailPasswordAuth: true, oidcProviders: [GOOGLE, AUTHENTIK] });
           const { strategies } = await service.getDiscovery();
 
-          expect(strategies).toHaveLength(1);
-          expect(strategies[0].type).toBe(AuthStrategyType.Oidc);
+          expect(strategies.map((s) => s.type)).toEqual([
+            AuthStrategyType.EmailAndPassword,
+            AuthStrategyType.Oidc,
+            AuthStrategyType.Oidc,
+          ]);
+          expect(strategies[1]).toBeInstanceOf(OidcStrategyDto);
+          expect(strategies[2]).toEqual({
+            type: 'oidc',
+            providerId: 'authentik',
+            displayName: 'Authentik',
+            discoveryUrl: AUTHENTIK.discoveryUrl,
+            authorizationEndpoint: `${AUTH_BASE}/sign-in/oauth2`,
+            signUpDisabled: false,
+          });
         });
 
-        it('returns an OidcStrategyDto instance', async () => {
-          const service = await createService({ ...OIDC_CONFIG });
-          const discovery = await service.getDiscovery();
+        it('never lists a client id or secret (#912)', async () => {
+          const service = await createService({ oidcProviders: [GOOGLE, AUTHENTIK] });
+          const serialized = JSON.stringify(await service.getDiscovery());
 
-          expect(discovery.strategies[0]).toBeInstanceOf(OidcStrategyDto);
+          for (const provider of [GOOGLE, AUTHENTIK]) {
+            expect(serialized).not.toContain(provider.clientId);
+            expect(serialized).not.toContain(provider.clientSecret);
+          }
         });
 
-        it('sets providerId from config', async () => {
-          const service = await createService({ ...OIDC_CONFIG, oidcProviderId: 'acme-sso' });
-          const discovery = await service.getDiscovery();
+        it('lists no oidc strategy when no sign-in provider is configured (#912)', async () => {
+          const service = await createService({ useEmailPasswordAuth: true, oidcProviders: [] });
+          const { strategies } = await service.getDiscovery();
 
-          const [strategy] = discovery.strategies as OidcStrategyDto[];
-
-          expect(strategy.providerId).toBe('acme-sso');
+          expect(strategies.map((s) => s.type)).toEqual([AuthStrategyType.EmailAndPassword]);
         });
 
-        it('falls back to "default-oidc-provider" when oidcProviderId is empty', async () => {
-          const service = await createService({ ...OIDC_CONFIG, oidcProviderId: '' });
-          const discovery = await service.getDiscovery();
-
-          const [strategy] = discovery.strategies as OidcStrategyDto[];
-
-          expect(strategy.providerId).toBe('default-oidc-provider');
-        });
-
-        it('sets signUpDisabled: false when registration is open', async () => {
-          const service = await createService({ ...OIDC_CONFIG });
-          const discovery = await service.getDiscovery();
-
-          const [strategy] = discovery.strategies as OidcStrategyDto[];
-
-          expect(strategy.signUpDisabled).toBe(false);
-        });
-
-        it('stays listed with signUpDisabled: true when registration is closed, for existing accounts', async () => {
-          const service = await createService({ ...OIDC_CONFIG }, REGISTRATION_CLOSED);
-          const discovery = await service.getDiscovery();
-
-          const [strategy] = discovery.strategies as OidcStrategyDto[];
-
-          expect(strategy.type).toBe(AuthStrategyType.Oidc);
-          expect(strategy.signUpDisabled).toBe(true);
-        });
-
-        it('sets discoveryUrl from config', async () => {
-          const service = await createService({ ...OIDC_CONFIG });
-          const discovery = await service.getDiscovery();
-
-          const [strategy] = discovery.strategies as OidcStrategyDto[];
-
-          expect(strategy.discoveryUrl).toBe(OIDC_CONFIG.oidcWellKnownUrl);
-        });
-
-        it('sets authorizationEndpoint to the absolute BetterAuth oauth2 sign-in URL', async () => {
-          const service = await createService({ ...OIDC_CONFIG });
-          const discovery = await service.getDiscovery();
-
-          const [strategy] = discovery.strategies as OidcStrategyDto[];
-
-          expect(strategy.authorizationEndpoint).toBe(`${AUTH_BASE}/sign-in/oauth2`);
-        });
-
-        it('does not expose clientId or clientSecret in the serialized response', async () => {
-          const service = await createService({ ...OIDC_CONFIG });
-          const discovery = await service.getDiscovery();
-          const serialized = JSON.stringify(discovery);
-
-          expect(serialized).not.toContain('test-client-id');
-          expect(serialized).not.toContain('test-client-secret');
-        });
-
-        it.each([
-          [
-            'oidcWellKnownUrl missing',
-            {
-              oidcClientId: OIDC_CONFIG.oidcClientId,
-              oidcClientSecret: OIDC_CONFIG.oidcClientSecret,
-              oidcWellKnownUrl: '',
-            },
-          ],
-          [
-            'oidcClientId missing',
-            {
-              oidcWellKnownUrl: OIDC_CONFIG.oidcWellKnownUrl,
-              oidcClientSecret: OIDC_CONFIG.oidcClientSecret,
-              oidcClientId: '',
-            },
-          ],
-          [
-            'oidcClientSecret missing',
-            {
-              oidcWellKnownUrl: OIDC_CONFIG.oidcWellKnownUrl,
-              oidcClientId: OIDC_CONFIG.oidcClientId,
-              oidcClientSecret: '',
-            },
-          ],
-        ])('omits OIDC strategy when %s', async (_label, partialConfig) => {
-          const service = await createService(partialConfig);
-          const discovery = await service.getDiscovery();
-
-          expect(discovery.strategies).toHaveLength(0);
-        });
-      });
-
-      describe('both strategies configured', () => {
-        it('returns both strategies in order (email first, OIDC second)', async () => {
-          const service = await createService({ useEmailPasswordAuth: true, ...OIDC_CONFIG });
+        it('marks every sign-in provider sign-up disabled while registration is closed (#585, #912)', async () => {
+          const service = await createService({ oidcProviders: [GOOGLE, AUTHENTIK] }, REGISTRATION_CLOSED);
           const { strategies } = await service.getDiscovery();
 
           expect(strategies).toHaveLength(2);
-          expect(strategies[0].type).toBe(AuthStrategyType.EmailAndPassword);
-          expect(strategies[1].type).toBe(AuthStrategyType.Oidc);
+          expect((strategies as OidcStrategyDto[]).map((s) => s.signUpDisabled)).toEqual([true, true]);
         });
       });
     });

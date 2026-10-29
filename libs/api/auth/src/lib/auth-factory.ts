@@ -28,16 +28,25 @@ import process from 'node:process';
 import { ADMIN_PLUGIN_OPTIONS } from './access/admin-roles';
 import type { AuthStorage } from './auth-storage';
 import { betterAuthLogger } from './better-auth-logger';
+import { type OidcProviderConfig, readOidcProviders, unlistedOidcVariables } from './configuration/oidc-providers';
 import { AUTH_BASE_PATH, AUTH_CLIENT_IP_HEADER, AUTH_COOKIE_PREFIX } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
+import { mapOidcProfile, OIDC_SCOPES } from './oidc-profile';
+import { createProviderEmailGate } from './provider-email-gate';
 import { providerPictureOnly } from './provider-picture';
 import { createSettingGates, settingGateDeps } from './setting-gates';
 import { createSignOutHook } from './sign-out-hook';
+import { createUsernameVariants } from './username-variant';
 
 interface UserCreatedHookDeps {
   eventEmitter?: EventEmitter2;
   auditContext?: AuditContextService;
   systemActorScope?: SystemActorScope;
+  /**
+   * The username a sign-in asked for when it was replaced by a variant (#912),
+   * read with the endpoint context `user.create.before` saw.
+   */
+  requestedUsername?: (context: object | null) => string | null;
 }
 
 /**
@@ -57,10 +66,12 @@ interface UserCreatedHookDeps {
  *
  * Exported for unit tests; `authFactory` wires it into `databaseHooks`.
  */
-export function createUserCreatedHook(deps: UserCreatedHookDeps): (user: User) => Promise<void> {
-  const { eventEmitter, auditContext, systemActorScope } = deps;
+export function createUserCreatedHook(
+  deps: UserCreatedHookDeps,
+): (user: User, context?: object | null) => Promise<void> {
+  const { eventEmitter, auditContext, systemActorScope, requestedUsername } = deps;
 
-  return async (user: User): Promise<void> => {
+  return async (user: User, context?: object | null): Promise<void> => {
     if (!eventEmitter) {
       throw new Error('EventEmitter2 not provided to authFactory');
     }
@@ -82,6 +93,7 @@ export function createUserCreatedHook(deps: UserCreatedHookDeps): (user: User) =
         isAnonymous: record.isAnonymous ?? false,
       },
       initiatedAt,
+      requestedUsername?.(context ?? null) ?? null,
     );
 
     const emit = (): void => {
@@ -124,12 +136,16 @@ export function authFactory(
 
   logger.log(`Trusted origins set to: ${trustedOrigins.join(', ')}`);
 
-  // Only build the OIDC config when it is actually configured. `buildOIDC`
-  // calls `getOrThrow` on the ConfigService path, so calling it
-  // unconditionally would crash startup for deployments without OIDC.
-  const oidcConfig = hasOIDC(configService) ? buildOIDC(configService) : null;
-  if (oidcConfig) {
-    logger.log(`Enabling OIDC provider: ${oidcConfig.providerId}`);
+  const providers = oidcProvidersFor(configService);
+  for (const provider of providers) {
+    logger.log(`Enabling sign-in provider: ${provider.id}`);
+  }
+
+  // A variable for an id OIDC_PROVIDERS does not list is most often a typo in
+  // the id, which would leave that provider silently off (#912).
+  const providerIds = providers.map((provider) => provider.id);
+  for (const key of unlistedOidcVariables(process.env, providerIds)) {
+    logger.warn(`${key} names a sign-in provider that OIDC_PROVIDERS does not list`);
   }
 
   if (options.useEmailPass) {
@@ -139,6 +155,8 @@ export function authFactory(
   const gateDeps = settingGateDeps(prisma, i18n);
   const settingGates = createSettingGates(gateDeps);
   const signOutHook = createSignOutHook({ render: gateDeps.render });
+  const usernameVariants = createUsernameVariants(prisma);
+  const providerEmailGate = createProviderEmailGate(providers, gateDeps.render);
 
   const usingSwagger = configService?.get<boolean>('swagger.enabled');
   if (usingSwagger) {
@@ -169,17 +187,7 @@ export function authFactory(
     passkey(),
     twoFactor(),
 
-    ...(oidcConfig
-      ? [
-          genericOAuth({
-            config: [
-              {
-                ...oidcConfig,
-              },
-            ],
-          }),
-        ]
-      : []),
+    ...(providers.length > 0 ? [genericOAuth({ config: providers.map(toGenericOAuthConfig) })] : []),
 
     ...(usingSwagger ? [openAPI()] : []),
 
@@ -220,6 +228,14 @@ export function authFactory(
         },
       },
     },
+    account: {
+      // A provider never attaches itself to an existing user (#912): that
+      // would let a provider's email claim take over a registered user. A link
+      // is made from a signed-in session instead, and may use a different
+      // email because people often hold different addresses at the provider
+      // and on this server.
+      accountLinking: { disableImplicitLinking: true, allowDifferentEmails: true },
+    },
     hooks: {
       before: createAuthMiddleware(async (context) => {
         await settingGates.beforeRoute(context);
@@ -240,13 +256,26 @@ export function authFactory(
     databaseHooks: {
       user: {
         create: {
-          // The registration gate first: a refused sign-up writes nothing,
-          // so there is no picture to keep or drop.
+          // The gates first: a refused sign-up writes nothing, so there is
+          // no username to vary and no picture to keep or drop. Registration
+          // before the provider's email, since a closed server is the answer
+          // whatever the email.
           before: async (user, context) => {
             await settingGates.beforeUserCreate(user, context);
-            return providerPictureOnly(user, context);
+            providerEmailGate(user, context);
+
+            const variant = await usernameVariants.beforeUserCreate(user, context);
+            const picture = providerPictureOnly(user, context);
+
+            // better-auth merges `data` into the row; the two touch different fields.
+            return variant || picture ? { data: { ...variant?.data, ...picture?.data } } : undefined;
           },
-          after: createUserCreatedHook({ eventEmitter, auditContext, systemActorScope }),
+          after: createUserCreatedHook({
+            eventEmitter,
+            auditContext,
+            systemActorScope,
+            requestedUsername: usernameVariants.requestedUsername,
+          }),
         },
         update: {
           before: settingGates.beforeUserUpdate,
@@ -287,36 +316,26 @@ function buildOptions(configService?: ConfigService) {
   return { hostUrl: envUrl, secret: envSecret, trusted: envOrigins, useEmailPass: envEmailPass, disableOriginCheck };
 }
 
-function hasOIDC(configService?: ConfigService) {
+/**
+ * The sign-in providers to enable (#912). Without a `ConfigService`, as when
+ * the better-auth command-line tool builds the instance, the same parser reads
+ * the environment.
+ */
+function oidcProvidersFor(configService?: ConfigService): readonly OidcProviderConfig[] {
   if (configService instanceof ConfigService) {
-    const wellKnownUrl = configService.get<string>('auth.oidcWellKnownUrl');
-    const clientId = configService.get<string>('auth.oidcClientId');
-    const clientSecret = configService.get<string>('auth.oidcClientSecret');
-    return Boolean(wellKnownUrl && clientId && clientSecret);
+    return configService.get<readonly OidcProviderConfig[]>('auth.oidcProviders') ?? [];
   }
 
-  const wellKnownUrl = process.env.OIDC_WELL_KNOWN_URL;
-  const clientId = process.env.OIDC_CLIENT_ID;
-  const clientSecret = process.env.OIDC_CLIENT_SECRET;
-  return Boolean(wellKnownUrl && clientId && clientSecret);
+  return readOidcProviders();
 }
 
-function buildOIDC(configService?: ConfigService) {
-  const defaultProviderId = 'default-oidc-provider';
-
-  if (configService instanceof ConfigService) {
-    const discoveryUrl = configService.getOrThrow<string>('auth.oidcWellKnownUrl');
-    const clientId = configService.getOrThrow<string>('auth.oidcClientId');
-    const clientSecret = configService.getOrThrow<string>('auth.oidcClientSecret');
-    const providerId = configService.get<string>('auth.oidcProviderId') || defaultProviderId;
-
-    return { discoveryUrl, clientId, clientSecret, providerId };
-  }
-
-  const discoveryUrl = process.env.OIDC_WELL_KNOWN_URL;
-  const clientId = process.env.OIDC_CLIENT_ID || '';
-  const clientSecret = process.env.OIDC_CLIENT_SECRET;
-  const providerId = process.env.OIDC_PROVIDER_ID || defaultProviderId;
-
-  return { discoveryUrl, clientId, clientSecret, providerId };
+function toGenericOAuthConfig(provider: OidcProviderConfig) {
+  return {
+    providerId: provider.id,
+    discoveryUrl: provider.discoveryUrl,
+    clientId: provider.clientId,
+    clientSecret: provider.clientSecret,
+    scopes: [...OIDC_SCOPES],
+    mapProfileToUser: mapOidcProfile,
+  };
 }

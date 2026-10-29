@@ -242,6 +242,18 @@ export interface GameShareAwaitingApprovalPayload extends HouseholdRefPayload {
 }
 
 /**
+ * A first sign-in through a sign-in provider asked for a username that was
+ * taken, so the user got the first free variant (#912). Sent to the new
+ * user alone. `usernameChangeAllowed` is the server setting as it stood when
+ * the notification was sent, so a client can offer the change or say it is off.
+ */
+export interface UsernameVariantAssignedPayload {
+  username: string;
+  requestedUsername: string;
+  usernameChangeAllowed: boolean;
+}
+
+/**
  * The single source of truth mapping every `NotificationType` to its payload
  * shape. Keyed by the enum value, so `NotificationPayloadMap[T]` resolves a
  * type's payload and the discriminated `UnreadNotificationDto` / typed
@@ -265,6 +277,7 @@ export type NotificationPayloadMap = {
   [NotificationType.HouseholdOwnershipTransferred]: HouseholdOwnershipTransferredPayload;
   [NotificationType.GameShareReceived]: GameShareReceivedPayload;
   [NotificationType.GameShareAwaitingApproval]: GameShareAwaitingApprovalPayload;
+  [NotificationType.UsernameVariantAssigned]: UsernameVariantAssignedPayload;
   [NotificationType.EventInviteReceived]: EventRefPayload;
   [NotificationType.EventCreated]: EventRefPayload;
   [NotificationType.EventCancelled]: EventCancelledPayload;

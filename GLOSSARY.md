@@ -126,6 +126,10 @@ _Avoid_: system user, service principal; system actor (the service account owns,
 One way a registered user can sign in, such as a password or a linked external provider.
 _Avoid_: account
 
+**Sign-in provider**:
+An identity server the operator configures, such as Authentik, Keycloak or Google, that registered users can sign in through. A first sign-in through one creates a registered user, if the provider confirms the email address or the operator allows this one not to; a registered user can also link one and then sign in through it. The operator gives each one a label (`OIDC_<ID>_DISPLAY_NAME`) that clients show; it is not a user's display name.
+_Avoid_: identity provider, IdP, SSO
+
 **Session**:
 A signed-in period of use by a registered or anonymous user.
 _Avoid_: session for a play or a search

@@ -15,6 +15,11 @@ export interface ProviderPictureContext {
   readonly path?: string;
 }
 
+/** Whether the endpoint creating a user is one a sign-in provider vouches for (#695, #912). */
+export function isProviderSignInPath(context: ProviderPictureContext | null): boolean {
+  return context?.path !== undefined && PROVIDER_SIGN_IN_PATHS.has(context.path);
+}
+
 /**
  * `databaseHooks.user.create.before`: a new user's `image` is their sign-in
  * provider's picture or nothing (#695).
@@ -34,7 +39,5 @@ export function providerPictureOnly(
     return undefined;
   }
 
-  return context?.path !== undefined && PROVIDER_SIGN_IN_PATHS.has(context.path)
-    ? undefined
-    : { data: { image: null } };
+  return isProviderSignInPath(context) ? undefined : { data: { image: null } };
 }
