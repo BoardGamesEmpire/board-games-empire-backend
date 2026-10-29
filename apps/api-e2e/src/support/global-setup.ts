@@ -17,6 +17,8 @@ import {
   decideProvisioning,
   E2E_BASE_URL_VAR,
   E2E_DATABASE_CONTAINER_ADDRESS_VAR,
+  E2E_FAKE_PROVIDER_URL_VAR,
+  fakeProviderEnv,
   parseRedisUrl,
   POSTGRES_IMAGE,
   REDIS_IMAGE,
@@ -24,6 +26,7 @@ import {
   redisOwnershipOverride,
   type RedisEndpoint,
 } from './e2e-env';
+import { startFakeSignInProvider, type FakeSignInProvider } from './fake-sign-in-provider';
 import { setE2EGlobalState } from './global-state';
 import { sweepThrottleBuckets } from './redis-reset';
 
@@ -131,7 +134,10 @@ async function launchApi(env: NodeJS.ProcessEnv): Promise<LaunchedApi> {
  *     is itself under test.
  *  4. `prisma db seed` — the real reference seeds via the `prisma.config.ts`
  *     seed hook (`libs/database/src/seed-cli.ts` → `runSeeds`).
- *  5. The built API bundle as a child process, gated on `/health/ready`;
+ *  5. A fake sign-in provider in this process, listed to the API as its only
+ *     sign-in provider (#912); its URL is published via
+ *     `BGE_E2E_FAKE_PROVIDER_URL`.
+ *  6. The built API bundle as a child process, gated on `/health/ready`;
  *     its base URL is published via `BGE_E2E_BASE_URL`.
  *
  * Handles are stashed on `globalThis` for `global-teardown`. If the process
@@ -147,6 +153,7 @@ export default async function globalSetup(): Promise<void> {
   let postgres: StartedPostgreSqlContainer | undefined;
   let redis: StartedRedisContainer | undefined;
   let api: ChildProcess | undefined;
+  let signInProvider: FakeSignInProvider | undefined;
 
   try {
     let databaseUrl: string;
@@ -210,6 +217,11 @@ export default async function globalSetup(): Promise<void> {
     runPrisma(['migrate', 'deploy'], databaseUrl);
     runPrisma(['db', 'seed'], databaseUrl);
 
+    // Before the API, which reads its sign-in providers once, at boot.
+    signInProvider = await startFakeSignInProvider();
+    Object.assign(process.env, fakeProviderEnv(signInProvider.url));
+    process.env[E2E_FAKE_PROVIDER_URL_VAR] = signInProvider.url;
+
     const launched = await launchApi(process.env);
     api = launched.child;
     process.env[E2E_BASE_URL_VAR] = launched.baseUrl;
@@ -218,12 +230,12 @@ export default async function globalSetup(): Promise<void> {
     // no-op after a clean teardown, since the child has exited by then.
     killOnExit(api);
 
-    setE2EGlobalState({ postgres, redis, api });
+    setE2EGlobalState({ postgres, redis, api, signInProvider });
     console.log(`[e2e] harness ready — API at ${launched.baseUrl}`);
   } catch (error) {
     // Teardown never runs when setup throws — stop whatever already started.
     api?.kill('SIGKILL');
-    await Promise.allSettled([postgres?.stop(), redis?.stop()]);
+    await Promise.allSettled([signInProvider?.close(), postgres?.stop(), redis?.stop()]);
     throw error;
   }
 }

@@ -4,23 +4,24 @@ import { getE2EGlobalState } from './global-state';
 
 /**
  * Stops whatever `global-setup` started — the API child process first (it
- * holds connections into both containers), then the containers. Container
- * stops are always attempted; failures are aggregated and rethrown so a
- * leaked container is a loud suite failure rather than a silent stray.
+ * holds connections into both containers and the fake sign-in provider),
+ * then the fake and the containers together. Every one of those stops is
+ * attempted, even when another fails; failures are aggregated and rethrown
+ * so a leaked container is a loud suite failure rather than a silent stray.
  * (A crashed run that never reaches teardown is covered by testcontainers'
  * reaper.)
  */
 export default async function globalTeardown(): Promise<void> {
-  const { postgres, redis, api } = getE2EGlobalState();
+  const { postgres, redis, api, signInProvider } = getE2EGlobalState();
 
   await stopChild(api);
 
-  const results = await Promise.allSettled([postgres?.stop(), redis?.stop()]);
+  const results = await Promise.allSettled([signInProvider?.close(), postgres?.stop(), redis?.stop()]);
 
   const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
   if (failures.length > 0) {
     throw new Error(
-      `e2e teardown failed to stop ${failures.length} container(s): ${failures.map((f) => String(f.reason)).join('; ')}`,
+      `e2e teardown failed to stop ${failures.length} of the fake sign-in provider and the containers: ${failures.map((f) => String(f.reason)).join('; ')}`,
     );
   }
 

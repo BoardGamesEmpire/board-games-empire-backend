@@ -186,6 +186,32 @@ export function workerEnvOverrides(): Record<string, string> {
 }
 
 /**
+ * Where the fake sign-in provider `global-setup` starts is listening, so a
+ * spec can read back what the API asked it for (#912).
+ */
+export const E2E_FAKE_PROVIDER_URL_VAR = 'BGE_E2E_FAKE_PROVIDER_URL';
+
+/** The id the API knows the fake sign-in provider by: its callback is `/api/auth/oauth2/callback/fake`. */
+export const FAKE_PROVIDER_ID = 'fake';
+
+/**
+ * The sign-in provider variables the API child boots with: the fake alone
+ * (#912). The API reads its providers once, at boot, so the fake is listed for
+ * every spec, and discovery shows it to all of them. `OIDC_PROVIDERS` is
+ * pinned like everything in {@link apiEnvOverrides}: a developer's `.env` may
+ * list real providers, which a spec must never reach.
+ */
+export function fakeProviderEnv(providerUrl: string): Record<string, string> {
+  return {
+    OIDC_PROVIDERS: FAKE_PROVIDER_ID,
+    OIDC_FAKE_DISCOVERY_URL: `${providerUrl}/.well-known/openid-configuration`,
+    OIDC_FAKE_CLIENT_ID: 'e2e-client',
+    OIDC_FAKE_CLIENT_SECRET: 'e2e-secret',
+    OIDC_FAKE_DISPLAY_NAME: 'Fake provider',
+  };
+}
+
+/**
  * The three logical Redis connections the API configures via
  * `makeRedisConfig` (see `apps/api/src/app/configuration`). The harness
  * points all three at the same ephemeral server; the per-connection

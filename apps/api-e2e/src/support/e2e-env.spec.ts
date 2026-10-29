@@ -10,6 +10,7 @@ import {
   E2E_DATABASE_URL_VAR,
   E2E_OWNS_REDIS_VAR,
   E2E_REDIS_URL_VAR,
+  fakeProviderEnv,
   parseRedisUrl,
   REDIS_ENV_DATABASES,
   REDIS_ENV_PREFIXES,
@@ -242,6 +243,20 @@ describe('e2e-env (pure logic)', () => {
       for (const value of Object.values(workerEnvOverrides())) {
         expect(typeof value).toBe('string');
       }
+    });
+  });
+
+  describe('fakeProviderEnv', () => {
+    const providerUrl = 'http://127.0.0.1:41235';
+
+    it('lists the fake as the only sign-in provider, with its four variables (#912)', () => {
+      expect(fakeProviderEnv(providerUrl)).toEqual({
+        OIDC_PROVIDERS: 'fake',
+        OIDC_FAKE_DISCOVERY_URL: 'http://127.0.0.1:41235/.well-known/openid-configuration',
+        OIDC_FAKE_CLIENT_ID: 'e2e-client',
+        OIDC_FAKE_CLIENT_SECRET: 'e2e-secret',
+        OIDC_FAKE_DISPLAY_NAME: 'Fake provider',
+      });
     });
   });
 
