@@ -15,12 +15,13 @@ import type { EventWithStatus } from './utils/event-status.util';
 describe('EventController', () => {
   let controller: EventController;
   let service: jest.Mocked<
-    Pick<EventService, 'getEvents' | 'getEventById' | 'createEvent' | 'updateEvent' | 'deleteEvent'>
+    Pick<EventService, 'getEvents' | 'browseEvents' | 'getEventById' | 'createEvent' | 'updateEvent' | 'deleteEvent'>
   >;
 
   beforeEach(async () => {
     service = {
       getEvents: jest.fn(),
+      browseEvents: jest.fn(),
       getEventById: jest.fn(),
       createEvent: jest.fn(),
       updateEvent: jest.fn(),
@@ -84,6 +85,35 @@ describe('EventController', () => {
 
       const envelope = ClsServiceManager.getClsService().runWith({}, () =>
         firstValueFrom(controller.getEvents(paginationQuery({ limit: 10 }))),
+      );
+
+      await expect(envelope).rejects.toThrow(ListScopeNotComposedError);
+      await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.Event}'`);
+    });
+  });
+
+  describe('browseEvents (#962)', () => {
+    it('delegates to EventService.browseEvents and wraps the rows in the paginated envelope', async () => {
+      const events = [stubEvent(), stubEvent()];
+      service.browseEvents.mockResolvedValue({ rows: events, total: 2 });
+
+      const pagination = paginationQuery({ limit: 10 });
+      const result = await firstValueFrom(controller.browseEvents(pagination));
+
+      expect(service.browseEvents).toHaveBeenCalledWith(pagination);
+      expect(result).toEqual({
+        events,
+        pagination: { page: 1, limit: 10, total: 2, totalPages: 1, hasMore: false },
+      });
+    });
+
+    // The service composes the `Event` scope, so the envelope must name
+    // `Event` too, or the guard can't tell the read was composed.
+    it('builds its envelope under the Event scope guard', async () => {
+      service.browseEvents.mockResolvedValue({ rows: [], total: 0 });
+
+      const envelope = ClsServiceManager.getClsService().runWith({}, () =>
+        firstValueFrom(controller.browseEvents(paginationQuery({ limit: 10 }))),
       );
 
       await expect(envelope).rejects.toThrow(ListScopeNotComposedError);

@@ -1,7 +1,7 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { ApiPaginatedEnvelope, paginated } from '@bge/shared';
+import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated } from '@bge/shared';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -50,6 +50,39 @@ export class EventController {
   @Get()
   getEvents(@Query() query: ListEventsQueryDto) {
     return from(this.eventService.getEvents(query)).pipe(
+      map((page) => paginated('events', page, query, ResourceType.Event)),
+    );
+  }
+
+  // Declared above `:id`, which would otherwise read `browse` as an event id.
+  @ApiOperation({
+    summary: "List upcoming events the acting user can read but doesn't attend",
+    description:
+      'Events the acting user could join (#962): public events, a friend’s events that reach friends, a ' +
+      'friend of a friend’s events that reach friends of friends, and the events of the acting user’s ' +
+      'households. A public event is left out when either the acting user or its host has blocked the other; ' +
+      'it stays readable by id. An event the acting user has any attendee row on is left out, whether they ' +
+      'host it, were invited, declined or were removed. Only upcoming events are listed: not cancelled, ' +
+      'archived or deleted, with a confirmed date that hasn’t ended, so each `status` is Scheduled or ' +
+      'Ongoing. A date with no end ends when it starts. Events with no date yet are left out. Soonest first: ' +
+      'by the start of each event’s earliest date that hasn’t ended, then by id. Each row is a ' +
+      '`GET /events` row. The Owner, Admins and Moderators get the same kind of list as everyone else, not ' +
+      'every event on the server. An **API key** is also limited by its own permissions (effective access ' +
+      'is key ∩ owner). Nobody can join an event from this list yet; that is #812. Paginated: `?page=` ' +
+      '(1-based) and `?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`.',
+  })
+  @ApiPaginatedEnvelope('events')
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description:
+      'Insufficient permissions, or an actor kind with no user of its own (plugin, system, external) ' +
+      '— provisional: see #395',
+  })
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Event))
+  @Get('browse')
+  browseEvents(@Query() query: DefaultPaginationQueryDto) {
+    return from(this.eventService.browseEvents(query)).pipe(
       map((page) => paginated('events', page, query, ResourceType.Event)),
     );
   }

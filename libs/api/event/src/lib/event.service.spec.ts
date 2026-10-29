@@ -13,6 +13,7 @@ import {
 import { uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
+import { DefaultPaginationQueryDto } from '@bge/shared';
 import {
   batchTransactionCall,
   createMockAbilityService,
@@ -29,12 +30,14 @@ import { WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { plainToInstance } from 'class-transformer';
+import { browseEventScope } from './browse-event-scope';
 import { EVENT_CREATE_INCLUDE } from './constants/event-create-include.constant';
 import type { CreateEventDto } from './dto/create-event.dto';
 import { ListEventsQueryDto } from './dto/list-events.query.dto';
 import { EventService } from './event.service';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
 import { EVENT_STATUS_DATE_SELECT } from './utils/event-status.util';
+import { upcomingDateWhere, upcomingEventWhere } from './utils/upcoming-events.util';
 
 const COND = { id: 'sentinel-condition' };
 
@@ -228,6 +231,69 @@ describe('EventService', () => {
       expect(rejection).toBeInstanceOf(ForbiddenException);
       expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.access'));
       expect(db.event.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * #962. The upcoming events the acting user can read and has no attendee row
+   * on. The list declares its own set, the browse scope, so elevated users are
+   * listed the same kind of set as everyone, and the ceiling only limits it
+   * (#512, #365).
+   * The paging itself is `pageUpcomingEvents`', pinned in its own spec.
+   */
+  describe('browseEvents (#962)', () => {
+    const NOW = new Date('2026-11-01T12:00:00Z');
+    let groupBy: jest.Mock;
+
+    const browse = (init: Record<string, unknown> = {}) =>
+      service.browseEvents(
+        plainToInstance(DefaultPaginationQueryDto, { limit: 20, ...init }, { enableImplicitConversion: true }),
+      );
+
+    beforeEach(() => {
+      jest.useFakeTimers({ now: NOW, doNotFake: ['nextTick', 'setImmediate'] });
+      unwrapTransaction(db);
+      groupBy = db.eventOccurrence.groupBy as unknown as jest.Mock;
+      groupBy.mockResolvedValue([]);
+      db.event.count.mockResolvedValue(0);
+    });
+
+    afterEach(() => jest.useRealTimers());
+
+    it('asks the composer for its where clause, declaring the browse scope', async () => {
+      await browse();
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.Event, Action.read, browseEventScope(MOCK_ACTING_USER_ID));
+    });
+
+    // Asking is not enough: the page has to use the answer. The ceiling stays
+    // ANDed in, because for an `apiKey` actor it carries the key ∩ owner floor.
+    it('pages through the composed clause, the ceiling limiting it rather than supplying it', async () => {
+      await browse({ page: 2 });
+
+      const composed = { ...browseEventScope(MOCK_ACTING_USER_ID), AND: [COND] };
+      const upcoming = { AND: [upcomingEventWhere(NOW), composed] };
+      const standing = { AND: [{ deletedAt: null, cancelledAt: null, archivedAt: null }, composed] };
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Event, Action.read);
+      expect(groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { ...upcomingDateWhere(NOW), event: { is: standing } }, skip: 20, take: 20 }),
+      );
+      expect(db.event.count).toHaveBeenCalledWith({ where: upcoming });
+    });
+
+    // PROVISIONAL (#395), as on `GET /events`: "the events I could join" has
+    // no meaning for an actor with no user behind it, and an empty page would
+    // tell a client there are none.
+    it('refuses an actor kind with no user behind it rather than answering an empty page', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
+
+      const rejection: unknown = await browse().catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(ForbiddenException);
+      expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.access'));
+      expect(groupBy).not.toHaveBeenCalled();
     });
   });
 

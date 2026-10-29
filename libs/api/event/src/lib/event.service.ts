@@ -16,13 +16,14 @@ import {
 import { lockExistingHousehold } from '@bge/household';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
-import { type PaginatedRows } from '@bge/shared';
+import { type DefaultPaginationQueryDto, type PaginatedRows } from '@bge/shared';
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
 import { isDeepStrictEqual } from 'node:util';
 import { assertInvitable } from './attendee/invitable';
+import { browseEventScope } from './browse-event-scope';
 import { ATTENDEE_ORDER } from './constants/attendee-order.constant';
 import { ATTENDEE_USER_AND_ROLE_INCLUDE } from './constants/attendee-user-and-role.constant';
 import {
@@ -38,6 +39,7 @@ import type { UpdateEventDto } from './dto/update-event.dto';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
 import { EVENT_STATUS_DATE_SELECT, withEventStatus, type EventWithStatus } from './utils/event-status.util';
 import { pickSnapshot } from './utils/pick-snapshot.util';
+import { pageUpcomingEvents } from './utils/upcoming-events.util';
 
 @Injectable()
 export class EventService {
@@ -125,6 +127,33 @@ export class EventService {
     );
 
     return { rows: rows.map((row) => withEventStatus(row, row.occurrences, now)), total };
+  }
+
+  /**
+   * One page of the upcoming events the acting user can read and has no
+   * attendee row on, soonest first, plus the total for the envelope (#962).
+   *
+   * The set is the endpoint's own, `browseEventScope`: the Public events, a
+   * friend's, a friend of a friend's and the acting user's households'. It is
+   * the same set for every role. The ceiling is ANDed in as the limit, never the
+   * answer: taken as the answer, it would list elevated users every event on
+   * the server, the widening #512 removed from `GET /events` (#365). For an
+   * `apiKey` actor the ceiling carries the key ∩ owner floor, so a key lists
+   * only what its own permissions read.
+   *
+   * `pageUpcomingEvents` adds "upcoming" to the composed clause, for the page
+   * and the count alike, then orders and pages the events soonest first. Its
+   * rows are `GET /events` rows, each reading Scheduled or Ongoing.
+   *
+   * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
+   * "the events I could join" has no meaning without a user, and the refusal
+   * must never soften into an empty page. PROVISIONAL — #395.
+   */
+  async browseEvents(query: DefaultPaginationQueryDto): Promise<PaginatedRows<EventWithStatus>> {
+    const userId = resolveScopeSubjectId(this.abilityService);
+    const where = this.scopeComposer.compose(ResourceType.Event, Action.read, browseEventScope(userId));
+
+    return pageUpcomingEvents(this.db, where, { skip: query.skip, take: query.pageSize }, new Date());
   }
 
   /**
