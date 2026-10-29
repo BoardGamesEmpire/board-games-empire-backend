@@ -229,8 +229,8 @@ export function authFactory(
       },
     },
     account: {
-      // A provider never attaches to an existing account on its own (#912):
-      // that would let a provider's email claim take over an account. A link
+      // A provider never attaches itself to an existing user (#912): that
+      // would let a provider's email claim take over a registered user. A link
       // is made from a signed-in session instead, and may use a different
       // email because people often hold different addresses at the provider
       // and on this server.
