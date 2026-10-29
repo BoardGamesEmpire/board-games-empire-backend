@@ -1,18 +1,11 @@
-import {
-  PluginCategory,
-  PluginScope,
-  PluginUnitDormantReason,
-  ResourceType,
-  RiskLevel,
-  type Plugin,
-} from '@bge/database';
+import { PluginScope, PluginUnitDormantReason, ResourceType, type Plugin } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
-import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { mintApiKey, type Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { arrangeInventoryPlugin } from './inventory-fixtures';
 
 /**
  * The wire half of #354 — the only plugin reads that answer before a slug is
@@ -40,59 +33,11 @@ describe('installed-plugin inventory (#354)', () => {
     await db.close();
   });
 
-  /**
-   * A distinct slug per plugin, because these reads ENUMERATE: a suite-wide
-   * fixture slug would let one test's rows appear in another's page. Tests
-   * therefore assert against their own slug rather than on page contents.
-   */
-  const arrangePlugin = async (rowOverrides: Record<string, unknown> = {}): Promise<Plugin> => {
-    const slug = `inv-${randomUUID().slice(0, 8)}`;
-    const manifest = buildPluginManifest({
-      slug,
-      bgeCompat: '>=0.0.0',
-      displayName: { en: 'Inventory Fixture', de: 'Bestandsvorrichtung' },
-      description: { en: 'Fixture for the inventory reads.' },
-      events: { emits: [`plugin.${slug}.digest-sent`], subscribes: ['feedback.created'] },
-      jobs: { queues: [`plugin:${slug}:digest`] },
-      storage: { ownTables: [`plugin_${slug.replace(/-/g, '_')}_digests`] },
-      permissions: {
-        declares: ['manage:digest'],
-        checks: [
-          {
-            slug: 'manage:digest',
-            required: true,
-            reason: { en: 'Stores and manages the digest configuration it owns.' },
-            consentScope: 'server',
-            feature: 'weekly-digest',
-          },
-        ],
-      },
-    });
-
-    const plugin = await db.client.plugin.create({
-      data: {
-        slug,
-        version: manifest.version,
-        category: PluginCategory.FeedbackSink,
-        scope: manifest.scope === 'server' ? PluginScope.Server : PluginScope.Household,
-        manifestJson: manifest as never,
-        enabled: true,
-        bundled: false,
-        installedSha256: 'a'.repeat(64),
-        installedFromUrl: 'https://registry.test/fixture.tgz',
-        ...rowOverrides,
-      },
-    });
-    await db.client.pluginPermission.create({
-      data: { pluginId: plugin.id, slug: `plugin|${slug}|manage:digest`, riskLevel: RiskLevel.Low },
-    });
-
-    return plugin;
-  };
+  const arrangePlugin = (row: Record<string, unknown> = {}): Promise<Plugin> =>
+    arrangeInventoryPlugin(db.client, { row });
 
   const listServer = (actor: Caller, query = '') => request(baseUrl).get(`/api/plugins${query}`).set(actor.headers);
-  const readOne = (actor: SessionActor, slug: string) =>
-    request(baseUrl).get(`/api/plugins/${slug}`).set(actor.headers);
+  const readOne = (actor: Caller, slug: string) => request(baseUrl).get(`/api/plugins/${slug}`).set(actor.headers);
   const listHousehold = (actor: Caller, householdId: string, query = '') =>
     request(baseUrl).get(`/api/households/${householdId}/plugins${query}`).set(actor.headers);
   const listUser = (actor: SessionActor, query = '') =>
@@ -104,6 +49,14 @@ describe('installed-plugin inventory (#354)', () => {
 
   const slugsOf = (body: { plugins: Array<Record<string, unknown>> }) =>
     body.plugins.map((entry) => entry['slug'] as string).sort();
+
+  const SERVER_READS: readonly { readonly name: string; readonly path: (slug: string) => string }[] = [
+    { name: 'GET /plugins', path: () => '/api/plugins' },
+    { name: 'GET /plugins/:slug', path: (slug) => `/api/plugins/${slug}` },
+    { name: 'GET /plugins/:slug/consent', path: (slug) => `/api/plugins/${slug}/consent` },
+    { name: 'GET /plugins/:slug/update/pending', path: (slug) => `/api/plugins/${slug}/update/pending` },
+    { name: 'GET /plugins/:slug/features', path: (slug) => `/api/plugins/${slug}/features` },
+  ];
 
   describe('GET /plugins — the server surface', () => {
     it('requires read:plugin, and is 401 unauthenticated', async () => {
@@ -231,14 +184,6 @@ describe('installed-plugin inventory (#354)', () => {
   // type check would pass on it. The server reads serve what that grant's
   // field list leaves out, so they gate on one of those columns instead.
   describe('the server reads refuse the grant every user holds', () => {
-    const SERVER_READS: readonly { readonly name: string; readonly path: (slug: string) => string }[] = [
-      { name: 'GET /plugins', path: () => '/api/plugins' },
-      { name: 'GET /plugins/:slug', path: (slug) => `/api/plugins/${slug}` },
-      { name: 'GET /plugins/:slug/consent', path: (slug) => `/api/plugins/${slug}/consent` },
-      { name: 'GET /plugins/:slug/update/pending', path: (slug) => `/api/plugins/${slug}/update/pending` },
-      { name: 'GET /plugins/:slug/features', path: (slug) => `/api/plugins/${slug}/features` },
-    ];
-
     const statuses = async (actor: Caller, slug: string): Promise<Record<string, number>> => {
       const answered: Record<string, number> = {};
 
@@ -295,6 +240,97 @@ describe('installed-plugin inventory (#354)', () => {
       await expect(statuses(await keyFor('read:plugin:installed'), plugin.slug)).resolves.toEqual(
         Object.fromEntries(SERVER_READS.map((route) => [route.name, 403])),
       );
+    });
+  });
+
+  /**
+   * The read gate is type-level, so a key whose `read:plugin` is pinned to one
+   * plugin passes it on every slug, and the services read by slug alone. Each
+   * route now resolves its slug under the actor's ceiling first, and answers
+   * a plugin outside the key's scope exactly as it answers a slug never
+   * installed: same status, same code. That holds whatever state the other
+   * plugin is in, since the check runs before the service draws its 410 or
+   * 409.
+   */
+  describe('a key scoped to one plugin (#789)', () => {
+    const SINGLE_READS = SERVER_READS.filter((route) => route.name !== 'GET /plugins');
+
+    const answers = async (actor: Caller, slug: string): Promise<Record<string, [number, unknown]>> => {
+      const answered: Record<string, [number, unknown]> = {};
+
+      for (const route of SINGLE_READS) {
+        const response = await request(baseUrl).get(route.path(slug)).set(actor.headers);
+        answered[route.name] = [response.status, response.body.code];
+      }
+
+      return answered;
+    };
+
+    const statusesOf = (answered: Record<string, [number, unknown]>) =>
+      Object.values(answered).map(([status]) => status);
+
+    /** `read:plugin`, pinned to `scoped` when it is given. */
+    const readKey = (owner: SessionActor, scoped?: Plugin) =>
+      mintApiKey(baseUrl, db.client, owner, {
+        slugs: ['read:plugin'],
+        resourceType: ResourceType.Plugin,
+        resourceId: scoped?.id,
+      });
+
+    it('answers 404 on the four single reads for any other plugin, whatever its state', async () => {
+      const admin = await actors.admin();
+      const [scoped, live, gone, staged] = await Promise.all([
+        arrangePlugin(),
+        arrangePlugin(),
+        arrangePlugin({ uninstalledAt: new Date() }),
+        arrangeInventoryPlugin(db.client, { stagedVersion: '9.9.9' }),
+      ]);
+      const key = await readKey(admin, scoped);
+      const missing = `missing-${randomUUID()}`;
+
+      // What each route answers a slug never installed: its own code, the one
+      // its service draws for an unknown slug.
+      const unknown = await answers(admin, missing);
+      expect(unknown).toEqual({
+        'GET /plugins/:slug': [404, 'PluginInventoryNotFoundError'],
+        'GET /plugins/:slug/consent': [404, 'PluginConsentPresentationNotFoundError'],
+        'GET /plugins/:slug/update/pending': [404, 'PluginUpdatePluginNotFoundError'],
+        'GET /plugins/:slug/features': [404, 'PluginFeatureStateNotFoundError'],
+      });
+
+      // The controls: the key reads its own plugin, and an unpinned key from
+      // the same owner reads the others in their states, so the 404s below
+      // are the pin's.
+      expect(statusesOf(await answers(key, scoped.slug))).toEqual([200, 200, 409, 200]);
+      const unpinned = await readKey(admin);
+      expect(statusesOf(await answers(unpinned, live.slug))).toEqual([200, 200, 409, 200]);
+      await readOne(unpinned, gone.slug).expect(410);
+      await request(baseUrl).get(`/api/plugins/${staged.slug}/update/pending`).set(unpinned.headers).expect(200);
+
+      const others = { missing, live: live.slug, gone: gone.slug, staged: staged.slug };
+      const answered: Record<string, unknown> = {};
+      for (const [state, slug] of Object.entries(others)) {
+        answered[state] = await answers(key, slug);
+      }
+
+      expect(answered).toEqual(Object.fromEntries(Object.keys(others).map((state) => [state, unknown])));
+    });
+
+    // The pinned grant passes the gate, and the identity-column grant beside
+    // it reads every row. The ceiling comes from the rules that read the
+    // gate's column, as the list's does, so the second adds nothing.
+    it('keeps a key to its scoped plugin when it also holds the identity-column grant', async () => {
+      const admin = await actors.admin();
+      const [scoped, live] = await Promise.all([arrangePlugin(), arrangePlugin()]);
+      const key = await mintApiKey(baseUrl, db.client, admin, [
+        { slugs: ['read:plugin'], resourceType: ResourceType.Plugin, resourceId: scoped.id },
+        { slugs: ['read:plugin:installed'], resourceType: ResourceType.Plugin },
+      ]);
+
+      // The control: the key reads its own plugin.
+      await readOne(key, scoped.slug).expect(200);
+
+      expect(statusesOf(await answers(key, live.slug))).toEqual([404, 404, 404, 404]);
     });
   });
 
@@ -485,6 +521,26 @@ describe('installed-plugin inventory (#354)', () => {
         await db.client.household.update({ where: { id: household.id }, data: { deletedAt: new Date() } });
 
         await listHousehold(key, household.id).expect(403);
+      });
+
+      // The single reads have no write to re-check liveness in either, so they
+      // check it as the list does, and answer the same 403.
+      it('refuses the consent and feature-state reads once the household is deleted (#790)', async () => {
+        const admin = await actors.admin();
+        const { household } = await actors.householdWithMembers({ owner: await actors.user() });
+        const plugin = await arrangePlugin({ scope: PluginScope.Household });
+        const key = await keyOf(admin);
+        const reads = (path: string) =>
+          request(baseUrl).get(`/api/households/${household.id}/plugins/${plugin.slug}/${path}`).set(key.headers);
+
+        // The control: the household is live, so the key reads both.
+        await reads('consent').expect(200);
+        await reads('features').expect(200);
+
+        await db.client.household.update({ where: { id: household.id }, data: { deletedAt: new Date() } });
+
+        await reads('consent').expect(403);
+        await reads('features').expect(403);
       });
 
       // The rows are plugins. A key with no rule on them is refused, not served

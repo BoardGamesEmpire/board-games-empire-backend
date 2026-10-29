@@ -21,7 +21,15 @@ import type {
   PluginUpdateService,
   UpdateEscalationComparison,
 } from '@bge/plugin';
-import { PluginUpdateNoPendingError } from '@bge/plugin';
+import {
+  PluginConsentPresentationNotFoundError,
+  PluginFeatureStateNotFoundError,
+  PluginGrantPluginNotFoundError,
+  PluginInventoryNotFoundError,
+  PluginLifecycleNotFoundError,
+  PluginUpdateNoPendingError,
+  PluginUpdatePluginNotFoundError,
+} from '@bge/plugin';
 import { ListScopeNotComposedError } from '@bge/shared';
 import {
   createMockAbilityService,
@@ -32,7 +40,7 @@ import {
 import { RequestMethod } from '@nestjs/common';
 import { ClsServiceManager } from 'nestjs-cls';
 import 'reflect-metadata';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, type Observable } from 'rxjs';
 import { PluginsController, SERVER_PLUGIN_LIST_SCOPE } from './plugins.controller';
 import { SERVER_PLUGIN_COLUMN } from './policies/read-server-plugins.policy';
 
@@ -100,7 +108,7 @@ describe('PluginsController (delegation)', () => {
   >;
   let grants: jest.Mocked<Pick<PluginGrantService, 'decide'>>;
   let featureState: jest.Mocked<Pick<PluginFeatureStateService, 'resolveForUnitBySlug'>>;
-  let inventory: jest.Mocked<Pick<PluginInventoryService, 'listForServer' | 'getBySlug'>>;
+  let inventory: jest.Mocked<Pick<PluginInventoryService, 'listForServer' | 'getBySlug' | 'existsUnderCeiling'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale'>>;
   let abilityService: MockAbilityService;
   let scopeComposer: ScopeComposer;
@@ -137,6 +145,9 @@ describe('PluginsController (delegation)', () => {
     inventory = {
       listForServer: jest.fn().mockResolvedValue(INVENTORY_PAGE as never),
       getBySlug: jest.fn().mockResolvedValue(DETAIL),
+      // Every slug here lies under the actor's ceiling unless a test says
+      // otherwise.
+      existsUnderCeiling: jest.fn().mockResolvedValue(true),
     };
     auditContext = { getLocale: jest.fn().mockReturnValue(null) };
     abilityService = createMockAbilityService();
@@ -466,6 +477,166 @@ describe('PluginsController (delegation)', () => {
 
       expect(inventory.getBySlug).toHaveBeenCalledWith('demo-sink', 'de');
       expect(result).toEqual({ plugin: DETAIL });
+    });
+  });
+
+  // The read gate passes a key's rule whatever plugin its scope names, and the
+  // services read by slug alone. So each route resolves its slug under the
+  // actor's ceiling first, composed as the server list composes it, and
+  // answers a slug outside it with the route's own not-found error: a key
+  // cannot tell a plugin outside its scope from one never installed.
+  describe("the single reads resolve their slug under the actor's ceiling (#789)", () => {
+    const reads = [
+      {
+        route: 'getBySlug',
+        call: (): Observable<unknown> => controller.getBySlug('demo-sink'),
+        service: () => inventory.getBySlug,
+        notFound: PluginInventoryNotFoundError,
+        slugField: 'pluginSlug',
+      },
+      {
+        route: 'consentPresentation',
+        call: (): Observable<unknown> => controller.consentPresentation('demo-sink'),
+        service: () => presentation.presentForUnitBySlug,
+        notFound: PluginConsentPresentationNotFoundError,
+        slugField: 'pluginSlug',
+      },
+      {
+        route: 'pendingUpdate',
+        call: (): Observable<unknown> => controller.pendingUpdate('demo-sink'),
+        service: () => updates.describePending,
+        notFound: PluginUpdatePluginNotFoundError,
+        slugField: 'slug',
+      },
+      {
+        route: 'featureStates',
+        call: (): Observable<unknown> => controller.featureStates('demo-sink'),
+        service: () => featureState.resolveForUnitBySlug,
+        notFound: PluginFeatureStateNotFoundError,
+        slugField: 'pluginSlug',
+      },
+    ];
+
+    it.each(reads)(
+      'answers $route outside the ceiling with its own not-found error, before its service',
+      async ({ call, service, notFound, slugField }) => {
+        inventory.existsUnderCeiling.mockResolvedValue(false);
+
+        const refused = firstValueFrom(call());
+
+        await expect(refused).rejects.toBeInstanceOf(notFound);
+        await expect(refused).rejects.toMatchObject({ [slugField]: 'demo-sink' });
+        expect(service()).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(reads)(
+      "composes $route's ceiling as the server list does, with the slug as its scope",
+      async ({ call }) => {
+        const compose = jest.spyOn(scopeComposer, 'compose');
+        abilityService.getCurrentResourceConditions.mockReturnValue([{ id: 'p-1' }]);
+
+        await firstValueFrom(call());
+        const [slug, ceiling] = inventory.existsUnderCeiling.mock.calls[0] ?? [];
+
+        expect(slug).toBe('demo-sink');
+        expect(ceiling?.({ slug: 'demo-sink' })).toEqual({ slug: 'demo-sink', AND: [{ id: 'p-1' }] });
+        expect(compose).toHaveBeenCalledWith(
+          ResourceType.Plugin,
+          Action.read,
+          { slug: 'demo-sink' },
+          SERVER_PLUGIN_COLUMN,
+        );
+      },
+    );
+  });
+
+  // The write gate is type-level too, and the service seam checks only that
+  // the acting user is a server admin: it never sees the key. So an Admin's
+  // key pinned to one plugin wrote every other until each write resolved its
+  // slug under the `manage` ceiling first, as the reads do under `read`.
+  describe("the writes resolve their slug under the actor's manage ceiling (#978)", () => {
+    const writes = [
+      {
+        route: 'decideGrant',
+        call: (): Observable<unknown> =>
+          controller.decideGrant('demo-sink', {
+            permissionSlug: 'plugin|demo-sink|manage:digest',
+            status: PluginGrantStatus.Granted,
+          }),
+        service: () => grants.decide,
+        notFound: PluginGrantPluginNotFoundError,
+        slugField: 'pluginSlug',
+      },
+      {
+        route: 'enable',
+        call: (): Observable<unknown> => controller.enable('demo-sink'),
+        service: () => lifecycle.enable,
+        notFound: PluginLifecycleNotFoundError,
+        slugField: 'slug',
+      },
+      {
+        route: 'disable',
+        call: (): Observable<unknown> => controller.disable('demo-sink'),
+        service: () => lifecycle.disable,
+        notFound: PluginLifecycleNotFoundError,
+        slugField: 'slug',
+      },
+      {
+        route: 'updateConfig',
+        call: (): Observable<unknown> => controller.updateConfig('demo-sink', { config: {} }),
+        service: () => lifecycle.updateConfig,
+        notFound: PluginLifecycleNotFoundError,
+        slugField: 'slug',
+      },
+      {
+        route: 'uninstall',
+        call: (): Observable<unknown> => controller.uninstall('demo-sink', {}),
+        service: () => lifecycle.uninstall,
+        notFound: PluginLifecycleNotFoundError,
+        slugField: 'slug',
+      },
+      {
+        route: 'approveUpdate',
+        call: (): Observable<unknown> => controller.approveUpdate('demo-sink', {}),
+        service: () => updates.approve,
+        notFound: PluginUpdatePluginNotFoundError,
+        slugField: 'slug',
+      },
+      {
+        route: 'rejectUpdate',
+        call: (): Observable<unknown> => controller.rejectUpdate('demo-sink'),
+        service: () => updates.reject,
+        notFound: PluginUpdatePluginNotFoundError,
+        slugField: 'slug',
+      },
+    ];
+
+    it.each(writes)(
+      'answers $route outside the ceiling with its own not-found error, before its service',
+      async ({ call, service, notFound, slugField }) => {
+        inventory.existsUnderCeiling.mockResolvedValue(false);
+
+        const refused = firstValueFrom(call());
+
+        await expect(refused).rejects.toBeInstanceOf(notFound);
+        await expect(refused).rejects.toMatchObject({ [slugField]: 'demo-sink' });
+        expect(service()).not.toHaveBeenCalled();
+      },
+    );
+
+    // A write serves no column, so its ceiling is built from every `manage`
+    // rule, with no column to narrow it by.
+    it.each(writes)("composes $route's ceiling under manage, with the slug as its scope", async ({ call }) => {
+      const compose = jest.spyOn(scopeComposer, 'compose');
+      abilityService.getCurrentResourceConditions.mockReturnValue([{ id: 'p-1' }]);
+
+      await firstValueFrom(call());
+      const [slug, ceiling] = inventory.existsUnderCeiling.mock.calls[0] ?? [];
+
+      expect(slug).toBe('demo-sink');
+      expect(ceiling?.({ slug: 'demo-sink' })).toEqual({ slug: 'demo-sink', AND: [{ id: 'p-1' }] });
+      expect(compose).toHaveBeenCalledWith(ResourceType.Plugin, Action.manage, { slug: 'demo-sink' }, undefined);
     });
   });
 

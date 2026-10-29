@@ -3,12 +3,18 @@ import { Action, PluginGrantScope, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, CheckPolicies, PoliciesGuard, ScopeComposer, Unscoped } from '@bge/permissions';
 import {
+  PluginConsentPresentationNotFoundError,
   PluginConsentPresentationService,
+  PluginFeatureStateNotFoundError,
   PluginFeatureStateService,
+  PluginGrantPluginNotFoundError,
   PluginGrantService,
+  PluginInventoryNotFoundError,
   PluginInventoryService,
+  PluginLifecycleNotFoundError,
   PluginLifecycleService,
   PluginUpdateNoPendingError,
+  PluginUpdatePluginNotFoundError,
   PluginUpdateService,
 } from '@bge/plugin';
 import { paginated, PaginatedResponseDto } from '@bge/shared';
@@ -56,11 +62,18 @@ export const SERVER_PLUGIN_LIST_SCOPE = Unscoped(
  * `purgeData` belongs in a body, which DELETE should not carry.
  *
  * The coarse `manage:plugin` CASL gate lives here; the service seam
- * re-verifies server-admin authority and owns every domain rule. The reads
- * gate on {@link canReadServerPlugins} rather than a bare type check, which
- * every user's identity-column grant would pass. Actor
+ * re-verifies the acting user's server-admin authority and owns every domain
+ * rule. The seam never sees an API key, so a key's scope is checked here. The
+ * reads gate on {@link canReadServerPlugins} rather than a bare type check,
+ * which every user's identity-column grant would pass. Actor
  * identity is resolved from CLS at this edge and passed into the runtime
  * input — never read from a request body.
+ *
+ * A type-level gate passes a key's rule whatever plugin it names, and the
+ * services read by slug alone. So each route addressed by slug first resolves
+ * its slug under the actor's ceiling, `read` for the reads and `manage` for
+ * the writes, and answers a slug outside it as not installed (#789, #978): a
+ * key scoped to one plugin reads and writes that plugin and no other.
  */
 @ApiBearerAuth()
 @ApiSecurity('api_key')
@@ -129,7 +142,7 @@ export class PluginsController {
     status: Http.Forbidden,
     description: 'Insufficient permissions, or a categorically ungrantable permission',
   })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @ApiResponse({
     status: Http.Conflict,
@@ -144,13 +157,15 @@ export class PluginsController {
   @Post(':slug/grants')
   decideGrant(@Param('slug') slug: string, @Body() dto: DecidePluginGrantDto) {
     return from(
-      this.grants.decide({
-        slug,
-        scopeType: PluginGrantScope.Server,
-        permissionSlug: dto.permissionSlug,
-        status: dto.status,
-        deciderId: this.abilityService.getActingUserId(),
-      }),
+      this.assertUnderCeiling(slug, Action.manage, PluginGrantPluginNotFoundError).then(() =>
+        this.grants.decide({
+          slug,
+          scopeType: PluginGrantScope.Server,
+          permissionSlug: dto.permissionSlug,
+          status: dto.status,
+          deciderId: this.abilityService.getActingUserId(),
+        }),
+      ),
     ).pipe(
       map(({ grant, changed }) => ({
         message: t('success.plugin.grant_decided', { slug, permissionSlug: dto.permissionSlug }),
@@ -169,7 +184,7 @@ export class PluginsController {
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies(canReadServerPlugins)
   // Must stay out of the response cache: it exists to be read right before a
@@ -177,36 +192,42 @@ export class PluginsController {
   @Get(':slug/consent')
   consentPresentation(@Param('slug') slug: string) {
     return from(
-      this.presentation.presentForUnitBySlug(slug, SERVER_PLUGIN_UNIT, this.auditContext.getLocale() ?? undefined),
+      this.assertUnderCeiling(slug, Action.read, PluginConsentPresentationNotFoundError).then(() =>
+        this.presentation.presentForUnitBySlug(slug, SERVER_PLUGIN_UNIT, this.auditContext.getLocale() ?? undefined),
+      ),
     ).pipe(map((presentation) => ({ presentation })));
   }
 
   @ApiOperation({ summary: 'Enable a plugin (server-level switch)' })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
   @HttpCode(Http.Ok)
   @Post(':slug/enable')
   enable(@Param('slug') slug: string) {
-    return from(this.lifecycle.enable({ slug, actorId: this.abilityService.getActingUserId() })).pipe(
-      map((plugin) => ({ message: t('success.plugin.enabled', { slug }), plugin })),
-    );
+    return from(
+      this.assertUnderCeiling(slug, Action.manage, PluginLifecycleNotFoundError).then(() =>
+        this.lifecycle.enable({ slug, actorId: this.abilityService.getActingUserId() }),
+      ),
+    ).pipe(map((plugin) => ({ message: t('success.plugin.enabled', { slug }), plugin })));
   }
 
   @ApiOperation({ summary: 'Disable a plugin (server-level switch)' })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
   @HttpCode(Http.Ok)
   @Post(':slug/disable')
   disable(@Param('slug') slug: string) {
-    return from(this.lifecycle.disable({ slug, actorId: this.abilityService.getActingUserId() })).pipe(
-      map((plugin) => ({ message: t('success.plugin.disabled', { slug }), plugin })),
-    );
+    return from(
+      this.assertUnderCeiling(slug, Action.manage, PluginLifecycleNotFoundError).then(() =>
+        this.lifecycle.disable({ slug, actorId: this.abilityService.getActingUserId() }),
+      ),
+    ).pipe(map((plugin) => ({ message: t('success.plugin.disabled', { slug }), plugin })));
   }
 
   @ApiOperation({
@@ -217,14 +238,16 @@ export class PluginsController {
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @ApiResponse({ status: Http.UnprocessableEntity, description: 'Configuration violates the declared schema' })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
   @Patch(':slug/config')
   updateConfig(@Param('slug') slug: string, @Body() dto: UpdatePluginConfigDto) {
     return from(
-      this.lifecycle.updateConfig({ slug, actorId: this.abilityService.getActingUserId(), config: dto.config }),
+      this.assertUnderCeiling(slug, Action.manage, PluginLifecycleNotFoundError).then(() =>
+        this.lifecycle.updateConfig({ slug, actorId: this.abilityService.getActingUserId(), config: dto.config }),
+      ),
     ).pipe(map((plugin) => ({ message: t('success.plugin.config_updated', { slug }), plugin })));
   }
 
@@ -237,7 +260,7 @@ export class PluginsController {
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was already uninstalled' })
   @ApiResponse({ status: Http.Conflict, description: 'Bundled plugins cannot be uninstalled' })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
@@ -245,7 +268,9 @@ export class PluginsController {
   @Post(':slug/uninstall')
   uninstall(@Param('slug') slug: string, @Body() dto: UninstallPluginDto) {
     return from(
-      this.lifecycle.uninstall({ slug, actorId: this.abilityService.getActingUserId(), purgeData: dto.purgeData }),
+      this.assertUnderCeiling(slug, Action.manage, PluginLifecycleNotFoundError).then(() =>
+        this.lifecycle.uninstall({ slug, actorId: this.abilityService.getActingUserId(), purgeData: dto.purgeData }),
+      ),
     ).pipe(
       map(({ plugin, affectedUnits }) => ({
         message: t('success.plugin.uninstalled', { slug }),
@@ -268,7 +293,7 @@ export class PluginsController {
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
   @ApiResponse({
     status: Http.Gone,
     description:
@@ -290,11 +315,13 @@ export class PluginsController {
   @Post(':slug/update/approve')
   approveUpdate(@Param('slug') slug: string, @Body() dto: ApprovePluginUpdateDto) {
     return from(
-      this.updates.approve({
-        slug,
-        approverId: this.abilityService.getActingUserId(),
-        confirmCriticalSlugs: dto.confirmCriticalSlugs,
-      }),
+      this.assertUnderCeiling(slug, Action.manage, PluginUpdatePluginNotFoundError).then(() =>
+        this.updates.approve({
+          slug,
+          approverId: this.abilityService.getActingUserId(),
+          confirmCriticalSlugs: dto.confirmCriticalSlugs,
+        }),
+      ),
     ).pipe(
       map((result) => ({
         message: t('success.plugin.update_approved', { slug, version: result.plugin.version }),
@@ -319,16 +346,18 @@ export class PluginsController {
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @ApiResponse({ status: Http.Conflict, description: 'No pending update to reject' })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
   @HttpCode(Http.Ok)
   @Post(':slug/update/reject')
   rejectUpdate(@Param('slug') slug: string) {
-    return from(this.updates.reject({ slug, rejectorId: this.abilityService.getActingUserId() })).pipe(
-      map((plugin) => ({ message: t('success.plugin.update_rejected', { slug }), plugin })),
-    );
+    return from(
+      this.assertUnderCeiling(slug, Action.manage, PluginUpdatePluginNotFoundError).then(() =>
+        this.updates.reject({ slug, rejectorId: this.abilityService.getActingUserId() }),
+      ),
+    ).pipe(map((plugin) => ({ message: t('success.plugin.update_rejected', { slug }), plugin })));
   }
 
   @ApiOperation({
@@ -342,7 +371,7 @@ export class PluginsController {
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @ApiResponse({ status: Http.Conflict, description: 'No pending update is staged' })
   @ApiResponse({
@@ -371,20 +400,24 @@ export class PluginsController {
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies(canReadServerPlugins)
   // Must stay out of the response cache: consent decisions must be visible on
   // the next read (#60).
   @Get(':slug/features')
   featureStates(@Param('slug') slug: string) {
-    // No scope refusal to make here, unlike the household axis: the
-    // household-viewpoint-on-server-scope rule is
-    // `scope === Server && unit.scopeType === 'Household'`, so a Server unit
-    // passes it at any plugin scope. The 404/410 pair and the guards that
-    // bracket the derivation both come from the slug entry point.
+    // The slug is resolved under the actor's ceiling first, as on every slug
+    // route (#789). Past that there is no plugin-scope refusal to make here,
+    // unlike the household axis: the household-viewpoint-on-server-scope rule
+    // is `scope === Server && unit.scopeType === 'Household'`, so a Server
+    // unit passes it at any plugin scope. For a slug under the ceiling, the
+    // 404/410 pair and the guards that bracket the derivation come from the
+    // slug entry point.
     return from(
-      this.featureState.resolveForUnitBySlug(slug, SERVER_PLUGIN_UNIT, this.auditContext.getLocale() ?? undefined),
+      this.assertUnderCeiling(slug, Action.read, PluginFeatureStateNotFoundError).then(() =>
+        this.featureState.resolveForUnitBySlug(slug, SERVER_PLUGIN_UNIT, this.auditContext.getLocale() ?? undefined),
+      ),
     ).pipe(map((featureState) => ({ featureState })));
   }
 
@@ -409,14 +442,54 @@ export class PluginsController {
   @ApiResponse({ status: Http.Ok, type: PluginInventoryDetailResponseDto })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies(canReadServerPlugins)
   @Get(':slug')
   getBySlug(@Param('slug') slug: string) {
-    return from(this.inventory.getBySlug(slug, this.auditContext.getLocale() ?? undefined)).pipe(
-      map((plugin) => ({ plugin })),
+    return from(
+      this.assertUnderCeiling(slug, Action.read, PluginInventoryNotFoundError).then(() =>
+        this.inventory.getBySlug(slug, this.auditContext.getLocale() ?? undefined),
+      ),
+    ).pipe(map((plugin) => ({ plugin })));
+  }
+
+  /**
+   * Resolves the route's slug under the actor's ceiling, before the route's
+   * service runs (#789, #978).
+   *
+   * The gates here are type-level, so a key whose scope names one plugin
+   * passes them on every slug, and the services read by slug alone. This
+   * reads the slug under the actor's ceiling, with the slug as its scope, and
+   * refuses a slug outside it with the route's own not-found error: the same
+   * 404 and code as a slug never installed, so a key cannot tell which
+   * plugins exist beyond its scope. It runs first, so a staged update or an
+   * uninstalled plugin outside the scope answers 404, never the 409 or 410
+   * its service would draw, and a write's seam is never reached.
+   *
+   * A read composes the ceiling the server list does, from the rules that
+   * read the column its gate asks about. A write serves no column, so every
+   * `manage` rule counts. Admin's rules carry no conditions, so the ceiling
+   * admits every row, uninstalled plugins included, and the services draw
+   * their own answers as before.
+   */
+  private async assertUnderCeiling(
+    slug: string,
+    action: typeof Action.read | typeof Action.manage,
+    notFound: new (slug: string) => Error,
+  ): Promise<void> {
+    const underCeiling = await this.inventory.existsUnderCeiling(slug, (scope) =>
+      this.scopeComposer.compose(
+        ResourceType.Plugin,
+        action,
+        scope,
+        action === Action.read ? SERVER_PLUGIN_COLUMN : undefined,
+      ),
     );
+
+    if (!underCeiling) {
+      throw new notFound(slug);
+    }
   }
 
   /**
@@ -438,6 +511,8 @@ export class PluginsController {
    * not worth a body re-derived on the next action.
    */
   private async loadPendingPresentation(slug: string): Promise<Record<string, unknown>> {
+    await this.assertUnderCeiling(slug, Action.read, PluginUpdatePluginNotFoundError);
+
     const description = await this.updates.describePending(slug);
     // Presented FROM the row describePending loaded, never re-read: a
     // re-read opens a window in which the staged update resolves and is
