@@ -100,6 +100,30 @@ describe('bindsConsentUnit (#591)', () => {
       PluginGrantScope.Household,
       false,
     ],
+    // The factory renders the whole serialized object, so a section opened in
+    // one field and closed in another removes the equality between them.
+    [
+      'wraps the id equality in a section spanning other values',
+      {
+        name: { contains: '{{^unit.householdId}}' },
+        id: '{{ unit.householdId }}',
+        description: { contains: '{{/unit.householdId}}' },
+      },
+      PluginGrantScope.Household,
+      false,
+    ],
+    [
+      'wraps the id equality in a section spanning keys',
+      { '{{^unit.userId}}a': 1, ownerId: '{{ unit.userId }}', 'b{{/unit.userId}}': 2 },
+      PluginGrantScope.User,
+      false,
+    ],
+    [
+      'carries a section in another field beside the id equality',
+      { householdId: '{{ unit.householdId }}', name: '{{#plugin.slug}}x{{/plugin.slug}}' },
+      PluginGrantScope.Household,
+      false,
+    ],
     [
       'embeds the id in surrounding text',
       { householdId: 'prefix-{{ unit.householdId }}' },

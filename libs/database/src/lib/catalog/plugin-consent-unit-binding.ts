@@ -72,8 +72,10 @@ export const CONSENT_UNIT_BINDING_REFUSAL =
  *   `update:household:restore` (`{ deletedAt: { not: null } }`), one
  *   household's consent would let the plugin restore every deleted household.
  * - The id named anywhere else: under `OR` beside a fixed branch, under `NOT`,
- *   `not`, `isNot`, `every` or `none`, behind a range or text operator, or in
- *   a section. The variable is there, but rows outside the unit still match.
+ *   `not`, `isNot`, `every` or `none`, or behind a range or text operator. The
+ *   variable is there, but rows outside the unit still match.
+ * - A section anywhere in the conditions, even one that leaves the id alone:
+ *   a section can span fields or keys, and rendering it can drop the equality.
  * - Another unit's id, a variable the context does not supply, or a template
  *   that does not parse: the rule would bind to the wrong unit, or the
  *   factory would refuse the plugin's whole ability.
@@ -101,9 +103,21 @@ export function bindsConsentUnit(
 
   return (
     variables.every((variable) => context.has(variable)) &&
+    !hasSection(permission.conditions) &&
     restrictsToUnit(permission.conditions, UNIT_ID_VARIABLE[scope])
   );
 }
+
+/**
+ * Whether the serialized conditions hold a section anywhere. The factory
+ * renders the whole serialized object, so a section opened in one field and
+ * closed in another can remove the id equality between them after the
+ * structural read below accepted it. Any nested section sits inside a
+ * top-level one, so the top level is enough. Called only on a template
+ * `parseTemplate` already parsed.
+ */
+const hasSection = (conditions: unknown): boolean =>
+  Mustache.parse(JSON.stringify(conditions)).some(([type]) => type === '#' || type === '^');
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
