@@ -20,8 +20,19 @@ export class OidcStrategyDto {
    * The provider identifier passed to BetterAuth's oauth2 sign-in endpoint.
    * Clients construct: GET <authorizationEndpoint>?callbackURL=<yourCallback>
    */
-  @ApiProperty({ description: 'Provider ID used to identify this OIDC provider', example: 'my-company-sso' })
+  @ApiProperty({ description: 'Provider ID used to identify this sign-in provider', example: 'authentik' })
   providerId!: string;
+
+  /**
+   * The operator's label for this sign-in provider, shown on the sign-in
+   * button. A proper noun, so it is not localized. Never carries the client
+   * id or secret.
+   */
+  @ApiProperty({
+    description: "The provider's name as the operator labels it. A proper noun, not localized.",
+    example: 'Authentik',
+  })
+  displayName!: string;
 
   /**
    * The OIDC well-known discovery URL. Public endpoint — safe to expose.

@@ -8,6 +8,17 @@ import { AuthStrategyDto, BgeDiscoveryDto } from './dto/bge-discovery.dto';
 import { EmailAndPasswordStrategyDto } from './dto/email-and-password-strategy.dto';
 import { OidcStrategyDto } from './dto/oidc-strategy.dto';
 
+/**
+ * What discovery lists of a sign-in provider (#912): a slice of the auth lib's
+ * provider config, declared here so this lib imports nothing from that one.
+ * The client id and secret are not part of it, so they are never in reach.
+ */
+interface ListedSignInProvider {
+  readonly id: string;
+  readonly displayName: string;
+  readonly discoveryUrl: string;
+}
+
 @Injectable()
 export class StrategyService {
   constructor(
@@ -68,8 +79,12 @@ export class StrategyService {
       strategies.push(this.buildEmailAndPasswordStrategy(registrationOpen));
     }
 
-    if (this.isOidcConfigured()) {
-      strategies.push(this.buildOidcStrategy(registrationOpen));
+    // One per sign-in provider, in the operator's list order (#912). The config
+    // refuses a partial provider at startup, so none is half-listed here.
+    const providers = this.configService.get<readonly ListedSignInProvider[]>('auth.oidcProviders') ?? [];
+
+    for (const provider of providers) {
+      strategies.push(this.buildOidcStrategy(provider, registrationOpen));
     }
 
     return strategies;
@@ -89,22 +104,17 @@ export class StrategyService {
     return dto;
   }
 
-  private buildOidcStrategy(registrationOpen: boolean): OidcStrategyDto {
+  private buildOidcStrategy(provider: ListedSignInProvider, registrationOpen: boolean): OidcStrategyDto {
     const dto = new OidcStrategyDto();
     // Listed either way, since existing accounts sign in through it; only a
     // first sign-in, which creates the account, is refused (#585).
     dto.signUpDisabled = !registrationOpen;
-    dto.providerId = this.configService.get<string>('auth.oidcProviderId') || 'default-oidc-provider';
-    // discoveryUrl points at an external IdP, so it stays an absolute URL.
-    dto.discoveryUrl = this.configService.getOrThrow<string>('auth.oidcWellKnownUrl');
+    dto.providerId = provider.id;
+    // The operator's label: a proper noun, so it is never localized (#912).
+    dto.displayName = provider.displayName;
+    // discoveryUrl points at the sign-in provider, so it stays an absolute URL.
+    dto.discoveryUrl = provider.discoveryUrl;
     dto.authorizationEndpoint = authPath('/sign-in/oauth2');
     return dto;
-  }
-
-  private isOidcConfigured(): boolean {
-    const wellKnownUrl = this.configService.get<string>('auth.oidcWellKnownUrl');
-    const clientId = this.configService.get<string>('auth.oidcClientId');
-    const clientSecret = this.configService.get<string>('auth.oidcClientSecret');
-    return Boolean(wellKnownUrl && clientId && clientSecret);
   }
 }
