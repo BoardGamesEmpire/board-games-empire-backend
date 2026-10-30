@@ -207,7 +207,8 @@ export class DataGatewayService extends GatewayServiceHost {
    * each through its own `bggService.call` and so its own retry boundary. A
    * batch that still fails or runs out of time logs a warning and sends its
    * results as search found them, leaving the other batches' alone; so does a
-   * result whose thing BGG's answer leaves out. An empty page asks BGG nothing.
+   * result whose thing BGG's answer leaves out or that can't be read. An empty
+   * page asks BGG nothing.
    */
   private withThings(items: BggSearchItem[], queryForLogging: string): Observable<proto.GameSearchData> {
     const batches = chunk(
@@ -242,9 +243,27 @@ export class DataGatewayService extends GatewayServiceHost {
       toArray(),
       mergeMap((answers) => {
         const thingsById = new Map(answers.flat().map((thing) => [thing.id, thing]));
-        return items.map((item) => searchItemToGameSearchData(item, thingsById.get(item.id)));
+        return items.map((item) => this.fillIn(item, thingsById.get(item.id), queryForLogging));
       }),
     );
+  }
+
+  /**
+   * A result filled in from its thing, or as search found it when the thing
+   * can't be read: the client passes some shapes it doesn't expect on as they
+   * are, and one game's details shouldn't fail a search that succeeded (#880).
+   */
+  private fillIn(item: BggSearchItem, thing: BggThing | undefined, queryForLogging: string): proto.GameSearchData {
+    try {
+      return searchItemToGameSearchData(item, thing);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `searchGames sent results without details for query '${queryForLogging}': couldn't read ${item.id}: ${message}`,
+      );
+
+      return searchItemToGameSearchData(item);
+    }
   }
 
   fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {

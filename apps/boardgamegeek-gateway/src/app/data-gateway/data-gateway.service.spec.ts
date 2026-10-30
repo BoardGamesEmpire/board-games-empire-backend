@@ -345,6 +345,23 @@ describe('DataGatewayService', () => {
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('BGG left out 174430'));
       });
 
+      // The client passes a <link> with no attributes on as a string, which the mapper can't read.
+      it("sends a result as search found it, with a warning, when its thing can't be read, and keeps the others' details", async () => {
+        const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+        const unreadable = { ...GLOOMHAVEN_THING, links: 'oops' } as unknown as BggThing;
+        answer([CATAN_SEARCH, GLOOMHAVEN_SEARCH], [CATAN_THING, unreadable]);
+
+        const frames = await searched({ correlationId: 'c', query: 'catan' });
+        const [catan, gloomhaven] = games(frames);
+
+        expect(catan?.thumbnailUrl).toBe('https://cf.geekdo.com/catan-thumb.jpg');
+        expect(gloomhaven).toMatchObject({ externalId: '174430', title: 'Gloomhaven', yearPublished: 2017 });
+        expect(gloomhaven?.thumbnailUrl).toBeUndefined();
+        expect(frames.at(-1)?.status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('174430'));
+      });
+
       it("sends a stalled batch's results as search found them after 10 seconds, and ends with SOURCE_DONE", async () => {
         jest.useFakeTimers();
         const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
