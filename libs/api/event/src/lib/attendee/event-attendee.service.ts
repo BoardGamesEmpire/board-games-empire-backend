@@ -12,6 +12,7 @@ import {
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
+import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import {
   BadRequestException,
   ConflictException,
@@ -58,19 +59,47 @@ export class EventAttendeeService {
   ) {}
 
   /**
-   * Every attendee of the event the caller may read. The scope is the path's
-   * event, composed with the caller's ceiling (#512), without the attendees a
-   * host removed (#551). Unpaginated, so no envelope guard checks it; paging
-   * it is #373.
+   * One page of the event's attendees the caller may read, plus the total for
+   * the response envelope. The scope is the path's event, composed with the
+   * caller's ceiling (#512), without the attendees a host removed (#551); the
+   * count runs through the same where, so a removed attendee leaves the total
+   * too.
+   *
+   * This read returned every attendee of the event until #373 paged it; the
+   * response is a truncating change, which pre-alpha allows without a shim.
+   *
+   * The order is {@link ATTENDEE_ORDER}. Its `id` tie-breaker holds attendees
+   * added in one write in place between requests; it cannot stop a removal or a
+   * re-add from shifting the rows after it. Pages are offsets into a live list,
+   * so a client paging through one meanwhile can miss or repeat an attendee.
+   *
+   * The existence probe runs ahead of the read and outside its transaction, as
+   * in `getOccurrences`. A soft delete keeps the attendee rows, so an event
+   * deleted between the two answers 200 with its attendees rather than 404, as
+   * a read just ahead of the delete would. The rows and count share one
+   * snapshot.
    */
-  async getAttendees(eventId: string): Promise<EventAttendee[]> {
+  async getAttendees(eventId: string, pagination: PaginationQueryDto): Promise<PaginatedRows<EventAttendee>> {
     await assertEventExists(this.db, eventId);
 
-    return this.db.eventAttendee.findMany({
-      where: this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { eventId, ...NOT_REMOVED }),
-      include: ATTENDEE_INCLUDE,
-      orderBy: ATTENDEE_ORDER,
-    });
+    const where = this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { eventId, ...NOT_REMOVED });
+
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.eventAttendee.findMany({
+          where,
+          include: ATTENDEE_INCLUDE,
+          orderBy: ATTENDEE_ORDER,
+          skip: pagination.skip,
+          take: pagination.pageSize,
+        }),
+
+        this.db.eventAttendee.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    return { rows, total };
   }
 
   async getAttendee(eventId: string, attendeeId: string): Promise<EventAttendee> {
@@ -388,8 +417,8 @@ export class EventAttendeeService {
   /**
    * The games an attendee has brought to the event, as far as the caller may
    * read them. The scope is the path's attendee, composed with the caller's
-   * ceiling (#512), without the games taken off the list (#551). Unpaginated,
-   * like `getAttendees`.
+   * ceiling (#512), without the games taken off the list (#551). Unpaginated;
+   * paging it is #1001.
    */
   async getGameList(eventId: string, attendeeId: string): Promise<EventAttendeeGameList[]> {
     await assertEventExists(this.db, eventId);

@@ -1,7 +1,8 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated } from '@bge/shared';
+import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
@@ -21,14 +22,25 @@ export class EventAttendeeController {
 
   constructor(private readonly attendeeService: EventAttendeeService) {}
 
-  @ApiOperation({ summary: 'List attendees for an event' })
+  @ApiOperation({
+    summary: 'List attendees for an event',
+    description:
+      'In the order attendees were first added, then id; an attendee added again keeps their first place. ' +
+      '**Paginated since #373**, this read used to return every attendee of the event: `?page=` (1-based) and ' +
+      '`?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`. A client that assumed ' +
+      'one complete list must now page. Pages are offsets into a live list, so an attendee removed or added again ' +
+      'between requests can shift the rows after them, and a row can be missed or repeated.',
+  })
   @ApiParam({ name: 'eventId', type: String })
-  @ApiResponse({ status: Http.Ok, description: 'Attendees retrieved' })
+  @ApiPaginatedEnvelope('attendees')
+  @ApiResponse({ status: Http.BadRequest, description: 'A page or limit out of range, or an unknown query parameter' })
   @ApiResponse({ status: Http.NotFound, description: 'Event not found' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.EventAttendee))
   @Get()
-  getAttendees(@Param('eventId') eventId: string) {
-    return from(this.attendeeService.getAttendees(eventId)).pipe(map((attendees) => ({ attendees })));
+  getAttendees(@Param('eventId') eventId: string, @Query() pagination: DefaultPaginationQueryDto) {
+    return from(this.attendeeService.getAttendees(eventId, pagination)).pipe(
+      map((page) => paginated('attendees', page, pagination, ResourceType.EventAttendee)),
+    );
   }
 
   @ApiOperation({ summary: 'Get a single attendee' })
