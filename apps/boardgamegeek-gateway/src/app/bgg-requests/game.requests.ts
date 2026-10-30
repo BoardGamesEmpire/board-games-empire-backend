@@ -65,7 +65,7 @@ export function searchGamesRequest(
       }),
     ).pipe(
       map((results) =>
-        collapseSearchItems(results.flatMap((result) => result.items))
+        collapseSearchItems(results.flatMap((result) => result.items ?? []))
           .filter((item) => kept.has(item.type) && inYearRange(item))
           .slice(offset, offset + limit),
       ),

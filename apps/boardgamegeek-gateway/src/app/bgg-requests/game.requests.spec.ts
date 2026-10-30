@@ -12,7 +12,7 @@ import {
 } from './game.requests';
 
 /** Item 2 is an expansion, which BGG answers twice: once under each label (#777). */
-const BOTH_LABELS: BggSearchResult[] = [
+const BOTH_LABELS = [
   {
     total: 3,
     items: [
@@ -21,7 +21,7 @@ const BOTH_LABELS: BggSearchResult[] = [
       { id: 2, type: BggThingType.BoardGameExpansion, name: 'Catan: Seafarers' },
     ],
   },
-];
+] satisfies BggSearchResult[];
 
 describe('searchGamesRequest', () => {
   it('forwards the query text to client.search.query', async () => {
@@ -120,6 +120,12 @@ describe('searchGamesRequest', () => {
     const result = await firstValueFrom(searchGamesRequest('Catan', 10)(client));
 
     expect(result).toHaveLength(2);
+  });
+
+  it('reads an answer with no items, which BGG sends when nothing matches, as no results (#967)', async () => {
+    const { client } = buildMockClient({ searchResults: [{ total: 0 }] });
+
+    await expect(firstValueFrom(searchGamesRequest('code words')(client))).resolves.toEqual([]);
   });
 
   it('is lazy — does not invoke client.search.query until subscribed', () => {
