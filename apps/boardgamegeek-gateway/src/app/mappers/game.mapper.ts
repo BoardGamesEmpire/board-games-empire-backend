@@ -331,10 +331,8 @@ export function searchItemToGameSearchData(item: BggSearchItem, thing?: BggThing
 
   return {
     ...fromThing,
+    ...found,
     title: found.title || fromThing.title,
-    contentType: found.contentType,
-    yearPublished: found.yearPublished,
-    sourceUrl: found.sourceUrl,
     availableReleases: [toSyntheticTabletopRelease(item)],
   } satisfies proto.GameSearchData;
 }

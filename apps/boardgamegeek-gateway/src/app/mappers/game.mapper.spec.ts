@@ -281,6 +281,15 @@ describe('searchItemToGameSearchData', () => {
     expect(result.availableReleases.map((release) => release.releaseDate)).toEqual(['1997-01-01']);
   });
 
+  it("stays undated when search found no year, whatever the thing's (#880)", () => {
+    const item = makeBggSearchItem({ yearpublished: undefined });
+
+    const result = searchItemToGameSearchData(item, makeBggThing({ yearpublished: 2017 }));
+
+    expect(result.yearPublished).toBeUndefined();
+    expect(result.availableReleases.map((release) => release.releaseDate)).toEqual([undefined]);
+  });
+
   it("takes the thing's title when search sent a blank name (#880)", () => {
     const item = makeBggSearchItem({ name: '  ', names: undefined });
 
