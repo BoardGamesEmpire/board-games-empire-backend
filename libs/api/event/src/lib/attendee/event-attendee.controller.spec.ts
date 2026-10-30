@@ -1,8 +1,10 @@
-import { EventAttendee, EventAttendeeGameList, EventParticipationStatus } from '@bge/database';
+import { EventAttendee, EventAttendeeGameList, EventParticipationStatus, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
-import { createTestingModuleWithDb, makeEventAttendee } from '@bge/testing';
+import { ListScopeNotComposedError } from '@bge/shared';
+import { createTestingModuleWithDb, makeEventAttendee, paginationQuery } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { UpdateAttendeeStatusDto } from './dto/update-attendee-status.dto';
@@ -51,14 +53,48 @@ describe('EventAttendeeController', () => {
   afterEach(() => jest.clearAllMocks());
 
   describe('getAttendees', () => {
-    it('delegates to service with abilities and wraps in { attendees }', async () => {
+    it('delegates with the paging and wraps the rows in the envelope', async () => {
       const attendees = [stubAttendee(), stubAttendee()];
-      service.getAttendees.mockResolvedValue(attendees);
+      service.getAttendees.mockResolvedValue({ rows: attendees, total: 2 });
 
-      const result = await firstValueFrom(controller.getAttendees('event-1'));
+      const pagination = paginationQuery({ limit: 10 });
+      const result = await firstValueFrom(controller.getAttendees('event-1', pagination));
 
-      expect(service.getAttendees).toHaveBeenCalledWith('event-1');
-      expect(result).toEqual({ attendees });
+      expect(service.getAttendees).toHaveBeenCalledWith('event-1', pagination);
+      expect(result).toEqual({
+        attendees,
+        pagination: { page: 1, limit: 10, total: 2, totalPages: 1, hasMore: false },
+      });
+    });
+
+    // #373: `total` is what tells a client the event has more attendees than
+    // the page it received.
+    it('reports more pages when the event has more attendees than one page', async () => {
+      service.getAttendees.mockResolvedValue({ rows: [stubAttendee()], total: 12 });
+
+      const result = await firstValueFrom(controller.getAttendees('event-1', paginationQuery({ limit: 5 })));
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          pagination: { page: 1, limit: 5, total: 12, totalPages: 3, hasMore: true },
+        }),
+      );
+    });
+
+    // The service composes the `EventAttendee` scope; the envelope is where the
+    // guard checks for it, under the resource type the handler passes. Built
+    // inside a request with nothing composed, it must fail, and the failure
+    // has to name `EventAttendee` itself: a handler passing a sibling list's
+    // type fails here too, and in a real request answers 500.
+    it('builds its envelope under the EventAttendee scope guard', async () => {
+      service.getAttendees.mockResolvedValue({ rows: [], total: 0 });
+
+      const envelope = ClsServiceManager.getClsService().runWith({}, () =>
+        firstValueFrom(controller.getAttendees('event-1', paginationQuery({ limit: 10 }))),
+      );
+
+      await expect(envelope).rejects.toThrow(ListScopeNotComposedError);
+      await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.EventAttendee}'`);
     });
   });
 

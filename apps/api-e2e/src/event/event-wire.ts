@@ -97,6 +97,11 @@ export interface ListOccurrencesEnvelope {
   readonly total: number;
 }
 
+export interface ListAttendeesEnvelope {
+  readonly attendees: readonly EventAttendeeWire[];
+  readonly total: number;
+}
+
 /**
  * One occurrence's entry in the availability summary, restated to the fields
  * a spec asserts on.
@@ -263,6 +268,13 @@ export function listOccurrencesEnvelope(
   const { rows, total } = paginatedEnvelope('occurrences', occurrenceRow, OCCURRENCE_ROW, response, request);
 
   return { occurrences: rows, total };
+}
+
+/** `GET /api/events/:eventId/attendees`: `{ attendees: [...], pagination }`, paged since #373. */
+export function listAttendeesEnvelope(response: HttpResponseLike, request: RequestDescription): ListAttendeesEnvelope {
+  const { rows, total } = paginatedEnvelope('attendees', withId<EventAttendeeWire>, ROW_WITH_ID, response, request);
+
+  return { attendees: rows, total };
 }
 
 /**

@@ -12,11 +12,14 @@ import {
 } from '@bge/database';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
+  batchTransactionCall,
   createMockAbilityService,
   createTestingModuleWithDb,
   makeEventAttendee,
   makeEventAttendeeGameList,
+  paginationQuery,
   rawQueryText,
+  unwrapTransaction,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
@@ -70,9 +73,10 @@ describe('EventAttendeeService', () => {
     compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
 
     // The writes run their statements on the transaction client; the mock
-    // hands the callback the same delegates. Nothing is supplied from the
+    // hands the callback the same delegates. The paged list read (#373) is the
+    // array form, which resolves positionally. Nothing is supplied from the
     // attendee's list unless a test says so.
-    db.$transaction.mockImplementation((cb) => cb(db));
+    unwrapTransaction(db);
     db.eventGameNomination.updateManyAndReturn.mockResolvedValue([]);
     db.eventGame.findMany.mockResolvedValue([]);
     // Every user an add names is a person unless a test says otherwise. The
@@ -89,14 +93,14 @@ describe('EventAttendeeService', () => {
   afterEach(() => jest.clearAllMocks());
 
   describe('EventAttendee resource', () => {
-    // #512. Unpaginated, so no envelope guard stands behind it (#373), but it
-    // is a collection read and composes like one. The rows do not change: the
-    // path's event was already the filter, and the ceiling still clips it.
+    // #512. A collection read, and composes like one; since #373 pages it, the
+    // envelope guard stands behind it too. The rows do not change: the path's
+    // event was already the filter, and the ceiling still clips it.
     it('getAttendees asks the composer for its where clause, declaring the path event as its scope', async () => {
       db.event.count.mockResolvedValue(1);
       db.eventAttendee.findMany.mockResolvedValue([]);
 
-      await service.getAttendees('event-1');
+      await service.getAttendees('event-1', paginationQuery({ limit: 10 }));
 
       expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, {
         eventId: 'event-1',
@@ -113,11 +117,49 @@ describe('EventAttendeeService', () => {
       db.event.count.mockResolvedValue(1);
       db.eventAttendee.findMany.mockResolvedValue([]);
 
-      await service.getAttendees('event-1');
+      await service.getAttendees('event-1', paginationQuery({ limit: 10 }));
 
       expect(db.eventAttendee.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }),
       );
+    });
+
+    // #373 pages a read that used to return every attendee of the event.
+    it('getAttendees takes one page rather than the whole event', async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findMany.mockResolvedValue([]);
+
+      await service.getAttendees('event-1', paginationQuery({ page: 2, limit: 5 }));
+
+      expect(db.eventAttendee.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 5, skip: 5 }));
+    });
+
+    // A count through any other where, or outside the rows' snapshot, lets
+    // `totalPages` promise a page that comes back short (#373).
+    it('getAttendees counts through the same where as the rows, removed attendees excluded, in one REPEATABLE READ transaction', async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findMany.mockResolvedValue([]);
+      db.eventAttendee.count.mockResolvedValue(7);
+
+      const page = await service.getAttendees('event-1', paginationQuery({ limit: 10 }));
+
+      expect(db.eventAttendee.count).toHaveBeenCalledWith({
+        where: { eventId: 'event-1', removedAt: null, AND: [COND] },
+      });
+      expect(page).toEqual({ rows: [], total: 7 });
+
+      const { operations, options } = batchTransactionCall(db);
+      expect(operations).toHaveLength(2);
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
+
+    // Paging must not turn a missing event into an empty page (#373): the
+    // probe runs first, and outside the read's transaction.
+    it('getAttendees throws NotFound for an event that does not exist, before any transaction', async () => {
+      db.event.count.mockResolvedValue(0);
+
+      await expect(service.getAttendees('missing', paginationQuery({ limit: 10 }))).rejects.toThrow(NotFoundException);
+      expect(db.$transaction).not.toHaveBeenCalled();
     });
 
     it('getAttendeeByUserId → read', async () => {
@@ -625,8 +667,8 @@ describe('EventAttendeeService', () => {
   });
 
   describe('EventAttendeeGameList resource', () => {
-    // #512. Same shape as `getAttendees`: unpaginated, a collection read, and
-    // scoped to the path's attendee, which was already its filter.
+    // #512. A collection read, scoped to the path's attendee, which was already
+    // its filter. Still unpaginated; paging it is #1001.
     it('getGameList asks the composer for its where clause, declaring the path attendee as its scope', async () => {
       db.event.count.mockResolvedValue(1);
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
