@@ -8,14 +8,25 @@ import serveStatic from 'serve-static';
 
 /**
  * The client's policy: helmet's default, which the api's own responses keep,
- * with three changes.
+ * with these changes.
  *
  * - `'wasm-unsafe-eval'`: CanvasKit compiles WebAssembly, and so does the
  *   database worker for `sqlite3.wasm`.
  * - No `upgrade-insecure-requests`: it would send a plain-HTTP self-hosted
  *   instance's page to fetch its own files over HTTPS.
- * - `fonts.gstatic.com` in `connect-src`: Flutter fetches the fonts for glyphs
- *   its bundled fonts lack (emoji, CJK) from there.
+ * - `https:` in `connect-src`: CanvasKit fetches a game image's bytes before
+ *   decoding them, and Flutter fetches the fonts for glyphs its bundled fonts
+ *   lack (emoji, CJK) from `fonts.gstatic.com`. This lets script on the page
+ *   send requests to any HTTPS host and read the ones that answer with CORS
+ *   headers. `script-src 'self'` is what keeps foreign script off the page, and
+ *   `img-src https:` already lets the page send data to any host in a URL.
+ * - `blob:` and `https:` in `img-src`: game images are on whatever host their
+ *   DataGateway reported or a user gave, and DataGateways declare no image
+ *   hosts, so the hosts can't be listed. When an image's host sends no CORS
+ *   headers, CanvasKit can't fetch it and the client shows it in an `<img>`
+ *   element instead; browsers other than Chromium decode fetched images
+ *   through a `blob:` URL (#996). This holds until the api serves its own
+ *   copies (#652).
  *
  * Every file gets it, not only `index.html`, because a worker takes its policy
  * from its own script's response.
@@ -23,7 +34,8 @@ import serveStatic from 'serve-static';
 const clientPolicy = contentSecurityPolicy({
   directives: {
     'script-src': ["'self'", "'wasm-unsafe-eval'"],
-    'connect-src': ["'self'", 'https://fonts.gstatic.com'],
+    'img-src': ["'self'", 'data:', 'blob:', 'https:'],
+    'connect-src': ["'self'", 'https:'],
     'upgrade-insecure-requests': null,
   },
 });
