@@ -64,7 +64,13 @@ export interface WsGameSearchResult {
 
   platforms: WsPlatformData[];
   sourceUrl?: string;
+
+  /**
+   * The game's thumbnail. No DataGateway sends alt text for it, so the title
+   * labels it (#880).
+   */
   thumbnailUrl?: string;
+
   title: string;
   yearPublished?: number;
 }

@@ -60,12 +60,15 @@ export function searchGamesRequest(
   return (client) =>
     defer(() =>
       client.search.query({
-        query,
+        // bgg-ts-client joins parameters into the URL unencoded, in 0.2.0 and
+        // 0.3.0, so & + and # would cut or change the query. Should it ever
+        // encode them itself, this must go, or queries are encoded twice (#969).
+        query: encodeURIComponent(query),
         type: [...DEFAULT_BGG_SEARCH_TYPES],
       }),
     ).pipe(
       map((results) =>
-        collapseSearchItems(results.flatMap((result) => result.items))
+        collapseSearchItems(results.flatMap((result) => result.items ?? []))
           .filter((item) => kept.has(item.type) && inYearRange(item))
           .slice(offset, offset + limit),
       ),

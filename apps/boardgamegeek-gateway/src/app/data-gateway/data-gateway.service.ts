@@ -4,13 +4,14 @@ import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import { defer, EMPTY, from, Observable, of } from 'rxjs';
-import { catchError, endWith, map, mergeMap, tap } from 'rxjs/operators';
+import { catchError, endWith, map, mergeMap, tap, timeout, toArray } from 'rxjs/operators';
 import {
   chunk,
   fetchThingRequest,
   fetchThingsRequest,
   parseExternalId,
   searchGamesRequest,
+  type ThingFetchOptions,
 } from '../bgg-requests/game.requests';
 import { BggService } from '../bgg/bgg.service';
 import { BggThingType, DEFAULT_BGG_SEARCH_TYPES, MAX_THINGS_PER_BATCH } from '../constants';
@@ -25,10 +26,22 @@ import {
 } from '../mappers/game.mapper';
 import { toGatewayLanguageEntries } from '../mappers/language.mapper';
 import { toCategoryList, toMechanicList } from '../mappers/taxonomy.mapper';
-import type { BggThing } from '../types';
+import type { BggSearchItem, BggThing } from '../types';
 
 const FETCH_GAME_TYPES = [BggThingType.BoardGame, BggThingType.BoardGameExpansion] as const;
 const EXPANSION_BATCH_TYPES = [BggThingType.BoardGameExpansion] as const;
+
+/** What search asks `/thing` for to fill a page's results in: ratings, and no versions (#880). */
+const SEARCH_THING_OPTIONS: ThingFetchOptions = { stats: 1, versions: 0, types: FETCH_GAME_TYPES };
+
+/**
+ * How long a page's `/thing` batch may take before its results go out as
+ * search found them. `bgg-ts-client` sets no timeout of its own, and the page
+ * waits on every batch, so a stalled one would hold back results search
+ * already has (#880). A batch of 20 was measured at about half a second, and
+ * this leaves room for a rate limit's retry.
+ */
+const SEARCH_THINGS_TIMEOUT_MS = 10_000;
 
 @Injectable()
 export class DataGatewayService extends GatewayServiceHost {
@@ -137,6 +150,8 @@ export class DataGatewayService extends GatewayServiceHost {
    * it labels expansions as base games in a base-game search (#777). A filter
    * naming nothing BGG has ends the search at once, without asking BGG. A
    * publish-year range narrows the games it keeps before they're paged (#719).
+   * Each page's results are filled in from their things, and a failed lookup
+   * sends them as search found them (#880).
    */
   searchGames(request: proto.GatewaySearchRequest): Observable<proto.GatewaySearchResult> {
     const limit = request.limit ?? undefined;
@@ -157,13 +172,13 @@ export class DataGatewayService extends GatewayServiceHost {
     return this.bggService.call(search).pipe(
       tap((items) => this.logger.log(`searchGames found ${items.length} results for query '${request.query}'`)),
 
-      mergeMap((items) => items),
+      mergeMap((items) => this.withThings(items, request.query)),
       map(
-        (item) =>
+        (game) =>
           ({
             correlationId: request.correlationId,
             status: proto.ResultStatus.RESULT_STATUS_RESULT,
-            game: searchItemToGameSearchData(item),
+            game,
           }) satisfies proto.GatewaySearchResult,
       ),
 
@@ -183,6 +198,72 @@ export class DataGatewayService extends GatewayServiceHost {
         } satisfies proto.GatewaySearchResult);
       }),
     );
+  }
+
+  /**
+   * A page's results in search order, each filled in from its thing (#880).
+   *
+   * The things are asked for in batches of MAX_THINGS_PER_BATCH, all at once,
+   * each through its own `bggService.call` and so its own retry boundary. A
+   * batch that still fails or runs out of time logs a warning and sends its
+   * results as search found them, leaving the other batches' alone; so does a
+   * result whose thing BGG's answer leaves out or that can't be read. An empty
+   * page asks BGG nothing.
+   */
+  private withThings(items: BggSearchItem[], queryForLogging: string): Observable<proto.GameSearchData> {
+    const batches = chunk(
+      items.map((item) => item.id),
+      MAX_THINGS_PER_BATCH,
+    );
+
+    return from(batches).pipe(
+      mergeMap((batch) =>
+        this.bggService.call(fetchThingsRequest(batch, SEARCH_THING_OPTIONS)).pipe(
+          timeout({ first: SEARCH_THINGS_TIMEOUT_MS }),
+
+          tap((things) => {
+            const answered = new Set(things.map((thing) => thing.id));
+            const missing = batch.filter((id) => !answered.has(id));
+
+            if (missing.length > 0) {
+              this.logger.warn(
+                `searchGames sent results without details for query '${queryForLogging}': BGG left out ${missing.join(', ')}`,
+              );
+            }
+          }),
+
+          catchError((err) => {
+            const message = err instanceof Error ? err.message : String(err);
+            this.logger.warn(`searchGames sent results without details for query '${queryForLogging}': ${message}`);
+
+            return of<BggThing[]>([]);
+          }),
+        ),
+      ),
+      toArray(),
+      mergeMap((answers) => {
+        const thingsById = new Map(answers.flat().map((thing) => [thing.id, thing]));
+        return items.map((item) => this.fillIn(item, thingsById.get(item.id), queryForLogging));
+      }),
+    );
+  }
+
+  /**
+   * A result filled in from its thing, or as search found it when the thing
+   * can't be read: the client passes some shapes it doesn't expect on as they
+   * are, and one game's details shouldn't fail a search that succeeded (#880).
+   */
+  private fillIn(item: BggSearchItem, thing: BggThing | undefined, queryForLogging: string): proto.GameSearchData {
+    try {
+      return searchItemToGameSearchData(item, thing);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `searchGames sent results without details for query '${queryForLogging}': couldn't read ${item.id}: ${message}`,
+      );
+
+      return searchItemToGameSearchData(item);
+    }
   }
 
   fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {

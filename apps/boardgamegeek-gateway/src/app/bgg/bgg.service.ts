@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Http } from '@status/codes';
-import { isAxiosError } from 'axios';
+import { BggApiError, BggClientError } from 'bgg-ts-client';
 import { Observable, throwError, timer } from 'rxjs';
 import { catchError, switchMap } from 'rxjs/operators';
 import { BGG_CLIENT } from './constants';
@@ -30,57 +30,35 @@ export class BggService {
   private readonly logger = new Logger(BggService.name);
 
   /**
-   * Default backoff applied to a 429 response when BGG does not include a
-   * `Retry-After` header.
+   * Backoff applied to a 429 response. `bgg-ts-client`'s error carries the
+   * status alone, so BGG's `Retry-After` header never reaches this layer.
    */
-
-  private readonly defaultRateLimitRetryMs = 2000;
+  private readonly rateLimitRetryMs = 2000;
 
   constructor(@Inject(BGG_CLIENT) private readonly client: BggClientLike) {}
 
   /**
    * Execute a request against the BGG API. On a 429 (rate-limited)
-   * response, wait and retry once — honoring the `Retry-After` header
-   * when present. All other errors propagate.
+   * response, wait and retry once. All other errors propagate.
    */
   call<T>(request: BggRequest<T>): Observable<T> {
     return request(this.client).pipe(
       catchError((err: unknown) => {
-        if (!isAxiosError(err) || err.response?.status !== Http.TooManyRequests) {
+        if (!isRateLimit(err)) {
           return throwError(() => err);
         }
 
-        const retryAfterMs = this.parseRetryAfterHeader(err.response.headers) ?? this.defaultRateLimitRetryMs;
-        this.logger.warn(`BGG rate limit hit; retrying in ${retryAfterMs}ms`);
+        this.logger.warn(`BGG rate limit hit; retrying in ${this.rateLimitRetryMs}ms`);
 
-        return timer(retryAfterMs).pipe(switchMap(() => request(this.client)));
+        return timer(this.rateLimitRetryMs).pipe(switchMap(() => request(this.client)));
       }),
     );
   }
+}
 
-  /**
-   * `Retry-After` may be either a delta in seconds or an HTTP date.
-   * BGG only emits the seconds form in practice; the date form is parsed
-   * defensively for forward-compatibility.
-   */
-  private parseRetryAfterHeader(headers: Record<string, unknown> | undefined): number | undefined {
-    const raw = headers?.['retry-after'] ?? headers?.['Retry-After'];
-    if (typeof raw !== 'string' && typeof raw !== 'number') {
-      return undefined;
-    }
-
-    const seconds = typeof raw === 'number' ? raw : Number(raw);
-    if (Number.isFinite(seconds) && seconds > 0) {
-      return Math.ceil(seconds * 1000);
-    }
-
-    if (typeof raw === 'string') {
-      const date = Date.parse(raw);
-      if (Number.isFinite(date)) {
-        return Math.max(0, date - Date.now());
-      }
-    }
-
-    return undefined;
-  }
+/** A 429 as `bgg-ts-client` throws it: its status on the `BggApiError` a `BggClientError` wraps (#880). */
+function isRateLimit(err: unknown): boolean {
+  return (
+    err instanceof BggClientError && err.cause instanceof BggApiError && err.cause.statusCode === Http.TooManyRequests
+  );
 }
