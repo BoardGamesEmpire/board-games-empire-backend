@@ -297,19 +297,20 @@ describe('createWebClient', () => {
       };
 
       // The client compiles WebAssembly (CanvasKit, and sqlite3 in its worker),
-      // may be served over plain HTTP, and fetches fallback glyphs from Google Fonts.
+      // may be served over plain HTTP, fetches fallback glyphs from Google Fonts,
+      // and loads game images from any HTTPS host (#996).
       const CLIENT_POLICY = {
         'default-src': ["'self'"],
         'base-uri': ["'self'"],
         'font-src': ["'self'", 'https:', 'data:'],
         'form-action': ["'self'"],
         'frame-ancestors': ["'self'"],
-        'img-src': ["'self'", 'data:'],
+        'img-src': ["'self'", 'data:', 'blob:', 'https:'],
         'object-src': ["'none'"],
         'script-src': ["'self'", "'wasm-unsafe-eval'"],
         'script-src-attr': ["'none'"],
         'style-src': ["'self'", 'https:', "'unsafe-inline'"],
-        'connect-src': ["'self'", 'https://fonts.gstatic.com'],
+        'connect-src': ["'self'", 'https:'],
       };
 
       it.each(['/', '/index.html', '/flutter_bootstrap.js', '/drift_worker.js', '/sqlite3.wasm'])(

@@ -40,9 +40,10 @@ The api serves the client from its own origin. A browser pointed at the api's UR
 - **Paths in the build** are served from it.
 - **Paths the build lacks:** a browser loading a page gets the app's `index.html`, and the app routes from there. Everything else gets a 404, so a missing script or asset is never answered with a page.
 - **Caching:** every file is sent with `Cache-Control: no-cache` and an ETag taken from its content. Flutter names its files the same in every release, so browsers ask about each file on every load, and the api answers 304 for any file the new build didn't change.
-- **Content-Security-Policy:** the client's files carry their own policy. It is helmet's default, which the API's own responses keep, with three changes:
+- **Content-Security-Policy:** the client's files carry their own policy. It is helmet's default, which the API's own responses keep, with these changes:
   - `'wasm-unsafe-eval'`, because the client compiles WebAssembly;
-  - `https://fonts.gstatic.com` in `connect-src`, for the fonts Flutter fetches when the text has glyphs its bundled fonts lack, such as emoji or Chinese and Japanese characters;
+  - `https:` in `connect-src`, for game images, and for the fonts Flutter fetches from `fonts.gstatic.com` when the text has glyphs its bundled fonts lack, such as emoji or Chinese and Japanese characters;
+  - `blob:` and `https:` in `img-src`, for game images. Their URLs point at whatever host the DataGateway reported or a user gave, so until the api serves its own copies (#652), users' browsers load them straight from that host, which sees their IP address (#996);
   - no `upgrade-insecure-requests`, so a deployment on plain HTTP works.
 
 When `apps/api/dist/web` has no `index.html`, the api serves only the API. It logs which case it is at boot. Working on the client locally needs no bundled client: the client repository's dev proxy gives the browser one origin (`docs/dev/web-proxy.md` there).
