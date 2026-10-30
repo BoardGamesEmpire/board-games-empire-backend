@@ -1,3 +1,4 @@
+import { BggClient } from 'bgg-ts-client';
 import { firstValueFrom } from 'rxjs';
 import type { BggClientLike } from '../bgg/interfaces';
 import { BggThingType, DEFAULT_BGG_SEARCH_TYPES } from '../constants';
@@ -10,6 +11,15 @@ import {
   parseExternalId,
   searchGamesRequest,
 } from './game.requests';
+
+/**
+ * Stands in for the network under the real bgg-ts-client, which fetches
+ * through isomorphic-unfetch, answering every request with no matches.
+ */
+const mockFetch = jest.fn<Promise<Response>, [string]>(
+  async () => new Response('<items total="0" termsofuse=""></items>'),
+);
+jest.mock('isomorphic-unfetch', () => (url: string) => mockFetch(url));
 
 /** Item 2 is an expansion, which BGG answers twice: once under each label (#777). */
 const BOTH_LABELS = [
@@ -30,6 +40,16 @@ describe('searchGamesRequest', () => {
     await firstValueFrom(searchGamesRequest('Catan')(client));
 
     expect(search).toHaveBeenCalledWith(expect.objectContaining({ query: 'Catan' }));
+  });
+
+  it('encodes the query, so & + and # reach BGG as typed (#969)', async () => {
+    const { client, search } = buildMockClient();
+
+    for (const query of ['Dungeons & Dragons', '1+1', '#']) {
+      await firstValueFrom(searchGamesRequest(query)(client));
+    }
+
+    expect(search.mock.calls.map(([params]) => params.query)).toEqual(['Dungeons%20%26%20Dragons', '1%2B1', '%23']);
   });
 
   it('always asks BGG for base games and expansions, since a base-game search alone returns expansions labelled as base games (#777)', async () => {
@@ -145,6 +165,23 @@ describe('searchGamesRequest', () => {
     await firstValueFrom(request$);
 
     expect(search).toHaveBeenCalledTimes(2);
+  });
+});
+
+// Pins the URL the real client builds, not just what it's handed. bgg-ts-client
+// joins parameters unencoded today; if an upgrade starts encoding them, the
+// gateway's own encoding doubles up and this fails (#969).
+describe('searchGamesRequest through bgg-ts-client (#969)', () => {
+  it('sends the query in the URL so that BGG reads it as typed', async () => {
+    const client = BggClient.Create({ apiKey: 'test-key' }) as unknown as BggClientLike;
+
+    for (const query of ['Dungeons & Dragons', '1+1', '#']) {
+      mockFetch.mockClear();
+
+      await expect(firstValueFrom(searchGamesRequest(query)(client))).resolves.toEqual([]);
+
+      expect(new URL(mockFetch.mock.calls[0][0]).searchParams.get('query')).toBe(query);
+    }
   });
 });
 
