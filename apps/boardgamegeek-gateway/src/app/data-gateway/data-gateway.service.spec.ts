@@ -1,7 +1,8 @@
 import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
+import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { firstValueFrom, of, throwError } from 'rxjs';
+import { firstValueFrom, NEVER, of, throwError } from 'rxjs';
 import { toArray } from 'rxjs/operators';
 import { BggService, type BggRequest } from '../bgg/bgg.service';
 import { BggLinkType, BggNameType, BggThingType, MAX_THINGS_PER_BATCH } from '../constants';
@@ -177,8 +178,23 @@ describe('DataGatewayService', () => {
   });
 
   describe('searchGames', () => {
+    /**
+     * Answers `bggService.call` in call order: the search with `items`, then
+     * each `/thing` batch with its things, or fails it with its error. Any
+     * later call answers no things.
+     */
+    const answer = (items: BggSearchItem[], ...batches: Array<BggThing[] | Error>): void => {
+      bggService.call.mockReturnValueOnce(of(items));
+
+      for (const batch of batches) {
+        bggService.call.mockReturnValueOnce(batch instanceof Error ? throwError(() => batch) : of(batch));
+      }
+
+      bggService.call.mockReturnValue(of([]));
+    };
+
     it('emits one RESULT frame per item followed by a single SOURCE_DONE', async () => {
-      bggService.call.mockReturnValue(of([CATAN_SEARCH, GLOOMHAVEN_SEARCH]));
+      answer([CATAN_SEARCH, GLOOMHAVEN_SEARCH]);
 
       const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'catan' }).pipe(toArray()));
 
@@ -191,7 +207,7 @@ describe('DataGatewayService', () => {
     });
 
     it('emits only SOURCE_DONE when BGG returns no results', async () => {
-      bggService.call.mockReturnValue(of([]));
+      answer([]);
 
       const frames = await firstValueFrom(
         service.searchGames({ correlationId: 'c', query: 'nonexistent' }).pipe(toArray()),
@@ -202,7 +218,7 @@ describe('DataGatewayService', () => {
     });
 
     it('maps the BGG id to externalId as a string', async () => {
-      bggService.call.mockReturnValue(of([CATAN_SEARCH]));
+      answer([CATAN_SEARCH]);
 
       const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'catan' }).pipe(toArray()));
       const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
@@ -211,7 +227,7 @@ describe('DataGatewayService', () => {
     });
 
     it('maps the BGG name to GameSearchData.title', async () => {
-      bggService.call.mockReturnValue(of([CATAN_SEARCH]));
+      answer([CATAN_SEARCH]);
 
       const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'catan' }).pipe(toArray()));
       const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
@@ -220,7 +236,7 @@ describe('DataGatewayService', () => {
     });
 
     it('propagates the correlationId in every emitted frame', async () => {
-      bggService.call.mockReturnValue(of([CATAN_SEARCH]));
+      answer([CATAN_SEARCH]);
 
       const frames = await firstValueFrom(
         service.searchGames({ correlationId: 'trace-abc', query: 'catan' }).pipe(toArray()),
@@ -243,13 +259,126 @@ describe('DataGatewayService', () => {
       expect(frames[0].message).toContain('BGG unavailable');
     });
 
-    it('issues exactly one bggService.call for a search', async () => {
-      bggService.call.mockReturnValue(of([]));
+    it('asks BGG nothing more when the search finds nothing (#880)', async () => {
+      answer([]);
       const request: proto.GatewaySearchRequest = { correlationId: 'c', query: 'catan', limit: 5 };
 
       await firstValueFrom(service.searchGames(request).pipe(toArray()));
 
       expect(bggService.call).toHaveBeenCalledTimes(1);
+    });
+
+    describe("filled in from each result's thing (#880)", () => {
+      afterEach(() => jest.restoreAllMocks());
+
+      /** Every frame the search sent. */
+      const searched = async (request: proto.GatewaySearchRequest): Promise<proto.GatewaySearchResult[]> =>
+        firstValueFrom(service.searchGames(request).pipe(toArray()));
+
+      /** The RESULT frames' games, in the order they were sent. */
+      const games = (frames: proto.GatewaySearchResult[]) =>
+        frames.filter((frame) => frame.status === proto.ResultStatus.RESULT_STATUS_RESULT).map((frame) => frame.game);
+
+      it('fills each result in from its thing', async () => {
+        answer([CATAN_SEARCH], [CATAN_THING]);
+
+        const [game] = games(await searched({ correlationId: 'c', query: 'catan' }));
+
+        expect(game).toMatchObject({
+          title: 'Catan',
+          thumbnailUrl: 'https://cf.geekdo.com/catan-thumb.jpg',
+          minPlayers: 3,
+          maxPlayers: 4,
+        });
+        expect(game?.averageRating).toBeCloseTo(7.15);
+      });
+
+      it('asks /thing for a page in batches of 20, with statistics, without versions, for both thing types', async () => {
+        const items = Array.from({ length: 45 }, (_, i) => ({ ...CATAN_SEARCH, id: i + 1 }));
+        answer(items);
+
+        await searched({ correlationId: 'c', query: 'catan', limit: 45 });
+
+        expect(bggService.call).toHaveBeenCalledTimes(4);
+        const asked = await Promise.all(
+          bggService.call.mock.calls.slice(1).map(async ([bggRequest]) => {
+            const thing = jest.fn().mockResolvedValue([]);
+            await firstValueFrom((bggRequest as BggRequest<unknown>)({ thing: { query: thing } } as never));
+            return thing.mock.calls[0][0];
+          }),
+        );
+        expect(asked.map((params) => params.id)).toEqual([
+          items.slice(0, 20).map((item) => item.id),
+          items.slice(20, 40).map((item) => item.id),
+          items.slice(40).map((item) => item.id),
+        ]);
+        for (const params of asked) {
+          expect(params).toMatchObject({
+            stats: 1,
+            versions: 0,
+            type: [BggThingType.BoardGame, BggThingType.BoardGameExpansion],
+          });
+        }
+      });
+
+      it('sends results in search order, whatever order BGG answers in', async () => {
+        answer([CATAN_SEARCH, GLOOMHAVEN_SEARCH], [GLOOMHAVEN_THING, CATAN_THING]);
+
+        const sent = games(await searched({ correlationId: 'c', query: 'catan' }));
+
+        expect(sent.map((game) => [game?.externalId, game?.thumbnailUrl])).toEqual([
+          ['13', 'https://cf.geekdo.com/catan-thumb.jpg'],
+          ['174430', 'https://cf.geekdo.com/gloom-thumb.jpg'],
+        ]);
+      });
+
+      it("sends a result as search found it, with a warning, when BGG's answer leaves its thing out", async () => {
+        const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+        answer([CATAN_SEARCH, GLOOMHAVEN_SEARCH], [CATAN_THING]);
+
+        const [catan, gloomhaven] = games(await searched({ correlationId: 'c', query: 'catan' }));
+
+        expect(catan?.thumbnailUrl).toBe('https://cf.geekdo.com/catan-thumb.jpg');
+        expect(gloomhaven).toMatchObject({ externalId: '174430', title: 'Gloomhaven', yearPublished: 2017 });
+        expect(gloomhaven?.thumbnailUrl).toBeUndefined();
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('BGG left out 174430'));
+      });
+
+      it("sends a stalled batch's results as search found them after 10 seconds, and ends with SOURCE_DONE", async () => {
+        jest.useFakeTimers();
+        const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+        bggService.call.mockReturnValueOnce(of([CATAN_SEARCH])).mockReturnValueOnce(NEVER);
+
+        try {
+          const frames$ = searched({ correlationId: 'c', query: 'catan' });
+
+          await jest.advanceTimersByTimeAsync(10_000);
+          const frames = await frames$;
+
+          expect(games(frames).map((game) => [game?.externalId, game?.thumbnailUrl])).toEqual([['13', undefined]]);
+          expect(frames.at(-1)?.status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
+          expect(warn).toHaveBeenCalledTimes(1);
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it("sends a failed batch's results as search found them, keeps the other batches' details, and ends with SOURCE_DONE", async () => {
+        const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+        const fillers = Array.from({ length: 20 }, (_, i) => ({ ...GLOOMHAVEN_SEARCH, id: 1001 + i }));
+        answer([...fillers, CATAN_SEARCH], new Error('429 Too Many Requests'), [CATAN_THING]);
+
+        const frames = await searched({ correlationId: 'c', query: 'catan' });
+        const sent = games(frames);
+
+        expect(sent).toHaveLength(21);
+        expect(frames.some((frame) => frame.status === proto.ResultStatus.RESULT_STATUS_ERROR)).toBe(false);
+        expect(frames.at(-1)?.status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
+        expect(sent.at(-1)?.thumbnailUrl).toBe('https://cf.geekdo.com/catan-thumb.jpg');
+        expect(sent.slice(0, 20).filter((game) => game?.thumbnailUrl !== undefined)).toEqual([]);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('429 Too Many Requests'));
+      });
     });
 
     describe('filtered by content type', () => {
@@ -299,8 +428,9 @@ describe('DataGatewayService', () => {
             ],
           },
         ]);
+        const things = jest.fn().mockResolvedValue([]);
         bggService.call.mockImplementation((bggRequest) =>
-          (bggRequest as BggRequest<unknown>)({ search: { query: search } } as never),
+          (bggRequest as BggRequest<unknown>)({ search: { query: search }, thing: { query: things } } as never),
         );
 
         const frames = await firstValueFrom(
@@ -345,8 +475,9 @@ describe('DataGatewayService', () => {
             ],
           },
         ]);
+        const things = jest.fn().mockResolvedValue([]);
         bggService.call.mockImplementation((bggRequest) =>
-          (bggRequest as BggRequest<unknown>)({ search: { query: search } } as never),
+          (bggRequest as BggRequest<unknown>)({ search: { query: search }, thing: { query: things } } as never),
         );
 
         const frames = await firstValueFrom(
@@ -668,6 +799,14 @@ const CATAN_THING: BggThing = {
     { type: BggLinkType.BoardGameMechanic, id: 22, value: 'Trading' },
   ],
   versions: [],
+};
+
+const GLOOMHAVEN_THING: BggThing = {
+  id: 174430,
+  type: BggThingType.BoardGame,
+  names: [{ type: BggNameType.Primary, value: 'Gloomhaven' }],
+  yearpublished: 2017,
+  thumbnail: 'https://cf.geekdo.com/gloom-thumb.jpg',
 };
 
 const SEAFARERS_EXPANSION_THING: BggThing = {

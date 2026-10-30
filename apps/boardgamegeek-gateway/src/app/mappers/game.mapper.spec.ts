@@ -220,6 +220,72 @@ describe('searchItemToGameSearchData', () => {
 
     expect(result.availableReleases).toEqual([]);
   });
+
+  it('fills a result in from its thing: thumbnail, player counts, play times, rating, base game and summary (#880)', () => {
+    const thing = makeBggThing({
+      id: 174430,
+      thumbnail: 'https://cf.geekdo-images.com/gloom-thumb.jpg',
+      minplayers: 1,
+      maxplayers: 4,
+      minplaytime: 60,
+      maxplaytime: 120,
+      description: 'Vanquish monsters.',
+      statistics: { ratings: { average: 8.6 } },
+      links: [{ type: BggLinkType.BoardGameExpansion, id: 13, value: 'Catan', inbound: true }],
+    });
+
+    const result = searchItemToGameSearchData(makeBggSearchItem(), thing);
+
+    expect(result).toMatchObject({
+      thumbnailUrl: 'https://cf.geekdo-images.com/gloom-thumb.jpg',
+      minPlayers: 1,
+      maxPlayers: 4,
+      minPlaytime: 60,
+      maxPlaytime: 120,
+      baseGameExternalId: '13',
+      summary: 'Vanquish monsters.',
+    });
+    expect(result.averageRating).toBeCloseTo(8.6);
+    expect(result.availableReleases).toHaveLength(1);
+  });
+
+  it('leaves the rating unset for a game nobody has rated, which BGG sends as 0 (#880)', () => {
+    const thing = makeBggThing({ statistics: { ratings: { average: 0 } } });
+
+    expect(searchItemToGameSearchData(makeBggSearchItem(), thing).averageRating).toBeUndefined();
+    expect(thingToGameData(thing).averageRating).toBeUndefined();
+  });
+
+  it('keeps the title, content type, year and source URL search found, whatever the thing says, and dates the release by that year (#880)', () => {
+    const item = makeBggSearchItem({
+      id: 325,
+      type: BggThingType.BoardGameExpansion,
+      name: 'Die Siedler von Catan: Seefahrer',
+      yearpublished: 1997,
+    });
+    const thing = makeBggThing({
+      id: 325,
+      type: BggThingType.BoardGame,
+      names: [{ type: BggNameType.Primary, value: 'Catan: Seafarers' }],
+      yearpublished: 1998,
+    });
+
+    const result = searchItemToGameSearchData(item, thing);
+
+    expect(result).toMatchObject({
+      title: 'Die Siedler von Catan: Seefahrer',
+      contentType: proto.ContentType.CONTENT_TYPE_EXPANSION,
+      yearPublished: 1997,
+      sourceUrl: 'https://boardgamegeek.com/boardgameexpansion/325',
+    });
+    expect(result.availableReleases.map((release) => release.releaseDate)).toEqual(['1997-01-01']);
+  });
+
+  it("takes the thing's title when search sent a blank name (#880)", () => {
+    const item = makeBggSearchItem({ name: '  ', names: undefined });
+
+    expect(searchItemToGameSearchData(item, makeBggThing()).title).toBe('Gloomhaven');
+  });
 });
 
 // BGG writes 0 for a game whose year it doesn't know. Sent on, it would read

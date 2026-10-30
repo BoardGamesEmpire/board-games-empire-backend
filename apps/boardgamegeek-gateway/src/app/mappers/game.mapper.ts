@@ -190,8 +190,8 @@ function coerceYear(year: number | undefined): number | undefined {
 }
 
 /**
- * Coerces BGG's "0 means unknown" sentinel on a player count, play time or
- * minimum age into undefined (#869).
+ * Coerces BGG's "0 means unknown" sentinel on a player count, play time,
+ * minimum age or average rating into undefined (#869, #880).
  */
 function coercePositive(value: number | undefined): number | undefined {
   return typeof value === 'number' && value > 0 ? value : undefined;
@@ -295,18 +295,25 @@ function toReleases(thing: BggThing): proto.GameReleaseData[] {
 }
 
 /**
- * Maps a BGG search-result item to the lean proto GameSearchData.
+ * Maps a BGG search-result item to proto GameSearchData, filled in from its
+ * thing when BGG answered for it.
  *
- * Search responses do not carry thumbnails, ratings, player counts, or
- * description — those fields stay undefined here and are populated by
- * a follow-up FetchGame call. `availableReleases` is intentionally
- * empty: search items have no platform/release data.
+ * Search answers carry no thumbnail, rating, player counts or description.
+ * `searchGames` asks for each item's thing and fills those in from it (#880).
+ * The title, content type and year stay as search found them, since the page
+ * was filtered and built on them. The source URL follows the content type,
+ * and the release is dated by search's year, so a result carries one year.
+ * The title is the name BGG matched, which can be an alternate one; a blank
+ * one takes the thing's.
+ *
+ * Without a thing, the result is as lean as search: `availableReleases` stays
+ * empty, since search items have no release data.
  */
-export function searchItemToGameSearchData(item: BggSearchItem): proto.GameSearchData {
+export function searchItemToGameSearchData(item: BggSearchItem, thing?: BggThing): proto.GameSearchData {
   // Trimmed, and a blank name falls back to `names`, as a fetched thing's title does (#716).
   const title = normalizeTitle(item.name) ?? normalizeTitle(selectPrimaryName(item.names)) ?? '';
 
-  return {
+  const found = {
     externalId: String(item.id),
     title,
     contentType: BGG_CONTENT_TYPE_MAP[item.type] ?? proto.ContentType.CONTENT_TYPE_UNSPECIFIED,
@@ -315,12 +322,28 @@ export function searchItemToGameSearchData(item: BggSearchItem): proto.GameSearc
     availablePlatforms: [TABLETOP_PLATFORM],
     availableReleases: [],
   } satisfies proto.GameSearchData;
+
+  if (!thing) {
+    return found;
+  }
+
+  const fromThing = thingToGameSearchData(thing);
+
+  return {
+    ...fromThing,
+    title: found.title || fromThing.title,
+    contentType: found.contentType,
+    yearPublished: found.yearPublished,
+    sourceUrl: found.sourceUrl,
+    availableReleases: [toSyntheticTabletopRelease(item)],
+  } satisfies proto.GameSearchData;
 }
 
 /**
- * Maps a fully-detailed BGG thing (used for expansion streaming) to lean
- * GameSearchData. Edition fields stay absent in search context — a
- * synthetic Tabletop release with identity and availability data only.
+ * Maps a fully-detailed BGG thing to lean GameSearchData: an expansion the
+ * expansion lookup streams, or the details a search result is filled in from
+ * (#880). Edition fields stay absent in search context — a synthetic
+ * Tabletop release with identity and availability data only.
  */
 export function thingToGameSearchData(thing: BggThing): proto.GameSearchData {
   const title = selectThingTitle(thing);
@@ -332,7 +355,7 @@ export function thingToGameSearchData(thing: BggThing): proto.GameSearchData {
     yearPublished: toPublishYear(thing.yearpublished),
     thumbnailUrl: decodeUrl(thing.thumbnail),
     sourceUrl: toSourceUrl(thing),
-    averageRating: thing.statistics?.ratings?.average,
+    averageRating: coercePositive(thing.statistics?.ratings?.average),
     ...toPlayerCounts(thing),
     ...toPlayTimes(thing),
     baseGameExternalId: toBaseGameExternalId(thing),
@@ -387,7 +410,7 @@ export function thingToGameData(thing: BggThing, locale?: string): proto.GameDat
     categories,
     families,
 
-    averageRating: ratings?.average,
+    averageRating: coercePositive(ratings?.average),
     bayesRating: ratings?.bayesaverage,
     ratingsCount: ratings?.usersrated,
     ...toPlayerCounts(thing),
