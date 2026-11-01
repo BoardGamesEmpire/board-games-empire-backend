@@ -18,6 +18,7 @@ import {
   attendeeEnvelope,
   availabilitySummaryEnvelope,
   eventGameEnvelope,
+  listAttendeesEnvelope,
   nominationEnvelope,
   occurrenceEnvelope,
   resolutionEnvelope,
@@ -58,7 +59,7 @@ describe('leaving an event', () => {
     await db.close();
   });
 
-  const { createdEventId } = createEventClient(baseUrl);
+  const { createdEventId, listAttendees } = createEventClient(baseUrl);
 
   const addAttendee = (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
     request(baseUrl).post(`${EVENTS_PATH}/${eventId}/attendees`).set(actor.headers).send(body);
@@ -287,8 +288,13 @@ describe('leaving an event', () => {
       await castVote(leaver, eventId, ofOthersGame.id, VoteType.Against).expect(403);
       await request(baseUrl).get(`${EVENTS_PATH}/${eventId}`).set(leaver.headers).expect(404);
 
-      const listed = await request(baseUrl).get(`${EVENTS_PATH}/${eventId}/attendees`).set(host.headers).expect(200);
-      expect((listed.body.attendees as { id: string }[]).map(({ id }) => id)).not.toContain(leaverId);
+      const listed = listAttendeesEnvelope(
+        await listAttendees(host, eventId).expect(200),
+        'GET /api/events/:eventId/attendees as the host',
+      );
+      expect(listed.attendees.map(({ id }) => id)).not.toContain(leaverId);
+      // The host and the stayer: the leaver's removal lowers the total too (#373).
+      expect(listed.total).toBe(2);
 
       await removeAttendee(host, eventId, leaverId).expect(404);
     });

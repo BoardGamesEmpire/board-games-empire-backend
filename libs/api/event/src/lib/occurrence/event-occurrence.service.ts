@@ -66,10 +66,10 @@ export class EventOccurrenceService {
    * transaction below: pulling it in would mean an interactive transaction, and
    * holding a pooled connection and an open snapshot across the probe to spare
    * a check-then-act window is the wrong trade for a read. The window is real
-   * and bounded — an event soft-deleted between the probe and the read answers
-   * 200 with an empty page rather than 404 — and it is the ordinary TOCTOU any
-   * probe-then-read has. It says nothing about the rows and count, which do
-   * share one snapshot.
+   * and bounded — a soft delete keeps the occurrence rows, so an event deleted
+   * between the probe and the read answers 200 with them rather than 404 — and
+   * it is the ordinary TOCTOU any probe-then-read has. It says nothing about the
+   * rows and count, which do share one snapshot.
    *
    * The scope is the path's event, composed with the caller's ceiling (#512).
    * Each occurrence's votes and games come from reads of their own, after the

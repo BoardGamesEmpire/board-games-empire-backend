@@ -18,6 +18,9 @@ export const EVENTS_PATH = '/api/events';
 /** `GET /api/events/browse`: the upcoming events the acting user can read but doesn't attend (#962). */
 export const BROWSE_PATH = `${EVENTS_PATH}/browse`;
 
+/** `/api/events/:eventId/attendees`: the route an event's attendees are listed and added on. */
+export const attendeesPath = (eventId: string) => `${EVENTS_PATH}/${eventId}/attendees`;
+
 export interface EventClient {
   /**
    * `POST /api/events` as `actor`, under a fresh title, with `body` merged
@@ -27,6 +30,9 @@ export interface EventClient {
 
   /** The id of the event `actor` creates, failing the test unless the create answers 201. */
   createdEventId(actor: AuthenticatedActor, body?: Record<string, unknown>): Promise<string>;
+
+  /** `GET /api/events/:eventId/attendees` as `actor`, returning the supertest chain. */
+  listAttendees(actor: AuthenticatedActor, eventId: string, query?: { page?: number; limit?: number }): request.Test;
 }
 
 export function createEventClient(baseUrl: string): EventClient {
@@ -40,5 +46,7 @@ export function createEventClient(baseUrl: string): EventClient {
     createEvent,
     createdEventId: async (actor, body = {}) =>
       eventEnvelope(await createEvent(actor, body).expect(201), 'POST /api/events').id,
+    listAttendees: (actor, eventId, query = {}) =>
+      request(baseUrl).get(attendeesPath(eventId)).query(query).set(actor.headers),
   };
 }

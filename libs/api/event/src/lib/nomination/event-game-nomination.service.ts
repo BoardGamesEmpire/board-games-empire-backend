@@ -74,9 +74,10 @@ export class EventGameNominationService {
    *
    * The existence probe runs ahead of the read, so an event that does not exist
    * is a 404 rather than an empty page — with the same caveat as the occurrence
-   * list: it is a separate statement, so an event deleted between the probe and
-   * the read answers 200 with an empty page. That is a check-then-act window,
-   * not the rows-versus-count split the transaction below closes.
+   * list: it is a separate statement, and a soft delete keeps the nominations,
+   * so an event deleted between the probe and the read answers 200 with them.
+   * That is a check-then-act window, not the rows-versus-count split the
+   * transaction below closes.
    *
    * The scope is the path's event, composed with the caller's ceiling (#512).
    */
