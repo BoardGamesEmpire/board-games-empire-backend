@@ -15,7 +15,13 @@ import {
 } from '@bge/database';
 import { lockExistingHousehold } from '@bge/household';
 import { t } from '@bge/i18n';
-import { AbilityService, PermissionsService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
+import {
+  AbilityService,
+  PermissionsService,
+  resolveActingUserIdOrNull,
+  resolveScopeSubjectId,
+  ScopeComposer,
+} from '@bge/permissions';
 import { type DefaultPaginationQueryDto, type PaginatedRows } from '@bge/shared';
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
@@ -37,6 +43,15 @@ import type { CreateEventDto } from './dto/create-event.dto';
 import type { ListEventsQueryDto } from './dto/list-events.query.dto';
 import type { UpdateEventDto } from './dto/update-event.dto';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
+import {
+  EVENT_ATTENDANCE_SELECT,
+  readEventAttendance,
+  toEventAttendance,
+  withEventAttendance,
+  type EventAttendance,
+  type EventListRow,
+  type OwnAttendeeWhere,
+} from './utils/event-attendance.util';
 import { EVENT_STATUS_DATE_SELECT, withEventStatus, type EventWithStatus } from './utils/event-status.util';
 import { pickSnapshot } from './utils/pick-snapshot.util';
 import { pageUpcomingEvents } from './utils/upcoming-events.util';
@@ -87,11 +102,19 @@ export class EventService {
    * "the events I attend" has no meaning without a user, and the refusal must
    * never soften into an empty page. PROVISIONAL — #395.
    *
-   * Rows and count come from one REPEATABLE READ snapshot, so an event created
-   * or soft-deleted between the two statements cannot make `total` describe a
-   * list the caller was not served.
+   * Each row also carries the acting user's `attendance`, from a read of its
+   * own under the attendee ceiling (#867). The list's scope says they have a row
+   * on every event it lists, and every event role reads attendees, so a session
+   * gets it through its role. An actor who can't read the row, such as a key with
+   * no read on attendees, gets `null`.
+   *
+   * Rows, count and attendance come from one REPEATABLE READ snapshot, so an
+   * event created or soft-deleted between the statements cannot make `total`
+   * describe a list the caller was not served, and a row's attendance describes
+   * that row. The transaction is interactive because the attendance read needs
+   * the page's ids.
    */
-  async getEvents(query: ListEventsQueryDto): Promise<PaginatedRows<EventWithStatus>> {
+  async getEvents(query: ListEventsQueryDto): Promise<PaginatedRows<EventListRow>> {
     const now = new Date();
     const userId = resolveScopeSubjectId(this.abilityService);
 
@@ -101,9 +124,9 @@ export class EventService {
       attendees: { some: { userId, ...NOT_REMOVED } },
     });
 
-    const [rows, total] = await this.db.$transaction(
-      [
-        this.db.event.findMany({
+    return this.db.$transaction(
+      async (tx) => {
+        const rows = await tx.event.findMany({
           where,
           include: {
             // Unbounded: every occurrence of every event on the page, which is
@@ -119,14 +142,46 @@ export class EventService {
           take: query.pageSize,
           // `id` breaks ties on `createdAt` so page boundaries hold between requests.
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        }),
+        });
 
-        this.db.event.count({ where }),
-      ],
+        const total = await tx.event.count({ where });
+
+        const attendance = await readEventAttendance(
+          tx,
+          rows.map(({ id }) => id),
+          this.ownAttendeeWhere(userId),
+        );
+
+        return {
+          rows: withEventAttendance(
+            rows.map((row) => withEventStatus(row, row.occurrences, now)),
+            attendance,
+          ),
+          total,
+        };
+      },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
+  }
 
-    return { rows: rows.map((row) => withEventStatus(row, row.occurrences, now)), total };
+  /**
+   * Builds the where for the acting user's own attendee rows on a set of events,
+   * under the attendee read ceiling, or `null` for an actor with no user (#867).
+   * `EventAttendee.userId` is nullable, so a where on `userId: null` would match
+   * the rows of attendees with no account; the `null` builder makes such a where
+   * impossible to build.
+   */
+  private ownAttendeeWhere(userId: string | null): OwnAttendeeWhere | null {
+    if (userId === null) {
+      return null;
+    }
+
+    return (eventIds) =>
+      this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, {
+        userId,
+        ...NOT_REMOVED,
+        eventId: { in: [...eventIds] },
+      });
   }
 
   /**
@@ -145,15 +200,27 @@ export class EventService {
    * and the count alike, then orders and pages the events soonest first. Its
    * rows are `GET /events` rows, each reading Scheduled or Ongoing.
    *
+   * Each row's `attendance` is always `null`, because the scope leaves out every
+   * event the acting user has a row on, so a parser never has to tell a missing
+   * field from a `null` one (#867). The read finds nothing today. It still takes
+   * the shared path rather than a special case, at the cost of one indexed read
+   * per page, so the field stays right if the scope ever changes.
+   *
    * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
    * "the events I could join" has no meaning without a user, and the refusal
    * must never soften into an empty page. PROVISIONAL — #395.
    */
-  async browseEvents(query: DefaultPaginationQueryDto): Promise<PaginatedRows<EventWithStatus>> {
+  async browseEvents(query: DefaultPaginationQueryDto): Promise<PaginatedRows<EventListRow>> {
     const userId = resolveScopeSubjectId(this.abilityService);
     const where = this.scopeComposer.compose(ResourceType.Event, Action.read, browseEventScope(userId));
 
-    return pageUpcomingEvents(this.db, where, { skip: query.skip, take: query.pageSize }, new Date());
+    return pageUpcomingEvents(
+      this.db,
+      where,
+      { skip: query.skip, take: query.pageSize },
+      new Date(),
+      this.ownAttendeeWhere(userId),
+    );
   }
 
   /**
@@ -174,19 +241,29 @@ export class EventService {
    * a status the event doesn't have. Only the three columns it needs are
    * read, and every occurrence read grant mirrors an event read grant today.
    *
-   * The five reads share one REPEATABLE READ snapshot, as the list's rows and
-   * count do, so the parts describe the event at one moment. They run whether
-   * or not the caller can read the event; if not, the 404 discards them. Each
-   * is an indexed lookup by event, so a 404 costs three small reads. Reading
-   * the event first would cost every 200 an interactive transaction, or the
-   * shared snapshot.
+   * A sixth read is the acting user's own attendee row, under the attendee
+   * ceiling (#867). It doesn't search `attendees`, which #404 may cap: a search
+   * would then give some attendees `null`. `attendance` is `null` for an acting
+   * user who doesn't attend or was removed, or an actor who can't read the row.
+   * An actor with no user gets `null` with no read at all: this route admits
+   * them, and `EventAttendee.userId` is nullable, so a where on `userId: null`
+   * would match the row of an attendee with no account.
+   *
+   * The reads share one REPEATABLE READ snapshot, as the list's rows and count
+   * do, so the parts describe the event at one moment. They run whether or not
+   * the caller can read the event; if not, the 404 discards them. Each is an
+   * indexed lookup by event, so a 404 costs a few small reads. Reading the
+   * event first would cost every 200 an interactive transaction, or the shared
+   * snapshot.
    *
    * The occurrences and attendees are unbounded, as the embed was. Capping
    * them is #404's.
    */
   async getEventById(id: string): Promise<EventDetail> {
     const now = new Date();
-    const [event, occurrences, attendees, policy, statusDates] = await this.db.$transaction(
+    const ownAttendeeWhere = this.ownAttendeeWhere(resolveActingUserIdOrNull(this.abilityService));
+
+    const [event, occurrences, attendees, policy, statusDates, ownRows] = await this.db.$transaction(
       [
         this.db.event.findUnique({
           where: {
@@ -217,12 +294,27 @@ export class EventService {
         }),
 
         this.db.eventOccurrence.findMany({ where: { eventId: id }, select: EVENT_STATUS_DATE_SELECT }),
+
+        ...(ownAttendeeWhere
+          ? [this.db.eventAttendee.findMany({ where: ownAttendeeWhere([id]), select: EVENT_ATTENDANCE_SELECT })]
+          : []),
       ],
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
     assert(event, new NotFoundException(t('errors.event.not_found', { id })));
-    return { ...withEventStatus(event, statusDates, now), occurrences, attendees, policy };
+
+    // `ownRows` is undefined when no read was made, and `@@unique([eventId, userId])`
+    // leaves at most one row when one was.
+    const ownRow = ownRows?.[0];
+
+    return {
+      ...withEventStatus(event, statusDates, now),
+      occurrences,
+      attendees,
+      policy,
+      attendance: ownRow ? toEventAttendance(ownRow) : null,
+    };
   }
 
   async createEvent(dto: CreateEventDto): Promise<CreatedEvent & { status: EventStatus }> {
@@ -674,4 +766,4 @@ export type EventDetail = Prisma.EventGetPayload<{
     attendees: { include: typeof ATTENDEE_USER_AND_ROLE_INCLUDE };
     policy: true;
   };
-}> & { status: EventStatus };
+}> & { status: EventStatus; attendance: EventAttendance | null };

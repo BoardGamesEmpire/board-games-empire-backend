@@ -29,7 +29,9 @@ export class EventController {
       'same kind of result for every caller. The row counts whatever its RSVP status, so events the caller is ' +
       'only invited to, or has declined, are listed too. Newest first, soft-deleted events excluded. ' +
       'Archived events are left out unless `?includeArchived=true`, and stay readable by id (#795). Each event ' +
-      'carries a `status` worked out from its cancel, archive and confirmed dates. ' +
+      'carries a `status` worked out from its cancel, archive and confirmed dates. Each event carries `attendance`, ' +
+      'the acting user\u2019s own attendee row: `attendeeId`, `status` (their RSVP), `role` and `rsvpDate`. It is ' +
+      '`null` when the actor can\u2019t read that row, as with an API key without permission to read attendees. ' +
       '**Breaking change (#512).** This route previously widened with the caller: a household member also received every event ' +
       'in their households, a friend received the events whose reach admits friends, and Owner/Admin/Moderator ' +
       'received every event on the server, with `pagination.total` scoped the same way (#365). Each of those ' +
@@ -66,7 +68,7 @@ export class EventController {
       'archived or deleted, with a confirmed date that hasn’t ended, so each `status` is Scheduled or ' +
       'Ongoing. A date with no end ends when it starts. Events with no date yet are left out. Soonest first: ' +
       'by the start of each event’s earliest date that hasn’t ended, then by id. Each row is a ' +
-      '`GET /events` row. The Owner, Admins and Moderators get the same kind of list as everyone else, not ' +
+      '`GET /events` row, and `attendance` is always `null`, since the acting user has no row on these events. The Owner, Admins and Moderators get the same kind of list as everyone else, not ' +
       'every event on the server. An **API key** is also limited by its own permissions (effective access ' +
       'is key ∩ owner). Nobody can join an event from this list yet; that is #812. Paginated: `?page=` ' +
       '(1-based) and `?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`.',
@@ -87,7 +89,12 @@ export class EventController {
     );
   }
 
-  @ApiOperation({ summary: 'Get event by ID' })
+  @ApiOperation({
+    summary: 'Get event by ID',
+    description:
+      '`attendance` is `null` when the acting user doesn\u2019t attend or was removed, or when the actor doesn\u2019t ' +
+      'have permission to read attendees.',
+  })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Event retrieved successfully' })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })

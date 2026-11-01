@@ -6,6 +6,7 @@ import type {
   EventGameNomination,
   EventGameVote,
   EventOccurrence,
+  EventParticipationStatus,
   EventPolicy,
   EventStatus,
   Game,
@@ -21,15 +22,37 @@ import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescripti
  */
 
 /**
+ * How the acting user attends an event (#867). Restated rather than imported from
+ * `@bge/event`, since the suite checks the wire contract and not the service's
+ * own type.
+ */
+export interface EventAttendanceWire {
+  readonly attendeeId: string;
+  readonly status: EventParticipationStatus;
+  readonly role: string | null;
+  readonly rsvpDate: string | null;
+}
+
+/**
  * An event as every event route serves it: the row, plus the `status` worked
  * out from its cancel, archive and confirmed dates, never stored (#795).
  */
-export type EventWire = Wire<Event> & { readonly status: EventStatus };
+export type EventWire = Wire<Event> & {
+  readonly status: EventStatus;
+};
 export type EventAttendeeWire = Wire<EventAttendee>;
 export type EventGameWire = Wire<EventGame>;
 
+/**
+ * An event as the reads serve it, with how the acting user attends (#867).
+ * Create, update and lifecycle responses don't carry `attendance`.
+ */
+export type EventReadWire = EventWire & {
+  readonly attendance: EventAttendanceWire | null;
+};
+
 export interface ListEventsEnvelope {
-  readonly events: readonly EventWire[];
+  readonly events: readonly EventReadWire[];
   readonly total: number;
 }
 
@@ -86,11 +109,17 @@ export type EventOccurrenceWire = Wire<EventOccurrence> & {
  * Each comes from a read under its own type's ceiling (#560), so a caller
  * without a read on one gets `[]` for it, or `null` for the policy.
  */
-export type EventDetailWire = EventWire & {
+export type EventDetailWire = EventReadWire & EventEmbedsWire;
+
+/** The embeds a create's replay shares with the event read. */
+export interface EventEmbedsWire {
   readonly occurrences: readonly Wire<EventOccurrence>[];
   readonly attendees: readonly EventAttendeeWire[];
   readonly policy: Wire<EventPolicy> | null;
-};
+}
+
+/** A create's replay: the event and its embeds, without `attendance` (#867). */
+export type EventReplayWire = EventWire & EventEmbedsWire;
 
 export interface ListOccurrencesEnvelope {
   readonly occurrences: readonly EventOccurrenceWire[];
@@ -161,13 +190,18 @@ export function eventEnvelope(response: HttpResponseLike, request: RequestDescri
   return event ?? fail("it carried no 'event' object with a string id", request, response);
 }
 
+/** Whether `value` carries `attendance`, an object or `null`: a read's row without the key changed shape (#867). */
+function hasAttendance(value: { readonly attendance?: unknown }): boolean {
+  return value.attendance === null || isRecord(value.attendance);
+}
+
 /**
- * `GET /api/events/:id`: `{ event }`, with the event's `occurrences` and
+ * A create's replay: `{ message, event }`, with the event's `occurrences` and
  * `attendees` arrays and its `policy`, an object or `null`. A missing key
  * means the response's shape changed, not that the caller was refused one.
  */
-export function eventDetailEnvelope(response: HttpResponseLike, request: RequestDescription): EventDetailWire {
-  const event = isRecord(response.body) ? withId<EventDetailWire>(response.body['event']) : undefined;
+export function eventReplayEnvelope(response: HttpResponseLike, request: RequestDescription): EventReplayWire {
+  const event = isRecord(response.body) ? withId<EventReplayWire>(response.body['event']) : undefined;
   const complete =
     event !== undefined &&
     Array.isArray(event.occurrences) &&
@@ -183,8 +217,27 @@ export function eventDetailEnvelope(response: HttpResponseLike, request: Request
       );
 }
 
+/** `GET /api/events/:id`: `{ event }`, as {@link eventReplayEnvelope} checks it, plus `attendance`. */
+export function eventDetailEnvelope(response: HttpResponseLike, request: RequestDescription): EventDetailWire {
+  const event = eventReplayEnvelope(response, request) as EventReplayWire & { readonly attendance?: unknown };
+
+  return hasAttendance(event)
+    ? (event as EventDetailWire)
+    : fail("its 'event' carried no 'attendance' object or null", request, response);
+}
+
 /** What a row must be for {@link withId}. */
 const ROW_WITH_ID = 'an object with a string id';
+
+/** What a row must be for {@link eventRow}. */
+const EVENT_ROW = "an object with a string id and an 'attendance' object or null";
+
+/** An event list's row: an id, and `attendance`, which every list read carries (#867). */
+function eventRow(value: unknown): EventReadWire | undefined {
+  const row = withId<EventReadWire>(value);
+
+  return row !== undefined && hasAttendance(row) ? row : undefined;
+}
 
 /** What a row must be for {@link occurrenceRow}. */
 const OCCURRENCE_ROW = "an object with a string id, an 'availabilityVotes' array and a 'games' array";
@@ -230,9 +283,9 @@ function paginatedEnvelope<TRow>(
   return { rows, total };
 }
 
-/** `GET /api/events`: `{ events: [...], pagination }`. */
+/** `GET /api/events` and the other event lists: `{ events: [...], pagination }`. */
 export function listEventsEnvelope(response: HttpResponseLike, request: RequestDescription): ListEventsEnvelope {
-  const { rows, total } = paginatedEnvelope('events', withId<EventWire>, ROW_WITH_ID, response, request);
+  const { rows, total } = paginatedEnvelope('events', eventRow, EVENT_ROW, response, request);
 
   return { events: rows, total };
 }

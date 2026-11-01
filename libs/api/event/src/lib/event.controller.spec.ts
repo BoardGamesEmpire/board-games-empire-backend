@@ -10,6 +10,7 @@ import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { EventController } from './event.controller';
 import { EventService } from './event.service';
+import type { EventListRow } from './utils/event-attendance.util';
 import type { EventWithStatus } from './utils/event-status.util';
 
 describe('EventController', () => {
@@ -44,7 +45,7 @@ describe('EventController', () => {
 
   describe('getEvents', () => {
     it('delegates to EventService.getEvents and wraps the rows in the paginated envelope', async () => {
-      const events = [stubEvent(), stubEvent()];
+      const events = [stubListRow(), stubListRow()];
       service.getEvents.mockResolvedValue({ rows: events, total: 2 });
 
       const pagination = paginationQuery({ limit: 10 });
@@ -60,7 +61,7 @@ describe('EventController', () => {
     // #372: the echoed paging describes the query the controller was handed, so
     // a deep page has to report itself as one — not as page 1 of the rows sent.
     it('echoes the requested page rather than the shape of the rows returned', async () => {
-      service.getEvents.mockResolvedValue({ rows: [stubEvent()], total: 25 });
+      service.getEvents.mockResolvedValue({ rows: [stubListRow()], total: 25 });
 
       const result = await firstValueFrom(controller.getEvents(paginationQuery({ page: 3, limit: 10 })));
 
@@ -94,7 +95,7 @@ describe('EventController', () => {
 
   describe('browseEvents (#962)', () => {
     it('delegates to EventService.browseEvents and wraps the rows in the paginated envelope', async () => {
-      const events = [stubEvent(), stubEvent()];
+      const events = [stubListRow(), stubListRow()];
       service.browseEvents.mockResolvedValue({ rows: events, total: 2 });
 
       const pagination = paginationQuery({ limit: 10 });
@@ -123,7 +124,7 @@ describe('EventController', () => {
 
   describe('getEventById', () => {
     it('delegates to EventService.getEventById and wraps response', async () => {
-      const event = { ...stubEvent({ id: 'ev-42' }), occurrences: [], attendees: [], policy: null };
+      const event = { ...stubListRow({ id: 'ev-42' }), occurrences: [], attendees: [], policy: null };
       service.getEventById.mockResolvedValue(event);
 
       const result = await firstValueFrom(controller.getEventById('ev-42'));
@@ -185,6 +186,11 @@ describe('EventController', () => {
     });
   });
 });
+
+/** An event as the lists serve it, with the acting user's attendance (#867). */
+function stubListRow(overrides: Partial<Event> = {}): EventListRow {
+  return { ...stubEvent(overrides), attendance: null };
+}
 
 /** An event as the service serves it, with its worked-out status (#795). */
 function stubEvent(overrides: Partial<Event> = {}): EventWithStatus {
