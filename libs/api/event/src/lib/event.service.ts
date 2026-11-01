@@ -165,6 +165,48 @@ export class EventService {
   }
 
   /**
+   * One page of a household's upcoming events, soonest first, plus the total
+   * for the envelope (#506). The acting user needn't attend them: a member who
+   * doesn't gets the event's row with `attendance` `null`.
+   *
+   * The set is the endpoint's own, and the ceiling only limits it, so someone
+   * outside the household gets what is open to them, such as its Public events,
+   * and staff get this household's events rather than every event on the server. An empty page is a 200 with no check
+   * for hidden rows, which would tell a stranger the household has events.
+   *
+   * The scope names the household and checks that it is live. `HouseholdLivenessGuard`
+   * passes an actor who can't read `Household`, such as a key scoped to events,
+   * and a soft delete leaves the household's events live (#992), so without it
+   * that key would list a deleted household's events. Whether the event itself
+   * is live is `pageUpcomingEvents`' to say, as on browse.
+   *
+   * It limits which events are listed, not what each one embeds, as on
+   * `GET /events`: an actor whose occurrence or policy ceiling is narrower than
+   * its event ceiling, such as a key scoped to events, still gets both here.
+   *
+   * A household's events aren't first-person, so `resolveScopeSubjectId` doesn't
+   * apply: an actor with no user gets the same list, with `attendance` `null`,
+   * as on `users/:userId/game-collections` (#514).
+   */
+  async getHouseholdEvents(
+    householdId: string,
+    query: DefaultPaginationQueryDto,
+  ): Promise<PaginatedRows<EventListRow>> {
+    const where = this.scopeComposer.compose(ResourceType.Event, Action.read, {
+      householdId,
+      household: { is: { deletedAt: null } },
+    });
+
+    return pageUpcomingEvents(
+      this.db,
+      where,
+      { skip: query.skip, take: query.pageSize },
+      new Date(),
+      this.ownAttendeeWhere(resolveActingUserIdOrNull(this.abilityService)),
+    );
+  }
+
+  /**
    * Builds the where for the acting user's own attendee rows on a set of events,
    * under the attendee read ceiling, or `null` for an actor with no user (#867).
    * `EventAttendee.userId` is nullable, so a where on `userId: null` would match

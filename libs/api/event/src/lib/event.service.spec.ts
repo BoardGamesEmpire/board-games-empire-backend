@@ -388,6 +388,83 @@ describe('EventService', () => {
   });
 
   /**
+   * #506. A household's upcoming events, whoever is asking. The scope also
+   * checks the household, because the liveness guard passes an actor who can't
+   * read `Household` and a soft delete leaves its events live (#992).
+   */
+  describe('getHouseholdEvents (#506)', () => {
+    const NOW = new Date('2026-11-01T12:00:00Z');
+    const SCOPE = { householdId: 'household-1', household: { is: { deletedAt: null } } };
+    let groupBy: jest.Mock;
+
+    const list = (init: Record<string, unknown> = {}) =>
+      service.getHouseholdEvents(
+        'household-1',
+        plainToInstance(DefaultPaginationQueryDto, { limit: 20, ...init }, { enableImplicitConversion: true }),
+      );
+
+    beforeEach(() => {
+      jest.useFakeTimers({ now: NOW, doNotFake: ['nextTick', 'setImmediate'] });
+      unwrapTransaction(db);
+      groupBy = db.eventOccurrence.groupBy as unknown as jest.Mock;
+      groupBy.mockResolvedValue([]);
+      db.event.count.mockResolvedValue(0);
+      db.eventAttendee.findMany.mockResolvedValue([]);
+    });
+
+    afterEach(() => jest.useRealTimers());
+
+    it('asks the composer for its where clause, naming the household and that it is live', async () => {
+      await list();
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.Event, Action.read, SCOPE);
+    });
+
+    it('pages through the composed clause, the ceiling limiting it rather than supplying it', async () => {
+      await list({ page: 2 });
+
+      const composed = { ...SCOPE, AND: [COND] };
+      const standing = { AND: [{ deletedAt: null, cancelledAt: null, archivedAt: null }, composed] };
+      expect(groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { ...upcomingDateWhere(NOW), event: { is: standing } }, skip: 20, take: 20 }),
+      );
+      expect(db.event.count).toHaveBeenCalledWith({ where: { AND: [upcomingEventWhere(NOW), composed] } });
+    });
+
+    it("reads the acting user's own attendee rows on the page (#867)", async () => {
+      groupBy.mockResolvedValue([{ eventId: 'event-1' }]);
+      db.event.findMany.mockResolvedValue([{ ...makeEvent({ id: 'event-1' }), occurrences: [futureDate()] }] as never);
+      db.eventAttendee.findMany.mockResolvedValue([ownAttendeeRow('event-1')] as never);
+
+      const { rows } = await list();
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, {
+        userId: MOCK_ACTING_USER_ID,
+        removedAt: null,
+        eventId: { in: ['event-1'] },
+      });
+      expect(rows[0].attendance?.attendeeId).toBe('attendee-event-1');
+    });
+
+    // This route isn't first-person: the household names the set, so an actor
+    // with no user gets the same list rather than a refusal, as on
+    // `users/:userId/game-collections` (#514). A where on `userId: null` would
+    // match the rows of attendees with no account, so it makes no attendance read.
+    it('lists for an actor with no user, with null attendance and no attendee read', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
+      groupBy.mockResolvedValue([{ eventId: 'event-1' }]);
+      db.event.findMany.mockResolvedValue([{ ...makeEvent({ id: 'event-1' }), occurrences: [futureDate()] }] as never);
+
+      const { rows } = await list();
+
+      expect(rows.map(({ id, attendance }) => ({ id, attendance }))).toEqual([{ id: 'event-1', attendance: null }]);
+      expect(db.eventAttendee.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
    * #560. The event read embedded its occurrences, attendees and policy, so
    * each went to whoever could read the event: a friend of the host, or a
    * household guest, got every attendee. Each is now a read of its own, with
