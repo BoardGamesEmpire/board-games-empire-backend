@@ -2,8 +2,8 @@ import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { firstValueFrom, NEVER, of, throwError } from 'rxjs';
-import { toArray } from 'rxjs/operators';
+import { firstValueFrom, NEVER, of, throwError, timer } from 'rxjs';
+import { map, takeUntil, toArray } from 'rxjs/operators';
 import { BggService, type BggRequest } from '../bgg/bgg.service';
 import { BggLinkType, BggNameType, BggThingType, MAX_THINGS_PER_BATCH } from '../constants';
 import { toCategoryList, toMechanicList } from '../mappers/taxonomy.mapper';
@@ -362,7 +362,7 @@ describe('DataGatewayService', () => {
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('174430'));
       });
 
-      it("sends a stalled batch's results as search found them after 10 seconds, and ends with SOURCE_DONE", async () => {
+      it("sends a stalled batch's results as search found them 12 seconds after the search began, and ends with SOURCE_DONE", async () => {
         jest.useFakeTimers();
         const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
         bggService.call.mockReturnValueOnce(of([CATAN_SEARCH])).mockReturnValueOnce(NEVER);
@@ -370,9 +370,50 @@ describe('DataGatewayService', () => {
         try {
           const frames$ = searched({ correlationId: 'c', query: 'catan' });
 
-          await jest.advanceTimersByTimeAsync(10_000);
+          await jest.advanceTimersByTimeAsync(12_000);
           const frames = await frames$;
 
+          expect(games(frames).map((game) => [game?.externalId, game?.thumbnailUrl])).toEqual([['13', undefined]]);
+          expect(frames.at(-1)?.status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
+          expect(warn).toHaveBeenCalledTimes(1);
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      // One 202 from BGG costs its client 6 seconds, and the api's REST search stops listening at 15 (#880).
+      it("gets a slow search's results to the api before REST stops listening, when its batch then stalls", async () => {
+        jest.useFakeTimers();
+        jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+        bggService.call.mockReturnValueOnce(timer(6_000).pipe(map(() => [CATAN_SEARCH]))).mockReturnValueOnce(NEVER);
+
+        try {
+          const frames$ = firstValueFrom(
+            service.searchGames({ correlationId: 'c', query: 'catan' }).pipe(takeUntil(timer(15_000)), toArray()),
+          );
+
+          await jest.advanceTimersByTimeAsync(15_000);
+          const frames = await frames$;
+
+          expect(games(frames).map((game) => [game?.externalId, game?.thumbnailUrl])).toEqual([['13', undefined]]);
+          expect(frames.at(-1)?.status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('asks BGG for no things when search used up the time, and sends its results as found', async () => {
+        jest.useFakeTimers();
+        const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+        bggService.call.mockReturnValueOnce(timer(12_000).pipe(map(() => [CATAN_SEARCH])));
+
+        try {
+          const frames$ = searched({ correlationId: 'c', query: 'catan' });
+
+          await jest.advanceTimersByTimeAsync(12_000);
+          const frames = await frames$;
+
+          expect(bggService.call).toHaveBeenCalledTimes(1);
           expect(games(frames).map((game) => [game?.externalId, game?.thumbnailUrl])).toEqual([['13', undefined]]);
           expect(frames.at(-1)?.status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
           expect(warn).toHaveBeenCalledTimes(1);

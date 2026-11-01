@@ -3,7 +3,7 @@ import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
-import { defer, EMPTY, from, Observable, of } from 'rxjs';
+import { defer, EMPTY, from, Observable, of, throwError } from 'rxjs';
 import { catchError, endWith, map, mergeMap, tap, timeout, toArray } from 'rxjs/operators';
 import {
   chunk,
@@ -35,13 +35,18 @@ const EXPANSION_BATCH_TYPES = [BggThingType.BoardGameExpansion] as const;
 const SEARCH_THING_OPTIONS: ThingFetchOptions = { stats: 1, versions: 0, types: FETCH_GAME_TYPES };
 
 /**
- * How long a page's `/thing` batch may take before its results go out as
- * search found them. `bgg-ts-client` sets no timeout of its own, and the page
- * waits on every batch, so a stalled one would hold back results search
- * already has (#880). A batch of 20 was measured at about half a second, and
- * this leaves room for a rate limit's retry.
+ * How long after a search begins its page's `/thing` batches may run before
+ * their results go out as search found them. `bgg-ts-client` sets no timeout
+ * of its own, and the page waits on every batch, so a stalled one would hold
+ * back results search already has (#880).
+ *
+ * It counts from the start of the search because the api's REST search stops
+ * listening 15 seconds in (`GameSearchService.searchExternal`), and search can
+ * use much of that: the client waits 6 seconds on each 202 from BGG. This
+ * leaves the results time to reach the api. A batch of 20 was measured at about
+ * half a second, so a quick search leaves room for a rate limit's retry or a 202.
  */
-const SEARCH_THINGS_TIMEOUT_MS = 10_000;
+const SEARCH_THINGS_DEADLINE_MS = 12_000;
 
 @Injectable()
 export class DataGatewayService extends GatewayServiceHost {
@@ -168,11 +173,12 @@ export class DataGatewayService extends GatewayServiceHost {
     }
 
     const search = searchGamesRequest(request.query, limit, offset, types, request.filter?.publishYear);
+    const thingsDeadline = new Date(Date.now() + SEARCH_THINGS_DEADLINE_MS);
 
     return this.bggService.call(search).pipe(
       tap((items) => this.logger.log(`searchGames found ${items.length} results for query '${request.query}'`)),
 
-      mergeMap((items) => this.withThings(items, request.query)),
+      mergeMap((items) => this.withThings(items, request.query, thingsDeadline)),
       map(
         (game) =>
           ({
@@ -208,9 +214,13 @@ export class DataGatewayService extends GatewayServiceHost {
    * batch that still fails or runs out of time logs a warning and sends its
    * results as search found them, leaving the other batches' alone; so does a
    * result whose thing BGG's answer leaves out or that can't be read. An empty
-   * page asks BGG nothing.
+   * page asks BGG nothing, and neither does a search that used up the time.
    */
-  private withThings(items: BggSearchItem[], queryForLogging: string): Observable<proto.GameSearchData> {
+  private withThings(
+    items: BggSearchItem[],
+    queryForLogging: string,
+    deadline: Date,
+  ): Observable<proto.GameSearchData> {
     const batches = chunk(
       items.map((item) => item.id),
       MAX_THINGS_PER_BATCH,
@@ -218,9 +228,7 @@ export class DataGatewayService extends GatewayServiceHost {
 
     return from(batches).pipe(
       mergeMap((batch) =>
-        this.bggService.call(fetchThingsRequest(batch, SEARCH_THING_OPTIONS)).pipe(
-          timeout({ first: SEARCH_THINGS_TIMEOUT_MS }),
-
+        this.thingsBefore(deadline, batch).pipe(
           tap((things) => {
             const answered = new Set(things.map((thing) => thing.id));
             const missing = batch.filter((id) => !answered.has(id));
@@ -246,6 +254,15 @@ export class DataGatewayService extends GatewayServiceHost {
         return items.map((item) => this.fillIn(item, thingsById.get(item.id), queryForLogging));
       }),
     );
+  }
+
+  /** A batch's things, failing at the deadline, without asking BGG if it has passed (#880). */
+  private thingsBefore(deadline: Date, batch: number[]): Observable<BggThing[]> {
+    if (Date.now() >= deadline.getTime()) {
+      return throwError(() => new Error('search left no time to ask for details'));
+    }
+
+    return this.bggService.call(fetchThingsRequest(batch, SEARCH_THING_OPTIONS)).pipe(timeout({ first: deadline }));
   }
 
   /**
