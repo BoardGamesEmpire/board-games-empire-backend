@@ -183,7 +183,12 @@ export interface BggSearchItem {
 
 export interface BggSearchResult {
   total: number;
-  items: BggSearchItem[];
+
+  /**
+   * Absent when nothing matched: BGG's answer has no `<item>`, and
+   * `bgg-ts-client` 0.2.0 then leaves this out (#967).
+   */
+  items?: BggSearchItem[];
 }
 
 /**

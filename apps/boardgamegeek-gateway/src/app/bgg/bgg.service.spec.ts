@@ -1,11 +1,18 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { Http } from '@status/codes';
-import { AxiosError, AxiosHeaders } from 'axios';
-import { firstValueFrom, of, throwError } from 'rxjs';
+import { BggApiError, BggClient, BggClientError } from 'bgg-ts-client';
+import { defer, firstValueFrom, of, throwError } from 'rxjs';
 import type { BggThing } from '../types';
 import { BggRequest, BggService } from './bgg.service';
 import { BGG_CLIENT } from './constants';
 import type { BggClientLike } from './interfaces';
+
+/**
+ * The network under the real `bgg-ts-client`, whose fetcher goes through
+ * isomorphic-unfetch.
+ */
+const mockFetch = jest.fn<Promise<Response>, [string]>();
+jest.mock('isomorphic-unfetch', () => (url: string) => mockFetch(url));
 
 describe('BggService', () => {
   let service: BggService;
@@ -46,19 +53,17 @@ describe('BggService', () => {
       expect(result).toEqual(MOCK_THINGS);
     });
 
-    it('propagates non-Axios errors without retrying', async () => {
+    it("propagates errors that are not the client's without retrying", async () => {
       const request: BggRequest<BggThing[]> = jest.fn().mockReturnValue(throwError(() => new Error('boom')));
 
       await expect(firstValueFrom(service.call(request))).rejects.toThrow('boom');
       expect(request).toHaveBeenCalledTimes(1);
     });
 
-    it('propagates Axios errors with non-429 status codes without retrying', async () => {
-      const request: BggRequest<BggThing[]> = jest
-        .fn()
-        .mockReturnValue(throwError(() => makeAxiosError(Http.NotFound)));
+    it('propagates client errors with non-429 status codes without retrying', async () => {
+      const request: BggRequest<BggThing[]> = jest.fn().mockReturnValue(throwError(() => clientError(Http.NotFound)));
 
-      await expect(firstValueFrom(service.call(request))).rejects.toBeInstanceOf(AxiosError);
+      await expect(firstValueFrom(service.call(request))).rejects.toBeInstanceOf(BggClientError);
       expect(request).toHaveBeenCalledTimes(1);
     });
   });
@@ -70,7 +75,7 @@ describe('BggService', () => {
     it('re-invokes the request factory once on a 429 response', async () => {
       const request: BggRequest<BggThing[]> = jest
         .fn()
-        .mockReturnValueOnce(throwError(() => makeAxiosError(Http.TooManyRequests)))
+        .mockReturnValueOnce(throwError(() => clientError(Http.TooManyRequests)))
         .mockReturnValueOnce(of(MOCK_THINGS));
 
       const result$ = firstValueFrom(service.call(request));
@@ -83,26 +88,10 @@ describe('BggService', () => {
       expect(result).toEqual(MOCK_THINGS);
     });
 
-    it('honors a numeric Retry-After header (seconds) for the backoff delay', async () => {
+    it('waits 2000ms before the retry', async () => {
       const request: BggRequest<BggThing[]> = jest
         .fn()
-        .mockReturnValueOnce(throwError(() => makeAxiosError(Http.TooManyRequests, { 'retry-after': '3' })))
-        .mockReturnValueOnce(of(MOCK_THINGS));
-
-      const result$ = firstValueFrom(service.call(request));
-
-      expect(request).toHaveBeenCalledTimes(1);
-      await jest.advanceTimersByTimeAsync(2999);
-      expect(request).toHaveBeenCalledTimes(1);
-      await jest.advanceTimersByTimeAsync(1);
-      await expect(result$).resolves.toEqual(MOCK_THINGS);
-      expect(request).toHaveBeenCalledTimes(2);
-    });
-
-    it('falls back to the default 2000ms when no Retry-After header is present', async () => {
-      const request: BggRequest<BggThing[]> = jest
-        .fn()
-        .mockReturnValueOnce(throwError(() => makeAxiosError(Http.TooManyRequests)))
+        .mockReturnValueOnce(throwError(() => clientError(Http.TooManyRequests)))
         .mockReturnValueOnce(of(MOCK_THINGS));
 
       const result$ = firstValueFrom(service.call(request));
@@ -118,10 +107,10 @@ describe('BggService', () => {
     it('throws if the retried request also fails with 429', async () => {
       const request: BggRequest<BggThing[]> = jest
         .fn()
-        .mockReturnValue(throwError(() => makeAxiosError(Http.TooManyRequests)));
+        .mockReturnValue(throwError(() => clientError(Http.TooManyRequests)));
 
       const result$ = firstValueFrom(service.call(request));
-      const rejection = expect(result$).rejects.toBeInstanceOf(AxiosError);
+      const rejection = expect(result$).rejects.toBeInstanceOf(BggClientError);
       await jest.runAllTimersAsync();
 
       await rejection;
@@ -131,7 +120,7 @@ describe('BggService', () => {
     it('does not retry a 429 followed by a non-retryable error — the second error propagates', async () => {
       const request: BggRequest<BggThing[]> = jest
         .fn()
-        .mockReturnValueOnce(throwError(() => makeAxiosError(Http.TooManyRequests)))
+        .mockReturnValueOnce(throwError(() => clientError(Http.TooManyRequests)))
         .mockReturnValueOnce(throwError(() => new Error('boom')));
 
       const result$ = firstValueFrom(service.call(request));
@@ -141,21 +130,28 @@ describe('BggService', () => {
       await rejection;
       expect(request).toHaveBeenCalledTimes(2);
     });
+
+    it('retries a 429 from the real client, which throws no Axios error (#880)', async () => {
+      const client = BggClient.Create({ apiKey: 'test-key' }) as unknown as BggClientLike;
+      const module = await Test.createTestingModule({
+        providers: [BggService, { provide: BGG_CLIENT, useValue: client }],
+      }).compile();
+      mockFetch
+        .mockResolvedValueOnce(new Response('Rate limit exceeded', { status: Http.TooManyRequests }))
+        .mockResolvedValueOnce(new Response('<items total="0" termsofuse=""></items>'));
+
+      const result$ = firstValueFrom(
+        module.get(BggService).call((bgg) => defer(() => bgg.search.query({ query: 'catan' }))),
+      );
+      await jest.runAllTimersAsync();
+
+      await expect(result$).resolves.toBeDefined();
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
   });
 });
 
-/**
- * Builds an AxiosError matching the shape the service inspects via
- * `isAxiosError(err)` + `err.response?.status`.
- */
-function makeAxiosError(status: number, headers: Record<string, string> = {}): AxiosError {
-  const axiosHeaders = new AxiosHeaders(headers);
-  const error = new AxiosError(`Status ${status}`, String(status), undefined, undefined, {
-    status,
-    statusText: '',
-    headers: axiosHeaders,
-    config: { headers: axiosHeaders },
-    data: undefined,
-  });
-  return error;
+/** An error of `status` as `bgg-ts-client` throws it. */
+function clientError(status: number): BggClientError {
+  return new BggClientError('thing', new BggApiError(status, 'https://boardgamegeek.com/xmlapi2/thing'));
 }
