@@ -1,6 +1,7 @@
 import type { Game } from '@bge/database';
-import { ContentType, Reach } from '@bge/database';
+import { ContentType, PlatformType, Reach } from '@bge/database';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import type { PlatformGameDetail } from '../platform-game-detail.select';
 
 export class GameDto implements Pick<
   Game,
@@ -93,9 +94,99 @@ export class GameDto implements Pick<
   updatedAt!: Date;
 }
 
+export class GamePlatformDto {
+  @ApiProperty({ description: 'Unique platform identifier' })
+  id!: string;
+
+  @ApiProperty({ description: 'Name of the platform' })
+  name!: string;
+
+  @ApiProperty({ type: String, nullable: true, description: 'Short name of the platform' })
+  abbreviation!: string | null;
+
+  @ApiProperty({ enum: PlatformType, enumName: 'PlatformType', description: 'Kind of platform' })
+  platformType!: PlatformType;
+}
+
+/**
+ * A game on one platform (#791). This class implements the read's row type and
+ * the service annotates that read with this class, so a column missing from
+ * either the select or this class fails the typecheck.
+ */
+export class PlatformGameDetailDto implements PlatformGameDetail {
+  @ApiProperty({ description: 'Unique platform game identifier, which `POST /game-collections` takes' })
+  id!: string;
+
+  @ApiProperty({ description: 'ID of the game this is a platform game of' })
+  gameId!: string;
+
+  @ApiProperty({ type: String, nullable: true, description: 'Full image URL. Null means use the game’s.' })
+  image!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, description: 'Thumbnail image URL. Null means use the game’s.' })
+  thumbnail!: string | null;
+
+  @ApiProperty({ type: Number, nullable: true, description: 'Minimum number of players. Null means use the game’s.' })
+  minPlayers!: number | null;
+
+  @ApiProperty({ type: Number, nullable: true, description: 'Maximum number of players. Null means use the game’s.' })
+  maxPlayers!: number | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'Minimum play time, in minutes. Null means use the game’s.',
+  })
+  minPlayTime!: number | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'Maximum play time, in minutes. Null means use the game’s.',
+  })
+  maxPlayTime!: number | null;
+
+  @ApiProperty({ description: 'Whether one person can play it alone' })
+  supportsSolo!: boolean;
+
+  @ApiProperty({ description: 'Whether people can play it together in one place' })
+  supportsLocal!: boolean;
+
+  @ApiProperty({ description: 'Whether people can play it together online' })
+  supportsOnline!: boolean;
+
+  @ApiProperty({ description: 'Whether players can take their turns at different times' })
+  hasAsyncPlay!: boolean;
+
+  @ApiProperty({ description: 'Whether players act at the same time' })
+  hasRealtime!: boolean;
+
+  @ApiProperty({ description: 'Whether it includes a tutorial' })
+  hasTutorial!: boolean;
+
+  @ApiProperty({ type: String, format: 'date-time' })
+  createdAt!: Date;
+
+  @ApiProperty({ type: String, format: 'date-time' })
+  updatedAt!: Date;
+
+  @ApiProperty({ type: GamePlatformDto })
+  platform!: GamePlatformDto;
+}
+
+export class GameDetailDto extends GameDto {
+  @ApiProperty({
+    type: [PlatformGameDetailDto],
+    description:
+      'The platform games the actor may read, in platform name order. Empty when the game has no platform, or ' +
+      'when the actor may not read them.',
+  })
+  platformGames!: PlatformGameDetailDto[];
+}
+
 export class GameResponseDto {
-  @ApiProperty({ type: GameDto })
-  game!: GameDto;
+  @ApiProperty({ type: GameDetailDto })
+  game!: GameDetailDto;
 }
 
 export class GameMessageResponseDto {

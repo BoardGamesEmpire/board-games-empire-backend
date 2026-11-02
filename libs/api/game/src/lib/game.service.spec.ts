@@ -14,10 +14,11 @@ import {
   type MockDatabaseService,
   type PageQueryInit,
 } from '@bge/testing';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { GAME_DESCRIPTION_MAX_LENGTH, ListGamesQueryDto, type CreateGameDto, type UpdateGameDto } from './dto';
 import { gameListScope } from './game-list-scope';
 import { GameService } from './game.service';
+import { PLATFORM_GAME_DETAIL_SELECT } from './platform-game-detail.select';
 
 const COND = { id: 'sentinel-condition' };
 
@@ -286,8 +287,9 @@ describe('GameService', () => {
     });
   });
 
-  it('getGame → read (single round trip on the happy path)', async () => {
+  it('getGame → read, with no pre-flight count on the happy path', async () => {
     db.game.findUniqueOrThrow.mockResolvedValue({ id: 'game-1' } as Game);
+    db.platformGame.findMany.mockResolvedValue([]);
 
     await service.getGame('game-1');
 
@@ -295,7 +297,7 @@ describe('GameService', () => {
     expect(db.game.findUniqueOrThrow).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ id: 'game-1', AND: [COND] }) }),
     );
-    // No pre-flight count: the read is one query when the row is visible.
+    // No pre-flight count: telling 404 from 403 is spent only on a refused read.
     expect(db.game.count).not.toHaveBeenCalled();
   });
 
@@ -311,6 +313,52 @@ describe('GameService', () => {
     db.game.count.mockResolvedValue(1);
 
     await expect(service.getGame('game-1')).rejects.toThrow(ForbiddenException);
+  });
+
+  describe('getGame, with its platform games (#791)', () => {
+    it('reads them through the composer, in platform name order, and returns them on the game', async () => {
+      const row = { id: 'platform-game-1' } as never;
+      db.game.findUniqueOrThrow.mockResolvedValue({ id: 'game-1' } as Game);
+      db.platformGame.findMany.mockResolvedValue([row]);
+
+      const game = await service.getGame('game-1');
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.PlatformGame, Action.read, { gameId: 'game-1' });
+      expect(db.platformGame.findMany).toHaveBeenCalledWith({
+        where: { gameId: 'game-1', AND: [COND] },
+        select: PLATFORM_GAME_DETAIL_SELECT,
+        orderBy: { platform: { name: 'asc' } },
+      });
+      expect(game).toEqual({ id: 'game-1', platformGames: [row] });
+    });
+
+    // Being allowed to read the game is what protects a private game's platform
+    // games: `read:platform_game` reaches every one of them for a User.
+    it.each([
+      ['403', 1, ForbiddenException],
+      ['404', 0, NotFoundException],
+    ])('reads none when the game answers %s', async (_status, count, exception) => {
+      db.game.findUniqueOrThrow.mockRejectedValue(dependentRecordNotFound());
+      db.game.count.mockResolvedValue(count);
+
+      await expect(service.getGame('game-1')).rejects.toThrow(exception);
+
+      expect(db.platformGame.findMany).not.toHaveBeenCalled();
+    });
+
+    // The log line and the 404/403 mapping are written for the game read, and
+    // this read has already got past it.
+    it('does not report a failure of this read as a failure of the game read', async () => {
+      const failure = new Error('connection lost');
+      const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      db.game.findUniqueOrThrow.mockResolvedValue({ id: 'game-1' } as Game);
+      db.platformGame.findMany.mockRejectedValue(failure);
+
+      await expect(service.getGame('game-1')).rejects.toBe(failure);
+
+      expect(errorSpy).not.toHaveBeenCalled();
+      errorSpy.mockRestore();
+    });
   });
 
   it('createGame does not filter by abilities and evicts the creator’s permission graph', async () => {
