@@ -14,8 +14,16 @@ import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { sampleByOffsets, type PaginatedRows, type RandomSampleQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { CreateGameDto, GAME_DESCRIPTION_MAX_LENGTH, ListGamesQueryDto, UpdateGameDto, type GameSort } from './dto';
+import {
+  CreateGameDto,
+  GAME_DESCRIPTION_MAX_LENGTH,
+  ListGamesQueryDto,
+  UpdateGameDto,
+  type GameSort,
+  type PlatformGameDetailDto,
+} from './dto';
 import { gameListScope } from './game-list-scope';
+import { PLATFORM_GAME_DETAIL_SELECT } from './platform-game-detail.select';
 
 /** A game's ranges, each as its minimum's field and its maximum's. */
 const GAME_RANGES = [
@@ -115,6 +123,22 @@ export class GameService {
   }
 
   async getGame(id: string) {
+    const game = await this.readGame(id);
+
+    // A second read, not a filter in the game's `include`: a deny-all condition
+    // is dropped there, and a key with no `read:platform_game` would get every
+    // row. It runs only once the actor has been allowed to read the game, which
+    // is what protects a private game's platform games (#791).
+    const platformGames: PlatformGameDetailDto[] = await this.db.platformGame.findMany({
+      where: this.scopeComposer.compose(ResourceType.PlatformGame, Action.read, { gameId: id }),
+      select: PLATFORM_GAME_DETAIL_SELECT,
+      orderBy: { platform: { name: 'asc' } },
+    });
+
+    return { ...game, platformGames };
+  }
+
+  private async readGame(id: string) {
     try {
       return await this.db.game.findUniqueOrThrow({
         where: {

@@ -1,4 +1,4 @@
-import type { Game } from '@bge/database';
+import type { Game, Platform, PlatformGame } from '@bge/database';
 import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
 
 /**
@@ -9,6 +9,11 @@ import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescripti
  */
 
 export type GameWire = Wire<Game>;
+
+/** One row of `GET /api/games/:id`'s `game.platformGames` (#791). */
+export type PlatformGameWire = Wire<Omit<PlatformGame, 'platformId' | 'enrichmentSource' | 'frozenAt'>> & {
+  readonly platform: Pick<Platform, 'id' | 'name' | 'abbreviation' | 'platformType'>;
+};
 
 export interface ListGamesEnvelope {
   readonly games: readonly GameWire[];
@@ -143,6 +148,24 @@ export function gameEnvelope(response: HttpResponseLike, request: RequestDescrip
   }
 
   return { game };
+}
+
+/**
+ * `GET /api/games/:id`: the game's platform games (#791). An empty list and an
+ * absent one mean different things here, so an absent one fails rather than
+ * reading as empty.
+ */
+export function gamePlatformGames(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): readonly PlatformGameWire[] {
+  const { game } = gameEnvelope(response, request);
+  const platformGames = (game as unknown as Record<string, unknown>)['platformGames'];
+  if (!Array.isArray(platformGames)) {
+    return fail("its 'game' carried no 'platformGames' array", request, response);
+  }
+
+  return platformGames as PlatformGameWire[];
 }
 
 /**

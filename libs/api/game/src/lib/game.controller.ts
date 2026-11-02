@@ -92,8 +92,17 @@ export class GameController {
     );
   }
 
+  @ApiOperation({
+    summary: 'Get a game',
+    description:
+      'A game the actor may read, with its `platformGames`: the ids `POST /game-collections` takes, in platform ' +
+      'name order. The list is empty when the game has no platform or the actor may not read its platform games, ' +
+      'such as an API key with no `read:platform_game`. See #791.',
+  })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, type: GameResponseDto })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: 'Game not found' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Game))
   @Get(':id')
