@@ -334,5 +334,12 @@ function toGenericOAuthConfig(provider: OidcProviderConfig) {
     clientSecret: provider.clientSecret,
     scopes: [...OIDC_SCOPES],
     mapProfileToUser: mapOidcProfile,
+    // Every provider here is an OpenID Connect one, so `sub` is the user's
+    // identity there. better-auth's default reads an `id` claim instead when
+    // discovery omits `id_token_signing_alg_values_supported`, which refuses
+    // every sign-in through such a provider (#1016). There is no fallback to
+    // `id`, which could change which user a sign-in resolves to: a profile
+    // without `sub` is refused, as better-auth refuses a blank key.
+    accountSubject: ({ profile }: { profile: { sub?: string | number | null } }) => profile.sub ?? '',
   };
 }

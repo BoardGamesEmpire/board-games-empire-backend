@@ -1,6 +1,7 @@
 import { createActors, pollUntil, type Actors } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
+import { postToAuth } from '../support/auth-routes';
 import { FAKE_PROVIDER_ID, fakeProviderEnv, LENIENT_FAKE_PROVIDER_ID, requireBaseUrl } from '../support/e2e-env';
 import { useSettingSwitch } from '../support/setting-switch';
 import { fakeProviderUrl, signInThroughProvider } from '../support/sign-in-provider';
@@ -84,7 +85,7 @@ describe('signing in through a sign-in provider', () => {
         provider_id: FAKE_PROVIDER_ID,
         display_name: 'Fake provider',
         discovery_url: providerEnv.OIDC_FAKE_DISCOVERY_URL,
-        authorization_endpoint: '/api/auth/sign-in/oauth2',
+        authorization_endpoint: '/api/auth/sign-in/social',
         sign_up_disabled: false,
       },
       {
@@ -92,7 +93,7 @@ describe('signing in through a sign-in provider', () => {
         provider_id: LENIENT_FAKE_PROVIDER_ID,
         display_name: 'Lenient fake provider',
         discovery_url: providerEnv.OIDC_FAKE_LENIENT_DISCOVERY_URL,
-        authorization_endpoint: '/api/auth/sign-in/oauth2',
+        authorization_endpoint: '/api/auth/sign-in/social',
         sign_up_disabled: false,
       },
     ]);
@@ -144,6 +145,37 @@ describe('signing in through a sign-in provider', () => {
     const result = await signInThroughProvider(baseUrl, { sub, email, preferred_username: username, ...verification });
 
     expect(result.location.searchParams.get('error')).toBe('SIGN_IN_PROVIDER_EMAIL_UNVERIFIED');
+    expect(result.location.searchParams.get('error_description')).toBe(
+      "Your sign-in provider hasn't confirmed your email address, so you can't sign up with it here. Confirm the address with the provider, then try again",
+    );
+    expect(result.cookie).toBe('');
+    await expect(db.client.user.count({ where: { email } })).resolves.toBe(0);
+  });
+
+  describe('while registration is closed', () => {
+    const setRegistration = useSettingSwitch(() => db, 'allowUserRegistration');
+
+    it('refuses a first sign-in with the code and a sentence for the client to show (#1016)', async () => {
+      await setRegistration(false);
+      const { sub, email } = freshIdentity();
+
+      const result = await signInThroughProvider(baseUrl, { sub, email, email_verified: true });
+
+      expect(result.location.searchParams.get('error')).toBe('REGISTRATION_DISABLED');
+      expect(result.location.searchParams.get('error_description')).toBe('This server is not accepting new accounts');
+      await expect(db.client.user.count({ where: { email } })).resolves.toBe(0);
+    });
+  });
+
+  // The main fake's discovery omits `id_token_signing_alg_values_supported`, so
+  // every other sign-in here fails if the server stops keying the Account row on
+  // `sub`. An `id` claim is no stand-in, since it could name another user.
+  it('refuses a first sign-in whose profile has an id claim but no sub, creating nothing (#1016)', async () => {
+    const { sub, email } = freshIdentity();
+
+    const result = await signInThroughProvider(baseUrl, { id: sub, email, email_verified: true });
+
+    expect(result.location.searchParams.get('error')).toBe('unable_to_get_user_info');
     expect(result.cookie).toBe('');
     await expect(db.client.user.count({ where: { email } })).resolves.toBe(0);
   });
@@ -276,7 +308,13 @@ describe('signing in through a sign-in provider', () => {
     const { sub } = freshIdentity();
     const providerEmail = `other-${sub}@example.test`;
 
-    const linked = await signInThroughProvider(baseUrl, { sub, email: providerEmail }, { linkWith: existing.headers });
+    // better-auth 1.7 links a provider that isn't one of its trusted ones only
+    // when the provider vouches for the email (#1016).
+    const linked = await signInThroughProvider(
+      baseUrl,
+      { sub, email: providerEmail, email_verified: true },
+      { linkWith: existing.headers },
+    );
 
     expect(linked.location.href).toBe(new URL('/', baseUrl).href);
     await expect(
@@ -288,5 +326,61 @@ describe('signing in through a sign-in provider', () => {
     expect(again.location.href).toBe(new URL('/', baseUrl).href);
     await expect(sessionUserId(again.cookie)).resolves.toBe(existing.user.id);
     await expect(db.client.user.count({ where: { email: providerEmail } })).resolves.toBe(0);
+  });
+
+  /**
+   * better-auth 1.7 unlinks by the Account row's own `id`: `providerId` is no
+   * longer part of the body (#1016). A signed-up user already holds a
+   * password sign-in method, so a linked provider is never their last, and
+   * what these tests exercise is the body, not the refusal to unlink a
+   * user's last sign-in method.
+   */
+  describe('unlinking a sign-in provider', () => {
+    const UNLINK_PATH = '/api/auth/unlink-account';
+
+    const linkedProvider = async () => {
+      const existing = await actors.user();
+      const { sub } = freshIdentity();
+      await signInThroughProvider(
+        baseUrl,
+        { sub, email: `other-${sub}@example.test`, email_verified: true },
+        { linkWith: existing.headers },
+      );
+      const account = await db.client.account.findFirstOrThrow({
+        where: { userId: existing.user.id, providerId: FAKE_PROVIDER_ID, accountId: sub },
+        select: { id: true },
+      });
+
+      return { existing, account };
+    };
+
+    it('unlinks by the Account row’s id (#1016)', async () => {
+      const { existing, account } = await linkedProvider();
+      await expect(db.client.account.count({ where: { userId: existing.user.id } })).resolves.toBe(2);
+
+      const response = await postToAuth(baseUrl, UNLINK_PATH).set(existing.headers).send({ accountId: account.id });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ status: true });
+      await expect(db.client.account.count({ where: { id: account.id } })).resolves.toBe(0);
+      await expect(db.client.account.count({ where: { userId: existing.user.id } })).resolves.toBe(1);
+    });
+
+    // The 1.6 body named the provider. A client still sending it is refused
+    // for the missing `accountId`, not for the last-sign-in-method rule or an
+    // unknown Account row, and the link stays.
+    it('answers 400 to an unlink naming a providerId, and removes nothing (#1016)', async () => {
+      const { existing, account } = await linkedProvider();
+
+      const response = await postToAuth(baseUrl, UNLINK_PATH)
+        .set(existing.headers)
+        .send({ providerId: FAKE_PROVIDER_ID });
+
+      expect(response.status).toBe(400);
+      expect(response.body.code).toBe('VALIDATION_ERROR');
+      expect(response.body.message).toContain('accountId');
+      await expect(db.client.account.count({ where: { id: account.id } })).resolves.toBe(1);
+      await expect(db.client.account.count({ where: { userId: existing.user.id } })).resolves.toBe(2);
+    });
   });
 });

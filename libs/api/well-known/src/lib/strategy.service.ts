@@ -114,7 +114,7 @@ export class StrategyService {
     dto.displayName = provider.displayName;
     // discoveryUrl points at the sign-in provider, so it stays an absolute URL.
     dto.discoveryUrl = provider.discoveryUrl;
-    dto.authorizationEndpoint = authPath('/sign-in/oauth2');
+    dto.authorizationEndpoint = authPath('/sign-in/social');
     return dto;
   }
 }

@@ -3,14 +3,12 @@ import { isProviderSignInPath, providerPictureOnly } from './provider-picture';
 const PICTURE = 'https://provider.example/a.png';
 
 describe('providerPictureOnly (databaseHooks.user.create.before)', () => {
-  // A sign-in provider vouches for these pictures: the OAuth callbacks, an ID
-  // token sent to social sign-in, and Google One Tap.
-  it.each(['/callback/:id', '/oauth2/callback/:providerId', '/sign-in/social', '/one-tap/callback'])(
-    "keeps the provider's picture from %s",
-    (path) => {
-      expect(providerPictureOnly({ image: PICTURE }, { path })).toBeUndefined();
-    },
-  );
+  // A sign-in provider vouches for these pictures: the OAuth callback (one
+  // path since better-auth 1.7, #1016), an ID token sent to social sign-in, and
+  // Google One Tap.
+  it.each(['/callback/:id', '/sign-in/social', '/one-tap/callback'])("keeps the provider's picture from %s", (path) => {
+    expect(providerPictureOnly({ image: PICTURE }, { path })).toBeUndefined();
+  });
 
   // Email sign-up takes `image` from the request body, so it is a URL the
   // registrant chose. Provisioning would make it their avatar, and every
@@ -33,7 +31,7 @@ describe('providerPictureOnly (databaseHooks.user.create.before)', () => {
 });
 
 describe('isProviderSignInPath', () => {
-  it.each(['/callback/:id', '/oauth2/callback/:providerId', '/sign-in/social', '/one-tap/callback'])(
+  it.each(['/callback/:id', '/sign-in/social', '/one-tap/callback'])(
     'is true for %s, which a sign-in provider vouches for (#912)',
     (path) => {
       expect(isProviderSignInPath({ path })).toBe(true);

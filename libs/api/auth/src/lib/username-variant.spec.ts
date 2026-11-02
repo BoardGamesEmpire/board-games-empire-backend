@@ -13,7 +13,7 @@ describe('firstFreeUsername', () => {
 });
 
 describe('createUsernameVariants', () => {
-  const PROVIDER_CONTEXT = { path: '/oauth2/callback/:providerId' };
+  const PROVIDER_CONTEXT = { path: '/callback/:id' };
 
   /**
    * `startsWith` as Postgres LIKE reads it: `_` matches any one character, `%`

@@ -191,7 +191,7 @@ export function workerEnvOverrides(): Record<string, string> {
  */
 export const E2E_FAKE_PROVIDER_URL_VAR = 'BGE_E2E_FAKE_PROVIDER_URL';
 
-/** The id the API knows the fake sign-in provider by: its callback is `/api/auth/oauth2/callback/fake`. */
+/** The id the API knows the fake sign-in provider by: its callback is `/api/auth/callback/fake`. */
 export const FAKE_PROVIDER_ID = 'fake';
 
 /**

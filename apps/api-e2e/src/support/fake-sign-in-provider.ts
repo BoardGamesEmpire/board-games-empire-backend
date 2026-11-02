@@ -78,6 +78,10 @@ export async function startFakeSignInProvider(): Promise<FakeSignInProvider> {
         authorization_endpoint: `${url}/authorize`,
         token_endpoint: `${url}/token`,
         userinfo_endpoint: `${url}/userinfo`,
+        // No `id_token_signing_alg_values_supported`, which OpenID Connect requires
+        // and some providers leave out. better-auth's default stops reading `sub`
+        // without it, so this proves the server keys the Account row on `sub`
+        // whatever discovery says (#1016).
       });
       return;
     }

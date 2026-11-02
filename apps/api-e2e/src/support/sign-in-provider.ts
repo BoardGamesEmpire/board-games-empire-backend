@@ -1,8 +1,8 @@
 import { postToAuth } from './auth-routes';
 import { E2E_FAKE_PROVIDER_URL_VAR, FAKE_PROVIDER_ID } from './e2e-env';
 
-const SIGN_IN_PATH = '/api/auth/sign-in/oauth2';
-const LINK_PATH = '/api/auth/oauth2/link';
+const SIGN_IN_PATH = '/api/auth/sign-in/social';
+const LINK_PATH = '/api/auth/link-social';
 
 /** better-auth's session cookie is `<prefix>.session_token`; the prefix is the auth lib's. */
 const SESSION_COOKIE_SUFFIX = '.session_token';
@@ -37,7 +37,7 @@ export interface ProviderSignInResult {
 export interface ProviderSignInOptions {
   /**
    * A signed-in user's headers. With them the flow links the provider to that
-   * user (`/oauth2/link`) instead of signing in with it.
+   * user (`/link-social`) instead of signing in with it.
    */
   readonly linkWith?: Record<string, string>;
 
@@ -81,7 +81,7 @@ export async function signInThroughProvider(
   claims: Record<string, unknown>,
   options: ProviderSignInOptions = {},
 ): Promise<ProviderSignInResult> {
-  const body = { providerId: options.providerId ?? FAKE_PROVIDER_ID, callbackURL: '/' };
+  const body = { provider: options.providerId ?? FAKE_PROVIDER_ID, callbackURL: '/' };
 
   const start = options.linkWith
     ? await postToAuth(baseUrl, LINK_PATH).set(options.linkWith).send(body)

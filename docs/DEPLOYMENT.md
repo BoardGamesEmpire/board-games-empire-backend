@@ -120,7 +120,7 @@ The `api` can let registered users sign in through identity servers you choose, 
 - A variable of that shape whose id is not listed is ignored and logged as a warning at startup, which catches a typo in an id.
 - The client secret can come from a variable of its own, such as a Kubernetes `secretKeyRef`, like any other setting.
 - `compose.yaml` passes the api only the variables it names, so put the `OIDC_*` variables under the api service in a `compose.override.yaml`.
-- In the provider's own settings, register `<BETTER_AUTH_URL>/api/auth/oauth2/callback/<id>` as the redirect URI.
+- In the provider's own settings, register `<BETTER_AUTH_URL>/api/auth/callback/<id>` as the redirect URI.
 
 ## Storage
 

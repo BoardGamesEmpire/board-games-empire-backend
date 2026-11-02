@@ -1,14 +1,9 @@
 /**
  * The better-auth endpoints that create a user from what a sign-in provider
- * vouches for: the OAuth callbacks, an ID token sent to social sign-in, and
+ * vouches for: the OAuth callback, an ID token sent to social sign-in, and
  * Google One Tap.
  */
-const PROVIDER_SIGN_IN_PATHS: ReadonlySet<string> = new Set([
-  '/callback/:id',
-  '/oauth2/callback/:providerId',
-  '/sign-in/social',
-  '/one-tap/callback',
-]);
+const PROVIDER_SIGN_IN_PATHS: ReadonlySet<string> = new Set(['/callback/:id', '/sign-in/social', '/one-tap/callback']);
 
 /** The slice of better-auth's endpoint context the hook reads. It is `null` outside an endpoint. */
 export interface ProviderPictureContext {

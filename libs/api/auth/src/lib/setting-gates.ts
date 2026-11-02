@@ -70,15 +70,6 @@ const ROUTE_GATES: ReadonlyMap<string, Gate> = new Map([
 const ADMIN_CREATE_USER_PATH = '/admin/create-user';
 
 /**
- * The OAuth callbacks, which answer a refused first login with a redirect
- * rather than a body. better-auth keeps only the error's message for that
- * redirect's `error` parameter, with its spaces turned into underscores, so a
- * refusal there carries its code as its message: the client gets
- * `error=REGISTRATION_DISABLED` to match, as it gets `code` in a body.
- */
-export const OAUTH_CALLBACK_PATHS: ReadonlySet<string> = new Set(['/oauth2/callback/:providerId', '/callback/:id']);
-
-/**
  * The route through which users edit their own profile. better-auth maps its
  * `name` onto our `username` column, so it is also how a username changes. An
  * admin's `/admin/update-user` is not gated.
@@ -106,10 +97,10 @@ export interface SettingGates {
   /**
    * `databaseHooks.user.create.before`. Every account better-auth creates
    * passes through it: email sign-up, anonymous sign-in, a first OIDC login
-   * and one-tap. A refused first OIDC login reaches the client as a redirect
-   * with `error=REGISTRATION_DISABLED` (see {@link OAUTH_CALLBACK_PATHS}), and
-   * better-auth logs it at error level, as it does any creation that fails on
-   * a callback.
+   * and one-tap. A refused first OIDC login reaches the client as a redirect,
+   * with the code as `error` and the message as `error_description` (#1016),
+   * and better-auth logs it at error level, as it does any creation that fails
+   * on a callback.
    */
   beforeUserCreate(user: unknown, context: SettingGateContext | null): Promise<void>;
   /**
@@ -135,15 +126,12 @@ export interface SettingGates {
 export function createSettingGates(deps: SettingGateDeps): SettingGates {
   const allows = async (gate: Gate): Promise<boolean> => (await deps.readSwitches())?.[gate.switch] === true;
 
-  const refusal = (gate: Gate, path?: string): APIError =>
-    new APIError('FORBIDDEN', {
-      code: gate.code,
-      message: path !== undefined && OAUTH_CALLBACK_PATHS.has(path) ? gate.code : deps.render(gate.message),
-    });
+  const refusal = (gate: Gate): APIError =>
+    new APIError('FORBIDDEN', { code: gate.code, message: deps.render(gate.message) });
 
-  const refuseUnlessAllowed = async (gate: Gate, path?: string): Promise<void> => {
+  const refuseUnlessAllowed = async (gate: Gate): Promise<void> => {
     if (!(await allows(gate))) {
-      throw refusal(gate, path);
+      throw refusal(gate);
     }
   };
 
@@ -153,7 +141,7 @@ export function createSettingGates(deps: SettingGateDeps): SettingGates {
         return;
       }
 
-      await refuseUnlessAllowed(REGISTRATION, context?.path);
+      await refuseUnlessAllowed(REGISTRATION);
     },
 
     async beforeUserUpdate(data, context) {

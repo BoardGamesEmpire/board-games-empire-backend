@@ -18,7 +18,7 @@ export interface OidcProviderConfig {
 }
 
 /**
- * The id is the callback path (`/api/auth/oauth2/callback/<id>`), so it stays
+ * The id is the callback path (`/api/auth/callback/<id>`), so it stays
  * URL-safe. Upper-casing and turning `-` into `_` then gives each id its own
  * variable segment, which a wider alphabet would not (`a_b` and `a-b`).
  */

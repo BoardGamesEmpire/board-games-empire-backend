@@ -70,7 +70,7 @@ describe('createUserCreatedHook', () => {
   });
 
   it('carries the username the sign-in asked for from the create hook to the event (#912)', async () => {
-    const context = { path: '/oauth2/callback/:providerId' };
+    const context = { path: '/callback/:id' };
     const requestedUsername = jest.fn().mockReturnValue('jason');
     const withRequested = createUserCreatedHook({
       eventEmitter: emitter as unknown as EventEmitter2,
