@@ -20,7 +20,7 @@ export type HostRule = (hostHeader: string | undefined) => boolean;
 
 /**
  * A `Host` value: a bracketed IPv6 address or a name, then an optional port.
- * Only these characters can reach a name pattern, so a pattern's `.*` can't
+ * Only these characters can reach a name pattern, so a pattern's `*` can't
  * match anything but a well-formed name.
  */
 const HOST_VALUE = /^(?:\[([^\]]+)\]|([a-z0-9._-]{1,253}))(?::\d+)?$/i;
@@ -42,14 +42,42 @@ const WILDCARD = /[*?]/;
 /** A hostname pattern with no literal name in it, so nothing ties it to this server. */
 const ONLY_WILDCARDS = /^[*?.]+$/;
 
-/** `*` is any run of characters and `?` is one, as better-auth reads them. */
-function wildcardToRegExp(pattern: string): RegExp {
-  const source = pattern
-    .replace(/[.+^${}()|[\]\\/-]/g, '\\$&')
-    .replace(/\*/g, '.*')
-    .replace(/\?/g, '.');
+/** Where an entry's authority ends. None of these is a wildcard, unlike `?`. */
+const AUTHORITY_END = /[/\\#]/;
 
-  return new RegExp(`^${source}$`);
+/**
+ * Whether `text` matches `pattern`, where `*` is any run of characters and `?`
+ * is one, as better-auth reads them. This walks both strings once and backs up
+ * only to the last `*`, so its time is bounded by their lengths multiplied. A
+ * regular expression of `.*`s backtracks: an entry with six `*` labels took
+ * seconds against one long Host, and this runs on every request (#977).
+ */
+function matchesWildcard(pattern: string, text: string): boolean {
+  let p = 0;
+  let t = 0;
+  let starAt = -1;
+  let starText = 0;
+
+  while (t < text.length) {
+    if (p < pattern.length && (pattern[p] === '?' || pattern[p] === text[t])) {
+      p++;
+      t++;
+    } else if (p < pattern.length && pattern[p] === '*') {
+      starAt = p++;
+      starText = t;
+    } else if (starAt !== -1) {
+      p = starAt + 1;
+      t = ++starText;
+    } else {
+      return false;
+    }
+  }
+
+  while (pattern[p] === '*') {
+    p++;
+  }
+
+  return p === pattern.length;
 }
 
 /**
@@ -62,11 +90,31 @@ function labelToAscii(label: string): string {
 }
 
 /**
- * The hostname pattern an entry names, if any. Entries aren't always URLs:
- * `http://localhost:{PORT}`, `https://*.preview.example` and `scrape.example`
- * are all valid, so `new URL` can't read them. An entry whose scheme covers
- * neither web scheme, such as `myapp://` or `myapp:/callback`, names no host. A
- * wildcard scheme does cover them, as `*://bge.example` does for better-auth.
+ * The host a configured URL names, if it's a web URL. These are URLs, not
+ * patterns, so a `*` or `?` in one is no wildcard, and a query or fragment can't
+ * reach the host as it would by splitting on `/`.
+ */
+function urlHostOf(url: string): string | undefined {
+  if (!URL.canParse(url)) {
+    return undefined;
+  }
+
+  const { protocol, hostname } = new URL(url);
+
+  return WEB_SCHEMES.includes(protocol.slice(0, -1)) ? hostname.replace(TRAILING_DOT, '') || undefined : undefined;
+}
+
+/**
+ * The hostname pattern a TRUSTED_ORIGINS entry names, if any. Entries aren't
+ * always URLs: `http://localhost:{PORT}`, `https://*.preview.example` and
+ * `scrape.example` are all valid, so `new URL` can't read them. An entry whose
+ * scheme covers neither web scheme, such as `myapp://` or `myapp:/callback`,
+ * names no host. A wildcard scheme does cover them, as `*://bge.example` does
+ * for better-auth.
+ *
+ * A `?` here is a wildcard, so it can't end the authority as a query would. An
+ * `@` after one doesn't end user details either, since those can't hold a `?`:
+ * `https://bge.example?x=@evil.example` names no host rather than `evil.example`.
  */
 function hostPatternOf(entry: string): string | undefined {
   const lowered = entry.toLowerCase();
@@ -77,22 +125,22 @@ function hostPatternOf(entry: string): string | undefined {
       return undefined;
     }
   } else {
-    const scheme = wildcardToRegExp(lowered.slice(0, schemeEnd));
-    if (!WEB_SCHEMES.some((webScheme) => scheme.test(webScheme))) {
+    const scheme = lowered.slice(0, schemeEnd);
+    if (!WEB_SCHEMES.some((webScheme) => matchesWildcard(scheme, webScheme))) {
       return undefined;
     }
   }
 
-  const [authority] = (schemeEnd === -1 ? lowered : lowered.slice(schemeEnd + 3)).split('/', 1);
-  const [hostname] = authority.slice(authority.lastIndexOf('@') + 1).split(':', 1);
+  const [authority] = (schemeEnd === -1 ? lowered : lowered.slice(schemeEnd + 3)).split(AUTHORITY_END, 1);
+  const wildcardAt = authority.indexOf('?');
+  const userDetails = wildcardAt === -1 ? authority : authority.slice(0, wildcardAt);
+  const [hostname] = authority.slice(userDetails.lastIndexOf('@') + 1).split(':', 1);
 
   return hostname.split('.').map(labelToAscii).join('.').replace(TRAILING_DOT, '') || undefined;
 }
 
 function hostPatternsOf(names: ServerNames): string[] {
-  return [names.publicUrl, ...names.trustedOrigins, names.mediaBaseUrl]
-    .map(hostPatternOf)
-    .filter((pattern): pattern is string => pattern !== undefined);
+  return names.trustedOrigins.map(hostPatternOf).filter((pattern): pattern is string => pattern !== undefined);
 }
 
 /**
@@ -132,7 +180,10 @@ function readHost(hostHeader: string): string | undefined {
  * header on its own `fetch`.
  */
 export function createHostRule(names: ServerNames): HostRule {
-  const patterns = hostPatternsOf(names).map(wildcardToRegExp);
+  const ownHosts = new Set(
+    [names.publicUrl, names.mediaBaseUrl].map(urlHostOf).filter((host): host is string => host !== undefined),
+  );
+  const patterns = hostPatternsOf(names);
 
   return (hostHeader) => {
     if (!hostHeader) {
@@ -144,7 +195,12 @@ export function createHostRule(names: ServerNames): HostRule {
       return false;
     }
 
-    return isIP(host) !== 0 || host === 'localhost' || patterns.some((pattern) => pattern.test(host));
+    return (
+      isIP(host) !== 0 ||
+      host === 'localhost' ||
+      ownHosts.has(host) ||
+      patterns.some((pattern) => matchesWildcard(pattern, host))
+    );
   };
 }
 

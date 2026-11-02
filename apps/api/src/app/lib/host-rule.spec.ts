@@ -150,6 +150,25 @@ describe('createHostRule (#977)', () => {
       expect(allowing('scrape.example/@me')('scrape.example')).toBe(true);
     });
 
+    // A URL parser ends the host at a fragment or a backslash, so an @ past
+    // either is no user details.
+    it.each(['https://scrape.example#@evil.example', 'https://scrape.example\\@evil.example'])(
+      'reads the host in %s before the @',
+      (entry) => {
+        const rule = allowing(entry);
+
+        expect(rule('scrape.example')).toBe(true);
+        expect(rule('evil.example')).toBe(false);
+      },
+    );
+
+    // Here ? is a wildcard, not a query, so the authority runs on past it. User
+    // details can't hold a ?, so the @ doesn't end them, and the entry names no
+    // host at all.
+    it('reads no host past an @ that follows a ?', () => {
+      expect(allowing('https://scrape.example?return=@evil.example')('evil.example')).toBe(false);
+    });
+
     // A browser sends a Unicode name in its ASCII form, so the Unicode spelling
     // alone would never match, and the server would refuse its own address.
     it.each([
@@ -159,6 +178,44 @@ describe('createHostRule (#977)', () => {
       ['https://pr-?.bücher.example', 'pr-1.xn--bcher-kva.example'],
     ])('reads %s in the form a browser sends', (entry, host) => {
       expect(allowing(entry)(host)).toBe(true);
+    });
+
+    // A backtracking regular expression took about five seconds to refuse this
+    // Host, on every request. The match now takes microseconds, so the bound
+    // leaves room for a slow runner without letting the old cost back in.
+    it('matches a deep wildcard entry against a long Host in bounded time', () => {
+      const rule = allowing(`https://${'*.'.repeat(6)}preview.example`);
+      const started = performance.now();
+
+      expect(rule(`${'a.'.repeat(90)}evil.example`)).toBe(false);
+      expect(performance.now() - started).toBeLessThan(500);
+      expect(rule(`${'a.'.repeat(6)}preview.example`)).toBe(true);
+    });
+  });
+
+  describe('the public and media URLs', () => {
+    const serving = (publicUrl: string) => createHostRule({ ...names, publicUrl, trustedOrigins: [] });
+
+    it.each([
+      'https://bge.example#@evil.example',
+      'https://bge.example?return=@evil.example',
+      'https://bge.example\\@evil.example',
+    ])('reads the host in %s as a URL parser does', (publicUrl) => {
+      const rule = serving(publicUrl);
+
+      expect(rule('bge.example')).toBe(true);
+      expect(rule('evil.example')).toBe(false);
+    });
+
+    // These are addresses, not TRUSTED_ORIGINS patterns, so a * in one is
+    // just a character and admits nothing else.
+    it('takes a * in them literally', () => {
+      expect(serving('https://*.example')('evil.example')).toBe(false);
+      expect(allowsEveryHost({ ...names, publicUrl: 'https://*' })).toBe(false);
+    });
+
+    it('reads the media URL host as well', () => {
+      expect(serving('https://bge.example')('media.example')).toBe(true);
     });
   });
 
