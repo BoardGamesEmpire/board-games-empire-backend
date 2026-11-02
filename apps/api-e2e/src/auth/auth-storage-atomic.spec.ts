@@ -1,6 +1,5 @@
-import { AUTH_CLIENT_IP_HEADER, authFactory, createRedisAuthStorage, type RedisAuthStorage } from '@bge/auth';
+import { AUTH_CLIENT_IP_HEADER, authFactory, createRedisAuthStorage, type CompleteAuthStorage } from '@bge/auth';
 import type { PrismaClient } from '@bge/database';
-import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
 import Redis from 'iovalkey';
@@ -8,16 +7,17 @@ import { apiCacheKey } from '../support/api-cache';
 import { REDIS_IMAGE } from '../support/e2e-env';
 
 /**
- * better-auth's storage over a real Redis, doing in one step what better-auth
- * would otherwise do in two: counting a request against a rate limit (#832),
+ * better-auth's storage over a real Redis, doing in one step each what
+ * better-auth 1.7 asks of it: counting a request against a rate limit (#832)
  * and using up a single-use verification value (#888). In-process rather than
  * over HTTP: the e2e api runs as `NODE_ENV=test`, so better-auth's limiter is
- * off there, and the harness runs one api process, where better-auth's own
- * lock already keeps a value single-use. Over a real Redis, because each step
- * is a Redis command, which an in-memory store can't stand in for. Each
- * instance here is one api process, so two instances over two clients are two
- * processes sharing one Redis. Like `bootstrap/cache-flush.spec.ts`, this spec
- * starts its own container.
+ * off there, and the harness runs one api process, so it has no second one to
+ * race. better-auth 1.7 puts no lock around a value consumed through the
+ * storage, so single use rests on `getAndDelete`. Over a real Redis, because
+ * each step is a Redis command, which an in-memory store can't stand in for.
+ * Each instance here is one api process, so two instances over two clients are
+ * two processes sharing one Redis. Like `bootstrap/cache-flush.spec.ts`, this
+ * spec starts its own container.
  */
 
 /** The configuration an instance needs to build, with email and password sign-in on. */
@@ -42,7 +42,7 @@ const noUsers = new Proxy(
  * once, at import. The instance reads the setting from its context on every
  * request, so it is switched on there.
  */
-async function limitedAuth(client: Redis, storage: RedisAuthStorage = createRedisAuthStorage(client)) {
+async function limitedAuth(client: Redis, storage: CompleteAuthStorage = createRedisAuthStorage(client)) {
   const auth = authFactory(noUsers, config, storage);
   (await auth.$context).rateLimit.enabled = true;
   return auth;
@@ -85,10 +85,10 @@ describe("better-auth's storage over Redis", () => {
 
   describe('rate-limit counts', () => {
     it('refuse every parallel sign-in past the third, each counted through increment (#832)', async () => {
-      // Each request counted through increment means better-auth took its
-      // atomic path, not its best-effort read and then write. Its warning
-      // about that fallback is once per process, so it would only prove this
-      // in whichever test signed in first.
+      // better-auth 1.7 counts a request against the limit through increment
+      // alone and throws when the storage has none, so it has no read and then
+      // write left to fall back to. Six calls for six requests show each was
+      // counted once, and no get shows no count was read back.
       const storage = createRedisAuthStorage(redisA);
       const increment = jest.spyOn(storage, 'increment');
       const get = jest.spyOn(storage, 'get');
@@ -142,11 +142,13 @@ describe("better-auth's storage over Redis", () => {
       expect(taken.filter((value) => value === undefined)).toHaveLength(1);
     });
 
-    it('are used once by better-auth, through getAndDelete, with no warning (#888)', async () => {
-      // better-auth warns once per instance, the first time it falls back to
-      // a read and then a delete, so the instance is this test's own.
-      const warn = jest.spyOn(Logger.prototype, 'warn');
-      const ctx = await authFactory(noUsers, config, createRedisAuthStorage(redisA)).$context;
+    it('are used once by better-auth, through getAndDelete (#888)', async () => {
+      // better-auth 1.7 takes a verification value out of secondary storage
+      // with getAndDelete and has no read and then delete to fall back to, so
+      // the spy shows the storage's own single step was the one used.
+      const storage = createRedisAuthStorage(redisA);
+      const getAndDelete = jest.spyOn(storage, 'getAndDelete');
+      const ctx = await authFactory(noUsers, config, storage).$context;
       await ctx.internalAdapter.createVerificationValue({
         identifier: 'e2e-single-use',
         value: 'u1',
@@ -157,7 +159,8 @@ describe("better-auth's storage over Redis", () => {
         value: 'u1',
       });
       await expect(ctx.internalAdapter.consumeVerificationValue('e2e-single-use')).resolves.toBeNull();
-      expect(warn).not.toHaveBeenCalledWith(expect.objectContaining({ msg: expect.stringMatching(/getAndDelete/) }));
+      expect(getAndDelete).toHaveBeenCalledTimes(2);
+      expect(getAndDelete).toHaveBeenCalledWith('verification:e2e-single-use');
     });
   });
 });

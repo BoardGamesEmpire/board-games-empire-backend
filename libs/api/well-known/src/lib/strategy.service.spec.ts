@@ -414,7 +414,7 @@ describe('StrategyService', () => {
             providerId: 'authentik',
             displayName: 'Authentik',
             discoveryUrl: AUTHENTIK.discoveryUrl,
-            authorizationEndpoint: `${AUTH_BASE}/sign-in/oauth2`,
+            authorizationEndpoint: `${AUTH_BASE}/sign-in/social`,
             signUpDisabled: false,
           });
         });

@@ -17,8 +17,8 @@ export class OidcStrategyDto {
   signUpDisabled!: boolean;
 
   /**
-   * The provider identifier passed to BetterAuth's oauth2 sign-in endpoint.
-   * Clients construct: GET <authorizationEndpoint>?callbackURL=<yourCallback>
+   * The provider identifier a client sends as `provider` to BetterAuth's
+   * social sign-in endpoint (#1016).
    */
   @ApiProperty({ description: 'Provider ID used to identify this sign-in provider', example: 'authentik' })
   providerId!: string;
@@ -46,12 +46,12 @@ export class OidcStrategyDto {
 
   /**
    * The BetterAuth endpoint to initiate the OAuth2/OIDC redirect for this provider.
-   * Clients POST here (with { providerId, callbackURL }); BetterAuth handles the
+   * Clients POST here (with { provider, callbackURL }); BetterAuth handles the
    * redirect and code exchange via the genericOAuth plugin.
    */
   @ApiProperty({
     description: 'Relative endpoint to initiate the OAuth2 sign-in flow for this provider (POST)',
-    example: '/api/auth/sign-in/oauth2',
+    example: '/api/auth/sign-in/social',
   })
   authorizationEndpoint!: string;
 }

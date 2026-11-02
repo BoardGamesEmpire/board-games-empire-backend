@@ -18,7 +18,20 @@ export interface OidcProviderConfig {
 }
 
 /**
- * The id is the callback path (`/api/auth/oauth2/callback/<id>`), so it stays
+ * The ids of the providers the operator allows unverified emails for (#1016).
+ * The one flag settles both things the email decides: a first sign-in through
+ * such a provider may create a user from an email it doesn't vouch for, and a
+ * signed-in user may link it without it vouching for the email, since it never
+ * does.
+ */
+export function idsAllowingUnverifiedEmail(
+  providers: readonly Pick<OidcProviderConfig, 'id' | 'allowUnverifiedEmail'>[],
+): string[] {
+  return providers.filter((provider) => provider.allowUnverifiedEmail).map((provider) => provider.id);
+}
+
+/**
+ * The id is the callback path (`/api/auth/callback/<id>`), so it stays
  * URL-safe. Upper-casing and turning `-` into `_` then gives each id its own
  * variable segment, which a wider alphabet would not (`a_b` and `a-b`).
  */

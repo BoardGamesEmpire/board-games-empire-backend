@@ -50,14 +50,14 @@ describe('createSettingGates', () => {
   const gates = () => createSettingGates(deps);
 
   describe('beforeUserCreate (every account creation better-auth makes)', () => {
-    it.each(['/sign-up/email', '/sign-in/anonymous', '/oauth2/callback/:providerId', '/one-tap/callback'])(
+    it.each(['/sign-up/email', '/sign-in/anonymous', '/callback/:id', '/one-tap/callback'])(
       'lets %s create an account while registration is open',
       async (path) => {
         await expect(gates().beforeUserCreate({}, { path })).resolves.toBeUndefined();
       },
     );
 
-    it.each(['/sign-up/email', '/sign-in/anonymous', '/one-tap/callback'])(
+    it.each(['/sign-up/email', '/sign-in/anonymous', '/callback/:id', '/one-tap/callback'])(
       'refuses %s with 403 REGISTRATION_DISABLED while registration is closed',
       async (path) => {
         switches = { ...ALL_OPEN, allowUserRegistration: false };
@@ -66,21 +66,6 @@ describe('createSettingGates', () => {
           status: 403,
           code: 'REGISTRATION_DISABLED',
           message: 'rendered:errors.auth.registration_disabled',
-        });
-      },
-    );
-
-    // An OAuth callback answers with a redirect whose `error` parameter
-    // carries the message alone, so there the message is the code.
-    it.each(['/oauth2/callback/:providerId', '/callback/:id'])(
-      'refuses %s with the code as its message, for the redirect to carry',
-      async (path) => {
-        switches = { ...ALL_OPEN, allowUserRegistration: false };
-
-        await expect(refusalOf(gates().beforeUserCreate({}, { path }))).resolves.toEqual({
-          status: 403,
-          code: 'REGISTRATION_DISABLED',
-          message: 'REGISTRATION_DISABLED',
         });
       },
     );

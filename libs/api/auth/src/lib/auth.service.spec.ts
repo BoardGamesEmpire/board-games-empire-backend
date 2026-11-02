@@ -67,6 +67,10 @@ describe('AuthService', () => {
           get: () => Promise.reject(new Error('Connection is closed.')),
           set: async () => undefined,
           delete: async () => undefined,
+          // Required of a storage since better-auth 1.7, and not reached by a
+          // session read (#1016).
+          getAndDelete: async () => undefined,
+          increment: async () => 1,
         },
       });
       const name = (await auth.$context).authCookies.sessionToken.name;
@@ -191,12 +195,17 @@ describe('AuthService', () => {
     it("returns the user as a session carries it: the admin plugin's ban included, unreturned fields left out", async () => {
       const { auth, service } = serviceOverMemory();
       const context = await auth.$context;
-      const created = await context.internalAdapter.createUser({
-        email: 'alice@example.test',
-        name: 'alice',
-        emailVerified: false,
-        privateNote: 'not for the wire',
-      });
+      // better-auth 1.7 asks where a user came from, to run its optional
+      // `validateUserInfo` gate, which this instance leaves unset (#1016).
+      const created = await context.internalAdapter.createUser(
+        {
+          email: 'alice@example.test',
+          name: 'alice',
+          emailVerified: false,
+          privateNote: 'not for the wire',
+        },
+        { method: 'email-password' },
+      );
 
       const found = await service.findUserById(created.id);
 

@@ -1,7 +1,7 @@
 import { isAPIError } from 'better-auth/api';
 import { createProviderEmailGate, SIGN_IN_PROVIDER_EMAIL_UNVERIFIED } from './provider-email-gate';
 
-const CALLBACK = '/oauth2/callback/:providerId';
+const CALLBACK = '/callback/:id';
 
 /** What a refusal carries on the wire, read off the thrown `APIError`. */
 function refusalOf(attempt: () => void): { status: number; code?: string; message?: string } {
@@ -28,24 +28,24 @@ describe('createProviderEmailGate', () => {
     (key) => `rendered:${key}`,
   );
 
-  const callbackOf = (providerId: string) => ({ path: CALLBACK, params: { providerId } });
+  const callbackOf = (id: string) => ({ path: CALLBACK, params: { id } });
 
   it('lets a first sign-in through when the provider vouches for the email (#912)', () => {
     expect(() => gate({ emailVerified: true }, callbackOf('strict'))).not.toThrow();
   });
 
-  // The callback's refusal reaches the client as the redirect's `error`, which
-  // better-auth takes from the message, so the message is the code there.
+  // The callback's refusal reaches the client as a redirect: the code as
+  // `error`, and the sentence as `error_description` (#1016).
   it.each([
     ['false', false],
     ['missing', undefined],
   ])(
-    'refuses a first sign-in whose email_verified is %s, with its code as the redirect error (#912)',
+    'refuses a first sign-in whose email_verified is %s, with its code and a rendered message (#912)',
     (_state, emailVerified) => {
       expect(refusalOf(() => gate({ emailVerified }, callbackOf('strict')))).toEqual({
         status: 403,
         code: SIGN_IN_PROVIDER_EMAIL_UNVERIFIED,
-        message: SIGN_IN_PROVIDER_EMAIL_UNVERIFIED,
+        message: 'rendered:errors.auth.sign_in_provider_email_unverified',
       });
     },
   );
@@ -55,8 +55,9 @@ describe('createProviderEmailGate', () => {
     expect(() => gate({}, callbackOf('lenient'))).not.toThrow();
   });
 
-  // A provider path with no configured provider behind it, such as a social
-  // provider's ID-token sign-in, answers with a body, so it gets the sentence.
+  // `/sign-in/social` names its provider in the body, not in `params`, so it is
+  // never let through unverified. The ID token gate keeps sign-in providers'
+  // tokens off that route until #1019.
   it('refuses an unverified email on a provider path the config does not list, with a rendered message (#912)', () => {
     expect(refusalOf(() => gate({ emailVerified: false }, { path: '/sign-in/social' }))).toEqual({
       status: 403,

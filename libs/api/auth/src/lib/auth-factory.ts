@@ -26,11 +26,17 @@ import type { User } from 'better-auth/types';
 import type { I18nService } from 'nestjs-i18n';
 import process from 'node:process';
 import { ADMIN_PLUGIN_OPTIONS } from './access/admin-roles';
-import type { AuthStorage } from './auth-storage';
+import type { CompleteAuthStorage } from './auth-storage';
 import { betterAuthLogger } from './better-auth-logger';
-import { type OidcProviderConfig, readOidcProviders, unlistedOidcVariables } from './configuration/oidc-providers';
+import {
+  idsAllowingUnverifiedEmail,
+  type OidcProviderConfig,
+  readOidcProviders,
+  unlistedOidcVariables,
+} from './configuration/oidc-providers';
 import { AUTH_BASE_PATH, AUTH_CLIENT_IP_HEADER, AUTH_COOKIE_PREFIX } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
+import { createIdTokenGate } from './id-token-gate';
 import { mapOidcProfile, OIDC_SCOPES } from './oidc-profile';
 import { createProviderEmailGate } from './provider-email-gate';
 import { providerPictureOnly } from './provider-picture';
@@ -120,7 +126,7 @@ export function createUserCreatedHook(
 export function authFactory(
   prisma: PrismaClient,
   configService?: ConfigService,
-  storage?: AuthStorage,
+  storage?: CompleteAuthStorage,
   eventEmitter?: EventEmitter2,
   auditContext?: AuditContextService,
   systemActorScope?: SystemActorScope,
@@ -155,6 +161,7 @@ export function authFactory(
   const gateDeps = settingGateDeps(prisma, i18n);
   const settingGates = createSettingGates(gateDeps);
   const signOutHook = createSignOutHook({ render: gateDeps.render });
+  const idTokenGate = createIdTokenGate(gateDeps.render);
   const usernameVariants = createUsernameVariants(prisma);
   const providerEmailGate = createProviderEmailGate(providers, gateDeps.render);
 
@@ -191,11 +198,7 @@ export function authFactory(
 
     ...(usingSwagger ? [openAPI()] : []),
 
-    deviceAuthorization({
-      verificationUri: '/device',
-      // temporary workaround: https://github.com/better-auth/better-auth/issues/9422
-      schema: {},
-    }),
+    deviceAuthorization({ verificationUri: '/device' }),
   ];
 
   return betterAuth({
@@ -209,6 +212,8 @@ export function authFactory(
       // write, and without an address it believes every client shares one
       // rate-limit bucket.
       ipAddress: { ipAddressHeaders: [AUTH_CLIENT_IP_HEADER] },
+      // better-auth 1.7 moved this out of `experimental` (#1016).
+      database: { joins: true },
     },
     basePath: AUTH_BASE_PATH,
     appName: 'BoardGamesEmpire',
@@ -234,15 +239,28 @@ export function authFactory(
       // is made from a signed-in session instead, and may use a different
       // email because people often hold different addresses at the provider
       // and on this server.
-      accountLinking: { disableImplicitLinking: true, allowDifferentEmails: true },
+      //
+      // A provider the operator allows unverified emails for is trusted for
+      // linking (#1016): its link starts from a signed-in session, so the
+      // email claim isn't what grants access, and without this it could sign
+      // in but never link. That is safe only while `disableImplicitLinking` is
+      // on: better-auth lets a trusted provider past its verified-email check
+      // for implicit linking too, so turning that off would let the provider's
+      // email claim attach it to a registered user. #913 turns implicit linking
+      // back on, and has to account for that.
+      accountLinking: {
+        disableImplicitLinking: true,
+        allowDifferentEmails: true,
+        trustedProviders: idsAllowingUnverifiedEmail(providers),
+      },
     },
     hooks: {
       before: createAuthMiddleware(async (context) => {
         await settingGates.beforeRoute(context);
         await signOutHook.beforeRoute(context);
+        idTokenGate.beforeRoute(context);
       }),
     },
-    experimental: { joins: true },
     secret: options.secret,
     database: prismaAdapter(prisma, {
       // Off everywhere (#627). The adapter prints these through a console
@@ -337,5 +355,19 @@ function toGenericOAuthConfig(provider: OidcProviderConfig) {
     clientSecret: provider.clientSecret,
     scopes: [...OIDC_SCOPES],
     mapProfileToUser: mapOidcProfile,
+    // Every provider here is an OpenID Connect one, so `sub` is the user's
+    // identity there. better-auth's default reads an `id` claim instead when
+    // discovery omits `id_token_signing_alg_values_supported`, which refuses
+    // every sign-in through such a provider (#1016). There is no fallback to
+    // `id`, which could change which user a sign-in resolves to: a profile
+    // without `sub` is refused, as better-auth refuses a blank key.
+    accountSubject: ({ profile }: { profile: { sub?: string | number | null } }) => profile.sub ?? '',
+    // Sign-out stays with this server until #1018 decides whether it may send
+    // a user to the provider (#1016). Discovery's `end_session_endpoint`
+    // would otherwise give the route a provider URL to answer with. Today the
+    // sign-out hook deletes the session before the route runs, so the route
+    // finds none and answers without one; this makes that deliberate, and it
+    // holds if the hook changes.
+    disableProviderLogout: true,
   };
 }

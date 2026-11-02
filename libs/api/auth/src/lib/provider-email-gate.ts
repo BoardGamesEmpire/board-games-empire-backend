@@ -1,8 +1,7 @@
 import type { I18nPath } from '@bge/i18n';
 import { APIError } from 'better-auth/api';
-import type { OidcProviderConfig } from './configuration/oidc-providers';
+import { idsAllowingUnverifiedEmail, type OidcProviderConfig } from './configuration/oidc-providers';
 import { isProviderSignInPath } from './provider-picture';
-import { OAUTH_CALLBACK_PATHS } from './setting-gates';
 
 export const SIGN_IN_PROVIDER_EMAIL_UNVERIFIED = 'SIGN_IN_PROVIDER_EMAIL_UNVERIFIED';
 
@@ -11,8 +10,8 @@ const MESSAGE: I18nPath = 'errors.auth.sign_in_provider_email_unverified';
 /** The slice of better-auth's endpoint context the gate reads. It is `null` outside an endpoint. */
 export interface ProviderEmailGateContext {
   readonly path?: string;
-  /** The callback's path parameters: `providerId` on `/oauth2/callback/:providerId`. */
-  readonly params?: { readonly providerId?: string };
+  /** The callback's path parameters: `id`, the sign-in provider's id, on `/callback/:id` (#1016). */
+  readonly params?: { readonly id?: string };
 }
 
 /**
@@ -28,32 +27,32 @@ export interface ProviderEmailGateContext {
  * path, is never let through unverified. A sign-in to an existing user and a
  * link from a signed-in session create no user, so they never reach here.
  *
- * On an OAuth callback the refusal's message is its code, which better-auth
- * hands the client as the redirect's `error` (see `OAUTH_CALLBACK_PATHS`).
+ * On an OAuth callback better-auth hands the client the refusal's code as the
+ * redirect's `error`, and its message as `error_description` (#1016).
+ *
+ * Only `/callback/:id` names its provider in `params`. `/sign-in/social` names
+ * it in `body.provider`, so a user created there counts as unlisted and is
+ * refused unverified, whatever the provider's setting. The ID token gate keeps
+ * sign-in providers' tokens off that route today. Native sign-in (#1019) has
+ * to read the provider from the body when it reopens the route.
  */
 export function createProviderEmailGate(
   providers: readonly Pick<OidcProviderConfig, 'id' | 'allowUnverifiedEmail'>[],
   render: (key: I18nPath) => string,
 ): (user: { readonly emailVerified?: unknown }, context: ProviderEmailGateContext | null) => void {
-  const lenient = new Set(providers.filter((provider) => provider.allowUnverifiedEmail).map((provider) => provider.id));
+  const lenient = new Set(idsAllowingUnverifiedEmail(providers));
 
   return (user, context) => {
     if (context === null || !isProviderSignInPath(context) || user.emailVerified === true) {
       return;
     }
 
-    const providerId = context.params?.providerId;
+    const providerId = context.params?.id;
 
     if (providerId !== undefined && lenient.has(providerId)) {
       return;
     }
 
-    throw new APIError('FORBIDDEN', {
-      code: SIGN_IN_PROVIDER_EMAIL_UNVERIFIED,
-      message:
-        context.path !== undefined && OAUTH_CALLBACK_PATHS.has(context.path)
-          ? SIGN_IN_PROVIDER_EMAIL_UNVERIFIED
-          : render(MESSAGE),
-    });
+    throw new APIError('FORBIDDEN', { code: SIGN_IN_PROVIDER_EMAIL_UNVERIFIED, message: render(MESSAGE) });
   };
 }
