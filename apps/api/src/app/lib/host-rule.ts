@@ -39,11 +39,8 @@ const TRAILING_DOT = /\.$/;
 const NON_ASCII = /\P{ASCII}/u;
 const WILDCARD = /[*?]/;
 
-/**
- * A name no entry means to list, under the reserved `.invalid` domain. Its depth
- * catches `*.*.*`, and a rebinding attacker can pick a name of any depth.
- */
-const NAME_NO_ENTRY_MEANS = 'any.name.invalid';
+/** A hostname pattern with no literal name in it, so nothing ties it to this server. */
+const ONLY_WILDCARDS = /^[*?.]+$/;
 
 /** `*` is any run of characters and `?` is one, as better-auth reads them. */
 function wildcardToRegExp(pattern: string): RegExp {
@@ -152,11 +149,10 @@ export function createHostRule(names: ServerNames): HostRule {
 }
 
 /**
- * Whether an entry is open enough to admit a name nobody listed, as `*`, `?*`
- * and `*.*` all are, which turns the check off.
+ * Whether an entry's hostname is only wildcards, as `*`, `?*` and `*.*.*.*` are.
+ * That turns the check off: a rebinding attacker picks the name, so can pick one
+ * of whatever depth and shape the entry admits.
  */
 export function allowsEveryHost(names: ServerNames): boolean {
-  return hostPatternsOf(names)
-    .map(wildcardToRegExp)
-    .some((pattern) => pattern.test(NAME_NO_ENTRY_MEANS));
+  return hostPatternsOf(names).some((pattern) => ONLY_WILDCARDS.test(pattern));
 }

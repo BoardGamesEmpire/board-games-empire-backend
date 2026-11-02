@@ -174,11 +174,17 @@ describe('createHostRule (#977)', () => {
       expect(allowsEveryHost(open)).toBe(true);
     });
 
-    // Two dots rather than every name, but an attacker picks the name's depth.
-    it('says so for https://*.*.*, which lets any name with enough labels through', () => {
-      const names = { ...open, trustedOrigins: ['https://*.*.*'] };
+    // Not every name, but an attacker picks the name's depth and shape, so no
+    // number of labels makes an entry of nothing but wildcards safe.
+    it.each([
+      ['https://*.*.*', 'a.evil.example'],
+      ['https://*.*.*.*', 'a.b.evil.example'],
+      ['https://*.*.*.*.*.*.*.*', 'a.b.c.d.e.f.evil.example'],
+      ['https://*.??', 'evil.de'],
+    ])('says so for %s, which lets %s through', (entry, host) => {
+      const names = { ...open, trustedOrigins: [entry] };
 
-      expect(createHostRule(names)('a.evil.example')).toBe(true);
+      expect(createHostRule(names)(host)).toBe(true);
       expect(allowsEveryHost(names)).toBe(true);
     });
 
