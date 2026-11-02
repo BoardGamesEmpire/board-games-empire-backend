@@ -1,0 +1,162 @@
+import { isIP, isIPv6 } from 'node:net';
+import { domainToASCII } from 'node:url';
+
+/**
+ * The configuration that names the addresses this server answers at (#977).
+ * Nothing is configured for this purpose alone: an address clients reach is
+ * already one of these.
+ */
+export interface ServerNames {
+  /** `auth.url`: where clients reach the api. */
+  readonly publicUrl: string;
+  /** `auth.trustedOrigins`, in the forms better-auth accepts. */
+  readonly trustedOrigins: readonly string[];
+  /** `media.baseUrl`: where the media links the api signs point. */
+  readonly mediaBaseUrl: string;
+}
+
+/** Decides whether a raw `Host` header value is one this server answers to. */
+export type HostRule = (hostHeader: string | undefined) => boolean;
+
+/**
+ * A `Host` value: a bracketed IPv6 address or a name, then an optional port.
+ * Only these characters can reach a name pattern, so a pattern's `.*` can't
+ * match anything but a well-formed name.
+ */
+const HOST_VALUE = /^(?:\[([^\]]+)\]|([a-z0-9._-]{1,253}))(?::\d+)?$/i;
+
+/** The schemes clients reach the api over, so the only ones that name its host. */
+const WEB_SCHEMES = ['http', 'https'];
+
+/**
+ * An entry with no `://` that is a host, with at most a port or a path after it.
+ * Anything else has a scheme of its own, such as `com.example.app:/callback`,
+ * RFC 8252's redirect form for a native app.
+ */
+const HOST_WITHOUT_SCHEME = /^[^/:]*(?::(?:\d+|\{port\}|\*))?(?:\/|$)/;
+
+const TRAILING_DOT = /\.$/;
+const NON_ASCII = /\P{ASCII}/u;
+const WILDCARD = /[*?]/;
+
+/**
+ * A name no entry means to list, under the reserved `.invalid` domain. Its depth
+ * catches `*.*.*`, and a rebinding attacker can pick a name of any depth.
+ */
+const NAME_NO_ENTRY_MEANS = 'any.name.invalid';
+
+/** `*` is any run of characters and `?` is one, as better-auth reads them. */
+function wildcardToRegExp(pattern: string): RegExp {
+  const source = pattern
+    .replace(/[.+^${}()|[\]\\/-]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.');
+
+  return new RegExp(`^${source}$`);
+}
+
+/**
+ * One label of a name, in the ASCII form a browser sends as `Host`. This goes a
+ * label at a time because `domainToASCII` reads a `?` as the end of the name,
+ * and a label holding a wildcard has no ASCII form to convert to.
+ */
+function labelToAscii(label: string): string {
+  return NON_ASCII.test(label) && !WILDCARD.test(label) ? domainToASCII(label) : label;
+}
+
+/**
+ * The hostname pattern an entry names, if any. Entries aren't always URLs:
+ * `http://localhost:{PORT}`, `https://*.preview.example` and `scrape.example`
+ * are all valid, so `new URL` can't read them. An entry whose scheme covers
+ * neither web scheme, such as `myapp://` or `myapp:/callback`, names no host. A
+ * wildcard scheme does cover them, as `*://bge.example` does for better-auth.
+ */
+function hostPatternOf(entry: string): string | undefined {
+  const lowered = entry.toLowerCase();
+  const schemeEnd = lowered.indexOf('://');
+
+  if (schemeEnd === -1) {
+    if (!HOST_WITHOUT_SCHEME.test(lowered)) {
+      return undefined;
+    }
+  } else {
+    const scheme = wildcardToRegExp(lowered.slice(0, schemeEnd));
+    if (!WEB_SCHEMES.some((webScheme) => scheme.test(webScheme))) {
+      return undefined;
+    }
+  }
+
+  const [authority] = (schemeEnd === -1 ? lowered : lowered.slice(schemeEnd + 3)).split('/', 1);
+  const [hostname] = authority.slice(authority.lastIndexOf('@') + 1).split(':', 1);
+
+  return hostname.split('.').map(labelToAscii).join('.').replace(TRAILING_DOT, '') || undefined;
+}
+
+function hostPatternsOf(names: ServerNames): string[] {
+  return [names.publicUrl, ...names.trustedOrigins, names.mediaBaseUrl]
+    .map(hostPatternOf)
+    .filter((pattern): pattern is string => pattern !== undefined);
+}
+
+/**
+ * The host in a `Host` value, lower-cased and without one trailing dot, or
+ * `undefined` when the value isn't a well-formed host. A bracketed value is
+ * only ever an IPv6 address, so it can't reach the name patterns.
+ */
+function readHost(hostHeader: string): string | undefined {
+  const match = HOST_VALUE.exec(hostHeader);
+  if (!match) {
+    return undefined;
+  }
+
+  const [, bracketed, name] = match;
+  if (bracketed !== undefined) {
+    return isIPv6(bracketed) ? bracketed : undefined;
+  }
+
+  return name.toLowerCase().replace(TRAILING_DOT, '') || undefined;
+}
+
+/**
+ * The rule that stops DNS rebinding (#977). A page that rebinds its own domain
+ * to this server's address sends its own domain as `Host`, so anything the
+ * server doesn't call itself is refused.
+ *
+ * - An absent `Host` passes: browsers always send one, so it can't be a rebound
+ *   request, and HTTP/1.0 health checkers don't.
+ * - An IP literal passes, because rebinding needs a hostname. The whole host
+ *   must be the literal: `127.0.0.1.evil.example` is a name.
+ * - `localhost` passes on any port, for development and local healthchecks.
+ * - Only the hostname is compared. The port plays no part in the attack, and it
+ *   differs behind a proxy.
+ *
+ * Callers pass the raw `Host` header. Express's `req.hostname` and `req.host`
+ * prefer `X-Forwarded-Host` under `trust proxy`, and a rebound page can set that
+ * header on its own `fetch`.
+ */
+export function createHostRule(names: ServerNames): HostRule {
+  const patterns = hostPatternsOf(names).map(wildcardToRegExp);
+
+  return (hostHeader) => {
+    if (!hostHeader) {
+      return true;
+    }
+
+    const host = readHost(hostHeader);
+    if (host === undefined) {
+      return false;
+    }
+
+    return isIP(host) !== 0 || host === 'localhost' || patterns.some((pattern) => pattern.test(host));
+  };
+}
+
+/**
+ * Whether an entry is open enough to admit a name nobody listed, as `*`, `?*`
+ * and `*.*` all are, which turns the check off.
+ */
+export function allowsEveryHost(names: ServerNames): boolean {
+  return hostPatternsOf(names)
+    .map(wildcardToRegExp)
+    .some((pattern) => pattern.test(NAME_NO_ENTRY_MEANS));
+}

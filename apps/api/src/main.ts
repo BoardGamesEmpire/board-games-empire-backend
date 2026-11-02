@@ -6,8 +6,9 @@ import { registerShutdownHandlers } from '@bge/otel';
 import { bootstrapLogger, otel } from './app/lib/logger';
 
 // Imports below this line are instrumented by the OTel auto-instrumentations.
-import { AUTH_INSTANCE, AUTH_REQUEST_HANDLER } from '@bge/auth';
+import { AUTH_INSTANCE, AUTH_REQUEST_HANDLER, fallbackLocaleRenderer } from '@bge/auth';
 import { createPrismaCliMigrator, runBootstrap } from '@bge/bootstrap';
+import type { I18nTranslations } from '@bge/i18n';
 import { nestLoggerFromPino } from '@bge/logger';
 import { createWebClient } from '@bge/web-client';
 import { Logger, RequestMethod } from '@nestjs/common';
@@ -18,7 +19,7 @@ import { DocumentBuilder, OpenAPIObject, SwaggerModule } from '@nestjs/swagger';
 import { toNodeHandler } from 'better-auth/node';
 import compression from 'compression';
 import helmet from 'helmet';
-import { I18nValidationPipe } from 'nestjs-i18n';
+import { I18nService, I18nValidationPipe } from 'nestjs-i18n';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { join } from 'node:path';
 import { RedisIoAdapter } from './app/adapters/redis-io.adapter';
@@ -26,6 +27,8 @@ import { AppModule } from './app/app.module';
 import { bootstrapCacheFlushPatterns } from './app/configuration/cache-flush';
 import redisConfig, { redisConfigValidationSchema } from './app/configuration/redis.config';
 import { createAuthClientIpHandler } from './app/lib/auth-client-ip';
+import { createHostCheck } from './app/lib/host-check';
+import { allowsEveryHost, createHostRule, type ServerNames } from './app/lib/host-rule';
 
 async function bootstrap() {
   const LOGGER_CONTEXT = 'Bootstrap';
@@ -89,6 +92,26 @@ async function bootstrap() {
   // warns once on the first request that actually carries a forwarded header,
   // which is the first moment there is evidence rather than a guess.
 
+  // Refuses a request for any name that isn't this server's, so a page that
+  // rebinds its own domain to this address can't read what the api answers
+  // without a session (#977).
+  const serverNames: ServerNames = {
+    publicUrl: configService.getOrThrow<string>('auth.url'),
+    trustedOrigins: configService.getOrThrow<string[]>('auth.trustedOrigins'),
+    mediaBaseUrl: configService.getOrThrow<string>('media.baseUrl'),
+  };
+  const hostCheck = createHostCheck({
+    rule: createHostRule(serverNames),
+    render: fallbackLocaleRenderer(app.get<I18nService<I18nTranslations>>(I18nService)),
+  });
+
+  if (allowsEveryHost(serverNames)) {
+    Logger.warn(
+      'TRUSTED_ORIGINS has an entry that matches every name, so this server answers at any address and DNS rebinding can reach it',
+      LOGGER_CONTEXT,
+    );
+  }
+
   app
     // I18nValidationPipe is ValidationPipe with an i18n-aware exceptionFactory:
     // decorator messages tagged via `i18nValidationMessage` (see @bge/i18n) are
@@ -109,6 +132,10 @@ async function bootstrap() {
       }),
     )
     .use(helmet())
+    // Ahead of the web client and the better-auth mount below, so it covers the
+    // whole Express app. It reads the Host header and not `req.hostname`, which
+    // `trust proxy` above takes from X-Forwarded-Host (#977).
+    .use(hostCheck.handler)
     .use(compression())
     .setGlobalPrefix(globalPrefix, { exclude: unprefixedRoutes })
     .enableCors({
@@ -184,7 +211,7 @@ async function bootstrap() {
     Logger.debug('Swagger document created and setup completed', LOGGER_CONTEXT);
   }
 
-  const redisAdapter = new RedisIoAdapter(app);
+  const redisAdapter = new RedisIoAdapter(hostCheck.allowRequest, app);
   await redisAdapter.connectToRedis(configService);
 
   app.useWebSocketAdapter(redisAdapter);

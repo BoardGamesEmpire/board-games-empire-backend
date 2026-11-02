@@ -115,6 +115,13 @@ export const API_THROTTLE_LIMIT = 1_000_000;
 export const API_THROTTLE_TTL_MS = 60_000;
 
 /**
+ * A name only `TRUSTED_ORIGINS` gives the API child. Loopback names and IP
+ * literals pass the Host check without reading configuration, so this is how a
+ * spec reaches the configured names on a running server (#977).
+ */
+export const API_CONFIGURED_SERVER_NAME = 'bge-e2e.test';
+
+/**
  * Environment the API child gets on top of the inherited process env, given
  * the ephemeral origin it is about to bind.
  *
@@ -136,7 +143,7 @@ export const API_THROTTLE_TTL_MS = 60_000;
  * may list only one, though, and the harness serves on `127.0.0.1`: an
  * `Origin: http://127.0.0.1:<port>` does not match a trusted
  * `http://localhost:<port>`. Both spellings are pinned so a spec may address
- * the server either way.
+ * the server either way. It also names `API_CONFIGURED_SERVER_NAME`.
  *
  * `DISABLE_ORIGIN_CHECK` is pinned off, as CI and `.env.example` have it. A
  * developer's `.env` may turn it on, and then every cookie is accepted from
@@ -144,7 +151,7 @@ export const API_THROTTLE_TTL_MS = 60_000;
  * missing origin is refused (#511) would fail on that machine alone.
  */
 export function apiEnvOverrides(baseUrl: string, port: number): Record<string, string> {
-  const trustedOrigins = [baseUrl, baseUrl.replace('127.0.0.1', 'localhost')];
+  const trustedOrigins = [baseUrl, baseUrl.replace('127.0.0.1', 'localhost'), `https://${API_CONFIGURED_SERVER_NAME}`];
 
   return {
     [API_PORT_VAR]: String(port),

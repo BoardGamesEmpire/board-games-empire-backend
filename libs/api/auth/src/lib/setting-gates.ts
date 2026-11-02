@@ -208,11 +208,11 @@ export function settingGateDeps(prisma: PrismaClient, i18n?: I18nService<I18nTra
 }
 
 /**
- * Renders a catalog key in the fallback locale, for refusals on `/api/auth/*`,
- * which runs ahead of Nest's i18n. Without an `I18nService`, as when the
- * better-auth CLI builds the instance, it returns the key. Never throws: a
- * catalog entry that cannot render would otherwise turn the refusal into a
- * 500.
+ * Renders a catalog key in the fallback locale, for refusals ahead of Nest's
+ * i18n, such as those on `/api/auth/*` and the Host check's (#977). Without an
+ * `I18nService`, as when the better-auth CLI builds the instance, it returns the
+ * key. Never throws: a catalog entry that cannot render would otherwise turn the
+ * refusal into a 500.
  */
 export function fallbackLocaleRenderer(
   i18n?: I18nService<I18nTranslations>,

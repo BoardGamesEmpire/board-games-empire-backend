@@ -157,6 +157,9 @@
     "invalid": "Invalid API key",
     "owner_banned": "This API key's owner is banned"
   },
+  "host": {
+    "not_allowed": "This server doesn't answer at this address. If you run this server, add the address to TRUSTED_ORIGINS"
+  },
   "auth": {
     "impersonated_session": "Impersonated sessions are not supported",
     "no_token": "No token provided",
