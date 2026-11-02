@@ -135,8 +135,16 @@ function hostPatternOf(entry: string): string | undefined {
   const wildcardAt = authority.indexOf('?');
   const userDetails = wildcardAt === -1 ? authority : authority.slice(0, wildcardAt);
   const [hostname] = authority.slice(userDetails.lastIndexOf('@') + 1).split(':', 1);
+  const labels = hostname.split('.');
+  const asciiLabels = labels.map(labelToAscii);
 
-  return hostname.split('.').map(labelToAscii).join('.').replace(TRAILING_DOT, '') || undefined;
+  // `domainToASCII` answers '' for a label with no ASCII form. Dropping only
+  // that label would widen the entry: `*.a‍` would become `*`.
+  if (asciiLabels.some((ascii, i) => ascii === '' && labels[i] !== '')) {
+    return undefined;
+  }
+
+  return asciiLabels.join('.').replace(TRAILING_DOT, '') || undefined;
 }
 
 function hostPatternsOf(names: ServerNames): string[] {

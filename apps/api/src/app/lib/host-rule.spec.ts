@@ -180,6 +180,18 @@ describe('createHostRule (#977)', () => {
       expect(allowing(entry)(host)).toBe(true);
     });
 
+    // `domainToASCII` answers '' for a label with no ASCII form, such as one
+    // ending in a zero-width joiner. Dropping just that label turned
+    // `*.a‍` into `*`, which admits every name (#977).
+    it.each(['https://*.a‍', 'https://*.‍', 'https://*.a‍.example'])(
+      'gives %s no meaning, since a label in it has no ASCII form',
+      (entry) => {
+        expect(allowing(entry)('evil.example')).toBe(false);
+        expect(allowing(entry)('x..example')).toBe(false);
+        expect(allowsEveryHost({ ...names, trustedOrigins: [entry] })).toBe(false);
+      },
+    );
+
     // A backtracking regular expression took about five seconds to refuse this
     // Host, on every request. The match now takes microseconds, so the bound
     // leaves room for a slow runner without letting the old cost back in.
