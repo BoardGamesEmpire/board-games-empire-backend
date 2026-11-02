@@ -95,18 +95,18 @@
       "dependencyDashboardApproval": true
     },
     {
-      "description": "Packages released together take their majors together (#613). Since Nest 12, every @nestjs package shares Nest's major. Nest's integrations (nestjs-cls, nestjs-pino, @willsoto/nestjs-prometheus) peer-depend on that major and support a new one only from a major of their own, so they join the group: apart, npm refuses each PR, the new Nest against the old integrations and the reverse. An integration that adds support in a minor arrives in the weekly group, which then has to merge first. The better-auth adapter matches too, but its rule below moves it to better-auth's group.",
+      "description": "Packages released together take their majors together (#613). Since Nest 12, every @nestjs package shares Nest's major. Nest's integrations (nestjs-cls, nestjs-pino, @willsoto/nestjs-prometheus) peer-depend on that major and support a new one only from a major of their own, so they join the group: apart, npm refuses each PR, the new Nest against the old integrations and the reverse. An integration that adds support in a minor arrives in the weekly group (the better-auth adapter's, in better-auth's group), which then has to merge first. The better-auth adapter matches too, but its rule below moves it to better-auth's group.",
       "matchManagers": ["npm"],
       "matchUpdateTypes": ["major"],
       "matchPackageNames": ["@nestjs/**", "nestjs-*", "@*/nestjs-*"],
       "groupName": "NestJS"
     },
     {
-      "description": "better-auth's plugins release with it, at its version, and the Nest adapter follows its majors (#613). The adapter's Nest support moves in its minors, through the weekly group.",
+      "description": "better-auth's plugins release with it, at its version, and a mix of versions broke #1013 and #1007, so every update type moves as one PR (#613, #1022). A direct pin on @better-auth/core keeps one copy installed: better-auth pins it exactly, its plugins peer-depend on a range, and without the pin a newer release could land beside better-auth's own. The group holds better-auth, core, its plugins, the auth CLI that npm run auth:generate runs, which @better-auth/** doesn't match, and the Nest adapter, whose Nest-support minors arrive here, not in the weekly group. separateMajorMinor is off because it otherwise takes priority over a group and proposes a package's major and minor updates separately. A major in the group waits for approval on the Dependency Dashboard and holds the whole group with it, as OpenTelemetry's does: while one is unapproved, the group's minor updates aren't proposed either. A security update does not join the group: Renovate applies vulnerabilityAlerts to a vulnerability fix PR as a force override of the packageRules, and that object's groupName defaults to null, so the fix opens alone, at once and by default at the lowest fixed version, even if it moves one of these packages apart from the rest. vulnerabilityAlerts.groupName could name a group, but it names one group for every security PR in the repository, so it is left alone. Before merging a security PR for one of these packages, check that the others still match it.",
       "matchManagers": ["npm"],
-      "matchUpdateTypes": ["major"],
-      "matchPackageNames": ["better-auth", "@better-auth/**", "@thallesp/nestjs-better-auth"],
-      "groupName": "better-auth"
+      "matchPackageNames": ["better-auth", "@better-auth/**", "@thallesp/nestjs-better-auth", "auth"],
+      "groupName": "better-auth",
+      "separateMajorMinor": false
     },
     {
       "description": "OpenTelemetry's stable packages and its experimental 0.x ones ship as one release, pinned to each other's exact versions. A stable major reaches the experimental half as a 0.x minor, so split by update type, it would send those to the weekly group alone. All of OpenTelemetry's updates share one PR instead, majors with the rest (#613); a stable major in it waits for approval, and holds the whole release with it. OpenTelemetry releases every two or three weeks, so the PR opens on the 1st of the month (all day, UTC), about one merge a month.",

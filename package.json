@@ -11,7 +11,7 @@
     "affected:lint": "nx affected:lint",
     "affected:test": "nx affected:test",
     "affected": "nx affected",
-    "auth:generate": "npx @better-auth/cli generate --config=utils/auth",
+    "auth:generate": "auth generate --config=utils/auth",
     "check": "npm-check -u",
     "compile": "nx run-many -t build --parallel",
     "db:generate": "nx run database:generate",
