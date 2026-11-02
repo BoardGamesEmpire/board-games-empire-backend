@@ -201,20 +201,30 @@ export const FAKE_PROVIDER_ID = 'fake';
 export const LENIENT_FAKE_PROVIDER_ID = 'fake-lenient';
 
 /**
- * The sign-in provider variables the API child boots with: the fake, twice
- * (#912). The API reads its providers once, at boot, so both are listed for
- * every spec, and discovery shows them to all of them. `OIDC_PROVIDERS` is
- * pinned like everything in {@link apiEnvOverrides}: a developer's `.env` may
- * list real providers, which a spec must never reach. The strict fake's
- * `ALLOW_UNVERIFIED_EMAIL` is pinned off for the same reason: inherited as
- * `true`, the refusal specs would sign up instead. `false`, not empty, since
- * an empty value is unset and the `.env` would fill it again.
+ * The same fake listed a third time, through a discovery document that
+ * publishes a JWKS, so its token response carries an ID token signed with it
+ * and better-auth verifies that token (#1016). The plain fake publishes none
+ * and has its claims read from `/userinfo`. Its `ALLOW_UNVERIFIED_EMAIL` is
+ * off, like the strict one's.
+ */
+export const SIGNED_FAKE_PROVIDER_ID = 'fake-signed';
+
+/**
+ * The sign-in provider variables the API child boots with: the fake, three
+ * times (#912, #1016). The API reads its providers once, at boot, so all are
+ * listed for every spec, and discovery shows them to all of them.
+ * `OIDC_PROVIDERS` is pinned like everything in {@link apiEnvOverrides}: a
+ * developer's `.env` may list real providers, which a spec must never reach.
+ * The strict fakes' `ALLOW_UNVERIFIED_EMAIL` is pinned off for the same
+ * reason: inherited as `true`, the refusal specs would sign up instead.
+ * `false`, not empty, since an empty value is unset and the `.env` would fill
+ * it again.
  */
 export function fakeProviderEnv(providerUrl: string): Record<string, string> {
   const discoveryUrl = `${providerUrl}/.well-known/openid-configuration`;
 
   return {
-    OIDC_PROVIDERS: `${FAKE_PROVIDER_ID},${LENIENT_FAKE_PROVIDER_ID}`,
+    OIDC_PROVIDERS: `${FAKE_PROVIDER_ID},${LENIENT_FAKE_PROVIDER_ID},${SIGNED_FAKE_PROVIDER_ID}`,
     OIDC_FAKE_DISCOVERY_URL: discoveryUrl,
     OIDC_FAKE_CLIENT_ID: 'e2e-client',
     OIDC_FAKE_CLIENT_SECRET: 'e2e-secret',
@@ -225,6 +235,11 @@ export function fakeProviderEnv(providerUrl: string): Record<string, string> {
     OIDC_FAKE_LENIENT_CLIENT_SECRET: 'e2e-lenient-secret',
     OIDC_FAKE_LENIENT_DISPLAY_NAME: 'Lenient fake provider',
     OIDC_FAKE_LENIENT_ALLOW_UNVERIFIED_EMAIL: 'true',
+    OIDC_FAKE_SIGNED_DISCOVERY_URL: `${providerUrl}/signed/.well-known/openid-configuration`,
+    OIDC_FAKE_SIGNED_CLIENT_ID: 'e2e-signed-client',
+    OIDC_FAKE_SIGNED_CLIENT_SECRET: 'e2e-signed-secret',
+    OIDC_FAKE_SIGNED_DISPLAY_NAME: 'Signed fake provider',
+    OIDC_FAKE_SIGNED_ALLOW_UNVERIFIED_EMAIL: 'false',
   };
 }
 

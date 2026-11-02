@@ -1,5 +1,6 @@
 import { postToAuth } from './auth-routes';
 import { E2E_FAKE_PROVIDER_URL_VAR, FAKE_PROVIDER_ID } from './e2e-env';
+import type { IdTokenFault } from './fake-sign-in-provider';
 
 const SIGN_IN_PATH = '/api/auth/sign-in/social';
 const LINK_PATH = '/api/auth/link-social';
@@ -43,17 +44,38 @@ export interface ProviderSignInOptions {
 
   /** The listed provider to sign in through; the strict fake unless set. */
   readonly providerId?: string;
+
+  /** Spoils the ID token the provider sends, when it sends one; a sound one unless set. */
+  readonly idToken?: IdTokenFault;
 }
 
 /** Each `Set-Cookie` header as the `name=value` pair a `Cookie` header sends back. */
-function cookiePairs(setCookie: readonly string[] | string | undefined): string[] {
+export function cookiePairs(setCookie: readonly string[] | string | undefined): string[] {
   const headers = typeof setCookie === 'string' ? [setCookie] : (setCookie ?? []);
 
   return headers.map((header) => header.split(';')[0].trim()).filter((pair) => pair.length > 0);
 }
 
-async function registerTicket(providerUrl: string, claims: Record<string, unknown>): Promise<string> {
-  const response = await fetch(`${providerUrl}/tickets`, {
+/**
+ * The session cookie a response sets, as `name=value`, or `''` when it sets
+ * none. A cookie set to nothing is one being cleared, not a session.
+ */
+export function sessionCookieOf(setCookie: readonly string[] | string | undefined): string {
+  const session = cookiePairs(setCookie).find((pair) => {
+    const [name, value] = pair.split('=', 2);
+    return name.endsWith(SESSION_COOKIE_SUFFIX) && Boolean(value);
+  });
+
+  return session ?? '';
+}
+
+async function registerTicket(
+  providerUrl: string,
+  claims: Record<string, unknown>,
+  idToken: IdTokenFault | undefined,
+): Promise<string> {
+  const query = idToken === undefined ? '' : `?idToken=${idToken}`;
+  const response = await fetch(`${providerUrl}/tickets${query}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(claims),
@@ -91,7 +113,7 @@ export async function signInThroughProvider(
     throw new Error(`starting a provider sign-in failed: ${start.status} ${JSON.stringify(start.body)}`);
   }
 
-  const ticket = await registerTicket(fakeProviderUrl(), claims);
+  const ticket = await registerTicket(fakeProviderUrl(), claims, options.idToken);
 
   const authorize = new URL(start.body.url);
   authorize.searchParams.set('ticket', ticket);
@@ -112,11 +134,5 @@ export async function signInThroughProvider(
     throw new Error(`the API's callback did not redirect: ${finish.status} ${await finish.text()}`);
   }
 
-  // A cookie set to nothing is one being cleared, not a session.
-  const session = cookiePairs(finish.headers.getSetCookie()).find((pair) => {
-    const [name, value] = pair.split('=', 2);
-    return name.endsWith(SESSION_COOKIE_SUFFIX) && Boolean(value);
-  });
-
-  return { location: new URL(location, baseUrl), cookie: session ?? '', ticket };
+  return { location: new URL(location, baseUrl), cookie: sessionCookieOf(finish.headers.getSetCookie()), ticket };
 }

@@ -1,8 +1,15 @@
 import { createActors, pollUntil, type Actors } from '@bge/testing-e2e';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { postToAuth } from '../support/auth-routes';
-import { FAKE_PROVIDER_ID, fakeProviderEnv, LENIENT_FAKE_PROVIDER_ID, requireBaseUrl } from '../support/e2e-env';
+import {
+  FAKE_PROVIDER_ID,
+  fakeProviderEnv,
+  LENIENT_FAKE_PROVIDER_ID,
+  requireBaseUrl,
+  SIGNED_FAKE_PROVIDER_ID,
+} from '../support/e2e-env';
+import { base64UrlJson } from '../support/fake-sign-in-provider';
 import { useSettingSwitch } from '../support/setting-switch';
 import { fakeProviderUrl, signInThroughProvider } from '../support/sign-in-provider';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
@@ -10,8 +17,7 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
 const GET_SESSION_PATH = '/api/auth/get-session';
 const SIGN_OUT_PATH = '/api/auth/sign-out';
 const DISCOVERY_PATH = '/.well-known/bge-identity';
-
-const base64UrlJson = (value: unknown): string => Buffer.from(JSON.stringify(value)).toString('base64url');
+const SIGNED_DISCOVERY_PATH = '/signed/.well-known/openid-configuration';
 
 /** What the server answers a submitted ID token with (#1016). */
 const ID_TOKEN_REFUSED_BODY = {
@@ -23,6 +29,30 @@ const ID_TOKEN_REFUSED_BODY = {
 /** A token with claims and no signature, as a client that forged one would send it. */
 const unsignedIdToken = (claims: Record<string, unknown>): string =>
   `${base64UrlJson({ alg: 'none', typ: 'JWT' })}.${base64UrlJson(claims)}.`;
+
+/**
+ * An ID token the signed fake provider signs with the key it publishes, for the
+ * claims given. Nothing about it is wrong: its issuer is the one the provider's
+ * discovery document names, its audience the client id the API holds for the
+ * provider, and it has not expired.
+ */
+const signedIdToken = async (claims: Record<string, unknown>): Promise<string> => {
+  const discovery = await request(fakeProviderUrl()).get(SIGNED_DISCOVERY_PATH).expect(200);
+  const issuedAt = Math.floor(Date.now() / 1000);
+
+  const minted = await request(fakeProviderUrl())
+    .post('/id-tokens')
+    .send({
+      iss: discovery.body.issuer,
+      aud: fakeProviderEnv(fakeProviderUrl()).OIDC_FAKE_SIGNED_CLIENT_ID,
+      iat: issuedAt,
+      exp: issuedAt + 600,
+      ...claims,
+    })
+    .expect(201);
+
+  return minted.body.idToken;
+};
 
 /**
  * Signing in through a sign-in provider (#912), end to end: the API talks to
@@ -75,6 +105,17 @@ describe('signing in through a sign-in provider', () => {
       { description: `a notification for user ${userId}` },
     );
 
+  /** What the fake provider recorded of one sign-in, read back by its ticket. */
+  const ticketOf = async (ticket: string) => {
+    const response = await request(fakeProviderUrl()).get(`/tickets/${ticket}`).expect(200);
+
+    return response.body;
+  };
+
+  /** How many Account rows link one provider's user, by the provider and the user's id there. */
+  const accountRowCount = (providerId: string, accountId: string) =>
+    db.client.account.count({ where: { providerId, accountId } });
+
   /** The user a credential, such as an actor's bearer token, signs in as, if it still does. */
   const sessionUserOf = async (headers: Record<string, string>): Promise<string | undefined> => {
     const response = await request(baseUrl).get(GET_SESSION_PATH).set(headers).expect(200);
@@ -113,12 +154,22 @@ describe('signing in through a sign-in provider', () => {
         authorization_endpoint: '/api/auth/sign-in/social',
         sign_up_disabled: false,
       },
+      {
+        type: 'oidc',
+        provider_id: SIGNED_FAKE_PROVIDER_ID,
+        display_name: 'Signed fake provider',
+        discovery_url: providerEnv.OIDC_FAKE_SIGNED_DISCOVERY_URL,
+        authorization_endpoint: '/api/auth/sign-in/social',
+        sign_up_disabled: false,
+      },
     ]);
     for (const secret of [
       providerEnv.OIDC_FAKE_CLIENT_ID,
       providerEnv.OIDC_FAKE_CLIENT_SECRET,
       providerEnv.OIDC_FAKE_LENIENT_CLIENT_ID,
       providerEnv.OIDC_FAKE_LENIENT_CLIENT_SECRET,
+      providerEnv.OIDC_FAKE_SIGNED_CLIENT_ID,
+      providerEnv.OIDC_FAKE_SIGNED_CLIENT_SECRET,
     ]) {
       expect(response.text).not.toContain(secret);
     }
@@ -129,8 +180,23 @@ describe('signing in through a sign-in provider', () => {
 
     const { ticket } = await signInThroughProvider(baseUrl, { sub, email, email_verified: true });
 
-    const response = await request(fakeProviderUrl()).get(`/tickets/${ticket}`).expect(200);
-    expect(response.body.scope.split(' ')).toEqual(['openid', 'profile', 'email']);
+    const recorded = await ticketOf(ticket);
+    expect(recorded.scope.split(' ')).toEqual(['openid', 'profile', 'email']);
+  });
+
+  // PKCE ties the authorization code to the request that asked for it: a code
+  // copied from the redirect is useless without the verifier only the API holds.
+  it('sends PKCE with S256, and the verifier matches the challenge (#1016)', async () => {
+    const { sub, email } = freshIdentity();
+
+    const { ticket } = await signInThroughProvider(baseUrl, { sub, email, email_verified: true });
+
+    const recorded = await ticketOf(ticket);
+    expect(recorded.codeChallengeMethod).toBe('S256');
+    expect(recorded.codeVerifier).toEqual(expect.any(String));
+    // RFC 7636 asks for a verifier of 43 to 128 characters.
+    expect(recorded.codeVerifier.length).toBeGreaterThanOrEqual(43);
+    expect(recorded.codeChallenge).toBe(createHash('sha256').update(recorded.codeVerifier).digest('base64url'));
   });
 
   it('creates a registered user from the provider’s claims on a first sign-in (#912)', async () => {
@@ -402,15 +468,70 @@ describe('signing in through a sign-in provider', () => {
   });
 
   /**
+   * A provider that publishes a JWKS has its ID token checked against it, and
+   * against the nonce the sign-in sent, and its claims are read from that token
+   * rather than from `/userinfo` (#1016). The fake counts its `/userinfo`
+   * calls, so a count of none shows the claims came from the token. Each
+   * spoiled token has one thing wrong and otherwise carries a sound one's
+   * claims, which `/userinfo` would answer for too: refused with no call to it,
+   * the token's check is what refused it.
+   */
+  describe('a provider that signs its ID token', () => {
+    // The control for the counts below: a provider with no JWKS has nothing to
+    // verify, so the claims come from `/userinfo`, and the fake counts the call.
+    it('reads the claims of a provider that publishes no JWKS from its userinfo endpoint (#1016)', async () => {
+      const { sub, email } = freshIdentity();
+
+      const result = await signInThroughProvider(baseUrl, { sub, email, email_verified: true });
+
+      expect(result.location.href).toBe(new URL('/', baseUrl).href);
+      const recorded = await ticketOf(result.ticket);
+      expect(recorded.nonce).toBeNull();
+      expect(recorded.userInfoCalls).toBe(1);
+    });
+
+    it('signs in through a provider whose ID token verifies against its JWKS (#1016)', async () => {
+      const { sub, email, username } = freshIdentity();
+
+      const result = await signInThroughProvider(
+        baseUrl,
+        { sub, email, email_verified: true, preferred_username: username, given_name: 'Ada', family_name: 'Lovelace' },
+        { providerId: SIGNED_FAKE_PROVIDER_ID },
+      );
+
+      expect(result.location.href).toBe(new URL('/', baseUrl).href);
+      const created = await userByEmail(email);
+      expect(created).toMatchObject({ username, firstName: 'Ada', lastName: 'Lovelace', emailVerified: true });
+      await expect(sessionUserId(result.cookie)).resolves.toBe(created.id);
+      await expect(accountRowCount(SIGNED_FAKE_PROVIDER_ID, sub)).resolves.toBe(1);
+      const recorded = await ticketOf(result.ticket);
+      expect(recorded.nonce).toEqual(expect.any(String));
+      expect(recorded.userInfoCalls).toBe(0);
+    });
+
+    it.each(['forged', 'wrong-nonce'] as const)('refuses a %s ID token, creating nothing (#1016)', async (idToken) => {
+      const { sub, email, username } = freshIdentity();
+
+      const result = await signInThroughProvider(
+        baseUrl,
+        { sub, email, email_verified: true, preferred_username: username },
+        { providerId: SIGNED_FAKE_PROVIDER_ID, idToken },
+      );
+
+      expect(result.location.searchParams.get('error')).toBe('unable_to_get_user_info');
+      expect(result.cookie).toBe('');
+      await expect(db.client.user.count({ where: { email } })).resolves.toBe(0);
+      await expect(accountRowCount(SIGNED_FAKE_PROVIDER_ID, sub)).resolves.toBe(0);
+      await expect(ticketOf(result.ticket)).resolves.toMatchObject({ userInfoCalls: 0 });
+    });
+  });
+
+  /**
    * What the server settles about a sign-in provider beyond signing in with it
    * (#1016): which providers may be linked without vouching for the email,
    * that sign-out stays here, and that no client submits a provider's token.
    */
   describe('linking, signing out and submitted ID tokens', () => {
-    /** How many Account rows link one provider's user, by the provider and the user's id there. */
-    const accountRowCount = (providerId: string, accountId: string) =>
-      db.client.account.count({ where: { providerId, accountId } });
-
     // A provider the operator allows unverified emails for never sends the
     // claim, and better-auth links an unvouched email only for a provider it
     // trusts. A link starts from a signed-in session, so the email isn't what
@@ -531,5 +652,32 @@ describe('signing in through a sign-in provider', () => {
       await expect(db.client.user.count({ where: { email } })).resolves.toBe(0);
       await expect(accountRowCount(FAKE_PROVIDER_ID, sub)).resolves.toBe(0);
     });
+
+    // The one submission better-auth would believe: the signed fake publishes a
+    // JWKS, and this token verifies against it, with no nonce to check since
+    // none was asked for. Without the gate it signs the new user in, or links
+    // the provider to the signed-in user.
+    it.each([
+      ['/api/auth/sign-in/social', false],
+      ['/api/auth/link-social', true],
+    ])(
+      'refuses a validly signed ID token submitted to %s, creating no user and linking nothing (#1016)',
+      async (path, signedIn) => {
+        const { sub, email } = freshIdentity();
+        const idToken = await signedIdToken({ sub, email, email_verified: true });
+
+        const submission = postToAuth(baseUrl, path);
+        const response = await (signedIn ? submission.set((await actors.user()).headers) : submission).send({
+          provider: SIGNED_FAKE_PROVIDER_ID,
+          idToken: { token: idToken },
+          callbackURL: '/',
+        });
+
+        expect(response.status).toBe(403);
+        expect(response.body).toEqual(ID_TOKEN_REFUSED_BODY);
+        await expect(db.client.user.count({ where: { email } })).resolves.toBe(0);
+        await expect(accountRowCount(SIGNED_FAKE_PROVIDER_ID, sub)).resolves.toBe(0);
+      },
+    );
   });
 });
