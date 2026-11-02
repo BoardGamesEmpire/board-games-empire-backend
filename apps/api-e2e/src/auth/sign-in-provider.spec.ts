@@ -8,7 +8,21 @@ import { fakeProviderUrl, signInThroughProvider } from '../support/sign-in-provi
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 
 const GET_SESSION_PATH = '/api/auth/get-session';
+const SIGN_OUT_PATH = '/api/auth/sign-out';
 const DISCOVERY_PATH = '/.well-known/bge-identity';
+
+const base64UrlJson = (value: unknown): string => Buffer.from(JSON.stringify(value)).toString('base64url');
+
+/** What the server answers a submitted ID token with (#1016). */
+const ID_TOKEN_REFUSED_BODY = {
+  code: 'SIGN_IN_PROVIDER_ID_TOKEN_REFUSED',
+  message:
+    "This server doesn't accept a sign-in provider's token sent directly. Sign in through the provider's page instead",
+} as const;
+
+/** A token with claims and no signature, as a client that forged one would send it. */
+const unsignedIdToken = (claims: Record<string, unknown>): string =>
+  `${base64UrlJson({ alg: 'none', typ: 'JWT' })}.${base64UrlJson(claims)}.`;
 
 /**
  * Signing in through a sign-in provider (#912), end to end: the API talks to
@@ -61,12 +75,15 @@ describe('signing in through a sign-in provider', () => {
       { description: `a notification for user ${userId}` },
     );
 
-  /** The user a session cookie signs in as, read the way a client reads it. */
-  const sessionUserId = async (cookie: string): Promise<string | undefined> => {
-    const response = await request(baseUrl).get(GET_SESSION_PATH).set('Cookie', cookie).expect(200);
+  /** The user a credential, such as an actor's bearer token, signs in as, if it still does. */
+  const sessionUserOf = async (headers: Record<string, string>): Promise<string | undefined> => {
+    const response = await request(baseUrl).get(GET_SESSION_PATH).set(headers).expect(200);
 
     return response.body?.user?.id;
   };
+
+  /** The user a session cookie signs in as, read the way a client reads it. */
+  const sessionUserId = (cookie: string): Promise<string | undefined> => sessionUserOf({ Cookie: cookie });
 
   /**
    * Discovery goes out through a snake_case interceptor, so these are the keys
@@ -381,6 +398,138 @@ describe('signing in through a sign-in provider', () => {
       expect(response.body.message).toContain('accountId');
       await expect(db.client.account.count({ where: { id: account.id } })).resolves.toBe(1);
       await expect(db.client.account.count({ where: { userId: existing.user.id } })).resolves.toBe(2);
+    });
+  });
+
+  /**
+   * What the server settles about a sign-in provider beyond signing in with it
+   * (#1016): which providers may be linked without vouching for the email,
+   * that sign-out stays here, and that no client submits a provider's token.
+   */
+  describe('linking, signing out and submitted ID tokens', () => {
+    /** How many Account rows link one provider's user, by the provider and the user's id there. */
+    const accountRowCount = (providerId: string, accountId: string) =>
+      db.client.account.count({ where: { providerId, accountId } });
+
+    // A provider the operator allows unverified emails for never sends the
+    // claim, and better-auth links an unvouched email only for a provider it
+    // trusts. A link starts from a signed-in session, so the email isn't what
+    // grants access.
+    it('links a provider allowed unverified emails, without email_verified (#1016)', async () => {
+      const existing = await actors.user();
+      const { sub } = freshIdentity();
+
+      const linked = await signInThroughProvider(
+        baseUrl,
+        { sub, email: `other-${sub}@example.test` },
+        { linkWith: existing.headers, providerId: LENIENT_FAKE_PROVIDER_ID },
+      );
+
+      expect(linked.location.href).toBe(new URL('/', baseUrl).href);
+      await expect(
+        db.client.account.count({
+          where: { userId: existing.user.id, providerId: LENIENT_FAKE_PROVIDER_ID, accountId: sub },
+        }),
+      ).resolves.toBe(1);
+    });
+
+    it('refuses to link a strict provider that doesn’t confirm the email (#1016)', async () => {
+      const existing = await actors.user();
+      const { sub } = freshIdentity();
+
+      const result = await signInThroughProvider(
+        baseUrl,
+        { sub, email: `other-${sub}@example.test` },
+        { linkWith: existing.headers },
+      );
+
+      expect(result.location.searchParams.get('error')).toBe('unable_to_link_account');
+      await expect(accountRowCount(FAKE_PROVIDER_ID, sub)).resolves.toBe(0);
+    });
+
+    /**
+     * Trusting a provider for linking also lets its sign-in past better-auth's
+     * check on the provider's email, for a user that email already belongs to.
+     * Only `disableImplicitLinking` stops that, so this fails without it. Both
+     * emails are verified but the claim isn't there, as with a provider that
+     * never sends it.
+     */
+    it('refuses a lenient provider’s sign-in with a registered user’s email, with account_not_linked (#1016)', async () => {
+      const existing = await actors.user();
+      await db.client.user.update({ where: { id: existing.user.id }, data: { emailVerified: true } });
+      const { sub } = freshIdentity();
+
+      const result = await signInThroughProvider(
+        baseUrl,
+        { sub, email: existing.user.email, preferred_username: 'someone' },
+        { providerId: LENIENT_FAKE_PROVIDER_ID },
+      );
+
+      expect(result.location.searchParams.get('error')).toBe('account_not_linked');
+      expect(result.cookie).toBe('');
+      await expect(accountRowCount(LENIENT_FAKE_PROVIDER_ID, sub)).resolves.toBe(0);
+      await expect(db.client.user.count({ where: { email: existing.user.email } })).resolves.toBe(1);
+    });
+
+    // The fake lists an `end_session_endpoint`, so better-auth could answer
+    // with a provider URL. Two things each stop it on their own: the sign-out
+    // hook deletes the session before the route looks for it, and
+    // `disableProviderLogout`, which `auth-factory.spec.ts` pins, switches the
+    // URL off. So this passes with either one removed and fails only with both
+    // gone (#1016). Sign-out stays here until #1018 decides.
+    it('answers sign-out with no provider URL for a user with a linked provider (#1016)', async () => {
+      const existing = await actors.user();
+      const { sub } = freshIdentity();
+      await signInThroughProvider(
+        baseUrl,
+        { sub, email: `other-${sub}@example.test`, email_verified: true },
+        { linkWith: existing.headers },
+      );
+      await expect(accountRowCount(FAKE_PROVIDER_ID, sub)).resolves.toBe(1);
+      const discovery = await request(fakeProviderUrl()).get('/.well-known/openid-configuration').expect(200);
+      expect(discovery.body.end_session_endpoint).toEqual(expect.any(String));
+      await expect(sessionUserOf(existing.headers)).resolves.toBe(existing.user.id);
+
+      const response = await postToAuth(baseUrl, SIGN_OUT_PATH).set(existing.headers).send({});
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ success: true });
+      expect(response.body).not.toHaveProperty('url');
+      expect(response.body).not.toHaveProperty('redirect');
+      expect(response.headers).not.toHaveProperty('location');
+      await expect(sessionUserOf(existing.headers)).resolves.toBeUndefined();
+    });
+
+    // Sent without the redirect flow's state and PKCE, a provider's token is a
+    // second way in that nothing here uses. The fake lists no JWKS, so
+    // better-auth would refuse it on its own with a 404: the code and the 403
+    // are the gate's. The token carries claims that would sign a user in or
+    // link a provider if it were believed.
+    it.each([
+      ['/api/auth/sign-in/social', false],
+      ['/api/auth/link-social', true],
+    ])('refuses an ID token submitted to %s, creating no user and linking nothing (#1016)', async (path, signedIn) => {
+      const { sub, email } = freshIdentity();
+      const idToken = unsignedIdToken({
+        iss: fakeProviderUrl(),
+        aud: 'e2e-client',
+        sub,
+        email,
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 600,
+      });
+
+      const submission = postToAuth(baseUrl, path);
+      const response = await (signedIn ? submission.set((await actors.user()).headers) : submission).send({
+        provider: FAKE_PROVIDER_ID,
+        idToken: { token: idToken },
+        callbackURL: '/',
+      });
+
+      expect(response.status).toBe(403);
+      expect(response.body).toEqual(ID_TOKEN_REFUSED_BODY);
+      await expect(db.client.user.count({ where: { email } })).resolves.toBe(0);
+      await expect(accountRowCount(FAKE_PROVIDER_ID, sub)).resolves.toBe(0);
     });
   });
 });

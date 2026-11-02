@@ -1,6 +1,6 @@
 import type { I18nPath } from '@bge/i18n';
 import { APIError } from 'better-auth/api';
-import type { OidcProviderConfig } from './configuration/oidc-providers';
+import { idsAllowingUnverifiedEmail, type OidcProviderConfig } from './configuration/oidc-providers';
 import { isProviderSignInPath } from './provider-picture';
 
 export const SIGN_IN_PROVIDER_EMAIL_UNVERIFIED = 'SIGN_IN_PROVIDER_EMAIL_UNVERIFIED';
@@ -29,12 +29,18 @@ export interface ProviderEmailGateContext {
  *
  * On an OAuth callback better-auth hands the client the refusal's code as the
  * redirect's `error`, and its message as `error_description` (#1016).
+ *
+ * Only `/callback/:id` names its provider in `params`. `/sign-in/social` names
+ * it in `body.provider`, so a user created there counts as unlisted and is
+ * refused unverified, whatever the provider's setting. The ID token gate keeps
+ * sign-in providers' tokens off that route today. Native sign-in (#1019) has
+ * to read the provider from the body when it reopens the route.
  */
 export function createProviderEmailGate(
   providers: readonly Pick<OidcProviderConfig, 'id' | 'allowUnverifiedEmail'>[],
   render: (key: I18nPath) => string,
 ): (user: { readonly emailVerified?: unknown }, context: ProviderEmailGateContext | null) => void {
-  const lenient = new Set(providers.filter((provider) => provider.allowUnverifiedEmail).map((provider) => provider.id));
+  const lenient = new Set(idsAllowingUnverifiedEmail(providers));
 
   return (user, context) => {
     if (context === null || !isProviderSignInPath(context) || user.emailVerified === true) {

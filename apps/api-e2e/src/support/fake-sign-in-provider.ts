@@ -82,6 +82,13 @@ export async function startFakeSignInProvider(): Promise<FakeSignInProvider> {
         // and some providers leave out. better-auth's default stops reading `sub`
         // without it, so this proves the server keys the Account row on `sub`
         // whatever discovery says (#1016).
+        // better-auth builds a provider logout URL from this, unless the
+        // provider's config switches it off. It is listed so that better-auth has
+        // a provider URL it could answer sign-out with. The sign-out hook and the
+        // option each keep it out of the answer on their own, so the sign-out spec
+        // fails only with both gone (#1016). Nothing serves it, as nothing may
+        // follow it.
+        end_session_endpoint: `${url}/logout`,
       });
       return;
     }

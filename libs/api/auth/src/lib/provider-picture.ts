@@ -1,7 +1,9 @@
 /**
- * The better-auth endpoints that create a user from what a sign-in provider
- * vouches for: the OAuth callback, an ID token sent to social sign-in, and
- * Google One Tap.
+ * The better-auth endpoints that could create a user from what a sign-in
+ * provider vouches for: the OAuth callback, an ID token sent to social sign-in,
+ * and Google One Tap. Only the callback does today. The ID token gate refuses
+ * sign-in providers' tokens on social sign-in until #1019, and One Tap has no
+ * Google client id. They stay listed so the email gate holds if either opens.
  */
 const PROVIDER_SIGN_IN_PATHS: ReadonlySet<string> = new Set(['/callback/:id', '/sign-in/social', '/one-tap/callback']);
 

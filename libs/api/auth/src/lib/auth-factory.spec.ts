@@ -26,6 +26,50 @@ const config = new ConfigService({
   },
 });
 
+/** `config` with sign-in providers listed. */
+const withProviders = (list: readonly unknown[]) =>
+  new ConfigService({
+    auth: {
+      url: 'http://localhost:33333',
+      secret: SECRET,
+      trustedOrigins: [],
+      useEmailPasswordAuth: true,
+      oidcProviders: list,
+    },
+  });
+
+/** The genericOAuth plugin an instance was built with, if it has one. */
+const genericOAuthOf = (auth: ReturnType<typeof authFactory>) =>
+  auth.options.plugins?.find((plugin) => plugin.id === 'generic-oauth') as
+    | { options: { config: Array<Record<string, unknown>> } }
+    | undefined;
+
+/**
+ * An instance with sign-in providers fetches each one's discovery document as
+ * it is built (#1016), and a test that doesn't wait for it leaves that running
+ * past its own end. So the stub stays for the whole file, set apart from the
+ * mocks `restoreAllMocks` undoes: no spec here makes a real lookup or logs a
+ * failed one.
+ */
+const realFetch = globalThis.fetch;
+
+beforeAll(() => {
+  globalThis.fetch = async (input) => {
+    const origin = new URL(input instanceof Request ? input.url : String(input)).origin;
+
+    return Response.json({
+      issuer: origin,
+      authorization_endpoint: `${origin}/authorize`,
+      token_endpoint: `${origin}/token`,
+      userinfo_endpoint: `${origin}/userinfo`,
+    });
+  };
+});
+
+afterAll(() => {
+  globalThis.fetch = realFetch;
+});
+
 /** better-auth-shaped user, as the `user.create.after` hook receives it. */
 const makeAuthUser = (overrides: Partial<User & { isAnonymous?: boolean }> = {}): User =>
   ({
@@ -404,28 +448,16 @@ describe("authFactory's sign-in providers", () => {
     },
   ];
 
-  const withProviders = (list: readonly unknown[]) =>
-    new ConfigService({
-      auth: {
-        url: 'http://localhost:33333',
-        secret: SECRET,
-        trustedOrigins: [],
-        useEmailPasswordAuth: true,
-        oidcProviders: list,
-      },
-    });
-
-  const genericOAuthOf = (auth: ReturnType<typeof authFactory>) =>
-    auth.options.plugins?.find((plugin) => plugin.id === 'generic-oauth') as
-      | { options: { config: Array<Record<string, unknown>> } }
-      | undefined;
-
   afterEach(() => jest.restoreAllMocks());
 
   it('turns implicit linking off and lets a link use a different email (#912)', () => {
     const auth = authFactory({} as PrismaClient, withProviders(providers));
 
-    expect(auth.options.account?.accountLinking).toEqual({ disableImplicitLinking: true, allowDifferentEmails: true });
+    expect(auth.options.account?.accountLinking).toEqual({
+      disableImplicitLinking: true,
+      allowDifferentEmails: true,
+      trustedProviders: [],
+    });
   });
 
   it('hands each provider to genericOAuth, in order, with fixed scopes and the profile mapping (#912)', () => {
@@ -451,5 +483,72 @@ describe("authFactory's sign-in providers", () => {
 
     const messages = warn.mock.calls.map(([message]) => String(message)).filter((m) => m.includes('OIDC_GOGLE'));
     expect(messages).toEqual(['OIDC_GOGLE_CLIENT_ID names a sign-in provider that OIDC_PROVIDERS does not list']);
+  });
+});
+
+/**
+ * What the sign-in providers' configuration settles about linking and
+ * sign-out (#1016). The discovery documents come from the file's stub.
+ */
+describe("authFactory's sign-in provider behaviours", () => {
+  const strict = {
+    id: 'strict',
+    discoveryUrl: 'https://strict.example/.well-known/openid-configuration',
+    clientId: 'c',
+    clientSecret: 's',
+    displayName: 'Strict',
+    allowUnverifiedEmail: false,
+  };
+  const lenient = {
+    id: 'lenient',
+    discoveryUrl: 'https://lenient.example/.well-known/openid-configuration',
+    clientId: 'c',
+    clientSecret: 's',
+    displayName: 'Lenient',
+    allowUnverifiedEmail: true,
+  };
+
+  // Sign-out stays with this server until #1018 decides whether it may send a
+  // user to the provider. The sign-out hook deletes the session first today,
+  // so the route would find none to redirect for: the option makes that
+  // deliberate, and it holds if the hook changes.
+  it('turns provider logout off for every sign-in provider (#1016)', () => {
+    const plugin = genericOAuthOf(authFactory({} as PrismaClient, withProviders([strict, lenient])));
+
+    expect(plugin?.options.config.map((entry) => entry['disableProviderLogout'])).toEqual([true, true]);
+  });
+
+  // A provider the operator allows unverified emails for can't pass
+  // better-auth's verified-email check on a link, so without this it signs in
+  // but never links. A link starts from a signed-in session, so the email isn't
+  // what grants access (#1016).
+  it('trusts for linking only the providers allowed unverified emails (#1016)', async () => {
+    const auth = authFactory({} as PrismaClient, withProviders([strict, lenient]));
+
+    const { trustedProviders } = await auth.$context;
+
+    expect(trustedProviders).toContain('lenient');
+    expect(trustedProviders).not.toContain('strict');
+  });
+
+  it('trusts no provider for linking when none is allowed unverified emails (#1016)', async () => {
+    const auth = authFactory({} as PrismaClient, withProviders([strict]));
+
+    const { trustedProviders } = await auth.$context;
+
+    expect(trustedProviders).toEqual([]);
+  });
+
+  // A trusted provider passes better-auth's verified-email check for implicit
+  // linking too, so only this option keeps a provider's email claim from
+  // attaching it to a registered user. The e2e suite pins the refusal; this
+  // pins that the two options travel together (#1016, #913).
+  it('keeps implicit linking off while a provider is trusted for linking (#1016)', () => {
+    const auth = authFactory({} as PrismaClient, withProviders([lenient]));
+
+    expect(auth.options.account?.accountLinking).toMatchObject({
+      disableImplicitLinking: true,
+      trustedProviders: ['lenient'],
+    });
   });
 });
