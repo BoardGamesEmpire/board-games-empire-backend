@@ -1,7 +1,11 @@
 /** What each sign-in provider is asked for: the claims the profile mapping reads (#912). */
 export const OIDC_SCOPES = ['openid', 'profile', 'email'] as const;
 
-export interface OidcProfileFields {
+/**
+ * The fields a profile mapping returns for the user row. It extends a record
+ * because better-auth 1.7 types what a mapping returns as one (#1016).
+ */
+export interface OidcProfileFields extends Record<string, unknown> {
   name?: string;
   firstName?: string;
   lastName?: string;

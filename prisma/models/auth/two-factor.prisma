@@ -9,6 +9,9 @@ model TwoFactor {
 
   verified Boolean? @default(true)
 
+  failedVerificationCount Int?      @default(0) @map("failed_verification_count")
+  lockedUntil             DateTime? @map("locked_until") @db.Timestamptz(3)
+
   @@index([secret])
   @@index([userId])
   @@map("two_factor")

@@ -16,5 +16,7 @@ model DeviceCode {
 
   expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
 
+  @@unique([deviceCode])
+  @@unique([userCode])
   @@map("device_codes")
 }

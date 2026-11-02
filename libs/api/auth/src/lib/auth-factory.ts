@@ -26,7 +26,7 @@ import type { User } from 'better-auth/types';
 import type { I18nService } from 'nestjs-i18n';
 import process from 'node:process';
 import { ADMIN_PLUGIN_OPTIONS } from './access/admin-roles';
-import type { AuthStorage } from './auth-storage';
+import type { CompleteAuthStorage } from './auth-storage';
 import { betterAuthLogger } from './better-auth-logger';
 import { type OidcProviderConfig, readOidcProviders, unlistedOidcVariables } from './configuration/oidc-providers';
 import { AUTH_BASE_PATH, AUTH_CLIENT_IP_HEADER, AUTH_COOKIE_PREFIX } from './constants';
@@ -120,7 +120,7 @@ export function createUserCreatedHook(
 export function authFactory(
   prisma: PrismaClient,
   configService?: ConfigService,
-  storage?: AuthStorage,
+  storage?: CompleteAuthStorage,
   eventEmitter?: EventEmitter2,
   auditContext?: AuditContextService,
   systemActorScope?: SystemActorScope,
@@ -191,11 +191,7 @@ export function authFactory(
 
     ...(usingSwagger ? [openAPI()] : []),
 
-    deviceAuthorization({
-      verificationUri: '/device',
-      // temporary workaround: https://github.com/better-auth/better-auth/issues/9422
-      schema: {},
-    }),
+    deviceAuthorization({ verificationUri: '/device' }),
   ];
 
   return betterAuth({
@@ -209,6 +205,8 @@ export function authFactory(
       // write, and without an address it believes every client shares one
       // rate-limit bucket.
       ipAddress: { ipAddressHeaders: [AUTH_CLIENT_IP_HEADER] },
+      // better-auth 1.7 moved this out of `experimental` (#1016).
+      database: { joins: true },
     },
     basePath: AUTH_BASE_PATH,
     appName: 'BoardGamesEmpire',
@@ -242,7 +240,6 @@ export function authFactory(
         await signOutHook.beforeRoute(context);
       }),
     },
-    experimental: { joins: true },
     secret: options.secret,
     database: prismaAdapter(prisma, {
       // Off everywhere (#627). The adapter prints these through a console

@@ -3,13 +3,19 @@ import type { BetterAuthOptions } from 'better-auth';
 import type Keyv from 'keyv';
 
 /**
- * better-auth's `secondaryStorage`: where it keeps sessions, verification
- * values and rate-limit counts. Every TTL it passes is in seconds.
+ * What a Keyv store can do of better-auth's `secondaryStorage`: where it keeps
+ * sessions, verification values and rate-limit counts. Every TTL it passes is
+ * in seconds. Without the one-step count and read-and-delete, which Keyv can't
+ * do, it is not enough to give better-auth: see {@link CompleteAuthStorage}.
  */
-export type AuthStorage = NonNullable<BetterAuthOptions['secondaryStorage']>;
+export type AuthStorage = Omit<NonNullable<BetterAuthOptions['secondaryStorage']>, 'increment' | 'getAndDelete'>;
 
-/** {@link AuthStorage} with the one-step count and read-and-delete better-auth uses when a storage has them. */
-export type RedisAuthStorage = AuthStorage & Required<Pick<AuthStorage, 'increment' | 'getAndDelete'>>;
+/**
+ * {@link AuthStorage} with the one-step count and read-and-delete, which
+ * better-auth 1.7 requires of a storage (#1016). Before, it fell back to a read
+ * and then a write, or a read and then a delete, when a storage had neither.
+ */
+export type CompleteAuthStorage = NonNullable<BetterAuthOptions['secondaryStorage']>;
 
 /**
  * Where better-auth's keys sit in the store. Unchanged from when the shared
@@ -63,10 +69,9 @@ return count`;
  *   rate limiter fails first on every `/api/auth` request, counting it ahead
  *   of every hook, rather than letting the request through unlimited.
  *
- * Keyv can't count, or read and delete, in one step. So over this alone
- * better-auth counts requests against a rate limit with a read and then a
- * write, and uses a single-use value with a read and then a delete.
- * {@link createRedisAuthStorage} adds both steps.
+ * Keyv can't count, or read and delete, in one step, and better-auth 1.7
+ * requires both of its storage (#1016). So this alone is not a storage to give
+ * `authFactory`: {@link createRedisAuthStorage} adds both steps.
  */
 export function createAuthStorage(store: Keyv): AuthStorage {
   if (!store.throwOnErrors) {
@@ -96,18 +101,21 @@ export function createAuthStorage(store: Keyv): AuthStorage {
  * {@link createAuthStorage} over the shared cache client, the api's Redis
  * connection for caches.
  *
- * - **A rate-limit count is one step** (#832). With a read and then a write,
+ * - **A rate-limit count is one step** (#832). better-auth 1.7 counts through
+ *   `increment` and throws without one. With a read and then a write,
  *   concurrent requests could all read the same count, and all get through.
  *   Counted here, they are counted across every api process sharing the
  *   Redis. A count that fails is raised, as every call here is.
- * - **A single-use value is used in one step** (#888). better-auth reads a
- *   verification value, such as a reset link's, and then deletes it, under a
- *   lock that spans one process only. Two api processes could each read the
- *   value before either deleted it, and both use it. `GETDEL` gives it to one
- *   of them. It returns what `get` would: the value inside Keyv's envelope, or
- *   nothing once the envelope's expiry has passed.
+ * - **A single-use value is used in one step** (#888). The api keeps
+ *   verification values in this storage, and better-auth 1.7 consumes one
+ *   through `getAndDelete`, which it requires, with no lock around it: its
+ *   lock, which spans one process only, covers just a value kept in the
+ *   database. So single use rests on this step. `GETDEL` gives a value, such
+ *   as a reset link's, to exactly one of two api processes using it at once.
+ *   It returns what `get` would: the value inside Keyv's envelope, or nothing
+ *   once the envelope's expiry has passed.
  */
-export function createRedisAuthStorage(client: Redis): RedisAuthStorage {
+export function createRedisAuthStorage(client: Redis): CompleteAuthStorage {
   const store = createCacheStore(client, STORE_NAMESPACE, { throwOnErrors: true });
 
   return {

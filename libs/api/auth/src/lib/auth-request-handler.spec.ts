@@ -4,8 +4,8 @@ import { ConfigService } from '@nestjs/config';
 import Keyv from 'keyv';
 import { authFactory } from './auth-factory';
 import { createAuthRequestHandler } from './auth-request-handler';
-import { createAuthStorage } from './auth-storage';
 import { AUTH_CLIENT_IP_HEADER } from './constants';
+import { memoryAuthStorage } from './memory-auth-storage.fixture';
 
 /** The configuration an instance needs to build, with email and password sign-in on. */
 const config = new ConfigService({
@@ -38,7 +38,7 @@ class ReadsFail extends Map<string, unknown> {
  */
 async function servedOver(store: Keyv) {
   store.on('error', () => undefined);
-  const auth = authFactory(noUsers, config, createAuthStorage(store));
+  const auth = authFactory(noUsers, config, memoryAuthStorage(store));
   (await auth.$context).rateLimit.enabled = true;
 
   return createAuthRequestHandler(auth.handler, { render: (key) => key });

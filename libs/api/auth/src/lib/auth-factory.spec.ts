@@ -7,9 +7,9 @@ import type { User } from 'better-auth/types';
 import Keyv from 'keyv';
 import { createHmac } from 'node:crypto';
 import { authFactory, createUserCreatedHook } from './auth-factory';
-import { createAuthStorage } from './auth-storage';
 import { AUTH_CLIENT_IP_HEADER } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
+import { memoryAuthStorage } from './memory-auth-storage.fixture';
 import { mapOidcProfile } from './oidc-profile';
 import { createSettingGates } from './setting-gates';
 
@@ -214,7 +214,7 @@ describe("authFactory's sign-in rate limit", () => {
    * so it is switched on there.
    */
   async function limitedAuth() {
-    const auth = authFactory(noUsers, config, createAuthStorage(new Keyv({ throwOnErrors: true })));
+    const auth = authFactory(noUsers, config, memoryAuthStorage(new Keyv({ throwOnErrors: true })));
     (await auth.$context).rateLimit.enabled = true;
     return auth;
   }
@@ -287,7 +287,7 @@ describe("authFactory's sign-out", () => {
 
   function authOver(store: Keyv) {
     store.on('error', () => undefined);
-    return authFactory({} as PrismaClient, config, createAuthStorage(store));
+    return authFactory({} as PrismaClient, config, memoryAuthStorage(store));
   }
 
   /** The cookie better-auth would have set for `token`: the token, signed with the instance's secret. */
