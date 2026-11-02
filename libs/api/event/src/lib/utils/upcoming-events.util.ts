@@ -1,7 +1,13 @@
 import { OccurrenceStatus, Prisma, type DatabaseService } from '@bge/database';
 import { type PaginatedRows } from '@bge/shared';
 import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
-import { withEventStatus, type EventWithStatus } from './event-status.util';
+import {
+  readEventAttendance,
+  withEventAttendance,
+  type EventListRow,
+  type OwnAttendeeWhere,
+} from './event-attendance.util';
+import { withEventStatus } from './event-status.util';
 
 /**
  * A date that hasn't ended at `now`: Confirmed, with a start, and its start or
@@ -58,8 +64,12 @@ export function upcomingEventWhere(now: Date): Prisma.EventWhereInput {
  * never sit in an `include` or `select` filter, which the extension doesn't
  * inspect.
  *
- * The ids, the count and the rows come from one REPEATABLE READ transaction,
- * so `total` describes the page served (#372).
+ * Each row also says how the acting user attends, from `readEventAttendance` under
+ * the `ownAttendeeWhere` the list hands over, which is `null` for an actor with
+ * no user (#867).
+ *
+ * The ids, the count, the rows and the attendance come from one REPEATABLE READ
+ * transaction, so `total` describes the page served (#372).
  *
  * Shared with each list of upcoming events, not with their scopes: browsing
  * (#962), a household's events (#506) and the public events (#820) each pass
@@ -70,7 +80,8 @@ export async function pageUpcomingEvents(
   where: Prisma.EventWhereInput,
   page: { skip: number; take: number },
   now: Date,
-): Promise<PaginatedRows<EventWithStatus>> {
+  ownAttendeeWhere: OwnAttendeeWhere | null,
+): Promise<PaginatedRows<EventListRow>> {
   const upcoming: Prisma.EventWhereInput = { AND: [upcomingEventWhere(now), where] };
   const standing: Prisma.EventWhereInput = { AND: [standingEventWhere(), where] };
 
@@ -104,7 +115,9 @@ export async function pageUpcomingEvents(
         return event ? [withEventStatus(event, event.occurrences, now)] : [];
       });
 
-      return { rows, total };
+      const attendance = await readEventAttendance(tx, ids, ownAttendeeWhere);
+
+      return { rows: withEventAttendance(rows, attendance), total };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );

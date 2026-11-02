@@ -1,4 +1,4 @@
-import { EventStatus, OccurrenceStatus, Prisma, type DatabaseService } from '@bge/database';
+import { EventParticipationStatus, EventStatus, OccurrenceStatus, Prisma, type DatabaseService } from '@bge/database';
 import {
   createMockDatabaseService,
   makeEvent,
@@ -7,6 +7,7 @@ import {
   type MockDatabaseService,
 } from '@bge/testing';
 import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
+import { EVENT_ATTENDANCE_SELECT, type OwnAttendeeWhere } from './event-attendance.util';
 import { pageUpcomingEvents, upcomingDateWhere, upcomingEventWhere } from './upcoming-events.util';
 
 const now = new Date('2026-11-01T12:00:00Z');
@@ -14,6 +15,9 @@ const hoursFromNow = (hours: number) => new Date(now.getTime() + hours * 60 * 60
 
 /** A composed where, as a service hands it over: which events, saying nothing of when. */
 const WHERE = { id: 'sentinel-where' } satisfies Prisma.EventWhereInput;
+
+/** The acting user's own attendee rows, as a service's builder hands them over (#867). */
+const OWN_WHERE = { id: 'sentinel-own-where' } satisfies Prisma.EventAttendeeWhereInput;
 
 /** The events the helper pages: the upcoming ones among `WHERE`. */
 const UPCOMING = { AND: [upcomingEventWhere(now), WHERE] };
@@ -57,7 +61,10 @@ describe('pageUpcomingEvents (#962)', () => {
   // carry, so the spec holds it as a plain mock.
   let groupBy: jest.Mock;
 
-  const page = () => pageUpcomingEvents(db as unknown as DatabaseService, WHERE, { skip: 25, take: 25 }, now);
+  let ownAttendeeWhere: jest.Mock;
+
+  const page = (builder: OwnAttendeeWhere | null = ownAttendeeWhere) =>
+    pageUpcomingEvents(db as unknown as DatabaseService, WHERE, { skip: 25, take: 25 }, now, builder);
 
   beforeEach(() => {
     db = createMockDatabaseService();
@@ -66,6 +73,8 @@ describe('pageUpcomingEvents (#962)', () => {
     groupBy.mockResolvedValue([]);
     db.event.count.mockResolvedValue(0);
     db.event.findMany.mockResolvedValue([]);
+    db.eventAttendee.findMany.mockResolvedValue([]);
+    ownAttendeeWhere = jest.fn().mockReturnValue(OWN_WHERE);
   });
 
   // Prisma can't order events by an aggregate of only some of their dates, so
@@ -121,11 +130,82 @@ describe('pageUpcomingEvents (#962)', () => {
     ]);
   });
 
-  it('reads no rows for an empty page, and still counts', async () => {
+  it('reads no rows and no attendance for an empty page, and still counts', async () => {
     db.event.count.mockResolvedValue(7);
 
     await expect(page()).resolves.toEqual({ rows: [], total: 7 });
     expect(db.event.findMany).not.toHaveBeenCalled();
+    expect(ownAttendeeWhere).not.toHaveBeenCalled();
+    expect(db.eventAttendee.findMany).not.toHaveBeenCalled();
+  });
+
+  /**
+   * #867. Every list of upcoming events says how the acting user attends each row,
+   * through one read on the page's own snapshot.
+   */
+  describe("the acting user's attendance (#867)", () => {
+    const pageOfTwo = () => {
+      groupBy.mockResolvedValue([{ eventId: 'b' }, { eventId: 'a' }]);
+      db.event.findMany.mockResolvedValue([
+        { ...makeEvent({ id: 'a' }), occurrences: [], policy: null },
+        { ...makeEvent({ id: 'b' }), occurrences: [], policy: null },
+      ] as never);
+    };
+
+    it("builds the where from the page's ids in page order, and reads on the page's transaction", async () => {
+      pageOfTwo();
+      const tx = createMockDatabaseService();
+      tx.eventOccurrence.groupBy = groupBy as never;
+      tx.event.count.mockResolvedValue(2);
+      tx.event.findMany = db.event.findMany;
+      tx.eventAttendee.findMany.mockResolvedValue([]);
+      db.$transaction.mockImplementation((cb) => cb(tx));
+
+      await page();
+
+      expect(ownAttendeeWhere).toHaveBeenCalledWith(['b', 'a']);
+      expect(tx.eventAttendee.findMany).toHaveBeenCalledWith({ where: OWN_WHERE, select: EVENT_ATTENDANCE_SELECT });
+      expect(db.eventAttendee.findMany).not.toHaveBeenCalled();
+    });
+
+    it('gives each row its own attendance, and null where the read found none', async () => {
+      pageOfTwo();
+      db.eventAttendee.findMany.mockResolvedValue([
+        {
+          id: 'attendee-a',
+          eventId: 'a',
+          status: EventParticipationStatus.Invited,
+          rsvpDate: null,
+          role: { role: { name: 'EventParticipant' } },
+        },
+      ] as never);
+
+      const { rows } = await page();
+
+      expect(rows.map(({ id, attendance }) => ({ id, attendance }))).toEqual([
+        { id: 'b', attendance: null },
+        {
+          id: 'a',
+          attendance: {
+            attendeeId: 'attendee-a',
+            status: EventParticipationStatus.Invited,
+            role: 'EventParticipant',
+            rsvpDate: null,
+          },
+        },
+      ]);
+    });
+
+    // A where on `userId: null` would match the rows of attendees with no
+    // account, so an actor with no user has no read at all.
+    it('makes no read for an actor with no user, and every row reads null', async () => {
+      pageOfTwo();
+
+      const { rows } = await page(null);
+
+      expect(rows.map(({ attendance }) => attendance)).toEqual([null, null]);
+      expect(db.eventAttendee.findMany).not.toHaveBeenCalled();
+    });
   });
 
   // #372: `total` describes the page served, so an event

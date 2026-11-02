@@ -9,7 +9,7 @@ import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, withBarrier } from '../support/lock-barrier';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { createEventClient, EVENTS_PATH } from './event-request';
-import { eventDetailEnvelope, eventEnvelope } from './event-wire';
+import { eventDetailEnvelope, eventEnvelope, eventReplayEnvelope } from './event-wire';
 
 type Unread = readonly UnreadNotificationWire[];
 
@@ -283,7 +283,7 @@ describe('event create idempotency (#252)', () => {
         .set(host.headers)
         .expect(200);
 
-      const replay = eventDetailEnvelope(
+      const replay = eventReplayEnvelope(
         await createEvent(host, body).expect(201),
         'POST /api/events (replay after an attendee was removed)',
       );

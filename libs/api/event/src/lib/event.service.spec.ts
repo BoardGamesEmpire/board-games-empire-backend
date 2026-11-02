@@ -1,6 +1,7 @@
 import type { Event } from '@bge/database';
 import {
   Action,
+  EventParticipationStatus,
   EventSchedulingMode,
   EventStatus,
   FriendshipStatus,
@@ -36,10 +37,22 @@ import type { CreateEventDto } from './dto/create-event.dto';
 import { ListEventsQueryDto } from './dto/list-events.query.dto';
 import { EventService } from './event.service';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
+import { EVENT_ATTENDANCE_SELECT } from './utils/event-attendance.util';
 import { EVENT_STATUS_DATE_SELECT } from './utils/event-status.util';
 import { upcomingDateWhere, upcomingEventWhere } from './utils/upcoming-events.util';
 
 const COND = { id: 'sentinel-condition' };
+
+const OWN_RSVP_DATE = new Date('2026-10-30T12:00:00Z');
+
+/** The acting user's attendee row on an event, as the attendance read selects it (#867). */
+const ownAttendeeRow = (eventId: string) => ({
+  id: `attendee-${eventId}`,
+  eventId,
+  status: EventParticipationStatus.Attending,
+  rsvpDate: OWN_RSVP_DATE,
+  role: { role: { name: 'EventHost' } },
+});
 
 /** A confirmed date a day from now, which makes an event Scheduled (#795). */
 const futureDate = () =>
@@ -123,8 +136,10 @@ describe('EventService', () => {
       );
 
     beforeEach(() => {
+      unwrapTransaction(db);
       db.event.findMany.mockResolvedValue([]);
       db.event.count.mockResolvedValue(0);
+      db.eventAttendee.findMany.mockResolvedValue([]);
     });
 
     it('asks the composer for its where clause, declaring the events the caller is an attendee of', async () => {
@@ -196,9 +211,67 @@ describe('EventService', () => {
       expect(db.event.count).toHaveBeenCalledWith({ where: findManyArgs.where });
       expect(page).toEqual({ rows: [], total: 12 });
 
-      const { operations, options } = batchTransactionCall(db);
-      expect(operations).toHaveLength(2);
+      // Interactive, because the attendance read needs the page's ids (#867).
+      const [operations, options] = db.$transaction.mock.calls[0] as unknown as [unknown, unknown];
+      expect(operations).toEqual(expect.any(Function));
       expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
+
+    /**
+     * #867. Each row says how the acting user attends. The ceiling goes in the read's
+     * top-level `where`, the only place a deny-all ceiling is enforced (#559).
+     */
+    it("reads the acting user's own attendee rows on the page, under the attendee ceiling (#867)", async () => {
+      db.event.findMany.mockResolvedValue([
+        { ...makeEvent({ id: 'event-1' }), occurrences: [] },
+        { ...makeEvent({ id: 'event-2' }), occurrences: [] },
+      ] as never);
+
+      await read();
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, {
+        userId: MOCK_ACTING_USER_ID,
+        removedAt: null,
+        eventId: { in: ['event-1', 'event-2'] },
+      });
+      expect(db.eventAttendee.findMany).toHaveBeenCalledWith({
+        where: {
+          userId: MOCK_ACTING_USER_ID,
+          removedAt: null,
+          eventId: { in: ['event-1', 'event-2'] },
+          AND: [COND],
+        },
+        select: EVENT_ATTENDANCE_SELECT,
+      });
+    });
+
+    it('gives each row its own attendance, and null where the read found none (#867)', async () => {
+      db.event.findMany.mockResolvedValue([
+        { ...makeEvent({ id: 'event-1' }), occurrences: [] },
+        { ...makeEvent({ id: 'event-2' }), occurrences: [] },
+      ] as never);
+      db.eventAttendee.findMany.mockResolvedValue([ownAttendeeRow('event-2')] as never);
+
+      const { rows } = await read();
+
+      expect(rows.map(({ id, attendance }) => ({ id, attendance }))).toEqual([
+        { id: 'event-1', attendance: null },
+        {
+          id: 'event-2',
+          attendance: {
+            attendeeId: 'attendee-event-2',
+            status: EventParticipationStatus.Attending,
+            role: 'EventHost',
+            rsvpDate: OWN_RSVP_DATE,
+          },
+        },
+      ]);
+    });
+
+    it('makes no attendee read for an empty page (#867)', async () => {
+      await read();
+
+      expect(db.eventAttendee.findMany).not.toHaveBeenCalled();
     });
 
     /**
@@ -281,6 +354,23 @@ describe('EventService', () => {
       expect(db.event.count).toHaveBeenCalledWith({ where: upcoming });
     });
 
+    // #867. The scope leaves out every event the acting user has a row on, so this
+    // read finds nothing, and a row says so with `null` rather than no field.
+    it('gives an upcoming row null attendance, through the same read as the other lists (#867)', async () => {
+      groupBy.mockResolvedValue([{ eventId: 'event-1' }]);
+      db.event.findMany.mockResolvedValue([{ ...makeEvent({ id: 'event-1' }), occurrences: [futureDate()] }] as never);
+      db.eventAttendee.findMany.mockResolvedValue([]);
+
+      const { rows } = await browse();
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, {
+        userId: MOCK_ACTING_USER_ID,
+        removedAt: null,
+        eventId: { in: ['event-1'] },
+      });
+      expect(rows.map(({ id, attendance }) => ({ id, attendance }))).toEqual([{ id: 'event-1', attendance: null }]);
+    });
+
     // PROVISIONAL (#395), as on `GET /events`: "the events I could join" has
     // no meaning for an actor with no user behind it, and an empty page would
     // tell a client there are none.
@@ -294,6 +384,83 @@ describe('EventService', () => {
       expect(rejection).toBeInstanceOf(ForbiddenException);
       expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.access'));
       expect(groupBy).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * #506. A household's upcoming events, whoever is asking. The scope also
+   * checks the household, because the liveness guard passes an actor who can't
+   * read `Household` and a soft delete leaves its events live (#992).
+   */
+  describe('getHouseholdEvents (#506)', () => {
+    const NOW = new Date('2026-11-01T12:00:00Z');
+    const SCOPE = { householdId: 'household-1', household: { is: { deletedAt: null } } };
+    let groupBy: jest.Mock;
+
+    const list = (init: Record<string, unknown> = {}) =>
+      service.getHouseholdEvents(
+        'household-1',
+        plainToInstance(DefaultPaginationQueryDto, { limit: 20, ...init }, { enableImplicitConversion: true }),
+      );
+
+    beforeEach(() => {
+      jest.useFakeTimers({ now: NOW, doNotFake: ['nextTick', 'setImmediate'] });
+      unwrapTransaction(db);
+      groupBy = db.eventOccurrence.groupBy as unknown as jest.Mock;
+      groupBy.mockResolvedValue([]);
+      db.event.count.mockResolvedValue(0);
+      db.eventAttendee.findMany.mockResolvedValue([]);
+    });
+
+    afterEach(() => jest.useRealTimers());
+
+    it('asks the composer for its where clause, naming the household and that it is live', async () => {
+      await list();
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.Event, Action.read, SCOPE);
+    });
+
+    it('pages through the composed clause, the ceiling limiting it rather than supplying it', async () => {
+      await list({ page: 2 });
+
+      const composed = { ...SCOPE, AND: [COND] };
+      const standing = { AND: [{ deletedAt: null, cancelledAt: null, archivedAt: null }, composed] };
+      expect(groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { ...upcomingDateWhere(NOW), event: { is: standing } }, skip: 20, take: 20 }),
+      );
+      expect(db.event.count).toHaveBeenCalledWith({ where: { AND: [upcomingEventWhere(NOW), composed] } });
+    });
+
+    it("reads the acting user's own attendee rows on the page (#867)", async () => {
+      groupBy.mockResolvedValue([{ eventId: 'event-1' }]);
+      db.event.findMany.mockResolvedValue([{ ...makeEvent({ id: 'event-1' }), occurrences: [futureDate()] }] as never);
+      db.eventAttendee.findMany.mockResolvedValue([ownAttendeeRow('event-1')] as never);
+
+      const { rows } = await list();
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, {
+        userId: MOCK_ACTING_USER_ID,
+        removedAt: null,
+        eventId: { in: ['event-1'] },
+      });
+      expect(rows[0].attendance?.attendeeId).toBe('attendee-event-1');
+    });
+
+    // This route isn't first-person: the household names the set, so an actor
+    // with no user gets the same list rather than a refusal, as on
+    // `users/:userId/game-collections` (#514). A where on `userId: null` would
+    // match the rows of attendees with no account, so it makes no attendance read.
+    it('lists for an actor with no user, with null attendance and no attendee read', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
+      groupBy.mockResolvedValue([{ eventId: 'event-1' }]);
+      db.event.findMany.mockResolvedValue([{ ...makeEvent({ id: 'event-1' }), occurrences: [futureDate()] }] as never);
+
+      const { rows } = await list();
+
+      expect(rows.map(({ id, attendance }) => ({ id, attendance }))).toEqual([{ id: 'event-1', attendance: null }]);
+      expect(db.eventAttendee.findMany).not.toHaveBeenCalled();
     });
   });
 
@@ -365,7 +532,60 @@ describe('EventService', () => {
         occurrences: [occurrence],
         attendees: [],
         policy,
+        attendance: null,
       });
+    });
+
+    /**
+     * #867. The acting user's own row is a read of its own rather than a search of
+     * `attendees`, because #404 may cap that embed and a search would then give
+     * some attendees `null`.
+     */
+    it("reads the acting user's own attendee row under the attendee ceiling, and serves it (#867)", async () => {
+      db.eventAttendee.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([ownAttendeeRow('event-1')] as never);
+
+      const detail = await service.getEventById('event-1');
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, {
+        userId: MOCK_ACTING_USER_ID,
+        removedAt: null,
+        eventId: { in: ['event-1'] },
+      });
+      expect(db.eventAttendee.findMany).toHaveBeenLastCalledWith({
+        where: { userId: MOCK_ACTING_USER_ID, removedAt: null, eventId: { in: ['event-1'] }, AND: [COND] },
+        select: EVENT_ATTENDANCE_SELECT,
+      });
+      expect(detail.attendance).toEqual({
+        attendeeId: 'attendee-event-1',
+        status: EventParticipationStatus.Attending,
+        role: 'EventHost',
+        rsvpDate: OWN_RSVP_DATE,
+      });
+    });
+
+    it('gives an acting user with no row of their own null attendance (#867)', async () => {
+      const detail = await service.getEventById('event-1');
+
+      expect(detail.attendance).toBeNull();
+    });
+
+    // `EventAttendee.userId` is nullable, so a where on `userId: null` would
+    // match the row of an attendee with no account and hand a plugin a stranger's
+    // attendance. `GET /events/:id` admits actors with no user, so the read is
+    // skipped.
+    it('makes no attendance read for an actor with no user, whose where would match attendees with no account (#867)', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
+
+      const detail = await service.getEventById('event-1');
+
+      expect(detail.attendance).toBeNull();
+      expect(db.eventAttendee.findMany).toHaveBeenCalledTimes(1);
+      expect(db.eventAttendee.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { eventId: 'event-1', removedAt: null, AND: [COND] } }),
+      );
+      expect(batchTransactionCall(db).operations).toHaveLength(5);
     });
 
     // An actor whose occurrence ceiling clips the dates still gets the
@@ -384,11 +604,11 @@ describe('EventService', () => {
       expect(detail.status).toBe(EventStatus.Scheduled);
     });
 
-    it('takes the five reads from one REPEATABLE READ snapshot', async () => {
+    it('takes the six reads from one REPEATABLE READ snapshot', async () => {
       await service.getEventById('event-1');
 
       const { operations, options } = batchTransactionCall(db);
-      expect(operations).toHaveLength(5);
+      expect(operations).toHaveLength(6);
       expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     });
 

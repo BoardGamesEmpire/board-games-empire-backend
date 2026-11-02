@@ -18,6 +18,9 @@ export const EVENTS_PATH = '/api/events';
 /** `GET /api/events/browse`: the upcoming events the acting user can read but doesn't attend (#962). */
 export const BROWSE_PATH = `${EVENTS_PATH}/browse`;
 
+/** `GET /api/households/:householdId/events`: a household's upcoming events (#506). */
+export const householdEventsPath = (householdId: string) => `/api/households/${householdId}/events`;
+
 /** `/api/events/:eventId/attendees`: the route an event's attendees are listed and added on. */
 export const attendeesPath = (eventId: string) => `${EVENTS_PATH}/${eventId}/attendees`;
 
