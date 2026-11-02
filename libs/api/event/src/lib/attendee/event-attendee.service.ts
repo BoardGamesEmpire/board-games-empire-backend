@@ -366,10 +366,10 @@ export class EventAttendeeService {
       throw new NotFoundException(t('errors.attendee.not_found', { attendeeId, eventId }));
     }
 
+    // Stamp every RSVP answer (attending / maybe / not attending). Invited is
+    // not an answer, so clear any earlier date if someone is moved back.
     const rsvpDate =
-      dto.status === EventParticipationStatus.Attending || dto.status === EventParticipationStatus.NotAttending
-        ? new Date()
-        : undefined;
+      dto.status === EventParticipationStatus.Invited ? null : new Date();
 
     try {
       // Not attending takes the attendee out of the event, and any other

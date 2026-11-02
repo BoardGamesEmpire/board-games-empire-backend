@@ -301,6 +301,31 @@ describe('EventAttendeeService', () => {
       );
     });
 
+    // #1027. Maybe is an RSVP answer, so it stamps rsvpDate like Attending /
+    // NotAttending. Invited is not an answer and clears any earlier date.
+    it.each([
+      [EventParticipationStatus.Maybe, expect.any(Date)],
+      [EventParticipationStatus.Attending, expect.any(Date)],
+      [EventParticipationStatus.NotAttending, expect.any(Date)],
+      [EventParticipationStatus.Invited, null],
+    ] as const)('updateStatus to %s writes rsvpDate %p', async (status, rsvpDate) => {
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findUnique.mockResolvedValue({
+        id: 'att-1',
+        userId: 'user-1',
+        status: EventParticipationStatus.Attending,
+      } as EventAttendee);
+      db.eventAttendee.update.mockResolvedValue(attendeeRow({ status }));
+
+      await service.updateStatus('event-1', 'att-1', { status });
+
+      expect(db.eventAttendee.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status, rsvpDate }),
+        }),
+      );
+    });
+
     // Not attending takes the attendee out of the event: the nominations of
     // games from their list pause, whoever made them, and the scheduled
     // ones are deleted, in the transaction that writes the RSVP.

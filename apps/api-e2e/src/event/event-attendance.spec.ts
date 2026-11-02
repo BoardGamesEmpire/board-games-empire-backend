@@ -110,8 +110,8 @@ describe("the acting user's attendance on event reads (#867)", () => {
     });
   });
 
-  // Each read after a write shows the write, so no list row is stale. Only
-  // `Attending` and `NotAttending` stamp `rsvpDate`, so `Maybe` leaves it null.
+  // Each read after a write shows the write, so no list row is stale. Every
+  // RSVP answer (including Maybe) stamps `rsvpDate`.
   it("follows an invited attendee's RSVP on the list row", async () => {
     const [host, invited] = await Promise.all([actors.user(), actors.user()]);
     const eventId = await createdEventId(host);
@@ -130,7 +130,7 @@ describe("the acting user's attendance on event reads (#867)", () => {
       attendeeId,
       status: EventParticipationStatus.Maybe,
       role: SystemRole.EventParticipant,
-      rsvpDate: null,
+      rsvpDate: expect.any(String),
     });
 
     await rsvp(invited, eventId, attendeeId, EventParticipationStatus.Attending);
@@ -138,6 +138,15 @@ describe("the acting user's attendance on event reads (#867)", () => {
     expect(await attendanceOnList(invited, eventId)).toEqual<EventAttendanceWire>({
       attendeeId,
       status: EventParticipationStatus.Attending,
+      role: SystemRole.EventParticipant,
+      rsvpDate: expect.any(String),
+    });
+
+    await rsvp(invited, eventId, attendeeId, EventParticipationStatus.Maybe);
+
+    expect(await attendanceOnList(invited, eventId)).toEqual<EventAttendanceWire>({
+      attendeeId,
+      status: EventParticipationStatus.Maybe,
       role: SystemRole.EventParticipant,
       rsvpDate: expect.any(String),
     });
