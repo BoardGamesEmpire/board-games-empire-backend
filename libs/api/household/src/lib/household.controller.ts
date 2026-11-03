@@ -49,21 +49,20 @@ export class HouseholdController {
       'Owner/Admin/Moderator received every household on the server, so it answered a different question ' +
       'depending on who asked — and `pagination.total` was scoped the same way, so a client could not tell ' +
       'the cases apart (#365). A friend\u2019s `Friends`-visible household is still readable at ' +
-      '`GET /households/:id`; listing another user\u2019s households is #485, and the all-subject staff surface ' +
-      'is #419. Because it answers the same question for every caller, a **user session** may treat a ' +
-      'household it has cached but does not find in the COMPLETE list as one it was removed from or one that ' +
-      'was deleted. Deleted is not necessarily final: server staff can restore a deleted household at any ' +
-      `time, and when one of its owners deleted it, its owners can for ${HOUSEHOLD_RESTORE_WINDOW_DAYS} days ` +
-      '(`POST /households/:id/restore`, #175), so a household can reappear in a later read. Absence from one ' +
-      'page says nothing about the others, and only a first page with ' +
-      '`hasMore: false` is a complete, consistent read: a walk across pages is not one snapshot, so a ' +
-      'household removed between two page requests shifts the rest up and can carry a live one past the ' +
-      'boundary unseen. Treat what a walk missed as something to re-check, not as proof. An **API key** ' +
-      'is additionally floored by its own permissions (effective access is key ∩ owner), so absence under a ' +
-      'key also admits \u201coutside this key\u2019s scope\u201d — do not purge a cache from a ' +
-      'key-authenticated read. Restricted keys are unbuilt (#266). Paginated: `?page=` (1-based) and ' +
-      '`?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` counts ' +
-      'the caller\u2019s visible memberships. See #230.',
+      '`GET /households/:id`; listing another user\u2019s households is #485, and staff list every household ' +
+      'at `GET /admin/households` (#419). Because it answers the same question for every caller, a **user session** ' +
+      'may treat a household it has cached but does not find in the COMPLETE list as one it was removed from or one ' +
+      'that was deleted. Deleted is not necessarily final: server staff can restore a deleted household at any time, ' +
+      `and when one of its owners deleted it, its owners can for ${HOUSEHOLD_RESTORE_WINDOW_DAYS} days ` +
+      '(`POST /households/:id/restore`, #175), so a household can reappear in a later read. Absence from one page ' +
+      'says nothing about the others, and only a first page with `hasMore: false` is a complete, consistent read: a ' +
+      'walk across pages is not one snapshot, so a household removed between two page requests shifts the rest up ' +
+      'and can carry a live one past the boundary unseen. Treat what a walk missed as something to re-check, not as ' +
+      'proof. An **API key** is additionally floored by its own permissions (effective access is key ∩ owner), so ' +
+      'absence under a key also admits \u201coutside this key\u2019s scope\u201d — do not purge a cache from a ' +
+      'key-authenticated read. Restricted keys are unbuilt (#266). Paginated: `?page=` (1-based) and `?limit=`, with ' +
+      'a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` counts the caller\u2019s ' +
+      'visible memberships. See #230.',
   })
   @ApiPaginatedEnvelope('households')
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
@@ -92,13 +91,13 @@ export class HouseholdController {
       'through `POST /households/:id/restore`. A household leaves this list when its window ends, when anyone ' +
       'restores it, and when the acting user is denied the restore. A delete by server staff who are not among ' +
       'its household owners is moderation and opens no window, so that household is never listed; staff ' +
-      'among its household owners delete as household owners, and it is. Staff’s own reach over deleted ' +
-      'households is #419. Read on demand, for instance by the screen that offers the undo: it is not part of ' +
-      'the client’s hydrate. Nor is it a membership list, so a client never purges a household because it ' +
-      'is missing here. An **API key** is floored by its key scopes (effective access is what both the key and ' +
-      'its key owner may do): a key lists nothing unless its key scopes also allow updating households. ' +
-      'Paginated: `?page=` (1-based) and `?limit=`, with the `pagination` envelope `GET /households` carries. ' +
-      'See #542.',
+      'among its household owners delete as household owners, and it is. Staff list deleted households at ' +
+      '`GET /admin/households?status=deleted` (#419). Read on demand, for instance by the screen that offers the ' +
+      'undo: it is not part of the client’s hydrate. Nor is it a membership list, so a client never purges a ' +
+      'household because it is missing here. An **API key** is floored by its key scopes (effective access is what ' +
+      'both the key and its key owner may do): a key lists nothing unless its key scopes also allow updating ' +
+      'households. Paginated: `?page=` (1-based) and `?limit=`, with the `pagination` envelope `GET /households` ' +
+      'carries. See #542.',
   })
   @ApiPaginatedEnvelope('households')
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })

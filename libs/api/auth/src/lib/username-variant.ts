@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@bge/database';
+import { escapeLikePattern } from '@bge/shared';
 import { isProviderSignInPath, type ProviderPictureContext } from './provider-picture';
 
 /**
@@ -17,16 +18,6 @@ export function firstFreeUsername(requested: string, taken: ReadonlySet<string>)
   }
 
   return `${requested}-${n}`;
-}
-
-/**
- * Prisma hands `startsWith` to SQL `LIKE` as written, where `%` and `_` are
- * wildcards and a backslash escapes the next character. Escaping all three
- * makes the prefix match only itself: unescaped, `a\b-` would miss `a\b-2`,
- * and every retry would then pick the same taken variant.
- */
-function escapeLikePattern(value: string): string {
-  return value.replace(/[\\%_]/g, '\\$&');
 }
 
 export interface UsernameVariants {

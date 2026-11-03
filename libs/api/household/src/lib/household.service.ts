@@ -455,8 +455,8 @@ export class HouseholdService {
    * {@link getHouseholdById}, which ANDs the ceiling exactly as before; what it
    * loses is its effect on this LIST. Reading another subject's households as a
    * list belongs on a path-parameterized route (#485), unbuilt until a consumer
-   * needs it; the all-subject staff surface is #419 and gets its own
-   * controllers.
+   * needs it; staff list every household at `GET /admin/households` (#419),
+   * through its own controller.
    *
    * Three constraints carry the guarantee (#364), and each is asserted rather
    * than left to the shape of this query:
@@ -520,7 +520,8 @@ export class HouseholdService {
    *   of a deleted household are frozen, and `read:households` matches them.
    *
    * A grant pinned to no household is left out. It reaches every deleted
-   * household, which is the all-subject view #419 owns, as is staff's reach.
+   * household, and staff list those at
+   * `GET /admin/households?status=deleted` (#419).
    *
    * The grants, the rows and the count share one REPEATABLE READ transaction.
    * Read apart, staff restoring the household and deleting it again in
