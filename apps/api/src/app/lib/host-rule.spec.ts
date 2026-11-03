@@ -31,7 +31,6 @@ describe('createHostRule (#977)', () => {
       '[::1]:33333',
       '[2001:db8::7]:80',
       undefined,
-      '',
     ])('lets %s through', (host) => {
       expect(rule(host)).toBe(true);
     });
@@ -54,7 +53,10 @@ describe('createHostRule (#977)', () => {
   });
 
   describe('a malformed Host', () => {
+    // Only a missing Host passes. An empty one is how Node hands on `Host:` with
+    // no value, and it names no server, so it is malformed like the rest (#977).
     it.each([
+      '',
       'a b',
       'x@bge.example',
       '[::1',
@@ -72,7 +74,7 @@ describe('createHostRule (#977)', () => {
 
     // A wildcard entry must not turn these into passes: the pattern `*` matches
     // any text, and only the reading of the Host keeps it to well-formed names.
-    it.each(['a b', 'x@bge.example', '[zz]:80', '.'])('refuses %s even with a bare * entry', (host) => {
+    it.each(['', 'a b', 'x@bge.example', '[zz]:80', '.'])('refuses %s even with a bare * entry', (host) => {
       expect(createHostRule({ ...names, trustedOrigins: ['*'] })(host)).toBe(false);
     });
   });

@@ -176,7 +176,10 @@ function readHost(hostHeader: string): string | undefined {
  * server doesn't call itself is refused.
  *
  * - An absent `Host` passes: browsers always send one, so it can't be a rebound
- *   request, and HTTP/1.0 health checkers don't.
+ *   request, and HTTP/1.0 health checkers don't. Node already answers 400 to an
+ *   HTTP/1.1 request without one, so only HTTP/1.0 reaches this.
+ * - An empty `Host` is refused. Node hands `Host:` with no value, or only
+ *   spaces, on as `''`, and no client that names a server sends that.
  * - An IP literal passes, because rebinding needs a hostname. The whole host
  *   must be the literal: `127.0.0.1.evil.example` is a name.
  * - `localhost` passes on any port, for development and local healthchecks.
@@ -194,7 +197,7 @@ export function createHostRule(names: ServerNames): HostRule {
   const patterns = hostPatternsOf(names);
 
   return (hostHeader) => {
-    if (!hostHeader) {
+    if (hostHeader === undefined) {
       return true;
     }
 

@@ -41,6 +41,22 @@ describe('the inbound Host check (#977)', () => {
     });
   }
 
+  /**
+   * A request written byte for byte, for the Host headers `node:http` won't
+   * send: none at all, or one with no value. Answers the whole response.
+   */
+  function rawExchange(raw: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const socket = netConnect({ host: hostname, port: Number(port) }, () => socket.write(raw));
+      let received = '';
+
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk: string) => (received += chunk));
+      socket.on('end', () => resolve(received));
+      socket.on('error', reject);
+    });
+  }
+
   describe("a request for a name that is not the server's", () => {
     it.each(['/health/live', '/metrics', '/api/games', '/no-such-path'])('refuses %s', async (path) => {
       const response = await request(baseUrl).get(path).set('Host', FOREIGN_NAME);
@@ -93,6 +109,16 @@ describe('the inbound Host check (#977)', () => {
       expect(answer.body).toContain(REFUSED_CODE);
     });
 
+    // Node passes `Host:` with no value on as '', unlike a missing Host, which
+    // it answers with its own 400 on HTTP/1.1. The check must refuse it itself.
+    it('refuses a request whose Host is empty', async () => {
+      const answer = await rawExchange('GET /health/live HTTP/1.1\r\nHost:\r\nConnection: close\r\n\r\n');
+      const [head, body] = answer.split('\r\n\r\n');
+
+      expect(head.split('\r\n')[0]).toContain('421');
+      expect(JSON.parse(body).code).toBe(REFUSED_CODE);
+    });
+
     // engine.io's allowRequest runs only for a handshake, and Socket.IO answers
     // its client files ahead of that, so these aren't served at any name.
     it.each(['/socket.io/socket.io.js', '/socket.io/socket.io.min.js.map'])("doesn't serve %s", async (path) => {
@@ -119,17 +145,7 @@ describe('the inbound Host check (#977)', () => {
     });
 
     it('answers an HTTP/1.0 request with no Host', async () => {
-      const answer = await new Promise<string>((resolve, reject) => {
-        const socket = netConnect({ host: hostname, port: Number(port) }, () => {
-          socket.write('GET /health/live HTTP/1.0\r\n\r\n');
-        });
-        let received = '';
-
-        socket.setEncoding('utf8');
-        socket.on('data', (chunk: string) => (received += chunk));
-        socket.on('end', () => resolve(received));
-        socket.on('error', reject);
-      });
+      const answer = await rawExchange('GET /health/live HTTP/1.0\r\n\r\n');
 
       expect(answer.split('\r\n')[0]).toContain('200');
     });
