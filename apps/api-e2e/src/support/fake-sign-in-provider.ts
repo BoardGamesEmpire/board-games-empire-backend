@@ -22,7 +22,7 @@ import type { AddressInfo } from 'node:net';
  * from the ID token the token response then carries, signed with the key the
  * JWKS lists, once it has checked the signature, issuer, audience, expiry and
  * nonce (#1016). A test spoils that token by registering its ticket with
- * `?idToken=` (`forged` or `wrong-nonce`). `POST /id-tokens` signs claims as
+ * `?idToken=` and one of {@link ID_TOKEN_FAULTS}. `POST /id-tokens` signs claims as
  * they are given, for a test that submits a token the API's own flow never
  * produced.
  *
@@ -38,14 +38,21 @@ export interface FakeSignInProvider {
 
 /**
  * How a ticket spoils the ID token it is sent with. Only a sign-in that sent a
- * nonce is sent one.
+ * nonce is sent one. Each fault changes one thing and keeps the rest of a sound
+ * token, the published key included unless the fault is the key.
  *
  * - `forged`: every claim is right, but a key the provider doesn't publish
  *   signed it, under the published key's id.
  * - `wrong-nonce`: the provider's key signed it, but its `nonce` is not the one
  *   the sign-in sent.
+ * - `wrong-audience`: its `aud` names another client, not the one the sign-in
+ *   asked as (#1038).
+ * - `wrong-issuer`: its `iss` is not the issuer the provider's discovery
+ *   document names (#1038).
+ * - `expired`: its `exp` passed two minutes ago, beyond better-auth's 30-second
+ *   allowance for clock skew (#1038).
  */
-export const ID_TOKEN_FAULTS = ['forged', 'wrong-nonce'] as const;
+export const ID_TOKEN_FAULTS = ['forged', 'wrong-nonce', 'wrong-audience', 'wrong-issuer', 'expired'] as const;
 
 export type IdTokenFault = (typeof ID_TOKEN_FAULTS)[number];
 
@@ -181,14 +188,15 @@ export async function startFakeSignInProvider(): Promise<FakeSignInProvider> {
 
   const idTokenFor = (ticket: Ticket): string => {
     const issuedAt = Math.floor(Date.now() / 1000);
+    const fault = ticket.idTokenFault;
 
-    return signJwt(ticket.idTokenFault === 'forged' ? forgingKey : signingKey, {
+    return signJwt(fault === 'forged' ? forgingKey : signingKey, {
       ...ticket.claims,
-      iss: signedIssuer(),
-      aud: ticket.clientId,
-      iat: issuedAt,
-      exp: issuedAt + ID_TOKEN_LIFETIME_SECONDS,
-      nonce: ticket.idTokenFault === 'wrong-nonce' ? `${ticket.nonce}-from-another-sign-in` : ticket.nonce,
+      iss: fault === 'wrong-issuer' ? `${url}/another-issuer` : signedIssuer(),
+      aud: fault === 'wrong-audience' ? `${ticket.clientId}-another-client` : ticket.clientId,
+      iat: fault === 'expired' ? issuedAt - 600 : issuedAt,
+      exp: fault === 'expired' ? issuedAt - 120 : issuedAt + ID_TOKEN_LIFETIME_SECONDS,
+      nonce: fault === 'wrong-nonce' ? `${ticket.nonce}-from-another-sign-in` : ticket.nonce,
     });
   };
 
