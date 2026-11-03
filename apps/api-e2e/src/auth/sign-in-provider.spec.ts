@@ -144,6 +144,8 @@ describe('signing in through a sign-in provider', () => {
         display_name: 'Fake provider',
         discovery_url: providerEnv.OIDC_FAKE_DISCOVERY_URL,
         authorization_endpoint: '/api/auth/sign-in/social',
+        app_sign_in_endpoint: '/api/auth/app-sign-in/start',
+        app_token_endpoint: '/api/auth/app-sign-in/token',
         sign_up_disabled: false,
       },
       {
@@ -152,6 +154,8 @@ describe('signing in through a sign-in provider', () => {
         display_name: 'Lenient fake provider',
         discovery_url: providerEnv.OIDC_FAKE_LENIENT_DISCOVERY_URL,
         authorization_endpoint: '/api/auth/sign-in/social',
+        app_sign_in_endpoint: '/api/auth/app-sign-in/start',
+        app_token_endpoint: '/api/auth/app-sign-in/token',
         sign_up_disabled: false,
       },
       {
@@ -160,6 +164,8 @@ describe('signing in through a sign-in provider', () => {
         display_name: 'Signed fake provider',
         discovery_url: providerEnv.OIDC_FAKE_SIGNED_DISCOVERY_URL,
         authorization_endpoint: '/api/auth/sign-in/social',
+        app_sign_in_endpoint: '/api/auth/app-sign-in/start',
+        app_token_endpoint: '/api/auth/app-sign-in/token',
         sign_up_disabled: false,
       },
     ]);

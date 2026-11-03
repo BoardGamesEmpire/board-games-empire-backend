@@ -54,4 +54,25 @@ export class OidcStrategyDto {
     example: '/api/auth/sign-in/social',
   })
   authorizationEndpoint!: string;
+
+  /**
+   * Where a native app starts an app sign-in through this provider (#1019):
+   * it opens this in a browser, with the provider, its return address and its
+   * PKCE challenge in the query.
+   */
+  @ApiProperty({
+    description: 'Relative endpoint a native app opens in a browser to sign in through this provider (GET)',
+    example: '/api/auth/app-sign-in/start',
+  })
+  appSignInEndpoint!: string;
+
+  /**
+   * Where a native app exchanges the code an app sign-in hands back, with its
+   * PKCE verifier, for a session of its own (#1019).
+   */
+  @ApiProperty({
+    description: 'Relative endpoint where a native app exchanges its sign-in code for a session (POST)',
+    example: '/api/auth/app-sign-in/token',
+  })
+  appTokenEndpoint!: string;
 }
