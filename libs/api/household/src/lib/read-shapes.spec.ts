@@ -1,11 +1,14 @@
-import { Prisma } from '@bge/database';
+import { Prisma, SystemRole } from '@bge/database';
 import { CONTEXT_INVITE_SELECT } from '@bge/invites';
 import {
+  ADMIN_HOUSEHOLD_ROW_SELECT,
+  HOUSEHOLD_SCALARS_OMITTED_FROM_ADMIN_ROW,
   HOUSEHOLD_SETTINGS_SCALARS_OMITTED,
   HOUSEHOLD_SETTINGS_SELECT,
   MEMBER_SCALARS_OMITTED,
   MEMBER_SELECT,
 } from './read-shapes';
+import { SHOWN_NAME_SELECT } from './shown-name';
 
 /**
  * The scalar keys of a select object: the ones written `field: true`, as
@@ -86,6 +89,37 @@ describe('household read shapes', () => {
 
     it('publishes the member share policy, which a member needs to know whether they may share (#810)', () => {
       expect(scalarKeysOf(HOUSEHOLD_SETTINGS_SELECT)).toContain('memberSharePolicy');
+    });
+  });
+
+  describe('ADMIN_HOUSEHOLD_ROW_SELECT (#419)', () => {
+    it('classifies every Household scalar as either selected or deliberately omitted', () => {
+      const declared = Object.values(Prisma.HouseholdScalarFieldEnum).sort();
+      const classified = [
+        ...scalarKeysOf(ADMIN_HOUSEHOLD_ROW_SELECT),
+        ...Object.keys(HOUSEHOLD_SCALARS_OMITTED_FROM_ADMIN_ROW),
+      ].sort();
+
+      // A new Household column lands here first: publish it on the staff
+      // households list, or withhold it with the reason.
+      expect(classified).toEqual(declared);
+    });
+
+    it('publishes the row scalars the staff households list shows', () => {
+      expect(scalarKeysOf(ADMIN_HOUSEHOLD_ROW_SELECT).sort()).toEqual(
+        ['createdAt', 'deletedAt', 'id', 'image', 'name', 'reach'].sort(),
+      );
+    });
+
+    // A list of every household on the server shouldn't carry every member
+    // (client#683): the row names its household owners and counts the rest.
+    it('lists the household owners only, never the full roster', () => {
+      expect(ADMIN_HOUSEHOLD_ROW_SELECT.members.where).toEqual({ role: { role: { name: SystemRole.HouseholdOwner } } });
+      expect(ADMIN_HOUSEHOLD_ROW_SELECT._count).toEqual({ select: { members: true } });
+    });
+
+    it('reads each owner’s username and display name, and nothing else of the user', () => {
+      expect(ADMIN_HOUSEHOLD_ROW_SELECT.members.select.user.select).toBe(SHOWN_NAME_SELECT);
     });
   });
 });

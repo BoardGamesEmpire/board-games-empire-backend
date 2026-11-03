@@ -474,6 +474,105 @@ export function restorableListEnvelope(
   return { households: households as readonly RestorableHouseholdWire[], pagination };
 }
 
+/** A household owner as a row of `GET /api/admin/households` names them (#419). */
+export interface AdminHouseholdOwnerWire {
+  readonly userId: string;
+  readonly username: string;
+  readonly displayName: string | null;
+}
+
+/**
+ * A row of `GET /api/admin/households` (#419): six household columns, the
+ * member count and the household owners. `Pick`, for the reason
+ * {@link HouseholdMemberWire} gives.
+ */
+export type AdminHouseholdWire = Wire<
+  Pick<Household, 'id' | 'name' | 'image' | 'reach' | 'createdAt' | 'deletedAt'>
+> & {
+  readonly memberCount: number;
+  readonly owners: readonly AdminHouseholdOwnerWire[];
+};
+
+export interface ListAdminHouseholdsEnvelope {
+  readonly households: readonly AdminHouseholdWire[];
+  readonly pagination: PaginationWire;
+}
+
+/** Every key a row of the staff households list publishes, and no other. */
+export const ADMIN_HOUSEHOLD_ROW_KEYS = [
+  'createdAt',
+  'deletedAt',
+  'id',
+  'image',
+  'memberCount',
+  'name',
+  'owners',
+  'reach',
+] as const;
+
+const ADMIN_HOUSEHOLD_OWNER_KEYS = ['displayName', 'userId', 'username'] as const;
+
+const hasExactKeys = (record: Record<string, unknown>, keys: readonly string[]): boolean =>
+  JSON.stringify(Object.keys(record).sort()) === JSON.stringify([...keys].sort());
+
+/**
+ * `GET /api/admin/households`: the list envelope, with each row checked in
+ * full, unlike the member-facing lists. The row is a `select` that names
+ * every column it publishes (#419), so a key beyond the eight, a roster, or
+ * an owner shaped otherwise is the regression the suite should fail on.
+ */
+export function adminListEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): ListAdminHouseholdsEnvelope {
+  const { households, pagination } = listEnvelope(response, request);
+
+  for (const household of households) {
+    const row = household as unknown as Record<string, unknown>;
+
+    if (!hasExactKeys(row, ADMIN_HOUSEHOLD_ROW_KEYS)) {
+      return fail(
+        `household '${household.id}' carried the keys [${Object.keys(row).sort().join(', ')}], not exactly ` +
+          `[${ADMIN_HOUSEHOLD_ROW_KEYS.join(', ')}]`,
+        request,
+        response,
+      );
+    }
+
+    if (!isNonNegativeInteger(row['memberCount'])) {
+      return fail(
+        `household '${household.id}' carried a 'memberCount' that is not a non-negative integer`,
+        request,
+        response,
+      );
+    }
+
+    const owners = row['owners'];
+    if (!Array.isArray(owners)) {
+      return fail(`household '${household.id}' carried no 'owners' array`, request, response);
+    }
+
+    for (const owner of owners as unknown[]) {
+      const valid =
+        isRecord(owner) &&
+        hasExactKeys(owner, ADMIN_HOUSEHOLD_OWNER_KEYS) &&
+        isNonEmptyString(owner['userId']) &&
+        isNonEmptyString(owner['username']) &&
+        (owner['displayName'] === null || typeof owner['displayName'] === 'string');
+
+      if (!valid) {
+        return fail(
+          `one of household '${household.id}'s owners is not { userId, username, displayName: string | null }`,
+          request,
+          response,
+        );
+      }
+    }
+  }
+
+  return { households: households as unknown as readonly AdminHouseholdWire[], pagination };
+}
+
 /**
  * DB name of the `@@unique([createdById, clientRequestId])` constraint, as
  * mapped in `prisma/models/household/household.prisma`. The application never

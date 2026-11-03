@@ -1,4 +1,5 @@
-import { Prisma } from '@bge/database';
+import { Prisma, SystemRole } from '@bge/database';
+import { SHOWN_NAME_SELECT } from './shown-name';
 
 /**
  * Select-shaped read surfaces for the household routes.
@@ -30,14 +31,16 @@ import { Prisma } from '@bge/database';
  *
  * ## What this does NOT cover
  *
- * Two models: `HouseholdMember`, and `HouseholdSettings` (#166). The invite
+ * Two models: `HouseholdMember`, and `HouseholdSettings` (#166), plus the
+ * `Household` row as the staff households list returns it (#419). The invite
  * shapes this file used to carry live in `@bge/invites`, which owns every
  * invite read so the invite routes and the lib's own transitions cannot drift
- * into two spellings of an invite. The `Household` row is still
- * `include:`-shaped in `household.service.ts` — both the detail read and
- * `HOUSEHOLD_LIST_INCLUDE` — so a column added to
- * `Household` still reaches clients with this suite green. Nothing sensitive
- * ships today (`clientRequestId` is a per-creator client request id, and `deletedAt` is null
+ * into two spellings of an invite. Every other read of the `Household` row is
+ * still `include:`-shaped in `household.service.ts` — both the detail read and
+ * `HOUSEHOLD_LIST_INCLUDE` — so a column added to `Household` fails this suite
+ * until the staff list classifies it, but reaches clients of those reads the
+ * moment it is added.
+ * Nothing sensitive ships today (`clientRequestId` is the founder’s client request id, and `deletedAt` is null
  * on every read but `GET /households/restorable`, where telling the household
  * owners who can restore it when it was deleted is intended), which is why it
  * was left rather than folded in: converting it changes the exported
@@ -50,7 +53,9 @@ import { Prisma } from '@bge/database';
  */
 
 /**
- * How a person is rendered wherever a household read names one.
+ * How a person is rendered wherever a household read embeds one. The staff
+ * households list is the exception: its row names each household owner flat,
+ * by user id, username and display name, as client#683 asks (#419).
  *
  * `@bge/invites` renders an invite's `inviter` the same way, and
  * `read-shapes.spec.ts` pins that the two cannot drift into two spellings of
@@ -137,3 +142,50 @@ export const HOUSEHOLD_SETTINGS_SCALARS_OMITTED = {
   createdAt: 'Row bookkeeping; it is the household’s own creation time.',
   updatedAt: 'Row bookkeeping. Nothing a client decides depends on when a setting last changed.',
 } as const satisfies Partial<Record<Prisma.HouseholdSettingsScalarFieldEnum, string>>;
+
+/**
+ * One row of the staff households list, `GET /admin/households` (#419).
+ *
+ * A `select`, so a column added to `Household` doesn't reach this route
+ * unnoticed: `read-shapes.spec.ts` fails until it is published here or
+ * withheld in {@link HOUSEHOLD_SCALARS_OMITTED_FROM_ADMIN_ROW}.
+ *
+ * It carries no roster. A list of every household on the server shouldn't
+ * carry every member (client#683), so the row counts the members and names
+ * only the household owners. Memberships survive a delete, so for a deleted
+ * household these are its owners as they stood at the delete. The owners come
+ * in the order they joined, the membership id breaking a tie, so a household
+ * lists them the same way on every read.
+ */
+export const ADMIN_HOUSEHOLD_ROW_SELECT = {
+  id: true,
+  name: true,
+  image: true,
+  reach: true,
+  createdAt: true,
+  deletedAt: true,
+
+  _count: { select: { members: true } },
+
+  members: {
+    where: { role: { role: { name: SystemRole.HouseholdOwner } } },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: {
+      userId: true,
+      user: { select: SHOWN_NAME_SELECT },
+    },
+  },
+} as const satisfies Prisma.HouseholdSelect;
+
+/**
+ * `Household` scalars the staff households list withholds, and why (#419).
+ * A column added to the model fails `read-shapes.spec.ts` until it is
+ * published in {@link ADMIN_HOUSEHOLD_ROW_SELECT} or withheld here.
+ */
+export const HOUSEHOLD_SCALARS_OMITTED_FROM_ADMIN_ROW = {
+  description: 'Detail, not a list column: read it on `GET /households/:id`.',
+  languageTagId: 'Detail, not a list column: read it on `GET /households/:id`.',
+  createdById: 'The founder is history, not authority: the household owners stand for the household.',
+  clientRequestId: 'The founder’s client request id (#210): only their client, replaying its create, has a use for it.',
+  updatedAt: 'Row bookkeeping. Nothing staff decide from the list depends on when a household last changed.',
+} as const satisfies Partial<Record<Prisma.HouseholdScalarFieldEnum, string>>;
