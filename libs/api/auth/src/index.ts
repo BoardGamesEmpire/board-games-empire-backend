@@ -1,3 +1,4 @@
+export { APP_SIGN_IN_FLOW_KEY } from './lib/app-sign-in/app-sign-in-hand-off';
 export * from './lib/auth-factory';
 export { createRedisAuthStorage, type CompleteAuthStorage } from './lib/auth-storage';
 export * from './lib/auth.module';

@@ -53,6 +53,33 @@ describe('parseAppReturnAddress', () => {
     expect(parseAppReturnAddress(longest)).toBeInstanceOf(URL);
     expect(parseAppReturnAddress(`${longest}a`)).toBeNull();
   });
+
+  // The flow stores the address encoded, as its `href`, and reads it back
+  // through this check. A limit on the address as sent let a short address
+  // with non-ASCII characters in it, whose encoded form is three times as
+  // long, open a flow its callback then couldn't read (#1019).
+  it('measures an address encoded: 512 characters encoded is accepted, 513 refused (#1019)', () => {
+    const prefix = 'bge://oauth/';
+    // 'ü' encodes as '%C3%BC', six characters.
+    const longest = prefix + 'a'.repeat(512 - prefix.length - 6 * 50) + 'ü'.repeat(50);
+
+    expect(longest.length).toBeLessThan(512);
+    expect(parseAppReturnAddress(longest)?.href).toHaveLength(512);
+    expect(parseAppReturnAddress(`${longest}a`)).toBeNull();
+    expect(parseAppReturnAddress(prefix + 'ü'.repeat(100))).toBeNull();
+  });
+
+  it.each([
+    ['non-ASCII', 'ü'],
+    ['characters a path escapes', '"<>`'],
+  ])('accepts its own encoded form of every address it accepts, with %s (#1019)', (_case, characters) => {
+    for (let count = 1; count <= 200; count++) {
+      const accepted = parseAppReturnAddress(`bge://oauth/${characters.repeat(count)}`);
+      if (accepted !== null) {
+        expect(parseAppReturnAddress(accepted.href)?.href).toBe(accepted.href);
+      }
+    }
+  });
 });
 
 describe('appReturnUrl', () => {

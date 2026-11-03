@@ -1,4 +1,10 @@
-/** The longest return address an app may send, in characters (#1019). */
+/**
+ * The longest return address an app may send, in characters once encoded
+ * (#1019). The flow stores the encoded form, its `href`, and reads it back
+ * through this check, so the limit applies to that form: a non-ASCII
+ * character is up to twelve characters encoded, and an address measured as
+ * sent could open a flow its callback then refuses.
+ */
 const RETURN_ADDRESS_MAX_LENGTH = 512;
 
 /**
@@ -39,6 +45,7 @@ export function parseAppReturnAddress(value: string): URL | null {
 
   // The same rule on the parsed address, as a second line behind the pattern.
   const exact =
+    address.href.length <= RETURN_ADDRESS_MAX_LENGTH &&
     address.protocol === 'bge:' &&
     address.host.toLowerCase() === 'oauth' &&
     address.port === '' &&

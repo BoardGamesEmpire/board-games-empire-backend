@@ -1,3 +1,4 @@
+import { APP_SIGN_IN_FLOW_KEY } from '@bge/auth';
 import { SIGN_IN_ANONYMOUS_PATH, waitForProvisionedRoleNames } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -444,7 +445,7 @@ describe('signing in from a native app (#1019)', () => {
 
       const web = await signInThroughProvider(baseUrl, claimsOf(intruder), {
         callbackURL: `${APP_SIGN_IN_RETURN_PATH}?flow=${flow}`,
-        ...(forged ? { additionalData: { serverContext: { appSignInFlow: flow } } } : {}),
+        ...(forged ? { additionalData: { serverContext: { [APP_SIGN_IN_FLOW_KEY]: flow } } } : {}),
       });
 
       // The web sign-in completes as usual, with the address it asked for.
