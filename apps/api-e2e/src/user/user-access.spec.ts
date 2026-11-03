@@ -7,11 +7,11 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
 
 /**
  * `GET /api/users/me/access` (#757): what the acting actor may do with each
- * resource type it names, over the real role catalog. Each `none` and `all` on
- * a DataGateway is paired with the route that checks that action, which must
- * refuse the same actor or let it past, so the answer is seen to agree with
- * the server's own checks. No DataGateway route checks `manage`, so its answer
- * stands alone.
+ * resource type it names, over the real role catalog. Each answer on a
+ * DataGateway is paired with the route that checks that action, so the answer
+ * is seen to agree with the server's own checks: a `none` is refused, an `all`
+ * gets past, and a `some` changes one record and is refused another. No
+ * DataGateway route checks `manage`, so its answer stands alone.
  *
  * Actors are made inside each test, because the database is reset before
  * every one. No coordinator runs here, so the DataGateway seeded for the API
@@ -52,12 +52,42 @@ describe('user access (#757)', () => {
     delete: (headers: AuthHeaders) => request(baseUrl).delete(`${GATEWAYS}/${ANY_ID}`).set(headers),
   };
 
+  // A `some` turns on the record, so it is held to two real ones: the route
+  // that checks the action must change the record the grant reaches and refuse
+  // one it doesn't. Only update has such a route here.
+  const recordRoutes: Partial<Record<string, (headers: AuthHeaders, id: string) => request.Test>> = {
+    update: (headers, id) =>
+      request(baseUrl)
+        .patch(`${GATEWAYS}/${id}`)
+        .set(headers)
+        .send({ name: `Renamed ${id}` }),
+  };
+
+  type Records = Readonly<{ reached: string; unreached: string }>;
+
   // Each answer is held to the route that checks its action: a `none` is
   // refused there, and an `all` gets past the policy check, so whatever comes
   // back (a 400 for the empty body, a 404 for the made-up id) is not a 403. A
-  // `some` depends on the record, so it is pinned by its expected value only.
-  const expectRoutesAgree = async (headers: AuthHeaders, answer: Record<string, string>) => {
+  // `some` with no record route or no records fails, rather than pass unchecked.
+  const expectRoutesAgree = async (headers: AuthHeaders, answer: Record<string, string>, records?: Records) => {
     for (const [action, route] of Object.entries(gatewayRoutes)) {
+      if (answer[action] === 'some') {
+        const recordRoute = recordRoutes[action];
+        if (!recordRoute || !records) {
+          throw new Error(`Nothing to hold ${action}: some to (#757)`);
+        }
+
+        const reached = await recordRoute(headers, records.reached);
+        const unreached = await recordRoute(headers, records.unreached);
+
+        expect({ action, reached: reached.status, unreached: unreached.status }).toEqual({
+          action,
+          reached: 200,
+          unreached: 403,
+        });
+        continue;
+      }
+
       const response = await route(headers);
 
       if (answer[action] === 'none') {
@@ -68,10 +98,10 @@ describe('user access (#757)', () => {
     }
   };
 
-  const seedGateway = () =>
+  const seedGateway = (name: string) =>
     db.client.dataGateway.create({
       data: {
-        name: 'Access Gateway',
+        name,
         connectionUrl: 'localhost',
         connectionPort: 50099,
         authType: AuthType.None,
@@ -125,20 +155,22 @@ describe('user access (#757)', () => {
 
   it('narrows an API key to its key scopes, and the routes agree (#757)', async () => {
     const admin = await actors.admin();
-    const gateway = await seedGateway();
-    // The roles above answer create and delete alike, so a route checking the
-    // other of the two would agree with them all. This key holds create without
-    // delete, so the two routes must disagree here (#757).
+    const pinned = await seedGateway('Pinned Gateway');
+    const other = await seedGateway('Other Gateway');
+    // The roles above answer create, update and delete alike, so a route
+    // checking another of the three would agree with them all. This key holds
+    // create, update on one DataGateway and no delete, so the three routes must
+    // disagree here (#757).
     const key = await mintApiKey(baseUrl, db.client, admin, [
       { slugs: ['create:data_gateway'], resourceType: ResourceType.DataGateway },
       { slugs: ['read:data_gateway'], resourceType: ResourceType.DataGateway },
-      { slugs: ['update:data_gateway'], resourceType: ResourceType.DataGateway, resourceId: gateway.id },
+      { slugs: ['update:data_gateway'], resourceType: ResourceType.DataGateway, resourceId: pinned.id },
     ]);
 
     const response = await accessOf(key.headers, ResourceType.DataGateway).expect(200);
 
     expect(response.body.access.DataGateway).toEqual({ ...NONE, create: 'all', read: 'all', update: 'some' });
-    await expectRoutesAgree(key.headers, response.body.access.DataGateway);
+    await expectRoutesAgree(key.headers, response.body.access.DataGateway, { reached: pinned.id, unreached: other.id });
   });
 
   it('answers a key with no key scopes none everywhere, whoever owns it, and every route agrees (#757)', async () => {
