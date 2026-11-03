@@ -1,4 +1,5 @@
 import { performSignup, type SignupResult } from '@bge/testing-e2e/signup';
+import { request as httpRequest } from 'node:http';
 import { chromium, type Browser } from 'playwright';
 import {
   awaitImport,
@@ -261,6 +262,29 @@ describe('the BGE images, run as the split profile', () => {
       const response = await fetch(`${stack.baseUrl}/no-such-file.js`);
 
       expect(response.status).toBe(404);
+    });
+
+    // The Host check sits ahead of the client's files, and only the image
+    // carries them (#977). `fetch` can't set Host, so this uses node:http.
+    it("refuses the client to a name that is not the server's", async () => {
+      const { status, body } = await new Promise<{ status?: number; body: string }>((resolve, reject) => {
+        const req = httpRequest(
+          `${stack.baseUrl}/`,
+          { headers: { Host: 'evil.example', Accept: 'text/html' } },
+          (res) => {
+            let received = '';
+            res.setEncoding('utf8');
+            res.on('data', (chunk: string) => (received += chunk));
+            res.on('end', () => resolve({ status: res.statusCode, body: received }));
+          },
+        );
+
+        req.on('error', reject);
+        req.end();
+      });
+
+      expect(status).toBe(421);
+      expect(JSON.parse(body).code).toBe('HOST_NOT_ALLOWED');
     });
   });
 

@@ -8,3 +8,4 @@ export * from './lib/constants';
 export * from './lib/events/auth.events';
 export * from './lib/interfaces';
 export * from './lib/session-credential';
+export { fallbackLocaleRenderer } from './lib/setting-gates';

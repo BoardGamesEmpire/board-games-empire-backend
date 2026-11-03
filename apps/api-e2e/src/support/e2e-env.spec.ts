@@ -1,5 +1,6 @@
 import { environments } from '@bge/env';
 import {
+  API_CONFIGURED_SERVER_NAME,
   API_NODE_ENV,
   API_PORT_VAR,
   API_THROTTLE_LIMIT,
@@ -185,7 +186,13 @@ describe('e2e-env (pure logic)', () => {
     it('trusts both loopback spellings of the ephemeral origin', () => {
       const origins = apiEnvOverrides(baseUrl, 41234).TRUSTED_ORIGINS.split(',');
 
-      expect(origins).toEqual(['http://127.0.0.1:41234', 'http://localhost:41234']);
+      expect(origins).toEqual(expect.arrayContaining(['http://127.0.0.1:41234', 'http://localhost:41234']));
+    });
+
+    it('names one server name that is neither loopback nor an IP, for the Host check to admit (#977)', () => {
+      const origins = apiEnvOverrides(baseUrl, 41234).TRUSTED_ORIGINS.split(',');
+
+      expect(origins).toContain(`https://${API_CONFIGURED_SERVER_NAME}`);
     });
 
     it('pins the IP-tier throttle limit above anything the suite can reach', () => {

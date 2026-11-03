@@ -88,7 +88,9 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
       DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:-}
       BETTER_AUTH_URL: ${BGE_PUBLIC_URL:-http://localhost:33333}
-      TRUSTED_ORIGINS: ${BGE_PUBLIC_URL:-http://localhost:33333}
+      # An address this list adds is one the api answers at, not only one it
+      # trusts for sign-in, so a refused name has one place to go (#977).
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-${BGE_PUBLIC_URL:-http://localhost:33333}}
       # Signed media links point here, at the stream route under `/api`.
       MEDIA_BASE_URL: ${BGE_PUBLIC_URL:-http://localhost:33333}/api
       GATEWAY_COORDINATOR_HOST: coordinator
