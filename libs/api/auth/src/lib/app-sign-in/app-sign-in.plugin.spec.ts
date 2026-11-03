@@ -87,6 +87,27 @@ describe('appSignIn', () => {
       expect(providerRefused.headers.getSetCookie()).toEqual([]);
     });
 
+    // A value sent twice is a malformed request, not a choice between two,
+    // and a `state` the app can't get back whole is refused rather than cut
+    // (#1019).
+    it('refuses a missing or repeated return address, an overlong state and a missing provider (#1019)', async () => {
+      const auth = createInstance();
+      const errorOf = (response: Response) => locationOf(response).searchParams.get('error');
+
+      const { redirect_uri: _omitted, ...withoutAddress } = VALID_START;
+      expect(errorOf(await get(auth, startPath(withoutAddress)))).toBe('APP_SIGN_IN_RETURN_ADDRESS_REFUSED');
+      const repeated = `${startPath(VALID_START)}&redirect_uri=bge%3A%2F%2Foauth`;
+      expect(errorOf(await get(auth, repeated))).toBe('APP_SIGN_IN_RETURN_ADDRESS_REFUSED');
+
+      const overlong = await get(auth, startPath({ ...VALID_START, state: 's'.repeat(1025) }));
+      const refused = new URL(overlong.headers.get('location') ?? '');
+      expect(refused.searchParams.get('error')).toBe('APP_SIGN_IN_REQUEST_INVALID');
+      expect(refused.searchParams.has('state')).toBe(false);
+
+      const { provider: _none, ...withoutProvider } = VALID_START;
+      expect(errorOf(await get(auth, startPath(withoutProvider)))).toBe('oauth_provider_not_found');
+    });
+
     // better-auth's callback sends its errors to `onAPIError.errorURL` when
     // one is set, so app sign-in's go there too, not to a page of their own.
     it('sends a refused return address to the error page better-auth’s callback uses (#1019)', async () => {
@@ -150,14 +171,14 @@ describe('appSignIn', () => {
 
   describe('return', () => {
     /** Starts a sign-in, then cancels it at the provider: where the callback sends the browser. */
-    const cancelledAtProvider = async (auth: Instance, error: string, description: string): Promise<URL> => {
+    const cancelledAtProvider = async (auth: Instance, error: string, description?: string): Promise<URL> => {
       const start = await get(auth, startPath(VALID_START));
       const state = locationOf(start).searchParams.get('state') ?? '';
-      const callback = await get(
-        auth,
-        `/api/auth/callback/github?${new URLSearchParams({ error, error_description: description, state }).toString()}`,
-        cookiesOf(start),
-      );
+      const params = new URLSearchParams({ error, state });
+      if (description !== undefined) {
+        params.set('error_description', description);
+      }
+      const callback = await get(auth, `/api/auth/callback/github?${params.toString()}`, cookiesOf(start));
 
       return locationOf(callback);
     };
@@ -178,6 +199,39 @@ describe('appSignIn', () => {
       expect(app.searchParams.get('state')).toBe('app-state');
       expect(app.searchParams.get('iss')).toBe(ORIGIN);
       expect(app.searchParams.has('code')).toBe(false);
+    });
+
+    // Some providers send a bare `error` (#1019, client#583).
+    it('passes a provider error with no description on without one (#1019)', async () => {
+      const auth = createInstance();
+      const returnPage = await cancelledAtProvider(auth, 'access_denied');
+
+      const response = await get(auth, `${returnPage.pathname}${returnPage.search}`);
+
+      const app = new URL(response.headers.get('location') ?? '');
+      expect(app.searchParams.get('error')).toBe('access_denied');
+      expect(app.searchParams.has('error_description')).toBe(false);
+      expect(app.searchParams.get('state')).toBe('app-state');
+    });
+
+    // The page never issues a code: a sign-in that reaches it without the
+    // callback handing it over is refused, and the flow is used up (#1019).
+    it('refuses a visit with no provider error, then the used flow, then no flow at all (#1019)', async () => {
+      const auth = createInstance();
+      const returnPage = await cancelledAtProvider(auth, 'access_denied');
+      const flowOnly = `${returnPage.pathname}?flow=${returnPage.searchParams.get('flow') ?? ''}`;
+      const errorPage = `${ORIGIN}/api/auth/error?error=APP_SIGN_IN_FLOW_INVALID&error_description=rendered%3Aerrors.auth.app_sign_in_flow_invalid`;
+
+      const withoutError = await get(auth, flowOnly);
+      expect(withoutError.headers.get('location')).toBe(
+        `bge://oauth?error=APP_SIGN_IN_FLOW_INVALID&error_description=rendered%3Aerrors.auth.app_sign_in_flow_invalid&state=app-state&iss=${encodeURIComponent(ORIGIN)}`,
+      );
+
+      const used = await get(auth, flowOnly);
+      expect(locationOf(used).href).toBe(errorPage);
+
+      const noFlow = await get(auth, returnPage.pathname);
+      expect(locationOf(noFlow).href).toBe(errorPage);
     });
   });
 
@@ -233,6 +287,42 @@ describe('appSignIn', () => {
       const proper = await exchange(auth, code);
       expect(proper.status).toBe(200);
       await expect(proper.json()).resolves.toMatchObject({ user: { id: user.id } });
+    });
+
+    // One code for every refusal, so the answer doesn't say which part was
+    // wrong; the wrong verifier still uses the code up (#1019).
+    it('refuses an unknown code, and a wrong verifier, which uses the code up (#1019)', async () => {
+      const auth = createInstance();
+      const { code } = await issuedCode(auth);
+      const refusal = { code: 'APP_SIGN_IN_CODE_INVALID', message: 'rendered:errors.auth.app_sign_in_code_invalid' };
+
+      const unknown = await exchange(auth, 'x'.repeat(32));
+      expect(unknown.status).toBe(400);
+      await expect(unknown.json()).resolves.toEqual(refusal);
+
+      const wrongVerifier = await postToken(
+        auth,
+        'application/json',
+        JSON.stringify({ code, code_verifier: 'w'.repeat(43) }),
+      );
+      expect(wrongVerifier.status).toBe(400);
+      await expect(wrongVerifier.json()).resolves.toEqual(refusal);
+
+      await expect((await exchange(auth, code)).json()).resolves.toEqual(refusal);
+    });
+
+    // A call from the server passes its body already parsed (#1019).
+    it('reads the body a server-side call passes, and refuses one that is no object (#1019)', async () => {
+      const auth = createInstance();
+      const { user, code } = await issuedCode(auth);
+
+      await expect(auth.api.appSignInToken({ body: 'not an object' })).rejects.toMatchObject({
+        body: { code: 'APP_SIGN_IN_REQUEST_INVALID' },
+      });
+      await expect(auth.api.appSignInToken({ body: { code, code_verifier: VERIFIER } })).resolves.toMatchObject({
+        token: expect.any(String),
+        user: { id: user.id },
+      });
     });
 
     // A user can be deleted while their code waits. In the api, provisioning
