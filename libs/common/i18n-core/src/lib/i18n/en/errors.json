@@ -322,6 +322,7 @@
     "static_analysis_unavailable": "Plugin static analysis is unavailable on this server — installs and updates are refused until an operator resolves the parser installation",
     "lifecycle_authority": "Enabling, disabling, configuring, or uninstalling a plugin requires a server administrator",
     "lifecycle_not_found": "Plugin '{slug}' is not installed",
+    "lifecycle_plugin_changed": "Plugin '{slug}' changed while your settings were being saved, so they were not saved — reload its settings and save them again",
     "lifecycle_tombstoned": "Plugin '{slug}' was uninstalled — reinstall it to manage it again",
     "uninstall_bundled": "Plugin '{slug}' is bundled with BGE and cannot be uninstalled — disable it instead",
     "config_invalid": "The configuration for plugin '{slug}' does not match its declared schema",

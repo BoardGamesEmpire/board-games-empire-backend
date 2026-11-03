@@ -405,7 +405,7 @@ describe('PluginUnitLifecycleService', () => {
       db.$queryRaw.mockResolvedValue([livingRow({ manifest_matches: false })] as never);
 
       await expect(service.enableHousehold(enableInput)).rejects.toThrow(
-        /re-activated at version 1\.2\.0 with different manifest content/,
+        /re-activated at version 1\.2\.0 with different plugin manifest content/,
       );
     });
 

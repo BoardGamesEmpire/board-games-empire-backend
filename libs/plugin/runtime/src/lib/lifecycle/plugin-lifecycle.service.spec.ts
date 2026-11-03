@@ -1,5 +1,5 @@
 import { PluginCategory, PluginExecutionMode, PluginScope, Prisma, type Plugin } from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, rawQueryText, type MockDatabaseService } from '@bge/testing';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
@@ -13,11 +13,13 @@ import {
 } from '../events/plugin.events';
 import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import type { PluginInstanceRegistry } from '../loader/plugin-instance-registry';
+import type { ClaimedPluginRow } from '../manifest/manifest-move';
 import type { PluginModuleOptions } from '../plugin-module.options';
 import {
   PluginLifecycleAuthorityError,
   PluginLifecycleManifestError,
   PluginLifecycleNotFoundError,
+  PluginLifecyclePluginChangedError,
   PluginLifecycleTombstonedError,
   PluginUninstallBundledError,
 } from './lifecycle.errors';
@@ -67,6 +69,23 @@ describe('PluginLifecycleService', () => {
     ...overrides,
   });
 
+  /**
+   * A row of `updateConfig`'s in-transaction claim of the plugin row.
+   * `manifest_matches` is the comparison the database performs against the
+   * plugin manifest the caller validated; it defaults TRUE because an
+   * unmoved plugin manifest is the ordinary case (#578).
+   */
+  const claimedRow = (
+    overrides: Partial<ClaimedPluginRow & { config: Prisma.JsonValue }> = {},
+  ): ClaimedPluginRow & { config: Prisma.JsonValue } => ({
+    uninstalled_at: null,
+    version: '1.2.0',
+    installed_at: new Date(0),
+    config: {},
+    manifest_matches: true,
+    ...overrides,
+  });
+
   let db: MockDatabaseService;
   let authority: jest.Mocked<Pick<PluginGrantAuthorityService, 'isServerAdmin'>>;
   let registry: jest.Mocked<Pick<PluginInstanceRegistry, 'has' | 'setEnabled' | 'unregister'>>;
@@ -95,6 +114,8 @@ describe('PluginLifecycleService', () => {
 
     db.$transaction.mockImplementation((cb) => cb(db));
     db.plugin.updateMany.mockResolvedValue({ count: 1 });
+    db.plugin.update.mockResolvedValue(makePlugin());
+    db.$queryRaw.mockResolvedValue([claimedRow()] as never);
     db.householdPlugin.findMany.mockResolvedValue([]);
     db.userPlugin.findMany.mockResolvedValue([]);
     db.pluginGrant.deleteMany.mockResolvedValue({ count: 0 });
@@ -248,7 +269,8 @@ describe('PluginLifecycleService', () => {
 
     it('persists a schema-valid payload and emits PluginConfigUpdatedEvent with both snapshots', async () => {
       db.plugin.findUnique.mockResolvedValue(makePlugin({ config: { webhookUrl: 'https://old.example.test' } }));
-      db.plugin.findUniqueOrThrow.mockResolvedValue(makePlugin({ config: { webhookUrl: 'https://new.example.test' } }));
+      db.$queryRaw.mockResolvedValue([claimedRow({ config: { webhookUrl: 'https://old.example.test' } })] as never);
+      db.plugin.update.mockResolvedValue(makePlugin({ config: { webhookUrl: 'https://new.example.test' } }));
 
       const result = await service.updateConfig({
         slug: 'demo-sink',
@@ -257,10 +279,11 @@ describe('PluginLifecycleService', () => {
       });
 
       expect(result.config).toEqual({ webhookUrl: 'https://new.example.test' });
-      // Last-writer-wins by decision: the only write precondition is the
-      // tombstone guard — no version/updatedAt fencing.
-      expect(db.plugin.updateMany).toHaveBeenCalledWith({
-        where: { id: 'plugin-1', uninstalledAt: null },
+      // Last-writer-wins by decision: no version/updatedAt fencing, and no
+      // uninstalled-plugin guard either, because the row claim before it has
+      // already refused an uninstalled plugin and holds the row (#578).
+      expect(db.plugin.update).toHaveBeenCalledWith({
+        where: { id: 'plugin-1' },
         data: { config: { webhookUrl: 'https://new.example.test' } },
       });
 
@@ -270,6 +293,123 @@ describe('PluginLifecycleService', () => {
       expect(event.after.config).toEqual({ webhookUrl: 'https://new.example.test' });
     });
 
+    it('reports the document the claim found as the before-snapshot, not the pre-transaction read (#578)', async () => {
+      // A second PATCH queued behind a first: it read the config before the
+      // first committed, and its claim then returns what the first wrote. The
+      // event has to report the change from that document, or the record
+      // skips the first PATCH's write.
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ config: { webhookUrl: 'https://x.example.test' } }));
+      db.$queryRaw.mockResolvedValue([claimedRow({ config: { webhookUrl: 'https://y.example.test' } })] as never);
+      db.plugin.update.mockResolvedValue(makePlugin({ config: { webhookUrl: 'https://z.example.test' } }));
+
+      await service.updateConfig({
+        slug: 'demo-sink',
+        actorId: 'admin-1',
+        config: { webhookUrl: 'https://z.example.test' },
+      });
+
+      const event = emittedEvent<PluginConfigUpdatedEvent>(PluginEvent.ConfigUpdated);
+      expect(event.before.config).toEqual({ webhookUrl: 'https://y.example.test' });
+      expect(event.after.config).toEqual({ webhookUrl: 'https://z.example.test' });
+    });
+
+    describe('the plugin-row claim (#578)', () => {
+      it('claims the plugin row FOR NO KEY UPDATE, comparing the plugin manifest it validated against, before the write', async () => {
+        db.plugin.findUnique.mockResolvedValue(makePlugin());
+
+        await service.updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: {} });
+
+        const [strings, ...values] = db.$queryRaw.mock.calls[0] as unknown as [TemplateStringsArray, ...unknown[]];
+        expect(rawQueryText(strings)).toBe(
+          'SELECT uninstalled_at, version, installed_at, config, manifest_json = ?::jsonb AS manifest_matches ' +
+            'FROM plugins WHERE id = ? FOR NO KEY UPDATE',
+        );
+        expect(values).toEqual([JSON.stringify(activeManifest), 'plugin-1']);
+        expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(db.plugin.update.mock.invocationCallOrder[0]);
+      });
+
+      it('refuses a document validated against a plugin manifest that was replaced at the same version', async () => {
+        db.plugin.findUnique.mockResolvedValue(makePlugin());
+        db.$queryRaw.mockResolvedValue([claimedRow({ manifest_matches: false })] as never);
+
+        const refusal = await service
+          .updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: {} })
+          .catch((err: unknown) => err);
+
+        expect(refusal).toBeInstanceOf(PluginLifecyclePluginChangedError);
+        expect((refusal as PluginLifecyclePluginChangedError).kind).toBe('version-activated');
+        expect(db.plugin.update).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
+
+      it('refuses a moved version as an activation, naming both versions', async () => {
+        db.plugin.findUnique.mockResolvedValue(makePlugin());
+        db.$queryRaw.mockResolvedValue([claimedRow({ version: '1.3.0', manifest_matches: false })] as never);
+
+        const refusal = await service
+          .updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: {} })
+          .catch((err: unknown) => err);
+
+        expect(refusal).toBeInstanceOf(PluginLifecyclePluginChangedError);
+        expect(refusal).toMatchObject({ kind: 'version-activated', expectedVersion: '1.2.0', actualVersion: '1.3.0' });
+        expect(db.plugin.update).not.toHaveBeenCalled();
+      });
+
+      it('refuses after a reinstall over an uninstalled plugin as reinstalled', async () => {
+        db.plugin.findUnique.mockResolvedValue(makePlugin());
+        db.$queryRaw.mockResolvedValue([claimedRow({ installed_at: new Date(1) })] as never);
+
+        const refusal = await service
+          .updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: {} })
+          .catch((err: unknown) => err);
+
+        expect(refusal).toBeInstanceOf(PluginLifecyclePluginChangedError);
+        expect((refusal as PluginLifecyclePluginChangedError).kind).toBe('reinstalled');
+        expect(db.plugin.update).not.toHaveBeenCalled();
+      });
+
+      it('refuses a plugin uninstalled after the read with the uninstalled-plugin error', async () => {
+        db.plugin.findUnique.mockResolvedValue(makePlugin());
+        db.$queryRaw.mockResolvedValue([claimedRow({ uninstalled_at: new Date('2026-08-01T00:00:00Z') })] as never);
+
+        await expect(service.updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: {} })).rejects.toThrow(
+          PluginLifecycleTombstonedError,
+        );
+        expect(db.plugin.update).not.toHaveBeenCalled();
+      });
+
+      it('refuses a plugin whose row vanished after the read as not installed', async () => {
+        db.plugin.findUnique.mockResolvedValue(makePlugin());
+        db.$queryRaw.mockResolvedValue([] as never);
+
+        await expect(service.updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: {} })).rejects.toThrow(
+          PluginLifecycleNotFoundError,
+        );
+      });
+
+      it('binds the retry to the plugin manifest now stored and writes against it', async () => {
+        const manifestB = { ...activeManifest, version: '1.3.0' };
+        const pluginB = makePlugin({ version: '1.3.0', manifestJson: manifestB as unknown as Prisma.JsonValue });
+
+        db.plugin.findUnique.mockResolvedValueOnce(makePlugin()).mockResolvedValueOnce(pluginB);
+        db.plugin.update.mockResolvedValue(pluginB);
+        db.$queryRaw
+          .mockResolvedValueOnce([claimedRow({ manifest_matches: false })] as never)
+          .mockResolvedValueOnce([claimedRow({ version: '1.3.0' })] as never);
+
+        await expect(service.updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: {} })).rejects.toThrow(
+          PluginLifecyclePluginChangedError,
+        );
+        expect(db.plugin.update).not.toHaveBeenCalled();
+
+        await service.updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: {} });
+
+        expect(db.plugin.update).toHaveBeenCalledTimes(1);
+        const [, ...retryValues] = db.$queryRaw.mock.calls[1] as unknown as [TemplateStringsArray, ...unknown[]];
+        expect(retryValues).toEqual([JSON.stringify(manifestB), 'plugin-1']);
+      });
+    });
+
     it('rejects a schema-violating payload with the collected issues — no write, no event', async () => {
       db.plugin.findUnique.mockResolvedValue(makePlugin());
 
@@ -277,7 +417,7 @@ describe('PluginLifecycleService', () => {
         service.updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: { webhookUrl: 42 } }),
       ).rejects.toThrow(PluginConfigValidationError);
 
-      expect(db.plugin.updateMany).not.toHaveBeenCalled();
+      expect(db.plugin.update).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
@@ -301,7 +441,7 @@ describe('PluginLifecycleService', () => {
       await expect(service.updateConfig({ slug: 'demo-sink', actorId: 'admin-1', config: {} })).rejects.toThrow(
         PluginLifecycleManifestError,
       );
-      expect(db.plugin.updateMany).not.toHaveBeenCalled();
+      expect(db.plugin.update).not.toHaveBeenCalled();
     });
 
     it('rejects a tombstoned plugin before validating anything', async () => {

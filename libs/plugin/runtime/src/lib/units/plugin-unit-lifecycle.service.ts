@@ -22,6 +22,12 @@ import {
 } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { lockHouseholdUnitScope, lockUserUnitScope } from '../grants/unit-scope-lock';
+import {
+  bindManifest,
+  classifyManifestMove,
+  type ClaimedPluginRow,
+  type ManifestSnapshot,
+} from '../manifest/manifest-move';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import {
@@ -65,26 +71,6 @@ export interface UserUnitActionInput {
 
 /** The columns the pre-transaction guards need; the full row is loaded only where the manifest is (enable/config). */
 type LivingPluginRef = Pick<Plugin, 'id' | 'slug' | 'scope'>;
-
-/**
- * Identifies the manifest a caller derived its gates from, so the locked
- * re-read can detect a replacement.
- *
- * `manifestJson` is what DETECTS a replacement, and the other two columns
- * are what CLASSIFY it. Neither of them can be the detector: staging refuses
- * only a version equal to the CURRENT one, so activations away from and back
- * to a version (A→B→A) are permitted, and that pair restores `version` while
- * never touching `installedAt` — the installer is its only writer — leaving a
- * replaced manifest invisible to both (#368). Comparing the content closes
- * that, and closes it self-enforcingly: a generation counter would have to be
- * bumped by every future writer of `manifest_json`, and one that forgot would
- * reopen this hole with nothing failing.
- *
- * They stay for the classification, which content cannot do: a reinstall that
- * writes a byte-identical manifest still purged every grant, and nothing about
- * the document says so — see {@link PluginUnitPluginChangedError}.
- */
-type ManifestSnapshotRef = Pick<Plugin, 'version' | 'installedAt' | 'manifestJson'>;
 
 type HouseholdEnableOutcome =
   | { readonly kind: 'unchanged'; readonly row: HouseholdPlugin }
@@ -523,7 +509,7 @@ export class PluginUnitLifecycleService {
     tx: Prisma.TransactionClient,
     plugin: LivingPluginRef,
     householdId: string,
-    options: { readonly expected?: ManifestSnapshotRef; readonly requireSurface?: boolean } = {},
+    options: { readonly expected?: ManifestSnapshot; readonly requireSurface?: boolean } = {},
   ): Promise<HouseholdPlugin | null> {
     // The household row, shared, before anything else (#548). The admin check
     // ran before the transaction and took no lock, so a soft-delete can commit
@@ -586,30 +572,15 @@ export class PluginUnitLifecycleService {
   private async assertStillLiving(
     tx: Prisma.TransactionClient,
     plugin: LivingPluginRef,
-    expected?: ManifestSnapshotRef,
+    expected?: ManifestSnapshot,
   ): Promise<{ scope: PluginScope; version: string }> {
-    // Serialized here and cast, rather than compared in this process, so the
-    // comparison is `jsonb = jsonb`: normalized, so key order and spacing
-    // cannot manufacture a false 409, and performed on the same read that
-    // takes the lock. NULL for the callers that pass no snapshot — the
-    // comparison then yields NULL, which the guard never consults.
-    //
-    // The document has been through JS since it was stored (Prisma parses
-    // jsonb on the way out), which is exact for everything a manifest holds:
-    // strings, booleans, and numbers within double precision, with jsonb
-    // comparing numbers numerically so a lost trailing zero is still equal.
-    // A manifest carrying an integer past 2^53 would round-trip differently
-    // and 409 every request for the plugin — retryable and loud rather than
-    // silent, and no manifest field is a number at all today.
-    const expectedManifest = expected === undefined ? null : JSON.stringify(expected.manifestJson);
+    // Bound as text and cast, so the comparison is `jsonb = jsonb` and runs on
+    // the same read that takes the lock (see bindManifest for the round-trip
+    // caveat). NULL for the callers that pass no snapshot — the comparison
+    // then yields NULL, which the guard never consults.
+    const expectedManifest = expected === undefined ? null : bindManifest(expected.manifestJson);
     const rows = await tx.$queryRaw<
-      {
-        uninstalled_at: Date | null;
-        scope: PluginScope;
-        version: string;
-        installed_at: Date;
-        manifest_matches: boolean | null;
-      }[]
+      (ClaimedPluginRow & { scope: PluginScope })[]
     >`SELECT uninstalled_at, scope, version, installed_at, manifest_json = ${expectedManifest}::jsonb AS manifest_matches
         FROM plugins WHERE id = ${plugin.id} FOR SHARE`;
     const row = rows[0];
@@ -623,34 +594,10 @@ export class PluginUnitLifecycleService {
     }
 
     if (expected !== undefined) {
-      // installedAt is tested FIRST because it is the unambiguous signal:
-      // the installer is its only writer, so a move means a reinstall and
-      // nothing else. A version move is not equally decisive — a reinstall
-      // over a tombstone installs whatever version it was handed, so it can
-      // move BOTH columns, and testing version first would report that
-      // reinstall as an activation. The distinction is client-visible and
-      // load-bearing: a reinstall purged every grant for the plugin, an
-      // activation kept them.
-      if (row.installed_at.getTime() !== expected.installedAt.getTime()) {
-        throw new PluginUnitPluginChangedError(plugin.slug, 'reinstalled', expected.version, row.version);
-      }
+      const kind = classifyManifestMove(row, expected);
 
-      if (row.version !== expected.version) {
-        throw new PluginUnitPluginChangedError(plugin.slug, 'version-activated', expected.version, row.version);
-      }
-
-      // Neither column moved, so an activation pair returned the version to
-      // where this request found it (#368) — `kind` is still
-      // `version-activated`, because that pair did not send consent back to
-      // zero the way a reinstall does, and the matching versions are what
-      // select the message that says so.
-      //
-      // Anything other than TRUE is a move: the column is NOT NULL and the
-      // bound document is non-null on this branch, so a NULL answer means
-      // the comparison did not run, and a guard that read that as
-      // "unchanged" would be no guard at all.
-      if (row.manifest_matches !== true) {
-        throw new PluginUnitPluginChangedError(plugin.slug, 'version-activated', expected.version, row.version);
+      if (kind !== null) {
+        throw new PluginUnitPluginChangedError(plugin.slug, kind, expected.version, row.version);
       }
     }
 

@@ -37,6 +37,7 @@ import {
   PluginLifecycleAuthorityError,
   PluginLifecycleManifestError,
   PluginLifecycleNotFoundError,
+  PluginLifecyclePluginChangedError,
   PluginLifecycleTombstonedError,
   PluginStaticAnalysisUnavailableError,
   PluginUninstallBundledError,
@@ -151,6 +152,27 @@ function buildRenderers(): RendererMap {
         findings: exception.findings,
         unacknowledgedSpecifiers: exception.unacknowledgedSpecifiers,
         unexpectedSpecifiers: exception.unexpectedSpecifiers,
+      },
+    });
+
+  // An activation or a reinstall replaced the active plugin manifest between
+  // the request's read and its transaction, so every judgment it derived from
+  // the plugin manifest is stale (#368, #578). `kind` names which writer moved
+  // it — a reinstall also purged consent, which the client may want to say out
+  // loud — and the version pair makes the retry informed rather than a blind
+  // repeat. The pair alone distinguishes nothing: it is equal for a
+  // same-version reinstall AND for the A→B→A activation the content comparison
+  // catches, so `kind` is what says whether consent survived.
+  const manifestMoveConflict =
+    (key: I18nPath) =>
+    (exception: PluginUnitPluginChangedError | PluginLifecyclePluginChangedError): PluginErrorRendering => ({
+      status: Http.Conflict,
+      message: t(key, { slug: exception.pluginSlug }),
+      fields: {
+        slug: exception.pluginSlug,
+        kind: exception.kind,
+        expectedVersion: exception.expectedVersion,
+        actualVersion: exception.actualVersion,
       },
     });
 
@@ -403,24 +425,8 @@ function buildRenderers(): RendererMap {
     fields: { slug: exception.pluginSlug, issues: exception.issues },
   }));
 
-  // An activation or a reinstall replaced the active manifest between the
-  // request's read and its transaction, so every manifest-derived judgment
-  // it made is stale. `kind` names which writer moved it — a reinstall also
-  // purged consent, which the client may want to say out loud — and the
-  // version pair makes the retry informed rather than a blind repeat. The
-  // pair alone distinguishes nothing: it is equal for a same-version
-  // reinstall AND for the A→B→A activation the content comparison catches
-  // (#368), so `kind` is what says whether consent survived.
-  renders(PluginUnitPluginChangedError, (exception) => ({
-    status: Http.Conflict,
-    message: t('errors.plugin.unit_plugin_changed', { slug: exception.pluginSlug }),
-    fields: {
-      slug: exception.pluginSlug,
-      kind: exception.kind,
-      expectedVersion: exception.expectedVersion,
-      actualVersion: exception.actualVersion,
-    },
-  }));
+  renders(PluginUnitPluginChangedError, manifestMoveConflict('errors.plugin.unit_plugin_changed'));
+  renders(PluginLifecyclePluginChangedError, manifestMoveConflict('errors.plugin.lifecycle_plugin_changed'));
 
   // ─── 409 — confirmation challenges (prompt inputs come FROM the error) ───
 
