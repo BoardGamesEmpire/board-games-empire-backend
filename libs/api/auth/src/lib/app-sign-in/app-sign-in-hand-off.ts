@@ -1,4 +1,4 @@
-import { APP_SIGN_IN_FLOW_INVALID, type AppSignInErrorCode } from './app-sign-in-codes';
+import { APP_SIGN_IN_FLOW_INVALID, APP_SIGN_IN_UNAVAILABLE, type AppSignInErrorCode } from './app-sign-in-codes';
 import { appSignInReturnPage } from './app-sign-in-paths';
 import type { AppSignInStore } from './app-sign-in-store';
 import { appReturnUrl } from './return-address';
@@ -47,6 +47,8 @@ export interface AppSignInHandOff {
   readonly issuer: string;
   /** The server's error page, showing `code` and its message. */
   readonly errorPage: (code: AppSignInErrorCode) => string;
+  /** `code`'s plain-language message, sent to the app as `error_description`. */
+  readonly message: (code: AppSignInErrorCode) => string;
 }
 
 /**
@@ -70,8 +72,10 @@ export interface AppSignInHandOff {
  * answer stands.
  *
  * Every redirect to the app carries `iss`, so the app can tell this server's
- * answer from another's (RFC 9207). A failure to store the code fails the
- * request.
+ * answer from another's (RFC 9207). Storage failing at this point is logged
+ * and answered with `APP_SIGN_IN_UNAVAILABLE`: at the app, once the flow is
+ * read, so it isn't left waiting on a sign-in that has already ended, and on
+ * the error page before that.
  */
 export async function handOffAppSignIn(handOff: AppSignInHandOff): Promise<string | undefined> {
   const flowId = handOff.oauthState?.serverContext?.[APP_SIGN_IN_FLOW_KEY];
@@ -93,12 +97,30 @@ export async function handOffAppSignIn(handOff: AppSignInHandOff): Promise<strin
       return undefined;
     }
 
-    const flow = await handOff.store.takeFlow(flowId);
+    let flow: Awaited<ReturnType<AppSignInStore['takeFlow']>>;
+    try {
+      flow = await handOff.store.takeFlow(flowId);
+    } catch (error) {
+      handOff.logger.error('Could not read the flow of an app sign-in', error);
+      return handOff.errorPage(APP_SIGN_IN_UNAVAILABLE);
+    }
     if (flow === null) {
       return handOff.errorPage(APP_SIGN_IN_FLOW_INVALID);
     }
 
-    const code = await handOff.store.issueCode({ userId: created.user.id, codeChallenge: flow.codeChallenge });
+    let code: string;
+    try {
+      code = await handOff.store.issueCode({ userId: created.user.id, codeChallenge: flow.codeChallenge });
+    } catch (error) {
+      // The flow is used up, so the app can't retry it: tell it to start over.
+      handOff.logger.error('Could not store the code of an app sign-in', error);
+      return appReturnUrl(flow.returnAddress, {
+        error: APP_SIGN_IN_UNAVAILABLE,
+        error_description: handOff.message(APP_SIGN_IN_UNAVAILABLE),
+        state: flow.state,
+        iss: handOff.issuer,
+      });
+    }
 
     return appReturnUrl(flow.returnAddress, { code, state: flow.state, iss: handOff.issuer });
   } finally {

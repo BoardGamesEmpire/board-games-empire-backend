@@ -1,4 +1,4 @@
-import { APP_SIGN_IN_FLOW_INVALID } from './app-sign-in-codes';
+import { APP_SIGN_IN_FLOW_INVALID, APP_SIGN_IN_UNAVAILABLE } from './app-sign-in-codes';
 import { APP_SIGN_IN_FLOW_KEY, handOffAppSignIn, type AppSignInHandOff } from './app-sign-in-hand-off';
 import { createAppSignInStore, type AppSignInStore } from './app-sign-in-store';
 import { memoryVerificationStore } from './verification-store.fixture';
@@ -53,6 +53,7 @@ async function setUp(overrides: { store?: (store: AppSignInStore) => AppSignInSt
       logger,
       issuer: ISSUER,
       errorPage: (code) => `${ISSUER}/api/auth/error?error=${code}`,
+      message: (code) => `message for ${code}`,
       ...input,
     });
 
@@ -167,19 +168,41 @@ describe('handOffAppSignIn', () => {
     expect(deleteSession).toHaveBeenCalledWith('callback-session-token');
   });
 
-  // The storage failing between the callback and the code: the request fails,
-  // and still no credential reaches the browser and the session is gone. An
-  // end-to-end test can't make Redis fail at that moment.
-  it('leaves no credential and no session behind when the code can’t be stored (#1019)', async () => {
+  // The storage failing between the callback and the code: the flow is used
+  // up, so the app is told to start over rather than left waiting, and still
+  // no credential reaches the browser and the session is gone. An end-to-end
+  // test can't make Redis fail at that moment.
+  it('sends the app APP_SIGN_IN_UNAVAILABLE, leaving no credential or session, when the code can’t be stored (#1019)', async () => {
     const failure = new Error('the verification store is unreachable');
-    const { deleteSession, headers, handOff } = await setUp({
+    const { deleteSession, headers, logger, handOff } = await setUp({
       store: (store) => ({ ...store, issueCode: () => Promise.reject(failure) }),
     });
 
-    await expect(handOff()).rejects.toBe(failure);
+    const url = new URL((await handOff()) as string);
 
+    expect(`${url.protocol}//${url.host}${url.pathname}`).toBe('bge://oauth/server-7');
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      error: APP_SIGN_IN_UNAVAILABLE,
+      error_description: `message for ${APP_SIGN_IN_UNAVAILABLE}`,
+      state: 'a&b',
+      iss: ISSUER,
+    });
+    expect(logger.error).toHaveBeenCalledWith(expect.any(String), failure);
     expect(headers.getSetCookie()).toEqual(['bge.state=; Max-Age=0; Path=/']);
     expect(headers.has('set-auth-token')).toBe(false);
+    expect(deleteSession).toHaveBeenCalledWith('callback-session-token');
+  });
+
+  // Without the flow there is no app address, so the error page answers.
+  it('sends the browser to the error page with APP_SIGN_IN_UNAVAILABLE when the flow can’t be read (#1019)', async () => {
+    const failure = new Error('the verification store is unreachable');
+    const { deleteSession, logger, handOff } = await setUp({
+      store: (store) => ({ ...store, takeFlow: () => Promise.reject(failure) }),
+    });
+
+    await expect(handOff()).resolves.toBe(`${ISSUER}/api/auth/error?error=${APP_SIGN_IN_UNAVAILABLE}`);
+
+    expect(logger.error).toHaveBeenCalledWith(expect.any(String), failure);
     expect(deleteSession).toHaveBeenCalledWith('callback-session-token');
   });
 
@@ -195,15 +218,18 @@ describe('handOffAppSignIn', () => {
     expect(logger.error).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the storage failure, not the delete failure, when both fail (#1019)', async () => {
-    const failure = new Error('the verification store is unreachable');
+  it('still answers the app when storing the code and deleting the session both fail (#1019)', async () => {
     const { deleteSession, logger, handOff } = await setUp({
-      store: (store) => ({ ...store, issueCode: () => Promise.reject(failure) }),
+      store: (store) => ({
+        ...store,
+        issueCode: () => Promise.reject(new Error('the verification store is unreachable')),
+      }),
     });
     deleteSession.mockRejectedValue(new Error('the session store is unreachable'));
 
-    await expect(handOff()).rejects.toBe(failure);
+    const url = new URL((await handOff()) as string);
 
-    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(url.searchParams.get('error')).toBe(APP_SIGN_IN_UNAVAILABLE);
+    expect(logger.error).toHaveBeenCalledTimes(2);
   });
 });

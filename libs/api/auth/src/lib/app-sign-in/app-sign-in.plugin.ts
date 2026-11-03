@@ -401,6 +401,7 @@ export function appSignIn(options: AppSignInOptions) {
               logger: ctx.context.logger,
               issuer: options.issuer,
               errorPage: (code) => errorPage(ctx.context, code),
+              message,
             });
 
             if (target === undefined) {
