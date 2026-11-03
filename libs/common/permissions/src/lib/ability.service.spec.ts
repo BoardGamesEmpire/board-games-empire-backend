@@ -2,10 +2,11 @@ import { type Actor, AuditContextService } from '@bge/actor-context';
 import { Action, type Prisma, ResourceType } from '@bge/database';
 import { ExtractSubjectType, SubjectRawRule } from '@casl/ability';
 import { createPrismaAbility, PrismaQuery } from '@casl/prisma';
-import { ForbiddenException, InternalServerErrorException } from '@nestjs/common';
+import { ForbiddenException, InternalServerErrorException, Logger } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { AbilityFactory } from './ability.factory';
 import { AbilityService } from './ability.service';
+import { AbilityContextNotPrimedError } from './errors/ability-context-not-primed.error';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type { ApikeyWithScopes, AppAbility, PluginGrantSnapshot, Subjects, UserWithRoles } from './interfaces';
 import { PermissionsService } from './permissions.service';
@@ -99,6 +100,61 @@ describe('AbilityService', () => {
       abilityContext.peek.mockReturnValue([]);
 
       expect(service.getCurrentAbilities()).toEqual([]);
+    });
+  });
+
+  describe('getCurrentAccess (#757)', () => {
+    it('answers each named resource type once, in the order named (#757)', () => {
+      abilityContext.peek.mockReturnValue([ability([{ action: Action.read, subject: 'all' }])]);
+
+      const access = service.getCurrentAccess([ResourceType.DataGateway, ResourceType.Game, ResourceType.DataGateway]);
+
+      expect(Object.keys(access)).toEqual([ResourceType.DataGateway, ResourceType.Game]);
+      expect(access[ResourceType.DataGateway]).toEqual({
+        create: 'none',
+        read: 'all',
+        update: 'none',
+        delete: 'none',
+        manage: 'none',
+      });
+    });
+
+    it('answers none everywhere for an actor with no abilities, rather than throwing (#757)', () => {
+      abilityContext.peek.mockReturnValue([]);
+
+      expect(service.getCurrentAccess([ResourceType.DataGateway])[ResourceType.DataGateway]).toEqual({
+        create: 'none',
+        read: 'none',
+        update: 'none',
+        delete: 'none',
+        manage: 'none',
+      });
+    });
+
+    it('logs an action whose permissions the matcher cannot read and answers it none, keeping the rest (#757)', () => {
+      const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      abilityContext.peek.mockReturnValue([
+        ability([
+          { action: Action.read, subject: 'all' },
+          { action: Action.read, subject: 'Game', conditions: { tags: ['x'] } as never, inverted: true },
+        ]),
+      ]);
+
+      const access = service.getCurrentAccess([ResourceType.Game, ResourceType.DataGateway]);
+
+      expect(access[ResourceType.Game]?.read).toBe('none');
+      expect(access[ResourceType.DataGateway]?.read).toBe('all');
+      expect(logError).toHaveBeenCalledWith(
+        "Failed to answer 'read' access for Game; answering none.",
+        expect.any(String),
+      );
+      logError.mockRestore();
+    });
+
+    it('throws when nothing was primed, as getCurrentAbilities does (#757)', () => {
+      abilityContext.peek.mockReturnValue(null);
+
+      expect(() => service.getCurrentAccess([ResourceType.DataGateway])).toThrow(AbilityContextNotPrimedError);
     });
   });
 

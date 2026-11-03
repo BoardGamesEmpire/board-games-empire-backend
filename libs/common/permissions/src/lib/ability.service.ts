@@ -8,12 +8,14 @@ import {
   isUserActor,
   type PluginActor,
 } from '@bge/actor-context';
-import { Action, Prisma } from '@bge/database';
+import { Action, Prisma, type ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { subject } from '@casl/ability';
-import { accessibleBy, createPrismaAbility, type WhereInput } from '@casl/prisma';
+import { accessibleBy, type WhereInput } from '@casl/prisma';
 import { ForbiddenException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { abilityOfRules } from './ability-of-rules';
 import { AbilityFactory } from './ability.factory';
+import { type ActorAccess, resourceTypeAccess } from './access';
 import { AbilityContextNotPrimedError } from './errors/ability-context-not-primed.error';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type { ApikeyWithScopes, AppAbility, ModelResourceType, SubjectInstance } from './interfaces';
@@ -104,6 +106,36 @@ export class AbilityService {
     }
 
     return abilities;
+  }
+
+  /**
+   * The current actor's access to each of `resourceTypes` (#757): for every
+   * action, whether its permissions reach every record, some, or none (see
+   * `accessExtent`). It is answered for the actor the request acts as,
+   * so for an API key it covers the key and its owner together, as
+   * `PoliciesGuard` checks them.
+   *
+   * A resource type named twice is answered once, in the order first named.
+   * An actor with no abilities is answered `none` everywhere. Throws as
+   * {@link getCurrentAbilities} does when nothing was primed. An action whose
+   * permissions the matcher cannot read is logged and answered `none`, as
+   * {@link getResourceConditionsForAbilities} refuses one, and the rest of the
+   * answer stands.
+   */
+  getCurrentAccess(resourceTypes: readonly ResourceType[]): ActorAccess {
+    const abilities = this.getCurrentAbilities();
+
+    return Object.fromEntries(
+      [...new Set(resourceTypes)].map((resourceType) => [
+        resourceType,
+        resourceTypeAccess(abilities, resourceType, (action, error) =>
+          this.logger.error(
+            `Failed to answer '${action}' access for ${resourceType}; answering none.`,
+            error instanceof Error ? error.stack : String(error),
+          ),
+        ),
+      ]),
+    );
   }
 
   /**
@@ -464,16 +496,10 @@ function assertNeverActor(actor: never): never {
 
 /**
  * An ability holding only `ability`'s rules that a check on `field` consults:
- * allows that read the column, and denials bound to it or to no field. CASL
- * hands them back highest priority first, and a built ability takes its last
- * rule as the highest, so they are reversed to keep a later denial winning.
- *
- * Their fields are dropped once the selection is made. The clause is built
- * with no field named, and CASL skips a field-bound denial in that form, so a
- * conditioned denial of the column would otherwise leave its rows in.
+ * allows that read the column, and denials bound to it or to no field. Built
+ * by {@link abilityOfRules}, which keeps their priority and drops their
+ * fields, so a conditioned denial of the column keeps its rows out.
  */
 function rulesAdmittingField(ability: AppAbility, action: Action, resourceType: ModelResourceType, field: string) {
-  const rules = ability.rulesFor(action, resourceType, field).map((rule) => ({ ...rule.origin, fields: undefined }));
-
-  return createPrismaAbility(rules.reverse()) as AppAbility;
+  return abilityOfRules(ability.rulesFor(action, resourceType, field));
 }

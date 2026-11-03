@@ -4,10 +4,11 @@ import { AbilityService, CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } fr
 import { ListScopeNotComposedError } from '@bge/shared';
 import { createMockAbilityService, createTestingModuleWithDb, MOCK_ACTING_USER_ID } from '@bge/testing';
 import { ForbiddenException } from '@nestjs/common';
+import { HEADERS_METADATA } from '@nestjs/common/constants';
 import { plainToInstance } from 'class-transformer';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
-import { UserSearchQueryDto } from './dto';
+import { UserAccessQueryDto, UserSearchQueryDto } from './dto';
 import { UserController } from './user.controller';
 import { UserService } from './user.service';
 
@@ -58,6 +59,32 @@ describe('UserController', () => {
     auth.findUserById.mockResolvedValue(null);
 
     await expect(firstValueFrom(controller.me())).resolves.toStrictEqual({ user: null });
+  });
+
+  it("answers /me/access with the acting actor's access to the named resource types (#757)", () => {
+    const access = {
+      DataGateway: { create: 'none', read: 'all', update: 'none', delete: 'none', manage: 'none' },
+    } as const;
+    abilityService.getCurrentAccess.mockReturnValue(access);
+
+    const query = plainToInstance(
+      UserAccessQueryDto,
+      { resourceTypes: 'DataGateway' },
+      { enableImplicitConversion: true },
+    );
+
+    expect(controller.access(query)).toStrictEqual({ access });
+    expect(abilityService.getCurrentAccess).toHaveBeenCalledWith([ResourceType.DataGateway]);
+  });
+
+  it('sends /me/access with Cache-Control: no-store, so a role change is seen at once (#757)', () => {
+    expect(Reflect.getMetadata(HEADERS_METADATA, UserController.prototype.access)).toEqual([
+      { name: 'Cache-Control', value: 'no-store' },
+    ]);
+  });
+
+  it('puts no policy check on /me/access: any actor may ask about itself (#757)', () => {
+    expect(Reflect.getMetadata(CHECK_POLICIES_KEY, UserController.prototype.access)).toBeUndefined();
   });
 
   it('searches as the acting user, never as a caller-supplied id', async () => {
