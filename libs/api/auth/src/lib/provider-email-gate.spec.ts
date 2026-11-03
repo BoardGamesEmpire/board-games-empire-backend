@@ -57,7 +57,8 @@ describe('createProviderEmailGate', () => {
 
   // `/sign-in/social` names its provider in the body, not in `params`, so it is
   // never let through unverified. The ID token gate keeps sign-in providers'
-  // tokens off that route until #1019.
+  // tokens off that route, and app sign-in creates its users on the callback
+  // (#1019).
   it('refuses an unverified email on a provider path the config does not list, with a rendered message (#912)', () => {
     expect(refusalOf(() => gate({ emailVerified: false }, { path: '/sign-in/social' }))).toEqual({
       status: 403,

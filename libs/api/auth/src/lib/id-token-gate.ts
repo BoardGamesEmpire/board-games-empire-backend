@@ -31,7 +31,9 @@ export interface IdTokenGate {
  * provider's own token endpoint. A submitted token has neither, so it is a
  * second way in that nothing here uses. better-auth's core has an option to
  * switch it off, but `genericOAuth` does not take it, so the route is refused
- * here. Native sign-in (#1019) can reopen it once it has a design.
+ * here. Native apps sign in through the redirect flow too, by app sign-in
+ * (#1019), so nothing reopens it; the refusal stays for any client that
+ * submits a token anyway.
  *
  * Any `idToken` is a submission, whatever its value: the route would reject a
  * malformed one itself, but the refusal does not depend on that. Google One
