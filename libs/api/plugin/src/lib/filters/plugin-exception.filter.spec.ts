@@ -28,6 +28,7 @@ import {
   PluginInstallProvenanceMismatchError,
   PluginInstallStaticAnalysisError,
   PluginInstallUnknownCorePermissionError,
+  PluginLifecyclePluginChangedError,
   PluginStaticAnalysisUnavailableError,
   PluginUnitAuthorityError,
   PluginUnitConfigRequiredError,
@@ -499,6 +500,17 @@ describe('PluginExceptionFilter', () => {
       expect(rendered().getStatus()).toBe(Http.Conflict);
       expect(body()['kind']).toBe('reinstalled');
       expect(body()['expectedVersion']).toBe(body()['actualVersion']);
+    });
+
+    it('maps a config write against a moved plugin manifest to 409 naming the kind (#578)', () => {
+      filter.catch(new PluginLifecyclePluginChangedError('sample', 'reinstalled', '1.2.0', '1.2.0'), host);
+
+      expect(rendered().getStatus()).toBe(Http.Conflict);
+      expect(body()['message']).toBe('t:errors.plugin.lifecycle_plugin_changed');
+      expect(body()['slug']).toBe('sample');
+      expect(body()['kind']).toBe('reinstalled');
+      expect(body()['expectedVersion']).toBe('1.2.0');
+      expect(body()['actualVersion']).toBe('1.2.0');
     });
 
     it('maps the scope refusal to 422 with the offending scope', () => {

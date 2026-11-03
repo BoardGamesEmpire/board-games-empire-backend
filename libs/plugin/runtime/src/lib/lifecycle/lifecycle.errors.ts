@@ -1,4 +1,5 @@
 import type { ManifestIssue } from '@boardgamesempire/plugin-manifest';
+import { describeManifestMove, type PluginChangeKind } from '../manifest/manifest-move';
 
 /**
  * Typed failures for the server lifecycle surface (#320): enable, disable,
@@ -41,6 +42,30 @@ export class PluginLifecycleTombstonedError extends Error {
     public readonly uninstalledAt: Date,
   ) {
     super(`Plugin '${slug}' was uninstalled at ${uninstalledAt.toISOString()} — reinstall it to manage it again`);
+  }
+}
+
+/**
+ * The active plugin manifest was replaced, or the plugin reinstalled, between
+ * the config write's read and its locked transaction, so the document it
+ * validated was judged against a plugin manifest that is no longer the stored
+ * one (#578). `kind` names which writer moved it; the version pair makes the
+ * retry informed, though it alone cannot say whether consent survived.
+ * Retryable, and immediately: the writer that moved it has already committed.
+ *
+ * The slug is `pluginSlug`, as on `PluginUnitPluginChangedError`, so one
+ * renderer serves every plugin manifest move refusal.
+ */
+export class PluginLifecyclePluginChangedError extends Error {
+  override readonly name = 'PluginLifecyclePluginChangedError';
+
+  constructor(
+    public readonly pluginSlug: string,
+    public readonly kind: PluginChangeKind,
+    public readonly expectedVersion: string,
+    public readonly actualVersion: string,
+  ) {
+    super(describeManifestMove(pluginSlug, kind, expectedVersion, actualVersion));
   }
 }
 

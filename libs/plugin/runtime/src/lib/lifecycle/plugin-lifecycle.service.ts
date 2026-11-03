@@ -12,6 +12,7 @@ import {
 } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginInstanceRegistry } from '../loader/plugin-instance-registry';
+import { bindManifest, classifyManifestMove, type ClaimedPluginRow } from '../manifest/manifest-move';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { CLEARED_STAGED_UPDATE } from '../update/staged-update.columns';
@@ -19,6 +20,7 @@ import {
   PluginLifecycleAuthorityError,
   PluginLifecycleManifestError,
   PluginLifecycleNotFoundError,
+  PluginLifecyclePluginChangedError,
   PluginLifecycleTombstonedError,
   PluginUninstallBundledError,
 } from './lifecycle.errors';
@@ -116,20 +118,53 @@ export class PluginLifecycleService {
       throw new PluginConfigValidationError(plugin.slug, issues);
     }
 
-    // Last-writer-wins by decision: no version precondition, matching the
-    // system-settings PATCH. The tombstone guard still rides the write so a
-    // concurrent uninstall cannot resurrect config onto a tombstone.
-    const updated = await this.db.$transaction(async (tx) => {
-      const claimed = await tx.plugin.updateMany({
-        where: { id: plugin.id, uninstalledAt: null },
+    // Last-writer-wins still holds between PATCHes: no version precondition,
+    // matching the system-settings PATCH. What it does not hold across is a
+    // plugin manifest replacement: the document above was validated against
+    // the plugin manifest read before this transaction, so the row is claimed
+    // first and compared against exactly that read (#578).
+    //
+    // The claim is `FOR NO KEY UPDATE`, the mode the config write takes
+    // anyway. `FOR SHARE` would be upgraded by that write, and two PATCHes
+    // each holding a share lock would deadlock. `FOR UPDATE` would also make
+    // every grant or unit insert for this plugin wait out the PATCH, because
+    // it conflicts with the `FOR KEY SHARE` their foreign key takes. This mode
+    // still queues a second PATCH and still waits for activation's
+    // `FOR UPDATE`, an uninstall's write and the unit paths' `FOR SHARE`.
+    //
+    // The claim has seen `uninstalled_at` NULL and holds the row until commit,
+    // so no uninstall can land before the write and the write needs no guard
+    // of its own. It also reads `config`, so the event's before-snapshot is
+    // the document this write replaced, not the one the pre-transaction read
+    // saw: a PATCH queued behind another reports the change from that one's
+    // document.
+    const { before, updated } = await this.db.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<
+        (ClaimedPluginRow & { config: Prisma.JsonValue })[]
+      >`SELECT uninstalled_at, version, installed_at, config, manifest_json = ${bindManifest(plugin.manifestJson)}::jsonb AS manifest_matches
+        FROM plugins WHERE id = ${plugin.id} FOR NO KEY UPDATE`;
+      const row = rows[0];
+
+      if (row === undefined) {
+        throw new PluginLifecycleNotFoundError(plugin.slug);
+      }
+
+      if (row.uninstalled_at !== null) {
+        throw new PluginLifecycleTombstonedError(plugin.slug, row.uninstalled_at);
+      }
+
+      const moved = classifyManifestMove(row, plugin);
+
+      if (moved !== null) {
+        throw new PluginLifecyclePluginChangedError(plugin.slug, moved, plugin.version, row.version);
+      }
+
+      const written = await tx.plugin.update({
+        where: { id: plugin.id },
         data: { config: input.config as Prisma.InputJsonValue },
       });
 
-      if (claimed.count !== 1) {
-        throw new PluginLifecycleTombstonedError(plugin.slug, await this.readTombstone(tx, plugin.slug, initiatedAt));
-      }
-
-      return tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      return { before: row.config, updated: written };
     });
 
     // The reload needs no direct publish: the lifecycle listener is the
@@ -137,7 +172,7 @@ export class PluginLifecycleService {
     this.emitter.emit(
       PluginConfigUpdatedEvent.eventName,
       new PluginConfigUpdatedEvent(
-        { id: plugin.id, slug: plugin.slug, config: plugin.config },
+        { id: plugin.id, slug: plugin.slug, config: before },
         { id: updated.id, slug: updated.slug, config: updated.config },
         initiatedAt,
       ),

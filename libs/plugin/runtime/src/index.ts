@@ -36,6 +36,7 @@ export * from './lib/loader/plugin-directory-resolver.service';
 export * from './lib/loader/plugin-instance-registry';
 export * from './lib/loader/plugin-loader.service';
 export * from './lib/loader/plugin-module-importer';
+export * from './lib/manifest/manifest-move';
 export * from './lib/manifest/stored-manifest';
 export * from './lib/plugin-module.options';
 export * from './lib/plugin.module';

@@ -234,13 +234,20 @@ export class PluginsController {
     summary: 'Replace the server-scope plugin configuration',
     description:
       "Validates the payload against the manifest's config.schema (422 with issues[] on violation), persists it, " +
-      'and triggers the config hot-reload. Last-writer-wins; there is no optimistic locking.',
+      'and triggers the config hot-reload. Last-writer-wins between two writes; a plugin manifest replaced ' +
+      'mid-request is refused with 409.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @ApiResponse({ status: Http.UnprocessableEntity, description: 'Configuration violates the declared schema' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description:
+      'The active plugin manifest was replaced mid-request — an activation or a reinstall, not necessarily at a ' +
+      'new version — so the document was judged against the old schema; reload and retry',
+  })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
   @Patch(':slug/config')
   updateConfig(@Param('slug') slug: string, @Body() dto: UpdatePluginConfigDto) {
