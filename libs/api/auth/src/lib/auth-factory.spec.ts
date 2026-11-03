@@ -552,3 +552,41 @@ describe("authFactory's sign-in provider behaviours", () => {
     });
   });
 });
+
+describe("authFactory's app sign-in", () => {
+  // Its hook on the provider's callback takes the session off the response.
+  // A plugin before it would see the app's sign-in as the browser's: the
+  // anonymous plugin would delete the browser's guest, and the bearer and
+  // last-login-method plugins would add a credential and a cookie. So it runs
+  // first, whichever optional plugins are on (#1019).
+  it.each([
+    ['with no optional plugins', config],
+    [
+      'with sign-in providers and the API docs',
+      new ConfigService({
+        auth: {
+          url: 'http://localhost:33333',
+          secret: SECRET,
+          trustedOrigins: [],
+          useEmailPasswordAuth: true,
+          oidcProviders: [
+            {
+              id: 'strict',
+              discoveryUrl: 'https://strict.example/.well-known/openid-configuration',
+              clientId: 'c',
+              clientSecret: 's',
+              displayName: 'Strict',
+            },
+          ],
+        },
+        swagger: { enabled: true },
+      }),
+    ],
+  ])('is the first plugin, %s (#1019)', (_case, configService) => {
+    const auth = authFactory({} as PrismaClient, configService);
+    const ids = auth.options.plugins?.map((plugin) => plugin.id) ?? [];
+
+    expect(ids[0]).toBe('app-sign-in');
+    expect(ids.filter((id) => id === 'app-sign-in')).toHaveLength(1);
+  });
+});

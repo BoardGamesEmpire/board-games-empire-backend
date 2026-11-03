@@ -47,6 +47,12 @@ export interface ProviderSignInOptions {
 
   /** Spoils the ID token the provider sends, when it sends one; a sound one unless set. */
   readonly idToken?: IdTokenFault;
+
+  /** Where the callback sends the browser on success; `/` unless set. */
+  readonly callbackURL?: string;
+
+  /** better-auth's `additionalData`, which rides the flow's state; none unless set. */
+  readonly additionalData?: Record<string, unknown>;
 }
 
 /** Each `Set-Cookie` header as the `name=value` pair a `Cookie` header sends back. */
@@ -69,7 +75,8 @@ export function sessionCookieOf(setCookie: readonly string[] | string | undefine
   return session ?? '';
 }
 
-async function registerTicket(
+/** Registers what the fake sign-in provider says about the user, and returns the sign-in's ticket. */
+export async function registerTicket(
   providerUrl: string,
   claims: Record<string, unknown>,
   idToken: IdTokenFault | undefined,
@@ -103,7 +110,11 @@ export async function signInThroughProvider(
   claims: Record<string, unknown>,
   options: ProviderSignInOptions = {},
 ): Promise<ProviderSignInResult> {
-  const body = { provider: options.providerId ?? FAKE_PROVIDER_ID, callbackURL: '/' };
+  const body = {
+    provider: options.providerId ?? FAKE_PROVIDER_ID,
+    callbackURL: options.callbackURL ?? '/',
+    ...(options.additionalData === undefined ? {} : { additionalData: options.additionalData }),
+  };
 
   const start = options.linkWith
     ? await postToAuth(baseUrl, LINK_PATH).set(options.linkWith).send(body)

@@ -26,6 +26,7 @@ import type { User } from 'better-auth/types';
 import type { I18nService } from 'nestjs-i18n';
 import process from 'node:process';
 import { ADMIN_PLUGIN_OPTIONS } from './access/admin-roles';
+import { appSignIn } from './app-sign-in';
 import type { CompleteAuthStorage } from './auth-storage';
 import { betterAuthLogger } from './better-auth-logger';
 import {
@@ -172,6 +173,19 @@ export function authFactory(
 
   // TODO: Make plugins configurable
   const plugins = [
+    // Native apps sign in through the redirect flow, on routes of their own
+    // (#1019). First: its hook on the provider's callback takes the session
+    // off the response before any other plugin's hook sees it. After it, the
+    // anonymous plugin can't take the app's sign-in for a guest's upgrade and
+    // delete the browser's guest, and the bearer and last-login-method
+    // plugins find no session to hand a credential or a cookie.
+    //
+    // `iss` is the issuer discovery publishes, read from the same
+    // configuration. It is missing only in the better-auth CLI's instance
+    // (`utils/auth.ts`), which serves no requests; the api's comes from
+    // `getOrThrow('auth.url')`, which also builds `baseURL`.
+    appSignIn({ render: gateDeps.render, issuer: options.hostUrl ?? '' }),
+
     // Impersonation is deliberately blocked, not removed (#408): the role map
     // withholds `user:impersonate`, so `POST /admin/impersonate-user` is denied
     // for every principal while the route and `Session.impersonatedBy` stay in
