@@ -126,14 +126,18 @@ describe('user access (#757)', () => {
   it('narrows an API key to its key scopes, and the routes agree (#757)', async () => {
     const admin = await actors.admin();
     const gateway = await seedGateway();
+    // The roles above answer create and delete alike, so a route checking the
+    // other of the two would agree with them all. This key holds create without
+    // delete, so the two routes must disagree here (#757).
     const key = await mintApiKey(baseUrl, db.client, admin, [
+      { slugs: ['create:data_gateway'], resourceType: ResourceType.DataGateway },
       { slugs: ['read:data_gateway'], resourceType: ResourceType.DataGateway },
       { slugs: ['update:data_gateway'], resourceType: ResourceType.DataGateway, resourceId: gateway.id },
     ]);
 
     const response = await accessOf(key.headers, ResourceType.DataGateway).expect(200);
 
-    expect(response.body.access.DataGateway).toEqual({ ...NONE, read: 'all', update: 'some' });
+    expect(response.body.access.DataGateway).toEqual({ ...NONE, create: 'all', read: 'all', update: 'some' });
     await expectRoutesAgree(key.headers, response.body.access.DataGateway);
   });
 
