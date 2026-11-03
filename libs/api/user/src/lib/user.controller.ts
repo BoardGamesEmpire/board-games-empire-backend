@@ -1,13 +1,19 @@
 import { AuthService, type AuthUser } from '@bge/auth';
 import { Action, ResourceType } from '@bge/database';
-import { AbilityService, CheckPolicies, PoliciesGuard, resolveScopeSubjectId } from '@bge/permissions';
+import {
+  AbilityService,
+  type ActorAccess,
+  CheckPolicies,
+  PoliciesGuard,
+  resolveScopeSubjectId,
+} from '@bge/permissions';
 import { paginated, PaginatedResponseDto } from '@bge/shared';
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Header, Query, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from, type Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { UserSearchQueryDto, UserSearchResultDto } from './dto';
+import { UserAccessEnvelopeDto, UserAccessQueryDto, UserSearchQueryDto, UserSearchResultDto } from './dto';
 import { UserService } from './user.service';
 
 const PaginatedUsersResponse = PaginatedResponseDto(UserSearchResultDto, 'users');
@@ -41,6 +47,44 @@ export class UserController {
     return from(this.authService.findUserById(this.abilityService.getActingUserId())).pipe(
       map((user) => ({ user: user === null ? null : withoutProviderPicture(user) })),
     );
+  }
+
+  /**
+   * What the acting actor may do with each resource type it names (#757), so a
+   * client can hide what the server would refuse. No policy check guards it:
+   * every actor may ask about itself, and an actor with no permissions is
+   * answered `none` everywhere.
+   *
+   * `no-store`, because a cached answer goes stale in exactly the moments a
+   * client needs it fresh: just after a role is granted or removed, and just
+   * after sign-up.
+   */
+  @ApiOperation({
+    summary: 'What the acting actor may do with each resource type named',
+    description:
+      'For each resource type named in `resourceTypes`, answers each action (`create`, `read`, `update`, ' +
+      "`delete` and `manage`) as the server's own checks decide it. `all`: the actor may act on every record. " +
+      '`some`: the actor may act on some records, or on some of their fields, and the server decides each ' +
+      'request by its conditions or with a 403. `none`: a route that checks that action on that resource ' +
+      'type refuses the request. A route that runs no such check, such as reading your own user, is not ' +
+      'covered by the answer. A client shows an action for `all` or `some` and hides it for `none`, and ' +
+      'never checks a condition itself. For an API ' +
+      'key, the answer covers the key and its owner together: each action gets the narrower of the two. A ' +
+      'grant that covers only some fields answers `some`, unless another grant covers every field, and so ' +
+      'does a denial of a single field. A grant of `manage` answers for every action, but holding the other ' +
+      'four never answers `manage`. A resource type named twice is answered once. Straight after sign-up, ' +
+      "the new user's roles may not be written yet, so ask again before trusting a `none`. The response is " +
+      'never cached (`Cache-Control: no-store`), so a role change shows at once. See #757.',
+  })
+  @ApiResponse({
+    status: Http.Ok,
+    type: UserAccessEnvelopeDto,
+    description: "The acting actor's access to each resource type named.",
+  })
+  @Header('Cache-Control', 'no-store')
+  @Get('me/access')
+  access(@Query() query: UserAccessQueryDto): { access: ActorAccess } {
+    return { access: this.abilityService.getCurrentAccess(query.resourceTypes) };
   }
 
   @ApiOperation({

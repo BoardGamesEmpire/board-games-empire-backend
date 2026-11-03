@@ -8,6 +8,7 @@ declare class AbilityService {
   getCurrentResourceConditions(resourceType: string, action: string): unknown[];
   getResourceConditionsForAbilities(abilities: unknown[], resourceType: string, action: string): unknown[];
   getCurrentAbilities(): unknown[];
+  getCurrentAccess(resourceTypes: readonly string[]): Record<string, Record<string, string>>;
   getActingUserId(): string;
   getActingApiKeyId(): string | null;
   getTriggeringUserAbility(): unknown | null;
@@ -34,6 +35,7 @@ export type MockAbilityService = Mocked<
     | 'getCurrentResourceConditions'
     | 'getResourceConditionsForAbilities'
     | 'getCurrentAbilities'
+    | 'getCurrentAccess'
     | 'getActingUserId'
     | 'getActingApiKeyId'
     | 'getTriggeringUserAbility'
@@ -47,10 +49,10 @@ export type MockAbilityService = Mocked<
  * Creates a typed AbilityService mock with sensible, non-throwing defaults:
  * condition resolvers return `[MOCK_RESOURCE_CONDITION]` (a non-empty filter,
  * never the dangerous `AND: []`), `resolveAbilitiesForActor` resolves
- * `[MOCK_ABILITY]`, `getActingUserId` returns `MOCK_ACTING_USER_ID`,
- * `getActingApiKeyId` returns `null` (a session, not a key), and the
- * instance check `assertCurrentActorCan`
- * allows (returns without throwing). Override per spec via the returned
+ * `[MOCK_ABILITY]`, `getCurrentAccess` answers `{}`, `getActingUserId`
+ * returns `MOCK_ACTING_USER_ID`, `getActingApiKeyId` returns `null` (a
+ * session, not a key), and the instance check `assertCurrentActorCan` allows
+ * (returns without throwing). Override per spec via the returned
  * jest.fns or the `overrides` argument.
  *
  * @example
@@ -67,6 +69,7 @@ export function createMockAbilityService(overrides: Partial<MockAbilityService> 
       .fn<AbilityService['getResourceConditionsForAbilities']>()
       .mockReturnValue([MOCK_RESOURCE_CONDITION]),
     getCurrentAbilities: jest.fn<AbilityService['getCurrentAbilities']>().mockReturnValue([]),
+    getCurrentAccess: jest.fn<AbilityService['getCurrentAccess']>().mockReturnValue({}),
     getActingUserId: jest.fn<AbilityService['getActingUserId']>().mockReturnValue(MOCK_ACTING_USER_ID),
     getActingApiKeyId: jest.fn<AbilityService['getActingApiKeyId']>().mockReturnValue(null),
     getTriggeringUserAbility: jest.fn<AbilityService['getTriggeringUserAbility']>().mockReturnValue(null),

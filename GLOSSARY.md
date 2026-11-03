@@ -267,7 +267,7 @@ The part of a permission that limits which records it reaches, usually by tying 
 _Avoid_: ABAC, filter, template, bounding condition
 
 **Grant**:
-Access actually conferred: an allowance that a role holds or that a user is given directly, or a granted consent decision. A denial is never a grant.
+Authority actually conferred: an allowance that a role holds or that a user is given directly, or a granted consent decision. A denial is never a grant.
 _Avoid_: grant for a consent decision that refuses
 
 **Denial**:
@@ -311,6 +311,10 @@ _Avoid_: principal, caller
 **Acting user**:
 The user an actor's actions are attributed to: the user themselves, or the owner of an API key. The server itself, outside systems and plugins have no acting user today.
 _Avoid_: owning user, triggering user, scope subject
+
+**Access**:
+What an actor may do with one resource type, as the server's checks decide it: for each action, whether its permissions reach every record, some records, or none.
+_Avoid_: abilities, capabilities, permissions (for the answer)
 
 **System actor**:
 The actor for work the server does on its own with nobody behind it, such as recurring jobs, bootstrap and clean-ups. It always states its reason and holds unrestricted authority.
