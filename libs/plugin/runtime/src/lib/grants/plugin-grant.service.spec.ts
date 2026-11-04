@@ -405,6 +405,64 @@ describe('PluginGrantService', () => {
       );
     });
 
+    describe('a catalog row deleted by the move the claim reports (#361)', () => {
+      // Activation deletes the catalog rows of the declares it drops, and
+      // uninstall deletes them all. Both hold the plugin row exclusively, so
+      // looked up before the claim, the catalog can already reflect a move the
+      // claim has yet to report. The client would get a 422 for a permission
+      // its own consent screen listed, instead of the 409 or 410 that tells it
+      // the screen is out of date.
+      const pluginDeclared = { ...serverDecision, permissionSlug: 'plugin|demo-sink|manage:digest' } as const;
+
+      it('reports an activation that dropped the permission as the plugin manifest move', async () => {
+        db.pluginPermission.findUnique.mockResolvedValue(null);
+        claimAnswers(claimedRow({ version: '1.3.0', manifest_matches: false }));
+
+        await expect(service.decide(pluginDeclared)).rejects.toMatchObject({
+          name: 'PluginGrantPluginChangedError',
+          kind: 'version-activated',
+          actualVersion: '1.3.0',
+        });
+        expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+      });
+
+      it('reports an uninstall that purged the catalog as the uninstall', async () => {
+        db.pluginPermission.findUnique.mockResolvedValue(null);
+        claimAnswers(claimedRow({ uninstalled_at: new Date('2026-08-10T00:00:00Z') }));
+
+        await expect(service.decide(pluginDeclared)).rejects.toBeInstanceOf(PluginGrantPluginTombstonedError);
+        expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+      });
+
+      it('reports the move on a deadlock replay, whose first read predates the deletion', async () => {
+        // The first attempt finds the row and loses a deadlock to an
+        // activation that drops the permission; the replay judges against the
+        // first read, so only its claim can say what happened.
+        db.pluginPermission.findUnique
+          .mockResolvedValueOnce({
+            id: 'plgperm_1',
+            pluginId: 'plg_1',
+            slug: 'plugin|demo-sink|manage:digest',
+            riskLevel: RiskLevel.Low,
+          } as PluginPermission)
+          .mockResolvedValue(null);
+        db.pluginGrant.upsert.mockRejectedValueOnce(deadlock());
+        claimSequence(claimedRow(), claimedRow({ version: '1.3.0', manifest_matches: false }));
+
+        await expect(service.decide(pluginDeclared)).rejects.toBeInstanceOf(PluginGrantPluginChangedError);
+        expect(db.$transaction).toHaveBeenCalledTimes(2);
+        expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(1);
+      });
+
+      it('reads the risk level under the claim, so a matching claim finds the row it declares', async () => {
+        await service.decide(pluginDeclared);
+
+        expect(db.pluginPermission.findUnique.mock.invocationCallOrder[0]).toBeGreaterThan(
+          db.$queryRaw.mock.invocationCallOrder[0],
+        );
+      });
+    });
+
     it('decides for a disabled plugin (#361)', async () => {
       db.plugin.findUnique.mockResolvedValue({ ...plugin, enabled: false } as unknown as Plugin);
 

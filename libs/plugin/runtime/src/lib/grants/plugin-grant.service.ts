@@ -220,7 +220,6 @@ export class PluginGrantService {
       }
 
       const scopeId = this.normalizeScopeId(input);
-      const decidedRiskLevel = await this.resolveRiskLevel(plugin, check);
       await this.assertDeciderAuthority(input, scopeId);
 
       const uniqueWhere = {
@@ -289,6 +288,18 @@ export class PluginGrantService {
         if (moved !== null) {
           throw new PluginGrantPluginChangedError(plugin.slug, moved, plugin.version, claim.version);
         }
+
+        // The catalog risk is read under the claim, not before it (#361).
+        // Activation deletes the catalog rows of the declares it drops and
+        // uninstall deletes them all, and both hold this row exclusively. Read
+        // before the claim, the catalog could already reflect a move the claim
+        // has yet to report, most of all on a deadlock replay, whose plugin
+        // read predates the activation it lost to. The client would get a 422
+        // for a permission its consent screen listed instead of the 409 or 410
+        // that says the screen is out of date. Under a claim that matched,
+        // the catalog is the one the claimed plugin manifest declares, so a
+        // missing row is a real inconsistency.
+        const decidedRiskLevel = await this.resolveRiskLevel(tx, plugin, check);
 
         const existing = await tx.pluginGrant.findUnique({ where: uniqueWhere });
 
@@ -1359,8 +1370,15 @@ export class PluginGrantService {
    * exclusions on the way: plugin-administration slugs (a self-escalation
    * loop) and `'all'`-wildcard-subject permissions are never
    * grantable to plugin principals, regardless of who consents.
+   *
+   * `client` is the decision's transaction, called once its plugin-row
+   * claim matched (#361).
    */
-  private async resolveRiskLevel(plugin: Plugin, check: NormalizedPermissionRequest): Promise<RiskLevel> {
+  private async resolveRiskLevel(
+    client: Prisma.TransactionClient,
+    plugin: Plugin,
+    check: NormalizedPermissionRequest,
+  ): Promise<RiskLevel> {
     if (check.origin === 'plugin') {
       // The categorical exclusions apply to the BARE form too — defense in
       // depth for the ability factory (#60): a naively mapped subjectPath
@@ -1384,7 +1402,7 @@ export class PluginGrantService {
         );
       }
 
-      const declared = await this.db.pluginPermission.findUnique({ where: { slug: check.canonicalSlug } });
+      const declared = await client.pluginPermission.findUnique({ where: { slug: check.canonicalSlug } });
 
       if (declared === null) {
         throw new PluginGrantUnknownPermissionError(
@@ -1406,7 +1424,7 @@ export class PluginGrantService {
 
     // A retired slug (#235) is unknown here on purpose: a unit must not be
     // asked to consent to authority the catalog has withdrawn.
-    const permission = await this.db.permission.findUnique({ where: { slug: check.canonicalSlug, retiredAt: null } });
+    const permission = await client.permission.findUnique({ where: { slug: check.canonicalSlug, retiredAt: null } });
 
     if (permission === null) {
       throw new PluginGrantUnknownPermissionError(
