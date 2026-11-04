@@ -18,11 +18,13 @@ import { DefaultPaginationQueryDto } from '@bge/shared';
 import {
   batchTransactionCall,
   createMockAbilityService,
+  createMockDatabaseService,
   createTestingModuleWithDb,
   makeEvent,
   makeEventOccurrence,
   makeEventPolicy,
   MOCK_ACTING_USER_ID,
+  rawQueryText,
   unwrapTransaction,
   type MockAbilityService,
   type MockDatabaseService,
@@ -618,164 +620,277 @@ describe('EventService', () => {
     });
   });
 
-  it('updateEvent → update', async () => {
-    db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Old' }));
-    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'New' })));
+  /**
+   * #731. Both writes take the event's row FOR NO KEY UPDATE first and read
+   * the row again under the lock, as the lifecycle transitions do (#795). A
+   * write that loses a race to a delete then finds the row deleted and answers
+   * 404, as a request arriving after the delete would.
+   */
+  describe('updateEvent and deleteEvent under the event row lock (#731)', () => {
+    /** The transaction's client, apart from `db`, so a write outside the transaction can't pass for one inside it. */
+    let tx: MockDatabaseService;
 
-    await service.updateEvent('event-1', { title: 'New' } as never);
+    /** The row the lock-then-read finds. */
+    let row: Event | null;
 
-    expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Event, Action.update);
-    expect(db.event.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ id: 'event-1', AND: [COND] }) }),
-    );
-  });
+    const dependentRecordNotFound = () =>
+      new Prisma.PrismaClientKnownRequestError('No record was found for an update.', {
+        code: 'P2025',
+        clientVersion: 'test',
+      });
 
-  it('skips the update event when only relation-managed fields were patched', async () => {
-    db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1' }));
-    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1' })));
+    beforeEach(() => {
+      tx = createMockDatabaseService();
+      db.$transaction.mockImplementation((async (callback: (client: MockDatabaseService) => Promise<unknown>) => {
+        const result = await callback(tx);
 
-    // occurrences/policy/inviteUserIds change no Event columns — an
-    // empty-diff "update" audit row would be noise.
-    await service.updateEvent('event-1', { occurrences: [] } as never);
+        // Nothing is told of a change before it commits.
+        expect(emitter.emit).not.toHaveBeenCalled();
 
-    expect(emitter.emit).not.toHaveBeenCalled();
-  });
+        return result;
+      }) as never);
 
-  it('updateEvent emits an EventUpdatedEvent carrying the changed subset', async () => {
-    db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Old' }));
-    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'New' })));
+      // A read outside the transaction would find the event live, as a
+      // request that loses the race found it before it queued. So only a read
+      // under the lock can answer 404 or give the before-snapshot.
+      db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Read before the lock' }));
+      db.event.count.mockResolvedValue(1);
 
-    await service.updateEvent('event-1', { title: 'New' } as never);
-
-    const [name, emitted] = emitter.emit.mock.calls[0];
-    expect(name).toBe(EventUpdatedEvent.eventName);
-    expect(emitted).toBeInstanceOf(EventUpdatedEvent);
-    expect(emitted.action).toBe('update');
-    expect(emitted.subjectId).toBe('event-1');
-    expect(emitted.before).toEqual({ id: 'event-1', title: 'Old' });
-    expect(emitted.after).toEqual({ id: 'event-1', title: 'New' });
-  });
-
-  // #538. Names only: `data` is copied verbatim to a URL the subscriber
-  // controls, and Event carries a `location` that may be a home address. A
-  // receiver reads the values with its own credentials.
-  it('updateEvent sends event.event.updated.v1 naming the changed columns, never their values', async () => {
-    db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Old', householdId: 'hh-1' }));
-    db.event.update.mockResolvedValue(
-      withDates(makeEvent({ id: 'event-1', title: 'New', location: '12 Home Street', householdId: 'hh-1' })),
-    );
-
-    await service.updateEvent('event-1', { title: 'New', location: '12 Home Street' } as never);
-
-    // No occurrenceId: two updates to one event are different occurrences,
-    // and nothing here names one stably (#127).
-    expect(emitter.emit).toHaveBeenCalledWith(WebhookEventType.EventUpdated, {
-      subjectId: 'event-1',
-      householdId: 'hh-1',
-      data: { eventId: 'event-1', householdId: 'hh-1', changedFields: ['title', 'location'] },
+      row = makeEvent({ id: 'event-1' });
+      tx.$queryRaw.mockResolvedValue([]);
+      tx.event.findUnique.mockImplementation((() => Promise.resolve(row)) as never);
+      tx.event.update.mockImplementation(((args: { data: Partial<Event> }) =>
+        Promise.resolve(withDates({ ...(row as Event), ...args.data }))) as never);
     });
-    expect(emitter.emit.mock.calls.find(([name]) => name === WebhookEventType.EventUpdated)?.[1]).not.toHaveProperty(
-      'occurrenceId',
-      expect.anything(),
-    );
-  });
 
-  it('updateEvent names only the columns whose values changed, not every key the patch sent', async () => {
-    db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Old', location: 'Same Hall' }));
-    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'New', location: 'Same Hall' })));
+    describe.each([
+      {
+        name: 'updateEvent',
+        run: () => service.updateEvent('event-1', { title: 'New' } as never),
+        forbidden: () => t('common.forbidden.update'),
+      },
+      {
+        name: 'deleteEvent',
+        run: () => service.deleteEvent('event-1'),
+        forbidden: () => t('common.forbidden.delete'),
+      },
+    ])('$name', ({ run, forbidden }) => {
+      it('locks the event row FOR NO KEY UPDATE before reading it', async () => {
+        await run();
 
-    await service.updateEvent('event-1', { title: 'New', location: 'Same Hall' } as never);
+        const [[lock]] = tx.$queryRaw.mock.calls;
+        expect(rawQueryText(lock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR NO KEY UPDATE$/);
+        expect((lock as Prisma.Sql).values).toEqual(['event-1']);
+        expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.event.findUnique.mock.invocationCallOrder[0]);
+        expect(tx.event.findUnique.mock.invocationCallOrder[0]).toBeLessThan(
+          tx.event.update.mock.invocationCallOrder[0],
+        );
+      });
 
-    const [, sent] = emitter.emit.mock.calls.find(([name]) => name === WebhookEventType.EventUpdated) ?? [];
-    expect(sent?.data.changedFields).toEqual(['title']);
-  });
+      it('answers 404 for an event deleted before the lock was granted, and writes nothing', async () => {
+        row = makeEvent({ id: 'event-1', deletedAt: new Date() });
 
-  it('updateEvent sends no webhook when the patch changes no value', async () => {
-    // A form that re-sends what it loaded would otherwise post "updated" to
-    // every subscriber for a change that never happened.
-    db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Same' }));
-    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'Same' })));
+        await expect(run()).rejects.toThrow(new NotFoundException(t('errors.event.not_found', { id: 'event-1' })));
+        expect(tx.event.update).not.toHaveBeenCalled();
+        expect(db.event.update).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
 
-    await service.updateEvent('event-1', { title: 'Same' } as never);
+      // A household delete removes its events' rows outright.
+      it('answers 404 when the row is gone', async () => {
+        row = null;
 
-    expect(emitter.emit).not.toHaveBeenCalledWith(WebhookEventType.EventUpdated, expect.anything());
-  });
+        await expect(run()).rejects.toThrow(new NotFoundException(t('errors.event.not_found', { id: 'event-1' })));
+        expect(tx.event.update).not.toHaveBeenCalled();
+      });
 
-  // From the dates the update reads back, with no read after the commit: a
-  // failed one would report a patch that happened as one that didn't.
-  it('updateEvent serves the status worked out from the dates it reads back (#795)', async () => {
-    db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Old' }));
-    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'New' }), [futureDate()]));
+      // The write repeats what the read under the lock found, so a write that
+      // finds no row was refused by the ceiling alone.
+      it('requires the event still live in the write, beside the ceiling', async () => {
+        await run();
 
-    const updated = await service.updateEvent('event-1', { title: 'New' } as never);
+        expect(tx.event.update).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { id: 'event-1', deletedAt: null, AND: [COND] } }),
+        );
+      });
 
-    expect(db.eventOccurrence.findMany).not.toHaveBeenCalled();
-    expect(updated.status).toBe(EventStatus.Scheduled);
-  });
+      it('still answers 403 when the ceiling refuses the live row', async () => {
+        tx.event.update.mockRejectedValue(dependentRecordNotFound());
 
-  it('rejects an empty update patch', async () => {
-    await expect(service.updateEvent('event-1', {} as never)).rejects.toThrow(BadRequestException);
-  });
-
-  it('deleteEvent → delete (soft)', async () => {
-    db.event.count.mockResolvedValue(1);
-    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1' })));
-
-    await service.deleteEvent('event-1');
-
-    expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Event, Action.delete);
-    expect(db.event.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ deletedAt: expect.any(Date) }) }),
-    );
-  });
-
-  it('deleteEvent emits an EventDeletedEvent (before-only)', async () => {
-    db.event.count.mockResolvedValue(1);
-    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'Doomed', createdById: 'user-1' })));
-
-    await service.deleteEvent('event-1');
-
-    const [name, emitted] = emitter.emit.mock.calls[0];
-    expect(name).toBe(EventDeletedEvent.eventName);
-    expect(emitted).toBeInstanceOf(EventDeletedEvent);
-    expect(emitted.action).toBe('delete');
-    expect(emitted.subjectId).toBe('event-1');
-    expect(emitted.before).toEqual(expect.objectContaining({ id: 'event-1', title: 'Doomed' }));
-    expect(emitted.after).toBeNull();
-  });
-
-  it('deleteEvent sends event.event.deleted.v1 with ids only, keyed on the event', async () => {
-    db.event.count.mockResolvedValue(1);
-    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'Doomed', householdId: null })));
-
-    await service.deleteEvent('event-1');
-
-    // An event is deleted once (nothing restores one), so its id names the
-    // occurrence and a re-emit dedups to one delivery while the first is still
-    // queued.
-    expect(emitter.emit).toHaveBeenCalledWith(WebhookEventType.EventDeleted, {
-      subjectId: 'event-1',
-      householdId: null,
-      occurrenceId: 'event-1',
-      data: { eventId: 'event-1', householdId: null },
+        await expect(run()).rejects.toThrow(new ForbiddenException(forbidden()));
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
     });
-  });
 
-  // The dates ride on the delete's own update, which holds the event's row
-  // lock, so no date write commits between the delete and the read, and a
-  // failed read rolls the delete back.
-  it('deleteEvent serves the status the event had from the dates its update reads back (#795)', async () => {
-    db.event.count.mockResolvedValue(1);
-    db.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1' }), [futureDate()]));
+    // A PATCH queued behind another write records the state that write left.
+    it('updateEvent takes the audit before-snapshot from the row read under the lock', async () => {
+      row = makeEvent({ id: 'event-1', title: 'Locked read' });
 
-    const deleted = await service.deleteEvent('event-1');
+      await service.updateEvent('event-1', { title: 'New' } as never);
 
-    expect(deleted).toEqual(expect.objectContaining({ id: 'event-1', status: EventStatus.Scheduled }));
-    expect(deleted).not.toHaveProperty('occurrences');
-    expect(db.event.update).toHaveBeenCalledWith(
-      expect.objectContaining({ include: { occurrences: { select: EVENT_STATUS_DATE_SELECT } } }),
-    );
-    expect(db.eventOccurrence.findMany).not.toHaveBeenCalled();
+      const [, emitted] = emitter.emit.mock.calls.find(([name]) => name === EventUpdatedEvent.eventName) ?? [];
+      expect(emitted?.before).toEqual({ id: 'event-1', title: 'Locked read' });
+    });
+
+    it('updateEvent → update', async () => {
+      row = makeEvent({ id: 'event-1', title: 'Old' });
+      tx.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'New' })));
+
+      await service.updateEvent('event-1', { title: 'New' } as never);
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Event, Action.update);
+      expect(tx.event.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ id: 'event-1', AND: [COND] }) }),
+      );
+    });
+
+    it('skips the update event when only relation-managed fields were patched', async () => {
+      tx.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1' })));
+
+      // occurrences/policy/inviteUserIds change no Event columns — an
+      // empty-diff "update" audit row would be noise.
+      await service.updateEvent('event-1', { occurrences: [] } as never);
+
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('updateEvent emits an EventUpdatedEvent carrying the changed subset', async () => {
+      row = makeEvent({ id: 'event-1', title: 'Old' });
+      tx.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'New' })));
+
+      await service.updateEvent('event-1', { title: 'New' } as never);
+
+      const [name, emitted] = emitter.emit.mock.calls[0];
+      expect(name).toBe(EventUpdatedEvent.eventName);
+      expect(emitted).toBeInstanceOf(EventUpdatedEvent);
+      expect(emitted.action).toBe('update');
+      expect(emitted.subjectId).toBe('event-1');
+      expect(emitted.before).toEqual({ id: 'event-1', title: 'Old' });
+      expect(emitted.after).toEqual({ id: 'event-1', title: 'New' });
+    });
+
+    // #538. Names only: `data` is copied verbatim to a URL the subscriber
+    // controls, and Event carries a `location` that may be a home address. A
+    // receiver reads the values with its own credentials.
+    it('updateEvent sends event.event.updated.v1 naming the changed columns, never their values', async () => {
+      row = makeEvent({ id: 'event-1', title: 'Old', householdId: 'hh-1' });
+      tx.event.update.mockResolvedValue(
+        withDates(makeEvent({ id: 'event-1', title: 'New', location: '12 Home Street', householdId: 'hh-1' })),
+      );
+
+      await service.updateEvent('event-1', { title: 'New', location: '12 Home Street' } as never);
+
+      // No occurrenceId: two updates to one event are different occurrences,
+      // and nothing here names one stably (#127).
+      expect(emitter.emit).toHaveBeenCalledWith(WebhookEventType.EventUpdated, {
+        subjectId: 'event-1',
+        householdId: 'hh-1',
+        data: { eventId: 'event-1', householdId: 'hh-1', changedFields: ['title', 'location'] },
+      });
+      expect(emitter.emit.mock.calls.find(([name]) => name === WebhookEventType.EventUpdated)?.[1]).not.toHaveProperty(
+        'occurrenceId',
+        expect.anything(),
+      );
+    });
+
+    it('updateEvent names only the columns whose values changed, not every key the patch sent', async () => {
+      row = makeEvent({ id: 'event-1', title: 'Old', location: 'Same Hall' });
+      tx.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'New', location: 'Same Hall' })));
+
+      await service.updateEvent('event-1', { title: 'New', location: 'Same Hall' } as never);
+
+      const [, sent] = emitter.emit.mock.calls.find(([name]) => name === WebhookEventType.EventUpdated) ?? [];
+      expect(sent?.data.changedFields).toEqual(['title']);
+    });
+
+    it('updateEvent sends no webhook when the patch changes no value', async () => {
+      // A form that re-sends what it loaded would otherwise post "updated" to
+      // every subscriber for a change that never happened.
+      row = makeEvent({ id: 'event-1', title: 'Same' });
+      tx.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'Same' })));
+
+      await service.updateEvent('event-1', { title: 'Same' } as never);
+
+      expect(emitter.emit).not.toHaveBeenCalledWith(WebhookEventType.EventUpdated, expect.anything());
+    });
+
+    // From the dates the update reads back, with no read after the commit: a
+    // failed one would report a patch that happened as one that didn't.
+    it('updateEvent serves the status worked out from the dates it reads back (#795)', async () => {
+      row = makeEvent({ id: 'event-1', title: 'Old' });
+      tx.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'New' }), [futureDate()]));
+
+      const updated = await service.updateEvent('event-1', { title: 'New' } as never);
+
+      expect(tx.eventOccurrence.findMany).not.toHaveBeenCalled();
+      expect(db.eventOccurrence.findMany).not.toHaveBeenCalled();
+      expect(updated.status).toBe(EventStatus.Scheduled);
+    });
+
+    it('rejects an empty update patch', async () => {
+      await expect(service.updateEvent('event-1', {} as never)).rejects.toThrow(BadRequestException);
+      expect(db.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('deleteEvent → delete (soft)', async () => {
+      tx.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1' })));
+
+      await service.deleteEvent('event-1');
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Event, Action.delete);
+      expect(tx.event.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ deletedAt: expect.any(Date) }) }),
+      );
+    });
+
+    it('deleteEvent emits an EventDeletedEvent (before-only)', async () => {
+      tx.event.update.mockResolvedValue(
+        withDates(makeEvent({ id: 'event-1', title: 'Doomed', createdById: 'user-1' })),
+      );
+
+      await service.deleteEvent('event-1');
+
+      const [name, emitted] = emitter.emit.mock.calls[0];
+      expect(name).toBe(EventDeletedEvent.eventName);
+      expect(emitted).toBeInstanceOf(EventDeletedEvent);
+      expect(emitted.action).toBe('delete');
+      expect(emitted.subjectId).toBe('event-1');
+      expect(emitted.before).toEqual(expect.objectContaining({ id: 'event-1', title: 'Doomed' }));
+      expect(emitted.after).toBeNull();
+    });
+
+    it('deleteEvent sends event.event.deleted.v1 with ids only, keyed on the event', async () => {
+      tx.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'Doomed', householdId: null })));
+
+      await service.deleteEvent('event-1');
+
+      // An event is deleted once (nothing restores one), so its id names the
+      // occurrence and a re-emit dedups to one delivery while the first is still
+      // queued.
+      expect(emitter.emit).toHaveBeenCalledWith(WebhookEventType.EventDeleted, {
+        subjectId: 'event-1',
+        householdId: null,
+        occurrenceId: 'event-1',
+        data: { eventId: 'event-1', householdId: null },
+      });
+    });
+
+    // The dates ride on the delete's own update, inside the transaction that
+    // holds the event's row lock, so no date write commits between the delete
+    // and the read, and a failed read rolls the delete back.
+    it('deleteEvent serves the status the event had from the dates its update reads back (#795)', async () => {
+      tx.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1' }), [futureDate()]));
+
+      const deleted = await service.deleteEvent('event-1');
+
+      expect(deleted).toEqual(expect.objectContaining({ id: 'event-1', status: EventStatus.Scheduled }));
+      expect(deleted).not.toHaveProperty('occurrences');
+      expect(tx.event.update).toHaveBeenCalledWith(
+        expect.objectContaining({ include: { occurrences: { select: EVENT_STATUS_DATE_SELECT } } }),
+      );
+      expect(tx.eventOccurrence.findMany).not.toHaveBeenCalled();
+      expect(db.eventOccurrence.findMany).not.toHaveBeenCalled();
+    });
   });
 
   // From the dates the create reads back, with no read after the commit.

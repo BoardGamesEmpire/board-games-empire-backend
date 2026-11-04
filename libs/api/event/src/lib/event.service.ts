@@ -53,6 +53,7 @@ import {
   type OwnAttendeeWhere,
 } from './utils/event-attendance.util';
 import { EVENT_STATUS_DATE_SELECT, withEventStatus, type EventWithStatus } from './utils/event-status.util';
+import { lockLiveEvent } from './utils/lock-live-event.util';
 import { pickSnapshot } from './utils/pick-snapshot.util';
 import { pageUpcomingEvents } from './utils/upcoming-events.util';
 
@@ -657,23 +658,27 @@ export class EventService {
     const { occurrences: _occurrences, policy: _policy, inviteUserIds: _inviteUserIds, ...fields } = dto;
 
     try {
-      // Full row (not a count) so the update event can carry a before snapshot.
-      const existing = await this.db.event.findUnique({
-        where: { id, deletedAt: null },
-      });
-      assert(existing, new NotFoundException(t('errors.event.not_found', { id })));
+      const { existing, updated } = await this.db.$transaction(async (tx) => {
+        // The before-snapshot is the row read under the lock, so it is the
+        // state the write replaces, even when another write to the event went
+        // first (#731).
+        const existing = await lockLiveEvent(tx, id);
 
-      const updated = await this.db.event.update({
-        where: {
-          id,
-          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update),
-        },
-        data: fields,
-        include: {
-          occurrences: { orderBy: OCCURRENCE_ORDER },
-          policy: true,
-        },
+        const updated = await tx.event.update({
+          where: {
+            id,
+            deletedAt: null,
+            // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update),
+          },
+          data: fields,
+          include: {
+            occurrences: { orderBy: OCCURRENCE_ORDER },
+            policy: true,
+          },
+        });
+
+        return { existing, updated };
       });
 
       const changedKeys = Object.keys(fields) as (keyof Event)[];
@@ -722,27 +727,29 @@ export class EventService {
     const initiatedAt = new Date();
     const userId = this.abilityService.getActingUserId();
     try {
-      const existing = await this.db.event.count({
-        where: { id, deletedAt: null },
-      });
-      assert(existing > 0, new NotFoundException(t('errors.event.not_found', { id })));
+      // The transaction takes the event's row lock first, which every write to
+      // its dates waits on (#795). So no date write commits between the delete
+      // and the read of the dates that comes back with it, and a failed read
+      // rolls the delete back rather than reporting a delete that happened as
+      // one that didn't. A delete that loses a race to another finds the row
+      // deleted under the lock and answers 404, as a request arriving after the
+      // first delete would (#731).
+      const { occurrences: dates, ...event } = await this.db.$transaction(async (tx) => {
+        await lockLiveEvent(tx, id);
 
-      // The dates come back with the delete, in its own transaction: the update
-      // holds the event's row lock, which every write to its dates waits on, so
-      // none commits between the delete and this read. A failed read rolls the
-      // delete back rather than reporting a delete that happened as one that
-      // didn't (#795).
-      const { occurrences: dates, ...event } = await this.db.event.update({
-        where: {
-          id,
-          // eslint-disable-next-line no-restricted-syntax -- single-row soft delete by id, not a collection read
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.delete),
-        },
-        data: {
-          deletedAt: new Date(),
-          deletedById: userId,
-        },
-        include: { occurrences: { select: EVENT_STATUS_DATE_SELECT } },
+        return tx.event.update({
+          where: {
+            id,
+            deletedAt: null,
+            // eslint-disable-next-line no-restricted-syntax -- single-row soft delete by id, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.delete),
+          },
+          data: {
+            deletedAt: new Date(),
+            deletedById: userId,
+          },
+          include: { occurrences: { select: EVENT_STATUS_DATE_SELECT } },
+        });
       });
 
       this.eventEmitter.emit(

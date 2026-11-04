@@ -11,7 +11,7 @@ import {
 import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
 import { eventWebhookIds } from '../event.service';
@@ -22,6 +22,7 @@ import {
   type EventStatusDate,
   type EventWithStatus,
 } from '../utils/event-status.util';
+import { lockLiveEvent } from '../utils/lock-live-event.util';
 import type { CancelEventDto } from './dto/cancel-event.dto';
 import {
   EventArchivedEvent,
@@ -294,10 +295,7 @@ export class EventLifecycleService {
   private async transition(id: string, ceiling: Prisma.EventWhereInput[], write: TransitionWrite): Promise<Transition> {
     try {
       return await this.db.$transaction(async (tx) => {
-        await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${id} FOR NO KEY UPDATE`);
-
-        const existing = await tx.event.findUnique({ where: { id } });
-        assert(existing && existing.deletedAt === null, new NotFoundException(t('errors.event.not_found', { id })));
+        const existing = await lockLiveEvent(tx, id);
 
         const entitled = (await tx.event.count({ where: { id, AND: ceiling } })) > 0;
         assert(entitled, new ForbiddenException(t('common.forbidden.update')));
