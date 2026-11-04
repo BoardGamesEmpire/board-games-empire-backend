@@ -101,30 +101,12 @@ export const SERVER_GRANT_INSERT =
    RETURNING id`;
 
 /**
- * The shape of activation's unit-set read — a plain, unlocked scan
- * (`plugin-update.service.ts`, the batched suspension pass).
- *
- * Retyped rather than lifted, because the real one is Prisma's `findMany` and
- * there is no template to lift. That makes it the weakest stand-in in this
- * file, and the weakness is specific: it copies the PREDICATE as well as the
- * mode, so a future narrowing of that `findMany` — scoping it by household, or
- * adding `enabled` — would leave the characterization green over a read the
- * application no longer performs. #361 is the issue most likely to do that, and
- * the spec using this says so.
- *
- * What it is here to model is the mode: no lock, no advisory key, so it cannot
- * see an uncommitted creation and nothing makes it wait for one.
- */
-export const ACTIVATION_UNIT_SCAN =
-  'SELECT id, household_id FROM household_plugins WHERE plugin_id = $1 AND suspended_for_consent = false';
-
-/**
  * A household unit row created the way the enable path creates it, as a
  * statement a barrier can hold open mid-transaction.
  *
- * Named rather than retyped at each call site: two specs need an uncommitted
- * creation, and a second hand-typed copy is the drift `shipped-sql.ts` exists
- * to prevent, arriving through the back door.
+ * Named rather than typed at its call site, so the next spec that needs an
+ * uncommitted creation reuses it: a second hand-typed copy is the drift
+ * `shipped-sql.ts` exists to prevent, arriving through the back door.
  */
 export const UNIT_ANCHOR_INSERT =
   'INSERT INTO household_plugins (id, household_id, plugin_id, updated_at) VALUES ($1, $2, $3, now()) RETURNING id';

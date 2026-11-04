@@ -105,12 +105,13 @@ describe('the plugin consent path is one lock order (#360)', () => {
   /**
    * Stage 1, as `decide()` now takes it (#398). Lifted from the grant service
    * rather than reusing `pluginShareLock` above: the two statements are the same
-   * MODE on the same row but not the same text — the unit path's carries #368's
-   * manifest comparison and this one reads `id` and nothing else — and a barrier
-   * case that replayed the wrong file's statement would report a lock the
-   * decision path does not actually take.
+   * MODE on the same row but not the same text — each carries its own plugin
+   * manifest comparison (#368, #361) and they select different columns — and a
+   * barrier case that replayed the wrong file's statement would report a lock the
+   * decision path does not actually take. Bound with `NO_SNAPSHOT` like the
+   * others: what the comparison answers does not change which lock it takes.
    */
-  const decisionPluginClaim = readShippedSql(GRANT_SERVICE, ['plugin.id'], {
+  const decisionPluginClaim = readShippedSql(GRANT_SERVICE, ['bindManifest(plugin.manifestJson)', 'plugin.id'], {
     after: 'const attempt = async ()',
     matching: /FOR SHARE/,
   });
@@ -637,7 +638,11 @@ describe('the plugin consent path is one lock order (#360)', () => {
 
         await waiter.begin();
 
-        const claim = waiter.issue(decisionPluginClaim.text, [plugin.pluginId], "the decision's plugin-row claim");
+        const claim = waiter.issue(
+          decisionPluginClaim.text,
+          [NO_SNAPSHOT, plugin.pluginId],
+          "the decision's plugin-row claim",
+        );
 
         await expectBlocked(barrier, claim);
 

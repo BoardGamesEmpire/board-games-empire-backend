@@ -21,8 +21,9 @@ import type { Prisma } from '@bge/database';
  * per-site argument, and a writer that skips the advisory reopens the
  * pre-row race class for every creator it can overlap with. The one
  * deliberate exception is activation's batched suspension pass, which
- * predates the scheme and stays eventually consistent by design (#361
- * owns the residual).
+ * predates the scheme; it is ordered anyway, because every unit-row writer
+ * claims the plugin row before this lock, so a unit write either committed
+ * before activation's claim or waits behind it (#361).
  *
  * The plugin row sorts BEFORE this lock, and that is a correctness
  * constraint rather than a convention: uninstall and activation both claim

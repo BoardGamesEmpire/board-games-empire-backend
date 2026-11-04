@@ -146,7 +146,10 @@ export class PluginsController {
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @ApiResponse({
     status: Http.Conflict,
-    description: 'Denial refused: the active manifest requires this permission (disable or uninstall instead)',
+    description:
+      'Denial refused: the active plugin manifest requires this permission (disable or uninstall instead). Also ' +
+      'returned when the plugin manifest was replaced while the decision was in flight, so it was not recorded; ' +
+      "reload the plugin's permissions and decide again",
   })
   @ApiResponse({
     status: Http.UnprocessableEntity,

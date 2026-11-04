@@ -46,8 +46,9 @@ export interface HouseholdDormancyTransition {
  * caller's transaction commits. `decide()` joined that discipline in #398 — it
  * claims the plugin row `FOR SHARE` as the first statement of its transaction —
  * and could not invalidate this read even before it did: it cannot create or
- * re-scope a household row, only suspend and re-enable existing ones. What it
- * still judges against a pre-transaction manifest is #361's residual.
+ * re-scope a household row, only suspend and re-enable existing ones. Its
+ * claim also compares the plugin manifest it judged against, so it refuses
+ * rather than writes after an activation moved it (#361).
  */
 export async function reconcileHouseholdDormancy(args: {
   readonly tx: Prisma.TransactionClient;
