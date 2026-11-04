@@ -19,17 +19,19 @@ import {
   VoteEligibility,
   VoteType,
 } from '@bge/database';
+import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
   createMockAbilityService,
+  createMockDatabaseService,
   createTestingModuleWithDb,
   paginationQuery,
   rawQueryText,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
-import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { LockedSupplier } from '../attendee/attendance';
 import { NominateGameDto } from './dto/nominate-game.dto';
@@ -415,69 +417,200 @@ describe('EventGameNominationService', () => {
     });
   });
 
-  it('withdraw → update', async () => {
-    db.eventGameNomination.findUnique.mockResolvedValue({
-      id: 'nom-1',
-      nominatedById: 'att-1',
-      status: NominationStatus.Open,
-    } as EventGameNomination);
-    db.eventGameNomination.update.mockResolvedValue(nominationRow({ status: NominationStatus.Withdrawn }));
+  /**
+   * #621. A withdraw locks the nomination's row and reads its status again,
+   * so one that loses a race to a settle answers 400, as a request arriving
+   * after the settle would, rather than writing Withdrawn over the outcome.
+   */
+  describe('withdraw under the nomination row lock (#621)', () => {
+    /** The transaction's client, apart from `db`, so a lock or a write outside the transaction can't pass for one inside it. */
+    let tx: MockDatabaseService;
 
-    await service.withdraw('event-1', 'nom-1');
+    beforeEach(() => {
+      tx = createMockDatabaseService();
+      db.$transaction.mockImplementation((async (callback: (client: MockDatabaseService) => Promise<unknown>) => {
+        const result = await callback(tx);
 
-    expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
-      ResourceType.EventGameNomination,
-      Action.update,
-    );
-    expect(db.eventGameNomination.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ id: 'nom-1', AND: [COND] }) }),
-    );
-  });
+        // Nothing is told of a change before it commits.
+        expect(emitter.emit).not.toHaveBeenCalled();
 
-  it('withdraw emits a NominationWithdrawnEvent carrying the status transition', async () => {
-    db.eventGameNomination.findUnique.mockResolvedValue({
-      id: 'nom-1',
-      nominatedById: 'att-1',
-      status: NominationStatus.Open,
-    } as EventGameNomination);
-    db.eventGameNomination.update.mockResolvedValue(nominationRow({ status: NominationStatus.Withdrawn }));
+        return result;
+      }) as never);
 
-    await service.withdraw('event-1', 'nom-1');
+      tx.eventGameNomination.update.mockResolvedValue(nominationRow({ status: NominationStatus.Withdrawn }));
+    });
 
-    const [name, emitted] = emitter.emit.mock.calls[0];
-    expect(name).toBe(NominationWithdrawnEvent.eventName);
-    expect(emitted).toBeInstanceOf(NominationWithdrawnEvent);
-    expect(emitted.action).toBe('update');
-    expect(emitted.subjectId).toBe('nom-1');
-    expect(emitted.before).toEqual({ id: 'nom-1', eventId: 'event-1', status: NominationStatus.Open });
-    expect(emitted.after).toEqual({ id: 'nom-1', eventId: 'event-1', status: NominationStatus.Withdrawn });
-  });
+    /**
+     * The nomination as the first read finds it, and the status the read
+     * under the lock finds: the same unless a test says otherwise, and no
+     * row at all for `null`.
+     */
+    const arrangeWithdraw = (
+      first: NominationStatus,
+      { locked = first, nominatedById = 'att-1' }: { locked?: NominationStatus | null; nominatedById?: string } = {},
+    ) => {
+      db.eventGameNomination.findUnique.mockResolvedValue({
+        id: 'nom-1',
+        nominatedById,
+        status: first,
+      } as EventGameNomination);
+      tx.$queryRaw.mockResolvedValue(locked === null ? [] : [{ status: locked }]);
+    };
 
-  // A paused nomination is still its nominator's to pull, whoever supplies
-  // it, so a game whose supplier left can still come off their list.
-  it('withdraw accepts a paused nomination, and forgets the status it paused from', async () => {
-    db.eventGameNomination.findUnique.mockResolvedValue({
-      id: 'nom-1',
-      nominatedById: 'att-1',
-      status: NominationStatus.Paused,
-    } as EventGameNomination);
-    db.eventGameNomination.update.mockResolvedValue(nominationRow({ status: NominationStatus.Withdrawn }));
+    const dependentRecordNotFound = () =>
+      new Prisma.PrismaClientKnownRequestError('No record was found for an update.', {
+        code: 'P2025',
+        clientVersion: 'test',
+      });
 
-    await service.withdraw('event-1', 'nom-1');
+    it('locks the nomination FOR NO KEY UPDATE before writing', async () => {
+      arrangeWithdraw(NominationStatus.Open);
 
-    expect(db.eventGameNomination.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { status: NominationStatus.Withdrawn, pausedFrom: null } }),
-    );
-  });
+      await service.withdraw('event-1', 'nom-1');
 
-  it('withdraw forbids a non-nominator', async () => {
-    db.eventGameNomination.findUnique.mockResolvedValue({
-      id: 'nom-1',
-      nominatedById: 'someone-else',
-      status: NominationStatus.Open,
-    } as EventGameNomination);
+      const [[lock]] = tx.$queryRaw.mock.calls;
+      expect(rawQueryText(lock)).toMatch(/^SELECT status FROM event_game_nominations WHERE id = \? FOR NO KEY UPDATE$/);
+      expect((lock as Prisma.Sql).values).toEqual(['nom-1']);
+      expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        tx.eventGameNomination.update.mock.invocationCallOrder[0],
+      );
+    });
 
-    await expect(service.withdraw('event-1', 'nom-1')).rejects.toThrow(ForbiddenException);
+    it('answers 400 for a nomination settled since the first read, and writes nothing', async () => {
+      arrangeWithdraw(NominationStatus.Open, { locked: NominationStatus.Approved });
+
+      await expect(service.withdraw('event-1', 'nom-1')).rejects.toThrow(
+        new BadRequestException(t('errors.nomination.cannot_withdraw_status', { status: NominationStatus.Approved })),
+      );
+      expect(tx.eventGameNomination.update).not.toHaveBeenCalled();
+      expect(db.eventGameNomination.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // A lost race is an expected answer: logged no more than the same refusal
+    // from the first read, which is not logged at all.
+    it.each([
+      ['400 for a settled nomination', NominationStatus.Approved],
+      ['404 for a nomination gone', null],
+    ])('logs no error when it answers %s at the lock', async (_case, locked) => {
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      arrangeWithdraw(NominationStatus.Open, { locked });
+
+      await expect(service.withdraw('event-1', 'nom-1')).rejects.toThrow();
+      expect(logged).not.toHaveBeenCalled();
+
+      logged.mockRestore();
+    });
+
+    it('answers 404 for a nomination gone at the lock', async () => {
+      arrangeWithdraw(NominationStatus.Open, { locked: null });
+
+      await expect(service.withdraw('event-1', 'nom-1')).rejects.toThrow(
+        new NotFoundException(t('errors.nomination.not_found', { nominationId: 'nom-1', eventId: 'event-1' })),
+      );
+      expect(tx.eventGameNomination.update).not.toHaveBeenCalled();
+    });
+
+    // The write repeats the status the read under the lock found, so a write
+    // that finds no row was refused by the ceiling alone.
+    it('requires the status read under the lock in the write', async () => {
+      arrangeWithdraw(NominationStatus.Open);
+
+      await service.withdraw('event-1', 'nom-1');
+
+      expect(tx.eventGameNomination.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'nom-1', status: NominationStatus.Open, AND: [COND] } }),
+      );
+    });
+
+    // A supplier leaving the event pauses the nomination in the leaving
+    // transaction (#551). It is still the nominator's to withdraw, and the
+    // domain event names the status the write replaced.
+    it('withdraws a nomination paused since the first read, naming Paused as the before-status', async () => {
+      arrangeWithdraw(NominationStatus.Open, { locked: NominationStatus.Paused });
+
+      await service.withdraw('event-1', 'nom-1');
+
+      expect(tx.eventGameNomination.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ status: NominationStatus.Paused }),
+          data: { status: NominationStatus.Withdrawn, pausedFrom: null },
+        }),
+      );
+      const [, emitted] = emitter.emit.mock.calls.find(([name]) => name === NominationWithdrawnEvent.eventName) ?? [];
+      expect(emitted?.before).toEqual({ id: 'nom-1', eventId: 'event-1', status: NominationStatus.Paused });
+    });
+
+    it('still answers 403 when the ceiling refuses the nomination', async () => {
+      arrangeWithdraw(NominationStatus.Open);
+      tx.eventGameNomination.update.mockRejectedValue(dependentRecordNotFound());
+
+      await expect(service.withdraw('event-1', 'nom-1')).rejects.toThrow(
+        new ForbiddenException(t('errors.nomination.forbidden_withdraw')),
+      );
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('withdraw → update', async () => {
+      arrangeWithdraw(NominationStatus.Open);
+
+      await service.withdraw('event-1', 'nom-1');
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+        ResourceType.EventGameNomination,
+        Action.update,
+      );
+      expect(tx.eventGameNomination.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ id: 'nom-1', AND: [COND] }) }),
+      );
+    });
+
+    it('withdraw emits a NominationWithdrawnEvent carrying the status transition', async () => {
+      arrangeWithdraw(NominationStatus.Open);
+
+      await service.withdraw('event-1', 'nom-1');
+
+      const [name, emitted] = emitter.emit.mock.calls[0];
+      expect(name).toBe(NominationWithdrawnEvent.eventName);
+      expect(emitted).toBeInstanceOf(NominationWithdrawnEvent);
+      expect(emitted.action).toBe('update');
+      expect(emitted.subjectId).toBe('nom-1');
+      expect(emitted.before).toEqual({ id: 'nom-1', eventId: 'event-1', status: NominationStatus.Open });
+      expect(emitted.after).toEqual({ id: 'nom-1', eventId: 'event-1', status: NominationStatus.Withdrawn });
+    });
+
+    // A paused nomination is still its nominator's to pull, whoever supplies
+    // it, so a game whose supplier left can still come off their list.
+    it('withdraw accepts a paused nomination, and forgets the status it paused from', async () => {
+      arrangeWithdraw(NominationStatus.Paused);
+
+      await service.withdraw('event-1', 'nom-1');
+
+      expect(tx.eventGameNomination.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: NominationStatus.Withdrawn, pausedFrom: null } }),
+      );
+    });
+
+    // Refused by the first read, so it takes no lock.
+    it('withdraw forbids a non-nominator', async () => {
+      arrangeWithdraw(NominationStatus.Open, { nominatedById: 'someone-else' });
+
+      await expect(service.withdraw('event-1', 'nom-1')).rejects.toThrow(ForbiddenException);
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(tx.$queryRaw).not.toHaveBeenCalled();
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('answers 400 for a status the first read already refuses, without locking', async () => {
+      arrangeWithdraw(NominationStatus.Approved);
+
+      await expect(service.withdraw('event-1', 'nom-1')).rejects.toThrow(
+        new BadRequestException(t('errors.nomination.cannot_withdraw_status', { status: NominationStatus.Approved })),
+      );
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(tx.$queryRaw).not.toHaveBeenCalled();
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+    });
   });
 
   describe('hostApprove', () => {
