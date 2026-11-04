@@ -33,8 +33,10 @@ export interface ProviderEmailGateContext {
  * Only `/callback/:id` names its provider in `params`. `/sign-in/social` names
  * it in `body.provider`, so a user created there counts as unlisted and is
  * refused unverified, whatever the provider's setting. The ID token gate keeps
- * sign-in providers' tokens off that route today. Native sign-in (#1019) has
- * to read the provider from the body when it reopens the route.
+ * sign-in providers' tokens off that route, and native apps sign in through
+ * the redirect flow by app sign-in (#1019), so their users are created on the
+ * callback too. A change that let a token through there would have to read
+ * the provider from the body.
  */
 export function createProviderEmailGate(
   providers: readonly Pick<OidcProviderConfig, 'id' | 'allowUnverifiedEmail'>[],

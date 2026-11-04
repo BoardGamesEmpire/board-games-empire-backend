@@ -144,6 +144,8 @@ describe('signing in through a sign-in provider', () => {
         display_name: 'Fake provider',
         discovery_url: providerEnv.OIDC_FAKE_DISCOVERY_URL,
         authorization_endpoint: '/api/auth/sign-in/social',
+        app_sign_in_endpoint: '/api/auth/app-sign-in/start',
+        app_token_endpoint: '/api/auth/app-sign-in/token',
         sign_up_disabled: false,
       },
       {
@@ -152,6 +154,8 @@ describe('signing in through a sign-in provider', () => {
         display_name: 'Lenient fake provider',
         discovery_url: providerEnv.OIDC_FAKE_LENIENT_DISCOVERY_URL,
         authorization_endpoint: '/api/auth/sign-in/social',
+        app_sign_in_endpoint: '/api/auth/app-sign-in/start',
+        app_token_endpoint: '/api/auth/app-sign-in/token',
         sign_up_disabled: false,
       },
       {
@@ -160,6 +164,8 @@ describe('signing in through a sign-in provider', () => {
         display_name: 'Signed fake provider',
         discovery_url: providerEnv.OIDC_FAKE_SIGNED_DISCOVERY_URL,
         authorization_endpoint: '/api/auth/sign-in/social',
+        app_sign_in_endpoint: '/api/auth/app-sign-in/start',
+        app_token_endpoint: '/api/auth/app-sign-in/token',
         sign_up_disabled: false,
       },
     ]);
@@ -509,21 +515,24 @@ describe('signing in through a sign-in provider', () => {
       expect(recorded.userInfoCalls).toBe(0);
     });
 
-    it.each(['forged', 'wrong-nonce'] as const)('refuses a %s ID token, creating nothing (#1016)', async (idToken) => {
-      const { sub, email, username } = freshIdentity();
+    it.each(['forged', 'wrong-nonce', 'wrong-audience', 'wrong-issuer', 'expired'] as const)(
+      'refuses a %s ID token, creating nothing (#1016, #1038)',
+      async (idToken) => {
+        const { sub, email, username } = freshIdentity();
 
-      const result = await signInThroughProvider(
-        baseUrl,
-        { sub, email, email_verified: true, preferred_username: username },
-        { providerId: SIGNED_FAKE_PROVIDER_ID, idToken },
-      );
+        const result = await signInThroughProvider(
+          baseUrl,
+          { sub, email, email_verified: true, preferred_username: username },
+          { providerId: SIGNED_FAKE_PROVIDER_ID, idToken },
+        );
 
-      expect(result.location.searchParams.get('error')).toBe('unable_to_get_user_info');
-      expect(result.cookie).toBe('');
-      await expect(db.client.user.count({ where: { email } })).resolves.toBe(0);
-      await expect(accountRowCount(SIGNED_FAKE_PROVIDER_ID, sub)).resolves.toBe(0);
-      await expect(ticketOf(result.ticket)).resolves.toMatchObject({ userInfoCalls: 0 });
-    });
+        expect(result.location.searchParams.get('error')).toBe('unable_to_get_user_info');
+        expect(result.cookie).toBe('');
+        await expect(db.client.user.count({ where: { email } })).resolves.toBe(0);
+        await expect(accountRowCount(SIGNED_FAKE_PROVIDER_ID, sub)).resolves.toBe(0);
+        await expect(ticketOf(result.ticket)).resolves.toMatchObject({ userInfoCalls: 0 });
+      },
+    );
   });
 
   /**

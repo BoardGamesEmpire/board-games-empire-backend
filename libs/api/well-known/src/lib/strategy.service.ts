@@ -115,6 +115,10 @@ export class StrategyService {
     // discoveryUrl points at the sign-in provider, so it stays an absolute URL.
     dto.discoveryUrl = provider.discoveryUrl;
     dto.authorizationEndpoint = authPath('/sign-in/social');
+    // App sign-in's routes (#1019), written out as the line above is: this
+    // lib imports nothing from the auth lib.
+    dto.appSignInEndpoint = authPath('/app-sign-in/start');
+    dto.appTokenEndpoint = authPath('/app-sign-in/token');
     return dto;
   }
 }

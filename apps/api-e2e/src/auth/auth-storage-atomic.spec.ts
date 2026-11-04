@@ -111,6 +111,44 @@ describe("better-auth's storage over Redis", () => {
       expect(statuses.sort()).toEqual([401, 401, 401, 429, 429, 429]);
     });
 
+    // better-auth's own sign-in limit matches only paths starting with
+    // `/sign-in`, so app sign-in sets the same three in ten seconds on its
+    // start and token routes (#1019). Sequential, so the order is the count's.
+    it('refuse a fourth app sign-in start within ten seconds from one address (#1019)', async () => {
+      const auth = await limitedAuth(redisA);
+      const statuses: number[] = [];
+
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const response = await auth.handler(
+          new Request('http://localhost:33333/api/auth/app-sign-in/start?redirect_uri=bge://oauth', {
+            headers: { [AUTH_CLIENT_IP_HEADER]: '198.51.100.30' },
+          }),
+        );
+        statuses.push(response.status);
+      }
+
+      // The first three are refused for the request they make, at the app.
+      expect(statuses).toEqual([302, 302, 302, 429]);
+    });
+
+    it('refuse a fourth app sign-in exchange within ten seconds from one address (#1019)', async () => {
+      const auth = await limitedAuth(redisA);
+      const statuses: number[] = [];
+
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const response = await auth.handler(
+          new Request('http://localhost:33333/api/auth/app-sign-in/token', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', [AUTH_CLIENT_IP_HEADER]: '198.51.100.31' },
+            body: JSON.stringify({ code: 'a-code-this-server-never-issued-', code_verifier: 'v'.repeat(43) }),
+          }),
+        );
+        statuses.push(response.status);
+      }
+
+      expect(statuses).toEqual([400, 400, 400, 429]);
+    });
+
     it("expire no later than the window, which a later request doesn't extend (#832)", async () => {
       // A count with no expiry would lock its client out until Redis restarted.
       // One whose expiry each request pushed out would keep a client that

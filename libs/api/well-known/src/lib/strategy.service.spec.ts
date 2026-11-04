@@ -289,6 +289,8 @@ describe('StrategyService', () => {
         expect(email.signInEndpoint.startsWith('/')).toBe(true);
         expect(email.signUpEndpoint?.startsWith('/')).toBe(true);
         expect(oidc.authorizationEndpoint.startsWith('/')).toBe(true);
+        expect(oidc.appSignInEndpoint.startsWith('/')).toBe(true);
+        expect(oidc.appTokenEndpoint.startsWith('/')).toBe(true);
         // the external IdP discovery URL is intentionally absolute
         expect(oidc.discoveryUrl).toMatch(/^https?:\/\//);
       });
@@ -415,8 +417,22 @@ describe('StrategyService', () => {
             displayName: 'Authentik',
             discoveryUrl: AUTHENTIK.discoveryUrl,
             authorizationEndpoint: `${AUTH_BASE}/sign-in/social`,
+            appSignInEndpoint: `${AUTH_BASE}/app-sign-in/start`,
+            appTokenEndpoint: `${AUTH_BASE}/app-sign-in/token`,
             signUpDisabled: false,
           });
+        });
+
+        // A native app opens the first in a browser and exchanges its code at
+        // the second, for any sign-in provider (#1019).
+        it('lists the app sign-in routes on every oidc strategy (#1019)', async () => {
+          const service = await createService({ oidcProviders: [GOOGLE, AUTHENTIK] });
+          const { strategies } = await service.getDiscovery();
+
+          for (const strategy of strategies as OidcStrategyDto[]) {
+            expect(strategy.appSignInEndpoint).toBe(`${AUTH_BASE}/app-sign-in/start`);
+            expect(strategy.appTokenEndpoint).toBe(`${AUTH_BASE}/app-sign-in/token`);
+          }
         });
 
         it('never lists a client id or secret (#912)', async () => {
