@@ -1191,7 +1191,11 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       expect(Logger.prototype.error).not.toHaveBeenCalled();
     });
 
-    it.each(passes)('the $pass whose current plugin manifest fails re-validation fails closed', async (pass) => {
+    it.each(passes)('the $pass whose current plugin manifest fails re-validation writes nothing', async (pass) => {
+      // Writing nothing is fail-closed only for late acceptance, whose unit
+      // stays suspended. A reconcile-path suspension leaves its unit serving
+      // until a later re-statement retries, the wrapper's posture for any
+      // failure (#361).
       pass.arrange();
       currentPlugin = makePlugin({ manifestJson: { not: 'a manifest' } });
 

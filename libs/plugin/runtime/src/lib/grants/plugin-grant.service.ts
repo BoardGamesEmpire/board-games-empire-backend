@@ -896,7 +896,10 @@ export class PluginGrantService {
    * against the plugin manifest current when it runs (#361): the denial
    * being re-stated may predate an activation that dropped the requirement,
    * or added others to the debt the event names. A plugin uninstalled in
-   * between leaves nothing to suspend, and the wrapper does nothing.
+   * between leaves nothing to suspend, and the wrapper does nothing. A current
+   * plugin manifest that fails re-validation is one of the failures the catch
+   * absorbs: the unit keeps serving until a re-statement after the plugin
+   * manifest is repaired, and the durable denial confers nothing meanwhile.
    */
   private async maybeSuspendHousehold(
     plugin: Plugin,
@@ -1329,7 +1332,11 @@ export class PluginGrantService {
    * The plugin manifest a post-commit pass judges against, parsed from the
    * row its claim read (#361). A stored plugin manifest that fails
    * re-validation throws `PluginGrantManifestInvalidError`, the same contract
-   * a decision applies, and the pass's catch fails closed.
+   * a decision applies, and the pass's catch logs it and writes nothing. What
+   * that leaves depends on the direction: late acceptance leaves the unit
+   * suspended, which is fail-closed, and a reconcile-path suspension leaves it
+   * serving until a later re-statement retries, the posture that wrapper takes
+   * for any failure.
    */
   private currentManifestOf(row: CurrentPluginSqlRow): CurrentPluginManifest {
     const validated = revalidateStoredManifest(
