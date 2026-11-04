@@ -277,12 +277,20 @@ describe('consent decisions under concurrency (#360)', () => {
       expect(activated).toBe(activation.status === 200);
 
       // Whichever lost, it lost for the documented reason and said so in the
-      // typed body the client renders its next step from.
+      // typed body the client renders its next step from. A losing denial has
+      // two legal codes, by interleaving (#361): one that read the plugin
+      // BEFORE activation committed waits on the claim behind activation's
+      // FOR UPDATE, finds the plugin manifest moved, and is refused as
+      // PluginGrantPluginChangedError; one whose read came AFTER the commit
+      // sees the required check at the front door and gets
+      // PluginGrantRequiredDenialError.
       const refusal = activation.status === 409 ? activation : denial;
 
-      expect(refusal.body.code).toBe(
-        activation.status === 409 ? 'PluginUpdateBlockedByDenialError' : 'PluginGrantRequiredDenialError',
-      );
+      if (activation.status === 409) {
+        expect(refusal.body.code).toBe('PluginUpdateBlockedByDenialError');
+      } else {
+        expect(['PluginGrantRequiredDenialError', 'PluginGrantPluginChangedError']).toContain(refusal.body.code);
+      }
 
       if (!activated) {
         expect(row.pendingVersion).toBe(pending.version);

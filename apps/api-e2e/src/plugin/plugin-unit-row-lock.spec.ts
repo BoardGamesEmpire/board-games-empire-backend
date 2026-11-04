@@ -155,6 +155,40 @@ describe('the consent path row locks (FOR UPDATE)', () => {
       });
     });
 
+    it("orders activation's suspension write behind a mirror pass holding the unit row (#361)", async () => {
+      // Activation's batched suspension pass takes no advisory key and reads
+      // its unit set without a lock. That read is safe because every unit-row
+      // writer claims the plugin row before the advisory key, so a unit write
+      // either committed before activation's claim, and is in the set it
+      // reads, or waits behind activation (#361). Once a unit row exists, the
+      // row's own lock is what orders activation's write against a pass
+      // already holding it: the write waits until the pass commits.
+      // `UNIT_SUSPEND_CLAIM` stands in for activation's write here, which
+      // sets the same column on the same row.
+      const fixture = await arrangeHouseholdCase();
+
+      await withBarrier(async (barrier) => {
+        const { holder, waiter } = barrier;
+
+        await holder.begin();
+        await holder.query(householdUnitLock.text, [fixture.householdId, fixture.pluginId]);
+
+        await waiter.begin();
+        const suspension = waiter.issue(
+          UNIT_SUSPEND_CLAIM,
+          [fixture.unitId],
+          "activation's suspension write against a locked unit row",
+        );
+
+        await expectBlocked(barrier, suspension);
+
+        await holder.commit();
+
+        await expect(suspension.result()).resolves.toHaveLength(1);
+        await waiter.commit();
+      });
+    });
+
     it('does not serialize a different household', async () => {
       const plugin = await arrangePlugin(db.client);
       const first = await arrangeHouseholdFor(db.client);

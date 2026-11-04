@@ -16,6 +16,7 @@ import {
   PluginGrantExclusionError,
   PluginGrantHouseholdNotFoundError,
   PluginGrantManifestInvalidError,
+  PluginGrantPluginChangedError,
   PluginGrantPluginNotFoundError,
   PluginGrantPluginTombstonedError,
   PluginGrantRequiredDenialError,
@@ -165,7 +166,9 @@ function buildRenderers(): RendererMap {
   // catches, so `kind` is what says whether consent survived.
   const manifestMoveConflict =
     (key: I18nPath) =>
-    (exception: PluginUnitPluginChangedError | PluginLifecyclePluginChangedError): PluginErrorRendering => ({
+    (
+      exception: PluginUnitPluginChangedError | PluginLifecyclePluginChangedError | PluginGrantPluginChangedError,
+    ): PluginErrorRendering => ({
       status: Http.Conflict,
       message: t(key, { slug: exception.pluginSlug }),
       fields: {
@@ -427,6 +430,7 @@ function buildRenderers(): RendererMap {
 
   renders(PluginUnitPluginChangedError, manifestMoveConflict('errors.plugin.unit_plugin_changed'));
   renders(PluginLifecyclePluginChangedError, manifestMoveConflict('errors.plugin.lifecycle_plugin_changed'));
+  renders(PluginGrantPluginChangedError, manifestMoveConflict('errors.plugin.grant_plugin_changed'));
 
   // ─── 409 — confirmation challenges (prompt inputs come FROM the error) ───
 

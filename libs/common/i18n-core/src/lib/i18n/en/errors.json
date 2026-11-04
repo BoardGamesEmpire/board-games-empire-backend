@@ -304,6 +304,7 @@
     "update_not_found": "Plugin '{slug}' is not installed",
     "grant_plugin_not_found": "Plugin '{slug}' is not installed",
     "update_tombstoned": "Plugin '{slug}' was uninstalled — reinstall it instead of updating",
+    "grant_plugin_changed": "Plugin '{slug}' changed while you were deciding — review its current permissions and decide again",
     "grant_tombstoned": "Plugin '{slug}' was uninstalled and cannot accept consent decisions",
     "install_conflict": "Plugin '{slug}' is already installed — updates go through the pending/approve flow",
     "install_permission_collision": "Plugin '{slug}' declares permission slugs that already exist",

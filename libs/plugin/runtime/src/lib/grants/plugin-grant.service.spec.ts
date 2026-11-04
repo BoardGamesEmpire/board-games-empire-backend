@@ -7,6 +7,7 @@ import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginGrantCreatedEvent, PluginGrantRejectedEvent } from '../events/plugin.events';
+import { type ClaimedPluginRow } from '../manifest/manifest-move';
 import type { PluginModuleOptions } from '../plugin-module.options';
 import {
   PluginGrantAuthorityError,
@@ -14,6 +15,7 @@ import {
   PluginGrantExclusionError,
   PluginGrantHouseholdNotFoundError,
   PluginGrantManifestInvalidError,
+  PluginGrantPluginChangedError,
   PluginGrantPluginNotFoundError,
   PluginGrantPluginTombstonedError,
   PluginGrantRequiredDenialError,
@@ -58,9 +60,27 @@ describe('PluginGrantService', () => {
     id: 'plg_1',
     slug: 'demo-sink',
     version: '1.2.0',
+    installedAt: new Date(0),
     manifestJson: manifest,
     uninstalledAt: null,
   } as unknown as Plugin;
+
+  /** A row of the plugin-row claim: every signal agreeing with the plugin manifest the decision read (#361). */
+  const claimedRow = (overrides: Partial<ClaimedPluginRow> = {}): ClaimedPluginRow => ({
+    uninstalled_at: null,
+    version: '1.2.0',
+    installed_at: new Date(0),
+    manifest_matches: true,
+    ...overrides,
+  });
+
+  /** The row a post-commit pass's claim reads (#361): the plugin the decision read, still current. */
+  const currentPluginRow = {
+    slug: 'demo-sink',
+    version: '1.2.0',
+    manifest_json: manifest,
+    uninstalled_at: null,
+  };
 
   const grantRow = (overrides: Partial<PluginGrant> = {}): PluginGrant =>
     ({
@@ -87,22 +107,52 @@ describe('PluginGrantService', () => {
   /** Whether the household share lock finds a live row; flipped by the soft-delete cases. */
   let householdLive: boolean;
 
+  /**
+   * Answers the decision's plugin-row claim with `rows` in order, one per
+   * claim (the last repeats), and keeps the strict router for every other
+   * statement. For a case where the replay must see a different row than the
+   * first attempt (#361).
+   */
+  const claimSequence = (...rows: ClaimedPluginRow[]): void => {
+    const route = db.$queryRaw.getMockImplementation() as (query: unknown) => Promise<unknown>;
+    let claims = 0;
+
+    db.$queryRaw.mockImplementation(((query: unknown) => {
+      if (!rawQueryText(query).includes('manifest_matches')) {
+        return route(query);
+      }
+
+      const row = rows[Math.min(claims, rows.length - 1)];
+
+      claims += 1;
+
+      return Promise.resolve([row]);
+    }) as never);
+  };
+
   beforeEach(() => {
     db = createMockDatabaseService();
     db.$transaction.mockImplementation((cb) => cb(db));
     db.plugin.findUnique.mockResolvedValue(plugin);
 
-    // Routes `$queryRaw` by table: the plugin-row claim (#398, D-398-1) answers
-    // with the row it locks, and the two unit-row locks keep the mock's default
-    // "no row" answer. A fourth raw statement landing here would otherwise get
-    // whichever row shape happened to match first and the test driving it would
-    // pass or fail for the wrong reason, so it fails loudly instead.
+    // Routes `$queryRaw` by table, and the `plugins` reads by the column they
+    // select: the decision's claim (#398, #361) answers with the signals it
+    // compares (`manifest_matches`), a post-commit pass's claim (#361) with the
+    // plugin manifest itself (`manifest_json`), and the two unit-row locks keep
+    // the mock's default "no row" answer. Handing either claim the other's row
+    // shape would make the test driving it pass or fail for the wrong reason,
+    // and so would a further raw statement matching whichever route came
+    // first, so that one fails loudly instead.
     householdLive = true;
     db.$queryRaw.mockImplementation(((query: unknown) => {
       const sql = rawQueryText(query);
 
+      if (sql.includes('manifest_matches')) {
+        return Promise.resolve([claimedRow()]);
+      }
+
       if (sql.includes('FROM plugins')) {
-        return Promise.resolve([{ id: plugin.id }]);
+        return Promise.resolve([currentPluginRow]);
       }
 
       if (sql.includes('FROM households')) {
@@ -168,11 +218,13 @@ describe('PluginGrantService', () => {
     it('claims the plugin row FOR SHARE before it writes the grant row', async () => {
       await service.decide(serverDecision);
 
-      const [[template, boundId]] = db.$queryRaw.mock.calls as [TemplateStringsArray, ...unknown[]][];
+      const [[template, boundManifest, boundId]] = db.$queryRaw.mock.calls as [TemplateStringsArray, ...unknown[]][];
       const sql = template.join('?').replace(/\s+/g, ' ').trim();
 
-      expect(sql).toBe('SELECT id FROM plugins WHERE id = ? FOR SHARE');
-      expect(boundId).toBe('plg_1');
+      expect(sql).toBe(
+        'SELECT uninstalled_at, version, installed_at, manifest_json = ?::jsonb AS manifest_matches FROM plugins WHERE id = ? FOR SHARE',
+      );
+      expect([boundManifest, boundId]).toEqual([JSON.stringify(manifest), 'plg_1']);
 
       // The whole point of the claim is WHERE it sits: the grant INSERT takes
       // an implicit FOR KEY SHARE on this row through the FK, and it takes it
@@ -184,7 +236,7 @@ describe('PluginGrantService', () => {
       expect(claim).toBeLessThan(db.pluginGrant.findUnique.mock.invocationCallOrder[0]);
     });
 
-    it('re-reads the manifest before retrying, so the replay cannot stamp a superseded version', async () => {
+    it('refuses a deadlock replay whose plugin manifest moved since the first attempt read it (#361)', async () => {
       const activated = {
         ...plugin,
         version: '1.4.0',
@@ -194,19 +246,22 @@ describe('PluginGrantService', () => {
       db.plugin.findUnique.mockResolvedValueOnce(plugin).mockResolvedValue(activated);
       db.pluginGrant.upsert.mockRejectedValueOnce(deadlock()).mockResolvedValue(grantRow({ manifestVersion: '1.4.0' }));
 
-      await service.decide(serverDecision);
+      // The first attempt claims a row still at 1.2.0, then loses the deadlock.
+      // An activation to 1.4.0 commits before the replay's claim.
+      claimSequence(claimedRow({ version: '1.2.0' }), claimedRow({ version: '1.4.0', manifest_matches: false }));
 
-      // A deadlock means a writer of this plugin row was live, and the writer
-      // this path deadlocks against is an activation — so a retry that replayed
-      // only the transaction would record the version that just lost, with the
-      // risk level derived from it.
-      expect(db.plugin.findUnique).toHaveBeenCalledTimes(2);
-      expect(db.pluginGrant.upsert).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          create: expect.objectContaining({ manifestVersion: '1.4.0' }),
-          update: expect.objectContaining({ manifestVersion: '1.4.0' }),
-        }),
-      );
+      const failure = await service.decide(serverDecision).catch((err: unknown) => err);
+
+      // A deadlock means a writer of this plugin row was live, most often an
+      // activation. A replay that read again would record consent against
+      // 1.4.0, which the client never saw, and answer 200. Judged against the
+      // first read, it refuses the move like any other request would.
+      expect(failure).toBeInstanceOf(PluginGrantPluginChangedError);
+      expect(failure).toMatchObject({ expectedVersion: '1.2.0', actualVersion: '1.4.0' });
+      expect(db.plugin.findUnique).toHaveBeenCalledTimes(1);
+      expect(db.$transaction).toHaveBeenCalledTimes(2);
+      expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(1);
+      expect(emitter.emit).not.toHaveBeenCalled();
     });
 
     it('runs the decision again when the first attempt is the deadlock victim', async () => {
@@ -216,6 +271,8 @@ describe('PluginGrantService', () => {
 
       expect(result.changed).toBe(true);
       expect(db.$transaction).toHaveBeenCalledTimes(2);
+      // The replay judges against the request's first read (#361).
+      expect(db.plugin.findUnique).toHaveBeenCalledTimes(1);
     });
 
     it('propagates a second deadlock rather than looping on it', async () => {
@@ -234,6 +291,183 @@ describe('PluginGrantService', () => {
 
       await expect(service.decide(serverDecision)).rejects.toBe(boom);
       expect(db.$transaction).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('decide — the claim is the plugin manifest check (#361)', () => {
+    const userDecision = {
+      ...serverDecision,
+      permissionSlug: 'read:public_content',
+      scopeType: PluginGrantScope.User,
+      scopeId: 'user-a',
+      deciderId: 'user-a',
+    } as const;
+    const householdDecision = {
+      ...serverDecision,
+      permissionSlug: 'update:calendar',
+      scopeType: PluginGrantScope.Household,
+      scopeId: 'hh_1',
+      deciderId: 'user-hh-admin',
+    } as const;
+
+    /** Answers the decision's plugin-row claim with `row` and keeps the strict router for every other statement. */
+    const claimAnswers = (row: ClaimedPluginRow | null) => {
+      const route = db.$queryRaw.getMockImplementation() as (query: unknown) => Promise<unknown>;
+
+      db.$queryRaw.mockImplementation(((query: unknown) =>
+        rawQueryText(query).includes('manifest_matches')
+          ? Promise.resolve(row === null ? [] : [row])
+          : route(query)) as never);
+    };
+
+    it.each([
+      ['Server', serverDecision],
+      ['Household', householdDecision],
+      ['User', userDecision],
+    ] as const)(
+      'refuses a decision whose plugin was uninstalled while it waited on the claim, at every scope: %s (#361)',
+      async (_scope, decision) => {
+        claimAnswers(claimedRow({ uninstalled_at: new Date('2026-08-10T00:00:00Z') }));
+
+        await expect(service.decide(decision)).rejects.toBeInstanceOf(PluginGrantPluginTombstonedError);
+        expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      },
+    );
+
+    it('reports a plugin row that vanished as not found (#361)', async () => {
+      claimAnswers(null);
+
+      await expect(service.decide(serverDecision)).rejects.toBeInstanceOf(PluginGrantPluginNotFoundError);
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+    });
+
+    it('refuses a decision judged against a plugin manifest replaced at the same version (#361)', async () => {
+      claimAnswers(claimedRow({ manifest_matches: false }));
+
+      const failure = await service.decide(serverDecision).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginGrantPluginChangedError);
+      expect(failure).toMatchObject({
+        pluginSlug: 'demo-sink',
+        kind: 'version-activated',
+        expectedVersion: '1.2.0',
+        actualVersion: '1.2.0',
+      });
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('refuses after a reinstall as reinstalled (#361)', async () => {
+      claimAnswers(claimedRow({ installed_at: new Date(1) }));
+
+      await expect(service.decide(serverDecision)).rejects.toMatchObject({
+        name: 'PluginGrantPluginChangedError',
+        kind: 'reinstalled',
+      });
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+    });
+
+    it('refuses a server-scope denial against a moved plugin manifest, without recording it (#361)', async () => {
+      claimAnswers(claimedRow({ version: '1.3.0', manifest_matches: false }));
+
+      await expect(service.decide({ ...serverDecision, status: PluginGrantStatus.Denied })).rejects.toMatchObject({
+        name: 'PluginGrantPluginChangedError',
+        kind: 'version-activated',
+        actualVersion: '1.3.0',
+      });
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('does not retry a plugin manifest move as if it were a deadlock (#361)', async () => {
+      claimAnswers(claimedRow({ manifest_matches: false }));
+
+      await expect(service.decide(serverDecision)).rejects.toBeInstanceOf(PluginGrantPluginChangedError);
+      expect(db.plugin.findUnique).toHaveBeenCalledTimes(1);
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('accepts the retry once the read matches, judged against the new plugin manifest (#361)', async () => {
+      const activated = {
+        ...plugin,
+        version: '1.3.0',
+        manifestJson: { ...manifest, version: '1.3.0' },
+      } as unknown as Plugin;
+      claimSequence(claimedRow({ version: '1.3.0', manifest_matches: false }), claimedRow({ version: '1.3.0' }));
+      db.plugin.findUnique.mockResolvedValueOnce(plugin).mockResolvedValue(activated);
+
+      await expect(service.decide(serverDecision)).rejects.toBeInstanceOf(PluginGrantPluginChangedError);
+      await expect(service.decide(serverDecision)).resolves.toMatchObject({ changed: true });
+      expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(1);
+      expect(db.pluginGrant.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ create: expect.objectContaining({ manifestVersion: '1.3.0' }) }),
+      );
+    });
+
+    describe('a catalog row deleted by the move the claim reports (#361)', () => {
+      // Activation deletes the catalog rows of the declares it drops, and
+      // uninstall deletes them all. Both hold the plugin row exclusively, so
+      // looked up before the claim, the catalog can already reflect a move the
+      // claim has yet to report. The client would get a 422 for a permission
+      // its own consent screen listed, instead of the 409 or 410 that tells it
+      // the screen is out of date.
+      const pluginDeclared = { ...serverDecision, permissionSlug: 'plugin|demo-sink|manage:digest' } as const;
+
+      it('reports an activation that dropped the permission as the plugin manifest move', async () => {
+        db.pluginPermission.findUnique.mockResolvedValue(null);
+        claimAnswers(claimedRow({ version: '1.3.0', manifest_matches: false }));
+
+        await expect(service.decide(pluginDeclared)).rejects.toMatchObject({
+          name: 'PluginGrantPluginChangedError',
+          kind: 'version-activated',
+          actualVersion: '1.3.0',
+        });
+        expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+      });
+
+      it('reports an uninstall that purged the catalog as the uninstall', async () => {
+        db.pluginPermission.findUnique.mockResolvedValue(null);
+        claimAnswers(claimedRow({ uninstalled_at: new Date('2026-08-10T00:00:00Z') }));
+
+        await expect(service.decide(pluginDeclared)).rejects.toBeInstanceOf(PluginGrantPluginTombstonedError);
+        expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+      });
+
+      it('reports the move on a deadlock replay, whose first read predates the deletion', async () => {
+        // The first attempt finds the row and loses a deadlock to an
+        // activation that drops the permission; the replay judges against the
+        // first read, so only its claim can say what happened.
+        db.pluginPermission.findUnique
+          .mockResolvedValueOnce({
+            id: 'plgperm_1',
+            pluginId: 'plg_1',
+            slug: 'plugin|demo-sink|manage:digest',
+            riskLevel: RiskLevel.Low,
+          } as PluginPermission)
+          .mockResolvedValue(null);
+        db.pluginGrant.upsert.mockRejectedValueOnce(deadlock());
+        claimSequence(claimedRow(), claimedRow({ version: '1.3.0', manifest_matches: false }));
+
+        await expect(service.decide(pluginDeclared)).rejects.toBeInstanceOf(PluginGrantPluginChangedError);
+        expect(db.$transaction).toHaveBeenCalledTimes(2);
+        expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(1);
+      });
+
+      it('reads the risk level under the claim, so a matching claim finds the row it declares', async () => {
+        await service.decide(pluginDeclared);
+
+        expect(db.pluginPermission.findUnique.mock.invocationCallOrder[0]).toBeGreaterThan(
+          db.$queryRaw.mock.invocationCallOrder[0],
+        );
+      });
+    });
+
+    it('decides for a disabled plugin (#361)', async () => {
+      db.plugin.findUnique.mockResolvedValue({ ...plugin, enabled: false } as unknown as Plugin);
+
+      await expect(service.decide(serverDecision)).resolves.toMatchObject({ changed: true });
+      expect(db.pluginGrant.upsert).toHaveBeenCalled();
     });
   });
 
@@ -445,54 +679,6 @@ describe('PluginGrantService', () => {
 
       expect(result.changed).toBe(true);
       expect(emitter.emit).toHaveBeenCalledWith(PluginEvent.GrantRejected, expect.any(PluginGrantRejectedEvent));
-    });
-
-    /**
-     * The in-transaction re-judgment: the pre-transaction check reads the
-     * plugin row BEFORE the write serializes against #356's activation
-     * lock, so an activation that commits in between is only catchable by
-     * re-reading AFTER the upsert. The throw rolls the recorded denial back
-     * with the transaction.
-     */
-    it('re-judges inside the transaction — an activation that promoted the check to required mid-decision rolls the denial back', async () => {
-      const promoted = buildPluginManifest({ scope: 'household', version: '1.3.0' });
-      promoted.permissions.checks = promoted.permissions.checks.map((check) =>
-        check.slug === 'feedback:read' ? { ...check, required: true } : check,
-      );
-      db.plugin.findUnique
-        .mockResolvedValueOnce(plugin) // the pre-transaction load: 1.2.0, feedback:read OPTIONAL — the front door passes
-        .mockResolvedValueOnce({ ...plugin, version: '1.3.0', manifestJson: promoted } as unknown as Plugin);
-
-      await expect(service.decide({ ...serverDecision, status: PluginGrantStatus.Denied })).rejects.toThrow(
-        PluginGrantRequiredDenialError,
-      );
-      // The write happened — and the throw took it back with the
-      // transaction, so nothing is emitted for a row that never committed.
-      expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(1);
-      expect(emitter.emit).not.toHaveBeenCalled();
-    });
-
-    it('tolerates the check being DROPPED by a mid-decision activation — a denial of nothing needs no refusal', async () => {
-      const dropped = buildPluginManifest({ scope: 'household', version: '1.3.0' });
-      dropped.permissions.checks = dropped.permissions.checks.filter((check) => check.slug !== 'feedback:read');
-      db.plugin.findUnique
-        .mockResolvedValueOnce(plugin)
-        .mockResolvedValueOnce({ ...plugin, version: '1.3.0', manifestJson: dropped } as unknown as Plugin);
-
-      const result = await service.decide({ ...serverDecision, status: PluginGrantStatus.Denied });
-
-      expect(result.changed).toBe(true);
-    });
-
-    it('answers a tombstone that landed mid-decision with the tombstone error, rolling the write back', async () => {
-      db.plugin.findUnique
-        .mockResolvedValueOnce(plugin)
-        .mockResolvedValueOnce({ ...plugin, uninstalledAt: new Date('2026-08-10T00:00:00Z') } as unknown as Plugin);
-
-      await expect(service.decide({ ...serverDecision, status: PluginGrantStatus.Denied })).rejects.toThrow(
-        PluginGrantPluginTombstonedError,
-      );
-      expect(emitter.emit).not.toHaveBeenCalled();
     });
   });
 

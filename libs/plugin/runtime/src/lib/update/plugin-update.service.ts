@@ -1175,13 +1175,15 @@ export class PluginUpdateService {
       // landing after a plain snapshot — activation would commit a manifest
       // the required-denial rule (D-AV) should have refused. `FOR UPDATE`
       // takes a row lock on every server grant, and Postgres row locks are
-      // mutual: `decide()`'s upsert blocks until this transaction resolves,
-      // so the flip either commits before this read (and refuses below) or
-      // serializes after activation — where `decide()`'s own in-transaction
-      // re-check (`assertDenialStillLegal`) re-reads the then-ACTIVE
-      // manifest and refuses the flip itself. Raw SQL because Prisma's query API
-      // cannot express FOR UPDATE; unqualified table name so the search_path
-      // (per-worker test schemas) resolves it. The lock covers EXISTING rows
+      // mutual. `decide()` waits earlier than its upsert, though: it claims
+      // the plugin row `FOR SHARE` before writing anything (#398), and that
+      // claim waits on this transaction's `FOR UPDATE` of the same row. So the
+      // flip either committed before this transaction's claim (and this read
+      // refuses below) or serializes after activation, where that claim
+      // compares the plugin manifest `decide()` judged against with the
+      // then-active one and refuses the flip itself (#361). Raw SQL because
+      // Prisma's query API cannot express FOR UPDATE; unqualified table name
+      // so the search_path (per-worker test schemas) resolves it. The lock covers EXISTING rows
       // only — a row that does not exist cannot be locked — so the
       // insert-half race stays with the unique index and the retry.
       const lockedGrantRows = await tx.$queryRaw<{ permission_slug: string; status: PluginGrantStatus }[]>`
@@ -1253,9 +1255,9 @@ export class PluginUpdateService {
       // provenance (#577). Left in place, a later version that requests the
       // permission again would inherit a consent decision nobody made for
       // it. Read before the delete, for the same reason as the declares diff.
-      // This does not reach a decide() that judged against the outgoing
-      // manifest and commits after this transaction; refusing that write is
-      // #361's.
+      // A decide() that judged against the outgoing plugin manifest cannot
+      // write one back afterwards: its claim waits for this transaction and
+      // then refuses the moved plugin manifest (#361).
       const droppedRequests = requestedSlugsDropped(active, next, removedDeclares);
       let unrequestedGrants: PluginGrant[] = [];
 

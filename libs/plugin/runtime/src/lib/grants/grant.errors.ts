@@ -1,5 +1,6 @@
 import type { PluginGrantScope } from '@bge/database';
 import type { ManifestIssue } from '@boardgamesempire/plugin-manifest';
+import { describeManifestMove, type PluginChangeKind } from '../manifest/manifest-move';
 
 /**
  * Typed failures for the consent write path (#59 Phase C1). Domain errors,
@@ -170,5 +171,30 @@ export class PluginGrantExclusionError extends Error {
     detail: string,
   ) {
     super(`'${permissionSlug}' can never be granted to a plugin: ${detail}`);
+  }
+}
+
+/**
+ * The plugin manifest was replaced, or the plugin reinstalled, between the
+ * decision's read and its locked transaction, so the gates and the stamped
+ * version and risk level came from a plugin manifest that is no longer the
+ * stored one (#361). Refused, not replayed: the 409 is how the client learns
+ * the consent surface it rendered is out of date. `kind` names which writer
+ * moved it.
+ * Retryable, and immediately: the writer that moved it has already committed.
+ *
+ * The slug is `pluginSlug`, as on `PluginLifecyclePluginChangedError`, so one
+ * renderer serves every plugin manifest move refusal.
+ */
+export class PluginGrantPluginChangedError extends Error {
+  override readonly name = 'PluginGrantPluginChangedError';
+
+  constructor(
+    public readonly pluginSlug: string,
+    public readonly kind: PluginChangeKind,
+    public readonly expectedVersion: string,
+    public readonly actualVersion: string,
+  ) {
+    super(describeManifestMove(pluginSlug, kind, expectedVersion, actualVersion));
   }
 }

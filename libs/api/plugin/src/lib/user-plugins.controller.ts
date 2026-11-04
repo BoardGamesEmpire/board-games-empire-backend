@@ -102,6 +102,12 @@ export class UserPluginsController {
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @ApiResponse({
+    status: Http.Conflict,
+    description:
+      'The plugin manifest was replaced while the decision was in flight, so it was not recorded; reload the ' +
+      "plugin's permissions and decide again",
+  })
+  @ApiResponse({
     status: Http.UnprocessableEntity,
     description: 'Not requested by the manifest, or decided at the wrong consent scope',
   })
