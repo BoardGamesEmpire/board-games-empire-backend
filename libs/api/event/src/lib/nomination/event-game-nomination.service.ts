@@ -25,6 +25,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -230,6 +231,22 @@ export class EventGameNominationService {
     return this.withVoteEligibilityOf(eventId, nomination, policy.voteEligibility);
   }
 
+  /**
+   * Withdraws the acting attendee's own nomination.
+   *
+   * The first read answers the common refusals without a lock: a nomination
+   * that isn't the actor's, or one whose status can't be withdrawn. The write
+   * then locks the nomination's row and reads its status again, since a
+   * settle, or a supplier leaving, can change it in between. A withdraw that
+   * loses to a settle answers 400, as a request arriving second would, rather
+   * than writing Withdrawn over the outcome. One that finds the nomination
+   * paused since withdraws it from Paused, and its domain event says so
+   * (#621).
+   *
+   * It holds the nomination's row alone, and settle and the supplier sync
+   * each lock that row after everything else they hold, so it cannot wait in
+   * a cycle with either (#551).
+   */
   async withdraw(eventId: string, nominationId: string): Promise<NominationDetail> {
     const initiatedAt = new Date();
     const attendeeId = await resolveActingAttendeeId(this.db, this.abilityService, eventId);
@@ -253,26 +270,39 @@ export class EventGameNominationService {
       NominationStatus.AwaitingApproval,
       NominationStatus.Paused,
     ];
-    assert(
-      withdrawable.includes(nomination.status),
-      new BadRequestException(t('errors.nomination.cannot_withdraw_status', { status: nomination.status })),
-    );
+    const assertWithdrawable = (status: NominationStatus) =>
+      assert(
+        withdrawable.includes(status),
+        new BadRequestException(t('errors.nomination.cannot_withdraw_status', { status })),
+      );
+    assertWithdrawable(nomination.status);
 
     try {
-      const updated = await this.db.eventGameNomination.update({
-        where: {
-          id: nominationId,
-          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventGameNomination, Action.update),
-        },
-        data: { status: NominationStatus.Withdrawn, pausedFrom: null },
-        include: NOMINATION_INCLUDE,
+      const { before, updated } = await this.db.$transaction(async (tx) => {
+        const [current] = await tx.$queryRaw<{ status: NominationStatus }[]>(
+          Prisma.sql`SELECT status FROM event_game_nominations WHERE id = ${nominationId} FOR NO KEY UPDATE`,
+        );
+        assert(current, new NotFoundException(t('errors.nomination.not_found', { nominationId, eventId })));
+        assertWithdrawable(current.status);
+
+        const written = await tx.eventGameNomination.update({
+          where: {
+            id: nominationId,
+            status: current.status,
+            // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventGameNomination, Action.update),
+          },
+          data: { status: NominationStatus.Withdrawn, pausedFrom: null },
+          include: NOMINATION_INCLUDE,
+        });
+
+        return { before: current.status, updated: written };
       });
 
       this.eventEmitter.emit(
         NominationWithdrawnEvent.eventName,
         new NominationWithdrawnEvent(
-          { id: nominationId, eventId, status: nomination.status },
+          { id: nominationId, eventId, status: before },
           { id: updated.id, eventId: updated.eventId, status: updated.status },
           initiatedAt,
         ),
@@ -280,6 +310,12 @@ export class EventGameNominationService {
 
       return this.withVoteEligibilityOf(eventId, updated);
     } catch (error) {
+      // A refusal under the lock is the answer to a lost race, as the same
+      // refusal from the first read is, not a server error.
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
       this.logger.error(`Error withdrawing nomination ${nominationId} for event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException(t('errors.nomination.forbidden_withdraw'));
