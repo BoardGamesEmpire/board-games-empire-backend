@@ -594,6 +594,10 @@ _Avoid_: catalog on its own, catalogue, game library
 A game that stands on its own and that expansions, DLC and other add-ons attach to.
 _Avoid_: parent game, main game
 
+**Expansion link**:
+A link written by the importer between an expansion and one of its base games. Its direction records which game is the base, independently of either game's content type. Each link has its own `isStandalone` value, so an expansion can be standalone for one base game and not another. The API names a link only when the linked game is visible to the actor.
+_Avoid_: game expansion (for the link), relation
+
 **Imported game**:
 A game brought in from a DataGateway. It belongs to the server, and everyone can see it.
 
