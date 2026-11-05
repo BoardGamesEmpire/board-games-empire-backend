@@ -1,9 +1,10 @@
 import type { GameCollection } from '@bge/database';
 import { ContentType, GameMedium, GameRemovalReason, PlatformType, Reach } from '@bge/database';
+import { ExpansionLinkDto } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import type { GameCollectionWithRelations } from '../collection-row';
+import type { GameCollectionRow } from '../collection-row';
 
-type CollectionPlatformGame = GameCollectionWithRelations['platformGame'];
+type CollectionPlatformGame = GameCollectionRow['platformGame'];
 type CollectionPlatform = CollectionPlatformGame['platform'];
 type CollectionGame = CollectionPlatformGame['game'];
 
@@ -49,6 +50,14 @@ export class CollectionGameSummaryDto implements CollectionGame {
 
   @ApiProperty({ type: Number, nullable: true, description: 'Maximum play time, in minutes' })
   maxPlayTime!: number | null;
+
+  @ApiProperty({
+    type: [ExpansionLinkDto],
+    description:
+      'For an expansion, the base games it attaches to that are live and that the viewer could open by id, in ' +
+      'title order, then game id, each with that link’s `isStandalone`. Empty for any other game.',
+  })
+  baseGames!: ExpansionLinkDto[];
 }
 
 export class CollectionPlatformSummaryDto implements CollectionPlatform {

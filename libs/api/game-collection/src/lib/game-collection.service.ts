@@ -1,9 +1,16 @@
-import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
+import {
+  Action,
+  DatabaseService,
+  isPrismaDependentRecordNotFoundError,
+  Prisma,
+  readBaseGameLinks,
+  ResourceType,
+} from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { COLLECTION_INCLUDE, type GameCollectionWithRelations } from './collection-row';
+import { COLLECTION_INCLUDE, type GameCollectionRow, type GameCollectionWithRelations } from './collection-row';
 import {
   CreateGameCollectionDto,
   GameCollectionDto,
@@ -99,7 +106,7 @@ export class GameCollectionService {
   private async paginate(
     where: Prisma.GameCollectionWhereInput,
     pagination: PaginationQueryDto,
-  ): Promise<PaginatedRows<GameCollectionWithRelations>> {
+  ): Promise<PaginatedRows<GameCollectionRow>> {
     const [rows, total] = await this.db.$transaction(
       [
         this.db.gameCollection.findMany({
@@ -115,7 +122,7 @@ export class GameCollectionService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    return { rows, total };
+    return { rows: await this.withBaseGames(rows), total };
   }
 
   /** A single entry the acting user may read (owner sees own tombstones). */
@@ -133,7 +140,7 @@ export class GameCollectionService {
       throw new NotFoundException(t('errors.game_collection.not_found', { id }));
     }
 
-    return collection;
+    return this.withRowBaseGames(collection);
   }
 
   /**
@@ -162,8 +169,9 @@ export class GameCollectionService {
     const provided = pickDefined({ ...attributes, releaseId });
     const lastUpdated = new Date();
 
+    let collection: GameCollectionWithRelations;
     try {
-      return await this.db.gameCollection.upsert({
+      collection = await this.db.gameCollection.upsert({
         where: { userId_platformGameId_medium: { userId, platformGameId, medium } },
         create: { userId, platformGameId, medium, ...provided, lastUpdated },
         update: { ...provided, deletedAt: null, deleteReason: null, lastUpdated },
@@ -177,6 +185,10 @@ export class GameCollectionService {
 
       throw error;
     }
+
+    // After the write's catch, so a failed link read is not taken for a
+    // missing platform game (#1070).
+    return this.withRowBaseGames(collection);
   }
 
   /**
@@ -210,8 +222,9 @@ export class GameCollectionService {
       await this.assertReleaseBelongsTo(data.releaseId, existing.platformGameId);
     }
 
+    let collection: GameCollectionWithRelations;
     try {
-      return await this.db.gameCollection.update({
+      collection = await this.db.gameCollection.update({
         where: {
           id,
           // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
@@ -223,6 +236,10 @@ export class GameCollectionService {
     } catch (error) {
       throw this.mapMissingToNotFound(error, id);
     }
+
+    // After the write's catch, so a failed link read is never mapped to 404
+    // (#1070).
+    return this.withRowBaseGames(collection);
   }
 
   /**
@@ -236,8 +253,9 @@ export class GameCollectionService {
 
     // Single scoped write: `deletedAt: null` in the filter makes a repeat
     // delete (or a foreign/missing row) miss and surface as 404.
+    let collection: GameCollectionWithRelations;
     try {
-      return await this.db.gameCollection.update({
+      collection = await this.db.gameCollection.update({
         where: {
           id,
           deletedAt: null,
@@ -250,6 +268,46 @@ export class GameCollectionService {
     } catch (error) {
       throw this.mapMissingToNotFound(error, id);
     }
+
+    // After the write's catch, so a failed link read is never mapped to 404
+    // (#1070).
+    return this.withRowBaseGames(collection);
+  }
+
+  /**
+   * Each row with its game's base games (#1070): the links whose base game is
+   * live and the viewer could open by id, the rule `GET /games/:id` uses. A
+   * game held more than once on the page is read once.
+   *
+   * - A link read of its own, with the filter in its `where`: in
+   *   `COLLECTION_INCLUDE` Prisma would drop a deny-all ceiling and name every
+   *   base game (`docs/agents/gotchas.md`).
+   * - The link's direction, not the game's content type, says which game is
+   *   the base, so a row whose game is no expansion gets `[]`.
+   * - The ceiling needs no user, so an anonymous viewer of another user's
+   *   collection gets the base games it could open, the Public ones.
+   */
+  private async withBaseGames(rows: readonly GameCollectionWithRelations[]): Promise<GameCollectionRow[]> {
+    const links = await readBaseGameLinks(
+      this.db,
+      [...new Set(rows.map((row) => row.platformGame.game.id))],
+      this.scopeComposer.compose(ResourceType.Game, Action.read, { deletedAt: null }),
+    );
+
+    return rows.map(({ platformGame, ...row }) => ({
+      ...row,
+      platformGame: {
+        ...platformGame,
+        game: { ...platformGame.game, baseGames: links.get(platformGame.game.id) ?? [] },
+      },
+    }));
+  }
+
+  /** One row with its game's base games, as {@link withBaseGames} reads them. */
+  private async withRowBaseGames(row: GameCollectionWithRelations): Promise<GameCollectionRow> {
+    const [withLinks] = await this.withBaseGames([row]);
+
+    return withLinks;
   }
 
   /**

@@ -1,4 +1,4 @@
-import type { Prisma } from '@bge/database';
+import type { ExpansionLink, Prisma } from '@bge/database';
 
 /**
  * What a collection row embeds, so a client can render, filter, sort and nest
@@ -39,3 +39,15 @@ export const COLLECTION_INCLUDE = {
 } satisfies Prisma.GameCollectionInclude;
 
 export type GameCollectionWithRelations = Prisma.GameCollectionGetPayload<{ include: typeof COLLECTION_INCLUDE }>;
+
+type IncludedPlatformGame = GameCollectionWithRelations['platformGame'];
+
+/**
+ * A collection row as the routes send it: the include's row, with its game's
+ * `baseGames`, read after it by a link read of its own (#1070).
+ */
+export type GameCollectionRow = Omit<GameCollectionWithRelations, 'platformGame'> & {
+  platformGame: Omit<IncludedPlatformGame, 'game'> & {
+    game: IncludedPlatformGame['game'] & { baseGames: ExpansionLink[] };
+  };
+};

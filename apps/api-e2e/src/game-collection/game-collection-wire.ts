@@ -99,7 +99,8 @@ export function listCollectionsEnvelope(
 
 /**
  * A collection row's embedded platform game (#1070). An absent platform game or
- * game would make every fact on it read as missing, so either fails here
+ * game would make every fact on it read as missing, and an absent `baseGames`
+ * would read as an expansion with no visible base game, so each fails here
  * rather than as an assertion against `undefined`.
  */
 export function collectionRowPlatformGame(
@@ -107,10 +108,11 @@ export function collectionRowPlatformGame(
   request: RequestDescription,
 ): CollectionRowPlatformGameWire {
   const platformGame = (row as unknown as Record<string, unknown>)['platformGame'];
-  if (!isRecord(platformGame) || !isRecord(platformGame['game'])) {
+  const game = isRecord(platformGame) ? platformGame['game'] : undefined;
+  if (!isRecord(game) || !Array.isArray(game['baseGames'])) {
     throw new Error(
-      `${request}: collection row ${row.id} carried no 'platformGame.game' object. The row's embedded ` +
-        'platform game has changed — update apps/api-e2e/src/game-collection/game-collection-wire.ts to match.',
+      `${request}: collection row ${row.id} carried no 'platformGame.game.baseGames' array. The row's ` +
+        'embedded platform game has changed — update apps/api-e2e/src/game-collection/game-collection-wire.ts to match.',
     );
   }
 
