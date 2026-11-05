@@ -71,7 +71,7 @@ RUN cp .env.example .env \
       @boardgamesempire/boardgamegeek-gateway \
       @boardgamesempire/igdb-gateway
 
-# What every image runs on: the production install and the four workspace
+# What every image runs on: the production install and the five workspace
 # packages the bundles load at runtime instead of bundling. Prisma's telemetry
 # stays off, as `.env.example` has it: the api runs the Prisma CLI to migrate.
 FROM node AS runtime
@@ -79,6 +79,7 @@ ENV NODE_ENV=production \
     CHECKPOINT_DISABLE=1
 WORKDIR /app
 COPY --from=deps /app ./
+COPY --from=build /app/libs/gateway/driver/contract/dist libs/gateway/driver/contract/dist
 COPY --from=build /app/libs/plugin/contract/dist libs/plugin/contract/dist
 COPY --from=build /app/libs/plugin/manifest/dist libs/plugin/manifest/dist
 COPY --from=build /app/libs/proto/gateway/dist libs/proto/gateway/dist

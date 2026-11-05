@@ -21,5 +21,8 @@
   "dependencies": {
     "@boardgamesempire/proto-gateway": "0.0.1",
     "tslib": "^2.3.0"
+  },
+  "peerDependencies": {
+    "rxjs": "^7.8.0"
   }
 }

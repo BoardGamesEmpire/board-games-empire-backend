@@ -1,0 +1,11 @@
+{
+  "correlationId": "golden",
+  "platforms": [
+    {
+      "externalId": "bgg-tabletop",
+      "name": "Tabletop",
+      "abbreviation": "TT",
+      "platformType": "PLATFORM_TYPE_TABLETOP"
+    }
+  ]
+}

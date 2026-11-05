@@ -18,7 +18,7 @@
  * this check no longer reads, and it is reported rather than passed.
  *
  * Only the bundle is read. What its externals load in turn is not followed, so
- * neither are the imports of the four workspace packages the bundles load from
+ * neither are the imports of the five workspace packages the bundles load from
  * their `dist`, nor the modules loaded by name at runtime: the logger's
  * transport targets and the Prisma CLI. Booting each role from the image is
  * what covers those (#600).

@@ -1,1 +1,0 @@
-export const IGDB_CLIENT_FACTORY = Symbol('IGDB_CLIENT_FACTORY');

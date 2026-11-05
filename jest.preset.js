@@ -19,7 +19,6 @@ const ESM_PACKAGES = [
   // reached only by suites that talk to an actual database (the e2e harness).
   '@prisma/client/runtime',
   '@thallesp/nestjs-better-auth',
-  'apicalypse',
   'axios',
   'better-auth',
   'better-call',

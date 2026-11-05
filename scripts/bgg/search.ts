@@ -1,4 +1,4 @@
-import { BggClient } from 'bgg-ts-client';
+import { createBggClient } from '@bge/gateway-driver-boardgamegeek';
 import process from 'node:process';
 
 const apiKey = process.env.BGG_API_KEY;
@@ -7,7 +7,7 @@ async function main() {
   if (!apiKey) {
     throw new Error('BGG API key must be provided');
   }
-  const client = BggClient.Create({ apiKey });
+  const client = createBggClient({ fetch, apiKey });
   const searchResults = await client.search.query({
     query: 'catan',
     exact: 0,

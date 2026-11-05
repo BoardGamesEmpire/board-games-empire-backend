@@ -1,0 +1,1 @@
+fields id,name,abbreviation,platform_type;sort id asc;limit 500;

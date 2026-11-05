@@ -1,0 +1,302 @@
+import type { IGDBClient } from '../client/igdb-client.interface';
+import { GameType, PlatformType } from '../constants';
+import type { IgdbGame } from '../types';
+import {
+  GAME_FETCH_FIELDS,
+  GAME_SEARCH_FIELDS,
+  fetchExpansionsRequest,
+  fetchGameRequest,
+  searchGamesRequest,
+} from './game.requests';
+
+/** The signal IgdbCaller hands each request, which the request passes on to the client (#1082). */
+const signal = new AbortController().signal;
+
+describe('GameRequests', () => {
+  describe('searchGamesRequest', () => {
+    it('requests the /games endpoint', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades')(client, signal);
+      expect(client.request).toHaveBeenCalledWith('/games', signal);
+    });
+
+    it('applies the search query', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades')(client, signal);
+      expect(client.search).toHaveBeenCalledWith('Hades');
+    });
+
+    it('escapes double quotes so the apicalypse search string stays valid', async () => {
+      const client = buildMockClient();
+      // The builder wraps the term as search "<q>"; an unescaped " would close
+      // the string early and produce an IGDB 400.
+      await searchGamesRequest('Frog "Detective"')(client, signal);
+      expect(client.search).toHaveBeenCalledWith('Frog \\"Detective\\"');
+    });
+
+    it('escapes backslashes before quotes so the escape cannot be consumed', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('a\\"b')(client, signal);
+      expect(client.search).toHaveBeenCalledWith('a\\\\\\"b');
+    });
+
+    it('uses the default limit of 20', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades')(client, signal);
+      expect(client.limit).toHaveBeenCalledWith(20);
+    });
+
+    it('uses the default offset of 0', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades')(client, signal);
+      expect(client.offset).toHaveBeenCalledWith(0);
+    });
+
+    it('forwards explicit limit and offset', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades', 5, 10)(client, signal);
+      expect(client.limit).toHaveBeenCalledWith(5);
+      expect(client.offset).toHaveBeenCalledWith(10);
+    });
+
+    it('excludes alternate versions via version_parent = null filter', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades')(client, signal);
+      expect(client.where).toHaveBeenCalledWith('version_parent = null & game_type != 14');
+    });
+
+    it('requests all GAME_SEARCH_FIELDS', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades')(client, signal);
+      expect(client.fields).toHaveBeenCalledWith(expect.arrayContaining([...GAME_SEARCH_FIELDS]));
+    });
+
+    it('resolves with the data array from the response', async () => {
+      const games: IgdbGame[] = [{ id: 1, name: 'Hades' }];
+      const client = buildMockClient(games);
+      const result = await searchGamesRequest('Hades')(client, signal);
+      expect(result).toEqual(games);
+    });
+
+    it('appends a language filter for a mapped locale', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, 'en-US')(client, signal);
+      expect(client.where).toHaveBeenCalledWith(
+        'version_parent = null & game_type != 14 & (language_supports.language = (7) | language_supports.language = null)',
+      );
+    });
+
+    it('keeps the base filter when the locale is unmapped', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, 'fr-CA')(client, signal);
+      // An unmapped locale must not drop the mandatory version_parent/game_type filter.
+      expect(client.where).toHaveBeenCalledWith('version_parent = null & game_type != 14');
+    });
+
+    it('narrows to games first released within the range, in Unix seconds (#719)', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, undefined, {
+        releasedBetween: { from: 631152000, before: 946684800, orUnknown: false },
+      })(client, signal);
+      expect(client.where).toHaveBeenCalledWith(
+        'version_parent = null & game_type != 14 & first_release_date >= 631152000 & first_release_date < 946684800',
+      );
+    });
+
+    it('asks only for games with no first release date when narrowed to them (#1082)', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, undefined, { undatedOnly: true })(client, signal);
+      expect(client.where).toHaveBeenCalledWith('version_parent = null & game_type != 14 & first_release_date = null');
+    });
+
+    it('asks only for games with a first release date when narrowed to them (#1082)', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, undefined, { datedOnly: true })(client, signal);
+      expect(client.where).toHaveBeenCalledWith('version_parent = null & game_type != 14 & first_release_date != null');
+    });
+
+    it('keeps games with no first release date when the range includes unknown ones (#719)', async () => {
+      const both = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, undefined, {
+        releasedBetween: { from: 631152000, before: 946684800, orUnknown: true },
+      })(both, signal);
+      expect(both.where).toHaveBeenCalledWith(
+        'version_parent = null & game_type != 14' +
+          ' & ((first_release_date >= 631152000 & first_release_date < 946684800) | first_release_date = null)',
+      );
+
+      const before = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, undefined, { releasedBetween: { before: 946684800, orUnknown: true } })(
+        before,
+        signal,
+      );
+      expect(before.where).toHaveBeenCalledWith(
+        'version_parent = null & game_type != 14 & (first_release_date < 946684800 | first_release_date = null)',
+      );
+    });
+
+    it('leaves out the comparison of a bound left out (#719)', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, undefined, {
+        releasedBetween: { from: 631152000, orUnknown: false },
+      })(client, signal);
+      expect(client.where).toHaveBeenCalledWith(
+        'version_parent = null & game_type != 14 & first_release_date >= 631152000',
+      );
+    });
+
+    it('narrows to the game types and platform types it is given, before the language filter', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, 'en-US', {
+        gameTypes: [GameType.MainGame, GameType.Fork],
+        platformTypes: [PlatformType.Console, PlatformType.PortableConsole],
+      })(client, signal);
+      expect(client.where).toHaveBeenCalledWith(
+        'version_parent = null & game_type != 14 & game_type = (0,12) & platforms.platform_type = (1,5)' +
+          ' & (language_supports.language = (7) | language_supports.language = null)',
+      );
+    });
+  });
+
+  describe('fetchGameRequest', () => {
+    it('requests the /games endpoint', async () => {
+      const client = buildMockClient();
+      await fetchGameRequest('1942')(client, signal);
+      expect(client.request).toHaveBeenCalledWith('/games', signal);
+    });
+
+    it('filters by the provided externalId', async () => {
+      const client = buildMockClient();
+      await fetchGameRequest('1942')(client, signal);
+      expect(client.where).toHaveBeenCalledWith(expect.stringContaining('1942'));
+    });
+
+    it('sets limit to 1', async () => {
+      const client = buildMockClient();
+      await fetchGameRequest('1942')(client, signal);
+      expect(client.limit).toHaveBeenCalledWith(1);
+    });
+
+    it('requests all GAME_FETCH_FIELDS', async () => {
+      const client = buildMockClient();
+      await fetchGameRequest('1942')(client, signal);
+      expect(client.fields).toHaveBeenCalledWith(expect.arrayContaining([...GAME_FETCH_FIELDS]));
+    });
+
+    it('includes involved_companies fields for publisher/developer mapping', async () => {
+      const client = buildMockClient();
+      await fetchGameRequest('1942')(client, signal);
+      expect(client.fields).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          'involved_companies.company.id',
+          'involved_companies.company.name',
+          'involved_companies.developer',
+          'involved_companies.publisher',
+        ]),
+      );
+    });
+
+    it('includes genre and theme fields for category mapping', async () => {
+      const client = buildMockClient();
+      await fetchGameRequest('1942')(client, signal);
+      expect(client.fields).toHaveBeenCalledWith(
+        expect.arrayContaining(['genres.id', 'genres.name', 'themes.id', 'themes.name']),
+      );
+    });
+
+    it('resolves with the data array from the response', async () => {
+      const games: IgdbGame[] = [{ id: 1942, name: 'Hades' }];
+      const client = buildMockClient(games);
+      const result = await fetchGameRequest('1942')(client, signal);
+      expect(result).toEqual(games);
+    });
+
+    it('retains the id filter when the locale is unmapped', async () => {
+      const client = buildMockClient();
+      await fetchGameRequest('1942', 'fr-CA')(client, signal);
+      // Dropping the id filter here would fetch an arbitrary game, not game 1942.
+      expect(client.where).toHaveBeenCalledWith(`id = '1942'`);
+    });
+
+    it('combines the id filter with a mapped locale language filter', async () => {
+      const client = buildMockClient();
+      await fetchGameRequest('1942', 'en-US')(client, signal);
+      expect(client.where).toHaveBeenCalledWith(
+        `id = '1942' & (language_supports.language = (7) | language_supports.language = null)`,
+      );
+    });
+  });
+
+  describe('fetchExpansionsRequest', () => {
+    it('requests the /games endpoint', async () => {
+      const client = buildMockClient();
+      await fetchExpansionsRequest('1942')(client, signal);
+      expect(client.request).toHaveBeenCalledWith('/games', signal);
+    });
+
+    it('includes parent_game filter with the baseExternalId', async () => {
+      const client = buildMockClient();
+      await fetchExpansionsRequest('1942')(client, signal);
+      expect(client.where).toHaveBeenCalledWith(expect.stringContaining(`parent_game = '1942'`));
+    });
+
+    it('includes version_parent filter with the baseExternalId', async () => {
+      const client = buildMockClient();
+      await fetchExpansionsRequest('1942')(client, signal);
+      expect(client.where).toHaveBeenCalledWith(expect.stringContaining(`version_parent = '1942'`));
+    });
+
+    it('uses an OR combinator between the two filters', async () => {
+      const client = buildMockClient();
+      await fetchExpansionsRequest('1942')(client, signal);
+      expect(client.where).toHaveBeenCalledWith(expect.stringContaining('|'));
+    });
+
+    it('sets a generous limit to capture all expansions', async () => {
+      const client = buildMockClient();
+      await fetchExpansionsRequest('1942')(client, signal);
+      // Limit should be high enough not to silently truncate prolific franchises.
+      const [calledLimit] = client.limit.mock.calls[0] as [number];
+      expect(calledLimit).toBeGreaterThanOrEqual(50);
+    });
+
+    it('resolves with the data array from the response', async () => {
+      const games: IgdbGame[] = [{ id: 9001, name: 'DLC', game_type: 1, parent_game: 1942 }];
+      const client = buildMockClient(games);
+      const result = await fetchExpansionsRequest('1942')(client, signal);
+      expect(result).toEqual(games);
+    });
+
+    it('retains the parent_game/version_parent filter when the locale is unmapped', async () => {
+      const client = buildMockClient();
+      await fetchExpansionsRequest('1942', 'en-AU')(client, signal);
+      // Dropping this filter would return up to 50 unrelated games.
+      expect(client.where).toHaveBeenCalledWith(`(parent_game = '1942' | version_parent = '1942')`);
+    });
+  });
+});
+
+type MockIGDBClient = {
+  [K in keyof IGDBClient]: jest.Mock;
+};
+
+function buildMockClient(results: IgdbGame[] = []): MockIGDBClient {
+  const client = {
+    fields: jest.fn(),
+    limit: jest.fn(),
+    offset: jest.fn(),
+    search: jest.fn(),
+    where: jest.fn(),
+    sort: jest.fn(),
+    request: jest.fn<Promise<{ data: IgdbGame[] }>, [string]>().mockResolvedValue({ data: results }),
+  } as MockIGDBClient;
+
+  // All chain methods return `this` so the fluent API composes correctly.
+  (Object.keys(client) as Array<keyof MockIGDBClient>).forEach((key) => {
+    if (key !== 'request') {
+      client[key].mockReturnValue(client);
+    }
+  });
+
+  return client;
+}

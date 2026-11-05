@@ -1,0 +1,641 @@
+<?xml version="1.0" encoding="utf-8"?><items termsofuse="https://boardgamegeek.com/xmlapi/termsofuse"><item type="boardgame" id="126163">
+         <thumbnail>https://cf.geekdo-images.com/kXf7mDyDYuHg6oe8yTUIEA__small/img/or9mAn4ClljY_wO_zvsLJDqs9tU=/fit-in/200x150/filters:strip_icc()/pic4604439.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/kXf7mDyDYuHg6oe8yTUIEA__original/img/f6-Au0KTnNR4nugSu2U-wPNbZCU=/0x0/filters:format(jpeg)/pic4604439.jpg</image>
+   	                                  				
+				<name type="primary" sortindex="1" value="Tzolk&#039;in: The Mayan Calendar" />
+			
+						                               				
+				<name type="alternate" sortindex="1" value="Tzolk&#039;in: Calendarul Maiaș" />
+			    				
+				<name type="alternate" sortindex="1" value="Tzolk&#039;in: De Kalender van de Maya&#039;s" />
+			    				
+				<name type="alternate" sortindex="1" value="Tzolk&#039;in: Der Maya-Kalender" />
+			    				
+				<name type="alternate" sortindex="1" value="Tzolk&#039;in: El Calendario Maya" />
+			    				
+				<name type="alternate" sortindex="1" value="Tzolk&#039;in: Il Calendario Maya" />
+			    				
+				<name type="alternate" sortindex="1" value="Tzolk&#039;in: Kalendarz Majów" />
+			    				
+				<name type="alternate" sortindex="1" value="Tzolk&#039;in: le calendrier maya" />
+			    				
+				<name type="alternate" sortindex="1" value="Tzolk&#039;in: Mayský kalendář" />
+			    				
+				<name type="alternate" sortindex="1" value="Tzolkin: The Mayan Calendar" />
+			    				
+				<name type="alternate" sortindex="1" value="Цольк&#039;ін: Календар мая" />
+			    				
+				<name type="alternate" sortindex="1" value="Цолькин: Календарь Майя" />
+			    				
+				<name type="alternate" sortindex="1" value="ツォルキン：マヤ神聖歴" />
+			    				
+				<name type="alternate" sortindex="1" value="卓尔金历：玛雅日历" />
+			    				
+				<name type="alternate" sortindex="1" value="卓爾金曆:馬雅曆法" />
+			    				
+				<name type="alternate" sortindex="1" value="卓爾金歷：瑪雅日曆" />
+			    				
+				<name type="alternate" sortindex="1" value="촐킨: 마야의 달력" />
+			
+						               													<description>Tzolkin: The Mayan Calendar presents a new game mechanism: dynamic worker placement. Players representing different Mayan tribes place their workers on giant connected gears, and as the gears rotate they take the workers to different action spots.
+
+During a turn, players can either (a) place one or more workers on the lowest visible spot of the gears or (b) pick up one or more workers. When placing workers, they must pay corn, which is used as a currency in the game. When they pick up a worker, they perform certain actions depending on the position of the worker. Actions located "later" on the gears are more valuable, so it's wise to let the time work for you &amp;ndash; but players cannot skip their turn; if they have all their workers on the gears, they have to pick some up.&amp;nbsp;
+
+The game ends after one full revolution of the central Tzolkin gear. There are many paths to victory. Pleasing the gods by placing crystal skulls in deep caves or building many temples are just two of those many paths...
+
+</description>
+										      	               				<yearpublished value="2012" />
+						               				<minplayers value="2" />
+						               				<maxplayers value="4" />
+						      			<poll name="suggested_numplayers" title="User Suggested Number of Players" totalvotes="672">
+			
+		<results numplayers="1">		
+					<result value="Best" numvotes="0" />
+					<result value="Recommended" numvotes="22" />
+					<result value="Not Recommended" numvotes="358" />
+				</results>					
+			
+		<results numplayers="2">		
+					<result value="Best" numvotes="95" />
+					<result value="Recommended" numvotes="388" />
+					<result value="Not Recommended" numvotes="74" />
+				</results>					
+			
+		<results numplayers="3">		
+					<result value="Best" numvotes="189" />
+					<result value="Recommended" numvotes="348" />
+					<result value="Not Recommended" numvotes="11" />
+				</results>					
+			
+		<results numplayers="4">		
+					<result value="Best" numvotes="426" />
+					<result value="Recommended" numvotes="129" />
+					<result value="Not Recommended" numvotes="21" />
+				</results>					
+			
+		<results numplayers="4+">		
+					<result value="Best" numvotes="3" />
+					<result value="Recommended" numvotes="19" />
+					<result value="Not Recommended" numvotes="280" />
+				</results>					
+	</poll>
+<poll-summary name="suggested_numplayers"  title="User Suggested Number of Players">
+  <result name="bestwith" value="Best with 4 players" />
+  <result name="recommmendedwith" value="Recommended with 2–4 players" />
+</poll-summary> 			               				<playingtime value="90" />
+						               				<minplaytime value="90" />
+						               				<maxplaytime value="90" />
+						               				<minage value="13" />
+						      			<poll name="suggested_playerage" title="User Suggested Player Age" totalvotes="120">
+			<results>		
+					<result value="2" numvotes="0" />
+					<result value="3" numvotes="0" />
+					<result value="4" numvotes="0" />
+					<result value="5" numvotes="0" />
+					<result value="6" numvotes="0" />
+					<result value="8" numvotes="7" />
+					<result value="10" numvotes="10" />
+					<result value="12" numvotes="55" />
+					<result value="14" numvotes="44" />
+					<result value="16" numvotes="3" />
+					<result value="18" numvotes="1" />
+					<result value="21 and up" numvotes="0" />
+				</results>					
+	</poll> 			      			<poll name="language_dependence" title="Language Dependence" totalvotes="109">
+			
+		<results>		
+					<result level="1" value="No necessary in-game text" numvotes="107" />
+					<result level="2" value="Some necessary text - easily memorized or small crib sheet" numvotes="1" />
+					<result level="3" value="Moderate in-game text - needs crib sheet or paste ups" numvotes="1" />
+					<result level="4" value="Extensive use of text - massive conversion needed to be playable" numvotes="0" />
+					<result level="5" value="Unplayable in another language" numvotes="0" />
+				</results>					
+	</poll> 			      			 			      				
+		 			
+
+			
+		
+					<link type="boardgamecategory" id="1050" value="Ancient" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamecategory" id="1015" value="Civilization" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamecategory" id="1021" value="Economic" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamecategory" id="1013" value="Farming" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamecategory" id="1082" value="Mythology" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgamemechanic" id="2957" value="Bias" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamemechanic" id="2875" value="End Game Bonuses" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamemechanic" id="2846" value="Once-Per-Game Abilities" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamemechanic" id="2939" value="Track Movement" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamemechanic" id="2829" value="Turn Order: Claim Action" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamemechanic" id="2082" value="Worker Placement" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="73184" value="Components: Calendars" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="61274" value="Components: Gears" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="12803" value="Country: Guatemala" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="10642" value="Country: Mexico" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="70360" value="Digital Implementations: Board Game Arena" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="70361" value="Digital Implementations: Boiteajeux" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="60542" value="Game: Tzolk&#039;in – The Mayan Calendar" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="113768" value="Players: Games with expansions that change player count" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="111632" value="Series: T games (Daniele Tascini)" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="62428" value="Theme: Mayans" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="43639" value="Theme: Native Americans / First Peoples" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="18319" value="Theme: Tropical" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameexpansion" id="134380" value="Tzolk&#039;in: The Mayan Calendar – Mini Expansion 1" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameexpansion" id="142580" value="Tzolk&#039;in: The Mayan Calendar – Mini Expansion 2" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameexpansion" id="143065" value="Tzolk&#039;in: The Mayan Calendar – Tribes &amp; Prophecies" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameexpansion" id="149801" value="Tzolk&#039;in: The Mayan Calendar – Tribes &amp; Prophecies: Ek Chuah" />
+		
+									
+			
+
+			      			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="172359" value="Tzolk&#039;in: The Mayan Calendar – Corn Set" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="309485" value="Tzolk&#039;in: The Mayan Calendar – e-Raptor Insert" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="267465" value="Tzolk&#039;in: The Mayan Calendar – Folded Space Insert" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="464060" value="Tzolk&#039;in: The Mayan Calendar – InMyBox 5th Player Set" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="464058" value="Tzolk&#039;in: The Mayan Calendar – InMyBox Organizer" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="464059" value="Tzolk&#039;in: The Mayan Calendar – InMyBox Tokens Set" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="271961" value="Tzolk&#039;in: The Mayan Calendar – Insert Here Insert" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="283413" value="Tzolk&#039;in: The Mayan Calendar – Meeple Realty Insert" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="283415" value="Tzolk&#039;in: The Mayan Calendar – Pyramids and Token Set" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="273055" value="Tzolk&#039;in: The Mayan Calendar – Score Track Markers – Ziggurats" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="373847" value="Tzolk&#039;in: The Mayan Calendar – Spike Craft Insert" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="273057" value="Tzolk&#039;in: The Mayan Calendar – Starting Player Token – Mayan Lord" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="283414" value="Tzolk&#039;in: The Mayan Calendar – Token Upgrade Kit" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="275002" value="Tzolk&#039;in: The Mayan Calendar – Upgrade Kit" />
+		
+									
+			
+
+			      			
+
+			      			
+
+			      			
+
+			      			
+
+			      			
+
+			      	      	      				
+		 			
+
+			
+		
+					<link type="boardgamedesigner" id="35418" value="Simone Luciani" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamedesigner" id="59986" value="Daniele Tascini" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			      	      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7345" value="Czech Games Edition (CGE)" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="10768" value="Cranio Creations" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="2366" value="Devir" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="23205" value="DiceTree Games" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="36981" value="Feelindigo" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="29194" value="GaGa Games" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="2862" value="The Game Master BV" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="264" value="Heidelberger Spieleverlag" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="1391" value="Hobby Japan" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="8923" value="IELLO" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="25203" value="Lex Games" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7992" value="MINDOK" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="22973" value="More Fun Co., Ltd." />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="30552" value="One Moment Games" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7466" value="Rebel Sp. z o.o." />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="3" value="Rio Grande Games" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="25973" value="Zacatrus" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+</items>

@@ -1,0 +1,2189 @@
+<?xml version="1.0" encoding="utf-8"?><items termsofuse="https://boardgamegeek.com/xmlapi/termsofuse"><item type="boardgame" id="126163">
+         <thumbnail>https://cf.geekdo-images.com/kXf7mDyDYuHg6oe8yTUIEA__small/img/or9mAn4ClljY_wO_zvsLJDqs9tU=/fit-in/200x150/filters:strip_icc()/pic4604439.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/kXf7mDyDYuHg6oe8yTUIEA__original/img/f6-Au0KTnNR4nugSu2U-wPNbZCU=/0x0/filters:format(jpeg)/pic4604439.jpg</image>
+   	                                  				
+				<name type="primary" sortindex="1" value="Tzolk&#039;in: The Mayan Calendar" />
+			
+						                               				
+				<name type="alternate" sortindex="1" value="Tzolk&#039;in: Calendarul Maiaș" />
+			    				
+				<name type="alternate" sortindex="1" value="Tzolk&#039;in: De Kalender van de Maya&#039;s" />
+			    				
+				<name type="alternate" sortindex="1" value="Tzolk&#039;in: Der Maya-Kalender" />
+			    				
+				<name type="alternate" sortindex="1" value="Tzolk&#039;in: El Calendario Maya" />
+			    				
+				<name type="alternate" sortindex="1" value="Tzolk&#039;in: Il Calendario Maya" />
+			    				
+				<name type="alternate" sortindex="1" value="Tzolk&#039;in: Kalendarz Majów" />
+			    				
+				<name type="alternate" sortindex="1" value="Tzolk&#039;in: le calendrier maya" />
+			    				
+				<name type="alternate" sortindex="1" value="Tzolk&#039;in: Mayský kalendář" />
+			    				
+				<name type="alternate" sortindex="1" value="Tzolkin: The Mayan Calendar" />
+			    				
+				<name type="alternate" sortindex="1" value="Цольк&#039;ін: Календар мая" />
+			    				
+				<name type="alternate" sortindex="1" value="Цолькин: Календарь Майя" />
+			    				
+				<name type="alternate" sortindex="1" value="ツォルキン：マヤ神聖歴" />
+			    				
+				<name type="alternate" sortindex="1" value="卓尔金历：玛雅日历" />
+			    				
+				<name type="alternate" sortindex="1" value="卓爾金曆:馬雅曆法" />
+			    				
+				<name type="alternate" sortindex="1" value="卓爾金歷：瑪雅日曆" />
+			    				
+				<name type="alternate" sortindex="1" value="촐킨: 마야의 달력" />
+			
+						               													<description>Tzolkin: The Mayan Calendar presents a new game mechanism: dynamic worker placement. Players representing different Mayan tribes place their workers on giant connected gears, and as the gears rotate they take the workers to different action spots.
+
+During a turn, players can either (a) place one or more workers on the lowest visible spot of the gears or (b) pick up one or more workers. When placing workers, they must pay corn, which is used as a currency in the game. When they pick up a worker, they perform certain actions depending on the position of the worker. Actions located "later" on the gears are more valuable, so it's wise to let the time work for you &amp;ndash; but players cannot skip their turn; if they have all their workers on the gears, they have to pick some up.&amp;nbsp;
+
+The game ends after one full revolution of the central Tzolkin gear. There are many paths to victory. Pleasing the gods by placing crystal skulls in deep caves or building many temples are just two of those many paths...
+
+</description>
+										      	               				<yearpublished value="2012" />
+						               				<minplayers value="2" />
+						               				<maxplayers value="4" />
+						      			<poll name="suggested_numplayers" title="User Suggested Number of Players" totalvotes="672">
+			
+		<results numplayers="1">		
+					<result value="Best" numvotes="0" />
+					<result value="Recommended" numvotes="22" />
+					<result value="Not Recommended" numvotes="358" />
+				</results>					
+			
+		<results numplayers="2">		
+					<result value="Best" numvotes="95" />
+					<result value="Recommended" numvotes="388" />
+					<result value="Not Recommended" numvotes="74" />
+				</results>					
+			
+		<results numplayers="3">		
+					<result value="Best" numvotes="189" />
+					<result value="Recommended" numvotes="348" />
+					<result value="Not Recommended" numvotes="11" />
+				</results>					
+			
+		<results numplayers="4">		
+					<result value="Best" numvotes="426" />
+					<result value="Recommended" numvotes="129" />
+					<result value="Not Recommended" numvotes="21" />
+				</results>					
+			
+		<results numplayers="4+">		
+					<result value="Best" numvotes="3" />
+					<result value="Recommended" numvotes="19" />
+					<result value="Not Recommended" numvotes="280" />
+				</results>					
+	</poll>
+<poll-summary name="suggested_numplayers"  title="User Suggested Number of Players">
+  <result name="bestwith" value="Best with 4 players" />
+  <result name="recommmendedwith" value="Recommended with 2–4 players" />
+</poll-summary> 			               				<playingtime value="90" />
+						               				<minplaytime value="90" />
+						               				<maxplaytime value="90" />
+						               				<minage value="13" />
+						      			<poll name="suggested_playerage" title="User Suggested Player Age" totalvotes="120">
+			<results>		
+					<result value="2" numvotes="0" />
+					<result value="3" numvotes="0" />
+					<result value="4" numvotes="0" />
+					<result value="5" numvotes="0" />
+					<result value="6" numvotes="0" />
+					<result value="8" numvotes="7" />
+					<result value="10" numvotes="10" />
+					<result value="12" numvotes="55" />
+					<result value="14" numvotes="44" />
+					<result value="16" numvotes="3" />
+					<result value="18" numvotes="1" />
+					<result value="21 and up" numvotes="0" />
+				</results>					
+	</poll> 			      			<poll name="language_dependence" title="Language Dependence" totalvotes="109">
+			
+		<results>		
+					<result level="1" value="No necessary in-game text" numvotes="107" />
+					<result level="2" value="Some necessary text - easily memorized or small crib sheet" numvotes="1" />
+					<result level="3" value="Moderate in-game text - needs crib sheet or paste ups" numvotes="1" />
+					<result level="4" value="Extensive use of text - massive conversion needed to be playable" numvotes="0" />
+					<result level="5" value="Unplayable in another language" numvotes="0" />
+				</results>					
+	</poll> 			      			 			      				
+		 			
+
+			
+		
+					<link type="boardgamecategory" id="1050" value="Ancient" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamecategory" id="1015" value="Civilization" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamecategory" id="1021" value="Economic" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamecategory" id="1013" value="Farming" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamecategory" id="1082" value="Mythology" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgamemechanic" id="2957" value="Bias" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamemechanic" id="2875" value="End Game Bonuses" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamemechanic" id="2846" value="Once-Per-Game Abilities" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamemechanic" id="2939" value="Track Movement" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamemechanic" id="2829" value="Turn Order: Claim Action" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamemechanic" id="2082" value="Worker Placement" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="73184" value="Components: Calendars" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="61274" value="Components: Gears" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="12803" value="Country: Guatemala" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="10642" value="Country: Mexico" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="70360" value="Digital Implementations: Board Game Arena" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="70361" value="Digital Implementations: Boiteajeux" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="60542" value="Game: Tzolk&#039;in – The Mayan Calendar" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="113768" value="Players: Games with expansions that change player count" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="111632" value="Series: T games (Daniele Tascini)" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="62428" value="Theme: Mayans" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="43639" value="Theme: Native Americans / First Peoples" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamefamily" id="18319" value="Theme: Tropical" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameexpansion" id="134380" value="Tzolk&#039;in: The Mayan Calendar – Mini Expansion 1" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameexpansion" id="142580" value="Tzolk&#039;in: The Mayan Calendar – Mini Expansion 2" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameexpansion" id="143065" value="Tzolk&#039;in: The Mayan Calendar – Tribes &amp; Prophecies" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameexpansion" id="149801" value="Tzolk&#039;in: The Mayan Calendar – Tribes &amp; Prophecies: Ek Chuah" />
+		
+									
+			
+
+			      			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="172359" value="Tzolk&#039;in: The Mayan Calendar – Corn Set" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="309485" value="Tzolk&#039;in: The Mayan Calendar – e-Raptor Insert" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="267465" value="Tzolk&#039;in: The Mayan Calendar – Folded Space Insert" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="464060" value="Tzolk&#039;in: The Mayan Calendar – InMyBox 5th Player Set" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="464058" value="Tzolk&#039;in: The Mayan Calendar – InMyBox Organizer" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="464059" value="Tzolk&#039;in: The Mayan Calendar – InMyBox Tokens Set" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="271961" value="Tzolk&#039;in: The Mayan Calendar – Insert Here Insert" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="283413" value="Tzolk&#039;in: The Mayan Calendar – Meeple Realty Insert" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="283415" value="Tzolk&#039;in: The Mayan Calendar – Pyramids and Token Set" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="273055" value="Tzolk&#039;in: The Mayan Calendar – Score Track Markers – Ziggurats" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="373847" value="Tzolk&#039;in: The Mayan Calendar – Spike Craft Insert" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="273057" value="Tzolk&#039;in: The Mayan Calendar – Starting Player Token – Mayan Lord" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="283414" value="Tzolk&#039;in: The Mayan Calendar – Token Upgrade Kit" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgameaccessory" id="275002" value="Tzolk&#039;in: The Mayan Calendar – Upgrade Kit" />
+		
+									
+			
+
+			      			
+
+			      			
+
+			      			
+
+			      			
+
+			      			
+
+			      	      	      				
+		 			
+
+			
+		
+					<link type="boardgamedesigner" id="35418" value="Simone Luciani" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamedesigner" id="59986" value="Daniele Tascini" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			      	      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7345" value="Czech Games Edition (CGE)" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="10768" value="Cranio Creations" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="2366" value="Devir" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="23205" value="DiceTree Games" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="36981" value="Feelindigo" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="29194" value="GaGa Games" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="2862" value="The Game Master BV" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="264" value="Heidelberger Spieleverlag" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="1391" value="Hobby Japan" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="8923" value="IELLO" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="25203" value="Lex Games" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7992" value="MINDOK" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="22973" value="More Fun Co., Ltd." />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="30552" value="One Moment Games" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7466" value="Rebel Sp. z o.o." />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="3" value="Rio Grande Games" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="25973" value="Zacatrus" />
+		
+									
+			
+
+			
+	
+
+	<versions><item type="boardgameversion" id="250967">
+         <thumbnail>https://cf.geekdo-images.com/kXf7mDyDYuHg6oe8yTUIEA__small/img/or9mAn4ClljY_wO_zvsLJDqs9tU=/fit-in/200x150/filters:strip_icc()/pic4604439.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/kXf7mDyDYuHg6oe8yTUIEA__original/img/f6-Au0KTnNR4nugSu2U-wPNbZCU=/0x0/filters:format(jpeg)/pic4604439.jpg</image>
+   			<canonicalname value="Tzolk\&#039;in: The Mayan Calendar"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="CGE-only English edition 2014" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7345" value="Czech Games Edition (CGE)" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			               				<yearpublished value="2014" />
+						               				<productcode value="CGE00019" />
+						               				<width value="11.7" />
+						               				<length value="11.7" />
+						               				<depth value="2.8" />
+						               				<weight value="3.30693" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2184" value="English" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="408947">
+         <thumbnail>https://cf.geekdo-images.com/Wh3Hz7M-BTj4OC1xb6fRJA__small/img/Fx5kh9oUet4tMlSLl-eesZD0s5Y=/fit-in/200x150/filters:strip_icc()/pic4170804.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/Wh3Hz7M-BTj4OC1xb6fRJA__original/img/EZ9MQ97GywxGj_hjvabx5ajU-Vc=/0x0/filters:format(jpeg)/pic4170804.jpg</image>
+   			<canonicalname value="卓爾金歷：瑪雅日曆"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Chinese edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="30552" value="One Moment Games" />
+		
+									
+			
+
+			      			
+
+			               				<yearpublished value="2017" />
+						               				<productcode value="" />
+						               				<width value="0" />
+						               				<length value="0" />
+						               				<depth value="0" />
+						               				<weight value="3.5274" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2181" value="Chinese" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="261341">
+         <thumbnail>https://cf.geekdo-images.com/ZjuaIm61TesVCMDbzURz7w__small/img/vKj3FPJqqTmw28Bq1pfi8HIHhjQ=/fit-in/200x150/filters:strip_icc()/pic2335945.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/ZjuaIm61TesVCMDbzURz7w__original/img/d3pIXlWWsP9OWMy_6JeGShsZg6s=/0x0/filters:format(jpeg)/pic2335945.jpg</image>
+   			<canonicalname value="Tzolk\&#039;in: Mayský kalendář"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Czech edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7992" value="MINDOK" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			               				<yearpublished value="2012" />
+						               				<productcode value="" />
+						               				<width value="11.7" />
+						               				<length value="11.7" />
+						               				<depth value="2.8" />
+						               				<weight value="0" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2180" value="Czech" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="192836">
+         <thumbnail>https://cf.geekdo-images.com/V23bj38NWPeSAT5H5vfqvA__small/img/KToNrdixz0KXxFukEmfgyfcf56A=/fit-in/200x150/filters:strip_icc()/pic1568748.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/V23bj38NWPeSAT5H5vfqvA__original/img/YEnQ0vGvn0_bMAKrWm3rZNhmzz0=/0x0/filters:format(jpeg)/pic1568748.jpg</image>
+   			<canonicalname value="Tzolk\&#039;in: De Kalender van de Maya\&#039;s"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Dutch edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="2862" value="The Game Master BV" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			               				<yearpublished value="2013" />
+						               				<productcode value="" />
+						               				<width value="11.7" />
+						               				<length value="11.7" />
+						               				<depth value="2.8" />
+						               				<weight value="0" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2183" value="Dutch" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="513820">
+         <thumbnail>https://cf.geekdo-images.com/0_FMITvAG50VxJzooN1mnA__small/img/wawyltrOHXuqSDM4N03MDlcthz0=/fit-in/200x150/filters:strip_icc()/pic5487128.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/0_FMITvAG50VxJzooN1mnA__original/img/PHv9T3AUTfHx5g_VtN9XH514iCQ=/0x0/filters:format(jpeg)/pic5487128.jpg</image>
+   			<canonicalname value="Tzolk\&#039;in: De Kalender van de Maya\&#039;s"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Dutch edition with award nomination logos" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="2862" value="The Game Master BV" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			               				<yearpublished value="2013" />
+						               				<productcode value="TMG-TZO-01, Batch 2013-01" />
+						               				<width value="11.6929" />
+						               				<length value="11.6929" />
+						               				<depth value="2.83465" />
+						               				<weight value="3.63763" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2183" value="Dutch" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="183846">
+         <thumbnail>https://cf.geekdo-images.com/FGWnRer58m7nNzVxffgc8g__small/img/h5TV3wwfUbOSlyAUjmB49VvJvUI=/fit-in/200x150/filters:strip_icc()/pic5557766.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/FGWnRer58m7nNzVxffgc8g__original/img/CecCNo52-C4bQil6sI56He7UojE=/0x0/filters:format(jpeg)/pic5557766.jpg</image>
+   			<canonicalname value="Tzolk\&#039;in: le calendrier maya"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="French edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="8923" value="IELLO" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			               				<yearpublished value="2012" />
+						               				<productcode value="" />
+						               				<width value="11.7" />
+						               				<length value="11.7" />
+						               				<depth value="2.8" />
+						               				<weight value="0" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2187" value="French" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="182429">
+         <thumbnail>https://cf.geekdo-images.com/418eul51i1SAJqU2TqlNJw__small/img/TAB6ynh6Qsua6gJbi6O2O3U1Ejc=/fit-in/200x150/filters:strip_icc()/pic1452346.png</thumbnail>
+      <image>https://cf.geekdo-images.com/418eul51i1SAJqU2TqlNJw__original/img/VAIAaqusKWAQha6GAI6gEinQT4k=/0x0/filters:format(png)/pic1452346.png</image>
+   			<canonicalname value="Tzolk\&#039;in: Der Maya-Kalender"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="German first edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="264" value="Heidelberger Spieleverlag" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			               				<yearpublished value="2012" />
+						               				<productcode value="" />
+						               				<width value="11.6" />
+						               				<length value="11.6" />
+						               				<depth value="2.8" />
+						               				<weight value="3.5274" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2188" value="German" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="390004">
+         <thumbnail>https://cf.geekdo-images.com/k6H4Db2rbKQEW58Sftjpxg__small/img/rtEemxkKfFGDFxBDKo9eGWGSOuA=/fit-in/200x150/filters:strip_icc()/pic2388140.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/k6H4Db2rbKQEW58Sftjpxg__original/img/ESm5gYbQ8Hh7DkK9DizsVQSs5J0=/0x0/filters:format(jpeg)/pic2388140.jpg</image>
+   			<canonicalname value="Tzolk\&#039;in: Der Maya-Kalender"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="German second edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7345" value="Czech Games Edition (CGE)" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="264" value="Heidelberger Spieleverlag" />
+		
+									
+			
+
+			      			
+
+			               				<yearpublished value="2013" />
+						               				<productcode value="" />
+						               				<width value="11.7" />
+						               				<length value="11.7" />
+						               				<depth value="2.8" />
+						               				<weight value="0" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2188" value="German" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="560716">
+         <thumbnail>https://cf.geekdo-images.com/_CJVYNB3Uhsa49kU8kDL4g__small/img/fIzOQBblBt2ZW6PbdyqZds7uyH0=/fit-in/200x150/filters:strip_icc()/pic6125369.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/_CJVYNB3Uhsa49kU8kDL4g__original/img/j7snxfGwhpoq61BBII6rUKr0dbE=/0x0/filters:format(jpeg)/pic6125369.jpg</image>
+   			<canonicalname value="Tzolk\&#039;in: Der Maya-Kalender"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="German third edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7345" value="Czech Games Edition (CGE)" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			               				<yearpublished value="2018" />
+						               				<productcode value="CZ025" />
+						               				<width value="11.7" />
+						               				<length value="11.7" />
+						               				<depth value="2.8" />
+						               				<weight value="3.17025" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2188" value="German" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="185724">
+         <thumbnail>https://cf.geekdo-images.com/LfJi_J1bCvDNcIvKgkuSMA__small/img/DMAU65BIh0MqqwHDj7KhT4UsIps=/fit-in/200x150/filters:strip_icc()/pic1489121.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/LfJi_J1bCvDNcIvKgkuSMA__original/img/3SoYssXlU88uTAXR7sUSCRGt8Ho=/0x0/filters:format(jpeg)/pic1489121.jpg</image>
+   			<canonicalname value="Tzolk\&#039;in: Il Calendario Maya"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Italian first edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="10768" value="Cranio Creations" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			               				<yearpublished value="2012" />
+						               				<productcode value="" />
+						               				<width value="11.7" />
+						               				<length value="11.7" />
+						               				<depth value="2.8" />
+						               				<weight value="0" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2193" value="Italian" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="569405">
+         <thumbnail>https://cf.geekdo-images.com/WK3qzBu85_Lb10aZWfFKaQ__small/img/v5nfVBT5qmVw5JHQL9jyph8RRN4=/fit-in/200x150/filters:strip_icc()/pic6255464.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/WK3qzBu85_Lb10aZWfFKaQ__original/img/ysKcuLH8GuZ8Abpm94Uqkt1rWtY=/0x0/filters:format(jpeg)/pic6255464.jpg</image>
+   			<canonicalname value="Tzolk\&#039;in: Il Calendario Maya"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Italian second edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="10768" value="Cranio Creations" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			               				<yearpublished value="2021" />
+						               				<productcode value="CC015" />
+						               				<width value="11.6929" />
+						               				<length value="11.6929" />
+						               				<depth value="2.75591" />
+						               				<weight value="0" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2193" value="Italian" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="251272">
+         <thumbnail>https://cf.geekdo-images.com/vWSSRdxWxCMGYmj5RbdRDA__small/img/L8Bo39CWV3NGy-BoP6-iyNIq1Hk=/fit-in/200x150/filters:strip_icc()/pic2230328.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/vWSSRdxWxCMGYmj5RbdRDA__original/img/rUTT0m1uSRDNv9JqEoPfCTViz1I=/0x0/filters:format(jpeg)/pic2230328.jpg</image>
+   			<canonicalname value="ツォルキン：マヤ神聖歴"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Japanese edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="1391" value="Hobby Japan" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			               				<yearpublished value="2014" />
+						               				<productcode value="" />
+						               				<width value="0" />
+						               				<length value="0" />
+						               				<depth value="0" />
+						               				<weight value="0" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2194" value="Japanese" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="380904">
+         <thumbnail>https://cf.geekdo-images.com/xN2oolSWYcJWHdy3HlRviw__small/img/wEpBvDKUdRY0CljzVOXmkcoEL4E=/fit-in/200x150/filters:strip_icc()/pic3859810.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/xN2oolSWYcJWHdy3HlRviw__original/img/-DjQKpekF43ngMxEiiYnTd6sqr4=/0x0/filters:format(jpeg)/pic3859810.jpg</image>
+   			<canonicalname value="촐킨: 마야의 달력"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Korean edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="23205" value="DiceTree Games" />
+		
+									
+			
+
+			      			
+
+			               				<yearpublished value="2017" />
+						               				<productcode value="" />
+						               				<width value="11.7" />
+						               				<length value="11.7" />
+						               				<depth value="2.8" />
+						               				<weight value="0" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2195" value="Korean" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="183538">
+         <thumbnail>https://cf.geekdo-images.com/1Wst2h6ihQdynMnpusDlQA__small/img/gxZV2nVoMWLbr9uwWYWhXTV0PcE=/fit-in/200x150/filters:strip_icc()/pic1441359.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/1Wst2h6ihQdynMnpusDlQA__original/img/_GrmcaBo6btWG3Mg4m8ztCKaKU8=/0x0/filters:format(jpeg)/pic1441359.jpg</image>
+   			<canonicalname value="Tzolk\&#039;in: Kalendarz Majów"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Polish edition 2012" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7466" value="Rebel Sp. z o.o." />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			               				<yearpublished value="2012" />
+						               				<productcode value="" />
+						               				<width value="11.7" />
+						               				<length value="11.7" />
+						               				<depth value="2.8" />
+						               				<weight value="0" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2199" value="Polish" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="747035">
+         <thumbnail>https://cf.geekdo-images.com/bQPwEbygKx1ptT5IAbmMPw__small/img/LFEOQhq5pLFf_djhEHftSzapQ2c=/fit-in/200x150/filters:strip_icc()/pic8715292.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/bQPwEbygKx1ptT5IAbmMPw__original/img/9SvqizqqM_Tvr5g7YZksTQGRPB8=/0x0/filters:format(jpeg)/pic8715292.jpg</image>
+   			<canonicalname value="Tzolk\&#039;in: Kalendarz Majów"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Polish edition 2021" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7345" value="Czech Games Edition (CGE)" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7466" value="Rebel Sp. z o.o." />
+		
+									
+			
+
+			      			
+
+			               				<yearpublished value="2021" />
+						               				<productcode value="" />
+						               				<width value="11.7" />
+						               				<length value="11.7" />
+						               				<depth value="2.8" />
+						               				<weight value="0" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2199" value="Polish" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="393676">
+         <thumbnail>https://cf.geekdo-images.com/w2ClL5EstaUm27deF4IN-Q__small/img/syMNg8K9Hmg7DcenY3gi-hcRbkU=/fit-in/200x150/filters:strip_icc()/pic4205564.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/w2ClL5EstaUm27deF4IN-Q__original/img/YGbBOpF3ItPp4WgMKetbT5stcgs=/0x0/filters:format(jpeg)/pic4205564.jpg</image>
+   			<canonicalname value="Tzolk\&#039;in: El Calendario Maya"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Portuguese/Spanish edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="2366" value="Devir" />
+		
+									
+			
+
+			      			
+
+			               				<yearpublished value="2018" />
+						               				<productcode value="" />
+						               				<width value="11.7" />
+						               				<length value="11.7" />
+						               				<depth value="2.8" />
+						               				<weight value="3.5274" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2200" value="Portuguese" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="language" id="2203" value="Spanish" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="168683">
+         <thumbnail>https://cf.geekdo-images.com/zP-C1l3CAIgmo98LJH23gw__small/img/3EXXx29zk9aLKlFZnX6_uyTErV0=/fit-in/200x150/filters:strip_icc()/pic1436763.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/zP-C1l3CAIgmo98LJH23gw__original/img/3gi3gj_QnxU46LqfogeklE6YN8g=/0x0/filters:format(jpeg)/pic1436763.jpg</image>
+   			<canonicalname value="Tzolk\&#039;in: The Mayan Calendar"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Rio Grande/CGE English edition 2012" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7345" value="Czech Games Edition (CGE)" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="3" value="Rio Grande Games" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			               				<yearpublished value="2012" />
+						               				<productcode value="RIO490" />
+						               				<width value="11.8" />
+						               				<length value="11.8" />
+						               				<depth value="3" />
+						               				<weight value="3.7" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2184" value="English" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="511473">
+         <thumbnail>https://cf.geekdo-images.com/Pudgh4Nx1cK7pzJ1uMxstw__small/img/EYW9t1dxO_WZT8y59tOLIMKTvrU=/fit-in/200x150/filters:strip_icc()/pic5459643.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/Pudgh4Nx1cK7pzJ1uMxstw__original/img/gRLWaa8dApaiGCa5oPKac1U_yzw=/0x0/filters:format(jpeg)/pic5459643.jpg</image>
+   			<canonicalname value="Tzolk\&#039;in: The Mayan Calendar"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Rio Grande/CGE English edition 2014" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7345" value="Czech Games Edition (CGE)" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="3" value="Rio Grande Games" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			               				<yearpublished value="2014" />
+						               				<productcode value="" />
+						               				<width value="11.7" />
+						               				<length value="11.7" />
+						               				<depth value="2.8" />
+						               				<weight value="0" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2184" value="English" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="209563">
+         <thumbnail>https://cf.geekdo-images.com/TVVs8ifBOBYzA4wfa2Em2A__small/img/qweBq9AnNH4mDQKA_O3dAK7ZfxM=/fit-in/200x150/filters:strip_icc()/pic1667247.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/TVVs8ifBOBYzA4wfa2Em2A__original/img/LEjC00w1tninEiFZB9_3Fjt6kh4=/0x0/filters:format(jpeg)/pic1667247.jpg</image>
+   			<canonicalname value="Tzolk\&#039;in: Calendarul Maiaș"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Romanian edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="25203" value="Lex Games" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			               				<yearpublished value="2013" />
+						               				<productcode value="" />
+						               				<width value="11.7" />
+						               				<length value="11.7" />
+						               				<depth value="2.8" />
+						               				<weight value="0" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2201" value="Romanian" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="340167">
+         <thumbnail>https://cf.geekdo-images.com/MJDLuk8YddteSQBDm1DEAw__small/img/_saqSjhaNLwTkglZHnU4dPtTxTk=/fit-in/200x150/filters:strip_icc()/pic3357264.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/MJDLuk8YddteSQBDm1DEAw__original/img/28w2kIngCv8vkTDjG9tmYwDXSYA=/0x0/filters:format(jpeg)/pic3357264.jpg</image>
+   			<canonicalname value="Цолькин: Календарь Майя"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Russian edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="29194" value="GaGa Games" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			               				<yearpublished value="2016" />
+						               				<productcode value="GG040" />
+						               				<width value="11.6142" />
+						               				<length value="11.6142" />
+						               				<depth value="2.75591" />
+						               				<weight value="3.61558" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2202" value="Russian" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="605838">
+         <thumbnail>https://cf.geekdo-images.com/GUPxKSgTyj-OZxEYnz3MsA__small/img/RJW9fCmF4gmY7MMnnRTRsHuirds=/fit-in/200x150/filters:strip_icc()/pic9275237.jpg</thumbnail>
+      <image>https://cf.geekdo-images.com/GUPxKSgTyj-OZxEYnz3MsA__original/img/xM-45uEzh7AXU4dcox_e5p7j1_s=/0x0/filters:format(jpeg)/pic9275237.jpg</image>
+   			<canonicalname value="卓尔金历：玛雅日历"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Simplified Chinese edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7345" value="Czech Games Edition (CGE)" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="22973" value="More Fun Co., Ltd." />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="30552" value="One Moment Games" />
+		
+									
+			
+
+			      			
+
+			               				<yearpublished value="2021" />
+						               				<productcode value="" />
+						               				<width value="11.7" />
+						               				<length value="11.7" />
+						               				<depth value="2.8" />
+						               				<weight value="0" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2181" value="Chinese" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="245254">
+         <thumbnail>https://cf.geekdo-images.com/OFMDRWLzRCOk_aZeT_ljPQ__small/img/sqdI0U-rOEadVY5UQaK1ZAKg5v0=/fit-in/200x150/filters:strip_icc()/pic2068090.png</thumbnail>
+      <image>https://cf.geekdo-images.com/OFMDRWLzRCOk_aZeT_ljPQ__original/img/Wl0AX-eQtxWznS-ulWhfvFJMx_U=/0x0/filters:format(png)/pic2068090.png</image>
+   			<canonicalname value="Tzolk\&#039;in: El Calendario Maya"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Spanish first edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="25973" value="Zacatrus" />
+		
+									
+			
+
+			      				
+		 			
+
+			
+		
+					<link type="boardgameartist" id="11961" value="Milan Vavroň" />
+		
+									
+			
+
+			               				<yearpublished value="2014" />
+						               				<productcode value="" />
+						               				<width value="11.7" />
+						               				<length value="11.7" />
+						               				<depth value="2.8" />
+						               				<weight value="0" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2203" value="Spanish" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+<item type="boardgameversion" id="666890">
+         <thumbnail>https://cf.geekdo-images.com/RrTwRzDCBFyZgDaXtKP5yg__small/img/hPpYDQ4Gdubw1ScXeNDM5tVb-i4=/fit-in/200x150/filters:strip_icc()/pic7566927.png</thumbnail>
+      <image>https://cf.geekdo-images.com/RrTwRzDCBFyZgDaXtKP5yg__original/img/bWJMa2mTH4JOQS1wSWV-g2TB68s=/0x0/filters:format(png)/pic7566927.png</image>
+   			<canonicalname value="Цольк\&#039;ін: Календар мая"></canonicalname>
+	         				
+		 			
+
+			
+		
+					<link type="boardgameversion" id="126163" value="Tzolk&#039;in: The Mayan Calendar" inbound="true"/>
+		
+									
+			
+
+			                               				
+				<name type="primary" sortindex="1" value="Ukrainian edition" />
+			
+						                           
+						      				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="7345" value="Czech Games Edition (CGE)" />
+		
+									
+				
+		 			
+
+			
+		
+					<link type="boardgamepublisher" id="36981" value="Feelindigo" />
+		
+									
+			
+
+			      			
+
+			               				<yearpublished value="2023" />
+						               				<productcode value="FI23053" />
+						               				<width value="11.7" />
+						               				<length value="11.7" />
+						               				<depth value="2.8" />
+						               				<weight value="0" />
+						      				
+		 			
+
+			
+		
+					<link type="language" id="2665" value="Ukrainian" />
+		
+									
+			
+
+			
+	
+
+	
+
+	
+	
+	
+   
+	
+          
+</item>
+</versions>
+
+	
+	
+	
+   		<statistics page="1">
+								<ratings >
+			<usersrated value="43019" />
+			<average value="7.84173" />
+			<bayesaverage value="7.67728" />
+
+			<ranks>
+															<rank type="subtype" id="1" name="boardgame" friendlyname="Board Game Rank" value="77" bayesaverage="7.67728" />
+																				<rank type="family" id="5497" name="strategygames" friendlyname="Strategy Game Rank" value="69" bayesaverage="7.69839" />
+												</ranks>
+
+			<stddev value="1.27079" />
+			<median value="0" />
+			<owned value="51099" />
+			<trading value="469" />
+			<wanting value="1332" />
+			<wishing value="9774" />
+			<numcomments value="6188" />
+			<numweights value="2119" />
+			<averageweight value="3.6626" />
+			</ratings>
+								</statistics>
+     
+	
+          
+</item>
+</items>

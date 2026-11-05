@@ -1,0 +1,1024 @@
+{
+  "correlationId": "golden",
+  "status": "RESULT_STATUS_RESULT",
+  "game": {
+    "ageRatings": [
+      {
+        "authority": "AGE_RATING_AUTHORITY_PEGI",
+        "rating": "PEGI 7",
+        "synopsis": "This game was rated PEGI 7 for mild violence to fantasy characters and pictures or sounds likely to be scary to young children. It is not suitable for persons below 7 years of age. "
+      },
+      {
+        "authority": "AGE_RATING_AUTHORITY_ACB",
+        "rating": "PG",
+        "synopsis": "Mild Violence, Mild Themes, Scary Scenes"
+      },
+      {
+        "authority": "AGE_RATING_AUTHORITY_CERO",
+        "rating": "B"
+      },
+      {
+        "authority": "AGE_RATING_AUTHORITY_USK",
+        "rating": "USK 12"
+      },
+      {
+        "authority": "AGE_RATING_AUTHORITY_ESRB",
+        "rating": "E10+"
+      }
+    ],
+    "artists": [],
+    "averageRating": 91.52377623821606,
+    "categories": [
+      {
+        "externalId": "8",
+        "name": "Platform"
+      },
+      {
+        "externalId": "31",
+        "name": "Adventure"
+      },
+      {
+        "externalId": "32",
+        "name": "Indie"
+      }
+    ],
+    "contentType": "CONTENT_TYPE_BASE_GAME",
+    "description": "A 2D metroidvania with an emphasis on close combat and exploration in which the player enters the once-prosperous now-bleak insect kingdom of Hallownest, travels through its various districts, meets friendly inhabitants, fights hostile ones and uncovers the kingdom's history while improving their combat abilities and movement arsenal by fighting bosses and accessing out-of-the-way areas.",
+    "designers": [
+      {
+        "externalId": "7263",
+        "name": "Team Cherry"
+      }
+    ],
+    "dlc": [],
+    "externalId": "14593",
+    "families": [
+      {
+        "externalId": "5702",
+        "name": "Hollow Knight",
+        "familyType": "collection"
+      }
+    ],
+    "imageUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big_2x/cobfzp.jpg",
+    "mechanics": [],
+    "metadataKeys": [],
+    "metadataValues": [],
+    "platforms": [
+      {
+        "externalId": "169",
+        "name": "Xbox Series X|S",
+        "abbreviation": "Series X|S",
+        "platformType": "PLATFORM_TYPE_CONSOLE"
+      },
+      {
+        "externalId": "48",
+        "name": "PlayStation 4",
+        "abbreviation": "PS4",
+        "platformType": "PLATFORM_TYPE_CONSOLE"
+      },
+      {
+        "externalId": "3",
+        "name": "Linux",
+        "abbreviation": "Linux",
+        "platformType": "PLATFORM_TYPE_PC"
+      },
+      {
+        "externalId": "508",
+        "name": "Nintendo Switch 2",
+        "abbreviation": "Switch 2",
+        "platformType": "PLATFORM_TYPE_CONSOLE"
+      },
+      {
+        "externalId": "6",
+        "name": "PC (Microsoft Windows)",
+        "abbreviation": "PC",
+        "platformType": "PLATFORM_TYPE_PC"
+      },
+      {
+        "externalId": "167",
+        "name": "PlayStation 5",
+        "abbreviation": "PS5",
+        "platformType": "PLATFORM_TYPE_CONSOLE"
+      },
+      {
+        "externalId": "14",
+        "name": "Mac",
+        "abbreviation": "Mac",
+        "platformType": "PLATFORM_TYPE_PC"
+      },
+      {
+        "externalId": "41",
+        "name": "Wii U",
+        "abbreviation": "WiiU",
+        "platformType": "PLATFORM_TYPE_CONSOLE"
+      },
+      {
+        "externalId": "49",
+        "name": "Xbox One",
+        "abbreviation": "XONE",
+        "platformType": "PLATFORM_TYPE_CONSOLE"
+      },
+      {
+        "externalId": "130",
+        "name": "Nintendo Switch",
+        "abbreviation": "Switch",
+        "platformType": "PLATFORM_TYPE_CONSOLE"
+      }
+    ],
+    "publishers": [
+      {
+        "externalId": "7263",
+        "name": "Team Cherry",
+        "website": "http://teamcherry.com.au/"
+      }
+    ],
+    "ratingsCount": 2279,
+    "releases": [
+      {
+        "externalId": "607803",
+        "platform": {
+          "externalId": "130",
+          "name": "Nintendo Switch",
+          "abbreviation": "Switch",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "releaseDate": "2018-06-12",
+        "releaseYear": 2018,
+        "localizations": [],
+        "languages": [
+          {
+            "ietfTag": "fr",
+            "iso6393": "fra",
+            "iso6391": "fr",
+            "name": "French"
+          },
+          {
+            "ietfTag": "en-US",
+            "iso6393": "eng",
+            "iso6391": "en",
+            "name": "English (US)"
+          },
+          {
+            "ietfTag": "de",
+            "iso6393": "deu",
+            "iso6391": "de",
+            "name": "German"
+          },
+          {
+            "ietfTag": "es-ES",
+            "iso6393": "spa",
+            "iso6391": "es",
+            "name": "Spanish (Spain)"
+          },
+          {
+            "ietfTag": "ru",
+            "iso6393": "rus",
+            "iso6391": "ru",
+            "name": "Russian"
+          },
+          {
+            "ietfTag": "ja",
+            "iso6393": "jpn",
+            "iso6391": "ja",
+            "name": "Japanese"
+          },
+          {
+            "ietfTag": "pt-BR",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Brazil)"
+          },
+          {
+            "ietfTag": "ko",
+            "iso6393": "kor",
+            "iso6391": "ko",
+            "name": "Korean"
+          },
+          {
+            "ietfTag": "zh-Hans",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Simplified)"
+          },
+          {
+            "ietfTag": "it",
+            "iso6393": "ita",
+            "iso6391": "it",
+            "name": "Italian"
+          },
+          {
+            "ietfTag": "pt-PT",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Portugal)"
+          },
+          {
+            "ietfTag": "zh-Hant",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Traditional)"
+          }
+        ]
+      },
+      {
+        "externalId": "716337",
+        "platform": {
+          "externalId": "41",
+          "name": "Wii U",
+          "abbreviation": "WiiU",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "releaseDate": "2017-12-31",
+        "releaseYear": 2017,
+        "localizations": [],
+        "languages": [
+          {
+            "ietfTag": "fr",
+            "iso6393": "fra",
+            "iso6391": "fr",
+            "name": "French"
+          },
+          {
+            "ietfTag": "en-US",
+            "iso6393": "eng",
+            "iso6391": "en",
+            "name": "English (US)"
+          },
+          {
+            "ietfTag": "de",
+            "iso6393": "deu",
+            "iso6391": "de",
+            "name": "German"
+          },
+          {
+            "ietfTag": "es-ES",
+            "iso6393": "spa",
+            "iso6391": "es",
+            "name": "Spanish (Spain)"
+          },
+          {
+            "ietfTag": "ru",
+            "iso6393": "rus",
+            "iso6391": "ru",
+            "name": "Russian"
+          },
+          {
+            "ietfTag": "ja",
+            "iso6393": "jpn",
+            "iso6391": "ja",
+            "name": "Japanese"
+          },
+          {
+            "ietfTag": "pt-BR",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Brazil)"
+          },
+          {
+            "ietfTag": "ko",
+            "iso6393": "kor",
+            "iso6391": "ko",
+            "name": "Korean"
+          },
+          {
+            "ietfTag": "zh-Hans",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Simplified)"
+          },
+          {
+            "ietfTag": "it",
+            "iso6393": "ita",
+            "iso6391": "it",
+            "name": "Italian"
+          },
+          {
+            "ietfTag": "pt-PT",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Portugal)"
+          },
+          {
+            "ietfTag": "zh-Hant",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Traditional)"
+          }
+        ]
+      },
+      {
+        "externalId": "499738",
+        "platform": {
+          "externalId": "3",
+          "name": "Linux",
+          "abbreviation": "Linux",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "releaseDate": "2017-02-24",
+        "releaseYear": 2017,
+        "localizations": [],
+        "languages": [
+          {
+            "ietfTag": "fr",
+            "iso6393": "fra",
+            "iso6391": "fr",
+            "name": "French"
+          },
+          {
+            "ietfTag": "en-US",
+            "iso6393": "eng",
+            "iso6391": "en",
+            "name": "English (US)"
+          },
+          {
+            "ietfTag": "de",
+            "iso6393": "deu",
+            "iso6391": "de",
+            "name": "German"
+          },
+          {
+            "ietfTag": "es-ES",
+            "iso6393": "spa",
+            "iso6391": "es",
+            "name": "Spanish (Spain)"
+          },
+          {
+            "ietfTag": "ru",
+            "iso6393": "rus",
+            "iso6391": "ru",
+            "name": "Russian"
+          },
+          {
+            "ietfTag": "ja",
+            "iso6393": "jpn",
+            "iso6391": "ja",
+            "name": "Japanese"
+          },
+          {
+            "ietfTag": "pt-BR",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Brazil)"
+          },
+          {
+            "ietfTag": "ko",
+            "iso6393": "kor",
+            "iso6391": "ko",
+            "name": "Korean"
+          },
+          {
+            "ietfTag": "zh-Hans",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Simplified)"
+          },
+          {
+            "ietfTag": "it",
+            "iso6393": "ita",
+            "iso6391": "it",
+            "name": "Italian"
+          },
+          {
+            "ietfTag": "pt-PT",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Portugal)"
+          },
+          {
+            "ietfTag": "zh-Hant",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Traditional)"
+          }
+        ]
+      },
+      {
+        "externalId": "714898",
+        "platform": {
+          "externalId": "49",
+          "name": "Xbox One",
+          "abbreviation": "XONE",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "releaseDate": "2018-09-25",
+        "releaseYear": 2018,
+        "localizations": [],
+        "languages": [
+          {
+            "ietfTag": "fr",
+            "iso6393": "fra",
+            "iso6391": "fr",
+            "name": "French"
+          },
+          {
+            "ietfTag": "en-US",
+            "iso6393": "eng",
+            "iso6391": "en",
+            "name": "English (US)"
+          },
+          {
+            "ietfTag": "de",
+            "iso6393": "deu",
+            "iso6391": "de",
+            "name": "German"
+          },
+          {
+            "ietfTag": "es-ES",
+            "iso6393": "spa",
+            "iso6391": "es",
+            "name": "Spanish (Spain)"
+          },
+          {
+            "ietfTag": "ru",
+            "iso6393": "rus",
+            "iso6391": "ru",
+            "name": "Russian"
+          },
+          {
+            "ietfTag": "ja",
+            "iso6393": "jpn",
+            "iso6391": "ja",
+            "name": "Japanese"
+          },
+          {
+            "ietfTag": "pt-BR",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Brazil)"
+          },
+          {
+            "ietfTag": "ko",
+            "iso6393": "kor",
+            "iso6391": "ko",
+            "name": "Korean"
+          },
+          {
+            "ietfTag": "zh-Hans",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Simplified)"
+          },
+          {
+            "ietfTag": "it",
+            "iso6393": "ita",
+            "iso6391": "it",
+            "name": "Italian"
+          },
+          {
+            "ietfTag": "pt-PT",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Portugal)"
+          },
+          {
+            "ietfTag": "zh-Hant",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Traditional)"
+          }
+        ]
+      },
+      {
+        "externalId": "499739",
+        "platform": {
+          "externalId": "14",
+          "name": "Mac",
+          "abbreviation": "Mac",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "releaseDate": "2017-04-11",
+        "releaseYear": 2017,
+        "localizations": [],
+        "languages": [
+          {
+            "ietfTag": "fr",
+            "iso6393": "fra",
+            "iso6391": "fr",
+            "name": "French"
+          },
+          {
+            "ietfTag": "en-US",
+            "iso6393": "eng",
+            "iso6391": "en",
+            "name": "English (US)"
+          },
+          {
+            "ietfTag": "de",
+            "iso6393": "deu",
+            "iso6391": "de",
+            "name": "German"
+          },
+          {
+            "ietfTag": "es-ES",
+            "iso6393": "spa",
+            "iso6391": "es",
+            "name": "Spanish (Spain)"
+          },
+          {
+            "ietfTag": "ru",
+            "iso6393": "rus",
+            "iso6391": "ru",
+            "name": "Russian"
+          },
+          {
+            "ietfTag": "ja",
+            "iso6393": "jpn",
+            "iso6391": "ja",
+            "name": "Japanese"
+          },
+          {
+            "ietfTag": "pt-BR",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Brazil)"
+          },
+          {
+            "ietfTag": "ko",
+            "iso6393": "kor",
+            "iso6391": "ko",
+            "name": "Korean"
+          },
+          {
+            "ietfTag": "zh-Hans",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Simplified)"
+          },
+          {
+            "ietfTag": "it",
+            "iso6393": "ita",
+            "iso6391": "it",
+            "name": "Italian"
+          },
+          {
+            "ietfTag": "pt-PT",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Portugal)"
+          },
+          {
+            "ietfTag": "zh-Hant",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Traditional)"
+          }
+        ]
+      },
+      {
+        "externalId": "714899",
+        "platform": {
+          "externalId": "48",
+          "name": "PlayStation 4",
+          "abbreviation": "PS4",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "releaseDate": "2018-09-25",
+        "releaseYear": 2018,
+        "localizations": [],
+        "languages": [
+          {
+            "ietfTag": "fr",
+            "iso6393": "fra",
+            "iso6391": "fr",
+            "name": "French"
+          },
+          {
+            "ietfTag": "en-US",
+            "iso6393": "eng",
+            "iso6391": "en",
+            "name": "English (US)"
+          },
+          {
+            "ietfTag": "de",
+            "iso6393": "deu",
+            "iso6391": "de",
+            "name": "German"
+          },
+          {
+            "ietfTag": "es-ES",
+            "iso6393": "spa",
+            "iso6391": "es",
+            "name": "Spanish (Spain)"
+          },
+          {
+            "ietfTag": "ru",
+            "iso6393": "rus",
+            "iso6391": "ru",
+            "name": "Russian"
+          },
+          {
+            "ietfTag": "ja",
+            "iso6393": "jpn",
+            "iso6391": "ja",
+            "name": "Japanese"
+          },
+          {
+            "ietfTag": "pt-BR",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Brazil)"
+          },
+          {
+            "ietfTag": "ko",
+            "iso6393": "kor",
+            "iso6391": "ko",
+            "name": "Korean"
+          },
+          {
+            "ietfTag": "zh-Hans",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Simplified)"
+          },
+          {
+            "ietfTag": "it",
+            "iso6393": "ita",
+            "iso6391": "it",
+            "name": "Italian"
+          },
+          {
+            "ietfTag": "pt-PT",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Portugal)"
+          },
+          {
+            "ietfTag": "zh-Hant",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Traditional)"
+          }
+        ]
+      },
+      {
+        "externalId": "499741",
+        "platform": {
+          "externalId": "6",
+          "name": "PC (Microsoft Windows)",
+          "abbreviation": "PC",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "releaseDate": "2017-02-24",
+        "releaseYear": 2017,
+        "localizations": [],
+        "languages": [
+          {
+            "ietfTag": "fr",
+            "iso6393": "fra",
+            "iso6391": "fr",
+            "name": "French"
+          },
+          {
+            "ietfTag": "en-US",
+            "iso6393": "eng",
+            "iso6391": "en",
+            "name": "English (US)"
+          },
+          {
+            "ietfTag": "de",
+            "iso6393": "deu",
+            "iso6391": "de",
+            "name": "German"
+          },
+          {
+            "ietfTag": "es-ES",
+            "iso6393": "spa",
+            "iso6391": "es",
+            "name": "Spanish (Spain)"
+          },
+          {
+            "ietfTag": "ru",
+            "iso6393": "rus",
+            "iso6391": "ru",
+            "name": "Russian"
+          },
+          {
+            "ietfTag": "ja",
+            "iso6393": "jpn",
+            "iso6391": "ja",
+            "name": "Japanese"
+          },
+          {
+            "ietfTag": "pt-BR",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Brazil)"
+          },
+          {
+            "ietfTag": "ko",
+            "iso6393": "kor",
+            "iso6391": "ko",
+            "name": "Korean"
+          },
+          {
+            "ietfTag": "zh-Hans",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Simplified)"
+          },
+          {
+            "ietfTag": "it",
+            "iso6393": "ita",
+            "iso6391": "it",
+            "name": "Italian"
+          },
+          {
+            "ietfTag": "pt-PT",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Portugal)"
+          },
+          {
+            "ietfTag": "zh-Hant",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Traditional)"
+          }
+        ]
+      },
+      {
+        "externalId": "867729",
+        "platform": {
+          "externalId": "508",
+          "name": "Nintendo Switch 2",
+          "abbreviation": "Switch 2",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "releaseDate": "2026-02-05",
+        "releaseYear": 2026,
+        "localizations": [],
+        "languages": [
+          {
+            "ietfTag": "fr",
+            "iso6393": "fra",
+            "iso6391": "fr",
+            "name": "French"
+          },
+          {
+            "ietfTag": "en-US",
+            "iso6393": "eng",
+            "iso6391": "en",
+            "name": "English (US)"
+          },
+          {
+            "ietfTag": "de",
+            "iso6393": "deu",
+            "iso6391": "de",
+            "name": "German"
+          },
+          {
+            "ietfTag": "es-ES",
+            "iso6393": "spa",
+            "iso6391": "es",
+            "name": "Spanish (Spain)"
+          },
+          {
+            "ietfTag": "ru",
+            "iso6393": "rus",
+            "iso6391": "ru",
+            "name": "Russian"
+          },
+          {
+            "ietfTag": "ja",
+            "iso6393": "jpn",
+            "iso6391": "ja",
+            "name": "Japanese"
+          },
+          {
+            "ietfTag": "pt-BR",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Brazil)"
+          },
+          {
+            "ietfTag": "ko",
+            "iso6393": "kor",
+            "iso6391": "ko",
+            "name": "Korean"
+          },
+          {
+            "ietfTag": "zh-Hans",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Simplified)"
+          },
+          {
+            "ietfTag": "it",
+            "iso6393": "ita",
+            "iso6391": "it",
+            "name": "Italian"
+          },
+          {
+            "ietfTag": "pt-PT",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Portugal)"
+          },
+          {
+            "ietfTag": "zh-Hant",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Traditional)"
+          }
+        ]
+      },
+      {
+        "externalId": "867816",
+        "platform": {
+          "externalId": "167",
+          "name": "PlayStation 5",
+          "abbreviation": "PS5",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "releaseDate": "2026-02-05",
+        "releaseYear": 2026,
+        "localizations": [],
+        "languages": [
+          {
+            "ietfTag": "fr",
+            "iso6393": "fra",
+            "iso6391": "fr",
+            "name": "French"
+          },
+          {
+            "ietfTag": "en-US",
+            "iso6393": "eng",
+            "iso6391": "en",
+            "name": "English (US)"
+          },
+          {
+            "ietfTag": "de",
+            "iso6393": "deu",
+            "iso6391": "de",
+            "name": "German"
+          },
+          {
+            "ietfTag": "es-ES",
+            "iso6393": "spa",
+            "iso6391": "es",
+            "name": "Spanish (Spain)"
+          },
+          {
+            "ietfTag": "ru",
+            "iso6393": "rus",
+            "iso6391": "ru",
+            "name": "Russian"
+          },
+          {
+            "ietfTag": "ja",
+            "iso6393": "jpn",
+            "iso6391": "ja",
+            "name": "Japanese"
+          },
+          {
+            "ietfTag": "pt-BR",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Brazil)"
+          },
+          {
+            "ietfTag": "ko",
+            "iso6393": "kor",
+            "iso6391": "ko",
+            "name": "Korean"
+          },
+          {
+            "ietfTag": "zh-Hans",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Simplified)"
+          },
+          {
+            "ietfTag": "it",
+            "iso6393": "ita",
+            "iso6391": "it",
+            "name": "Italian"
+          },
+          {
+            "ietfTag": "pt-PT",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Portugal)"
+          },
+          {
+            "ietfTag": "zh-Hant",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Traditional)"
+          }
+        ]
+      },
+      {
+        "externalId": "867817",
+        "platform": {
+          "externalId": "169",
+          "name": "Xbox Series X|S",
+          "abbreviation": "Series X|S",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "releaseDate": "2026-02-05",
+        "releaseYear": 2026,
+        "localizations": [],
+        "languages": [
+          {
+            "ietfTag": "fr",
+            "iso6393": "fra",
+            "iso6391": "fr",
+            "name": "French"
+          },
+          {
+            "ietfTag": "en-US",
+            "iso6393": "eng",
+            "iso6391": "en",
+            "name": "English (US)"
+          },
+          {
+            "ietfTag": "de",
+            "iso6393": "deu",
+            "iso6391": "de",
+            "name": "German"
+          },
+          {
+            "ietfTag": "es-ES",
+            "iso6393": "spa",
+            "iso6391": "es",
+            "name": "Spanish (Spain)"
+          },
+          {
+            "ietfTag": "ru",
+            "iso6393": "rus",
+            "iso6391": "ru",
+            "name": "Russian"
+          },
+          {
+            "ietfTag": "ja",
+            "iso6393": "jpn",
+            "iso6391": "ja",
+            "name": "Japanese"
+          },
+          {
+            "ietfTag": "pt-BR",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Brazil)"
+          },
+          {
+            "ietfTag": "ko",
+            "iso6393": "kor",
+            "iso6391": "ko",
+            "name": "Korean"
+          },
+          {
+            "ietfTag": "zh-Hans",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Simplified)"
+          },
+          {
+            "ietfTag": "it",
+            "iso6393": "ita",
+            "iso6391": "it",
+            "name": "Italian"
+          },
+          {
+            "ietfTag": "pt-PT",
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese (Portugal)"
+          },
+          {
+            "ietfTag": "zh-Hant",
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese (Traditional)"
+          }
+        ]
+      }
+    ],
+    "sourceUrl": "https://www.igdb.com/games/hollow-knight",
+    "summary": "A 2D metroidvania with an emphasis on close combat and exploration in which the player enters the once-prosperous now-bleak insect kingdom of Hallownest, travels through its various districts, meets friendly inhabitants, fights hostile ones and uncovers the kingdom's history while improving their combat abilities and movement arsenal by fighting bosses and accessing out-of-the-way areas.",
+    "themes": [
+      {
+        "externalId": "1",
+        "name": "Action"
+      },
+      {
+        "externalId": "17",
+        "name": "Fantasy"
+      }
+    ],
+    "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/cobfzp.jpg",
+    "title": "Hollow Knight",
+    "yearPublished": 2017
+  }
+}

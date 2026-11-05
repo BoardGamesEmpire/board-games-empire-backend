@@ -4,7 +4,6 @@ import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import { configuration, configurationValidationSchema } from './configuration';
 import { DataGatewayModule } from './data-gateway/data-gateway.module';
-import { IgdbModule } from './igdb/igdb.module';
 import { baseLogger } from './lib/logger';
 
 @Module({
@@ -37,7 +36,6 @@ import { baseLogger } from './lib/logger';
     }),
 
     DataGatewayModule,
-    IgdbModule,
   ],
 })
 export class AppModule {}

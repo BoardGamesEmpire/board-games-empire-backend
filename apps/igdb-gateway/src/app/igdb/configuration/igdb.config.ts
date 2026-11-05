@@ -1,7 +1,7 @@
 import { env } from '@bge/env';
+import { TWITCH_TOKEN_URL } from '@bge/gateway-driver-igdb';
 import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
-import { TWITCH_TOKEN_URL } from '../lib/fetch-access-token';
 
 export interface IGDBConfig {
   clientId: string;

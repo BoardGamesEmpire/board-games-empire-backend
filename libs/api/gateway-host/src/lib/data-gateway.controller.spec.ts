@@ -1,20 +1,63 @@
+import { unsupportedOperation, type DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { status } from '@grpc/grpc-js';
 import { RpcException } from '@nestjs/microservices';
-import { Test, TestingModule } from '@nestjs/testing';
-import { firstValueFrom, Observable, of } from 'rxjs';
-import { toArray } from 'rxjs/operators';
+import { Test } from '@nestjs/testing';
+import { firstValueFrom, lastValueFrom, Observable, of, throwError, toArray } from 'rxjs';
+import { DATA_GATEWAY_DRIVER } from './data-gateway-driver.token';
 import { DataGatewayController } from './data-gateway.controller';
-import { GatewayServiceHost } from './gateway-service.host';
 
+type Rpc = Exclude<keyof DataGatewayDriver, 'dispose' | 'handleInbound'>;
+
+/** Each RPC with a request the controller is handed and the frames its driver answers with. */
+const RPCS: ReadonlyArray<[Rpc, object, object[]]> = [
+  [
+    'ping',
+    { correlationId: 'c' },
+    [{ correlationId: 'c', timestampMs: 0n, gatewayName: 'TestGateway', gatewayVersion: '1.0.0' }],
+  ],
+  ['check', { service: '' }, [{ status: proto.HealthCheckResponse_ServingStatus.SERVING }]],
+  ['describe', { correlationId: 'c' }, [{ correlationId: 'c', capabilities: [] }]],
+  [
+    'searchGames',
+    { correlationId: 'c', query: 'catan' },
+    [
+      { correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_RESULT },
+      { correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE },
+    ],
+  ],
+  ['fetchGame', { correlationId: 'c', externalId: '13' }, [{ correlationId: 'c', status: 'RESULT_STATUS_ERROR' }]],
+  [
+    'fetchExpansions',
+    { correlationId: 'c', baseExternalId: '13' },
+    [
+      { correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_RESULT },
+      { correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE },
+    ],
+  ],
+  ['listLanguages', { correlationId: 'c' }, [{ correlationId: 'c', languages: [] }]],
+  ['listPlatforms', { correlationId: 'c' }, [{ correlationId: 'c', platforms: [] }]],
+  ['listCategories', { correlationId: 'c' }, [{ correlationId: 'c', categories: [] }]],
+  ['listMechanics', { correlationId: 'c' }, [{ correlationId: 'c', mechanics: [] }]],
+];
+
+/**
+ * The gRPC controller every remote DataGateway's app serves, and the server
+ * too when it serves a plugin DataGateway (#1083): it hands each RPC to the
+ * driver it was given, so both run the same code (#1082).
+ */
 describe('DataGatewayController', () => {
   let controller: DataGatewayController;
-  let host: jest.Mocked<GatewayServiceHost>;
+  let driver: jest.Mocked<DataGatewayDriver>;
+
+  /** Calls `rpc` on the controller as the gRPC server does, its answer as frames. */
+  const answer = (rpc: Rpc, request: object) =>
+    (controller[rpc] as (request: object) => Observable<unknown>).call(controller, request);
 
   beforeEach(async () => {
-    const mockHost: jest.Mocked<GatewayServiceHost> = {
+    driver = {
       ping: jest.fn(),
-      healthCheck: jest.fn(),
+      check: jest.fn(),
       describe: jest.fn(),
       searchGames: jest.fn(),
       fetchGame: jest.fn(),
@@ -23,251 +66,67 @@ describe('DataGatewayController', () => {
       listPlatforms: jest.fn(),
       listCategories: jest.fn(),
       listMechanics: jest.fn(),
+      dispose: jest.fn(),
     };
 
-    const module: TestingModule = await Test.createTestingModule({
+    const module = await Test.createTestingModule({
       controllers: [DataGatewayController],
-      providers: [{ provide: GatewayServiceHost, useValue: mockHost }],
+      providers: [{ provide: DATA_GATEWAY_DRIVER, useValue: driver }],
     }).compile();
 
     controller = module.get(DataGatewayController);
-    host = module.get(GatewayServiceHost);
   });
 
-  afterEach(() => jest.clearAllMocks());
+  it.each(RPCS)(
+    'hands %s to the driver with the request it was given, and sends its frames',
+    async (rpc, request, frames) => {
+      (driver[rpc] as jest.Mock).mockReturnValue(of(...frames));
 
-  it('should be defined', () => {
-    expect(controller).toBeDefined();
-  });
+      await expect(lastValueFrom(answer(rpc, request).pipe(toArray()))).resolves.toEqual(frames);
+      expect(driver[rpc]).toHaveBeenCalledWith(request);
+    },
+  );
 
-  describe('ping', () => {
-    it('delegates to the host and returns its result', () => {
-      const request: proto.GatewayPingRequest = { correlationId: 'corr-1' };
-      const expected: proto.GatewayPingResponse = {
-        correlationId: 'corr-1',
-        timestampMs: BigInt(0),
-        gatewayName: 'TestGateway',
-        gatewayVersion: '1.0.0',
-      };
-      host.ping.mockReturnValue(expected);
+  // A driver can't depend on Nest, so it says which gRPC status a failure is
+  // with a code on the error, and the controller passes it on as that status
+  // (#1082).
+  it("sends a driver's error that carries a gRPC status code as that status", async () => {
+    driver.listMechanics.mockReturnValue(unsupportedOperation('ListMechanics'));
 
-      const result = controller.ping(request);
+    const refusal = await firstValueFrom(answer('listMechanics', {})).catch((err: unknown) => err);
 
-      expect(host.ping).toHaveBeenCalledWith(request);
-      expect(result).toBe(expected);
-    });
-  });
-
-  describe('describe', () => {
-    it('delegates to the host and returns its result', () => {
-      const request: proto.DescribeRequest = { correlationId: 'corr-1' };
-      const expected: proto.DescribeResponse = {
-        correlationId: 'corr-1',
-        capabilities: [proto.Capability.CAPABILITY_FETCH],
-        coverage: {
-          platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
-          contentTypes: [proto.ContentType.CONTENT_TYPE_BASE_GAME],
-        },
-        filterableAxes: [],
-        languageCodeFormats: {
-          acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME],
-          responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME,
-          passthroughSearchLanguage: false,
-        },
-        contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
-      };
-      host.describe.mockReturnValue(expected);
-
-      const result = controller.describe(request);
-
-      expect(host.describe).toHaveBeenCalledWith(request);
-      expect(result).toBe(expected);
+    expect(refusal).toBeInstanceOf(RpcException);
+    expect((refusal as RpcException).getError()).toEqual({
+      code: status.UNIMPLEMENTED,
+      message: 'ListMechanics is not served by this DataGateway',
     });
   });
 
-  describe('check', () => {
-    it('delegates to host.healthCheck and returns its result', () => {
-      const request: proto.HealthCheckRequest = { service: 'GatewayService' };
-      const expected: proto.HealthCheckResponse = {
-        status: proto.HealthCheckResponse_ServingStatus.SERVING,
-      };
-      host.healthCheck.mockReturnValue(expected);
+  it('passes an error with no gRPC status code through unchanged', async () => {
+    const failure = new Error('upstream exploded');
+    const systemFailure = Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+    driver.fetchGame.mockReturnValueOnce(throwError(() => failure));
+    driver.searchGames.mockReturnValueOnce(throwError(() => systemFailure));
 
-      const result = controller.check(request);
-
-      expect(host.healthCheck).toHaveBeenCalledWith(request);
-      expect(result).toBe(expected);
-    });
+    await expect(firstValueFrom(answer('fetchGame', {}))).rejects.toBe(failure);
+    await expect(firstValueFrom(answer('searchGames', {}))).rejects.toBe(systemFailure);
   });
 
-  describe('searchGames', () => {
-    it('delegates to the host with the original request and streams its frames', async () => {
-      const request: proto.GatewaySearchRequest = { correlationId: 'c', query: 'catan' };
-      const resultFrame: proto.GatewaySearchResult = {
-        correlationId: 'c',
-        status: proto.ResultStatus.RESULT_STATUS_RESULT,
-        game: minimalGameSearchData(),
-      };
-      const doneFrame: proto.GatewaySearchResult = {
-        correlationId: 'c',
-        status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE,
-      };
-      host.searchGames.mockReturnValue(of(resultFrame, doneFrame));
+  // A DOMException carries a legacy numeric code of its own (AbortError's is
+  // 20), which isn't a gRPC status, so it isn't sent as one (#1082).
+  it('passes a DOMException through unchanged, though it carries a numeric code', async () => {
+    const aborted = new DOMException('The operation was aborted.', 'AbortError');
+    const notAStatus = Object.assign(new Error('teapot'), { code: 418 });
+    driver.listPlatforms.mockReturnValueOnce(throwError(() => aborted));
+    driver.listCategories.mockReturnValueOnce(throwError(() => notAStatus));
 
-      const frames = await firstValueFrom(controller.searchGames(request).pipe(toArray()));
-
-      expect(host.searchGames).toHaveBeenCalledWith(request);
-      expect(frames).toEqual([resultFrame, doneFrame]);
-    });
+    await expect(firstValueFrom(answer('listPlatforms', {}))).rejects.toBe(aborted);
+    await expect(firstValueFrom(answer('listCategories', {}))).rejects.toBe(notAStatus);
   });
 
-  describe('fetchGame', () => {
-    it('delegates to the host with the original request and resolves its response', async () => {
-      const request: proto.FetchGameRequest = { correlationId: 'c', externalId: '13' };
-      const response: proto.FetchGameResponse = {
-        correlationId: 'c',
-        status: proto.ResultStatus.RESULT_STATUS_RESULT,
-        game: minimalGameData(),
-      };
-      host.fetchGame.mockReturnValue(of(response));
+  it('disposes of the driver once when the app shuts down', async () => {
+    await controller.onApplicationShutdown();
 
-      const result = await firstValueFrom(controller.fetchGame(request));
-
-      expect(host.fetchGame).toHaveBeenCalledWith(request);
-      expect(result).toBe(response);
-    });
-
-    it('passes through an ERROR response from the host', async () => {
-      const request: proto.FetchGameRequest = { correlationId: 'c', externalId: '999999' };
-      const errorResponse: proto.FetchGameResponse = {
-        correlationId: 'c',
-        status: proto.ResultStatus.RESULT_STATUS_ERROR,
-        message: 'Game not found',
-      };
-      host.fetchGame.mockReturnValue(of(errorResponse));
-
-      const result = await firstValueFrom(controller.fetchGame(request));
-
-      expect(result.status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
-      expect(result.message).toBe('Game not found');
-    });
-  });
-
-  describe('fetchExpansions', () => {
-    it('delegates to the host with the original request and streams its frames', async () => {
-      const request: proto.FetchExpansionsRequest = { correlationId: 'c', baseExternalId: '13' };
-      const resultFrame: proto.GatewaySearchResult = {
-        correlationId: 'c',
-        status: proto.ResultStatus.RESULT_STATUS_RESULT,
-        game: minimalGameSearchData(),
-      };
-      const doneFrame: proto.GatewaySearchResult = {
-        correlationId: 'c',
-        status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE,
-      };
-      host.fetchExpansions.mockReturnValue(of(resultFrame, doneFrame));
-
-      const frames = await firstValueFrom(controller.fetchExpansions(request).pipe(toArray()));
-
-      expect(host.fetchExpansions).toHaveBeenCalledWith(request);
-      expect(frames).toEqual([resultFrame, doneFrame]);
-    });
-
-    it('passes through an ERROR frame from the host', async () => {
-      const request: proto.FetchExpansionsRequest = { correlationId: 'c', baseExternalId: '13' };
-      const errorFrame: proto.GatewaySearchResult = {
-        correlationId: 'c',
-        status: proto.ResultStatus.RESULT_STATUS_ERROR,
-        message: 'Gateway unreachable',
-      };
-      host.fetchExpansions.mockReturnValue(of(errorFrame));
-
-      const frames = await firstValueFrom(controller.fetchExpansions(request).pipe(toArray()));
-
-      expect(frames).toHaveLength(1);
-      expect(frames[0].status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
-      expect(frames[0].message).toBe('Gateway unreachable');
-    });
-  });
-  describe('the list calls (#718)', () => {
-    it('passes ListPlatforms, ListCategories and ListMechanics to the host', async () => {
-      const platforms: proto.ListPlatformsResponse = {
-        correlationId: 'p',
-        platforms: [{ externalId: '6', name: 'PC', platformType: proto.PlatformType.PLATFORM_TYPE_PC }],
-      };
-      const categories: proto.ListCategoriesResponse = {
-        correlationId: 'c',
-        categories: [{ externalId: '15', name: 'Strategy' }],
-      };
-      const mechanics: proto.ListMechanicsResponse = {
-        correlationId: 'm',
-        mechanics: [{ externalId: '2082', name: 'Worker Placement' }],
-      };
-      host.listPlatforms.mockReturnValue(of(platforms));
-      host.listCategories.mockReturnValue(of(categories));
-      host.listMechanics.mockReturnValue(of(mechanics));
-
-      await expect(firstValueFrom(controller.listPlatforms({ correlationId: 'p' }))).resolves.toBe(platforms);
-      await expect(firstValueFrom(controller.listCategories({ correlationId: 'c' }))).resolves.toBe(categories);
-      await expect(firstValueFrom(controller.listMechanics({ correlationId: 'm' }))).resolves.toBe(mechanics);
-      expect(host.listPlatforms).toHaveBeenCalledWith({ correlationId: 'p' });
-      expect(host.listCategories).toHaveBeenCalledWith({ correlationId: 'c' });
-      expect(host.listMechanics).toHaveBeenCalledWith({ correlationId: 'm' });
-    });
-
-    // A DataGateway declares only the lists it serves, so one that serves
-    // none needs no code for them (#711, #718).
-    it('answers UNIMPLEMENTED for a list the host does not override (#718)', async () => {
-      const bare = new DataGatewayController(new HostWithoutLists());
-
-      const refusal = await firstValueFrom(bare.listMechanics({ correlationId: 'm' })).catch((err: unknown) => err);
-
-      expect(refusal).toBeInstanceOf(RpcException);
-      expect((refusal as RpcException).getError()).toMatchObject({ code: status.UNIMPLEMENTED });
-      await expect(firstValueFrom(bare.listPlatforms({}))).rejects.toBeInstanceOf(RpcException);
-      await expect(firstValueFrom(bare.listCategories({}))).rejects.toBeInstanceOf(RpcException);
-    });
+    expect(driver.dispose).toHaveBeenCalledTimes(1);
   });
 });
-
-function minimalGameSearchData(): proto.GameSearchData {
-  return {
-    externalId: '13',
-    title: 'Catan',
-    contentType: proto.ContentType.CONTENT_TYPE_BASE_GAME,
-    availablePlatforms: [],
-    availableReleases: [],
-  };
-}
-
-function minimalGameData(): proto.GameData {
-  return {
-    externalId: '13',
-    title: 'Catan',
-    contentType: proto.ContentType.CONTENT_TYPE_BASE_GAME,
-    designers: [],
-    artists: [],
-    publishers: [],
-    mechanics: [],
-    categories: [],
-    families: [],
-    platforms: [],
-    releases: [],
-    themes: [],
-    ageRatings: [],
-    metadataKeys: [],
-    metadataValues: [],
-    dlc: [],
-  };
-}
-
-/** A host that serves none of the list calls, as most DataGateways serve some of them. */
-class HostWithoutLists extends GatewayServiceHost {
-  ping = jest.fn();
-  healthCheck = jest.fn();
-  describe = jest.fn();
-  searchGames = jest.fn(() => new Observable<proto.GatewaySearchResult>());
-  fetchGame = jest.fn(() => new Observable<proto.FetchGameResponse>());
-  fetchExpansions = jest.fn(() => new Observable<proto.GatewaySearchResult>());
-  listLanguages = jest.fn();
-}

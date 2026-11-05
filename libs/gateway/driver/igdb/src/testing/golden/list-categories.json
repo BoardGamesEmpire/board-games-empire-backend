@@ -1,0 +1,97 @@
+{
+  "correlationId": "golden",
+  "categories": [
+    {
+      "externalId": "2",
+      "name": "Point-and-click"
+    },
+    {
+      "externalId": "4",
+      "name": "Fighting"
+    },
+    {
+      "externalId": "5",
+      "name": "Shooter"
+    },
+    {
+      "externalId": "7",
+      "name": "Music"
+    },
+    {
+      "externalId": "8",
+      "name": "Platform"
+    },
+    {
+      "externalId": "9",
+      "name": "Puzzle"
+    },
+    {
+      "externalId": "10",
+      "name": "Racing"
+    },
+    {
+      "externalId": "11",
+      "name": "Real Time Strategy (RTS)"
+    },
+    {
+      "externalId": "12",
+      "name": "Role-playing (RPG)"
+    },
+    {
+      "externalId": "13",
+      "name": "Simulator"
+    },
+    {
+      "externalId": "14",
+      "name": "Sport"
+    },
+    {
+      "externalId": "15",
+      "name": "Strategy"
+    },
+    {
+      "externalId": "16",
+      "name": "Turn-based strategy (TBS)"
+    },
+    {
+      "externalId": "24",
+      "name": "Tactical"
+    },
+    {
+      "externalId": "25",
+      "name": "Hack and slash/Beat 'em up"
+    },
+    {
+      "externalId": "26",
+      "name": "Quiz/Trivia"
+    },
+    {
+      "externalId": "30",
+      "name": "Pinball"
+    },
+    {
+      "externalId": "31",
+      "name": "Adventure"
+    },
+    {
+      "externalId": "32",
+      "name": "Indie"
+    },
+    {
+      "externalId": "33",
+      "name": "Arcade"
+    },
+    {
+      "externalId": "34",
+      "name": "Visual Novel"
+    },
+    {
+      "externalId": "35",
+      "name": "Card & Board Game"
+    },
+    {
+      "externalId": "36",
+      "name": "MOBA"
+    }
+  ]
+}

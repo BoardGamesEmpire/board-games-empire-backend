@@ -28,6 +28,9 @@
   ],
   "references": [
     {
+      "path": "../../libs/gateway/driver/contract/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/proto/gateway/tsconfig.lib.json"
     },
     {

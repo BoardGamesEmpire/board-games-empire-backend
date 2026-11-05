@@ -1,0 +1,686 @@
+import * as proto from '@boardgamesempire/proto-gateway';
+import { BggLinkType, BggNameType, BggThingType, DEFAULT_EDITION_KEY } from '../constants';
+import type { BggLink, BggName, BggSearchItem, BggThing, BggVersion } from '../types';
+
+import {
+  getOutboundExpansionIds,
+  isInbound,
+  searchItemToGameSearchData,
+  selectPrimaryName,
+  thingToGameData,
+  thingToGameSearchData,
+} from './game.mapper';
+
+describe('selectPrimaryName', () => {
+  it('returns the entry flagged as primary', () => {
+    const result = selectPrimaryName([
+      { type: BggNameType.Alternate, value: 'Catan (Spanish)' },
+      { type: BggNameType.Primary, value: 'Catan' },
+    ]);
+
+    expect(result).toBe('Catan');
+  });
+
+  it('falls back to the first entry when no primary is flagged', () => {
+    const result = selectPrimaryName([
+      { type: BggNameType.Alternate, value: 'First Alternate' },
+      { type: BggNameType.Alternate, value: 'Second Alternate' },
+    ]);
+
+    expect(result).toBe('First Alternate');
+  });
+
+  it('returns undefined when given an empty array', () => {
+    expect(selectPrimaryName([])).toBeUndefined();
+  });
+
+  it('returns undefined when given undefined', () => {
+    expect(selectPrimaryName(undefined)).toBeUndefined();
+  });
+});
+
+describe('isInbound', () => {
+  it('returns true for the string "true"', () => {
+    expect(isInbound('true')).toBe(true);
+  });
+
+  it('is case-insensitive on string values', () => {
+    expect(isInbound('TRUE')).toBe(true);
+    expect(isInbound('True')).toBe(true);
+  });
+
+  it('returns false for any other string', () => {
+    expect(isInbound('false')).toBe(false);
+    expect(isInbound('1')).toBe(false);
+    expect(isInbound('')).toBe(false);
+  });
+
+  it('returns false for undefined', () => {
+    expect(isInbound(undefined)).toBe(false);
+  });
+});
+
+describe('getOutboundExpansionIds', () => {
+  it('returns expansion link ids without inbound flag', () => {
+    const thing: Pick<BggThing, 'links'> = {
+      links: [
+        { type: BggLinkType.BoardGameExpansion, id: 100, value: 'A' },
+        { type: BggLinkType.BoardGameExpansion, id: 101, value: 'B' },
+      ],
+    };
+
+    expect(getOutboundExpansionIds(thing)).toEqual([100, 101]);
+  });
+
+  it('excludes inbound expansion links (the thing IS-an-expansion-of)', () => {
+    const thing: Pick<BggThing, 'links'> = {
+      links: [
+        { type: BggLinkType.BoardGameExpansion, id: 13, value: 'Catan', inbound: 'true' },
+        { type: BggLinkType.BoardGameExpansion, id: 200, value: 'Outbound' },
+      ],
+    };
+
+    expect(getOutboundExpansionIds(thing)).toEqual([200]);
+  });
+
+  it('treats the string "true" as inbound (XML→JSON conversion variance)', () => {
+    const thing: Pick<BggThing, 'links'> = {
+      links: [
+        { type: BggLinkType.BoardGameExpansion, id: 13, value: 'Parent', inbound: 'true' },
+        { type: BggLinkType.BoardGameExpansion, id: 200, value: 'Real Expansion' },
+      ],
+    };
+
+    expect(getOutboundExpansionIds(thing)).toEqual([200]);
+  });
+
+  it('ignores links of unrelated types', () => {
+    const thing: Pick<BggThing, 'links'> = {
+      links: [
+        { type: BggLinkType.BoardGameDesigner, id: 11, value: 'Designer' },
+        { type: BggLinkType.BoardGameMechanic, id: 22, value: 'Mechanic' },
+        { type: BggLinkType.BoardGameExpansion, id: 200, value: 'Expansion' },
+      ],
+    };
+
+    expect(getOutboundExpansionIds(thing)).toEqual([200]);
+  });
+
+  it('returns an empty array when there are no links', () => {
+    expect(getOutboundExpansionIds({ links: undefined })).toEqual([]);
+    expect(getOutboundExpansionIds({ links: [] })).toEqual([]);
+  });
+
+  it('returns an empty array when the thing has only inbound expansion links', () => {
+    const thing: Pick<BggThing, 'links'> = {
+      links: [{ type: BggLinkType.BoardGameExpansion, id: 13, value: 'Parent', inbound: 'true' }],
+    };
+
+    expect(getOutboundExpansionIds(thing)).toEqual([]);
+  });
+});
+
+describe('searchItemToGameSearchData', () => {
+  it('maps the basic identity fields', () => {
+    const item: BggSearchItem = {
+      id: 174430,
+      type: BggThingType.BoardGame,
+      name: 'Gloomhaven',
+      yearpublished: 2017,
+    };
+
+    const result = searchItemToGameSearchData(item);
+
+    expect(result.externalId).toBe('174430');
+    expect(result.title).toBe('Gloomhaven');
+    expect(result.yearPublished).toBe(2017);
+  });
+
+  it('decodes the title, and keeps one that looks like a number as BGG sent it (#716, #863)', () => {
+    const encoded = makeBggSearchItem({ name: 'Tzolk&#039;in: The Mayan Calendar' });
+    const digits = makeBggSearchItem({ name: '007' });
+
+    expect(searchItemToGameSearchData(encoded).title).toBe(`Tzolk'in: The Mayan Calendar`);
+    expect(searchItemToGameSearchData(digits).title).toBe('007');
+  });
+
+  it('maps boardgame type to BASE_GAME content type', () => {
+    const result = searchItemToGameSearchData({ id: 1, type: BggThingType.BoardGame, name: 'Catan' });
+
+    expect(result.contentType).toBe(proto.ContentType.CONTENT_TYPE_BASE_GAME);
+  });
+
+  it('maps boardgameexpansion type to EXPANSION content type', () => {
+    const result = searchItemToGameSearchData({ id: 2, type: BggThingType.BoardGameExpansion, name: 'Seafarers' });
+
+    expect(result.contentType).toBe(proto.ContentType.CONTENT_TYPE_EXPANSION);
+  });
+
+  it('maps unknown type to UNSPECIFIED content type', () => {
+    const result = searchItemToGameSearchData({ id: 3, type: 'unknown-type', name: 'Mystery' });
+
+    expect(result.contentType).toBe(proto.ContentType.CONTENT_TYPE_UNSPECIFIED);
+  });
+
+  it('builds a /boardgame/ source URL for boardgames', () => {
+    const result = searchItemToGameSearchData({ id: 174430, type: BggThingType.BoardGame, name: 'Gloomhaven' });
+
+    expect(result.sourceUrl).toBe('https://boardgamegeek.com/boardgame/174430');
+  });
+
+  it('builds a /boardgameexpansion/ source URL for expansions', () => {
+    const result = searchItemToGameSearchData({ id: 11, type: BggThingType.BoardGameExpansion, name: 'Seafarers' });
+
+    expect(result.sourceUrl).toBe('https://boardgamegeek.com/boardgameexpansion/11');
+  });
+
+  it('trims the title, as fetching the same game does (#716)', () => {
+    expect(searchItemToGameSearchData(makeBggSearchItem({ name: '  Catan ' })).title).toBe('Catan');
+  });
+
+  it('returns an empty title when no name is available', () => {
+    const result = searchItemToGameSearchData({ id: 1, type: BggThingType.BoardGame });
+
+    expect(result.title).toBe('');
+  });
+
+  it('always includes a Tabletop platform chip', () => {
+    const result = searchItemToGameSearchData({ id: 1, type: BggThingType.BoardGame, name: 'Catan' });
+
+    expect(result.availablePlatforms).toHaveLength(1);
+    expect(result.availablePlatforms[0].platformType).toBe(proto.PlatformType.PLATFORM_TYPE_TABLETOP);
+  });
+
+  it('does not populate availableReleases — search results are too lean', () => {
+    const result = searchItemToGameSearchData({ id: 1, type: BggThingType.BoardGame, name: 'Catan' });
+
+    expect(result.availableReleases).toEqual([]);
+  });
+
+  it('fills a result in from its thing: thumbnail, player counts, play times, rating, base game and summary (#880)', () => {
+    const thing = makeBggThing({
+      id: 174430,
+      thumbnail: 'https://cf.geekdo-images.com/gloom-thumb.jpg',
+      minplayers: 1,
+      maxplayers: 4,
+      minplaytime: 60,
+      maxplaytime: 120,
+      description: 'Vanquish monsters.',
+      statistics: { ratings: { average: 8.6 } },
+      links: [{ type: BggLinkType.BoardGameExpansion, id: 13, value: 'Catan', inbound: 'true' }],
+    });
+
+    const result = searchItemToGameSearchData(makeBggSearchItem(), thing);
+
+    expect(result).toMatchObject({
+      thumbnailUrl: 'https://cf.geekdo-images.com/gloom-thumb.jpg',
+      minPlayers: 1,
+      maxPlayers: 4,
+      minPlaytime: 60,
+      maxPlaytime: 120,
+      baseGameExternalId: '13',
+      summary: 'Vanquish monsters.',
+    });
+    expect(result.averageRating).toBeCloseTo(8.6);
+    expect(result.availableReleases).toHaveLength(1);
+  });
+
+  it('leaves the rating unset for a game nobody has rated, which BGG sends as 0 (#880)', () => {
+    const thing = makeBggThing({ statistics: { ratings: { average: 0 } } });
+
+    expect(searchItemToGameSearchData(makeBggSearchItem(), thing).averageRating).toBeUndefined();
+    expect(thingToGameData(thing).averageRating).toBeUndefined();
+  });
+
+  it('keeps the title, content type, year and source URL search found, whatever the thing says, and dates the release by that year (#880)', () => {
+    const item = makeBggSearchItem({
+      id: 325,
+      type: BggThingType.BoardGameExpansion,
+      name: 'Die Siedler von Catan: Seefahrer',
+      yearpublished: 1997,
+    });
+    const thing = makeBggThing({
+      id: 325,
+      type: BggThingType.BoardGame,
+      names: [{ type: BggNameType.Primary, value: 'Catan: Seafarers' }],
+      yearpublished: 1998,
+    });
+
+    const result = searchItemToGameSearchData(item, thing);
+
+    expect(result).toMatchObject({
+      title: 'Die Siedler von Catan: Seefahrer',
+      contentType: proto.ContentType.CONTENT_TYPE_EXPANSION,
+      yearPublished: 1997,
+      sourceUrl: 'https://boardgamegeek.com/boardgameexpansion/325',
+    });
+    expect(result.availableReleases.map((release) => release.releaseDate)).toEqual(['1997-01-01']);
+  });
+
+  it("stays undated when search found no year, whatever the thing's (#880)", () => {
+    const item = makeBggSearchItem({ yearpublished: undefined });
+
+    const result = searchItemToGameSearchData(item, makeBggThing({ yearpublished: 2017 }));
+
+    expect(result.yearPublished).toBeUndefined();
+    expect(result.availableReleases.map((release) => release.releaseDate)).toEqual([undefined]);
+  });
+
+  it("takes the thing's title when search sent a blank name (#880)", () => {
+    const item = makeBggSearchItem({ name: '  ' });
+
+    expect(searchItemToGameSearchData(item, makeBggThing()).title).toBe('Gloomhaven');
+  });
+});
+
+// BGG writes 0 for a game whose year it doesn't know. Sent on, it would read
+// as a year, fail every publish-year range, and be stored on import (#719).
+describe('publish year (#719)', () => {
+  it("sends BGG's year 0 as no publish year, and keeps negative years", () => {
+    const cases: [number | undefined, number | undefined][] = [
+      [0, undefined],
+      [-2200, -2200],
+      [2017, 2017],
+      [undefined, undefined],
+    ];
+
+    for (const [yearpublished, expected] of cases) {
+      expect(searchItemToGameSearchData(makeBggSearchItem({ yearpublished })).yearPublished).toBe(expected);
+      expect(thingToGameSearchData(makeBggThing({ yearpublished })).yearPublished).toBe(expected);
+      expect(thingToGameData(makeBggThing({ yearpublished })).yearPublished).toBe(expected);
+    }
+  });
+});
+
+// BGG writes 0 for a player count or play time it doesn't know, as it does for
+// a year. Sent on, a 0-minute game would fit every play-time maximum, and a
+// 0–0 game would read as known, dropped where an unknown one is kept, on BGG's
+// results and on the games imported from it (#869).
+describe('player counts and play times (#869)', () => {
+  const mapped = (thing: BggThing) => [thingToGameSearchData(thing), thingToGameData(thing)];
+
+  it('reads playingtime as both ends of a play time BGG gives no range for, on an expansion search result too', () => {
+    for (const game of mapped(makeBggThing({ playingtime: 120 }))) {
+      expect([game.minPlaytime, game.maxPlaytime]).toEqual([120, 120]);
+    }
+  });
+
+  it('prefers the minimum and maximum play time to playingtime', () => {
+    for (const game of mapped(makeBggThing({ minplayers: 2, maxplayers: 5, minplaytime: 45, maxplaytime: 75 }))) {
+      expect([game.minPlayers, game.maxPlayers, game.minPlaytime, game.maxPlaytime]).toEqual([2, 5, 45, 75]);
+    }
+  });
+
+  it("sends BGG's 0 as no player count or play time", () => {
+    for (const game of mapped(
+      makeBggThing({ minplayers: 0, maxplayers: 0, minplaytime: 0, maxplaytime: 0, playingtime: 0 }),
+    )) {
+      expect([game.minPlayers, game.maxPlayers, game.minPlaytime, game.maxPlaytime]).toEqual([
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+      ]);
+    }
+  });
+
+  // BGG's 0 here is the same sentinel, and POST /games refuses a minimum age
+  // of 0, so import doesn't store one either.
+  it("imports BGG's 0 as no minimum age", () => {
+    expect(thingToGameData(makeBggThing({ minage: 0 })).minAge).toBeUndefined();
+  });
+
+  it('falls back on playingtime when the minimum play time is 0', () => {
+    for (const game of mapped(makeBggThing({ minplaytime: 0, playingtime: 90 }))) {
+      expect([game.minPlaytime, game.maxPlaytime]).toEqual([90, 90]);
+    }
+  });
+
+  // BGG holds some pairs with the minimum above the maximum, and there's no
+  // telling which end is wrong. Both ends go unknown rather than reversed,
+  // which would fit play-time filters the game can't (#869).
+  it('sends a reversed player count or play time as unknown at both ends', () => {
+    for (const game of mapped(makeBggThing({ minplayers: 5, maxplayers: 2, minplaytime: 120, maxplaytime: 60 }))) {
+      expect([game.minPlayers, game.maxPlayers, game.minPlaytime, game.maxPlaytime]).toEqual([
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+      ]);
+    }
+  });
+
+  it('checks the order after playingtime stands in for a missing end', () => {
+    for (const game of mapped(makeBggThing({ minplaytime: 120, maxplaytime: 0, playingtime: 60 }))) {
+      expect([game.minPlaytime, game.maxPlaytime]).toEqual([undefined, undefined]);
+    }
+  });
+
+  it('keeps a range with equal ends, or with one end unknown', () => {
+    for (const game of mapped(
+      makeBggThing({ minplayers: 4, maxplayers: 4, minplaytime: 30, maxplaytime: 0, playingtime: 0 }),
+    )) {
+      expect([game.minPlayers, game.maxPlayers, game.minPlaytime, game.maxPlaytime]).toEqual([4, 4, 30, undefined]);
+    }
+  });
+});
+
+describe('thingToGameSearchData — synthetic release', () => {
+  it('emits a single default-edition Tabletop release with the year as the release date', () => {
+    const result = thingToGameSearchData(makeBggThing({ id: 174430, yearpublished: 2017 }));
+
+    expect(result.availableReleases).toHaveLength(1);
+    expect(result.availableReleases[0].externalId).toBe(DEFAULT_EDITION_KEY);
+    expect(result.availableReleases[0].releaseDate).toBe('2017-01-01');
+    expect(result.availableReleases[0].platform?.platformType).toBe(proto.PlatformType.PLATFORM_TYPE_TABLETOP);
+  });
+
+  it('omits releaseDate when yearpublished is absent', () => {
+    const result = thingToGameSearchData(makeBggThing({ yearpublished: undefined }));
+
+    expect(result.availableReleases[0].releaseDate).toBeUndefined();
+  });
+
+  it('omits edition fields in search context', () => {
+    const result = thingToGameSearchData(makeBggThing({ yearpublished: 2017 }));
+
+    expect(result.availableReleases[0].editionName).toBeUndefined();
+    expect(result.availableReleases[0].releaseYear).toBeUndefined();
+    expect(result.availableReleases[0].parentEditionExternalId).toBeUndefined();
+  });
+
+  it('titles it with its primary name, wherever BGG puts it (#1082)', () => {
+    const result = thingToGameSearchData(
+      makeBggThing({
+        names: [makeBggName({ type: BggNameType.Alternate, value: 'Catane' }), makeBggName({ value: 'Catan' })],
+      }),
+    );
+
+    expect(result.title).toBe('Catan');
+  });
+});
+
+describe('thingToGameData — synthetic default release (no versions)', () => {
+  it('emits a single Tabletop platform with the default-edition synthetic release', () => {
+    const result = thingToGameData(makeBggThing({ id: 174430, yearpublished: 2017 }));
+
+    expect(result.platforms).toHaveLength(1);
+    expect(result.platforms[0].platformType).toBe(proto.PlatformType.PLATFORM_TYPE_TABLETOP);
+    expect(result.releases).toHaveLength(1);
+    expect(result.releases[0].externalId).toBe(DEFAULT_EDITION_KEY);
+    expect(result.releases[0].releaseDate).toBe('2017-01-01');
+    expect(result.releases[0].editionName).toBeUndefined();
+  });
+
+  it('omits releaseDate when yearpublished is the BGG sentinel zero', () => {
+    const result = thingToGameData(makeBggThing({ yearpublished: 0 }));
+
+    expect(result.releases[0].releaseDate).toBeUndefined();
+  });
+
+  it('omits releaseDate when yearpublished is undefined', () => {
+    const result = thingToGameData(makeBggThing({ yearpublished: undefined }));
+
+    expect(result.releases[0].releaseDate).toBeUndefined();
+  });
+
+  it('titles it with its primary name, wherever BGG puts it (#1082)', () => {
+    const result = thingToGameData(
+      makeBggThing({
+        names: [makeBggName({ type: BggNameType.Alternate, value: 'Catane' }), makeBggName({ value: 'Catan' })],
+      }),
+    );
+
+    expect(result.title).toBe('Catan');
+  });
+
+  it('falls back to the first other name that is not blank when the primary one is (#716)', () => {
+    const result = thingToGameData(
+      makeBggThing({
+        names: [
+          makeBggName({ value: ' ' }),
+          makeBggName({ type: BggNameType.Alternate, value: '' }),
+          makeBggName({ type: BggNameType.Alternate, value: 'Die Siedler von Catan' }),
+        ],
+      }),
+    );
+
+    expect(result.title).toBe('Die Siedler von Catan');
+  });
+
+  it('returns an empty title when the thing has no names', () => {
+    expect(thingToGameData(makeBggThing({ names: undefined })).title).toBe('');
+  });
+});
+
+describe('thingToGameData — version-driven releases', () => {
+  it('emits one release per BGG version when versions are present', () => {
+    const thing = makeBggThing({
+      versions: [
+        makeBggVersion({ id: 1, name: 'First Edition', yearpublished: 1995, languageNames: ['English'] }),
+        makeBggVersion({ id: 2, name: 'Afrikaans edition', yearpublished: 0, languageNames: ['Afrikaans'] }),
+      ],
+    });
+
+    const result = thingToGameData(thing);
+
+    expect(result.releases).toHaveLength(2);
+    expect(result.releases.map((r) => r.externalId)).toEqual(['1', '2']);
+    expect(result.releases[0].editionName).toBe('First Edition');
+    expect(result.releases[1].editionName).toBe('Afrikaans edition');
+  });
+
+  it('decodes an edition name (#716)', () => {
+    const thing = makeBggThing({
+      versions: [makeBggVersion({ id: 1, name: 'Collector&#039;s &amp; Deluxe Edition' })],
+    });
+
+    expect(thingToGameData(thing).releases[0].editionName).toBe(`Collector's & Deluxe Edition`);
+  });
+
+  it('coerces BGG sentinel zero on yearpublished to undefined releaseYear', () => {
+    const thing = makeBggThing({
+      versions: [makeBggVersion({ id: 1, yearpublished: 0 })],
+    });
+
+    expect(thingToGameData(thing).releases[0].releaseYear).toBeUndefined();
+    expect(thingToGameData(thing).releases[0].releaseDate).toBeUndefined();
+  });
+
+  it('populates releaseYear and releaseDate from a known yearpublished', () => {
+    const thing = makeBggThing({
+      versions: [makeBggVersion({ id: 1, yearpublished: 1995 })],
+    });
+
+    const release = thingToGameData(thing).releases[0];
+    expect(release.releaseYear).toBe(1995);
+    expect(release.releaseDate).toBe('1995-01-01');
+  });
+
+  it("extracts languages from a version's language links", () => {
+    const thing = makeBggThing({
+      versions: [makeBggVersion({ id: 1, languageNames: ['English', 'German'] })],
+    });
+
+    const release = thingToGameData(thing).releases[0];
+    expect(release.languages.map((l) => l.iso6393)).toEqual(['eng', 'deu']);
+  });
+
+  it('passes an unrecognized language on by name, with no ISO codes (#717)', () => {
+    const thing = makeBggThing({
+      versions: [makeBggVersion({ id: 1, languageNames: ['English', 'Klingon'] })],
+    });
+
+    expect(thingToGameData(thing).releases[0].languages).toEqual([
+      { iso6393: 'eng', iso6391: 'en', name: 'English' },
+      { name: 'Klingon' },
+    ]);
+  });
+
+  it('leaves parentEditionExternalId undefined for all BGG releases', () => {
+    const thing = makeBggThing({
+      versions: [makeBggVersion({ id: 1 }), makeBggVersion({ id: 2 })],
+    });
+
+    expect(thingToGameData(thing).releases.every((r) => r.parentEditionExternalId === undefined)).toBe(true);
+  });
+
+  it("does not populate edition-level overrides (BGG versions don't expose them)", () => {
+    const thing = makeBggThing({
+      versions: [makeBggVersion({ id: 1 })],
+    });
+
+    const release = thingToGameData(thing).releases[0];
+    expect(release.minPlayers).toBeUndefined();
+    expect(release.maxPlayers).toBeUndefined();
+    expect(release.minPlaytime).toBeUndefined();
+    expect(release.maxPlaytime).toBeUndefined();
+  });
+
+  it('falls back to the synthetic default release when versions array is empty', () => {
+    const thing = makeBggThing({ versions: [], yearpublished: 2017 });
+
+    const releases = thingToGameData(thing).releases;
+    expect(releases).toHaveLength(1);
+    expect(releases[0].externalId).toBe(DEFAULT_EDITION_KEY);
+  });
+});
+
+describe('thingToGameData — links and image URLs (#716)', () => {
+  const nameless: BggLink[] = [
+    { type: BggLinkType.BoardGameDesigner, id: 1 } as BggLink,
+    { type: BggLinkType.BoardGameArtist, id: 2, value: ' ' },
+    { type: BggLinkType.BoardGamePublisher, id: 3, value: '' },
+    { type: BggLinkType.BoardGameMechanic, id: 4 } as BggLink,
+    { type: BggLinkType.BoardGameCategory, id: 5, value: '  ' },
+    { type: BggLinkType.BoardGameFamily, id: 6 } as BggLink,
+  ];
+
+  it('skips a link with a blank or absent name, so nameless links never merge into one record named ""', () => {
+    const game = thingToGameData(makeBggThing({ links: nameless }));
+
+    expect([game.designers, game.artists, game.publishers, game.mechanics, game.categories, game.families]).toEqual([
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+    ]);
+  });
+
+  it('trims and decodes a link name', () => {
+    const links: BggLink[] = [
+      { type: BggLinkType.BoardGameDesigner, id: 7, value: ' Daniele Tascini &amp; Simone Luciani ' },
+    ];
+
+    expect(thingToGameData(makeBggThing({ links })).designers).toEqual([
+      { externalId: '7', name: 'Daniele Tascini & Simone Luciani' },
+    ]);
+  });
+
+  it('decodes an image URL, so an `&amp;` in its query reaches the server as `&`', () => {
+    const thing = makeBggThing({
+      thumbnail: 'https://cf.geekdo-images.com/t.jpg?a=1&amp;b=2',
+      image: 'https://cf.geekdo-images.com/i.jpg?a=1&amp;b=2',
+    });
+
+    const game = thingToGameData(thing);
+
+    expect([game.thumbnailUrl, game.imageUrl]).toEqual([
+      'https://cf.geekdo-images.com/t.jpg?a=1&b=2',
+      'https://cf.geekdo-images.com/i.jpg?a=1&b=2',
+    ]);
+    expect(thingToGameSearchData(thing).thumbnailUrl).toBe('https://cf.geekdo-images.com/t.jpg?a=1&b=2');
+  });
+
+  it('leaves out a blank image URL', () => {
+    const game = thingToGameData(makeBggThing({ thumbnail: ' ', image: '' }));
+
+    expect([game.thumbnailUrl, game.imageUrl]).toEqual([undefined, undefined]);
+  });
+});
+
+/**
+ * Typed factory functions for building test fixtures. Defaults emit
+ * minimally-valid records; pass overrides for the fields under test.
+ */
+
+export function makeBggThing(overrides: Partial<BggThing> = {}): BggThing {
+  return {
+    id: 174430,
+    type: BggThingType.BoardGame,
+    names: [{ type: BggNameType.Primary, value: 'Gloomhaven' }],
+    yearpublished: 2017,
+    minplayers: 1,
+    maxplayers: 4,
+    playingtime: 120,
+    minage: 12,
+    ...overrides,
+  } as BggThing;
+}
+
+export function makeBggSearchItem(overrides: Partial<BggSearchItem> = {}): BggSearchItem {
+  return {
+    id: 174430,
+    type: BggThingType.BoardGame,
+    name: 'Gloomhaven',
+    yearpublished: 2017,
+    ...overrides,
+  };
+}
+
+export function makeBggName(overrides: Partial<BggName> = {}): BggName {
+  return {
+    type: BggNameType.Primary,
+    value: 'Test Game',
+    ...overrides,
+  };
+}
+
+export function makeBggLink(overrides: Partial<BggLink> = {}): BggLink {
+  return {
+    type: BggLinkType.BoardGameCategory,
+    id: 1,
+    value: 'Test',
+    ...overrides,
+  };
+}
+
+export function makeBggVersion(
+  overrides: Partial<BggVersion> & { languageNames?: readonly string[]; publisherName?: string } = {},
+): BggVersion {
+  const { languageNames = [], publisherName, ...rest } = overrides;
+
+  const links: BggLink[] = [];
+
+  if (publisherName !== undefined) {
+    links.push({
+      type: BggLinkType.BoardGamePublisher,
+      id: 31418,
+      value: publisherName,
+    });
+  }
+
+  for (const [index, value] of languageNames.entries()) {
+    links.push({
+      type: BggLinkType.Language,
+      id: 2000 + index,
+      value,
+    });
+  }
+
+  return {
+    id: 100,
+    type: BggThingType.BoardGame,
+    name: 'Test Edition',
+    yearpublished: 2000,
+    productcode: '',
+    width: 0,
+    length: 0,
+    depth: 0,
+    weight: 0,
+    links,
+    ...rest,
+  };
+}

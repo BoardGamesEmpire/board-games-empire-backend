@@ -1,0 +1,1 @@
+fields cover.url,expansions,first_release_date,game_status,game_type,id,language_supports.language.*,name,parent_game,platforms.abbreviation,platforms.name,platforms.platform_type,standalone_expansions,summary,total_rating,url,version_parent;search "Hollow Knight";limit 20;where version_parent = null & game_type != 14 & platforms.platform_type = (1);

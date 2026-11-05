@@ -1,0 +1,5 @@
+{
+  "correlationId": "golden",
+  "status": "RESULT_STATUS_ERROR",
+  "message": "No game found for externalId '999999999'"
+}
