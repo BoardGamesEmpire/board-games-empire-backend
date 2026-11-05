@@ -14,7 +14,7 @@ import {
   type MockDatabaseService,
   type PageQueryInit,
 } from '@bge/testing';
-import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, HttpException, Logger, NotFoundException } from '@nestjs/common';
 import { GAME_DESCRIPTION_MAX_LENGTH, ListGamesQueryDto, type CreateGameDto, type UpdateGameDto } from './dto';
 import { GAME_DETAIL_INCLUDE } from './game-detail.include';
 import { gameListScope } from './game-list-scope';
@@ -368,6 +368,51 @@ describe('GameService', () => {
     db.game.count.mockResolvedValue(1);
 
     await expect(service.getGame('game-1')).rejects.toThrow(ForbiddenException);
+  });
+
+  /**
+   * #1067. Listing a game's expansions at its DataGateways asks each one by
+   * the game's external ID there. The links are read under the same `Game`
+   * read conditions as `GET /games/:id`, so an actor never learns the links
+   * of a game they can't open.
+   */
+  describe('readDataGatewayLinks', () => {
+    it('answers a readable game’s DataGateway links', async () => {
+      const links = [
+        { gatewayId: 'bgg', externalId: '13' },
+        { gatewayId: 'igdb', externalId: '740' },
+      ];
+      db.game.findUniqueOrThrow.mockResolvedValue({ gameSources: links } as never);
+
+      await expect(service.readDataGatewayLinks('game-1')).resolves.toEqual(links);
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Game, Action.read);
+      expect(db.game.findUniqueOrThrow).toHaveBeenCalledWith({
+        where: { id: 'game-1', AND: [COND] },
+        select: {
+          gameSources: {
+            select: { gatewayId: true, externalId: true },
+            orderBy: [{ gatewayId: 'asc' }, { externalId: 'asc' }],
+          },
+        },
+      });
+    });
+
+    it.each([
+      ['404', 0, NotFoundException, t('errors.game.not_found', { id: 'game-1' })],
+      ['403', 1, ForbiddenException, t('common.forbidden.view')],
+    ])(
+      'answers %s as GET /games/:id does: 404 for a game that doesn’t exist, 403 for one the actor may not read',
+      async (_status, count, exception, message) => {
+        db.game.findUniqueOrThrow.mockRejectedValue(dependentRecordNotFound());
+        db.game.count.mockResolvedValue(count);
+
+        const refusal = await service.readDataGatewayLinks('game-1').catch((error: unknown) => error);
+
+        expect(refusal).toBeInstanceOf(exception);
+        expect((refusal as HttpException).getResponse()).toEqual(message);
+      },
+    );
   });
 
   describe('getGame, with its platform games (#791)', () => {

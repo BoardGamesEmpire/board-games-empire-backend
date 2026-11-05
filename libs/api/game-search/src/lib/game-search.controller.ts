@@ -2,6 +2,7 @@ import { Action, ResourceType } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { Controller, Get, Logger, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ExpansionsQueryDto } from './dto/expansions-query.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { SearchResponseDto } from './dto/search-response.dto';
 import { GameSearchService } from './game-search.service';
@@ -45,5 +46,39 @@ export class GameSearchController {
   search(@Query() dto: SearchQueryDto) {
     this.logger.debug(`REST search: query="${dto.query}" gateways=[${dto.gatewayIds?.join(',') ?? ''}]`);
     return this.gameSearchService.search(dto);
+  }
+
+  @ApiOperation({
+    summary: "List a base game's expansions at its DataGateways",
+    description:
+      'Name the base game one of two ways: `gatewayId` and `externalId`, the DataGateway and the external ID ' +
+      'a game search result gives, for a game not yet imported; or `gameId`, a game on this server, whose ' +
+      'DataGateway links are each asked. The answer has the shape of `GET /games/search`: rows grouped by ' +
+      'DataGateway, each saying whether the expansion is already in the game catalog, with its game id if so, ' +
+      'and `errors`, `rateLimitedSources` and `unavailableSources` for the DataGateways that could not answer. ' +
+      'A game with no DataGateway link answers an empty result. Like search, it stops after 15 seconds (#1067).',
+  })
+  @ApiResponse({ status: 200, type: SearchResponseDto })
+  @ApiResponse({
+    status: 400,
+    description:
+      'The base game was named both ways, or neither, or a field failed validation, such as an external ID ' +
+      'longer than 128 characters.',
+  })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'An actor who may not ask the DataGateways, such as an anonymous user, or, for `gameId`, a game the actor ' +
+      'may not read, as `GET /games/:id` answers it.',
+  })
+  @ApiResponse({ status: 404, description: 'For `gameId`, no game has that id, as `GET /games/:id` answers it.' })
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Game))
+  @Get('expansions')
+  expansions(@Query() dto: ExpansionsQueryDto) {
+    this.logger.debug(
+      `REST expansions: gatewayId=${dto.gatewayId ?? ''} externalId=${dto.externalId ?? ''} gameId=${dto.gameId ?? ''}`,
+    );
+    return this.gameSearchService.fetchExpansions(dto);
   }
 }

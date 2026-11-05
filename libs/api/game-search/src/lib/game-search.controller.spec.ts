@@ -1,7 +1,10 @@
-import { PoliciesGuard } from '@bge/permissions';
+import { Action, ResourceType } from '@bge/database';
+import { CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
 import { createTestingModuleWithDb } from '@bge/testing';
+import { PATH_METADATA } from '@nestjs/common/constants';
 import { plainToInstance } from 'class-transformer';
 import { firstValueFrom, of, throwError } from 'rxjs';
+import { ExpansionsQueryDto } from './dto/expansions-query.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
 import type { SearchResponseDto } from './dto/search-response.dto';
 import { GameSearchController } from './game-search.controller';
@@ -13,6 +16,7 @@ describe('GameSearchController', () => {
 
   const mockSearchService = {
     search: jest.fn(),
+    fetchExpansions: jest.fn(),
   } satisfies Partial<jest.Mocked<GameSearchService>>;
 
   beforeEach(async () => {
@@ -97,5 +101,36 @@ describe('GameSearchController', () => {
     await firstValueFrom(controller.search(dto));
 
     expect(searchService.search).toHaveBeenCalledWith(expect.objectContaining({ locale: 'de', limit: 10, offset: 5 }));
+  });
+
+  /** #1067. A base game's expansions at its DataGateways, at `GET /games/search/expansions`. */
+  describe('expansions', () => {
+    /** What each policy handler on `handler` asks of an ability that records the question. */
+    const askedBy = (handler: object) => {
+      const handlers = Reflect.getMetadata(CHECK_POLICIES_KEY, handler) as Array<(ability: AppAbility) => boolean>;
+      const can = jest.fn().mockReturnValue(true);
+
+      handlers.forEach((policy) => policy({ can } as unknown as AppAbility));
+
+      return can.mock.calls;
+    };
+
+    it('delegates to GameSearchService.fetchExpansions with the query DTO', async () => {
+      const dto = plainToInstance(ExpansionsQueryDto, { gatewayId: 'bgg', externalId: '13' });
+      searchService.fetchExpansions.mockReturnValue(of(makeResponse()));
+
+      await firstValueFrom(controller.expansions(dto));
+
+      expect(searchService.fetchExpansions).toHaveBeenCalledWith(dto);
+    });
+
+    it('is served at expansions, under games/search', () => {
+      expect(Reflect.getMetadata(PATH_METADATA, GameSearchController.prototype.expansions)).toBe('expansions');
+    });
+
+    it('asks for a read of Game, as search does', () => {
+      expect(askedBy(GameSearchController.prototype.expansions)).toEqual([[Action.read, ResourceType.Game]]);
+      expect(askedBy(GameSearchController.prototype.search)).toEqual([[Action.read, ResourceType.Game]]);
+    });
   });
 });

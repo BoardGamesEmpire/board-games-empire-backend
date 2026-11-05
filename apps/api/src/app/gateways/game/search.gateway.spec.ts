@@ -2,7 +2,7 @@ import { AuditContextService } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, PlatformType, ResourceType, ContentType as StoredContentType } from '@bge/database';
-import { gameListScope } from '@bge/game';
+import { gameListScope, GameService } from '@bge/game';
 import type {
   WsClientData,
   WsRateLimitedPayload,
@@ -109,6 +109,8 @@ describe('GameSearchGateway', () => {
           provide: GatewayCoordinatorClientService,
           useValue: coordinator,
         },
+        // Never asked: a WebSocket search lists no expansions (#1067).
+        { provide: GameService, useValue: {} },
         {
           provide: AuthService,
           useValue: { verifyToken: jest.fn() },

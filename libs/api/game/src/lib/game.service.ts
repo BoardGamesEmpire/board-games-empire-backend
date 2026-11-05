@@ -14,6 +14,7 @@ import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { sampleByOffsets, type PaginatedRows, type RandomSampleQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import type { DataGatewayLink } from './data-gateway-link';
 import {
   CreateGameDto,
   GAME_DESCRIPTION_MAX_LENGTH,
@@ -235,6 +236,35 @@ export class GameService {
     return byGame;
   }
 
+  /**
+   * A game's DataGateway links, ordered by DataGateway, then external ID, for
+   * asking its DataGateways about it (#1067). The game is read under the same
+   * `Game` read conditions as `GET /games/:id`, with the same 404/403 split,
+   * so an actor never learns the DataGateway links of a game they can't open.
+   */
+  async readDataGatewayLinks(id: string): Promise<DataGatewayLink[]> {
+    try {
+      const { gameSources } = await this.db.game.findUniqueOrThrow({
+        where: {
+          id,
+          // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.read),
+        },
+
+        select: {
+          gameSources: {
+            select: { gatewayId: true, externalId: true },
+            orderBy: [{ gatewayId: 'asc' }, { externalId: 'asc' }],
+          },
+        },
+      });
+
+      return gameSources;
+    } catch (error) {
+      return this.refuseGameRead(id, error);
+    }
+  }
+
   private async readGame(id: string) {
     try {
       return await this.db.game.findUniqueOrThrow({
@@ -247,22 +277,31 @@ export class GameService {
         include: GAME_DETAIL_INCLUDE,
       });
     } catch (error) {
-      this.logger.error(`Error fetching game with id ${id}`, error);
-      // findUniqueOrThrow throws P2025 both when no game has this id AND when a
-      // game exists but the read conditions exclude it. Only on this error path
-      // do we spend a permission-agnostic count to tell 404 from 403 — the
-      // happy path stays a single round trip.
-      if (isPrismaDependentRecordNotFoundError(error)) {
-        const exists = await this.db.game.count({ where: { id } });
-        if (exists === 0) {
-          throw new NotFoundException(t('errors.game.not_found', { id }));
-        }
+      return this.refuseGameRead(id, error);
+    }
+  }
 
-        throw new ForbiddenException(t('common.forbidden.view'));
+  /**
+   * The failure of a read of one game by id, as `GET /games/:id` answers it:
+   * 404 when no game has the id, 403 when one does but the actor may not
+   * read it. Any other error is rethrown.
+   */
+  private async refuseGameRead(id: string, error: unknown): Promise<never> {
+    this.logger.error(`Error fetching game with id ${id}`, error);
+    // findUniqueOrThrow throws P2025 both when no game has this id AND when a
+    // game exists but the read conditions exclude it. Only on this error path
+    // do we spend a permission-agnostic count to tell 404 from 403 — the
+    // happy path stays a single round trip.
+    if (isPrismaDependentRecordNotFoundError(error)) {
+      const exists = await this.db.game.count({ where: { id } });
+      if (exists === 0) {
+        throw new NotFoundException(t('errors.game.not_found', { id }));
       }
 
-      throw error;
+      throw new ForbiddenException(t('common.forbidden.view'));
     }
+
+    throw error;
   }
 
   async createGame(createGameDto: CreateGameDto) {
