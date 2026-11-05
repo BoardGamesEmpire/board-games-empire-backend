@@ -226,7 +226,8 @@ export class WebhookSubscriptionService {
         url: dto.url,
         secret: rotatedSecret !== undefined ? this.encryption.encrypt(rotatedSecret) : undefined,
       },
-      dto.eventTypes,
+      // `@IsOptional()` lets `null` through validation; null leaves the event types alone.
+      dto.eventTypes ?? undefined,
     );
 
     return rotatedSecret !== undefined ? this.reveal(updated, rotatedSecret) : this.redact(updated);

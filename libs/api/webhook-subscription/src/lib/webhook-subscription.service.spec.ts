@@ -20,6 +20,7 @@ import {
 } from '@bge/testing';
 import {
   CreateWebhookSubscriptionDto,
+  UpdateWebhookSubscriptionDto,
   WebhookEventRegistry,
   WebhookEventType,
   WebhookVisibilityService,
@@ -651,6 +652,23 @@ describe('WebhookSubscriptionService', () => {
 
       expect(db.$transaction).not.toHaveBeenCalled();
       expect(db.webhookSubscriptionEventType.deleteMany).not.toHaveBeenCalled();
+    });
+
+    // `@IsOptional()` skips its validators for `null`, so `eventTypes: null`
+    // reaches the service. It leaves the event types alone, as it did before
+    // the event-type write moved out of the nested write (#767).
+    it('leaves the event types alone when a PATCH sends them as null', async () => {
+      db.webhookSubscription.findFirst.mockResolvedValue(makeWebhookSub());
+      db.webhookSubscription.update.mockResolvedValue(makeWebhookSub());
+      const dto = { url: 'https://new.example.com/hook', eventTypes: null } as unknown as UpdateWebhookSubscriptionDto;
+
+      await service.update('sub-1', dto);
+
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(db.webhookSubscriptionEventType.deleteMany).not.toHaveBeenCalled();
+      expect(db.webhookSubscription.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ url: 'https://new.example.com/hook' }) }),
+      );
     });
 
     it('re-encrypts and reveals a rotated secret', async () => {
