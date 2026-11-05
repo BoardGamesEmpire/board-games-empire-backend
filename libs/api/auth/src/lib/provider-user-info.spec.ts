@@ -267,6 +267,21 @@ describe('createProviderUserInfo', () => {
     expect(logger.warn.mock.calls[0][0]).toContain('"p"');
   });
 
+  it('sets aside a UserInfo answer whose numeric sub is too large to read exactly, and warns (#993)', async () => {
+    const fetch = providerFetch(
+      () =>
+        new Response(`{"sub":9007199254740993,"email":"${EMAIL}","email_verified":true}`, {
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
+    const getUserInfo = createProviderUserInfo(PROVIDER, { logger, fetch });
+
+    const profile = await getUserInfo(tokensFor({ sub: '9007199254740992', email: EMAIL }));
+
+    expect(profile).toMatchObject({ sub: '9007199254740992', email: EMAIL, emailVerified: false });
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+
   // Leaving `sub` out is how the provider answers, not a passing fault, so
   // once tells the operator, and the mismatch warning isn't buried.
   it('warns once that UserInfo carries no subject, however many sign-ins it sets aside (#993)', async () => {

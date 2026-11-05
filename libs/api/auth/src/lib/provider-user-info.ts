@@ -177,7 +177,7 @@ export function createProviderUserInfo(
           }
         } else if (merged.userInfoSetAside && !setAsideWarned) {
           setAsideWarned = true;
-          warn("UserInfo carries no subject, so its answers are set aside; this isn't logged again");
+          warn("UserInfo carries no subject that can be read, so its answers are set aside; this isn't logged again");
         }
         return merged.profile;
     }

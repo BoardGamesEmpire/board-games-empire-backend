@@ -60,6 +60,22 @@ describe('mergeProviderClaims', () => {
     });
   });
 
+  // A JSON number past Number.MAX_SAFE_INTEGER is rounded when the answer is
+  // parsed, so 9007199254740993 arrives as 9007199254740992. The text it reads
+  // as can then name another subject, or miss the user's own, so it can't be
+  // compared: the answer is set aside, not counted and not refused.
+  it.each([
+    ['another subject', '9007199254740992'],
+    ["the user's own subject", '9007199254740993'],
+  ])('sets aside a numeric UserInfo sub too large to read exactly, when the ID token names %s (#993)', (_name, sub) => {
+    const userInfo = JSON.parse(`{"sub":9007199254740993,"email":"${EMAIL}","email_verified":true}`);
+
+    const merged = mergeProviderClaims({ sub, email: EMAIL }, userInfo);
+
+    expect(merged).toMatchObject({ outcome: 'profile', userInfoSetAside: true });
+    expect(profileOf(merged)).toMatchObject({ sub, emailVerified: false });
+  });
+
   it.each([undefined, null, ''])('sets aside a UserInfo answer with no subject: %p (#993)', (sub) => {
     const merged = mergeProviderClaims({ sub: SUB, email: EMAIL }, { sub, email: EMAIL, email_verified: true });
 

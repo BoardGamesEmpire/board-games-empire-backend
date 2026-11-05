@@ -18,7 +18,7 @@ export type MergedProviderClaims =
   | {
       readonly outcome: 'profile';
       readonly profile: ProviderProfile;
-      /** Whether a UserInfo answer was there but left out, because it named no subject. */
+      /** Whether a UserInfo answer was there but left out, because it named no subject that could be read. */
       readonly userInfoSetAside: boolean;
     }
   | { readonly outcome: 'subject-mismatch' }
@@ -34,6 +34,20 @@ function textClaim(claims: ProviderClaims, key: string): string | undefined {
 /** Whether `claims` names a subject: a `sub` that is non-empty text (#993). */
 function hasSubject(claims: ProviderClaims): boolean {
   return Boolean(textClaim(claims, 'sub'));
+}
+
+/**
+ * A UserInfo `sub` as the text it reads as, or `undefined` when it can't be
+ * read exactly (#993). Some providers send it as a JSON number, which counts as
+ * its text. One past `Number.MAX_SAFE_INTEGER` was rounded when the answer was
+ * parsed, so its text could name another subject, or miss the user's own.
+ */
+function userInfoSubject(value: unknown): unknown {
+  if (typeof value !== 'number') {
+    return value;
+  }
+
+  return Number.isSafeInteger(value) ? String(value) : undefined;
 }
 
 /** Whether a claim says nothing: missing, `null` or empty text (#993). */
@@ -72,7 +86,9 @@ function confirms(source: ProviderClaims | undefined, email: string | undefined)
  * is the ID token's, so another subject refuses the sign-in, and an answer
  * with none is set aside. A UserInfo `sub` sent as a number counts as the text
  * it reads as: some providers send one, and before #993 an ID token with an
- * email kept UserInfo from being asked at all, so they signed users in.
+ * email kept UserInfo from being asked at all, so they signed users in. A
+ * number too large to have been read exactly is set aside too, since it can't
+ * be told apart from a neighbouring subject's.
  *
  * `email_verified` counts only beside its own email. A source confirming an
  * address that isn't the one kept has not confirmed that one: counting it
@@ -94,11 +110,11 @@ export function mergeProviderClaims(
   let counted = userInfo;
   let userInfoSetAside = false;
   if (token !== undefined && userInfo !== undefined) {
-    const subject = userInfo['sub'];
+    const subject = userInfoSubject(userInfo['sub']);
     if (isBlank(subject)) {
       counted = undefined;
       userInfoSetAside = true;
-    } else if ((typeof subject === 'number' ? String(subject) : subject) !== token['sub']) {
+    } else if (subject !== token['sub']) {
       return { outcome: 'subject-mismatch' };
     }
   }
