@@ -46,6 +46,7 @@ describe('PluginInventoryService', () => {
     registrySlug: 'community',
     pendingVersion: null,
     pendingSince: null,
+    pendingSha256: null,
     manifestJson: manifest,
     ...overrides,
   });
@@ -170,12 +171,27 @@ describe('PluginInventoryService', () => {
 
     it('surfaces a staged update with pendingSince, never updatedAt', async () => {
       const since = new Date('2026-08-20T10:00:00Z');
-      db.plugin.findMany.mockResolvedValue([row({ pendingVersion: '1.3.0', pendingSince: since })] as never);
+      db.plugin.findMany.mockResolvedValue([
+        row({ pendingVersion: '1.3.0', pendingSince: since, pendingSha256: 'b'.repeat(64) }),
+      ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
       const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
 
       expect(rows[0].pendingUpdate).toEqual({ version: '1.3.0', since });
+    });
+
+    // #696: approval answers 409 no staged update for a staged row without a
+    // checksum, so the list must not offer that row an update to approve.
+    it('reports a staged row without a checksum as no staged update, as approval does', async () => {
+      db.plugin.findMany.mockResolvedValue([
+        row({ pendingVersion: '1.3.0', pendingSince: new Date('2026-08-20T10:00:00Z'), pendingSha256: null }),
+      ] as never);
+      db.plugin.count.mockResolvedValue(1 as never);
+
+      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
+
+      expect(rows[0].pendingUpdate).toBeNull();
     });
 
     it('reports no staged update as null rather than an empty object', async () => {
@@ -577,6 +593,7 @@ describe('PluginInventoryService', () => {
         'registrySlug',
         'pendingVersion',
         'pendingSince',
+        'pendingSha256',
         'installedAt',
         'restartRequired',
         'uninstalledAt',

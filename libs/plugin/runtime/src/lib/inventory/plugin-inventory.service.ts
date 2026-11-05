@@ -257,6 +257,8 @@ const SERVER_SELECT = {
   registrySlug: true,
   pendingVersion: true,
   pendingSince: true,
+  // Read only to decide whether an update is staged; never served.
+  pendingSha256: true,
 } satisfies Prisma.PluginSelect;
 
 /** `enabled` only, surfaced as `serverEnabled` — no provenance, no staging. */
@@ -590,7 +592,12 @@ export class PluginInventoryService {
       restartRequired: row.restartRequired,
       installedAt: row.installedAt,
       provenance: { sha256: row.installedSha256, url: row.installedFromUrl, registrySlug: row.registrySlug },
-      pendingUpdate: row.pendingVersion === null ? null : { version: row.pendingVersion, since: row.pendingSince },
+      // A staged row without a checksum is no staged update, as approval and the
+      // pending read treat it (#696): the list must not offer one to approve.
+      pendingUpdate:
+        row.pendingVersion === null || row.pendingSha256 === null
+          ? null
+          : { version: row.pendingVersion, since: row.pendingSince },
     };
   }
 
