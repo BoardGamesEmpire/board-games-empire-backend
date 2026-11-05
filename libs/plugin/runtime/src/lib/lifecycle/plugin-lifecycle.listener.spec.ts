@@ -30,6 +30,8 @@ import {
   PluginUninstalledEvent,
   PluginUpdateApprovedEvent,
   PluginUpdateCheckCompletedEvent,
+  PluginUpdatePendingEvent,
+  PluginUpdateRejectedEvent,
   UserPluginDisabledEvent,
   UserPluginUnitDisabledEvent,
   UserPluginUnitEnabledEvent,
@@ -184,8 +186,8 @@ describe('PluginLifecycleListener', () => {
     /** D-CN on #59/#370: the reset flag rides the same payload the seeded grants already do. */
     it('persists an UpdateApproved row carrying granted permissions and the retained-config reset flag', async () => {
       const event = new PluginUpdateApprovedEvent(
-        { id: 'plugin-1', slug: 'demo-sink', version: '1.2.0', pendingVersion: '1.3.0' },
-        { id: 'plugin-1', slug: 'demo-sink', version: '1.3.0', pendingVersion: null },
+        { id: 'plugin-1', slug: 'demo-sink', version: '1.2.0', pendingVersion: '1.3.0', pendingStagingId: 'staging-1' },
+        { id: 'plugin-1', slug: 'demo-sink', version: '1.3.0', pendingVersion: null, pendingStagingId: null },
         [{ slug: 'plugin.demo-sink.send', required: true, consentScope: 'server', reason: 'Send digests' }],
         true,
         initiatedAt,
@@ -205,6 +207,85 @@ describe('PluginLifecycleListener', () => {
             ],
             retainedConfigReset: true,
           }),
+        }),
+      );
+    });
+
+    it('records which staging an approval answered, from the row before it was cleared (#357)', async () => {
+      emitter.emit(
+        PluginEvent.UpdateApproved,
+        new PluginUpdateApprovedEvent(
+          {
+            id: 'plugin-1',
+            slug: 'demo-sink',
+            version: '1.2.0',
+            pendingVersion: '1.3.0',
+            pendingStagingId: 'staging-2',
+          },
+          { id: 'plugin-1', slug: 'demo-sink', version: '1.3.0', pendingVersion: null, pendingStagingId: null },
+          [],
+          false,
+          initiatedAt,
+        ),
+      );
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({ payload: expect.objectContaining({ stagingId: 'staging-2' }) }),
+      );
+    });
+
+    it('records the staging id on update_pending, so two stagings of one artifact stay apart (#357)', async () => {
+      emitter.emit(
+        PluginEvent.UpdatePending,
+        new PluginUpdatePendingEvent(
+          { id: 'plugin-1', slug: 'demo-sink', version: '1.2.0', pendingVersion: null, pendingStagingId: null },
+          {
+            id: 'plugin-1',
+            slug: 'demo-sink',
+            version: '1.2.0',
+            pendingVersion: '1.3.0',
+            pendingStagingId: 'staging-1',
+          },
+          'b'.repeat(64),
+          [],
+          [],
+          initiatedAt,
+        ),
+      );
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          event: PluginLifecycleEventType.UpdatePending,
+          payload: expect.objectContaining({ pendingVersion: '1.3.0', stagingId: 'staging-1' }),
+        }),
+      );
+    });
+
+    it('records which staging a rejection answered, which the cleared row no longer names (#357)', async () => {
+      emitter.emit(
+        PluginEvent.UpdateRejected,
+        new PluginUpdateRejectedEvent(
+          {
+            id: 'plugin-1',
+            slug: 'demo-sink',
+            version: '1.2.0',
+            pendingVersion: '1.3.0',
+            pendingStagingId: 'staging-1',
+          },
+          { id: 'plugin-1', slug: 'demo-sink', version: '1.2.0', pendingVersion: null, pendingStagingId: null },
+          initiatedAt,
+        ),
+      );
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          pluginId: 'plugin-1',
+          pluginSlug: 'demo-sink',
+          event: PluginLifecycleEventType.UpdateRejected,
+          payload: { stagingId: 'staging-1' },
         }),
       );
     });

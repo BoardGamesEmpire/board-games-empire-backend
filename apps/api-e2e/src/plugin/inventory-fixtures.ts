@@ -2,6 +2,9 @@ import { PluginCategory, PluginScope, RiskLevel, type Plugin, type PrismaClient 
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 
+/** The staging id (#357) on every update `arrangeInventoryPlugin` stages; approve and reject must send it. */
+export const INVENTORY_STAGING_ID = 'e2e-staging-1';
+
 export interface InventoryPluginOptions {
   /** Columns written over the installed defaults: `uninstalledAt`, `scope`, and so on. */
   readonly row?: Record<string, unknown>;
@@ -50,8 +53,9 @@ export const arrangeInventoryPlugin = async (
       : {
           pendingVersion: options.stagedVersion,
           pendingManifestJson: { ...manifest, version: options.stagedVersion } as never,
-          pendingSha256: 'e2e-staged',
+          pendingSha256: 'b'.repeat(64),
           pendingSince: new Date(),
+          pendingStagingId: INVENTORY_STAGING_ID,
         };
 
   const plugin = await prisma.plugin.create({

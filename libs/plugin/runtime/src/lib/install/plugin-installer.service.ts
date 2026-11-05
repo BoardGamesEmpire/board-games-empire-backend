@@ -10,7 +10,7 @@ import {
   type PluginGrant,
   type PluginPermission,
 } from '@bge/database';
-import type { InstalledPluginDirectory } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import {
   PluginManifestValidationError,
   resolveLocalizedString,
@@ -26,6 +26,7 @@ import { PluginConfigSchemaService } from '../config/plugin-config-schema.servic
 import { retainedServerConfig } from '../config/retained-server-config';
 import { PluginInstalledEvent, type GrantedPermissionRecord, type PluginProvenance } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
+import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
 import {
@@ -61,12 +62,12 @@ import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
 import { gatingFindings, type StaticAnalysisFinding, type StaticAnalysisReport } from './static-analysis.types';
 
 /**
- * Where the plugin artifact came from: its checksum, link and registry (#84).
- * Every plugin is installed from an artifact, because none ships inside the
- * server (#696), so the checksum is always present.
+ * Where the plugin artifact came from, beyond its checksum (#84): the link it
+ * was fetched from and the registry it was found through. The checksum is the
+ * artifact directory's own (#224), so it is not a second input here that
+ * could disagree with the directory.
  */
 export interface PluginInstallProvenance {
-  readonly installedSha256: string;
   /** Absent for a manual upload, which has a checksum but no link. */
   readonly installedFromUrl?: string;
   /** `PluginRegistrySource.slug` the artifact was discovered through (#84). */
@@ -74,9 +75,14 @@ export interface PluginInstallProvenance {
 }
 
 export interface PluginInstallInput {
-  /** Populated by the #84 pipeline — the installer never opens the plugin artifact itself (#59). */
-  readonly directory: InstalledPluginDirectory;
-  readonly provenance: PluginInstallProvenance;
+  /**
+   * The plugin artifact's directory, which the install ingress is to place
+   * (planned, #1094); its checksum is the one the row records (#224). The
+   * installer never opens the plugin artifact itself (#59).
+   */
+  readonly directory: PluginArtifactDirectory;
+  /** Omitted for a manual upload, which has neither link nor registry. */
+  readonly provenance?: PluginInstallProvenance;
   /** The installing admin — server-admin authority is verified, never assumed. */
   readonly installerId: string;
   /** Exact re-entry of every Critical + required permission slug. */
@@ -119,9 +125,10 @@ export interface PluginInstallResult {
  * `PluginPermission` catalog (fresh-install rows only), and the
  * server-scope grant seed → post-commit `plugin.installed` provenance.
  *
- * Input is a resolved directory plus typed provenance — ingress, SHA-256
- * verification, extraction, and the atomic move belong to the #84 pipeline
- * that wraps this service. The fresh-install denial-list check was
+ * Input is a resolved artifact directory plus its link and registry. The
+ * install ingress, SHA-256 verification, extraction and placing the
+ * directory belong to the #84 pipeline that wraps this service. The
+ * fresh-install denial-list check was
  * deliberately dropped: no `PluginGrant` rows can exist for a plugin
  * being created, and uninstall purges them, so denial at install is
  * expressed by the admin declining to confirm.
@@ -149,11 +156,23 @@ export class PluginInstallerService {
     private readonly configSchema: PluginConfigSchemaService,
     private readonly emitter: EventEmitter2,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
+    private readonly directories: PluginDirectoryResolverService,
   ) {}
 
   async install(input: PluginInstallInput): Promise<PluginInstallResult> {
     const initiatedAt = new Date();
-    const { directory, provenance } = input;
+    // Before anything is read from it or recorded: the row is to name a
+    // checksum the loader resolves at the next boot, so a directory the
+    // resolver would refuse then is refused now, with the same error (#224).
+    const directory = await this.directories.confirm(input.directory);
+    // What the row and the installed event record: the checksum is the
+    // artifact directory's own (#224), and a link or registry the provenance
+    // leaves out is stored as null.
+    const provenance: PluginProvenance = {
+      installedFromUrl: input.provenance?.installedFromUrl ?? null,
+      installedSha256: directory.sha256,
+      registrySlug: input.provenance?.registrySlug ?? null,
+    };
 
     const validated = await this.validateManifest(directory);
     this.assertNoForbiddenPluginPermissions(validated);
@@ -222,7 +241,7 @@ export class PluginInstallerService {
    * (`PluginGrantService`), install DOES gate on `bgeCompat`: a plugin that
    * cannot load under the running BGE must not be installable.
    */
-  private async validateManifest(directory: InstalledPluginDirectory): Promise<PluginManifestValidationResult> {
+  private async validateManifest(directory: PluginArtifactDirectory): Promise<PluginManifestValidationResult> {
     let raw: unknown;
 
     try {
@@ -401,7 +420,7 @@ export class PluginInstallerService {
 
   private async persist(
     validated: PluginManifestValidationResult,
-    provenance: PluginInstallProvenance,
+    provenance: PluginProvenance,
     installerId: string,
     serverChecks: readonly NormalizedPermissionRequest[],
     corePermissions: ReadonlyMap<string, Permission>,
@@ -454,9 +473,9 @@ export class PluginInstallerService {
         // The VALIDATED manifest object — the canonical form every later
         // re-validation (loader, grants, C3 comparison) starts from.
         manifestJson: manifest as Prisma.InputJsonValue,
-        installedFromUrl: provenance.installedFromUrl ?? null,
+        installedFromUrl: provenance.installedFromUrl,
         installedSha256: provenance.installedSha256,
-        registrySlug: provenance.registrySlug ?? null,
+        registrySlug: provenance.registrySlug,
         installedById: installerId,
         installedAt: initiatedAt,
       };
@@ -615,19 +634,13 @@ export class PluginInstallerService {
    */
   private emitInstalled(
     plugin: Plugin,
-    provenance: PluginInstallProvenance,
+    provenance: PluginProvenance,
     serverChecks: readonly NormalizedPermissionRequest[],
     analysis: StaticAnalysisReport,
     acknowledgedForbiddenImports: readonly string[],
     retainedConfigReset: boolean,
     initiatedAt: Date,
   ): void {
-    const eventProvenance: PluginProvenance = {
-      installedFromUrl: provenance.installedFromUrl ?? null,
-      installedSha256: provenance.installedSha256,
-      registrySlug: provenance.registrySlug ?? null,
-    };
-
     const grantedPermissions: GrantedPermissionRecord[] = serverChecks.map((check) => ({
       slug: check.canonicalSlug,
       required: check.required,
@@ -648,7 +661,7 @@ export class PluginInstallerService {
         enabled: plugin.enabled,
       },
       {
-        provenance: eventProvenance,
+        provenance,
         grantedPermissions,
         // npm audit consultation is the #84 pipeline's step; it extends this
         // context with findings when it lands.

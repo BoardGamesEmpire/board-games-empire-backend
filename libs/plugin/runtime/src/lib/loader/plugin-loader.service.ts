@@ -12,7 +12,7 @@ import type { PluginModuleOptions } from '../plugin-module.options';
 import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import type { PluginPackageDescriptor } from './entrypoint-resolver';
 import { assertResolvedEntrypointContained, resolvePluginEntrypoint } from './entrypoint-resolver';
-import { PluginEntrypointError, PluginModuleShapeError } from './loader.errors';
+import { PluginDiskVersionMismatchError, PluginEntrypointError, PluginModuleShapeError } from './loader.errors';
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './plugin-instance-registry';
 import { PLUGIN_MODULE_IMPORTER, type PluginModuleImporter } from './plugin-module-importer';
@@ -23,7 +23,8 @@ import { PLUGIN_MODULE_IMPORTER, type PluginModuleImporter } from './plugin-modu
  * registers the product with `PluginInstanceRegistry`.
  *
  * Per-plugin isolation is the load-failure contract: a plugin whose
- * directory, manifest, entrypoint, import, or factory fails is QUARANTINED
+ * directory, manifest, entrypoint, import, or factory fails, or whose
+ * artifact directory holds another version than the row's, is QUARANTINED
  * — `LoadFailed` provenance recorded, force-disabled in the DB (a
  * quarantined plugin must not auto-retry on every boot; re-enabling is an
  * explicit admin decision), logged at error level — and boot continues.
@@ -95,8 +96,19 @@ export class PluginLoaderService implements OnApplicationBootstrap {
 
   private async loadOne(plugin: Plugin): Promise<void> {
     const manifest = this.validateManifest(plugin);
-    const directory = await this.directories.resolve(plugin.slug);
+    const directory = await this.directories.resolve(plugin.slug, plugin.installedSha256);
+
+    // Before anything else is read from the directory, and before any of its
+    // code is imported. Every plugin artifact has a directory of its own
+    // (#224), so the one installedSha256 names holds the version the row
+    // activated; another version there is drift, not a staged update
+    // awaiting consent, and loading it would run code nobody approved.
     const diskVersion = await this.readDiskVersion(directory.manifestPath);
+
+    if (diskVersion !== plugin.version) {
+      throw new PluginDiskVersionMismatchError(plugin.slug, plugin.version, diskVersion);
+    }
+
     const descriptor = await this.readPackageDescriptor(plugin.slug, directory.packageJsonPath);
     const entrypoint = resolvePluginEntrypoint(plugin.slug, descriptor, directory.rootDir);
     // Symlink-aware containment re-check: the lexical check inside
@@ -130,31 +142,15 @@ export class PluginLoaderService implements OnApplicationBootstrap {
       { enabled: true },
     );
 
-    // A restart clears `restartRequired` only when the code on disk is
-    // actually the activated version. Advisory, never fatal: the directory
-    // resolver exposes ONE path per plugin, so a staged update's files
-    // legitimately occupy that path before anyone approves it — quarantining
-    // on a mismatch would force-disable a healthy plugin awaiting consent.
-    // A staged-file location is #84's to define; until it exists, the honest
-    // posture is to load the plugin and refuse to claim the restart happened.
-    const diskMatchesRow = diskVersion === plugin.version;
-    const clearRestartRequired = plugin.restartRequired && diskMatchesRow;
-
-    if (plugin.restartRequired && !diskMatchesRow) {
-      this.logger.warn(
-        `Plugin '${plugin.slug}' expected v${plugin.version} on disk but found ` +
-          `${diskVersion === null ? 'an unreadable manifest' : `v${diskVersion}`}; loaded it anyway and left ` +
-          'restartRequired set — the activated version is not the code now running',
-      );
-    }
-
-    if (plugin.loadFailed || clearRestartRequired) {
-      // One recovery write for both self-healing flags.
+    // The code now running is the activated version — the disk check above
+    // proved it — so a clean load is what clears both self-healing flags,
+    // in one recovery write.
+    if (plugin.loadFailed || plugin.restartRequired) {
       await this.db.plugin.update({
         where: { id: plugin.id },
         data: {
           ...(plugin.loadFailed ? { loadFailed: false, loadError: null } : {}),
-          ...(clearRestartRequired ? { restartRequired: false } : {}),
+          ...(plugin.restartRequired ? { restartRequired: false } : {}),
         },
       });
 
@@ -162,7 +158,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
         this.logger.log(`Plugin '${plugin.slug}' recovered from a prior load failure`);
       }
 
-      if (clearRestartRequired) {
+      if (plugin.restartRequired) {
         this.logger.log(`Plugin '${plugin.slug}' v${plugin.version} loaded post-update — restartRequired cleared`);
       }
     }

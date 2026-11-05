@@ -63,7 +63,7 @@ describe('household plugin routes for a missing or deleted household (#553)', ()
         scope: PluginScope.Household,
         manifestJson: manifest as never,
         enabled: true,
-        installedSha256: randomUUID(),
+        installedSha256: 'a'.repeat(64),
       },
     });
     await db.client.pluginPermission.create({

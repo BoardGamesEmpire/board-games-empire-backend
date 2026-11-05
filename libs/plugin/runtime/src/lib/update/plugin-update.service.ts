@@ -15,7 +15,7 @@ import {
   type PluginGrant,
   type UserPlugin,
 } from '@bge/database';
-import type { InstalledPluginDirectory } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import {
   PluginManifestValidationError,
   resolveLocalizedString,
@@ -26,6 +26,7 @@ import {
 } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { createId } from '@paralleldrive/cuid2';
 import { readFile } from 'node:fs/promises';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { retainedServerConfig } from '../config/retained-server-config';
@@ -52,6 +53,7 @@ import {
 import { MANIFEST_SCOPE_TO_PRISMA } from '../install/manifest-enum.maps';
 import { PluginStaticAnalysisService } from '../install/plugin-static-analysis.service';
 import { gatingFindings, type StaticAnalysisReport } from '../install/static-analysis.types';
+import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
 import {
@@ -72,6 +74,7 @@ import {
   PluginUpdateNoPendingError,
   PluginUpdatePendingConflictError,
   PluginUpdatePluginNotFoundError,
+  PluginUpdateStagingReplacedError,
   PluginUpdateStaticAnalysisError,
   PluginUpdateTombstonedError,
   PluginUpdateUnknownCorePermissionError,
@@ -144,20 +147,15 @@ function requestedSlugsDropped(
   ];
 }
 
-/**
- * The staged update's plugin artifact, by its checksum. Every update names
- * one, because no plugin ships inside the server (#696). URL/registry
- * provenance columns keep describing the INSTALL; #84 extends this when its
- * ingress metadata needs to ride an update.
- */
-export interface PluginUpdateProvenance {
-  readonly pendingSha256: string;
-}
-
 export interface PluginUpdateStageInput {
-  /** The NEW version's resolved directory — placed by #84; this service never opens the plugin artifact itself (#59). */
-  readonly directory: InstalledPluginDirectory;
-  readonly provenance: PluginUpdateProvenance;
+  /**
+   * The NEW version's plugin artifact directory, which update staging is to
+   * place (planned, #1096). Its checksum is the one the staging records as
+   * `pendingSha256` (#224); the link and
+   * registry columns keep describing the INSTALL. This service never opens
+   * the plugin artifact itself (#59).
+   */
+  readonly directory: PluginArtifactDirectory;
   /** The staging admin — server-admin authority is verified, never assumed, exactly as install verifies it. */
   readonly initiatorId: string;
   /** Admin opt-in: extend static analysis into node_modules; findings advisory only. */
@@ -181,6 +179,13 @@ export interface PluginUpdateStageResult {
 export interface PluginUpdateApproveInput {
   readonly slug: string;
   readonly approverId: string;
+  /**
+   * The staging this approval answers, as the staged-update read reported it
+   * (#357). Any other current staging refuses with
+   * `PluginUpdateStagingReplacedError`, so an approval never activates a
+   * staging its approver didn't review.
+   */
+  readonly stagingId: string;
   /** Exact re-entry of every Critical permission slug this approval will GRANT — the same second factor install demands (#59). */
   readonly confirmCriticalSlugs?: readonly string[];
 }
@@ -215,6 +220,8 @@ export interface PluginUpdateApproveResult {
 export interface PluginUpdateRejectInput {
   readonly slug: string;
   readonly rejectorId: string;
+  /** The staging this rejection answers, as the staged-update read reported it (#357). */
+  readonly stagingId: string;
 }
 
 /**
@@ -333,15 +340,20 @@ export class PluginUpdateService {
     private readonly configSchema: PluginConfigSchemaService,
     private readonly emitter: EventEmitter2,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
+    private readonly directories: PluginDirectoryResolverService,
   ) {}
 
   async stage(input: PluginUpdateStageInput): Promise<PluginUpdateStageResult> {
     const initiatedAt = new Date();
-    const { directory, provenance } = input;
 
     if (!(await this.authority.isServerAdmin(input.initiatorId))) {
       throw new PluginUpdateAuthorityError(input.initiatorId);
     }
+
+    // Before anything is read from it or recorded: approval is to make this
+    // checksum the one the loader resolves, so a directory the resolver would
+    // refuse at that boot is refused now, with the same error (#224).
+    const directory = await this.directories.confirm(input.directory);
 
     const plugin = await this.loadUpdatablePlugin(directory.slug);
 
@@ -377,7 +389,7 @@ export class PluginUpdateService {
         plugin,
         active,
         next,
-        provenance,
+        directory.sha256,
         comparison,
         [],
         corePermissions,
@@ -414,8 +426,12 @@ export class PluginUpdateService {
         data: {
           pendingVersion: next.manifest.version,
           pendingManifestJson: next.manifest as Prisma.InputJsonValue,
-          pendingSha256: provenance.pendingSha256,
+          pendingSha256: directory.sha256,
           pendingSince: initiatedAt,
+          // The staging's identity (#357): fresh for every staging, even one
+          // of the same version from the same artifact, so a rejection or an
+          // approval aimed at an earlier staging can never match this one.
+          pendingStagingId: createId(),
         },
       });
 
@@ -444,7 +460,7 @@ export class PluginUpdateService {
       new PluginUpdatePendingEvent(
         this.stagingSnapshot(plugin),
         this.stagingSnapshot(staged),
-        provenance.pendingSha256,
+        directory.sha256,
         comparison.escalations,
         acknowledgedForbiddenImports,
         initiatedAt,
@@ -478,6 +494,7 @@ export class PluginUpdateService {
 
     const { plugin, active, next, corePermissions, comparison, pendingSha256 } = await this.resolvePendingUpdate(
       input.slug,
+      input.stagingId,
     );
 
     if (comparison.blockedByDenial.length > 0) {
@@ -513,7 +530,7 @@ export class PluginUpdateService {
       plugin,
       active,
       next,
-      { pendingSha256 },
+      pendingSha256,
       comparison,
       checksToSeed,
       corePermissions,
@@ -590,22 +607,27 @@ export class PluginUpdateService {
       throw new PluginUpdateNoPendingError(plugin.slug);
     }
 
+    if (plugin.pendingStagingId !== input.stagingId) {
+      throw new PluginUpdateStagingReplacedError(plugin.slug, input.stagingId);
+    }
+
     // Conditional on the EXACT staging the rejector saw, like every other
     // staged-update writer: an unconditional clear racing an approve would
-    // report "rejected" for an update that in fact activated — and emit the
-    // update_rejected event #84 keys staged-file cleanup off, against files
-    // that just became the active version's code. Racing a replacement
-    // stage, it would wipe a staged version nobody decided on — and because
-    // a rejected version can be re-staged under the SAME number (only the
-    // ACTIVE version is refused), the version is not identity enough:
-    // pendingSince, written fresh by every staging, is what pins the
-    // staging this rejection targets.
+    // report "rejected" for an update that in fact activated, and emit
+    // update_rejected for code that had just become the active version's.
+    // Racing a replacement stage, it would wipe a staged version nobody
+    // decided on — and because a rejected version can be re-staged under the
+    // SAME number (only the ACTIVE version is refused), the version is not
+    // identity enough, and neither is the checksum, since staging the same
+    // artifact again gives the same one. pendingStagingId, written fresh by
+    // every staging, is what pins the staging this rejection targets (#357);
+    // pendingSince is for display, and two stagings can share its millisecond.
     const rejected = await this.db.$transaction(async (tx) => {
       const cleared = await tx.plugin.updateMany({
         where: {
           id: plugin.id,
           pendingVersion: plugin.pendingVersion,
-          pendingSince: plugin.pendingSince,
+          pendingStagingId: plugin.pendingStagingId,
           uninstalledAt: null,
         },
         data: CLEARED_STAGED_UPDATE,
@@ -614,11 +636,18 @@ export class PluginUpdateService {
       if (cleared.count !== 1) {
         const current = await tx.plugin.findUnique({
           where: { id: plugin.id },
-          select: { uninstalledAt: true },
+          select: { uninstalledAt: true, pendingStagingId: true },
         });
 
         if (current?.uninstalledAt != null) {
           throw new PluginUpdateTombstonedError(plugin.slug, current.uninstalledAt);
+        }
+
+        // Another staging took the slot after the check above: the rejector
+        // answered one that is gone, the same answer as if it had already
+        // been gone when the request arrived (#357).
+        if (current?.pendingStagingId != null && current.pendingStagingId !== input.stagingId) {
+          throw new PluginUpdateStagingReplacedError(plugin.slug, input.stagingId);
         }
 
         throw new PluginUpdateNoPendingError(plugin.slug);
@@ -628,15 +657,15 @@ export class PluginUpdateService {
       // The clear leaves `pendingVersion` null, which is exactly the slot
       // stage() claims on, so an outside read-back can observe a NEWLY
       // staged version — handing this response, and the rejected event's
-      // `after` snapshot that #84 keys staged-file cleanup off, a pending
-      // update nobody rejected. The atomic single-statement update this
-      // replaced could not express that state; the guarded updateMany can.
+      // `after` snapshot, a staged update nobody rejected. The atomic
+      // single-statement update this replaced could not express that state;
+      // the guarded updateMany can.
       return tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
     });
 
-    // #84 seam: the staged version's on-disk files are the distribution
-    // pipeline's to remove — this service never touches the filesystem
-    // beyond reading manifests (#59).
+    // Removing the staged artifact's directory, once no living row names it,
+    // is the planned artifact sweep's job (#1094, #224); this service never
+    // touches the filesystem beyond reading manifests (#59).
     this.emitter.emit(
       PluginUpdateRejectedEvent.eventName,
       new PluginUpdateRejectedEvent(this.stagingSnapshot(plugin), this.stagingSnapshot(rejected), initiatedAt),
@@ -661,7 +690,11 @@ export class PluginUpdateService {
    * a version that can no longer load would trade a typed refusal here for
    * a quarantine at the next boot.
    */
-  private async resolvePendingUpdate(slug: string): Promise<{
+  private async resolvePendingUpdate(
+    slug: string,
+    /** The staging an approval answers (#357); the read that reports the id passes none. */
+    stagingId?: string,
+  ): Promise<{
     readonly plugin: Plugin;
     readonly active: PluginManifestValidationResult;
     readonly next: PluginManifestValidationResult;
@@ -676,6 +709,12 @@ export class PluginUpdateService {
     // is nothing approval could activate (#696): it is not a staged update.
     if (plugin.pendingVersion === null || plugin.pendingManifestJson === null || plugin.pendingSha256 === null) {
       throw new PluginUpdateNoPendingError(plugin.slug);
+    }
+
+    // Before the staged manifest is validated or compared: a staging the
+    // approver never saw is refused for that, whatever else is wrong with it.
+    if (stagingId !== undefined && plugin.pendingStagingId !== stagingId) {
+      throw new PluginUpdateStagingReplacedError(plugin.slug, stagingId);
     }
 
     const next = this.validateStoredManifest(plugin, plugin.pendingManifestJson, plugin.pendingVersion, {
@@ -705,7 +744,7 @@ export class PluginUpdateService {
   }
 
   private async validateNextManifest(
-    directory: InstalledPluginDirectory,
+    directory: PluginArtifactDirectory,
     plugin: Plugin,
   ): Promise<PluginManifestValidationResult> {
     let raw: unknown;
@@ -945,7 +984,8 @@ export class PluginUpdateService {
     plugin: Plugin,
     active: PluginManifestValidationResult,
     next: PluginManifestValidationResult,
-    provenance: PluginUpdateProvenance,
+    /** The checksum of the plugin artifact being activated, which becomes `installedSha256` (#224). */
+    artifactSha256: string,
     comparison: UpdateEscalationComparison,
     checksToSeed: readonly NormalizedPermissionRequest[],
     corePermissions: ReadonlyMap<string, Permission>,
@@ -971,7 +1011,7 @@ export class PluginUpdateService {
         plugin,
         active,
         next,
-        provenance,
+        artifactSha256,
         comparison,
         checksToSeed,
         corePermissions,
@@ -1028,7 +1068,7 @@ export class PluginUpdateService {
     plugin: Plugin,
     active: PluginManifestValidationResult,
     next: PluginManifestValidationResult,
-    provenance: PluginUpdateProvenance,
+    artifactSha256: string,
     comparison: UpdateEscalationComparison,
     checksToSeed: readonly NormalizedPermissionRequest[],
     corePermissions: ReadonlyMap<string, Permission>,
@@ -1084,20 +1124,20 @@ export class PluginUpdateService {
       // die on that same unique index (an untyped 500) or silently
       // re-activate; on the immediate stage() path (pending columns null)
       // the same predicate keeps a concurrently staged update from being
-      // clobbered by this write's cleared columns. pendingSince rides the
-      // predicate as the staging IDENTITY: a rejected version can be
-      // re-staged under the same number with different content, so the
-      // version alone would let this claim promote a payload the approver
-      // never reviewed — the staging timestamp is fresh per staging write
-      // and cannot be re-entered. Claiming before any other write means
-      // the loser exits with a typed refusal while the transaction has
-      // touched nothing.
+      // clobbered by this write's cleared columns. pendingStagingId rides
+      // the predicate as the staging IDENTITY (#357): a rejected version can
+      // be re-staged under the same number, with different content or from
+      // the same artifact, so neither the version nor the checksum would
+      // stop this claim promoting a payload the approver never reviewed, and
+      // a timestamp can repeat. The staging id is fresh per staging write
+      // and never reused. Claiming before any other write means the loser
+      // exits with a typed refusal while the transaction has touched nothing.
       const claimed = await tx.plugin.updateMany({
         where: {
           id: plugin.id,
           uninstalledAt: null,
           pendingVersion: plugin.pendingVersion,
-          pendingSince: plugin.pendingSince,
+          pendingStagingId: plugin.pendingStagingId,
         },
         data: {
           version: next.manifest.version,
@@ -1112,7 +1152,10 @@ export class PluginUpdateService {
           // so activation is not the one manifest-replacing path that leaves
           // a stale server config in force.
           config: retainedConfig.config as Prisma.InputJsonValue,
-          installedSha256: provenance.pendingSha256,
+          // Activation switches which artifact directory the row names, and
+          // nothing on disk moves: the loader finds the new code by this
+          // checksum on the next boot (#224).
+          installedSha256: artifactSha256,
           ...CLEARED_STAGED_UPDATE,
           // The running instance is still the prior code; the loader
           // clears this on the boot that actually loads the new version.
@@ -1123,7 +1166,7 @@ export class PluginUpdateService {
       if (claimed.count !== 1) {
         const current = await tx.plugin.findUnique({
           where: { id: plugin.id },
-          select: { uninstalledAt: true, pendingVersion: true },
+          select: { uninstalledAt: true, pendingVersion: true, pendingStagingId: true },
         });
 
         if (current?.uninstalledAt != null) {
@@ -1136,6 +1179,16 @@ export class PluginUpdateService {
         // immediate stage() path lost the empty slot to a concurrent stage
         // — the same refuse-don't-supersede answer the staging write gives.
         if (plugin.pendingVersion !== null) {
+          // Another staging took the slot after approve() checked it: the
+          // approver reviewed one that is gone (#357).
+          if (
+            plugin.pendingStagingId !== null &&
+            current?.pendingStagingId != null &&
+            current.pendingStagingId !== plugin.pendingStagingId
+          ) {
+            throw new PluginUpdateStagingReplacedError(plugin.slug, plugin.pendingStagingId);
+          }
+
           throw new PluginUpdateNoPendingError(plugin.slug);
         }
 
@@ -1630,9 +1683,9 @@ export class PluginUpdateService {
   }
 
   private stagingSnapshot(plugin: Plugin) {
-    const { id, slug, version, pendingVersion } = plugin;
+    const { id, slug, version, pendingVersion, pendingStagingId } = plugin;
 
-    return { id, slug, version, pendingVersion };
+    return { id, slug, version, pendingVersion, pendingStagingId };
   }
 
   private householdUnitSnapshot(unit: HouseholdPlugin) {

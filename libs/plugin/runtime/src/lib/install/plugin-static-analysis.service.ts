@@ -1,4 +1,4 @@
-import type { InstalledPluginDirectory } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import { classifyImportSpecifier, resolveAliasedPackageName } from '@boardgamesempire/plugin-manifest';
 import { Injectable, Logger } from '@nestjs/common';
 import { init, parse as parseEsm } from 'es-module-lexer';
@@ -120,7 +120,7 @@ export class PluginStaticAnalysisService {
   private readonly logger = new Logger(PluginStaticAnalysisService.name);
   private parserChecked = false;
 
-  async analyze(directory: InstalledPluginDirectory, options: StaticAnalysisOptions): Promise<StaticAnalysisReport> {
+  async analyze(directory: PluginArtifactDirectory, options: StaticAnalysisOptions): Promise<StaticAnalysisReport> {
     // Idempotent WASM initialization — resolved once, awaited every call.
     await init;
     this.assertParserSanity();
@@ -487,7 +487,7 @@ export class PluginStaticAnalysisService {
    * Severity follows authorship, not danger: what the author DECLARED gates,
    * what the resolver produced is advisory (see `lockfilePackageNames`).
    */
-  private async screenDependencies(directory: InstalledPluginDirectory): Promise<StaticAnalysisFinding[]> {
+  private async screenDependencies(directory: PluginArtifactDirectory): Promise<StaticAnalysisFinding[]> {
     // Keyed without severity so one package cannot be reported twice for the
     // same descriptor, and resolved by UPGRADE so the strongest verdict wins
     // regardless of which field is visited first — a package listed in both

@@ -1,4 +1,4 @@
-import type { InstalledPluginDirectory } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -46,8 +46,9 @@ jest.mock('meriyah', () => ({
 describe('PluginStaticAnalysisService parser guard', () => {
   let rootDir: string;
 
-  const directory = (): InstalledPluginDirectory => ({
+  const directory = (): PluginArtifactDirectory => ({
     slug: 'demo-sink',
+    sha256: 'a'.repeat(64),
     rootDir,
     manifestPath: join(rootDir, 'manifest.json'),
     packageJsonPath: join(rootDir, 'package.json'),

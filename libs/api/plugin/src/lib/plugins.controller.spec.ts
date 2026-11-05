@@ -61,6 +61,7 @@ const PENDING_PLUGIN = {
   enabled: true,
   version: '1.2.0',
   pendingVersion: '1.3.0',
+  pendingStagingId: 'staging-a',
 } as never;
 const DECLARES = { added: ['plugin|demo-sink|manage:digest'], removed: ['plugin|demo-sink|read:legacy'] };
 const NO_LONGER_REQUESTED = ['feedback:read'];
@@ -231,12 +232,13 @@ describe('PluginsController (delegation)', () => {
   describe('update consent endpoints (#321)', () => {
     it('approveUpdate forwards slug, actor, and the confirmation set; the response surfaces the consequences', async () => {
       const result = await firstValueFrom(
-        controller.approveUpdate('demo-sink', { confirmCriticalSlugs: ['user:impersonate'] }),
+        controller.approveUpdate('demo-sink', { stagingId: 'staging-a', confirmCriticalSlugs: ['user:impersonate'] }),
       );
 
       expect(updates.approve).toHaveBeenCalledWith({
         slug: 'demo-sink',
         approverId: MOCK_ACTING_USER_ID,
+        stagingId: 'staging-a',
         confirmCriticalSlugs: ['user:impersonate'],
       });
       expect(result).toEqual({
@@ -254,19 +256,24 @@ describe('PluginsController (delegation)', () => {
     });
 
     it('an omitted confirmation set stays undefined — the service owns the expectation', async () => {
-      await firstValueFrom(controller.approveUpdate('demo-sink', {}));
+      await firstValueFrom(controller.approveUpdate('demo-sink', { stagingId: 'staging-a' }));
 
       expect(updates.approve).toHaveBeenCalledWith({
         slug: 'demo-sink',
         approverId: MOCK_ACTING_USER_ID,
+        stagingId: 'staging-a',
         confirmCriticalSlugs: undefined,
       });
     });
 
-    it('rejectUpdate forwards slug + actorId, wrapping with a success message', async () => {
-      const result = await firstValueFrom(controller.rejectUpdate('demo-sink'));
+    it('rejectUpdate forwards slug, actorId and the staging it answers, wrapping with a success message (#357)', async () => {
+      const result = await firstValueFrom(controller.rejectUpdate('demo-sink', { stagingId: 'staging-a' }));
 
-      expect(updates.reject).toHaveBeenCalledWith({ slug: 'demo-sink', rejectorId: MOCK_ACTING_USER_ID });
+      expect(updates.reject).toHaveBeenCalledWith({
+        slug: 'demo-sink',
+        rejectorId: MOCK_ACTING_USER_ID,
+        stagingId: 'staging-a',
+      });
       expect(result).toEqual({
         message: expect.objectContaining({ key: 'success.plugin.update_rejected', args: { slug: 'demo-sink' } }),
         plugin: PLUGIN,
@@ -287,6 +294,9 @@ describe('PluginsController (delegation)', () => {
         activeVersion: '1.2.0',
         pendingVersion: '1.3.0',
         pendingSince: new Date('2026-07-29T00:00:00Z'),
+        // What approve and reject must send back, so neither answers a
+        // staging the admin wasn't shown (#357).
+        stagingId: 'staging-a',
         escalations: COMPARISON.escalations,
         serverGating: true,
         blockedByDenial: [],
@@ -603,14 +613,14 @@ describe('PluginsController (delegation)', () => {
       },
       {
         route: 'approveUpdate',
-        call: (): Observable<unknown> => controller.approveUpdate('demo-sink', {}),
+        call: (): Observable<unknown> => controller.approveUpdate('demo-sink', { stagingId: 'staging-a' }),
         service: () => updates.approve,
         notFound: PluginUpdatePluginNotFoundError,
         slugField: 'slug',
       },
       {
         route: 'rejectUpdate',
-        call: (): Observable<unknown> => controller.rejectUpdate('demo-sink'),
+        call: (): Observable<unknown> => controller.rejectUpdate('demo-sink', { stagingId: 'staging-a' }),
         service: () => updates.reject,
         notFound: PluginUpdatePluginNotFoundError,
         slugField: 'slug',

@@ -10,6 +10,29 @@ import type { StaticAnalysisFinding } from '../install/static-analysis.types';
  * check runs before it.
  */
 
+/**
+ * The caller answered a staging that is no longer the current one (#357): it
+ * was resolved and another staged since — possibly the same version from the
+ * same plugin artifact — or replaced while the request was in flight.
+ * Approving or rejecting by slug alone would answer a staging nobody
+ * reviewed, so approve and reject name the staging the staged-update read
+ * reported, and any other current staging refuses with this.
+ */
+export class PluginUpdateStagingReplacedError extends Error {
+  override readonly name = 'PluginUpdateStagingReplacedError';
+
+  constructor(
+    public readonly slug: string,
+    /** The staging the caller named. Not the current one: the caller reads and reviews that before answering it. */
+    public readonly stagingId: string,
+  ) {
+    super(
+      `Plugin '${slug}' no longer has staging '${stagingId}' — the staged update changed since it was read; ` +
+        'read it again before approving or rejecting it',
+    );
+  }
+}
+
 /** No `Plugin` row exists for the slug an update arrived for. */
 export class PluginUpdatePluginNotFoundError extends Error {
   override readonly name = 'PluginUpdatePluginNotFoundError';
@@ -93,10 +116,9 @@ export class PluginUpdateVersionConflictError extends Error {
 /**
  * A pending update is already staged. Refused rather than superseded: the
  * staged version may already be sitting in front of an admin, and silently
- * replacing it would discard an in-flight consent decision, orphan the
- * previous version's staged files (#84 keys cleanup off the resolution
- * events), and leave the lifecycle timeline claiming a version was staged
- * and never resolved. Reject the pending one, then stage this.
+ * replacing it would discard an in-flight consent decision and leave the
+ * lifecycle timeline claiming a version was staged and never resolved.
+ * Reject the pending one, then stage this.
  */
 export class PluginUpdatePendingConflictError extends Error {
   override readonly name = 'PluginUpdatePendingConflictError';

@@ -314,6 +314,7 @@
     "update_version_conflict": "Version '{version}' of plugin '{slug}' is already active",
     "update_pending_conflict": "Plugin '{slug}' already has version '{pendingVersion}' staged — resolve it before staging '{incomingVersion}'",
     "update_no_pending": "Plugin '{slug}' has no staged pending update to resolve",
+    "update_staging_replaced": "The staged update for plugin '{slug}' changed since it was shown — review it again before approving or rejecting it",
     "install_critical_confirmation": "This install grants Critical permissions that must be explicitly confirmed — re-enter each listed permission exactly",
     "update_critical_confirmation": "This update grants Critical permissions that must be explicitly confirmed — re-enter each listed permission exactly",
     "install_static_analysis": "Static analysis found forbidden imports — re-enter each listed specifier to accept the risk and install anyway",

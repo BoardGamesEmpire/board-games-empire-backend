@@ -33,6 +33,9 @@ describe('plugin update consent (approve/reject/pending)', () => {
   const baseUrl = requireBaseUrl(process.env);
   const PLUGINS_PATH = '/api/plugins';
   const STAGED_AT = new Date('2026-08-01T12:00:00Z');
+  /** The staged plugin artifact's checksum, and the staging's id (#357), on every row this spec stages. */
+  const STAGED_SHA = 'b'.repeat(64);
+  const STAGING_ID = 'e2e-staging-1';
 
   let db: TestDatabase;
   let actors: Actors;
@@ -133,23 +136,28 @@ describe('plugin update consent (approve/reject/pending)', () => {
         scope: scope === 'server' ? PluginScope.Server : PluginScope.Household,
         manifestJson: active as never,
         enabled: true,
-        installedSha256: randomUUID(),
+        installedSha256: 'a'.repeat(64),
         config: (overrides.activeConfig ?? {}) as never,
         pendingVersion: pending.version,
         pendingManifestJson: pending as never,
-        pendingSha256: 'e2e-new-sha',
+        pendingSha256: STAGED_SHA,
         pendingSince: STAGED_AT,
+        pendingStagingId: STAGING_ID,
       },
     });
 
     return { plugin, pending };
   };
 
+  /** Approve and reject answer one staging, named the way the staged-update read reports it (#357). */
   const approve = (actor: SessionActor, slug: string, body: Record<string, unknown> = {}) =>
-    request(baseUrl).post(`${PLUGINS_PATH}/${slug}/update/approve`).set(actor.headers).send(body);
+    request(baseUrl)
+      .post(`${PLUGINS_PATH}/${slug}/update/approve`)
+      .set(actor.headers)
+      .send({ stagingId: STAGING_ID, ...body });
 
-  const reject = (actor: SessionActor, slug: string) =>
-    request(baseUrl).post(`${PLUGINS_PATH}/${slug}/update/reject`).set(actor.headers).send({});
+  const reject = (actor: SessionActor, slug: string, stagingId: string = STAGING_ID) =>
+    request(baseUrl).post(`${PLUGINS_PATH}/${slug}/update/reject`).set(actor.headers).send({ stagingId });
 
   const readPending = (actor: SessionActor, slug: string) =>
     request(baseUrl).get(`${PLUGINS_PATH}/${slug}/update/pending`).set(actor.headers);
@@ -224,7 +232,8 @@ describe('plugin update consent (approve/reject/pending)', () => {
       expect(row.pendingManifestJson).toBeNull();
       expect(row.pendingSha256).toBeNull();
       expect(row.pendingSince).toBeNull();
-      expect(row.installedSha256).toBe('e2e-new-sha');
+      expect(row.pendingStagingId).toBeNull();
+      expect(row.installedSha256).toBe(STAGED_SHA);
 
       const grants = await db.client.pluginGrant.findMany({ where: { pluginId: plugin.id } });
       expect(grants).toHaveLength(2);
@@ -463,12 +472,169 @@ describe('plugin update consent (approve/reject/pending)', () => {
       expect(row.pendingManifestJson).toBeNull();
       expect(row.pendingSha256).toBeNull();
       expect(row.pendingSince).toBeNull();
+      expect(row.pendingStagingId).toBeNull();
       // Rejection is not an activation: nothing to reload, nothing seeded.
       expect(row.restartRequired).toBe(false);
       await expect(db.client.pluginGrant.count({ where: { pluginId: plugin.id } })).resolves.toBe(0);
 
       const rows = await awaitLifecycleRow(plugin, PluginLifecycleEventType.UpdateRejected);
       expect(rows).toHaveLength(1);
+    });
+  });
+
+  describe('naming the staging (#357)', () => {
+    it('approving with the id of a staging that was rejected and re-staged from the same artifact answers 409 and activates nothing (#357)', async () => {
+      // The admin reviewed staging 1 and rejected it; the same artifact was
+      // then staged again — same version, same checksum, even the same
+      // staging timestamp. An approval still naming staging 1 must not
+      // activate staging 2, which nobody has reviewed.
+      const admin = await actors.admin();
+      const { plugin, pending } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK]);
+
+      await reject(admin, plugin.slug).expect(200);
+      await db.client.plugin.update({
+        where: { id: plugin.id },
+        data: {
+          pendingVersion: pending.version,
+          pendingManifestJson: pending as never,
+          pendingSha256: STAGED_SHA,
+          pendingSince: STAGED_AT,
+          pendingStagingId: 'e2e-staging-2',
+        },
+      });
+
+      const response = await approve(admin, plugin.slug, { stagingId: STAGING_ID }).expect(409);
+
+      expect(response.body.code).toBe('PluginUpdateStagingReplacedError');
+      expect(response.body.slug).toBe(plugin.slug);
+      const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      expect(row.version).toBe('1.2.0');
+      expect(row.pendingVersion).toBe('1.3.0');
+      expect(row.pendingStagingId).toBe('e2e-staging-2');
+      await expect(db.client.pluginGrant.count({ where: { pluginId: plugin.id } })).resolves.toBe(0);
+    });
+
+    it('rejecting with the id of a replaced staging answers 409 and clears nothing (#357)', async () => {
+      const admin = await actors.admin();
+      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK]);
+
+      const response = await reject(admin, plugin.slug, 'e2e-staging-0').expect(409);
+
+      expect(response.body.code).toBe('PluginUpdateStagingReplacedError');
+      const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      expect(row.pendingStagingId).toBe(STAGING_ID);
+    });
+
+    it('a staging whose manifest no longer validates can still be rejected, with the id the plugin read reports (#357)', async () => {
+      // A BGE upgrade can leave a staged version outside its bgeCompat range.
+      // The staged-update read then refuses to present it, so the id reject
+      // needs comes from the plugin read, which never parses the staged
+      // manifest.
+      const admin = await actors.admin();
+      const { plugin, pending } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK]);
+      await db.client.plugin.update({
+        where: { id: plugin.id },
+        data: { pendingManifestJson: { ...pending, bgeCompat: '>=99.0.0' } as never },
+      });
+
+      await readPending(admin, plugin.slug).expect(422);
+      const detail = await request(baseUrl).get(`${PLUGINS_PATH}/${plugin.slug}`).set(admin.headers).expect(200);
+      expect(detail.body.plugin.pendingUpdate.stagingId).toBe(STAGING_ID);
+
+      await reject(admin, plugin.slug, detail.body.plugin.pendingUpdate.stagingId).expect(200);
+
+      const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      expect(row.pendingVersion).toBeNull();
+      expect(row.pendingStagingId).toBeNull();
+    });
+
+    it('the staged-update read reports the staging id (#357)', async () => {
+      const admin = await actors.admin();
+      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK]);
+
+      const response = await readPending(admin, plugin.slug).expect(200);
+
+      expect(response.body.stagingId).toBe(STAGING_ID);
+    });
+
+    it('answers 400 when approve or reject names no staging (#357)', async () => {
+      const admin = await actors.admin();
+      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK]);
+
+      await request(baseUrl)
+        .post(`${PLUGINS_PATH}/${plugin.slug}/update/approve`)
+        .set(admin.headers)
+        .send({})
+        .expect(400);
+      await request(baseUrl)
+        .post(`${PLUGINS_PATH}/${plugin.slug}/update/reject`)
+        .set(admin.headers)
+        .send({})
+        .expect(400);
+
+      const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      expect(row.pendingStagingId).toBe(STAGING_ID);
+    });
+  });
+
+  describe('the staged-update columns (#357)', () => {
+    /**
+     * Every string an error carries, own properties included (`message`,
+     * `cause`, Prisma's `meta`), so the assertion doesn't depend on which
+     * layer the driver adapter put Postgres's words in.
+     */
+    const errorText = (value: unknown, depth = 0): string => {
+      if (depth > 4 || value === null || value === undefined) {
+        return '';
+      }
+
+      if (typeof value !== 'object') {
+        return String(value);
+      }
+
+      return Object.getOwnPropertyNames(value)
+        .map((key) => errorText((value as Record<string, unknown>)[key], depth + 1))
+        .join(' ');
+    };
+
+    it('the database refuses a half-staged plugin row (#357)', async () => {
+      // Both guarded writes key on the staging id. A row with some staged
+      // columns set and others null would let their predicates match the
+      // wrong staging, or a degenerate one, so Postgres refuses the shape.
+      const active = activeManifest();
+      const plugin = await db.client.plugin.create({
+        data: {
+          slug: active.slug,
+          version: active.version,
+          category: PluginCategory.FeedbackSink,
+          scope: PluginScope.Server,
+          manifestJson: active as never,
+          enabled: true,
+          installedSha256: 'a'.repeat(64),
+        },
+      });
+
+      const failure = await db.client.plugin
+        .update({ where: { id: plugin.id }, data: { pendingVersion: '9.9.9' } })
+        .catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(errorText(failure)).toContain('plugins_staged_update_all_or_nothing');
+      const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      expect(row.pendingVersion).toBeNull();
+    });
+
+    it('the database refuses clearing only part of a staged update (#357)', async () => {
+      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK]);
+
+      const failure = await db.client.plugin
+        .update({ where: { id: plugin.id }, data: { pendingStagingId: null } })
+        .catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(errorText(failure)).toContain('plugins_staged_update_all_or_nothing');
+      const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      expect(row.pendingStagingId).toBe(STAGING_ID);
     });
   });
 

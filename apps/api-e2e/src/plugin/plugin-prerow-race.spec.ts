@@ -1,7 +1,6 @@
 import { PluginCategory, PluginGrantStatus, PluginScope, RiskLevel, type Plugin } from '@bge/database';
 import { createActors, type Actors } from '@bge/testing-e2e';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
-import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectAdvisoryWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
@@ -110,7 +109,7 @@ describe('the pre-row races (#360)', () => {
         scope: PluginScope.Household,
         manifestJson: manifest as never,
         enabled: true,
-        installedSha256: randomUUID(),
+        installedSha256: 'a'.repeat(64),
       },
     });
     await db.client.pluginPermission.create({

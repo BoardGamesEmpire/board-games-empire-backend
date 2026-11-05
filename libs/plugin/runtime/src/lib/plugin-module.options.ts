@@ -7,8 +7,10 @@ import { ConfigurableModuleBuilder } from '@nestjs/common';
  */
 export interface PluginModuleOptions {
   /**
-   * Root directory for installed plugins (`<pluginsRoot>/<slug>`), populated by
-   * the #84 pipeline. The only one: no plugin ships inside the server (#696).
+   * Root directory for installed plugins, one directory per plugin artifact
+   * (`<pluginsRoot>/<slug>/<sha256>`, #224), which the install ingress is to
+   * populate (planned, #1094). The only one: no plugin ships inside the server
+   * (#696).
    */
   readonly pluginsRoot: string;
   /** Running BGE version for manifest `bgeCompat` evaluation — build-time injected constant per #59. */

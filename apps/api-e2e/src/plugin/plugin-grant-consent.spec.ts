@@ -8,7 +8,6 @@ import {
 } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
-import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
@@ -113,7 +112,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
         scope: PluginScope.Household,
         manifestJson: active as never,
         enabled: true,
-        installedSha256: randomUUID(),
+        installedSha256: 'a'.repeat(64),
         ...overrides,
       },
     });
@@ -205,8 +204,9 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       const plugin = await arrangePlugin(DEFAULT_CHECKS, {
         pendingVersion: pending.version,
         pendingManifestJson: pending as never,
-        pendingSha256: 'e2e-new-sha',
+        pendingSha256: 'b'.repeat(64),
         pendingSince: STAGED_AT,
+        pendingStagingId: 'e2e-staging-1',
       });
 
       await decideServer(admin, plugin.slug, denied('read:safe_http_policy')).expect(200);
@@ -214,7 +214,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       const refusal = await request(baseUrl)
         .post(`${PLUGINS_PATH}/${plugin.slug}/update/approve`)
         .set(admin.headers)
-        .send({})
+        .send({ stagingId: 'e2e-staging-1' })
         .expect(409);
 
       expect(refusal.body.code).toBe('PluginUpdateBlockedByDenialError');

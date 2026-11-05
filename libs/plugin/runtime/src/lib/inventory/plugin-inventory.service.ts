@@ -97,7 +97,15 @@ export interface PluginInventoryProvenance {
 export interface PluginInventoryPendingUpdate {
   readonly version: string;
   /** `pendingSince`, never `updatedAt` — the latter moves on any row touch. */
-  readonly since: Date | null;
+  readonly since: Date;
+  /**
+   * The staging approve and reject must name (#357). Reported here as well as
+   * on the staged-update read because this read never parses the staged
+   * manifest: a staging whose manifest no longer validates — after a BGE
+   * upgrade past its range, say — can't be presented, but it can still be
+   * rejected with this id.
+   */
+  readonly stagingId: string;
 }
 
 /**
@@ -259,6 +267,7 @@ const SERVER_SELECT = {
   pendingSince: true,
   // Read only to decide whether an update is staged; never served.
   pendingSha256: true,
+  pendingStagingId: true,
 } satisfies Prisma.PluginSelect;
 
 /** `enabled` only, surfaced as `serverEnabled` — no provenance, no staging. */
@@ -593,11 +602,17 @@ export class PluginInventoryService {
       installedAt: row.installedAt,
       provenance: { sha256: row.installedSha256, url: row.installedFromUrl, registrySlug: row.registrySlug },
       // A staged row without a checksum is no staged update, as approval and the
-      // pending read treat it (#696): the list must not offer one to approve.
+      // pending read treat it (#696). The database sets the five staged columns
+      // together or not at all (plugins_staged_update_all_or_nothing, #357), so
+      // a staged update always has its time and its staging id; testing them
+      // narrows the types to say so.
       pendingUpdate:
-        row.pendingVersion === null || row.pendingSha256 === null
+        row.pendingVersion === null ||
+        row.pendingSha256 === null ||
+        row.pendingSince === null ||
+        row.pendingStagingId === null
           ? null
-          : { version: row.pendingVersion, since: row.pendingSince },
+          : { version: row.pendingVersion, since: row.pendingSince, stagingId: row.pendingStagingId },
     };
   }
 

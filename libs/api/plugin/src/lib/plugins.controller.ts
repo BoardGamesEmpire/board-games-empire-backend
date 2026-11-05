@@ -29,6 +29,7 @@ import {
   ListPluginsQueryDto,
   PluginInventoryDetailResponseDto,
   PluginInventoryEntryDto,
+  RejectPluginUpdateDto,
   UninstallPluginDto,
   UpdatePluginConfigDto,
 } from './dto';
@@ -298,7 +299,8 @@ export class PluginsController {
       'applies the declares[] catalog diff, and suspends household/user units owing a fresh decision (reported ' +
       'per axis on the response). Activation is DB-side — the running instance keeps the prior code until the ' +
       'next restart (restartRequired). Enforcement of the confirmation sets stays in the service; the 409 ' +
-      'challenge bodies carry the prompt inputs to re-submit verbatim.',
+      'challenge bodies carry the prompt inputs to re-submit verbatim. The body names the staging it answers with ' +
+      'the stagingId the staged-update read reported (#357).',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
@@ -312,8 +314,9 @@ export class PluginsController {
   @ApiResponse({
     status: Http.Conflict,
     description:
-      'No pending update; or a challenge: Critical confirmation required (expectedSlugs), or activation is ' +
-      'blocked by a durable denial (deniedRequiredSlugs)',
+      'No staged update; the staging named by stagingId was replaced since it was read ' +
+      '(PluginUpdateStagingReplacedError — read it again); or a challenge: Critical confirmation required ' +
+      '(expectedSlugs), or activation is blocked by a durable denial (deniedRequiredSlugs)',
   })
   @ApiResponse({
     status: Http.UnprocessableEntity,
@@ -328,6 +331,7 @@ export class PluginsController {
         this.updates.approve({
           slug,
           approverId: this.abilityService.getActingUserId(),
+          stagingId: dto.stagingId,
           confirmCriticalSlugs: dto.confirmCriticalSlugs,
         }),
       ),
@@ -350,21 +354,29 @@ export class PluginsController {
   @ApiOperation({
     summary: 'Reject the staged pending update',
     description:
-      'Clears the pending columns and emits plugin.update_rejected — the #84 distribution pipeline keys staged-file ' +
-      'cleanup off that event; this endpoint never touches the filesystem.',
+      'Clears the staged-update columns and emits plugin.update_rejected. The staged plugin artifact stays on ' +
+      'disk until the planned artifact sweep (#1094) removes it: no living plugin names it, and no running plugin ' +
+      'was loaded from it; ' +
+      'this endpoint never touches the filesystem. The body names the staging it answers with the stagingId the ' +
+      'staged-update read, or the plugin read, reported (#357).',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
-  @ApiResponse({ status: Http.Conflict, description: 'No pending update to reject' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description:
+      'No staged update to reject, or the staging named by stagingId was replaced since it was read ' +
+      '(PluginUpdateStagingReplacedError — read it again)',
+  })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
   @HttpCode(Http.Ok)
   @Post(':slug/update/reject')
-  rejectUpdate(@Param('slug') slug: string) {
+  rejectUpdate(@Param('slug') slug: string, @Body() dto: RejectPluginUpdateDto) {
     return from(
       this.assertUnderCeiling(slug, Action.manage, PluginUpdatePluginNotFoundError).then(() =>
-        this.updates.reject({ slug, rejectorId: this.abilityService.getActingUserId() }),
+        this.updates.reject({ slug, rejectorId: this.abilityService.getActingUserId(), stagingId: dto.stagingId }),
       ),
     ).pipe(map((plugin) => ({ message: t('success.plugin.update_rejected', { slug }), plugin })));
   }
@@ -373,7 +385,8 @@ export class PluginsController {
     summary: 'Present the staged pending update for approval',
     description:
       "The approval screen's data source: the escalation comparison recomputed against today's decisions " +
-      '(escalations, serverGating, blockedByDenial), pendingSince, the declares[] catalog diff approving would ' +
+      '(escalations, serverGating, blockedByDenial), pendingSince, stagingId (which approve and reject send back, ' +
+      'so neither answers a staging the admin was not shown, #357), the declares[] catalog diff approving would ' +
       'apply (added/removed plugin-namespaced permissions — removed takes their grants), noLongerRequested (the ' +
       'requested permissions the update stops requesting, whose decisions approving deletes at every scope), ' +
       "and the staged manifest's " +
@@ -527,8 +540,9 @@ export class PluginsController {
     const description = await this.updates.describePending(slug);
     // Presented FROM the row describePending loaded, never re-read: a
     // re-read opens a window in which the staged update resolves and is
-    // replaced — possibly under the SAME version, which no equality check
-    // can detect — and the body would mix two updates. One snapshot makes
+    // replaced — possibly by the SAME version from the same artifact, which
+    // only the staging id tells apart (#357) — and the body would mix two
+    // updates. One snapshot makes
     // the comparison and the consent surface consistent by construction.
     const presentation = await this.presentation.presentPendingFromRow(
       description.plugin,
@@ -547,6 +561,9 @@ export class PluginsController {
       activeVersion: description.plugin.version,
       pendingVersion: description.plugin.pendingVersion,
       pendingSince: description.pendingSince,
+      // What approve and reject send back (#357): an answer naming a staging
+      // that has since been replaced is refused instead of applied to it.
+      stagingId: description.plugin.pendingStagingId,
       escalations: description.comparison.escalations,
       serverGating: description.comparison.serverGating,
       blockedByDenial: description.comparison.blockedByDenial,

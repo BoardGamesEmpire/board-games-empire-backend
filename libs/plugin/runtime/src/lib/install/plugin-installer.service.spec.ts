@@ -15,7 +15,7 @@ import {
   type PluginPermission,
 } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
-import type { InstalledPluginDirectory } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -29,6 +29,8 @@ import {
   PluginInstalledEvent,
 } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
+import { PluginDirectoryLayoutError } from '../loader/loader.errors';
+import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import type { PluginModuleOptions } from '../plugin-module.options';
 import {
   PluginInstallAuthorityError,
@@ -85,6 +87,7 @@ describe('PluginInstallerService', () => {
     pendingManifestJson: null,
     pendingSha256: null,
     pendingSince: null,
+    pendingStagingId: null,
     restartRequired: false,
     uninstalledAt: null,
     createdAt: new Date(0),
@@ -138,10 +141,12 @@ describe('PluginInstallerService', () => {
   let authority: jest.Mocked<Pick<PluginGrantAuthorityService, 'isServerAdmin'>>;
   let analyzer: jest.Mocked<Pick<PluginStaticAnalysisService, 'analyze'>>;
   let emitter: { emit: jest.Mock };
+  let directories: { confirm: jest.Mock };
   let service: PluginInstallerService;
 
-  const directory = (): InstalledPluginDirectory => ({
+  const directory = (): PluginArtifactDirectory => ({
     slug: 'demo-sink',
+    sha256: 'a'.repeat(64),
     rootDir,
     manifestPath: join(rootDir, 'manifest.json'),
     packageJsonPath: join(rootDir, 'package.json'),
@@ -161,7 +166,6 @@ describe('PluginInstallerService', () => {
   const input = (overrides: Partial<PluginInstallInput> = {}): PluginInstallInput => ({
     directory: directory(),
     provenance: {
-      installedSha256: 'sha-256-digest',
       installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
       registrySlug: 'bge-official',
     },
@@ -208,6 +212,9 @@ describe('PluginInstallerService', () => {
     analyzer.analyze.mockResolvedValue(emptyReport);
 
     emitter = { emit: jest.fn() };
+    // The resolver's own spec covers the layout; here it confirms whatever
+    // directory the case hands over.
+    directories = { confirm: jest.fn((dir: PluginArtifactDirectory) => Promise.resolve(dir)) };
 
     service = new PluginInstallerService(
       db as unknown as DatabaseService,
@@ -216,6 +223,7 @@ describe('PluginInstallerService', () => {
       new PluginConfigSchemaService(),
       emitter as unknown as EventEmitter2,
       options,
+      directories as unknown as PluginDirectoryResolverService,
     );
   });
 
@@ -236,7 +244,7 @@ describe('PluginInstallerService', () => {
           scope: 'Server',
           executionMode: 'InProcess',
           installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
-          installedSha256: 'sha-256-digest',
+          installedSha256: 'a'.repeat(64),
           registrySlug: 'bge-official',
           installedById: 'admin-1',
           manifestJson: expect.objectContaining({ slug: 'demo-sink', version: '1.2.0' }),
@@ -247,20 +255,19 @@ describe('PluginInstallerService', () => {
       expect(result.analysis).toBe(emptyReport);
     });
 
-    it('writes the provenance checksum, link and registry to the row (#696)', async () => {
-      // Every plugin is installed from an artifact, so its checksum always
-      // reaches the row. A link or registry the provenance leaves out is stored as null.
-      await service.install(input({ provenance: { installedSha256: 'a'.repeat(64) } }));
+    it("records the artifact directory's checksum as installedSha256 (#224)", async () => {
+      // The directory's name is the artifact's checksum, so the install takes
+      // it from there rather than from a second input that could disagree. A
+      // link or registry the provenance leaves out is stored as null (#696).
+      await service.install(input({ directory: { ...directory(), sha256: 'c'.repeat(64) }, provenance: undefined }));
 
       const [{ data }] = db.plugin.create.mock.calls[0] as [{ data: Record<string, unknown> }];
       expect(data).toEqual(
-        expect.objectContaining({ installedSha256: 'a'.repeat(64), installedFromUrl: null, registrySlug: null }),
+        expect.objectContaining({ installedSha256: 'c'.repeat(64), installedFromUrl: null, registrySlug: null }),
       );
-      // No plugin ships inside the server, so the installer has no flag to write.
-      expect('bundled' in data).toBe(false);
       expect(installedEvent().provenance).toEqual({
         installedFromUrl: null,
-        installedSha256: 'a'.repeat(64),
+        installedSha256: 'c'.repeat(64),
         registrySlug: null,
       });
     });
@@ -333,7 +340,7 @@ describe('PluginInstallerService', () => {
       });
       expect(event.provenance).toEqual({
         installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
-        installedSha256: 'sha-256-digest',
+        installedSha256: 'a'.repeat(64),
         registrySlug: 'bge-official',
       });
       expect(event.grantedPermissions).toEqual([
@@ -374,6 +381,26 @@ describe('PluginInstallerService', () => {
   });
 
   describe('manifest gate', () => {
+    it('refuses a directory the loader could not resolve at the next boot, and records nothing (#224)', async () => {
+      directories.confirm.mockRejectedValue(new PluginDirectoryLayoutError('demo-sink', 'checksum fails the pattern'));
+
+      await expect(
+        service.install(input({ directory: { ...directory(), sha256: `sha256:${'A'.repeat(64)}` } })),
+      ).rejects.toBeInstanceOf(PluginDirectoryLayoutError);
+      expect(db.plugin.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('reads the manifest from the directory the resolver confirms (#224)', async () => {
+      // The handed-over manifest path names nothing; the install succeeds
+      // only by reading the manifest at the path the resolver gives.
+      const handed = { ...directory(), manifestPath: join(rootDir, 'elsewhere.json') };
+      directories.confirm.mockResolvedValue(directory());
+
+      await expect(service.install(input({ directory: handed }))).resolves.toBeDefined();
+      expect(directories.confirm).toHaveBeenCalledWith(handed);
+    });
+
     it('rejects unreadable manifest JSON', async () => {
       await writeFile(join(rootDir, 'manifest.json'), '{ not json', 'utf-8');
 
@@ -734,6 +761,7 @@ describe('PluginInstallerService', () => {
               pendingVersion: null,
               pendingSha256: null,
               pendingSince: null,
+              pendingStagingId: null,
             }),
           }),
         );

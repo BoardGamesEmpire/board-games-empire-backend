@@ -8,7 +8,6 @@ import {
 } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
-import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
@@ -98,7 +97,7 @@ describe('consent decisions under concurrency (#360)', () => {
         scope: PluginScope.Household,
         manifestJson: active as never,
         enabled: true,
-        installedSha256: randomUUID(),
+        installedSha256: 'a'.repeat(64),
         ...overrides,
       },
     });
@@ -116,7 +115,10 @@ describe('consent decisions under concurrency (#360)', () => {
     request(baseUrl).post(`${PLUGINS_PATH}/${slug}/grants`).set(actor.headers).send(body);
 
   const approve = (actor: SessionActor, slug: string) =>
-    request(baseUrl).post(`${PLUGINS_PATH}/${slug}/update/approve`).set(actor.headers).send({});
+    request(baseUrl)
+      .post(`${PLUGINS_PATH}/${slug}/update/approve`)
+      .set(actor.headers)
+      .send({ stagingId: 'e2e-staging-1' });
 
   describe('Granted against Denied on the same required household check', () => {
     it('never leaves the unit serving over a durable denial, or suspended with nothing outstanding', async () => {
@@ -230,8 +232,9 @@ describe('consent decisions under concurrency (#360)', () => {
       const plugin = await arrangePlugin(undefined, {
         pendingVersion: pending.version,
         pendingManifestJson: pending as never,
-        pendingSha256: 'e2e-new-sha',
+        pendingSha256: 'b'.repeat(64),
         pendingSince: STAGED_AT,
+        pendingStagingId: 'e2e-staging-1',
       });
 
       const [denial, activation] = await Promise.all([

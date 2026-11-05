@@ -21,7 +21,7 @@ import {
   readPrismaModels,
   type MockDatabaseService,
 } from '@bge/testing';
-import type { InstalledPluginDirectory } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -41,6 +41,8 @@ import {
 import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import type { PluginStaticAnalysisService } from '../install/plugin-static-analysis.service';
 import type { StaticAnalysisFinding, StaticAnalysisReport } from '../install/static-analysis.types';
+import { PluginDirectoryLayoutError } from '../loader/loader.errors';
+import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import type { PluginModuleOptions } from '../plugin-module.options';
 import { PluginUpdateService, type PluginUpdateStageInput } from './plugin-update.service';
 import {
@@ -51,6 +53,7 @@ import {
   PluginUpdateNoPendingError,
   PluginUpdatePendingConflictError,
   PluginUpdatePluginNotFoundError,
+  PluginUpdateStagingReplacedError,
   PluginUpdateStaticAnalysisError,
   PluginUpdateTombstonedError,
   PluginUpdateUnknownCorePermissionError,
@@ -99,6 +102,7 @@ describe('PluginUpdateService', () => {
     pendingManifestJson: null,
     pendingSha256: null,
     pendingSince: null,
+    pendingStagingId: null,
     restartRequired: false,
     uninstalledAt: null,
     createdAt: new Date(0),
@@ -166,6 +170,7 @@ describe('PluginUpdateService', () => {
   let db: MockDatabaseService;
   let authority: jest.Mocked<Pick<PluginGrantAuthorityService, 'isServerAdmin'>>;
   let analyzer: jest.Mocked<Pick<PluginStaticAnalysisService, 'analyze'>>;
+  let directories: { confirm: jest.Mock };
   let emitter: { emit: jest.Mock };
   let service: PluginUpdateService;
   /**
@@ -179,8 +184,9 @@ describe('PluginUpdateService', () => {
   /** The row the plugin-config lock (D-CN) answers with — defaults to an empty retained config. */
   let setPluginConfigLock: (config: unknown) => void;
 
-  const directory = (): InstalledPluginDirectory => ({
+  const directory = (): PluginArtifactDirectory => ({
     slug: 'demo-sink',
+    sha256: 'b'.repeat(64),
     rootDir,
     manifestPath: join(rootDir, 'manifest.json'),
     packageJsonPath: join(rootDir, 'package.json'),
@@ -196,7 +202,6 @@ describe('PluginUpdateService', () => {
 
   const input = (overrides: Partial<PluginUpdateStageInput> = {}): PluginUpdateStageInput => ({
     directory: directory(),
-    provenance: { pendingSha256: 'new-sha' },
     initiatorId: 'admin-1',
     ...overrides,
   });
@@ -212,6 +217,7 @@ describe('PluginUpdateService', () => {
     db = createMockDatabaseService();
     authority = { isServerAdmin: jest.fn().mockResolvedValue(true) };
     analyzer = { analyze: jest.fn().mockResolvedValue(emptyReport) };
+    directories = { confirm: jest.fn((dir: PluginArtifactDirectory) => Promise.resolve(dir)) };
     emitter = { emit: jest.fn() };
     service = new PluginUpdateService(
       db as never,
@@ -220,6 +226,9 @@ describe('PluginUpdateService', () => {
       new PluginConfigSchemaService(),
       emitter as never,
       options,
+      // The resolver's own spec covers the layout; here it confirms whatever
+      // directory the case hands over.
+      directories as unknown as PluginDirectoryResolverService,
     );
 
     db.plugin.findUnique.mockResolvedValue(makePlugin());
@@ -275,6 +284,17 @@ describe('PluginUpdateService', () => {
   });
 
   describe('stage() gates', () => {
+    it('refuses a directory the loader could not resolve at the next boot, and records nothing (#224)', async () => {
+      directories.confirm.mockRejectedValue(new PluginDirectoryLayoutError('demo-sink', 'checksum fails the pattern'));
+      await writeManifest(nextManifest());
+
+      await expect(
+        service.stage(input({ directory: { ...directory(), sha256: `sha256:${'A'.repeat(64)}` } })),
+      ).rejects.toBeInstanceOf(PluginDirectoryLayoutError);
+      expect(db.plugin.updateMany).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
     it('requires server-admin authority', async () => {
       authority.isServerAdmin.mockResolvedValue(false);
       await writeManifest(nextManifest());
@@ -305,7 +325,7 @@ describe('PluginUpdateService', () => {
       expect(failure).toBeInstanceOf(PluginUpdatePendingConflictError);
       expect(failure).toMatchObject({ pendingVersion: '1.3.0', incomingVersion: '1.4.0' });
       // Nothing written: the staged version stays intact for whoever is
-      // looking at it, and #84 keeps its cleanup signal.
+      // looking at it.
       expect(db.plugin.update).not.toHaveBeenCalled();
       expect(db.plugin.updateMany).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();
@@ -372,14 +392,15 @@ describe('PluginUpdateService', () => {
           // take the whole activation with it) AND on the pending slot still
           // being empty — the immediate path must not clobber a concurrently
           // staged update with its cleared columns.
-          where: { id: 'plugin-1', uninstalledAt: null, pendingVersion: null, pendingSince: null },
+          where: { id: 'plugin-1', uninstalledAt: null, pendingVersion: null, pendingStagingId: null },
           data: expect.objectContaining({
             version: '1.3.0',
             restartRequired: true,
-            installedSha256: 'new-sha',
+            installedSha256: 'b'.repeat(64),
             pendingVersion: null,
             pendingSha256: null,
             pendingSince: null,
+            pendingStagingId: null,
           }),
         }),
       );
@@ -388,6 +409,17 @@ describe('PluginUpdateService', () => {
         expect.any(PluginUpdateApprovedEvent),
       );
       expect(emitter.emit).not.toHaveBeenCalledWith(PluginUpdatePendingEvent.eventName, expect.anything());
+    });
+
+    it("an update that activates at once records the artifact directory's checksum (#224)", async () => {
+      await writeManifest(nextManifest());
+
+      const result = await service.stage(input({ directory: { ...directory(), sha256: 'd'.repeat(64) } }));
+
+      expect(result.activated).toBe(true);
+      expect(db.plugin.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ installedSha256: 'd'.repeat(64) }) }),
+      );
     });
 
     it('refuses to activate onto a row uninstalled mid-flight — the whole transaction rolls back', async () => {
@@ -526,13 +558,46 @@ describe('PluginUpdateService', () => {
         where: { id: 'plugin-1', pendingVersion: null, uninstalledAt: null },
         data: expect.objectContaining({
           pendingVersion: '1.3.0',
-          pendingSha256: 'new-sha',
+          pendingSha256: 'b'.repeat(64),
           pendingSince: expect.any(Date),
         }),
       });
       expect(emitter.emit).toHaveBeenCalledWith(
         PluginUpdatePendingEvent.eventName,
         expect.objectContaining({ escalations: result.comparison.escalations }),
+      );
+    });
+
+    it('stage writes a fresh staging id (#357)', async () => {
+      // The id is the staging's identity in both guarded writes, so it must
+      // differ between two stagings of the same version from the same bytes.
+      await writeManifest(nextManifest({ storage: { ...activeManifest.storage, writesCore: ['GameNight'] } }));
+
+      await service.stage(input());
+      await service.stage(input());
+
+      const stagingIds = (db.plugin.updateMany.mock.calls as [{ data: { pendingStagingId?: unknown } }][]).map(
+        ([args]) => args.data.pendingStagingId,
+      );
+      expect(stagingIds).toHaveLength(2);
+      expect(stagingIds[0]).toMatch(/^[a-z0-9]{24}$/);
+      expect(stagingIds[1]).toMatch(/^[a-z0-9]{24}$/);
+      expect(stagingIds[0]).not.toBe(stagingIds[1]);
+    });
+
+    it("stages the artifact directory's checksum as pendingSha256 (#224)", async () => {
+      // The staged update's files are the directory its pendingSha256 names,
+      // so the checksum comes from that directory and from nowhere else.
+      await writeManifest(nextManifest({ storage: { ...activeManifest.storage, writesCore: ['GameNight'] } }));
+
+      await service.stage(input({ directory: { ...directory(), sha256: 'd'.repeat(64) } }));
+
+      expect(db.plugin.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ pendingSha256: 'd'.repeat(64) }) }),
+      );
+      expect(emitter.emit).toHaveBeenCalledWith(
+        PluginUpdatePendingEvent.eventName,
+        expect.objectContaining({ pendingSha256: 'd'.repeat(64) }),
       );
     });
 
@@ -593,13 +658,74 @@ describe('PluginUpdateService', () => {
         pendingManifestJson: nextJson as unknown as Prisma.JsonValue,
         pendingSha256: 'new-sha',
         pendingSince: new Date('2026-07-29T00:00:00Z'),
+        pendingStagingId: 'staging-a',
         ...overrides,
       });
 
     it('refuses without a staged pending update', async () => {
-      await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
-        PluginUpdateNoPendingError,
+      await expect(
+        service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
+      ).rejects.toThrow(PluginUpdateNoPendingError);
+    });
+
+    it('activation claims only the staging it loaded, by its staging id (#357)', async () => {
+      // A staging's timestamp is not an identity: two stagings can share a
+      // millisecond, and a clock can step back onto an old one. The id can't
+      // repeat, so the claim names it and nothing else.
+      db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
+
+      await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
+
+      const [claim] = db.plugin.updateMany.mock.calls[0];
+      expect(claim.where).toEqual({
+        id: 'plugin-1',
+        uninstalledAt: null,
+        pendingVersion: '1.3.0',
+        pendingStagingId: 'staging-a',
+      });
+    });
+
+    it('approval records the staged checksum as installedSha256 (#224)', async () => {
+      // Activation switches which artifact directory the row names: the
+      // staged artifact becomes the installed one, and nothing on disk moves.
+      db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest(), { pendingSha256: 'e'.repeat(64) }));
+
+      await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
+
+      expect(db.plugin.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ installedSha256: 'e'.repeat(64) }) }),
       );
+    });
+
+    it('approve refuses a staging id that is not the current staging, and writes nothing (#357)', async () => {
+      // The admin approved what the staged-update read showed them. If that
+      // staging was rejected and another staged since — even the same version
+      // from the same artifact — approving it would consent to something they
+      // never reviewed.
+      db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest(), { pendingStagingId: 'staging-b' }));
+
+      const failure = await service
+        .approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' })
+        .catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateStagingReplacedError);
+      expect(failure).toMatchObject({ slug: 'demo-sink', stagingId: 'staging-a' });
+      expect(db.plugin.updateMany).not.toHaveBeenCalled();
+      expect(db.pluginGrant.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('approve answers a replaced staging when another one takes the slot between its check and its claim (#357)', async () => {
+      db.plugin.findUnique
+        .mockResolvedValueOnce(pendingPlugin(nextManifest())) // this approve's load: staging-a
+        .mockResolvedValue(pendingPlugin(nextManifest(), { pendingStagingId: 'staging-b' })); // the claim's re-read
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
+      ).rejects.toThrow(PluginUpdateStagingReplacedError);
+      expect(db.pluginGrant.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
     });
 
     it('refuses to approve a staged row with no checksum (#696)', async () => {
@@ -608,9 +734,9 @@ describe('PluginUpdateService', () => {
       // no artifact to record.
       db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest(), { pendingSha256: null }));
 
-      await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
-        PluginUpdateNoPendingError,
-      );
+      await expect(
+        service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
+      ).rejects.toThrow(PluginUpdateNoPendingError);
       expect(db.plugin.updateMany).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();
     });
@@ -618,19 +744,19 @@ describe('PluginUpdateService', () => {
     it('loses a concurrent-approve race with the typed no-pending refusal, before writing a single grant', async () => {
       // Both approves load the same staged row; the other one commits first,
       // consuming the pending state. The claim — keyed on the exact staging
-      // this approval computed from (version AND the pendingSince stamp: a
-      // rejected version can be re-staged under the same number, so the
-      // version alone is a reusable identity), running before any other
-      // write — is what turns the loser into a 409 instead of a unique-index
-      // crash on the grants the winner just seeded.
+      // this approval computed from (version AND staging id: a rejected
+      // version can be re-staged under the same number, so the version alone
+      // is a reusable identity), running before any other write — is what
+      // turns the loser into a 409 instead of a unique-index crash on the
+      // grants the winner just seeded.
       db.plugin.findUnique
         .mockResolvedValueOnce(pendingPlugin(nextManifest())) // this approve's load
         .mockResolvedValue(makePlugin()); // the guard's re-read: pending already consumed
       db.plugin.updateMany.mockResolvedValue({ count: 0 });
 
-      await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
-        PluginUpdateNoPendingError,
-      );
+      await expect(
+        service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
+      ).rejects.toThrow(PluginUpdateNoPendingError);
 
       expect(db.plugin.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -638,7 +764,7 @@ describe('PluginUpdateService', () => {
             id: 'plugin-1',
             uninstalledAt: null,
             pendingVersion: '1.3.0',
-            pendingSince: new Date('2026-07-29T00:00:00Z'),
+            pendingStagingId: 'staging-a',
           },
         }),
       );
@@ -664,9 +790,9 @@ describe('PluginUpdateService', () => {
       // activation, not the moment of the request.
       queueGrantLock([lockedRow('feedback:read', PluginGrantStatus.Denied)]);
 
-      await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
-        PluginUpdateBlockedByDenialError,
-      );
+      await expect(
+        service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
+      ).rejects.toThrow(PluginUpdateBlockedByDenialError);
       expect(db.pluginGrant.create).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();
     });
@@ -695,9 +821,9 @@ describe('PluginUpdateService', () => {
       // (and refuses here) or blocks on it until this transaction resolves.
       queueGrantLock([lockedRow('feedback:read', PluginGrantStatus.Denied)]);
 
-      await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
-        PluginUpdateBlockedByDenialError,
-      );
+      await expect(
+        service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
+      ).rejects.toThrow(PluginUpdateBlockedByDenialError);
       expect(db.pluginGrant.create).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();
 
@@ -743,9 +869,9 @@ describe('PluginUpdateService', () => {
       // the lock statement and touches nothing after it.
       queueGrantLock([lockedRow('feedback:read', PluginGrantStatus.Denied)]);
 
-      await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
-        PluginUpdateBlockedByDenialError,
-      );
+      await expect(
+        service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
+      ).rejects.toThrow(PluginUpdateBlockedByDenialError);
 
       const [template] = grantLockCalls()[0] as [TemplateStringsArray];
       const sql = template.join('?').replace(/\s+/g, ' ');
@@ -771,7 +897,7 @@ describe('PluginUpdateService', () => {
       // the still-undecided check may seed.
       queueGrantLock([lockedRow('feedback:read', PluginGrantStatus.Granted)]);
 
-      const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+      const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
 
       expect(db.pluginGrant.create).toHaveBeenCalledTimes(1);
       expect(db.pluginGrant.create).toHaveBeenCalledWith({
@@ -814,7 +940,12 @@ describe('PluginUpdateService', () => {
       queueGrantLock([lockedRow('user:impersonate', PluginGrantStatus.Granted)]);
 
       const failure = await service
-        .approve({ slug: 'demo-sink', approverId: 'admin-1', confirmCriticalSlugs: ['user:impersonate'] })
+        .approve({
+          slug: 'demo-sink',
+          approverId: 'admin-1',
+          stagingId: 'staging-a',
+          confirmCriticalSlugs: ['user:impersonate'],
+        })
         .catch((err: unknown) => err);
 
       expect(failure).toBeInstanceOf(PluginUpdateCriticalConfirmationError);
@@ -847,7 +978,7 @@ describe('PluginUpdateService', () => {
         // collided with, so the check drops out rather than colliding again.
         queueGrantLock([lockedRow('feedback:read', PluginGrantStatus.Granted)]);
 
-        const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+        const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
 
         expect(result.seededGrants).toEqual([seeded]);
         expect(db.pluginGrant.create).toHaveBeenCalledTimes(2);
@@ -880,9 +1011,9 @@ describe('PluginUpdateService', () => {
 
         // The durable-denial rule, not a 500: what the collision was hiding
         // is a refusal the retry can finally see.
-        await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
-          PluginUpdateBlockedByDenialError,
-        );
+        await expect(
+          service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
+        ).rejects.toThrow(PluginUpdateBlockedByDenialError);
         expect(db.pluginGrant.create).toHaveBeenCalledTimes(1);
         expect(emitter.emit).not.toHaveBeenCalled();
       });
@@ -897,7 +1028,9 @@ describe('PluginUpdateService', () => {
         queueGrantLock([]); // first attempt's locked read
         queueGrantLock([]); // retry: still undecided in ITS read, so it seeds and loses again
 
-        await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toBe(collision);
+        await expect(
+          service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
+        ).rejects.toBe(collision);
         expect(db.pluginGrant.create).toHaveBeenCalledTimes(2);
         expect(emitter.emit).not.toHaveBeenCalled();
       });
@@ -920,7 +1053,9 @@ describe('PluginUpdateService', () => {
           .mockResolvedValueOnce([]); // serverChecksToSeed()
         queueGrantLock([]); // the only attempt's locked read
 
-        await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toBe(failure);
+        await expect(
+          service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
+        ).rejects.toBe(failure);
         expect(db.pluginGrant.create).toHaveBeenCalledTimes(1);
         expect(db.plugin.updateMany).toHaveBeenCalledTimes(1);
       });
@@ -943,7 +1078,7 @@ describe('PluginUpdateService', () => {
         queueGrantLock([]); // the victim attempt's locked read
         queueGrantLock([]); // the retry's own read
 
-        const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+        const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
 
         // The retry seeds the FULL set, unlike the collision case above: a
         // deadlock says nothing about what any other transaction decided, so
@@ -965,7 +1100,9 @@ describe('PluginUpdateService', () => {
         queueGrantLock([]);
         queueGrantLock([]);
 
-        await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toBe(second);
+        await expect(
+          service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
+        ).rejects.toBe(second);
         expect(db.plugin.updateMany).toHaveBeenCalledTimes(2);
         expect(emitter.emit).not.toHaveBeenCalled();
       });
@@ -983,9 +1120,9 @@ describe('PluginUpdateService', () => {
       db.plugin.findUnique.mockResolvedValue(pendingPlugin(next));
       db.pluginGrant.findMany.mockResolvedValue([makeGrant({ status: PluginGrantStatus.Denied })]);
 
-      await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
-        PluginUpdateBlockedByDenialError,
-      );
+      await expect(
+        service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
+      ).rejects.toThrow(PluginUpdateBlockedByDenialError);
     });
 
     it('demands exact Critical re-entry for the NEW server checks it will grant, as install does', async () => {
@@ -1012,9 +1149,9 @@ describe('PluginUpdateService', () => {
         .mockResolvedValueOnce([makeGrant()]) // comparison
         .mockResolvedValueOnce([makeGrant()]); // serverChecksToSeed existing rows
 
-      await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
-        PluginUpdateCriticalConfirmationError,
-      );
+      await expect(
+        service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
+      ).rejects.toThrow(PluginUpdateCriticalConfirmationError);
     });
 
     it('activates: seeds ONLY undecided server checks Granted, promotes pending, suspends unconsented units', async () => {
@@ -1088,6 +1225,7 @@ describe('PluginUpdateService', () => {
       const result = await service.approve({
         slug: 'demo-sink',
         approverId: 'admin-1',
+        stagingId: 'staging-a',
         confirmCriticalSlugs: ['user:impersonate'],
       });
 
@@ -1152,7 +1290,7 @@ describe('PluginUpdateService', () => {
         db.plugin.findUniqueOrThrow.mockResolvedValue(pendingPlugin(manifest, { scope: PluginScope.Household }));
         db.householdPlugin.updateMany.mockResolvedValue({ count: 1 });
 
-        await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+        await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
       };
 
       it('a server-scope manifest makes every household row dormant, leaving the admin switch alone', async () => {
@@ -1457,7 +1595,7 @@ describe('PluginUpdateService', () => {
         // config PATCH could have already moved past.
         setPluginConfigLock(existingConfig);
 
-        await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+        await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
       };
 
       it('carries retained server config forward when it still satisfies the new schema', async () => {
@@ -1508,7 +1646,7 @@ describe('PluginUpdateService', () => {
         db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest(), { config: { webhookUrl: 'stale' } }));
         setPluginConfigLock({ webhookUrl: 'https://fresh.example.test' });
 
-        await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+        await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
 
         expect(db.plugin.updateMany).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -1549,7 +1687,9 @@ describe('PluginUpdateService', () => {
       });
 
       it('demands the Critical second factor even though nothing new is being seeded', async () => {
-        const failure = await service.approve({ slug: 'demo-sink', approverId: 'admin-1' }).catch((e: unknown) => e);
+        const failure = await service
+          .approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' })
+          .catch((e: unknown) => e);
 
         expect(failure).toBeInstanceOf(PluginUpdateCriticalConfirmationError);
         expect(failure).toMatchObject({ expectedSlugs: ['feedback:read'] });
@@ -1560,6 +1700,7 @@ describe('PluginUpdateService', () => {
         await service.approve({
           slug: 'demo-sink',
           approverId: 'admin-2',
+          stagingId: 'staging-a',
           confirmCriticalSlugs: ['feedback:read'],
         });
 
@@ -1615,7 +1756,7 @@ describe('PluginUpdateService', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([staleHouseholdGrant]);
 
-      const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+      const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
 
       expect(result.comparison.escalations).toEqual([
         expect.objectContaining({ kind: 'consent-scope-changed', from: 'household', to: 'server' }),
@@ -1683,7 +1824,7 @@ describe('PluginUpdateService', () => {
       db.householdPlugin.findMany.mockResolvedValue([makeUnit()]);
       db.householdPlugin.updateMany.mockResolvedValue({ count: 1 });
 
-      await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+      await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
 
       expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
         where: { id: { in: ['hp-1'] }, suspendedForConsent: false },
@@ -1736,7 +1877,7 @@ describe('PluginUpdateService', () => {
       // against the full row, so the projection is asserted.
       db.householdPlugin.findMany.mockResolvedValueOnce([{ id: 'hp-1' } as HouseholdPlugin]);
 
-      const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+      const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
 
       const suspensionEvents = emitter.emit.mock.calls.filter(
         ([name]) => name === HouseholdPluginUnitDisabledEvent.eventName,
@@ -1785,7 +1926,7 @@ describe('PluginUpdateService', () => {
         .mockResolvedValueOnce([coveringGrant]);
       db.householdPlugin.findMany.mockResolvedValue([makeUnit()]);
 
-      await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+      await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
 
       expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
     });
@@ -1825,7 +1966,7 @@ describe('PluginUpdateService', () => {
       // suspension cannot be re-stamped or double-reported.
       db.householdPlugin.findMany.mockResolvedValue([]);
 
-      await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+      await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
 
       expect(db.householdPlugin.findMany).toHaveBeenCalledWith({
         where: { pluginId: 'plugin-1', suspendedForConsent: false },
@@ -2014,20 +2155,30 @@ describe('PluginUpdateService', () => {
   });
 
   describe('reject()', () => {
-    it('clears the pending columns — conditionally on the exact staging the rejector saw — and emits update_rejected', async () => {
-      // The staging stamp joins the version in the predicate: a rejected
-      // version can be re-staged under the same number, and this clear must
-      // never take a replacement staging with it.
-      const stagedAt = new Date('2026-08-10T09:00:00Z');
+    it('reject clears only the staging it loaded, by its staging id (#357)', async () => {
+      // The staging id joins the version in the predicate: a rejected
+      // version can be re-staged under the same number from the same bytes,
+      // and this clear must never take a replacement staging with it.
       db.plugin.findUnique.mockResolvedValue(
-        makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha', pendingSince: stagedAt }),
+        makePlugin({
+          pendingVersion: '1.3.0',
+          pendingSha256: 'new-sha',
+          pendingSince: new Date('2026-08-10T09:00:00Z'),
+          pendingStagingId: 'staging-a',
+        }),
       );
 
-      await service.reject({ slug: 'demo-sink', rejectorId: 'admin-1' });
+      await service.reject({ slug: 'demo-sink', rejectorId: 'admin-1', stagingId: 'staging-a' });
 
       expect(db.plugin.updateMany).toHaveBeenCalledWith({
-        where: { id: 'plugin-1', pendingVersion: '1.3.0', pendingSince: stagedAt, uninstalledAt: null },
-        data: { pendingVersion: null, pendingManifestJson: Prisma.DbNull, pendingSha256: null, pendingSince: null },
+        where: { id: 'plugin-1', pendingVersion: '1.3.0', pendingStagingId: 'staging-a', uninstalledAt: null },
+        data: {
+          pendingVersion: null,
+          pendingManifestJson: Prisma.DbNull,
+          pendingSha256: null,
+          pendingSince: null,
+          pendingStagingId: null,
+        },
       });
       expect(emitter.emit).toHaveBeenCalledWith(
         PluginUpdateRejectedEvent.eventName,
@@ -2036,9 +2187,40 @@ describe('PluginUpdateService', () => {
     });
 
     it('refuses without a pending update', async () => {
-      await expect(service.reject({ slug: 'demo-sink', rejectorId: 'admin-1' })).rejects.toThrow(
-        PluginUpdateNoPendingError,
+      await expect(
+        service.reject({ slug: 'demo-sink', rejectorId: 'admin-1', stagingId: 'staging-a' }),
+      ).rejects.toThrow(PluginUpdateNoPendingError);
+    });
+
+    it('reject refuses a staging id that is not the current staging, and writes nothing (#357)', async () => {
+      db.plugin.findUnique.mockResolvedValue(
+        makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha', pendingStagingId: 'staging-b' }),
       );
+
+      const failure = await service
+        .reject({ slug: 'demo-sink', rejectorId: 'admin-1', stagingId: 'staging-a' })
+        .catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateStagingReplacedError);
+      expect(failure).toMatchObject({ slug: 'demo-sink', stagingId: 'staging-a' });
+      expect(db.plugin.updateMany).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('reject answers a replaced staging when another one takes the slot between its check and its clear (#357)', async () => {
+      db.plugin.findUnique
+        .mockResolvedValueOnce(
+          makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha', pendingStagingId: 'staging-a' }),
+        ) // the load
+        .mockResolvedValue(
+          makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha', pendingStagingId: 'staging-b' }),
+        ); // the guard's re-read
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.reject({ slug: 'demo-sink', rejectorId: 'admin-1', stagingId: 'staging-a' }),
+      ).rejects.toThrow(PluginUpdateStagingReplacedError);
+      expect(emitter.emit).not.toHaveBeenCalled();
     });
 
     it('refuses — with no event — when the staged update it targeted resolved or was replaced mid-flight', async () => {
@@ -2047,24 +2229,30 @@ describe('PluginUpdateService', () => {
       // clear a version nobody decided on. The guarded write turns both
       // races into the typed no-pending refusal.
       db.plugin.findUnique
-        .mockResolvedValueOnce(makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha' })) // the load
+        .mockResolvedValueOnce(
+          makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha', pendingStagingId: 'staging-a' }),
+        ) // the load
         .mockResolvedValue(makePlugin()); // the guard's re-read: still installed, pending gone
       db.plugin.updateMany.mockResolvedValue({ count: 0 });
 
-      await expect(service.reject({ slug: 'demo-sink', rejectorId: 'admin-1' })).rejects.toThrow(
-        PluginUpdateNoPendingError,
-      );
+      await expect(
+        service.reject({ slug: 'demo-sink', rejectorId: 'admin-1', stagingId: 'staging-a' }),
+      ).rejects.toThrow(PluginUpdateNoPendingError);
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
     it('answers the tombstone, not no-pending, when an uninstall won the race', async () => {
       const uninstalledAt = new Date('2026-08-16T12:00:00Z');
       db.plugin.findUnique
-        .mockResolvedValueOnce(makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha' }))
+        .mockResolvedValueOnce(
+          makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha', pendingStagingId: 'staging-a' }),
+        )
         .mockResolvedValue(makePlugin({ uninstalledAt }));
       db.plugin.updateMany.mockResolvedValue({ count: 0 });
 
-      const failure = await service.reject({ slug: 'demo-sink', rejectorId: 'admin-1' }).catch((err: unknown) => err);
+      const failure = await service
+        .reject({ slug: 'demo-sink', rejectorId: 'admin-1', stagingId: 'staging-a' })
+        .catch((err: unknown) => err);
 
       expect(failure).toBeInstanceOf(PluginUpdateTombstonedError);
       expect(failure).toMatchObject({ uninstalledAt });
@@ -2088,6 +2276,7 @@ describe('PluginUpdateService', () => {
         pendingManifestJson: nextJson as unknown as Prisma.JsonValue,
         pendingSha256: 'new-sha',
         pendingSince,
+        pendingStagingId: 'staging-a',
         ...overrides,
       });
 

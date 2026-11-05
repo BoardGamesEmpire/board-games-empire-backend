@@ -38,6 +38,29 @@ export class PluginEntrypointError extends Error {
   }
 }
 
+/**
+ * The plugin artifact directory a row's `installedSha256` names holds another
+ * version than the row activated, or a manifest whose version can't be read
+ * (#224). Every artifact has a directory of its own, so this is drift — the
+ * row activated with the code never placed, or the directory edited by hand —
+ * and never a staged update awaiting consent.
+ */
+export class PluginDiskVersionMismatchError extends Error {
+  override readonly name = 'PluginDiskVersionMismatchError';
+
+  constructor(
+    public readonly slug: string,
+    public readonly expectedVersion: string,
+    public readonly foundVersion: string | null,
+  ) {
+    super(
+      `Plugin '${slug}' artifact directory holds ${
+        foundVersion === null ? 'a manifest with no readable version' : `v${foundVersion}`
+      }, but its version on record is v${expectedVersion}`,
+    );
+  }
+}
+
 /** The imported module does not satisfy the factory contract (default-exported function). */
 export class PluginModuleShapeError extends Error {
   override readonly name = 'PluginModuleShapeError';

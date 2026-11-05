@@ -8,7 +8,6 @@ import {
 } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
-import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { SOFT_DELETE_HOUSEHOLD } from '../household/lock-fixtures';
 import type { Caller } from '../support/api-key';
@@ -80,7 +79,7 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
         scope: PluginScope.Household,
         manifestJson: manifest as never,
         enabled: true,
-        installedSha256: randomUUID(),
+        installedSha256: 'a'.repeat(64),
       },
     });
     await db.client.pluginPermission.create({
