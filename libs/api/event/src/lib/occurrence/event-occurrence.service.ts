@@ -11,7 +11,7 @@ import {
   ResourceType,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService, ScopeComposer } from '@bge/permissions';
+import { AbilityService, resolveActingUserIdOrNull, ScopeComposer } from '@bge/permissions';
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -463,6 +463,7 @@ export class EventOccurrenceService {
     { refuseOnCancelledEvent = false }: { refuseOnCancelledEvent?: boolean } = {},
   ): Promise<OccurrenceDetail> {
     const initiatedAt = new Date();
+    const actingUserId = resolveActingUserIdOrNull(this.abilityService);
     const readStatus = (client: Prisma.TransactionClient) =>
       client.eventOccurrence.findUnique({
         where: { id: occurrenceId, eventId },
@@ -515,6 +516,7 @@ export class EventOccurrenceService {
         new OccurrenceStatusChangedEvent(
           { id: occurrenceId, eventId, status: before.status },
           { id: updated.id, eventId: updated.eventId, status: updated.status },
+          { occurrenceLabel: updated.label, actingUserId },
           initiatedAt,
         ),
       );

@@ -17,6 +17,7 @@ import {
   createTestingModuleWithDb,
   makeEventAttendee,
   makeEventAttendeeGameList,
+  MOCK_ACTING_USER_ID,
   paginationQuery,
   rawQueryText,
   unwrapTransaction,
@@ -435,6 +436,21 @@ describe('EventAttendeeService', () => {
         userId: 'user-1',
         status: EventParticipationStatus.Attending,
       });
+    });
+
+    it('updateStatus carries who acted on the RSVP (#802)', async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findUnique.mockResolvedValue({
+        id: 'att-1',
+        userId: 'user-1',
+        status: EventParticipationStatus.Invited,
+      } as EventAttendee);
+      db.eventAttendee.update.mockResolvedValue(attendeeRow({ status: EventParticipationStatus.Attending }));
+
+      await service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.Attending });
+
+      const [, emitted] = emitter.emit.mock.calls[0];
+      expect(emitted.actingUserId).toBe(MOCK_ACTING_USER_ID);
     });
 
     it('throws NotFound when removing a non-existent attendee', async () => {

@@ -78,7 +78,13 @@ export class AttendeeStatusUpdatedEvent extends MutationEvent<EventAttendee> {
   readonly subject = ResourceType.EventAttendee;
   readonly subjectId: string;
 
-  constructor(before: AttendeeStatusSnapshot, after: AttendeeStatusSnapshot, initiatedAt: Date) {
+  constructor(
+    before: AttendeeStatusSnapshot,
+    after: AttendeeStatusSnapshot,
+    /** The user who acted, or `null` when the actor is not a user (#802). Context for listeners, not audited. */
+    public readonly actingUserId: string | null,
+    initiatedAt: Date,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }

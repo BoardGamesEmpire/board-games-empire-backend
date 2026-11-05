@@ -869,6 +869,46 @@ describe('EventOccurrenceService', () => {
       expect(emitted.after).toEqual({ id: 'occ-1', eventId: 'event-1', status: OccurrenceStatus.Confirmed });
     });
 
+    it("carries the date's label and who acted on a status change (#802)", async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue({
+        id: 'occ-1',
+        status: OccurrenceStatus.Proposed,
+      } as EventOccurrence);
+      db.eventOccurrence.update.mockResolvedValue(
+        makeEventOccurrence({
+          id: 'occ-1',
+          eventId: 'event-1',
+          status: OccurrenceStatus.Confirmed,
+          label: 'Saturday evening',
+        }),
+      );
+
+      await service.confirmOccurrence('event-1', 'occ-1');
+
+      const [, emitted] = emitter.emit.mock.calls[0];
+      expect(emitted.occurrenceLabel).toBe('Saturday evening');
+      expect(emitted.actingUserId).toBe(MOCK_ACTING_USER_ID);
+    });
+
+    // getActingUserId answers 403 for an actor with no user behind it.
+    it('carries a null actor when the actor is not a user (#802)', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+      db.eventOccurrence.findUnique.mockResolvedValue({
+        id: 'occ-1',
+        status: OccurrenceStatus.Proposed,
+      } as EventOccurrence);
+      db.eventOccurrence.update.mockResolvedValue(
+        makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status: OccurrenceStatus.Confirmed }),
+      );
+
+      await service.confirmOccurrence('event-1', 'occ-1');
+
+      const [, emitted] = emitter.emit.mock.calls[0];
+      expect(emitted.actingUserId).toBeNull();
+    });
+
     it('rejects an illegal source status', async () => {
       db.eventOccurrence.findUnique.mockResolvedValue({
         id: 'occ-1',

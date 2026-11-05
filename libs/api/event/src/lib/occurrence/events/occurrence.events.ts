@@ -90,9 +90,23 @@ export class OccurrenceStatusChangedEvent extends MutationEvent<EventOccurrence>
   readonly subject = ResourceType.EventOccurrence;
   readonly subjectId: string;
 
-  constructor(before: OccurrenceStatusSnapshot, after: OccurrenceStatusSnapshot, initiatedAt: Date) {
+  readonly occurrenceLabel: string | null;
+  readonly actingUserId: string | null;
+
+  constructor(
+    before: OccurrenceStatusSnapshot,
+    after: OccurrenceStatusSnapshot,
+    /**
+     * Context for listeners, kept out of the audit entry: the date's label, and
+     * the user who acted, or `null` when the actor is not a user (#802).
+     */
+    context: { occurrenceLabel: string | null; actingUserId: string | null },
+    initiatedAt: Date,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
+    this.occurrenceLabel = context.occurrenceLabel;
+    this.actingUserId = context.actingUserId;
   }
 }
 

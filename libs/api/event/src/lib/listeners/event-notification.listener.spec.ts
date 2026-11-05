@@ -1,22 +1,22 @@
 import {
-  EventAvailabilityVote,
+  EventParticipationStatus,
   Game,
   NominationStatus,
   NotificationType,
   OccurrenceStatus,
   PlatformGame,
+  SystemRole,
 } from '@bge/database';
 import { NotificationsService } from '@bge/notifications-service';
 import {
   createTestingModuleWithDb,
   makeEvent,
   makeEventAttendee,
-  makeEventOccurrence,
   makeHouseholdMember,
   makePlatformGame,
   MockDatabaseService,
 } from '@bge/testing';
-import { AttendeeAddedEvent } from '../attendee/events/attendee.events';
+import { AttendeeAddedEvent, AttendeeStatusUpdatedEvent } from '../attendee/events/attendee.events';
 import { EventCreatedEvent } from '../events/event.events';
 import { EventCancelledEvent, EventReopenedEvent } from '../lifecycle/events/event-lifecycle.events';
 import { NominationCreatedEvent, NominationResolvedEvent } from '../nomination/events/nomination.events';
@@ -330,53 +330,211 @@ describe('EventNotificationListener', () => {
     });
   });
 
-  describe('onOccurrenceConfirmed', () => {
-    const event = new OccurrenceStatusChangedEvent(
-      { id: 'occ-1', eventId: 'ev-1', status: OccurrenceStatus.Proposed },
-      { id: 'occ-1', eventId: 'ev-1', status: OccurrenceStatus.Confirmed },
-      new Date(),
-    );
-
-    it('notifies voters who are not the host', async () => {
-      db.event.findUnique.mockResolvedValue(
-        makeEvent({
-          title: 'Game Night',
-          createdById: 'user-host',
-          id: 'ev-1',
-        }),
+  /**
+   * #802. An RSVP tells the event's hosts and co-hosts who were not removed,
+   * minus the person acting. The creator has no part in it, and nobody hosting
+   * means nobody is told.
+   */
+  describe('onAttendeeRsvp', () => {
+    const rsvp = (userId: string | null, actingUserId: string | null) =>
+      new AttendeeStatusUpdatedEvent(
+        { id: 'att-1', eventId: 'ev-1', userId, status: EventParticipationStatus.Invited },
+        { id: 'att-1', eventId: 'ev-1', userId, status: EventParticipationStatus.Attending },
+        actingUserId,
+        new Date(),
       );
 
-      db.eventOccurrence.findUnique.mockResolvedValue(
-        makeEventOccurrence({
+    beforeEach(() => {
+      db.event.findUnique.mockResolvedValue(makeEvent({ id: 'ev-1', title: 'Game Night', createdById: 'u-creator' }));
+      db.user.findUnique.mockResolvedValue({ username: 'ada', profile: { displayName: 'Ada' } } as never);
+    });
+
+    it('tells the hosts and co-hosts, not the creator (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }, { userId: 'u-cohost' }] as never);
+
+      await listener.onAttendeeRsvp(rsvp('u-invitee', 'u-invitee'));
+
+      expect(db.eventAttendee.findMany).toHaveBeenCalledWith({
+        where: {
           eventId: 'ev-1',
-          label: 'Saturday',
-          startDate: new Date(),
+          removedAt: null,
+          userId: { not: null },
+          role: { is: { role: { is: { name: { in: [SystemRole.EventHost, SystemRole.EventCoHost] } } } } },
+        },
+        select: { userId: true },
+      });
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        {
+          userId: 'u-host',
+          type: NotificationType.EventRsvpReceived,
+          payload: { eventId: 'ev-1', eventTitle: 'Game Night', attendeeName: 'Ada' },
+        },
+        {
+          userId: 'u-cohost',
+          type: NotificationType.EventRsvpReceived,
+          payload: { eventId: 'ev-1', eventTitle: 'Game Night', attendeeName: 'Ada' },
+        },
+      ]);
+    });
+
+    it('leaves out the host who changed the RSVP (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }, { userId: 'u-cohost' }] as never);
+
+      await listener.onAttendeeRsvp(rsvp('u-host', 'u-host'));
+
+      expect(notifications.createMany).toHaveBeenCalledWith([expect.objectContaining({ userId: 'u-cohost' })]);
+    });
+
+    it('sends the RSVP of an attendee without an account with no name (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }] as never);
+
+      await listener.onAttendeeRsvp(rsvp(null, 'u-cohost'));
+
+      expect(db.user.findUnique).not.toHaveBeenCalled();
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        expect.objectContaining({
+          userId: 'u-host',
+          payload: { eventId: 'ev-1', eventTitle: 'Game Night', attendeeName: null },
         }),
+      ]);
+    });
+
+    it('tells nobody when the event has no host (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([]);
+
+      await listener.onAttendeeRsvp(rsvp('u-invitee', 'u-invitee'));
+
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+
+    // The status is required on every write, so a host editing only the
+    // attendee's notes sends the same RSVP again.
+    it('tells nobody when the RSVP is sent again unchanged (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }] as never);
+      const attending = { id: 'att-1', eventId: 'ev-1', userId: 'u-a', status: EventParticipationStatus.Attending };
+
+      await listener.onAttendeeRsvp(new AttendeeStatusUpdatedEvent(attending, attending, 'u-cohost', new Date()));
+
+      expect(db.eventAttendee.findMany).not.toHaveBeenCalled();
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+
+    // Every user has a username, so a missing name is a user deleted since the RSVP.
+    it("tells nobody when the attendee's user is gone (#802)", async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }] as never);
+      db.user.findUnique.mockResolvedValue(null);
+
+      await listener.onAttendeeRsvp(rsvp('u-a', 'u-cohost'));
+
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+
+    it('tells a host once when two rows name them (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }, { userId: 'u-host' }] as never);
+
+      await listener.onAttendeeRsvp(rsvp('u-invitee', 'u-invitee'));
+
+      expect(notifications.createMany).toHaveBeenCalledWith([expect.objectContaining({ userId: 'u-host' })]);
+    });
+  });
+
+  /**
+   * #802, #677. A date's confirm, decline or cancel tells every attendee not
+   * removed who has not answered not attending, whether or not they voted,
+   * minus the person acting.
+   */
+  describe('date status changes', () => {
+    const change = (actingUserId: string | null) =>
+      new OccurrenceStatusChangedEvent(
+        { id: 'occ-1', eventId: 'ev-1', status: OccurrenceStatus.Proposed },
+        { id: 'occ-1', eventId: 'ev-1', status: OccurrenceStatus.Confirmed },
+        { occurrenceLabel: 'Saturday evening', actingUserId },
+        new Date(),
       );
 
-      db.eventAvailabilityVote.findMany.mockResolvedValue([
-        makeAvailabilityVote({
-          attendeeId: 'attendee-a',
-          ...(<any>{ attendee: { userId: 'user-a' } }),
-        }),
-        makeAvailabilityVote({
-          attendeeId: 'attendee-host',
-          ...(<any>{ attendee: { userId: 'user-host' } }),
-        }), // should be excluded
+    beforeEach(() => {
+      db.event.findUnique.mockResolvedValue(makeEvent({ id: 'ev-1', title: 'Game Night', createdById: 'u-creator' }));
+    });
+
+    it('tells the attendees still coming, whether or not they voted (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'user-a' }, { userId: 'user-b' }] as never);
+
+      await listener.onOccurrenceConfirmed(change('user-host'));
+
+      expect(db.eventAttendee.findMany).toHaveBeenCalledWith({
+        where: {
+          eventId: 'ev-1',
+          removedAt: null,
+          userId: { not: null },
+          status: { not: EventParticipationStatus.NotAttending },
+        },
+        select: { userId: true },
+      });
+      expect(db.eventAvailabilityVote.findMany).not.toHaveBeenCalled();
+      expect(notifications.createMany).toHaveBeenCalledWith(
+        ['user-a', 'user-b'].map((userId) => ({
+          userId,
+          type: NotificationType.EventOccurrenceConfirmed,
+          payload: {
+            eventId: 'ev-1',
+            eventTitle: 'Game Night',
+            occurrenceId: 'occ-1',
+            occurrenceLabel: 'Saturday evening',
+          },
+        })),
+      );
+    });
+
+    it('leaves out the person acting, not the creator (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-creator' }, { userId: 'user-host' }] as never);
+
+      await listener.onOccurrenceDeclined(change('user-host'));
+
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        expect.objectContaining({ userId: 'u-creator', type: NotificationType.EventOccurrenceDeclined }),
       ]);
+    });
 
-      await listener.onOccurrenceConfirmed(event);
+    it("notifies when the date's row is already gone (#677)", async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'user-a' }] as never);
 
+      await listener.onOccurrenceCancelled(change('user-host'));
+
+      expect(db.eventOccurrence.findUnique).not.toHaveBeenCalled();
       expect(notifications.createMany).toHaveBeenCalledWith([
         expect.objectContaining({
           userId: 'user-a',
-          type: NotificationType.EventOccurrenceConfirmed,
-          payload: expect.objectContaining({
-            occurrenceId: 'occ-1',
-            occurrenceLabel: 'Saturday',
-          }),
+          type: NotificationType.EventOccurrenceCanceled,
+          payload: expect.objectContaining({ occurrenceLabel: 'Saturday evening' }),
         }),
       ]);
+    });
+
+    it('notifies each user once (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'user-a' }, { userId: 'user-a' }] as never);
+
+      await listener.onOccurrenceConfirmed(change('user-host'));
+
+      expect(notifications.createMany).toHaveBeenCalledWith([expect.objectContaining({ userId: 'user-a' })]);
+    });
+
+    it('still tells everyone when a plugin or system confirmed the date (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'user-a' }, { userId: 'user-host' }] as never);
+
+      await listener.onOccurrenceConfirmed(change(null));
+
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        expect.objectContaining({ userId: 'user-a' }),
+        expect.objectContaining({ userId: 'user-host' }),
+      ]);
+    });
+
+    it('warns and sends nothing when the event is gone (#677)', async () => {
+      db.event.findUnique.mockResolvedValue(null);
+
+      await listener.onOccurrenceConfirmed(change('user-host'));
+
+      expect(notifications.createMany).not.toHaveBeenCalled();
     });
   });
 
@@ -469,18 +627,6 @@ describe('EventNotificationListener', () => {
     });
   });
 });
-
-function makeAvailabilityVote(overrides: Partial<EventAvailabilityVote> = {}): EventAvailabilityVote {
-  return {
-    id: `av-${Math.random()}`,
-    occurrenceId: 'occ-1',
-    attendeeId: 'attendee-1',
-    response: 'Available',
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    ...overrides,
-  };
-}
 
 function stubPlatformGameWithGame(
   options: Partial<PlatformGame> = {},

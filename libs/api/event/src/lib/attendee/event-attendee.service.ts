@@ -11,7 +11,7 @@ import {
   SystemRole,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
+import { AbilityService, PermissionsService, resolveActingUserIdOrNull, ScopeComposer } from '@bge/permissions';
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import {
   BadRequestException,
@@ -355,6 +355,7 @@ export class EventAttendeeService {
 
   async updateStatus(eventId: string, attendeeId: string, dto: UpdateAttendeeStatusDto): Promise<EventAttendee> {
     const initiatedAt = new Date();
+    const actingUserId = resolveActingUserIdOrNull(this.abilityService);
     await assertEventExists(this.db, eventId);
 
     const existing = await this.db.eventAttendee.findUnique({
@@ -399,6 +400,7 @@ export class EventAttendeeService {
         new AttendeeStatusUpdatedEvent(
           { id: attendeeId, eventId, userId: existing.userId, status: existing.status },
           { id: updated.id, eventId: updated.eventId, userId: updated.userId, status: updated.status },
+          actingUserId,
           initiatedAt,
         ),
       );

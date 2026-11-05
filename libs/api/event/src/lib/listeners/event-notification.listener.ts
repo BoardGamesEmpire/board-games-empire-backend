@@ -17,6 +17,7 @@ import type {
 } from '../nomination/events/nomination.events';
 import { OccurrenceEvents } from '../occurrence/constants/index';
 import type { OccurrenceStatusChangedEvent } from '../occurrence/events/occurrence.events';
+import { hostUserIds, usersStillComing, withoutActor } from './notification-audience';
 
 @Injectable()
 export class EventNotificationListener {
@@ -121,48 +122,65 @@ export class EventNotificationListener {
 
   @OnEvent(AttendeeEvents.AttendeeStatusUpdated, { async: true })
   async onAttendeeRsvp(event: AttendeeStatusUpdatedEvent): Promise<void> {
-    const { eventId, userId } = event.after;
+    const { eventId, userId, status } = event.after;
+
+    // The status is required on every write, so editing only an attendee's
+    // notes sends the RSVP again unchanged. That is no news to anyone (#802).
+    if (event.before.status === status) {
+      return this.logger.debug(`RSVP unchanged for AttendeeStatusUpdated eventId=${eventId}, userId=${userId}`);
+    }
 
     try {
-      // Notify the event host that someone RSVP'd
-      const eventRecord = await this.db.event.findUnique({
-        where: { id: eventId },
-        select: { createdById: true, title: true },
-      });
+      const [hostIds, eventRecord] = await Promise.all([
+        hostUserIds(this.db, eventId),
+        this.db.event.findUnique({ where: { id: eventId }, select: { title: true } }),
+      ]);
 
-      if (!eventRecord || eventRecord.createdById === userId) {
+      if (!eventRecord) {
+        return this.logger.warn(`Event not found for AttendeeStatusUpdated notification, eventId=${eventId}`);
+      }
+
+      // The hosts hear of an RSVP, not the creator (#802), and not the host
+      // who answered or changed it themselves.
+      const recipients = withoutActor(hostIds, event.actingUserId);
+
+      if (recipients.length === 0) {
         return this.logger.debug(
           `No notification needed for AttendeeStatusUpdated eventId=${eventId}, userId=${userId}`,
         );
       }
 
-      const attendeeName = userId
-        ? await this.db.user
-            .findUnique({
-              where: { id: userId },
-              select: {
-                username: true,
-                profile: { select: { displayName: true } },
-              },
-            })
-            .then((u) => u?.profile?.displayName ?? u?.username ?? 'Unknown')
-        : 'A guest';
+      const attendeeName = userId === null ? null : await this.displayNameOf(userId);
 
-      await this.notifications.create({
-        userId: eventRecord.createdById,
-        type: NotificationType.EventRsvpReceived,
-        payload: {
-          eventId,
-          eventTitle: eventRecord.title,
-          attendeeName,
-        },
-      });
+      // Every user has a username, so a missing name is a user deleted since
+      // the RSVP. There is nobody to name to the hosts.
+      if (userId !== null && attendeeName === null) {
+        return this.logger.debug(`Attendee's user is gone for AttendeeStatusUpdated eventId=${eventId}`);
+      }
+
+      await this.notifications.createMany(
+        recipients.map((recipientId) => ({
+          userId: recipientId,
+          type: NotificationType.EventRsvpReceived,
+          // `null` is an attendee without an account, and the client words it.
+          payload: { eventId, eventTitle: eventRecord.title, attendeeName },
+        })),
+      );
     } catch (err) {
       this.logger.error(
         `Failed to notify on AttendeeStatusUpdated eventId=${eventId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }
+  }
+
+  private async displayNameOf(userId: string): Promise<string | null> {
+    const user = await this.db.user.findUnique({
+      where: { id: userId },
+      select: { username: true, profile: { select: { displayName: true } } },
+    });
+
+    return user?.profile?.displayName ?? user?.username ?? null;
   }
 
   @OnEvent(NominationEvent.NominationCreated, { async: true })
@@ -343,8 +361,8 @@ export class EventNotificationListener {
 
   /**
    * #795. One notification per attendee, with the host's reason, rather than
-   * one per cancelled date: a Fixed event's date has no voters, so the date
-   * notifications would tell nobody.
+   * one per cancelled date. The cancel moves its dates in bulk writes that
+   * emit no date events, so this is the only word of it.
    */
   @OnEvent(EventEvents.EventCancelled, { async: true })
   async onEventCancelled(event: EventCancelledEvent): Promise<void> {
@@ -375,7 +393,7 @@ export class EventNotificationListener {
    */
   private async notifyAttendeesOfEvent(
     eventId: string,
-    actingUserId: string,
+    actingUserId: string | null,
     notificationFor: (userId: string) => CreateNotificationInput,
   ): Promise<void> {
     try {
@@ -414,6 +432,12 @@ export class EventNotificationListener {
     await this.notifyAttendeesOfOccurrenceChange(event, NotificationType.EventOccurrenceCanceled);
   }
 
+  /**
+   * Tells the attendees still coming about a date's confirm, decline or
+   * cancel, except the person acting (#802). The date's label rides on the
+   * domain event, so a date deleted right after its cancel still gets its
+   * notification (#677).
+   */
   private async notifyAttendeesOfOccurrenceChange(
     event: OccurrenceStatusChangedEvent,
     type: NotificationType,
@@ -421,51 +445,32 @@ export class EventNotificationListener {
     const { id: occurrenceId, eventId } = event.after;
 
     try {
-      const [eventRecord, occurrence] = await Promise.all([
-        this.db.event.findUnique({
-          where: { id: eventId },
-          select: { title: true, createdById: true },
-        }),
-        this.db.eventOccurrence.findUnique({
-          where: { id: occurrenceId },
-          select: { label: true, startDate: true },
-        }),
-      ]);
+      const eventRecord = await this.db.event.findUnique({
+        where: { id: eventId },
+        select: { title: true },
+      });
 
-      if (!eventRecord || !occurrence) {
+      if (!eventRecord) {
         return this.logger.warn(
-          `Event or occurrence not found for OccurrenceStatusChanged notification, eventId=${eventId}, occurrenceId=${occurrenceId}`,
+          `Event not found for OccurrenceStatusChanged notification, eventId=${eventId}, occurrenceId=${occurrenceId}`,
         );
       }
 
-      // Only notify attendees who voted on this occurrence
-      const voters = await this.db.eventAvailabilityVote.findMany({
-        where: { occurrenceId, attendee: { is: NOT_REMOVED } },
-        select: {
-          attendeeId: true,
-          attendee: {
-            select: { userId: true },
-          },
-        },
-      });
+      const recipients = withoutActor(await usersStillComing(this.db, eventId), event.actingUserId);
 
-      const inputs: CreateNotificationInput[] = voters
-        // filters guest attendees and any weird edge cases where userId is null
-        .filter((v) => v.attendee.userId)
-        .filter((v) => v.attendee.userId !== eventRecord.createdById)
-        .map((v) => ({
-          userId: v.attendee.userId!,
-          type,
-          payload: {
-            eventId,
-            eventTitle: eventRecord.title,
-            occurrenceId,
-            occurrenceLabel: occurrence.label,
-          },
-        }));
-
-      if (inputs.length > 0) {
-        await this.notifications.createMany(inputs);
+      if (recipients.length > 0) {
+        await this.notifications.createMany(
+          recipients.map((userId) => ({
+            userId,
+            type,
+            payload: {
+              eventId,
+              eventTitle: eventRecord.title,
+              occurrenceId,
+              occurrenceLabel: event.occurrenceLabel,
+            },
+          })),
+        );
       }
     } catch (err) {
       this.logger.error(

@@ -135,7 +135,8 @@ export interface EventCancelledPayload extends EventRefPayload {
 
 /** Someone RSVP'd to an event the recipient hosts. */
 export interface EventRsvpReceivedPayload extends EventRefPayload {
-  attendeeName: string;
+  /** `null` is an attendee without an account, and the client words it. */
+  attendeeName: string | null;
 }
 
 /** A game was nominated for an event (sent to fellow attendees). */
