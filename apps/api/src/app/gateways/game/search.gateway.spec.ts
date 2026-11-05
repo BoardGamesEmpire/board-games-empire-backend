@@ -589,6 +589,28 @@ describe('GameSearchGateway', () => {
         expect(payload.games[0].title).toBe('Gloomhaven');
       });
 
+      it('carries the DataGateway result’s Markdown summary in search:result (#862)', async () => {
+        const client = makeSocket(gateway);
+        coordinator.searchGames.mockReturnValue(
+          of(
+            makeResultFrame({
+              game: {
+                externalId: '174430',
+                title: 'Gloomhaven',
+                contentType: ContentType.CONTENT_TYPE_BASE_GAME,
+                summary: 'A *campaign* in a changing world',
+              } as GameSearchData,
+            }),
+            makeSourceDone(),
+          ),
+        );
+
+        await gateway.handleSearchStart(client, makeStartDto());
+
+        const payload = assertEmitted<WsSearchResultPayload>(room('corr-1'), SearchEvents.SearchResult);
+        expect(payload.games[0].summary).toBe('A *campaign* in a changing world');
+      });
+
       it('sets inSystem=true on search:result when coordinator marks the game as in-system', async () => {
         const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(

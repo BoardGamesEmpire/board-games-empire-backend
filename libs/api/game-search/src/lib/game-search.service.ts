@@ -357,6 +357,7 @@ export class GameSearchService {
       yearPublished: game.yearPublished,
       thumbnailUrl: game.thumbnailUrl,
       sourceUrl: game.sourceUrl,
+      summary: game.summary,
       averageRating: game.averageRating,
       minPlayers: game.minPlayers,
       maxPlayers: game.maxPlayers,

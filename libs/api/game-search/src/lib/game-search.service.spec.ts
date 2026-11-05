@@ -439,5 +439,43 @@ describe('GameSearchService', () => {
       expect(minimumOnly.minPlayTime).toBe(45);
       expect(minimumOnly.maxPlayTime).toBeUndefined();
     });
+
+    // #862: the coordinator sends each summary as Markdown (#714), and the
+    // mapping used to drop it, so neither REST nor the WebSocket carried one.
+    it('carries a DataGateway result’s Markdown summary', () => {
+      expect(service.mapProtoGame(resultWith({ summary: '**Trade** and build' })).summary).toBe('**Trade** and build');
+    });
+
+    it('leaves summary out when the DataGateway sent none', () => {
+      expect(service.mapProtoGame(resultWith({})).summary).toBeUndefined();
+    });
+  });
+
+  describe('search (REST): a DataGateway result’s summary (#862)', () => {
+    it('carries the summary in resultsBySource', async () => {
+      const frames: proto.SearchGameResult[] = [
+        {
+          correlationId: 'c1',
+          gatewayId: 'bgg',
+          status: proto.ResultStatus.RESULT_STATUS_RESULT,
+          game: {
+            externalId: '13',
+            title: 'Catan',
+            contentType: proto.ContentType.CONTENT_TYPE_BASE_GAME,
+            availablePlatforms: [],
+            availableReleases: [],
+            summary: '**Trade** and build',
+          },
+        },
+        { correlationId: 'c1', gatewayId: 'bgg', status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE },
+      ];
+      coordinator.searchGames.mockReturnValue(of(...frames));
+
+      const response = await firstValueFrom(
+        service.search(plainToInstance(SearchQueryDto, { query: 'catan', includeLocal: false })),
+      );
+
+      expect(response.resultsBySource['bgg'][0].summary).toBe('**Trade** and build');
+    });
   });
 });
