@@ -50,6 +50,29 @@ export class OccurrenceUpdatedEvent extends MutationEvent<EventOccurrence> {
   }
 }
 
+type OccurrenceRemovedSnapshot = Readonly<
+  Pick<EventOccurrence, 'id' | 'eventId' | 'label' | 'startDate' | 'endDate' | 'status'>
+>;
+
+/**
+ * A hard delete of a date (#677), modeled before-only. The snapshot is the row
+ * as the delete returned it, so the audit entry keeps what the date was.
+ */
+export class OccurrenceRemovedEvent extends MutationEvent<EventOccurrence> {
+  static readonly eventName = OccurrenceEvents.OccurrenceRemoved;
+
+  declare readonly before: OccurrenceRemovedSnapshot;
+  declare readonly after: null;
+
+  readonly subject = ResourceType.EventOccurrence;
+  readonly subjectId: string;
+
+  constructor(before: OccurrenceRemovedSnapshot, initiatedAt: Date) {
+    super(before, null, initiatedAt);
+    this.subjectId = before.id;
+  }
+}
+
 /** Changed subset (`status`) plus `eventId`, which occurrence-change listeners key off. */
 type OccurrenceStatusSnapshot = Readonly<Pick<EventOccurrence, 'id' | 'eventId' | 'status'>>;
 

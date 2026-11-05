@@ -165,6 +165,61 @@ describe('status changes racing on one date or nomination (#621)', () => {
     });
   });
 
+  describe("a date's removal and confirm (#677)", () => {
+    const changeDate = (actor: AuthenticatedActor, eventId: string, occurrenceId: string, change: string) =>
+      request(baseUrl).post(`${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}/${change}`).set(actor.headers);
+
+    const removeDate = (actor: AuthenticatedActor, eventId: string, occurrenceId: string) =>
+      request(baseUrl).delete(`${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}`).set(actor.headers);
+
+    /** A Poll event with one Proposed date. */
+    const arrange = async () => {
+      const host = await actors.user();
+      const eventId = await createdEventId(host, {
+        schedulingMode: EventSchedulingMode.Poll,
+        occurrences: [{ startDate: hoursFromNow(24) }],
+      });
+      const [{ id: occurrenceId }] = await db.client.eventOccurrence.findMany({
+        where: { eventId },
+        select: { id: true },
+      });
+
+      return { host, eventId, occurrenceId };
+    };
+
+    it('answers a removal queued behind a confirm 400, and keeps the date', async () => {
+      const { host, eventId, occurrenceId } = await arrange();
+
+      const statuses = await race(
+        EVENT_ROW,
+        eventId,
+        () => changeDate(host, eventId, occurrenceId, 'confirm'),
+        () => removeDate(host, eventId, occurrenceId),
+      );
+
+      expect(statuses).toEqual([201, 400]);
+      const date = await db.client.eventOccurrence.findUniqueOrThrow({
+        where: { id: occurrenceId },
+        select: { status: true },
+      });
+      expect(date.status).toBe(OccurrenceStatus.Confirmed);
+    });
+
+    it('answers a removal queued behind another removal 404 (#1064)', async () => {
+      const { host, eventId, occurrenceId } = await arrange();
+
+      const statuses = await race(
+        EVENT_ROW,
+        eventId,
+        () => removeDate(host, eventId, occurrenceId),
+        () => removeDate(host, eventId, occurrenceId),
+      );
+
+      expect(statuses).toEqual([200, 404]);
+      expect(await db.client.eventOccurrence.count({ where: { id: occurrenceId } })).toBe(0);
+    });
+  });
+
   describe('a nomination awaiting the host', () => {
     /** An event whose host approves each game nominated, and the host's own nomination of a game for it. */
     const arrange = async () => {

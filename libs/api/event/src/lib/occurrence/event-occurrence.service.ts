@@ -30,6 +30,7 @@ import { UpdateEventOccurrenceDto } from './dto/update-event-occurrence.dto';
 import {
   AvailabilityVoteSubmittedEvent,
   OccurrenceAddedEvent,
+  OccurrenceRemovedEvent,
   OccurrenceStatusChangedEvent,
   OccurrenceUpdatedEvent,
 } from './events/occurrence.events';
@@ -329,25 +330,69 @@ export class EventOccurrenceService {
 
     assert(existing, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
 
-    // The votes and games are deleted with the occurrence, so they are read
-    // first, to answer with what was removed. One added between this read and
+    // The votes and games are deleted with the date, so they are read first,
+    // only to answer with what was removed. One added between this read and
     // the delete is removed without being listed. Closing that gap would take
-    // a lock on the occurrence row, held in an interactive transaction across
-    // both reads and the delete, and this answer is all it would protect: the
-    // delete emits no event, so nothing else reads the list.
+    // a lock on the date's row, held in an interactive transaction across both
+    // reads and the delete, and this answer is all it would protect: the
+    // domain event below carries the date's own columns, not that list (#677).
     const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
 
     try {
       const { written: removed, removedGames } = await this.db.$transaction((tx) =>
-        writeEventDates(tx, eventId, initiatedAt, () =>
-          tx.eventOccurrence.delete({
-            where: {
-              id: occurrenceId,
-              // eslint-disable-next-line no-restricted-syntax -- single-row delete by id, not a collection read
-              AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.delete),
-            },
+        writeEventDates(tx, eventId, initiatedAt, async () => {
+          // eslint-disable-next-line no-restricted-syntax -- single-row delete by id, not a collection read
+          const deleteConditions = this.abilityService.getCurrentResourceConditions(
+            ResourceType.EventOccurrence,
+            Action.delete,
+          );
+
+          // Read under the event's lock, which a confirm or another removal
+          // also holds, so the status is the one the delete meets. A Confirmed
+          // date must be cancelled first, and is refused here, so its attendees
+          // are told it is off before it disappears (#677). A removal that lost
+          // a race to another removal answers 404, as one arriving second would
+          // (#1064).
+          const current = await tx.eventOccurrence.findFirst({
+            where: { id: occurrenceId, eventId, AND: deleteConditions },
+            select: { status: true },
+          });
+
+          if (!current) {
+            // The grant is checked before the status, so a caller who may not
+            // remove the date learns nothing of it: 403, never 400 (#677).
+            const present = await tx.eventOccurrence.findFirst({
+              where: { id: occurrenceId, eventId },
+              select: { id: true },
+            });
+            assert(present, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
+            throw new ForbiddenException(t('common.forbidden.remove'));
+          }
+
+          assert(
+            current.status !== OccurrenceStatus.Confirmed,
+            new BadRequestException(t('errors.occurrence.confirmed_remove')),
+          );
+
+          return tx.eventOccurrence.delete({
+            where: { id: occurrenceId, AND: deleteConditions },
             include: { policy: true },
-          }),
+          });
+        }),
+      );
+      // Date first, then its games, so the audit order reads the way it happened.
+      this.eventEmitter.emit(
+        OccurrenceRemovedEvent.eventName,
+        new OccurrenceRemovedEvent(
+          {
+            id: removed.id,
+            eventId: removed.eventId,
+            label: removed.label,
+            startDate: removed.startDate,
+            endDate: removed.endDate,
+            status: removed.status,
+          },
+          initiatedAt,
         ),
       );
       emitRemovedGames(this.eventEmitter, eventId, removedGames, initiatedAt);

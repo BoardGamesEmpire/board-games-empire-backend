@@ -1,5 +1,13 @@
-import { GameAdditionMode, NominationStatus, OccurrenceStatus, PlatformType, ScheduledGameRole } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import {
+  EventSchedulingMode,
+  GameAdditionMode,
+  NominationStatus,
+  OccurrenceStatus,
+  PlatformType,
+  ResourceType,
+  ScheduledGameRole,
+} from '@bge/database';
+import { createActors, pollUntil, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
@@ -26,6 +34,9 @@ import { eventGameEnvelope, listOccurrencesEnvelope, nominationEnvelope, occurre
  */
 describe('event occurrences', () => {
   const baseUrl = requireBaseUrl(process.env);
+
+  /** The audit listener writes after the response; generous for a loaded CI runner. */
+  const AUDIT_ROW_LANDS_MS = 5_000;
 
   let db: TestDatabase;
   let actors: Actors;
@@ -239,6 +250,53 @@ describe('event occurrences', () => {
     // Checked in the database: a read answering 404 would pass just as well
     // if the read scope left cancelled occurrences out.
     expect(await db.client.eventOccurrence.count({ where: { id: occurrence.id } })).toBe(0);
+
+    // The audit entry is written by a listener after the response, so it is
+    // awaited with a deadline rather than read at once (#677).
+    const rows = await pollUntil(
+      async () => {
+        const found = await db.client.auditLog.findMany({
+          where: { event: 'event.occurrence.removed', subject: ResourceType.EventOccurrence, subjectId: occurrence.id },
+        });
+
+        return found.length > 0 ? found : undefined;
+      },
+      { description: `the audit entry for the removal of date ${occurrence.id}`, timeoutMs: AUDIT_ROW_LANDS_MS },
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].payload).toEqual({
+      before: expect.objectContaining({ id: occurrence.id, label: 'Saturday', status: OccurrenceStatus.Cancelled }),
+      after: null,
+    });
+  });
+
+  it('refuses removing a Confirmed date 400 until it is cancelled (#677)', async () => {
+    const host = await actors.user();
+    const eventId = await createdEventId(host);
+    const occurrence = await addedOccurrence(host, eventId);
+    expect(occurrence.status).toBe(OccurrenceStatus.Confirmed);
+    const datePath = `${occurrencesPath(eventId)}/${occurrence.id}`;
+
+    const refused = await request(baseUrl).delete(datePath).set(host.headers).expect(400);
+    expect(refused.body.message).toBe('This date is confirmed. Cancel it first, then remove it.');
+    expect(await db.client.eventOccurrence.count({ where: { id: occurrence.id } })).toBe(1);
+
+    await request(baseUrl).post(`${datePath}/cancel`).set(host.headers).expect(201);
+    await request(baseUrl).delete(datePath).set(host.headers).expect(200);
+    expect(await db.client.eventOccurrence.count({ where: { id: occurrence.id } })).toBe(0);
+  });
+
+  it("answers 403, not 400, to someone who can't remove a Confirmed date (#677)", async () => {
+    const host = await actors.user();
+    const stranger = await actors.user();
+    const eventId = await createdEventId(host);
+    const occurrence = await addedOccurrence(host, eventId);
+
+    await request(baseUrl)
+      .delete(`${occurrencesPath(eventId)}/${occurrence.id}`)
+      .set(stranger.headers)
+      .expect(403);
+    expect(await db.client.eventOccurrence.count({ where: { id: occurrence.id } })).toBe(1);
   });
 
   /**
@@ -287,7 +345,12 @@ describe('event occurrences', () => {
     /** An event whose host approves each game nominated, with a date, and the host's nomination of a game for it. */
     const arrange = async () => {
       const host = await actors.user();
-      const eventId = await createdEventId(host, { policy: { gameAdditionMode: GameAdditionMode.HostApproval } });
+      // A Poll event's date is Proposed, so the removal under test may go
+      // ahead; a Confirmed date is cancelled first (#677).
+      const eventId = await createdEventId(host, {
+        schedulingMode: EventSchedulingMode.Poll,
+        policy: { gameAdditionMode: GameAdditionMode.HostApproval },
+      });
       const { id: occurrenceId } = await addedOccurrence(host, eventId);
       const entry = await arrangeListEntry(db.client, eventId, host.user.id);
       const nomination = nominationEnvelope(
