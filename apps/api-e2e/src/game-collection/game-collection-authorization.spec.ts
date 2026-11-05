@@ -11,7 +11,8 @@ import { listCollectionsEnvelope, readCollectionEnvelope } from './game-collecti
  * real rows and the real anonymous sign-in.
  *
  * An anonymous user is a temporary guest holding `AnonymousUser` INSTEAD of
- * `User`, and the one thing that role grants is the Public collection read.
+ * `User`, and of a collection that role reads the Public entries alone (its
+ * other reads are Public games and their platform games, #1076).
  * Every denial below follows a control showing the same row IS readable — by a
  * friend of its owner — so a denial cannot pass because the row was unreadable
  * to everyone, or because the route answered nothing at all.

@@ -753,6 +753,17 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Low,
     reason: 'View platform-specific game entries',
   }),
+  // The anonymous user's copy, through the game's reach: `AnonymousUser` may
+  // hold no unconditioned grant, and a platform game has no reach of its own
+  // (#1076).
+  permission({
+    action: Action.read,
+    subject: ResourceType.PlatformGame,
+    conditions: { game: { is: { deletedAt: null, reach: 'Public' } } },
+    slug: 'read:platform_game:public',
+    riskLevel: RiskLevel.Low,
+    reason: 'View the platform games of public games',
+  }),
   permission({
     action: Action.create,
     subject: ResourceType.PlatformGame,

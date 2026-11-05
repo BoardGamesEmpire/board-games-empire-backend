@@ -139,6 +139,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
       'read:game:public': 'fixed filter',
       'read:game:shared': 'binds user.id',
     },
+    AnonymousUser: { 'read:game:public': 'fixed filter' },
   },
   GameCollection: {
     User: {
@@ -169,6 +170,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
   },
   PlatformGame: {
     User: { 'read:platform_game': 'every row' },
+    AnonymousUser: { 'read:platform_game:public': 'fixed filter' },
   },
   RuleVariant: {},
   SessionPlayer: {},

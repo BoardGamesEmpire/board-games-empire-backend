@@ -197,6 +197,15 @@ const DECLARED_GLOBAL_STAFF_GRANTS: readonly DeclaredGrant[] = [
   ['read:event', SystemRole.Moderator, Action.read, ResourceType.Event],
   ['delete:event:moderate', SystemRole.Admin, Action.delete, ResourceType.Event],
   ['delete:event:moderate', SystemRole.Moderator, Action.delete, ResourceType.Event],
+
+  // The one `AnonymousUser` read that `User` does not also hold (#1076). Listed
+  // for the reason restore is: `{ game: { is: { deletedAt: null, reach:
+  // 'Public' } } }` names no template variable, so the guard counts it as
+  // unconditioned, and it does reach every live Public game's platform games.
+  // The condition keeps it off every other one. `User` reads them all through
+  // the unconditioned `read:platform_game`, so it holds no copy that would
+  // excuse this line.
+  ['read:platform_game:public', SystemRole.AnonymousUser, Action.read, ResourceType.PlatformGame],
 ];
 
 const edge = (slug: string, role: string) => `${slug} via ${role}`;

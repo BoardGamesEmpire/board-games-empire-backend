@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { gameEnvelope, listGamesEnvelope, localSearchGameIds } from './game-wire';
+import { gameEnvelope, gamePlatformGames, listGamesEnvelope, localSearchGameIds } from './game-wire';
 
 /**
  * Who may read and change a game (#472, #491), against real rows.
@@ -138,17 +138,39 @@ describe('game authorization', () => {
       }
     });
 
-    it('refuses an anonymous guest both routes, Public games included', async () => {
-      // `AnonymousUser` holds no game read at all (#484), so the guard refuses
-      // before a row is read.
+    it('serves an anonymous user a Public game by id, in the list and in search, with its platform games, and refuses a Private one (#1076)', async () => {
+      // `AnonymousUser` holds `read:game:public` and `read:platform_game:public`
+      // (#1076), so an anonymous user reads the Public games and no others. It
+      // signs in before any row exists (#256 ordering rule).
+      const anonymousUser = await actors.anonymous();
       const creator = await actors.user();
-      const publicGame = await arrangeGame(creator.user.id, Reach.Public);
-      const guest = await actors.anonymous();
+      const token = randomUUID().slice(0, 8);
+      const publicGame = await arrangeGame(creator.user.id, Reach.Public, `e2e anonymous public ${token}`);
+      const privateGame = await arrangeGame(creator.user.id, Reach.Private, `e2e anonymous private ${token}`);
+      const tabletop = await db.client.platform.findUniqueOrThrow({
+        where: { slug: 'tabletop' },
+        select: { id: true },
+      });
+      const platformGame = await db.client.platformGame.create({
+        data: { gameId: publicGame.id, platformId: tabletop.id },
+        select: { id: true },
+      });
 
-      await readGame(creator, publicGame.id).expect(200);
+      const platformGames = gamePlatformGames(
+        await readGame(anonymousUser, publicGame.id).expect(200),
+        'GET /api/games/:id as an anonymous user',
+      );
+      expect(platformGames.map((row) => row.id)).toEqual([platformGame.id]);
 
-      await listGames(guest).expect(403);
-      await readGame(guest, publicGame.id).expect(403);
+      // The Public game on the same routes is the control for each refusal.
+      const listed = await listedIds(anonymousUser, 'an anonymous user');
+      expect(listed).toContain(publicGame.id);
+      expect(listed).not.toContain(privateGame.id);
+      const searched = await searchedIds(anonymousUser, token, 'an anonymous user');
+      expect(searched).toContain(publicGame.id);
+      expect(searched).not.toContain(privateGame.id);
+
+      await readGame(anonymousUser, privateGame.id).expect(403);
     });
   });
 

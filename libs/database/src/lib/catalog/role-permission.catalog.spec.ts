@@ -141,13 +141,34 @@ describe('the shipped catalogs', () => {
       expect(ROLE_PERMISSION_CATALOG[SystemRole.Owner]).toEqual(['manage:all']);
     });
 
-    it('grant AnonymousUser the Public collection read and nothing else', () => {
+    it('grant AnonymousUser the Public collection, game and platform game reads and nothing else', () => {
       // Anyone who opens an anonymous session holds this role, so the list grows
       // one consumer at a time, each driven through its route (#484). Pinned
       // exactly, so an addition is an edit someone makes here on purpose rather
-      // than a line that arrives unread. A guest's event rights are not here:
-      // they come from the event role on the guest's attendee row.
-      expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).toEqual(['read:game_collection:public']);
+      // than a line that arrives unread. The game and platform game reads serve
+      // the game routes and the base games named on the collection rows an
+      // anonymous user reads (#1076). An anonymous user's event rights are not
+      // here: they come from the event role on their attendee row.
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).toEqual([
+        'read:game_collection:public',
+        'read:game:public',
+        'read:platform_game:public',
+      ]);
+    });
+
+    it('reads a Public game’s platform games through read:platform_game:public, for anonymous users only (#1076)', () => {
+      const entry = PERMISSION_CATALOG.find(({ slug }) => slug === 'read:platform_game:public');
+
+      // A platform game has no reach of its own, so an anonymous user reads it
+      // through its game's. Pinned exactly: a lost `reach` would hand anyone
+      // with an anonymous session the platform games of every Private game,
+      // and a lost `deletedAt` those of a deleted one. `User` already reads
+      // every platform game through `read:platform_game`, so it holds no copy.
+      expect(entry?.action).toBe(Action.read);
+      expect(entry?.subject).toBe(ResourceType.PlatformGame);
+      expect(entry?.conditions).toStrictEqual({ game: { is: { deletedAt: null, reach: 'Public' } } });
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).toContain('read:platform_game:public');
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).not.toContain('read:platform_game:public');
     });
 
     it('enumerate Admin rather than deriving it from the catalog', () => {
