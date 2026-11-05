@@ -73,6 +73,7 @@ import {
   PluginUpdateNoPendingError,
   PluginUpdatePendingConflictError,
   PluginUpdatePluginNotFoundError,
+  PluginUpdateStagingReplacedError,
   PluginUpdateStaticAnalysisError,
   PluginUpdateTombstonedError,
   PluginUpdateUnknownCorePermissionError,
@@ -177,6 +178,13 @@ export interface PluginUpdateStageResult {
 export interface PluginUpdateApproveInput {
   readonly slug: string;
   readonly approverId: string;
+  /**
+   * The staging this approval answers, as the staged-update read reported it
+   * (#357). Any other current staging refuses with
+   * `PluginUpdateStagingReplacedError`, so an approval never activates a
+   * staging its approver didn't review.
+   */
+  readonly stagingId: string;
   /** Exact re-entry of every Critical permission slug this approval will GRANT — the same second factor install demands (#59). */
   readonly confirmCriticalSlugs?: readonly string[];
 }
@@ -211,6 +219,8 @@ export interface PluginUpdateApproveResult {
 export interface PluginUpdateRejectInput {
   readonly slug: string;
   readonly rejectorId: string;
+  /** The staging this rejection answers, as the staged-update read reported it (#357). */
+  readonly stagingId: string;
 }
 
 /**
@@ -478,6 +488,7 @@ export class PluginUpdateService {
 
     const { plugin, active, next, corePermissions, comparison, pendingSha256 } = await this.resolvePendingUpdate(
       input.slug,
+      input.stagingId,
     );
 
     if (comparison.blockedByDenial.length > 0) {
@@ -590,6 +601,10 @@ export class PluginUpdateService {
       throw new PluginUpdateNoPendingError(plugin.slug);
     }
 
+    if (plugin.pendingStagingId !== input.stagingId) {
+      throw new PluginUpdateStagingReplacedError(plugin.slug, input.stagingId);
+    }
+
     // Conditional on the EXACT staging the rejector saw, like every other
     // staged-update writer: an unconditional clear racing an approve would
     // report "rejected" for an update that in fact activated, and emit
@@ -615,11 +630,18 @@ export class PluginUpdateService {
       if (cleared.count !== 1) {
         const current = await tx.plugin.findUnique({
           where: { id: plugin.id },
-          select: { uninstalledAt: true },
+          select: { uninstalledAt: true, pendingStagingId: true },
         });
 
         if (current?.uninstalledAt != null) {
           throw new PluginUpdateTombstonedError(plugin.slug, current.uninstalledAt);
+        }
+
+        // Another staging took the slot after the check above: the rejector
+        // answered one that is gone, the same answer as if it had already
+        // been gone when the request arrived (#357).
+        if (current?.pendingStagingId != null && current.pendingStagingId !== input.stagingId) {
+          throw new PluginUpdateStagingReplacedError(plugin.slug, input.stagingId);
         }
 
         throw new PluginUpdateNoPendingError(plugin.slug);
@@ -662,7 +684,11 @@ export class PluginUpdateService {
    * a version that can no longer load would trade a typed refusal here for
    * a quarantine at the next boot.
    */
-  private async resolvePendingUpdate(slug: string): Promise<{
+  private async resolvePendingUpdate(
+    slug: string,
+    /** The staging an approval answers (#357); the read that reports the id passes none. */
+    stagingId?: string,
+  ): Promise<{
     readonly plugin: Plugin;
     readonly active: PluginManifestValidationResult;
     readonly next: PluginManifestValidationResult;
@@ -677,6 +703,12 @@ export class PluginUpdateService {
     // is nothing approval could activate (#696): it is not a staged update.
     if (plugin.pendingVersion === null || plugin.pendingManifestJson === null || plugin.pendingSha256 === null) {
       throw new PluginUpdateNoPendingError(plugin.slug);
+    }
+
+    // Before the staged manifest is validated or compared: a staging the
+    // approver never saw is refused for that, whatever else is wrong with it.
+    if (stagingId !== undefined && plugin.pendingStagingId !== stagingId) {
+      throw new PluginUpdateStagingReplacedError(plugin.slug, stagingId);
     }
 
     const next = this.validateStoredManifest(plugin, plugin.pendingManifestJson, plugin.pendingVersion, {
@@ -1128,7 +1160,7 @@ export class PluginUpdateService {
       if (claimed.count !== 1) {
         const current = await tx.plugin.findUnique({
           where: { id: plugin.id },
-          select: { uninstalledAt: true, pendingVersion: true },
+          select: { uninstalledAt: true, pendingVersion: true, pendingStagingId: true },
         });
 
         if (current?.uninstalledAt != null) {
@@ -1141,6 +1173,16 @@ export class PluginUpdateService {
         // immediate stage() path lost the empty slot to a concurrent stage
         // — the same refuse-don't-supersede answer the staging write gives.
         if (plugin.pendingVersion !== null) {
+          // Another staging took the slot after approve() checked it: the
+          // approver reviewed one that is gone (#357).
+          if (
+            plugin.pendingStagingId !== null &&
+            current?.pendingStagingId != null &&
+            current.pendingStagingId !== plugin.pendingStagingId
+          ) {
+            throw new PluginUpdateStagingReplacedError(plugin.slug, plugin.pendingStagingId);
+          }
+
           throw new PluginUpdateNoPendingError(plugin.slug);
         }
 

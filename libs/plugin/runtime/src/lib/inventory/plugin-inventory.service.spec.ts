@@ -170,16 +170,20 @@ describe('PluginInventoryService', () => {
       });
     });
 
-    it('surfaces a staged update with pendingSince, never updatedAt', async () => {
+    it('surfaces a staged update with pendingSince, never updatedAt, and its staging id (#357)', async () => {
+      // The staging id is what reject must name. The staged-update read can't
+      // present a staging whose manifest no longer validates (a BGE upgrade
+      // past its range, say), so this read, which never parses the staged
+      // manifest, is where a client finds the id to reject it with.
       const since = new Date('2026-08-20T10:00:00Z');
       db.plugin.findMany.mockResolvedValue([
-        row({ pendingVersion: '1.3.0', pendingSince: since, pendingSha256: 'b'.repeat(64) }),
+        row({ pendingVersion: '1.3.0', pendingSince: since, pendingSha256: 'b'.repeat(64), pendingStagingId: 'staging-a' }),
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
       const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
 
-      expect(rows[0].pendingUpdate).toEqual({ version: '1.3.0', since });
+      expect(rows[0].pendingUpdate).toEqual({ version: '1.3.0', since, stagingId: 'staging-a' });
     });
 
     // #696: approval answers 409 no staged update for a staged row without a

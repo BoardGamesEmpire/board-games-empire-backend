@@ -47,6 +47,7 @@ import {
   PluginUpdateNoPendingError,
   PluginUpdatePendingConflictError,
   PluginUpdatePluginNotFoundError,
+  PluginUpdateStagingReplacedError,
   PluginUpdateStaticAnalysisError,
   PluginUpdateTombstonedError,
   PluginUpdateUnknownCorePermissionError,
@@ -204,6 +205,7 @@ describe('PluginExceptionFilter', () => {
       [new PluginUpdateVersionConflictError('sample', '2.0.0'), 'update_version_conflict'],
       [new PluginUpdatePendingConflictError('sample', '2.0.0', '2.1.0'), 'update_pending_conflict'],
       [new PluginUpdateNoPendingError('sample'), 'update_no_pending'],
+      [new PluginUpdateStagingReplacedError('sample', 'staging-a'), 'update_staging_replaced'],
       [new PluginInstallPermissionCollisionError('sample', ['plugin|sample|sync']), 'install_permission_collision'],
     ] as const)('maps %s to 409', (exception, key) => {
       filter.catch(exception, host);
@@ -211,6 +213,15 @@ describe('PluginExceptionFilter', () => {
       expect(rendered().getStatus()).toBe(Http.Conflict);
       expect(body()['message']).toBe(`t:errors.plugin.${key}`);
       expect(body()['code']).toBe(exception.name);
+    });
+
+    it('names the plugin and the staging the caller answered when that staging was replaced (#357)', () => {
+      filter.catch(new PluginUpdateStagingReplacedError('sample', 'staging-a'), host);
+
+      expect(rendered().getStatus()).toBe(Http.Conflict);
+      expect(body()['code']).toBe('PluginUpdateStagingReplacedError');
+      expect(body()['slug']).toBe('sample');
+      expect(body()['stagingId']).toBe('staging-a');
     });
 
     it('carries staged and incoming versions on a pending conflict', () => {

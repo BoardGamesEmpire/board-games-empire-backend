@@ -55,6 +55,15 @@ class PendingUpdateDto implements PluginInventoryPendingUpdate {
     description: 'When the update was staged — pendingSince, not updatedAt',
   })
   since!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'The staging approve and reject must name. Reported here too, because a staging whose manifest no longer ' +
+      'validates cannot be presented by GET /plugins/:slug/update/pending but can still be rejected with this id',
+  })
+  stagingId!: string | null;
 }
 
 /**

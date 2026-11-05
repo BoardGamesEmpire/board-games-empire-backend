@@ -57,6 +57,7 @@ import {
   PluginUpdateNoPendingError,
   PluginUpdatePendingConflictError,
   PluginUpdatePluginNotFoundError,
+  PluginUpdateStagingReplacedError,
   PluginUpdateStaticAnalysisError,
   PluginUpdateTombstonedError,
   PluginUpdateUnknownCorePermissionError,
@@ -396,6 +397,15 @@ function buildRenderers(): RendererMap {
     status: Http.Conflict,
     message: t('errors.plugin.update_no_pending', { slug: exception.slug }),
     fields: { slug: exception.slug },
+  }));
+
+  // The staging the caller answered is not the current one (#357). The body
+  // echoes the id the caller sent, never the current staging's: answering
+  // that one takes a fresh read of the staged update, and a review.
+  renders(PluginUpdateStagingReplacedError, (exception) => ({
+    status: Http.Conflict,
+    message: t('errors.plugin.update_staging_replaced', { slug: exception.slug }),
+    fields: { slug: exception.slug, stagingId: exception.stagingId },
   }));
 
   // The enable-time config gate (#323): enable refused because required household config was

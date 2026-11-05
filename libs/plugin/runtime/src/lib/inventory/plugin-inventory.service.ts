@@ -98,6 +98,14 @@ export interface PluginInventoryPendingUpdate {
   readonly version: string;
   /** `pendingSince`, never `updatedAt` — the latter moves on any row touch. */
   readonly since: Date | null;
+  /**
+   * The staging approve and reject must name (#357). Reported here as well as
+   * on the staged-update read because this read never parses the staged
+   * manifest: a staging whose manifest no longer validates — after a BGE
+   * upgrade past its range, say — can't be presented, but it can still be
+   * rejected with this id.
+   */
+  readonly stagingId: string | null;
 }
 
 /**
@@ -259,6 +267,7 @@ const SERVER_SELECT = {
   pendingSince: true,
   // Read only to decide whether an update is staged; never served.
   pendingSha256: true,
+  pendingStagingId: true,
 } satisfies Prisma.PluginSelect;
 
 /** `enabled` only, surfaced as `serverEnabled` — no provenance, no staging. */
@@ -597,7 +606,7 @@ export class PluginInventoryService {
       pendingUpdate:
         row.pendingVersion === null || row.pendingSha256 === null
           ? null
-          : { version: row.pendingVersion, since: row.pendingSince },
+          : { version: row.pendingVersion, since: row.pendingSince, stagingId: row.pendingStagingId },
     };
   }
 

@@ -116,7 +116,10 @@ describe('consent decisions under concurrency (#360)', () => {
     request(baseUrl).post(`${PLUGINS_PATH}/${slug}/grants`).set(actor.headers).send(body);
 
   const approve = (actor: SessionActor, slug: string) =>
-    request(baseUrl).post(`${PLUGINS_PATH}/${slug}/update/approve`).set(actor.headers).send({});
+    request(baseUrl)
+      .post(`${PLUGINS_PATH}/${slug}/update/approve`)
+      .set(actor.headers)
+      .send({ stagingId: 'e2e-staging-1' });
 
   describe('Granted against Denied on the same required household check', () => {
     it('never leaves the unit serving over a durable denial, or suspended with nothing outstanding', async () => {

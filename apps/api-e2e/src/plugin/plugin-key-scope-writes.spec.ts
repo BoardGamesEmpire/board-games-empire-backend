@@ -5,7 +5,7 @@ import request from 'supertest';
 import { mintApiKey, type Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { arrangeInventoryPlugin } from './inventory-fixtures';
+import { arrangeInventoryPlugin, INVENTORY_STAGING_ID } from './inventory-fixtures';
 
 /**
  * The server plugin writes gate on a type-level `can(manage, Plugin)`, which a
@@ -51,9 +51,15 @@ describe('server plugin writes through a key scoped to one plugin (#978)', () =>
     'POST /plugins/:slug/uninstall': (actor, slug) =>
       request(baseUrl).post(`/api/plugins/${slug}/uninstall`).set(actor.headers).send({}),
     'POST /plugins/:slug/update/approve': (actor, slug) =>
-      request(baseUrl).post(`/api/plugins/${slug}/update/approve`).set(actor.headers).send({}),
+      request(baseUrl)
+        .post(`/api/plugins/${slug}/update/approve`)
+        .set(actor.headers)
+        .send({ stagingId: INVENTORY_STAGING_ID }),
     'POST /plugins/:slug/update/reject': (actor, slug) =>
-      request(baseUrl).post(`/api/plugins/${slug}/update/reject`).set(actor.headers).send({}),
+      request(baseUrl)
+        .post(`/api/plugins/${slug}/update/reject`)
+        .set(actor.headers)
+        .send({ stagingId: INVENTORY_STAGING_ID }),
   } as const satisfies Record<string, (actor: Caller, slug: string) => request.Test>;
 
   type Write = keyof typeof WRITES;

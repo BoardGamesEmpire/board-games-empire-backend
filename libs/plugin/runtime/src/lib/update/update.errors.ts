@@ -10,6 +10,29 @@ import type { StaticAnalysisFinding } from '../install/static-analysis.types';
  * check runs before it.
  */
 
+/**
+ * The caller answered a staging that is no longer the current one (#357): it
+ * was resolved and another staged since — possibly the same version from the
+ * same plugin artifact — or replaced while the request was in flight.
+ * Approving or rejecting by slug alone would answer a staging nobody
+ * reviewed, so approve and reject name the staging the staged-update read
+ * reported, and any other current staging refuses with this.
+ */
+export class PluginUpdateStagingReplacedError extends Error {
+  override readonly name = 'PluginUpdateStagingReplacedError';
+
+  constructor(
+    public readonly slug: string,
+    /** The staging the caller named. Not the current one: the caller reads and reviews that before answering it. */
+    public readonly stagingId: string,
+  ) {
+    super(
+      `Plugin '${slug}' no longer has staging '${stagingId}' — the staged update changed since it was read; ` +
+        'read it again before approving or rejecting it',
+    );
+  }
+}
+
 /** No `Plugin` row exists for the slug an update arrived for. */
 export class PluginUpdatePluginNotFoundError extends Error {
   override readonly name = 'PluginUpdatePluginNotFoundError';

@@ -215,7 +215,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       const refusal = await request(baseUrl)
         .post(`${PLUGINS_PATH}/${plugin.slug}/update/approve`)
         .set(admin.headers)
-        .send({})
+        .send({ stagingId: 'e2e-staging-1' })
         .expect(409);
 
       expect(refusal.body.code).toBe('PluginUpdateBlockedByDenialError');
