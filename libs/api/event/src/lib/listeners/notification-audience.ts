@@ -34,6 +34,15 @@ export function usersStillComing(db: DatabaseService, eventId: string): Promise<
 }
 
 /**
+ * Every attendee with an account who was not removed, whatever their RSVP,
+ * Invited and Declined included. Each user once. This is the rule #795 uses
+ * for the whole event (#802).
+ */
+export function usersNotRemoved(db: DatabaseService, eventId: string): Promise<string[]> {
+  return attendeeUserIds(db, eventId);
+}
+
+/**
  * The event's current hosts and co-hosts who were not removed (#802). The
  * creator is not a host by being the creator, and an event nobody hosts has
  * none. Each user once.

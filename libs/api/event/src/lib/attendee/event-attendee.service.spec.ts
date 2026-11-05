@@ -247,6 +247,7 @@ describe('EventAttendeeService', () => {
       });
 
       it('emits an AttendeeRemovedEvent as an update of removedAt', async () => {
+        abilityService.getActingUserId.mockReturnValue('user-host');
         await service.removeAttendee('event-1', 'att-1');
 
         const [name, emitted] = emitter.emit.mock.calls[0];
@@ -256,6 +257,7 @@ describe('EventAttendeeService', () => {
         expect(emitted.subjectId).toBe('att-1');
         expect(emitted.before).toEqual(expect.objectContaining({ id: 'att-1', eventId: 'event-1', removedAt: null }));
         expect(emitted.after).toEqual(expect.objectContaining({ id: 'att-1', eventId: 'event-1', removedAt }));
+        expect(emitted.actingUserId).toBe('user-host');
       });
 
       // A removed attendee is out of the event, as one not attending is.

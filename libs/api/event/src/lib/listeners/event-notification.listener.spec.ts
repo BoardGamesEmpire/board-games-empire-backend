@@ -16,8 +16,12 @@ import {
   makePlatformGame,
   MockDatabaseService,
 } from '@bge/testing';
-import { AttendeeAddedEvent, AttendeeStatusUpdatedEvent } from '../attendee/events/attendee.events';
-import { EventCreatedEvent } from '../events/event.events';
+import {
+  AttendeeAddedEvent,
+  AttendeeRemovedEvent,
+  AttendeeStatusUpdatedEvent,
+} from '../attendee/events/attendee.events';
+import { EventCreatedEvent, EventDeletedEvent } from '../events/event.events';
 import { EventCancelledEvent, EventReopenedEvent } from '../lifecycle/events/event-lifecycle.events';
 import { NominationCreatedEvent, NominationResolvedEvent } from '../nomination/events/nomination.events';
 import { OccurrenceStatusChangedEvent } from '../occurrence/events/occurrence.events';
@@ -436,6 +440,70 @@ describe('EventNotificationListener', () => {
 
       expect(notifications.createMany).toHaveBeenCalledWith([expect.objectContaining({ userId: 'u-host' })]);
     });
+
+    it('tells the attendee when someone else changed their RSVP (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }] as never);
+
+      await listener.onAttendeeRsvp(rsvp('u-a', 'u-host'));
+
+      expect(notifications.createMany).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          {
+            userId: 'u-a',
+            type: NotificationType.EventRsvpChanged,
+            payload: {
+              eventId: 'ev-1',
+              eventTitle: 'Game Night',
+              status: EventParticipationStatus.Attending,
+              changedByName: 'Ada',
+            },
+          },
+        ]),
+      );
+    });
+
+    it('names nobody as the changer when the actor is not a user (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([]);
+
+      await listener.onAttendeeRsvp(rsvp('u-a', null));
+
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        expect.objectContaining({
+          userId: 'u-a',
+          type: NotificationType.EventRsvpChanged,
+          payload: expect.objectContaining({ changedByName: null }),
+        }),
+      ]);
+    });
+
+    it('does not tell the attendee of their own RSVP (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }] as never);
+
+      await listener.onAttendeeRsvp(rsvp('u-a', 'u-a'));
+
+      const types = notifications.createMany.mock.calls.flatMap(([inputs]) => inputs.map((input) => input.type));
+      expect(types).not.toContain(NotificationType.EventRsvpChanged);
+    });
+
+    it('tells a host whose RSVP someone else changed once, as the attendee (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }, { userId: 'u-cohost' }] as never);
+
+      await listener.onAttendeeRsvp(rsvp('u-cohost', 'u-host'));
+
+      expect(notifications.createMany).toHaveBeenCalledTimes(1);
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        expect.objectContaining({ userId: 'u-cohost', type: NotificationType.EventRsvpChanged }),
+      ]);
+    });
+
+    it('tells nobody that the RSVP of an attendee without an account changed (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }, { userId: 'u-cohost' }] as never);
+
+      await listener.onAttendeeRsvp(rsvp(null, 'u-host'));
+
+      const types = notifications.createMany.mock.calls.flatMap(([inputs]) => inputs.map((input) => input.type));
+      expect(types).toEqual([NotificationType.EventRsvpReceived]);
+    });
   });
 
   /**
@@ -614,6 +682,95 @@ describe('EventNotificationListener', () => {
 
       await expect(run('user-host')).resolves.toBeUndefined();
       expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * #802. A deleted event tells the attendees who were not removed, except the
+   * person deleting it. The title rides the domain event, which is already gone.
+   */
+  describe('onEventDeleted', () => {
+    it('tells the attendees not removed, except the person deleting it (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([
+        { userId: 'u-host' },
+        { userId: 'u-a' },
+        { userId: 'u-b' },
+      ] as never);
+
+      await listener.onEventDeleted(
+        new EventDeletedEvent(
+          { id: 'ev-1', title: 'Game Night', createdById: 'u-host', householdId: null },
+          'u-host',
+          new Date(),
+        ),
+      );
+
+      expect(db.event.findUnique).not.toHaveBeenCalled();
+      expect(db.eventAttendee.findMany).toHaveBeenCalledWith({
+        where: { eventId: 'ev-1', removedAt: null, userId: { not: null } },
+        select: { userId: true },
+      });
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        {
+          userId: 'u-a',
+          type: NotificationType.EventDeleted,
+          payload: { eventId: 'ev-1', eventTitle: 'Game Night' },
+        },
+        {
+          userId: 'u-b',
+          type: NotificationType.EventDeleted,
+          payload: { eventId: 'ev-1', eventTitle: 'Game Night' },
+        },
+      ]);
+    });
+  });
+
+  /**
+   * #802. A removed attendee is told, unless they removed themselves. An
+   * attendee without an account has nobody to tell.
+   */
+  describe('onAttendeeRemoved', () => {
+    const removal = (userId: string | null, actingUserId: string) => {
+      const snapshot = {
+        id: 'att-1',
+        eventId: 'ev-1',
+        userId,
+        guestName: null,
+        status: EventParticipationStatus.Attending,
+      };
+
+      return new AttendeeRemovedEvent(
+        { ...snapshot, removedAt: null },
+        { ...snapshot, removedAt: new Date() },
+        actingUserId,
+        new Date(),
+      );
+    };
+
+    beforeEach(() => {
+      db.event.findUnique.mockResolvedValue(makeEvent({ id: 'ev-1', title: 'Game Night' }));
+    });
+
+    it('tells the person removed (#802)', async () => {
+      await listener.onAttendeeRemoved(removal('u-a', 'u-host'));
+
+      expect(notifications.create).toHaveBeenCalledWith({
+        userId: 'u-a',
+        type: NotificationType.EventAttendeeRemoved,
+        payload: { eventId: 'ev-1', eventTitle: 'Game Night' },
+      });
+    });
+
+    it('tells nobody when an attendee without an account is removed (#802)', async () => {
+      await listener.onAttendeeRemoved(removal(null, 'u-host'));
+
+      expect(notifications.create).not.toHaveBeenCalled();
+    });
+
+    it('tells nobody when the person removed is the one acting (#802)', async () => {
+      await listener.onAttendeeRemoved(removal('u-host', 'u-host'));
+
+      expect(notifications.create).not.toHaveBeenCalled();
     });
   });
 

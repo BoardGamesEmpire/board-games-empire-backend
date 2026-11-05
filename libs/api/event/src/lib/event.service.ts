@@ -756,6 +756,7 @@ export class EventService {
         EventDeletedEvent.eventName,
         new EventDeletedEvent(
           { id: event.id, title: event.title, createdById: event.createdById, householdId: event.householdId },
+          userId,
           initiatedAt,
         ),
       );

@@ -285,10 +285,11 @@ export class EventAttendeeService {
    */
   async removeAttendee(eventId: string, attendeeId: string): Promise<EventAttendee> {
     const initiatedAt = new Date();
-    // Attribution guard, not payload data: removal must be performed by a
-    // user-attributed actor — system/external actors throw here instead of
-    // silently removing attendees. The value itself rides CLS for the audit row.
-    this.abilityService.getActingUserId();
+    // Attribution guard: removal must be performed by a user-attributed
+    // actor — system/external actors throw here instead of silently removing
+    // attendees. The id also rides the domain event, so the listener can tell the
+    // person removed unless they removed themselves (#802).
+    const actingUserId = this.abilityService.getActingUserId();
     await assertEventExists(this.db, eventId);
 
     const attendee = await this.db.eventAttendee.findUnique({
@@ -334,6 +335,7 @@ export class EventAttendeeService {
         new AttendeeRemovedEvent(
           { ...snapshot, removedAt: null },
           { ...snapshot, removedAt: removed.removedAt },
+          actingUserId,
           initiatedAt,
         ),
       );

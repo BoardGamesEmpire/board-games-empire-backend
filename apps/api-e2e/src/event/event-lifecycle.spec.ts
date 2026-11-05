@@ -71,11 +71,15 @@ describe('event cancel, reopen and archive (#795)', () => {
       })
     ).id;
 
-  /** `actor` sets their RSVP to `status`, which tells the event's hosts: a later notification to wait for. */
-  const rsvp = async (actor: AuthenticatedActor, eventId: string, status = 'Attending') =>
+  /**
+   * `by` sets `attendee`'s RSVP to `status`; `attendee` is `by` unless a host
+   * sets another's. An RSVP tells the event's hosts, which makes it a later
+   * notification to wait for.
+   */
+  const rsvp = async (by: AuthenticatedActor, eventId: string, status = 'Attending', attendee = by) =>
     request(baseUrl)
-      .patch(`${EVENTS_PATH}/${eventId}/attendees/${await attendeeRowId(eventId, actor.user.id)}/status`)
-      .set(actor.headers)
+      .patch(`${EVENTS_PATH}/${eventId}/attendees/${await attendeeRowId(eventId, attendee.user.id)}/status`)
+      .set(by.headers)
       .send({ status })
       .expect(200);
 
@@ -459,6 +463,61 @@ describe('event cancel, reopen and archive (#795)', () => {
       await cancel(host, eventId).expect(200);
       const inviteeList = await unreadOnceHolding(invitee, NotificationType.EventCancelled, eventId);
       expect(notificationsOf(inviteeList, NotificationType.EventRsvpReceived, eventId)).toEqual([]);
+    });
+  });
+
+  describe('the notifications of a changed RSVP, a deleted event and a removed attendee (#802)', () => {
+    it("tells an attendee whose RSVP a host changed, with the host's name (#802)", async () => {
+      const host = await actors.user();
+      const invitee = await actors.user();
+      const eventId = await createdEventId(host, { inviteUserIds: [invitee.user.id] });
+
+      await rsvp(host, eventId, 'Attending', invitee);
+
+      // The name as the server resolves it: the display name, else the username.
+      const hostRecord = await db.client.user.findUniqueOrThrow({
+        where: { id: host.user.id },
+        select: { username: true, profile: { select: { displayName: true } } },
+      });
+      const list = await unreadOnceHolding(invitee, NotificationType.EventRsvpChanged, eventId);
+      expect(notificationsOf(list, NotificationType.EventRsvpChanged, eventId)).toEqual([
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            status: 'Attending',
+            changedByName: hostRecord.profile?.displayName ?? hostRecord.username,
+          }),
+        }),
+      ]);
+    });
+
+    it('tells the attendees of a deleted event, and not the host who deleted it (#802)', async () => {
+      const host = await actors.user();
+      const invitee = await actors.user();
+      const eventId = await createdEventId(host, { inviteUserIds: [invitee.user.id] });
+
+      await request(baseUrl).delete(`${EVENTS_PATH}/${eventId}`).set(host.headers).expect(200);
+
+      await unreadOnceHolding(invitee, NotificationType.EventDeleted, eventId);
+
+      // The listener sends every recipient's notification in one write, so a
+      // host's would have arrived with the invitee's. A later notification
+      // can't be the sentinel here: a deleted event takes no more writes.
+      const hostList = await unreadWhen(baseUrl, host, () => true);
+      expect(notificationsOf(hostList, NotificationType.EventDeleted, eventId)).toEqual([]);
+    });
+
+    it('tells an attendee a host removed (#802)', async () => {
+      const host = await actors.user();
+      const invitee = await actors.user();
+      const eventId = await createdEventId(host, { inviteUserIds: [invitee.user.id] });
+
+      await request(baseUrl)
+        .delete(`${EVENTS_PATH}/${eventId}/attendees/${await attendeeRowId(eventId, invitee.user.id)}`)
+        .set(host.headers)
+        .expect(200);
+
+      const list = await unreadOnceHolding(invitee, NotificationType.EventAttendeeRemoved, eventId);
+      expect(notificationsOf(list, NotificationType.EventAttendeeRemoved, eventId)).toHaveLength(1);
     });
   });
 });

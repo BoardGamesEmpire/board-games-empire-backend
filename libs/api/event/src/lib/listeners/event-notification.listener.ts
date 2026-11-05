@@ -4,10 +4,14 @@ import { NotificationsService } from '@bge/notifications-service';
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { AttendeeEvents } from '../attendee/constants';
-import type { AttendeeAddedEvent, AttendeeStatusUpdatedEvent } from '../attendee/events/attendee.events';
+import type {
+  AttendeeAddedEvent,
+  AttendeeRemovedEvent,
+  AttendeeStatusUpdatedEvent,
+} from '../attendee/events/attendee.events';
 import { EventEvents } from '../constants/event-events.constant';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
-import type { EventCreatedEvent } from '../events/event.events';
+import type { EventCreatedEvent, EventDeletedEvent } from '../events/event.events';
 import type { EventCancelledEvent, EventReopenedEvent } from '../lifecycle/events/event-lifecycle.events';
 import { NominationEvent } from '../nomination/constants';
 import type {
@@ -17,7 +21,7 @@ import type {
 } from '../nomination/events/nomination.events';
 import { OccurrenceEvents } from '../occurrence/constants/index';
 import type { OccurrenceStatusChangedEvent } from '../occurrence/events/occurrence.events';
-import { hostUserIds, usersStillComing, withoutActor } from './notification-audience';
+import { hostUserIds, usersNotRemoved, usersStillComing, withoutActor } from './notification-audience';
 
 @Injectable()
 export class EventNotificationListener {
@@ -123,6 +127,7 @@ export class EventNotificationListener {
   @OnEvent(AttendeeEvents.AttendeeStatusUpdated, { async: true })
   async onAttendeeRsvp(event: AttendeeStatusUpdatedEvent): Promise<void> {
     const { eventId, userId, status } = event.after;
+    const { actingUserId } = event;
 
     // The status is required on every write, so editing only an attendee's
     // notes sends the RSVP again unchanged. That is no news to anyone (#802).
@@ -131,6 +136,11 @@ export class EventNotificationListener {
     }
 
     try {
+      // Someone else changed this attendee's RSVP, so they are told (#802).
+      // An attendee without an account has nobody to tell, and a person is
+      // not told of their own answer.
+      const rsvpChangedFor = userId !== null && userId !== actingUserId ? userId : null;
+
       const [hostIds, eventRecord] = await Promise.all([
         hostUserIds(this.db, eventId),
         this.db.event.findUnique({ where: { id: eventId }, select: { title: true } }),
@@ -141,34 +151,82 @@ export class EventNotificationListener {
       }
 
       // The hosts hear of an RSVP, not the creator (#802), and not the host
-      // who answered or changed it themselves.
-      const recipients = withoutActor(hostIds, event.actingUserId);
+      // who answered or changed it themselves. A host whose own RSVP someone
+      // else changed hears once, as the attendee.
+      const hosts = withoutActor(hostIds, actingUserId).filter((hostId) => hostId !== rsvpChangedFor);
 
-      if (recipients.length === 0) {
+      if (hosts.length === 0 && rsvpChangedFor === null) {
         return this.logger.debug(
           `No notification needed for AttendeeStatusUpdated eventId=${eventId}, userId=${userId}`,
         );
       }
 
-      const attendeeName = userId === null ? null : await this.displayNameOf(userId);
+      const [attendeeName, changedByName] = await Promise.all([
+        userId === null ? null : this.displayNameOf(userId),
+        rsvpChangedFor === null || actingUserId === null ? null : this.displayNameOf(actingUserId),
+      ]);
 
       // Every user has a username, so a missing name is a user deleted since
-      // the RSVP. There is nobody to name to the hosts.
+      // the RSVP. There is nobody to name to the hosts, and nobody to tell.
       if (userId !== null && attendeeName === null) {
         return this.logger.debug(`Attendee's user is gone for AttendeeStatusUpdated eventId=${eventId}`);
       }
 
-      await this.notifications.createMany(
-        recipients.map((recipientId) => ({
-          userId: recipientId,
-          type: NotificationType.EventRsvpReceived,
-          // `null` is an attendee without an account, and the client words it.
-          payload: { eventId, eventTitle: eventRecord.title, attendeeName },
-        })),
-      );
+      const inputs: CreateNotificationInput[] = hosts.map((hostId) => ({
+        userId: hostId,
+        type: NotificationType.EventRsvpReceived,
+        // `null` is an attendee without an account, and the client words it.
+        payload: { eventId, eventTitle: eventRecord.title, attendeeName },
+      }));
+
+      if (rsvpChangedFor !== null) {
+        // `changedByName` is `null` for a plugin or the system, and the client words it.
+        inputs.push({
+          userId: rsvpChangedFor,
+          type: NotificationType.EventRsvpChanged,
+          payload: { eventId, eventTitle: eventRecord.title, status, changedByName },
+        });
+      }
+
+      await this.notifications.createMany(inputs);
     } catch (err) {
       this.logger.error(
         `Failed to notify on AttendeeStatusUpdated eventId=${eventId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+  }
+
+  /**
+   * #802. The person removed is told, unless they removed themselves. An
+   * attendee without an account has nobody to tell.
+   */
+  @OnEvent(AttendeeEvents.AttendeeRemoved, { async: true })
+  async onAttendeeRemoved(event: AttendeeRemovedEvent): Promise<void> {
+    const { eventId, userId } = event.after;
+
+    if (userId === null || userId === event.actingUserId) {
+      return this.logger.debug(`No notification needed for AttendeeRemoved eventId=${eventId}`);
+    }
+
+    try {
+      const eventRecord = await this.db.event.findUnique({
+        where: { id: eventId },
+        select: { title: true },
+      });
+
+      if (!eventRecord) {
+        return this.logger.warn(`Event not found for AttendeeRemoved notification, eventId=${eventId}`);
+      }
+
+      await this.notifications.create({
+        userId,
+        type: NotificationType.EventAttendeeRemoved,
+        payload: { eventId, eventTitle: eventRecord.title },
+      });
+    } catch (err) {
+      this.logger.error(
+        `Failed to notify on AttendeeRemoved eventId=${eventId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }
@@ -387,6 +445,21 @@ export class EventNotificationListener {
   }
 
   /**
+   * #802. The attendees who were not removed, except the person deleting it.
+   * The title rides the domain event, because the event is already gone.
+   */
+  @OnEvent(EventEvents.EventDeleted, { async: true })
+  async onEventDeleted(event: EventDeletedEvent): Promise<void> {
+    const { id: eventId, title } = event.before;
+
+    await this.notifyAttendeesOfEvent(eventId, event.actingUserId, (userId) => ({
+      userId,
+      type: NotificationType.EventDeleted,
+      payload: { eventId, eventTitle: title },
+    }));
+  }
+
+  /**
    * Tells every attendee of the event who has an account and was not removed,
    * whatever their RSVP, Invited and Declined included, except the person
    * acting (#795). Each user once.
@@ -397,17 +470,10 @@ export class EventNotificationListener {
     notificationFor: (userId: string) => CreateNotificationInput,
   ): Promise<void> {
     try {
-      const attendees = await this.db.eventAttendee.findMany({
-        where: { eventId, ...NOT_REMOVED, userId: { not: null } },
-        select: { userId: true },
-      });
+      const recipients = withoutActor(await usersNotRemoved(this.db, eventId), actingUserId);
 
-      const recipients = new Set(
-        attendees.flatMap(({ userId }) => (userId === null || userId === actingUserId ? [] : [userId])),
-      );
-
-      if (recipients.size > 0) {
-        await this.notifications.createMany([...recipients].map(notificationFor));
+      if (recipients.length > 0) {
+        await this.notifications.createMany(recipients.map(notificationFor));
       }
     } catch (err) {
       this.logger.error(

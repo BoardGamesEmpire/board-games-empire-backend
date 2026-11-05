@@ -60,7 +60,13 @@ export class AttendeeRemovedEvent extends MutationEvent<EventAttendee> {
   readonly subject = ResourceType.EventAttendee;
   readonly subjectId: string;
 
-  constructor(before: AttendeeRemovedSnapshot, after: AttendeeRemovedSnapshot, initiatedAt: Date) {
+  constructor(
+    before: AttendeeRemovedSnapshot,
+    after: AttendeeRemovedSnapshot,
+    /** The user who removed the attendee. Context for listeners, not audited (#802). */
+    public readonly actingUserId: string,
+    initiatedAt: Date,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
