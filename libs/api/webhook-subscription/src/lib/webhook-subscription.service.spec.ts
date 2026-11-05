@@ -20,6 +20,7 @@ import {
 } from '@bge/testing';
 import {
   CreateWebhookSubscriptionDto,
+  UpdateWebhookSubscriptionDto,
   WebhookEventRegistry,
   WebhookEventType,
   WebhookVisibilityService,
@@ -469,6 +470,7 @@ describe('WebhookSubscriptionService', () => {
         makeWebhookSub({ eventTypes: [makeEventType({ eventType: WebhookEventType.EventCreated })] }),
       );
       db.webhookSubscription.update.mockResolvedValue(makeWebhookSub());
+      db.webhookSubscription.findUniqueOrThrow.mockResolvedValue(makeWebhookSub());
     });
 
     type Refusal = 'common.forbidden.update' | 'common.forbidden.delete';
@@ -477,6 +479,12 @@ describe('WebhookSubscriptionService', () => {
         'update',
         Action.update,
         () => service.update('sub-1', { url: 'https://new.example.com/hook' }),
+        'common.forbidden.update',
+      ],
+      [
+        'update of the event types',
+        Action.update,
+        () => service.update('sub-1', { eventTypes: [WebhookEventType.EventUpdated] }),
         'common.forbidden.update',
       ],
       ['disable', Action.update, () => service.disable('sub-1'), 'common.forbidden.update'],
@@ -493,27 +501,49 @@ describe('WebhookSubscriptionService', () => {
           expect.objectContaining({ where: expect.objectContaining({ id: 'sub-1', AND: [ceilingFor(Action.read)] }) }),
         );
         expect(db.webhookSubscription.update).toHaveBeenCalledWith(
-          expect.objectContaining({ where: { id: 'sub-1', AND: [ceilingFor(action)] } }),
+          expect.objectContaining({ where: { id: 'sub-1', deletedAt: null, AND: [ceilingFor(action)] } }),
         );
       },
     );
 
-    // The pre-read passed, so the row exists and the actor may read it. A
-    // write that then matches nothing was refused by the ceiling: that is a
-    // 403, not a 500 and not a 404.
+    const dependentRecordNotFound = () =>
+      new Prisma.PrismaClientKnownRequestError('No record was found for an update.', {
+        code: 'P2025',
+        clientVersion: 'test',
+      });
+
+    // The check passed again after the write matched nothing, so the row is
+    // still live and the actor may still read it: the ceiling refused the
+    // write. That is a 403, not a 500 and not a 404.
     it.each(writes)('%s answers 403 when its ceiling refuses the row', async (_name, _action, write, message) => {
-      db.webhookSubscription.update.mockRejectedValue(
-        new Prisma.PrismaClientKnownRequestError('No record was found for an update.', {
-          code: 'P2025',
-          clientVersion: 'test',
-        }),
-      );
+      db.webhookSubscription.update.mockRejectedValue(dependentRecordNotFound());
 
       const rejection: unknown = await write().catch((error: unknown) => error);
 
       expect(rejection).toBeInstanceOf(ForbiddenException);
       expect((rejection as ForbiddenException).getResponse()).toEqual(t(message));
+      expect(db.webhookSubscription.findFirst).toHaveBeenCalledTimes(2);
     });
+
+    // The write requires a live row, so one deleted after the check matches
+    // nothing. Nothing restores a deleted webhook subscription, so running the
+    // check again tells that apart from the ceiling's refusal.
+    it.each(writes)(
+      '%s answers 404 when the row was deleted before the write, as a second request would (#767)',
+      async (_name, _action, write) => {
+        db.webhookSubscription.findFirst
+          .mockResolvedValueOnce(
+            makeWebhookSub({ eventTypes: [makeEventType({ eventType: WebhookEventType.EventCreated })] }),
+          )
+          .mockResolvedValueOnce(null);
+        db.webhookSubscription.update.mockRejectedValue(dependentRecordNotFound());
+
+        await expect(write()).rejects.toThrow(
+          new NotFoundException(t('errors.webhook_subscription.not_found', { id: 'sub-1' })),
+        );
+        expect(db.webhookSubscription.findFirst).toHaveBeenCalledTimes(2);
+      },
+    );
 
     it.each(writes)('%s passes any other failure through unchanged', async (_name, _action, write) => {
       const failure = new Error('connection reset');
@@ -536,7 +566,9 @@ describe('WebhookSubscriptionService', () => {
         await write();
 
         expect(db.webhookSubscription.update).toHaveBeenCalledWith(
-          expect.objectContaining({ where: { id: 'sub-1', AND: [ceilingFor(action)], apiKeyId: 'key-1' } }),
+          expect.objectContaining({
+            where: { id: 'sub-1', deletedAt: null, AND: [ceilingFor(action)], apiKeyId: 'key-1' },
+          }),
         );
       },
     );
@@ -582,6 +614,63 @@ describe('WebhookSubscriptionService', () => {
   });
 
   describe('update', () => {
+    // A nested write would read the row's id through the guard, then update by
+    // id alone, so a PATCH queued behind a delete would rewrite a deleted
+    // webhook subscription's event types. The guarded UPDATE goes first and
+    // names a column, so it is the statement that waits and re-checks.
+    it('replaces the event types after a guarded UPDATE of the row, in one transaction (#767)', async () => {
+      db.webhookSubscription.findFirst.mockResolvedValue(makeWebhookSub());
+      db.webhookSubscription.findUniqueOrThrow.mockResolvedValue(
+        makeWebhookSub({ eventTypes: [makeEventType({ eventType: WebhookEventType.EventUpdated })] }),
+      );
+
+      const result = await service.update('sub-1', { eventTypes: [WebhookEventType.EventUpdated] });
+
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+      expect(db.webhookSubscription.update).toHaveBeenCalledWith({
+        where: expect.objectContaining({ id: 'sub-1', deletedAt: null }),
+        data: { url: undefined, secret: undefined, updatedAt: expect.any(Date) },
+        select: { id: true },
+      });
+      expect(db.webhookSubscriptionEventType.deleteMany).toHaveBeenCalledWith({ where: { subscriptionId: 'sub-1' } });
+      expect(db.webhookSubscriptionEventType.createMany).toHaveBeenCalledWith({
+        data: [{ subscriptionId: 'sub-1', eventType: WebhookEventType.EventUpdated }],
+      });
+      const [update] = db.webhookSubscription.update.mock.invocationCallOrder;
+      const [deleteMany] = db.webhookSubscriptionEventType.deleteMany.mock.invocationCallOrder;
+      const [createMany] = db.webhookSubscriptionEventType.createMany.mock.invocationCallOrder;
+      expect(update).toBeLessThan(deleteMany);
+      expect(deleteMany).toBeLessThan(createMany);
+      expect(result.eventTypes.map(({ eventType }) => eventType)).toEqual([WebhookEventType.EventUpdated]);
+    });
+
+    it('writes a PATCH without event types in one guarded UPDATE, outside a transaction', async () => {
+      db.webhookSubscription.findFirst.mockResolvedValue(makeWebhookSub());
+      db.webhookSubscription.update.mockResolvedValue(makeWebhookSub());
+
+      await service.update('sub-1', { url: 'https://new.example.com/hook' });
+
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(db.webhookSubscriptionEventType.deleteMany).not.toHaveBeenCalled();
+    });
+
+    // `@IsOptional()` skips its validators for `null`, so `eventTypes: null`
+    // reaches the service. It leaves the event types alone, as it did before
+    // the event-type write moved out of the nested write (#767).
+    it('leaves the event types alone when a PATCH sends them as null', async () => {
+      db.webhookSubscription.findFirst.mockResolvedValue(makeWebhookSub());
+      db.webhookSubscription.update.mockResolvedValue(makeWebhookSub());
+      const dto = { url: 'https://new.example.com/hook', eventTypes: null } as unknown as UpdateWebhookSubscriptionDto;
+
+      await service.update('sub-1', dto);
+
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(db.webhookSubscriptionEventType.deleteMany).not.toHaveBeenCalled();
+      expect(db.webhookSubscription.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ url: 'https://new.example.com/hook' }) }),
+      );
+    });
+
     it('re-encrypts and reveals a rotated secret', async () => {
       db.webhookSubscription.findFirst.mockResolvedValue(makeWebhookSub());
       db.webhookSubscription.update.mockResolvedValue(makeWebhookSub());
@@ -714,7 +803,7 @@ describe('WebhookSubscriptionService', () => {
 
       expect(db.webhookSubscription.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'sub-1', AND: [MOCK_RESOURCE_CONDITION] },
+          where: { id: 'sub-1', deletedAt: null, AND: [MOCK_RESOURCE_CONDITION] },
           data: expect.objectContaining({ status: WebhookSubscriptionStatus.Disabled, disabledAt: expect.any(Date) }),
         }),
       );

@@ -219,13 +219,16 @@ export class WebhookSubscriptionService {
     }
 
     const rotatedSecret = dto.secret;
-    const updated = await this.writeScoped(id, Action.update, {
-      url: dto.url,
-      secret: rotatedSecret !== undefined ? this.encryption.encrypt(rotatedSecret) : undefined,
-      eventTypes: dto.eventTypes
-        ? { deleteMany: {}, create: dto.eventTypes.map((eventType) => ({ eventType })) }
-        : undefined,
-    });
+    const updated = await this.writeScoped(
+      id,
+      Action.update,
+      {
+        url: dto.url,
+        secret: rotatedSecret !== undefined ? this.encryption.encrypt(rotatedSecret) : undefined,
+      },
+      // `@IsOptional()` lets `null` through validation; null leaves the event types alone.
+      dto.eventTypes ?? undefined,
+    );
 
     return rotatedSecret !== undefined ? this.reveal(updated, rotatedSecret) : this.redact(updated);
   }
@@ -342,35 +345,64 @@ export class WebhookSubscriptionService {
    * on the route and the read in `getById` both pass for an actor who may read
    * the row but not change it, such as an API key with `read` on every
    * subscription and `manage` on one, so the write has to carry the ceiling
-   * itself. A write it refuses matches no row, and that P2025 is a 403: the
-   * read before it already showed the row exists.
+   * itself.
    *
    * A write through an API key also matches only that key's own webhook
    * subscriptions, as {@link getWritable} has already checked, so the reach a
    * webhook subscription recorded at creation never changes (#723). A write
    * through the user's session is not limited by key and leaves the recorded
    * key alone.
+   *
+   * The write requires a live row. So a write that matches nothing (P2025)
+   * has three causes: the ceiling, the key filter, or a delete that committed
+   * after the request's first check. That check, run again, tells them apart,
+   * and is conclusive because nothing restores a deleted webhook
+   * subscription: a deleted row answers 404, as a request arriving after the
+   * delete would. One that passes it again was refused by the ceiling: 403
+   * (#767).
+   *
+   * Postgres re-checks that requirement for a write queued behind a delete
+   * only when it sits in the UPDATE itself. A Prisma update with nested
+   * writes doesn't keep it there: it reads the row's id through the filter,
+   * runs the nested writes, then updates by id alone. So `eventTypes` are
+   * replaced in a transaction of their own, after a guarded UPDATE of the
+   * row, which is the statement that waits for the delete and re-checks it.
+   * The UPDATE sets `updatedAt` itself, since a PATCH of the event types alone
+   * names no column, and Prisma skips the UPDATE of a patch that names none.
    */
   private async writeScoped(
     id: string,
     action: typeof Action.update | typeof Action.delete,
     data: Prisma.WebhookSubscriptionUpdateInput,
+    eventTypes?: readonly string[],
   ): Promise<WebhookSubscriptionWithEventTypes> {
     const apiKeyId = this.abilityService.getActingApiKeyId();
+    const where: Prisma.WebhookSubscriptionWhereUniqueInput = {
+      id,
+      deletedAt: null,
+      // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+      AND: this.abilityService.getCurrentResourceConditions(ResourceType.WebhookSubscription, action),
+      ...(apiKeyId !== null && { apiKeyId }),
+    };
 
     try {
-      return await this.db.webhookSubscription.update({
-        where: {
-          id,
-          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.WebhookSubscription, action),
-          ...(apiKeyId !== null && { apiKeyId }),
-        },
-        data,
-        include: { eventTypes: true },
+      if (eventTypes === undefined) {
+        return await this.db.webhookSubscription.update({ where, data, include: { eventTypes: true } });
+      }
+
+      return await this.db.$transaction(async (tx) => {
+        await tx.webhookSubscription.update({ where, data: { ...data, updatedAt: new Date() }, select: { id: true } });
+        await tx.webhookSubscriptionEventType.deleteMany({ where: { subscriptionId: id } });
+        await tx.webhookSubscriptionEventType.createMany({
+          data: eventTypes.map((eventType) => ({ subscriptionId: id, eventType })),
+        });
+
+        return tx.webhookSubscription.findUniqueOrThrow({ where: { id }, include: { eventTypes: true } });
       });
     } catch (error) {
       if (isPrismaDependentRecordNotFoundError(error)) {
+        await this.getWritable(id);
+
         this.logger.warn(`Refused ${action} on webhook subscription ${id}: outside the actor's ceiling`);
         throw new ForbiddenException(
           t(action === Action.delete ? 'common.forbidden.delete' : 'common.forbidden.update'),
