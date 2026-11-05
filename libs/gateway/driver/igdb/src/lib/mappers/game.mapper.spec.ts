@@ -177,6 +177,24 @@ describe('game.mapper', () => {
       expect(toSearchNarrowing(filter({ publishYear: { min: -10000, max: 10000, includeUnknown: true } }))).toEqual({});
     });
 
+    // A bound left out still left out games with no first release date. IGDB
+    // pages before the server drops what the range excludes, so asking for
+    // those would let them take a page's places from dated matches (#1082).
+    it('asks only for dated games when every bound is left out and the range leaves unknown ones out', () => {
+      expect(toSearchNarrowing(filter({ publishYear: { min: 1900 } }))).toEqual({ datedOnly: true });
+      expect(toSearchNarrowing(filter({ publishYear: { max: 2040 } }))).toEqual({ datedOnly: true });
+      expect(toSearchNarrowing(filter({ publishYear: { min: 1900, max: 2040 } }))).toEqual({ datedOnly: true });
+      expect(toSearchNarrowing(filter({ publishYear: { max: 300_000 } }))).toEqual({ datedOnly: true });
+      expect(toSearchNarrowing(filter({ publishYear: { min: -300_000 } }))).toEqual({ datedOnly: true });
+      expect(toSearchNarrowing(filter({ publishYear: { min: 1900, includeUnknown: true } }))).toEqual({});
+    });
+
+    // As the server reads a range (#719): one with no bound narrows nothing,
+    // whatever it says of unknown years.
+    it('narrows nothing by a range with no bound, even one leaving unknown years out', () => {
+      expect(toSearchNarrowing(filter({ publishYear: { includeUnknown: false } }))).toEqual({});
+    });
+
     // A minimum after the span, or a maximum before it, holds for no date
     // IGDB has: only a game with no first release date can match, and when
     // the range leaves those out, nothing can, so IGDB isn't asked (#1082).

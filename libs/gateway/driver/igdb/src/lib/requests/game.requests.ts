@@ -110,6 +110,10 @@ export function searchGamesRequest(
     clauses.push('first_release_date = null');
   }
 
+  if (narrowing.datedOnly) {
+    clauses.push('first_release_date != null');
+  }
+
   return (client: IGDBClient, signal: AbortSignal) => {
     const builder = client.fields(GAME_SEARCH_FIELDS).search(escapeSearchQuery(query));
     return includeLanguageFilter(builder, locale, clauses.join(' & '))

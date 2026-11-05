@@ -30,6 +30,13 @@ export interface IgdbSearchNarrowing {
    * holds no date IGDB has, though it includes unknown ones (#1082).
    */
   undatedOnly?: true;
+
+  /**
+   * Only games with a first release date: every bound the range a search
+   * asks for holds for every date IGDB has, but the range leaves unknown
+   * ones out (#1082).
+   */
+  datedOnly?: true;
 }
 
 export interface IgdbCover {

@@ -177,16 +177,25 @@ const yearStartSeconds = (year: number): number => {
  *
  * IGDB refuses a filter on a value outside the span it holds dates in with a
  * 400 (#1082). A bound on the span's far side, a minimum before it or a
- * maximum after it, holds for every date IGDB has, so it is left out. A bound
+ * maximum after it, holds for every date IGDB has, so it is left out. It
+ * still left out games with no date, though: when it was the range's only
+ * bound and the range leaves those out, only dated games are asked for, so
+ * undated ones the server would drop don't take a page's places. A bound
  * on its near side, a minimum after it or a maximum before it, holds for
  * none: only a game with no date can match, when the range includes those.
  */
 function toYearNarrowing(
   range: proto.IntRange | undefined,
-): Pick<IgdbSearchNarrowing, 'releasedBetween' | 'undatedOnly'> | null | undefined {
+): Pick<IgdbSearchNarrowing, 'releasedBetween' | 'undatedOnly' | 'datedOnly'> | null | undefined {
   const from = typeof range?.min === 'number' ? yearStartSeconds(range.min) : undefined;
   const before = typeof range?.max === 'number' ? yearStartSeconds(range.max + 1) : undefined;
   const orUnknown = range?.includeUnknown === true;
+
+  // As the server reads a range: one with no bound narrows nothing, whatever
+  // it says of unknown years.
+  if (from === undefined && before === undefined) {
+    return undefined;
+  }
 
   if ((from !== undefined && from > IGDB_LATEST_SECOND) || (before !== undefined && before <= IGDB_EARLIEST_SECOND)) {
     return orUnknown ? { undatedOnly: true } : null;
@@ -196,7 +205,7 @@ function toYearNarrowing(
   const upper = before !== undefined && before <= IGDB_LATEST_SECOND ? before : undefined;
 
   if (lower === undefined && upper === undefined) {
-    return undefined;
+    return orUnknown ? undefined : { datedOnly: true };
   }
 
   return {
