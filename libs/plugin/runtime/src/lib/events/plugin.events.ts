@@ -341,7 +341,15 @@ export class PluginUpdateCheckCompletedEvent extends MutationEvent<Plugin> {
   }
 }
 
-type PluginUpdateStagingSnapshot = Readonly<Pick<Plugin, 'id' | 'slug' | 'version' | 'pendingVersion'>>;
+/**
+ * The staged-update events' row snapshot. `pendingStagingId` says which
+ * staging the event concerns (#357): a rejected version can be staged again
+ * from the same artifact, with the same version and checksum, and only the
+ * staging id tells the two apart in the audit trail.
+ */
+type PluginUpdateStagingSnapshot = Readonly<
+  Pick<Plugin, 'id' | 'slug' | 'version' | 'pendingVersion' | 'pendingStagingId'>
+>;
 
 /** A validated update was staged (`pendingVersion`/`pendingManifestJson` populated), awaiting consent (#59 update flow). */
 export class PluginUpdatePendingEvent extends MutationEvent<Plugin> {

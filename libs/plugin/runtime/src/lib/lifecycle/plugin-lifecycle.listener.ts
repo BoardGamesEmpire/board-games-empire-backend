@@ -28,6 +28,7 @@ import {
   PluginUpdateApprovedEvent,
   PluginUpdateCheckCompletedEvent,
   PluginUpdatePendingEvent,
+  PluginUpdateRejectedEvent,
   UserPluginDisabledEvent,
   UserPluginEnabledEvent,
   UserPluginUnitDisabledEvent,
@@ -395,6 +396,10 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
         payload: {
           pendingVersion: event.after.pendingVersion,
           pendingSha256: event.pendingSha256,
+          // The staging's identity (#357), which approve and reject must
+          // name: the same artifact staged twice has the same version and
+          // checksum, so only this tells the two rows apart.
+          stagingId: event.after.pendingStagingId,
           // What escalated and what the staging admin waved through — the
           // consent record for WHY approval was demanded.
           escalations: event.escalations,
@@ -410,12 +415,24 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
         // per-grant events are deliberately not emitted (install parity),
         // so this payload is where the seed's provenance lives.
         payload: {
+          // The staging this approval answered (#357); null when an update
+          // with nothing to consent to activated as it was staged.
+          stagingId: event.before.pendingStagingId,
           grantedPermissions: event.grantedPermissions,
           // Whether activation dropped retained server config as
           // schema-invalid under the manifest just promoted (D-CN) — same
           // "asked of this table directly" contract as install's field.
           retainedConfigReset: event.retainedConfigReset,
         },
+      };
+    }
+
+    if (event instanceof PluginUpdateRejectedEvent) {
+      return {
+        ...this.pluginRowIdentity(event.before),
+        // The staging this rejection answered (#357); the row's columns are
+        // cleared by now, so this is the only record of which one it was.
+        payload: { stagingId: event.before.pendingStagingId },
       };
     }
 
@@ -432,7 +449,7 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
     }
 
     // Remaining Plugin-subject events (Enabled, Disabled,
-    // ConfigUpdated, UpdateRejected): id + slug live on
+    // ConfigUpdated): id + slug live on
     // whichever snapshot is non-null; no extra context payload. Guarded on
     // the subject: for any OTHER subject the snapshot's id is a unit or
     // grant row's, and recording it as the pluginId is silent provenance

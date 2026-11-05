@@ -177,7 +177,12 @@ describe('PluginInventoryService', () => {
       // manifest, is where a client finds the id to reject it with.
       const since = new Date('2026-08-20T10:00:00Z');
       db.plugin.findMany.mockResolvedValue([
-        row({ pendingVersion: '1.3.0', pendingSince: since, pendingSha256: 'b'.repeat(64), pendingStagingId: 'staging-a' }),
+        row({
+          pendingVersion: '1.3.0',
+          pendingSince: since,
+          pendingSha256: 'b'.repeat(64),
+          pendingStagingId: 'staging-a',
+        }),
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
@@ -190,7 +195,12 @@ describe('PluginInventoryService', () => {
     // checksum, so the list must not offer that row an update to approve.
     it('reports a staged row without a checksum as no staged update, as approval does', async () => {
       db.plugin.findMany.mockResolvedValue([
-        row({ pendingVersion: '1.3.0', pendingSince: new Date('2026-08-20T10:00:00Z'), pendingSha256: null }),
+        row({
+          pendingVersion: '1.3.0',
+          pendingSince: new Date('2026-08-20T10:00:00Z'),
+          pendingStagingId: 'staging-a',
+          pendingSha256: null,
+        }),
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 

@@ -1683,9 +1683,9 @@ export class PluginUpdateService {
   }
 
   private stagingSnapshot(plugin: Plugin) {
-    const { id, slug, version, pendingVersion } = plugin;
+    const { id, slug, version, pendingVersion, pendingStagingId } = plugin;
 
-    return { id, slug, version, pendingVersion };
+    return { id, slug, version, pendingVersion, pendingStagingId };
   }
 
   private householdUnitSnapshot(unit: HouseholdPlugin) {
