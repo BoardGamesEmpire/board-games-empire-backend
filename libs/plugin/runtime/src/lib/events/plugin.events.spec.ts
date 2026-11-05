@@ -57,7 +57,6 @@ describe('plugin lifecycle events', () => {
         category: 'FeedbackSink',
         scope: 'Server',
         enabled: false,
-        bundled: false,
       },
       {
         provenance,
@@ -105,7 +104,6 @@ describe('plugin lifecycle events', () => {
           category: 'FeedbackSink',
           scope: 'Server',
           enabled: false,
-          bundled: true,
         },
         context,
         initiatedAt,
@@ -124,11 +122,7 @@ describe('plugin lifecycle events', () => {
 
   describe('PluginUninstalledEvent', () => {
     it('is delete-shaped and takes its subjectId from the before snapshot', () => {
-      const event = new PluginUninstalledEvent(
-        { id: 'plg_1', slug: 'demo-sink', version: '1.2.0', bundled: false },
-        [],
-        initiatedAt,
-      );
+      const event = new PluginUninstalledEvent({ id: 'plg_1', slug: 'demo-sink', version: '1.2.0' }, [], initiatedAt);
 
       expect(event.action).toBe('delete');
       expect(event.subjectId).toBe('plg_1');
@@ -137,7 +131,7 @@ describe('plugin lifecycle events', () => {
 
     it('carries the affected-unit coordinates as context — the announcement seam, off the row snapshot', () => {
       const event = new PluginUninstalledEvent(
-        { id: 'plg_1', slug: 'demo-sink', version: '1.2.0', bundled: false },
+        { id: 'plg_1', slug: 'demo-sink', version: '1.2.0' },
         [
           { scopeType: 'Household', householdId: 'hh_1' },
           { scopeType: 'User', userId: 'usr_1' },

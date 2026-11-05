@@ -248,7 +248,7 @@ export class PluginLifecycleService {
     this.emitter.emit(
       PluginUninstalledEvent.eventName,
       new PluginUninstalledEvent(
-        { id: plugin.id, slug: plugin.slug, version: plugin.version, bundled: plugin.bundled },
+        { id: plugin.id, slug: plugin.slug, version: plugin.version },
         affectedUnits,
         initiatedAt,
       ),

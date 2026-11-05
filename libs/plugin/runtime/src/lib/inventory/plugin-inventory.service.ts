@@ -83,25 +83,20 @@ export interface PluginServerInventoryOptions extends PluginInventoryOptions {
 }
 
 /**
- * Where the installed artifact came from — D-AG's typed provenance as read
- * back off the row, rather than the eleven-nullable-columns shape the table
- * stores. `bundled` carries no artifact fields at all, which is the
- * invariant (`bundled ⇒ no tarball`) made visible instead of implied by
- * nulls.
+ * Where the installed plugin artifact came from, as read back off the row.
+ * There is one shape, with no kind to tell apart, because every plugin is
+ * installed from an artifact (#696).
  *
- * `sha256` stays nullable on the `installed` arm even though the installer
- * enforces `bundled = false ⇒ installedSha256 IS NOT NULL`: this type
- * describes what a read found, and asserting the invariant here would turn
- * corrupt state into a non-null lie rather than something a screen can show.
+ * `sha256` stays nullable even though the installer always writes it: this
+ * type describes what a read found, and asserting the invariant here would
+ * turn corrupt state into a non-null lie rather than something a screen can
+ * show.
  */
-export type PluginInventoryProvenance =
-  | { readonly kind: 'bundled' }
-  | {
-      readonly kind: 'installed';
-      readonly sha256: string | null;
-      readonly url: string | null;
-      readonly registrySlug: string | null;
-    };
+export interface PluginInventoryProvenance {
+  readonly sha256: string | null;
+  readonly url: string | null;
+  readonly registrySlug: string | null;
+}
 
 /** A staged update awaiting consent, as the list surfaces it. */
 export interface PluginInventoryPendingUpdate {
@@ -260,7 +255,6 @@ const SERVER_SELECT = {
   ...IDENTITY_SELECT,
   enabled: true,
   uninstalledAt: true,
-  bundled: true,
   restartRequired: true,
   installedAt: true,
   installedFromUrl: true,
@@ -600,14 +594,7 @@ export class PluginInventoryService {
       uninstalledAt: row.uninstalledAt,
       restartRequired: row.restartRequired,
       installedAt: row.installedAt,
-      provenance: row.bundled
-        ? { kind: 'bundled' }
-        : {
-            kind: 'installed',
-            sha256: row.installedSha256,
-            url: row.installedFromUrl,
-            registrySlug: row.registrySlug,
-          },
+      provenance: { sha256: row.installedSha256, url: row.installedFromUrl, registrySlug: row.registrySlug },
       pendingUpdate: row.pendingVersion === null ? null : { version: row.pendingVersion, since: row.pendingSince },
     };
   }

@@ -100,8 +100,8 @@ export class PluginsController {
     summary: 'List the plugins installed on this server',
     description:
       "The plugin management screen's first read, and the only plugin read that answers before a slug is known: " +
-      'installed set, server enablement, restart-required and pending-update state, and typed provenance ' +
-      '(bundled vs installed). Paginated per #230 — `?page=` (1-based) and `?limit=`, with a `pagination` ' +
+      'installed set, server enablement, restart-required and staged-update state, and where each plugin ' +
+      'artifact came from. Paginated per #230 — `?page=` (1-based) and `?limit=`, with a `pagination` ' +
       'envelope. Tombstoned plugins are excluded unless `?includeUninstalled=true`. A plugin whose stored ' +
       'manifest cannot be read is still listed, marked `manifestUnreadable` with its localized fields null, ' +
       'rather than failing the page.',

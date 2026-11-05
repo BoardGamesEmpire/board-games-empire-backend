@@ -143,7 +143,6 @@ describe('PluginLifecycleListener', () => {
           category: 'FeedbackSink',
           scope: 'Server',
           enabled: false,
-          bundled: false,
         },
         {
           provenance,
@@ -622,7 +621,7 @@ describe('PluginLifecycleListener', () => {
       emitter.emit(
         PluginEvent.Uninstalled,
         new PluginUninstalledEvent(
-          { id: 'plugin-1', slug: 'demo-sink', version: '1.2.0', bundled: false },
+          { id: 'plugin-1', slug: 'demo-sink', version: '1.2.0' },
           [
             { scopeType: 'Household', householdId: 'hh_1' },
             { scopeType: 'User', userId: 'usr_1' },
@@ -680,11 +679,7 @@ describe('PluginLifecycleListener', () => {
     it('publishes a reload on uninstall so every process drops the tombstoned plugin’s snapshot', async () => {
       emitter.emit(
         PluginEvent.Uninstalled,
-        new PluginUninstalledEvent(
-          { id: 'plugin-1', slug: 'demo-sink', version: '1.2.0', bundled: false },
-          [],
-          initiatedAt,
-        ),
+        new PluginUninstalledEvent({ id: 'plugin-1', slug: 'demo-sink', version: '1.2.0' }, [], initiatedAt),
       );
       await flush();
 

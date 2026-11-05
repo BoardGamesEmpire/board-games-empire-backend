@@ -22,10 +22,14 @@ import type { UpdateEscalation } from '../update/update-escalation.types';
  * therefore out of `AuditLog.payload`.
  */
 
-/** Where an installed artifact came from (#84 ingress). All-null for `bundled` plugins. */
+/**
+ * Where the installed plugin artifact came from: its link, checksum and
+ * registry (#84). Every plugin is installed from one, so its checksum is
+ * always set (#696).
+ */
 export interface PluginProvenance {
   readonly installedFromUrl: string | null;
-  readonly installedSha256: string | null;
+  readonly installedSha256: string;
   readonly registrySlug: string | null;
 }
 
@@ -47,9 +51,7 @@ export interface NpmAuditFinding {
   readonly advisoryUrl: string;
 }
 
-type PluginInstalledSnapshot = Readonly<
-  Pick<Plugin, 'id' | 'slug' | 'version' | 'category' | 'scope' | 'enabled' | 'bundled'>
->;
+type PluginInstalledSnapshot = Readonly<Pick<Plugin, 'id' | 'slug' | 'version' | 'category' | 'scope' | 'enabled'>>;
 
 /**
  * The install-specific context an installed event carries beyond the row
@@ -150,7 +152,7 @@ export class PluginDisabledEvent extends MutationEvent<Plugin> {
   }
 }
 
-type PluginUninstalledSnapshot = Readonly<Pick<Plugin, 'id' | 'slug' | 'version' | 'bundled'>>;
+type PluginUninstalledSnapshot = Readonly<Pick<Plugin, 'id' | 'slug' | 'version'>>;
 
 export class PluginUninstalledEvent extends MutationEvent<Plugin> {
   static readonly eventName = PluginEvent.Uninstalled;
@@ -354,8 +356,8 @@ export class PluginUpdatePendingEvent extends MutationEvent<Plugin> {
   constructor(
     before: PluginUpdateStagingSnapshot,
     after: PluginUpdateStagingSnapshot,
-    /** Checksum of the staged tarball; `null` for bundled upgrades. */
-    public readonly pendingSha256: string | null,
+    /** Checksum of the staged plugin artifact; every staged update has one (#696). */
+    public readonly pendingSha256: string,
     /** What escalated — WHY this update needed staged consent. Context for the lifecycle row and the C4 surface. */
     public readonly escalations: readonly UpdateEscalation[],
     /** Forbidden import specifiers the staging admin explicitly accepted on the NEW version. */

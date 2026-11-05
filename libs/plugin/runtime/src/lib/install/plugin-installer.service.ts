@@ -646,7 +646,6 @@ export class PluginInstallerService {
         category: plugin.category,
         scope: plugin.scope,
         enabled: plugin.enabled,
-        bundled: plugin.bundled,
       },
       {
         provenance: eventProvenance,

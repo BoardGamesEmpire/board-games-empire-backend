@@ -152,29 +152,21 @@ describe('PluginInventoryService', () => {
       expect(rows[0].displayName).toBe('Demo Sink');
     });
 
-    it('renders installed provenance from the artifact columns', async () => {
-      db.plugin.findMany.mockResolvedValue([row()] as never);
-      db.plugin.count.mockResolvedValue(1 as never);
-
-      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
-
-      expect(rows[0].provenance).toEqual({
-        kind: 'installed',
-        sha256: 'a'.repeat(64),
-        url: 'https://registry.test/demo-sink-1.2.0.tgz',
-        registrySlug: 'community',
-      });
-    });
-
-    it('a bundled plugin carries no artifact fields at all', async () => {
+    it('reports where the artifact came from, in one shape (#696)', async () => {
+      // Every plugin is installed from a plugin artifact, so provenance has no
+      // kind to tell apart: it is the artifact's checksum, link and registry.
       db.plugin.findMany.mockResolvedValue([
-        row({ bundled: true, installedSha256: null, installedFromUrl: null, registrySlug: null }),
+        row({ installedFromUrl: 'https://registry.example/x.tgz', registrySlug: 'bge-official' }),
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
       const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
 
-      expect(rows[0].provenance).toEqual({ kind: 'bundled' });
+      expect(rows[0].provenance).toStrictEqual({
+        sha256: 'a'.repeat(64),
+        url: 'https://registry.example/x.tgz',
+        registrySlug: 'bge-official',
+      });
     });
 
     it('surfaces a staged update with pendingSince, never updatedAt', async () => {

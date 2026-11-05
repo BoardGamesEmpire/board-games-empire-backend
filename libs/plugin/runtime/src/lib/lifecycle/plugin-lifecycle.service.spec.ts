@@ -556,7 +556,7 @@ describe('PluginLifecycleService', () => {
       const event = emittedEvent<PluginUninstalledEvent>(PluginEvent.Uninstalled);
       expect(event).toBeInstanceOf(PluginUninstalledEvent);
       expect(event.affectedUnits).toEqual(expectedUnits);
-      expect(event.before).toEqual({ id: 'plugin-1', slug: 'demo-sink', version: '1.2.0', bundled: false });
+      expect(event.before).toEqual({ id: 'plugin-1', slug: 'demo-sink', version: '1.2.0' });
     });
 
     it('emits only the uninstalled event — the force-disable rides it, not a second disabled event', async () => {

@@ -444,7 +444,7 @@ export class PluginUpdateService {
       new PluginUpdatePendingEvent(
         this.stagingSnapshot(plugin),
         this.stagingSnapshot(staged),
-        staged.pendingSha256,
+        provenance.pendingSha256,
         comparison.escalations,
         acknowledgedForbiddenImports,
         initiatedAt,

@@ -331,7 +331,6 @@ describe('PluginInstallerService', () => {
         category: 'FeedbackSink',
         scope: 'Server',
         enabled: false,
-        bundled: false,
       });
       expect(event.provenance).toEqual({
         installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
