@@ -1,5 +1,6 @@
 export * from './constraint-identity';
 export * from './deadlock';
+export * from './expansion-links';
 export * from './friendship-conditions';
 export * from './game-summary';
 export * from './household-conditions';
