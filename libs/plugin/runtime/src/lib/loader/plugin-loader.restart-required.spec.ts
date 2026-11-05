@@ -55,7 +55,6 @@ describe('PluginLoaderService — restart-required and tombstones', () => {
       category: PluginCategory.FeedbackSink,
       scope: PluginScope.Server,
       enabled: true,
-      bundled: false,
       manifestJson: { slug: 'demo-sink' },
       config: {},
       loadFailed: false,
@@ -175,8 +174,7 @@ describe('PluginLoaderService — restart-required and tombstones', () => {
    * A version mismatch is advisory. The directory resolver exposes ONE path
    * per plugin, so a staged-but-unapproved update's files legitimately sit
    * there while the row still names the active version — quarantining would
-   * force-disable a healthy plugin awaiting consent, and for a bundled
-   * plugin (whose path is BGE's own) it would be unavoidable.
+   * force-disable a healthy plugin awaiting consent.
    */
   describe('on-disk version mismatch is advisory, never a quarantine', () => {
     it('loads the plugin and LEAVES restartRequired set when the disk holds another version', async () => {

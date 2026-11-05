@@ -38,7 +38,6 @@ describe('PluginInventoryService', () => {
     category: PluginCategory.FeedbackSink,
     scope: PluginScope.Server,
     enabled: true,
-    bundled: false,
     restartRequired: false,
     installedAt: INSTALLED_AT,
     uninstalledAt: null,

@@ -80,7 +80,6 @@ describe('PluginUnitLifecycleService', () => {
     scope: PluginScope.Household,
     executionMode: PluginExecutionMode.InProcess,
     enabled: true,
-    bundled: false,
     manifestJson: householdManifest() as unknown as Prisma.JsonValue,
     config: {},
     loadFailed: false,

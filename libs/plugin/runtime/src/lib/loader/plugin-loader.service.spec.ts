@@ -54,7 +54,6 @@ describe('PluginLoaderService', () => {
       category: PluginCategory.FeedbackSink,
       scope: PluginScope.Server,
       enabled: true,
-      bundled: false,
       manifestJson: { slug: 'demo-sink' },
       config: { apiKey: 'k' },
       loadFailed: false,

@@ -85,15 +85,10 @@ export interface PluginServerInventoryOptions extends PluginInventoryOptions {
 /**
  * Where the installed plugin artifact came from, as read back off the row.
  * There is one shape, with no kind to tell apart, because every plugin is
- * installed from an artifact (#696).
- *
- * `sha256` stays nullable even though the installer always writes it: this
- * type describes what a read found, and asserting the invariant here would
- * turn corrupt state into a non-null lie rather than something a screen can
- * show.
+ * installed from an artifact (#696), and the database requires its checksum.
  */
 export interface PluginInventoryProvenance {
-  readonly sha256: string | null;
+  readonly sha256: string;
   readonly url: string | null;
   readonly registrySlug: string | null;
 }

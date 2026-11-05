@@ -35,12 +35,8 @@ import { ApiProperty } from '@nestjs/swagger';
 
 /** Where the plugin artifact came from. One shape: every plugin is installed from an artifact (#696). */
 class PluginProvenanceDto implements PluginInventoryProvenance {
-  @ApiProperty({
-    type: String,
-    nullable: true,
-    description: 'SHA-256 of the installed plugin artifact. Null only if the stored row was corrupted.',
-  })
-  sha256!: string | null;
+  @ApiProperty({ description: 'SHA-256 of the installed plugin artifact' })
+  sha256!: string;
 
   @ApiProperty({ type: String, nullable: true, description: 'Ingress URL; null for a manual upload' })
   url!: string | null;

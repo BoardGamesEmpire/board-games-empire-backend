@@ -41,7 +41,6 @@ describe('PluginLifecycleService', () => {
     scope: PluginScope.Server,
     executionMode: PluginExecutionMode.InProcess,
     enabled: false,
-    bundled: false,
     manifestJson: activeManifest as unknown as Prisma.JsonValue,
     config: {},
     loadFailed: false,
@@ -457,20 +456,6 @@ describe('PluginLifecycleService', () => {
       db.plugin.findUniqueOrThrow.mockResolvedValue(
         makePlugin({ enabled: false, uninstalledAt: new Date('2026-08-16T00:00:00Z'), restartRequired: true }),
       );
-    });
-
-    it('uninstalls a row whose bundled column is still set (#696)', async () => {
-      // No plugin ships inside the server, so any of them can be uninstalled.
-      // The column survives until the schema change drops it, and a set flag
-      // must not hold the uninstall back.
-      db.plugin.findUnique.mockResolvedValue(makePlugin({ bundled: true }));
-
-      await service.uninstall({ slug: 'demo-sink', actorId: 'admin-1' });
-
-      expect(db.plugin.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'plugin-1', uninstalledAt: null } }),
-      );
-      expect(db.pluginGrant.deleteMany).toHaveBeenCalledWith({ where: { pluginId: 'plugin-1' } });
     });
 
     it('tombstones with force-disable, restartRequired, and the staged update cleared — one guarded write', async () => {

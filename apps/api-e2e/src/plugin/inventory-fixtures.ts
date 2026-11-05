@@ -62,7 +62,6 @@ export const arrangeInventoryPlugin = async (
       scope: manifest.scope === 'server' ? PluginScope.Server : PluginScope.Household,
       manifestJson: manifest as never,
       enabled: true,
-      bundled: false,
       installedSha256: 'a'.repeat(64),
       installedFromUrl: 'https://registry.test/fixture.tgz',
       ...staged,

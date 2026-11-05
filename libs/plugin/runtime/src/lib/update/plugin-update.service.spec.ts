@@ -81,7 +81,6 @@ describe('PluginUpdateService', () => {
     scope: PluginScope.Server,
     executionMode: PluginExecutionMode.InProcess,
     enabled: true,
-    bundled: false,
     manifestJson: activeManifest as unknown as Prisma.JsonValue,
     config: {},
     loadFailed: false,

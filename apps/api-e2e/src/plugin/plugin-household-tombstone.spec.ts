@@ -80,7 +80,6 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
         scope: PluginScope.Household,
         manifestJson: manifest as never,
         enabled: true,
-        bundled: false,
         installedSha256: randomUUID(),
       },
     });

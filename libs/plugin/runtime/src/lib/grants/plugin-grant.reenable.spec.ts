@@ -78,7 +78,6 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
     scope: PluginScope.Server,
     executionMode: PluginExecutionMode.InProcess,
     enabled: true,
-    bundled: false,
     manifestJson: manifest as unknown as Prisma.JsonValue,
     config: {},
     loadFailed: false,

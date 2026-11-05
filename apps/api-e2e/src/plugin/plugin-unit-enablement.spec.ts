@@ -99,7 +99,6 @@ describe('plugin unit enablement + feature state (#323)', () => {
         scope: manifest.scope === 'server' ? PluginScope.Server : PluginScope.Household,
         manifestJson: manifest as never,
         enabled: true,
-        bundled: false,
         installedSha256: randomUUID(),
         ...rowOverrides,
       },
