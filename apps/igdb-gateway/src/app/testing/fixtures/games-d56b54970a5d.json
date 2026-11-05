@@ -1,0 +1,1615 @@
+[
+  {
+    "id": 13166,
+    "cover": {
+      "id": 121128,
+      "url": "//images.igdb.com/igdb/image/upload/t_thumb/co2lgo.jpg"
+    },
+    "first_release_date": 1464566400,
+    "name": "The Witcher 3: Wild Hunt - Blood and Wine",
+    "parent_game": 1942,
+    "platforms": [
+      {
+        "id": 169,
+        "abbreviation": "Series X|S",
+        "name": "Xbox Series X|S",
+        "platform_type": 1
+      },
+      {
+        "id": 48,
+        "abbreviation": "PS4",
+        "name": "PlayStation 4",
+        "platform_type": 1
+      },
+      {
+        "id": 6,
+        "abbreviation": "PC",
+        "name": "PC (Microsoft Windows)",
+        "platform_type": 4
+      },
+      {
+        "id": 167,
+        "abbreviation": "PS5",
+        "name": "PlayStation 5",
+        "platform_type": 1
+      },
+      {
+        "id": 49,
+        "abbreviation": "XONE",
+        "name": "Xbox One",
+        "platform_type": 1
+      },
+      {
+        "id": 130,
+        "abbreviation": "Switch",
+        "name": "Nintendo Switch",
+        "platform_type": 1
+      }
+    ],
+    "summary": "Blood and Wine is the second major expansion to The Witcher 3: Wild Hunt.\n\nThe players will accompany Geralt of Rivia to the region of Toussaint, one of the few places in the Witcher universe which has remained largely untouched by the war. The calm, laid-back atmosphere holds a dark and bloody secret that only the White Wolf can uncover; the expansion features new items for players to collect on their adventure and introduces previously unknown characters.",
+    "total_rating": 94.20229475577315,
+    "url": "https://www.igdb.com/games/the-witcher-3-wild-hunt-blood-and-wine",
+    "language_supports": [
+      {
+        "id": 89315,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 89316,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 89317,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 89318,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 89319,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 89320,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 89321,
+        "language": {
+          "id": 15,
+          "name": "Italian",
+          "native_name": "Italiano",
+          "locale": "it-IT",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "52074797-ab02-c337-a805-a3e9969fc0eb"
+        }
+      },
+      {
+        "id": 89322,
+        "language": {
+          "id": 15,
+          "name": "Italian",
+          "native_name": "Italiano",
+          "locale": "it-IT",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "52074797-ab02-c337-a805-a3e9969fc0eb"
+        }
+      },
+      {
+        "id": 89323,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 89325,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 89326,
+        "language": {
+          "id": 9,
+          "name": "Spanish (Spain)",
+          "native_name": "Español (España)",
+          "locale": "es-ES",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "62657819-b6f2-2beb-786e-78455af2de8f"
+        }
+      },
+      {
+        "id": 89324,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 89327,
+        "language": {
+          "id": 9,
+          "name": "Spanish (Spain)",
+          "native_name": "Español (España)",
+          "locale": "es-ES",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "62657819-b6f2-2beb-786e-78455af2de8f"
+        }
+      },
+      {
+        "id": 89328,
+        "language": {
+          "id": 1,
+          "name": "Arabic",
+          "native_name": "العربية",
+          "locale": "ar",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e0963ddc-1e01-32e2-a959-d5ccda50410c"
+        }
+      },
+      {
+        "id": 89329,
+        "language": {
+          "id": 1,
+          "name": "Arabic",
+          "native_name": "العربية",
+          "locale": "ar",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e0963ddc-1e01-32e2-a959-d5ccda50410c"
+        }
+      },
+      {
+        "id": 89332,
+        "language": {
+          "id": 14,
+          "name": "Hungarian",
+          "native_name": "Magyar",
+          "locale": "hu-HU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "362d33d4-4896-3e8d-b703-cc030c2c7f73"
+        }
+      },
+      {
+        "id": 89330,
+        "language": {
+          "id": 4,
+          "name": "Czech",
+          "native_name": "čeština",
+          "locale": "cs-CZ",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "58621751-aa00-f068-dbaf-2369d2e5a015"
+        }
+      },
+      {
+        "id": 89333,
+        "language": {
+          "id": 14,
+          "name": "Hungarian",
+          "native_name": "Magyar",
+          "locale": "hu-HU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "362d33d4-4896-3e8d-b703-cc030c2c7f73"
+        }
+      },
+      {
+        "id": 89334,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 89335,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 89336,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 89340,
+        "language": {
+          "id": 19,
+          "name": "Polish",
+          "native_name": "Polski",
+          "locale": "pl-PL",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "19ec0e97-56cc-dc50-54fa-e2dd3989ba11"
+        }
+      },
+      {
+        "id": 89345,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      },
+      {
+        "id": 89348,
+        "language": {
+          "id": 3,
+          "name": "Chinese (Traditional)",
+          "native_name": "繁體中文",
+          "locale": "zh-TW",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e7a793e9-d117-bc98-a000-67e444c0893d"
+        }
+      },
+      {
+        "id": 89352,
+        "language": {
+          "id": 24,
+          "name": "Turkish",
+          "native_name": "Türkçe",
+          "locale": "tr-TR",
+          "created_at": 1664803640,
+          "updated_at": 1664803640,
+          "checksum": "3fa287a0-7ee0-f965-2282-93931077359c"
+        }
+      },
+      {
+        "id": 89338,
+        "language": {
+          "id": 17,
+          "name": "Korean",
+          "native_name": "한국어",
+          "locale": "ko-KR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "9ba648bf-f5fa-fa3c-3c6a-2fc7e1510cd6"
+        }
+      },
+      {
+        "id": 89339,
+        "language": {
+          "id": 19,
+          "name": "Polish",
+          "native_name": "Polski",
+          "locale": "pl-PL",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "19ec0e97-56cc-dc50-54fa-e2dd3989ba11"
+        }
+      },
+      {
+        "id": 89337,
+        "language": {
+          "id": 17,
+          "name": "Korean",
+          "native_name": "한국어",
+          "locale": "ko-KR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "9ba648bf-f5fa-fa3c-3c6a-2fc7e1510cd6"
+        }
+      },
+      {
+        "id": 89341,
+        "language": {
+          "id": 19,
+          "name": "Polish",
+          "native_name": "Polski",
+          "locale": "pl-PL",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "19ec0e97-56cc-dc50-54fa-e2dd3989ba11"
+        }
+      },
+      {
+        "id": 89344,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 89349,
+        "language": {
+          "id": 3,
+          "name": "Chinese (Traditional)",
+          "native_name": "繁體中文",
+          "locale": "zh-TW",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e7a793e9-d117-bc98-a000-67e444c0893d"
+        }
+      },
+      {
+        "id": 89353,
+        "language": {
+          "id": 24,
+          "name": "Turkish",
+          "native_name": "Türkçe",
+          "locale": "tr-TR",
+          "created_at": 1664803640,
+          "updated_at": 1664803640,
+          "checksum": "3fa287a0-7ee0-f965-2282-93931077359c"
+        }
+      },
+      {
+        "id": 89331,
+        "language": {
+          "id": 4,
+          "name": "Czech",
+          "native_name": "čeština",
+          "locale": "cs-CZ",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "58621751-aa00-f068-dbaf-2369d2e5a015"
+        }
+      },
+      {
+        "id": 89343,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 89347,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      },
+      {
+        "id": 89350,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      },
+      {
+        "id": 89342,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 89346,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      },
+      {
+        "id": 89351,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      },
+      {
+        "id": 809057,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      }
+    ],
+    "game_type": 2
+  },
+  {
+    "id": 403150,
+    "cover": {
+      "id": 565688,
+      "url": "//images.igdb.com/igdb/image/upload/t_thumb/coc4hk.jpg"
+    },
+    "first_release_date": 1830211200,
+    "name": "The Witcher 3: Wild Hunt - Songs of the Past",
+    "parent_game": 1942,
+    "platforms": [
+      {
+        "id": 169,
+        "abbreviation": "Series X|S",
+        "name": "Xbox Series X|S",
+        "platform_type": 1
+      },
+      {
+        "id": 508,
+        "abbreviation": "Switch 2",
+        "name": "Nintendo Switch 2",
+        "platform_type": 1
+      },
+      {
+        "id": 6,
+        "abbreviation": "PC",
+        "name": "PC (Microsoft Windows)",
+        "platform_type": 4
+      },
+      {
+        "id": 167,
+        "abbreviation": "PS5",
+        "name": "PlayStation 5",
+        "platform_type": 1
+      }
+    ],
+    "summary": "Songs of the Past is a brand-new full-fledged expansion to The Witcher 3: Wild Hunt, one of the most acclaimed role-playing games of all time.\n\nCreated in partnership with Fool’s Theory, a team comprising veteran The Witcher 3 developers, players can once again take on the role of Geralt of Rivia and embark on a brand-new adventure before heading out on the Path as Ciri in the upcoming The Witcher 4.",
+    "url": "https://www.igdb.com/games/the-witcher-3-wild-hunt-songs-of-the-past",
+    "language_supports": [
+      {
+        "id": 1743222,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 1743223,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 1743224,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 1743225,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 1743226,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 1743227,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 1743228,
+        "language": {
+          "id": 15,
+          "name": "Italian",
+          "native_name": "Italiano",
+          "locale": "it-IT",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "52074797-ab02-c337-a805-a3e9969fc0eb"
+        }
+      },
+      {
+        "id": 1743229,
+        "language": {
+          "id": 15,
+          "name": "Italian",
+          "native_name": "Italiano",
+          "locale": "it-IT",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "52074797-ab02-c337-a805-a3e9969fc0eb"
+        }
+      },
+      {
+        "id": 1743230,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 1743231,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 1743232,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 1743233,
+        "language": {
+          "id": 9,
+          "name": "Spanish (Spain)",
+          "native_name": "Español (España)",
+          "locale": "es-ES",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "62657819-b6f2-2beb-786e-78455af2de8f"
+        }
+      },
+      {
+        "id": 1743234,
+        "language": {
+          "id": 9,
+          "name": "Spanish (Spain)",
+          "native_name": "Español (España)",
+          "locale": "es-ES",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "62657819-b6f2-2beb-786e-78455af2de8f"
+        }
+      },
+      {
+        "id": 1743235,
+        "language": {
+          "id": 1,
+          "name": "Arabic",
+          "native_name": "العربية",
+          "locale": "ar",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e0963ddc-1e01-32e2-a959-d5ccda50410c"
+        }
+      },
+      {
+        "id": 1743236,
+        "language": {
+          "id": 1,
+          "name": "Arabic",
+          "native_name": "العربية",
+          "locale": "ar",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e0963ddc-1e01-32e2-a959-d5ccda50410c"
+        }
+      },
+      {
+        "id": 1743237,
+        "language": {
+          "id": 4,
+          "name": "Czech",
+          "native_name": "čeština",
+          "locale": "cs-CZ",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "58621751-aa00-f068-dbaf-2369d2e5a015"
+        }
+      },
+      {
+        "id": 1743238,
+        "language": {
+          "id": 4,
+          "name": "Czech",
+          "native_name": "čeština",
+          "locale": "cs-CZ",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "58621751-aa00-f068-dbaf-2369d2e5a015"
+        }
+      },
+      {
+        "id": 1743239,
+        "language": {
+          "id": 14,
+          "name": "Hungarian",
+          "native_name": "Magyar",
+          "locale": "hu-HU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "362d33d4-4896-3e8d-b703-cc030c2c7f73"
+        }
+      },
+      {
+        "id": 1743240,
+        "language": {
+          "id": 14,
+          "name": "Hungarian",
+          "native_name": "Magyar",
+          "locale": "hu-HU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "362d33d4-4896-3e8d-b703-cc030c2c7f73"
+        }
+      },
+      {
+        "id": 1743241,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 1743242,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 1743243,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 1743244,
+        "language": {
+          "id": 17,
+          "name": "Korean",
+          "native_name": "한국어",
+          "locale": "ko-KR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "9ba648bf-f5fa-fa3c-3c6a-2fc7e1510cd6"
+        }
+      },
+      {
+        "id": 1743245,
+        "language": {
+          "id": 17,
+          "name": "Korean",
+          "native_name": "한국어",
+          "locale": "ko-KR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "9ba648bf-f5fa-fa3c-3c6a-2fc7e1510cd6"
+        }
+      },
+      {
+        "id": 1743246,
+        "language": {
+          "id": 17,
+          "name": "Korean",
+          "native_name": "한국어",
+          "locale": "ko-KR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "9ba648bf-f5fa-fa3c-3c6a-2fc7e1510cd6"
+        }
+      },
+      {
+        "id": 1743247,
+        "language": {
+          "id": 19,
+          "name": "Polish",
+          "native_name": "Polski",
+          "locale": "pl-PL",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "19ec0e97-56cc-dc50-54fa-e2dd3989ba11"
+        }
+      },
+      {
+        "id": 1743248,
+        "language": {
+          "id": 19,
+          "name": "Polish",
+          "native_name": "Polski",
+          "locale": "pl-PL",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "19ec0e97-56cc-dc50-54fa-e2dd3989ba11"
+        }
+      },
+      {
+        "id": 1743249,
+        "language": {
+          "id": 19,
+          "name": "Polish",
+          "native_name": "Polski",
+          "locale": "pl-PL",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "19ec0e97-56cc-dc50-54fa-e2dd3989ba11"
+        }
+      },
+      {
+        "id": 1743250,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 1743251,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 1743252,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 1743253,
+        "language": {
+          "id": 3,
+          "name": "Chinese (Traditional)",
+          "native_name": "繁體中文",
+          "locale": "zh-TW",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e7a793e9-d117-bc98-a000-67e444c0893d"
+        }
+      },
+      {
+        "id": 1743254,
+        "language": {
+          "id": 3,
+          "name": "Chinese (Traditional)",
+          "native_name": "繁體中文",
+          "locale": "zh-TW",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e7a793e9-d117-bc98-a000-67e444c0893d"
+        }
+      },
+      {
+        "id": 1743255,
+        "language": {
+          "id": 24,
+          "name": "Turkish",
+          "native_name": "Türkçe",
+          "locale": "tr-TR",
+          "created_at": 1664803640,
+          "updated_at": 1664803640,
+          "checksum": "3fa287a0-7ee0-f965-2282-93931077359c"
+        }
+      },
+      {
+        "id": 1743256,
+        "language": {
+          "id": 24,
+          "name": "Turkish",
+          "native_name": "Türkçe",
+          "locale": "tr-TR",
+          "created_at": 1664803640,
+          "updated_at": 1664803640,
+          "checksum": "3fa287a0-7ee0-f965-2282-93931077359c"
+        }
+      },
+      {
+        "id": 1743258,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      },
+      {
+        "id": 1743259,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      },
+      {
+        "id": 1743260,
+        "language": {
+          "id": 28,
+          "name": "Ukrainian",
+          "native_name": "українська",
+          "locale": "uk-UA",
+          "created_at": 1666085871,
+          "updated_at": 1666085871,
+          "checksum": "0030d38e-0f5a-1ce0-f3f0-0a99fac33b0f"
+        }
+      },
+      {
+        "id": 1743261,
+        "language": {
+          "id": 28,
+          "name": "Ukrainian",
+          "native_name": "українська",
+          "locale": "uk-UA",
+          "created_at": 1666085871,
+          "updated_at": 1666085871,
+          "checksum": "0030d38e-0f5a-1ce0-f3f0-0a99fac33b0f"
+        }
+      },
+      {
+        "id": 1743262,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      },
+      {
+        "id": 1743257,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      },
+      {
+        "id": 1743263,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      }
+    ],
+    "game_type": 2
+  },
+  {
+    "id": 12503,
+    "cover": {
+      "id": 84518,
+      "url": "//images.igdb.com/igdb/image/upload/t_thumb/co1t7q.jpg"
+    },
+    "first_release_date": 1444608000,
+    "name": "The Witcher 3: Wild Hunt - Hearts of Stone",
+    "parent_game": 1942,
+    "platforms": [
+      {
+        "id": 169,
+        "abbreviation": "Series X|S",
+        "name": "Xbox Series X|S",
+        "platform_type": 1
+      },
+      {
+        "id": 48,
+        "abbreviation": "PS4",
+        "name": "PlayStation 4",
+        "platform_type": 1
+      },
+      {
+        "id": 6,
+        "abbreviation": "PC",
+        "name": "PC (Microsoft Windows)",
+        "platform_type": 4
+      },
+      {
+        "id": 167,
+        "abbreviation": "PS5",
+        "name": "PlayStation 5",
+        "platform_type": 1
+      },
+      {
+        "id": 49,
+        "abbreviation": "XONE",
+        "name": "Xbox One",
+        "platform_type": 1
+      },
+      {
+        "id": 130,
+        "abbreviation": "Switch",
+        "name": "Nintendo Switch",
+        "platform_type": 1
+      }
+    ],
+    "summary": "The Witcher 3: Wild Hunt – Hearts of Stone is the first major expansion for The Witcher 3: Wild Hunt, released in October 2015. It adds a new storyline set in the existing game world, where Geralt is hired to deal with Olgierd von Everec, a nobleman with a mysterious and cursed past.\n\nThe expansion introduces new characters, quests, enemies, and the Runewords system, which enhances gear with powerful effects. It emphasises narrative depth and moral choices, consistent with the tone of the main game.",
+    "total_rating": 91.83594827012068,
+    "url": "https://www.igdb.com/games/the-witcher-3-wild-hunt-hearts-of-stone",
+    "language_supports": [
+      {
+        "id": 73128,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 73135,
+        "language": {
+          "id": 4,
+          "name": "Czech",
+          "native_name": "čeština",
+          "locale": "cs-CZ",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "58621751-aa00-f068-dbaf-2369d2e5a015"
+        }
+      },
+      {
+        "id": 73138,
+        "language": {
+          "id": 14,
+          "name": "Hungarian",
+          "native_name": "Magyar",
+          "locale": "hu-HU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "362d33d4-4896-3e8d-b703-cc030c2c7f73"
+        }
+      },
+      {
+        "id": 73145,
+        "language": {
+          "id": 19,
+          "name": "Polish",
+          "native_name": "Polski",
+          "locale": "pl-PL",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "19ec0e97-56cc-dc50-54fa-e2dd3989ba11"
+        }
+      },
+      {
+        "id": 73160,
+        "language": {
+          "id": 24,
+          "name": "Turkish",
+          "native_name": "Türkçe",
+          "locale": "tr-TR",
+          "created_at": 1664803640,
+          "updated_at": 1664803640,
+          "checksum": "3fa287a0-7ee0-f965-2282-93931077359c"
+        }
+      },
+      {
+        "id": 73139,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 73143,
+        "language": {
+          "id": 17,
+          "name": "Korean",
+          "native_name": "한국어",
+          "locale": "ko-KR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "9ba648bf-f5fa-fa3c-3c6a-2fc7e1510cd6"
+        }
+      },
+      {
+        "id": 73136,
+        "language": {
+          "id": 4,
+          "name": "Czech",
+          "native_name": "čeština",
+          "locale": "cs-CZ",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "58621751-aa00-f068-dbaf-2369d2e5a015"
+        }
+      },
+      {
+        "id": 73141,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 73156,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      },
+      {
+        "id": 73146,
+        "language": {
+          "id": 19,
+          "name": "Polish",
+          "native_name": "Polski",
+          "locale": "pl-PL",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "19ec0e97-56cc-dc50-54fa-e2dd3989ba11"
+        }
+      },
+      {
+        "id": 73147,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 73148,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 73149,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 73150,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      },
+      {
+        "id": 73151,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      },
+      {
+        "id": 73152,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      },
+      {
+        "id": 73153,
+        "language": {
+          "id": 3,
+          "name": "Chinese (Traditional)",
+          "native_name": "繁體中文",
+          "locale": "zh-TW",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e7a793e9-d117-bc98-a000-67e444c0893d"
+        }
+      },
+      {
+        "id": 73154,
+        "language": {
+          "id": 3,
+          "name": "Chinese (Traditional)",
+          "native_name": "繁體中文",
+          "locale": "zh-TW",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e7a793e9-d117-bc98-a000-67e444c0893d"
+        }
+      },
+      {
+        "id": 73155,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      },
+      {
+        "id": 73120,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 73137,
+        "language": {
+          "id": 14,
+          "name": "Hungarian",
+          "native_name": "Magyar",
+          "locale": "hu-HU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "362d33d4-4896-3e8d-b703-cc030c2c7f73"
+        }
+      },
+      {
+        "id": 73140,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 73158,
+        "language": {
+          "id": 24,
+          "name": "Turkish",
+          "native_name": "Türkçe",
+          "locale": "tr-TR",
+          "created_at": 1664803640,
+          "updated_at": 1664803640,
+          "checksum": "3fa287a0-7ee0-f965-2282-93931077359c"
+        }
+      },
+      {
+        "id": 73129,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 73130,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 73131,
+        "language": {
+          "id": 9,
+          "name": "Spanish (Spain)",
+          "native_name": "Español (España)",
+          "locale": "es-ES",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "62657819-b6f2-2beb-786e-78455af2de8f"
+        }
+      },
+      {
+        "id": 73132,
+        "language": {
+          "id": 9,
+          "name": "Spanish (Spain)",
+          "native_name": "Español (España)",
+          "locale": "es-ES",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "62657819-b6f2-2beb-786e-78455af2de8f"
+        }
+      },
+      {
+        "id": 73133,
+        "language": {
+          "id": 1,
+          "name": "Arabic",
+          "native_name": "العربية",
+          "locale": "ar",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e0963ddc-1e01-32e2-a959-d5ccda50410c"
+        }
+      },
+      {
+        "id": 73134,
+        "language": {
+          "id": 1,
+          "name": "Arabic",
+          "native_name": "العربية",
+          "locale": "ar",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e0963ddc-1e01-32e2-a959-d5ccda50410c"
+        }
+      },
+      {
+        "id": 73121,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 73122,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 73123,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 73124,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 73126,
+        "language": {
+          "id": 15,
+          "name": "Italian",
+          "native_name": "Italiano",
+          "locale": "it-IT",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "52074797-ab02-c337-a805-a3e9969fc0eb"
+        }
+      },
+      {
+        "id": 73127,
+        "language": {
+          "id": 15,
+          "name": "Italian",
+          "native_name": "Italiano",
+          "locale": "it-IT",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "52074797-ab02-c337-a805-a3e9969fc0eb"
+        }
+      },
+      {
+        "id": 73125,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 73142,
+        "language": {
+          "id": 17,
+          "name": "Korean",
+          "native_name": "한국어",
+          "locale": "ko-KR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "9ba648bf-f5fa-fa3c-3c6a-2fc7e1510cd6"
+        }
+      },
+      {
+        "id": 73144,
+        "language": {
+          "id": 19,
+          "name": "Polish",
+          "native_name": "Polski",
+          "locale": "pl-PL",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "19ec0e97-56cc-dc50-54fa-e2dd3989ba11"
+        }
+      },
+      {
+        "id": 809056,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      }
+    ],
+    "game_type": 2
+  }
+]

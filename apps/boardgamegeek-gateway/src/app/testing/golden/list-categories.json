@@ -1,0 +1,345 @@
+{
+  "correlationId": "golden",
+  "categories": [
+    {
+      "externalId": "1001",
+      "name": "Political"
+    },
+    {
+      "externalId": "1002",
+      "name": "Card Game"
+    },
+    {
+      "externalId": "1008",
+      "name": "Nautical"
+    },
+    {
+      "externalId": "1009",
+      "name": "Abstract Strategy"
+    },
+    {
+      "externalId": "1010",
+      "name": "Fantasy"
+    },
+    {
+      "externalId": "1011",
+      "name": "Transportation"
+    },
+    {
+      "externalId": "1013",
+      "name": "Farming"
+    },
+    {
+      "externalId": "1015",
+      "name": "Civilization"
+    },
+    {
+      "externalId": "1016",
+      "name": "Science Fiction"
+    },
+    {
+      "externalId": "1017",
+      "name": "Dice"
+    },
+    {
+      "externalId": "1019",
+      "name": "Wargame"
+    },
+    {
+      "externalId": "1020",
+      "name": "Exploration"
+    },
+    {
+      "externalId": "1021",
+      "name": "Economic"
+    },
+    {
+      "externalId": "1022",
+      "name": "Adventure"
+    },
+    {
+      "externalId": "1023",
+      "name": "Bluffing"
+    },
+    {
+      "externalId": "1024",
+      "name": "Horror"
+    },
+    {
+      "externalId": "1025",
+      "name": "Word Game"
+    },
+    {
+      "externalId": "1026",
+      "name": "Negotiation"
+    },
+    {
+      "externalId": "1027",
+      "name": "Trivia"
+    },
+    {
+      "externalId": "1028",
+      "name": "Puzzle"
+    },
+    {
+      "externalId": "1029",
+      "name": "City Building"
+    },
+    {
+      "externalId": "1030",
+      "name": "Party Game"
+    },
+    {
+      "externalId": "1031",
+      "name": "Racing"
+    },
+    {
+      "externalId": "1032",
+      "name": "Action / Dexterity"
+    },
+    {
+      "externalId": "1033",
+      "name": "Mafia"
+    },
+    {
+      "externalId": "1034",
+      "name": "Trains"
+    },
+    {
+      "externalId": "1035",
+      "name": "Medieval"
+    },
+    {
+      "externalId": "1036",
+      "name": "Prehistoric"
+    },
+    {
+      "externalId": "1037",
+      "name": "Real-time"
+    },
+    {
+      "externalId": "1038",
+      "name": "Sports"
+    },
+    {
+      "externalId": "1039",
+      "name": "Deduction"
+    },
+    {
+      "externalId": "1040",
+      "name": "Murder / Mystery"
+    },
+    {
+      "externalId": "1041",
+      "name": "Children's Game"
+    },
+    {
+      "externalId": "1042",
+      "name": "Expansion for Base-game"
+    },
+    {
+      "externalId": "1044",
+      "name": "Collectible Components"
+    },
+    {
+      "externalId": "1045",
+      "name": "Memory"
+    },
+    {
+      "externalId": "1046",
+      "name": "Fighting"
+    },
+    {
+      "externalId": "1047",
+      "name": "Miniatures"
+    },
+    {
+      "externalId": "1048",
+      "name": "American Civil War"
+    },
+    {
+      "externalId": "1049",
+      "name": "World War II"
+    },
+    {
+      "externalId": "1050",
+      "name": "Ancient"
+    },
+    {
+      "externalId": "1051",
+      "name": "Napoleonic"
+    },
+    {
+      "externalId": "1052",
+      "name": "Arabian"
+    },
+    {
+      "externalId": "1054",
+      "name": "Music"
+    },
+    {
+      "externalId": "1055",
+      "name": "American West"
+    },
+    {
+      "externalId": "1059",
+      "name": "Maze"
+    },
+    {
+      "externalId": "1064",
+      "name": "Movies / TV / Radio theme"
+    },
+    {
+      "externalId": "1065",
+      "name": "World War I"
+    },
+    {
+      "externalId": "1069",
+      "name": "Modern Warfare"
+    },
+    {
+      "externalId": "1070",
+      "name": "Renaissance"
+    },
+    {
+      "externalId": "1072",
+      "name": "Electronic"
+    },
+    {
+      "externalId": "1075",
+      "name": "American Revolutionary War"
+    },
+    {
+      "externalId": "1079",
+      "name": "Humor"
+    },
+    {
+      "externalId": "1081",
+      "name": "Spies / Secret Agents"
+    },
+    {
+      "externalId": "1082",
+      "name": "Mythology"
+    },
+    {
+      "externalId": "1084",
+      "name": "Environmental"
+    },
+    {
+      "externalId": "1086",
+      "name": "Territory Building"
+    },
+    {
+      "externalId": "1088",
+      "name": "Industry / Manufacturing"
+    },
+    {
+      "externalId": "1089",
+      "name": "Animals"
+    },
+    {
+      "externalId": "1090",
+      "name": "Pirates"
+    },
+    {
+      "externalId": "1091",
+      "name": "Korean War"
+    },
+    {
+      "externalId": "1093",
+      "name": "Novel-based"
+    },
+    {
+      "externalId": "1094",
+      "name": "Educational"
+    },
+    {
+      "externalId": "1097",
+      "name": "Travel"
+    },
+    {
+      "externalId": "1098",
+      "name": "Number"
+    },
+    {
+      "externalId": "1101",
+      "name": "Video Game Theme"
+    },
+    {
+      "externalId": "1102",
+      "name": "Civil War"
+    },
+    {
+      "externalId": "1104",
+      "name": "Math"
+    },
+    {
+      "externalId": "1108",
+      "name": "American Indian Wars"
+    },
+    {
+      "externalId": "1109",
+      "name": "Vietnam War"
+    },
+    {
+      "externalId": "1113",
+      "name": "Space Exploration"
+    },
+    {
+      "externalId": "1115",
+      "name": "Religious"
+    },
+    {
+      "externalId": "1116",
+      "name": "Comic Book / Strip"
+    },
+    {
+      "externalId": "1117",
+      "name": "Book"
+    },
+    {
+      "externalId": "1118",
+      "name": "Mature / Adult"
+    },
+    {
+      "externalId": "1119",
+      "name": "Game System"
+    },
+    {
+      "externalId": "1120",
+      "name": "Print & Play"
+    },
+    {
+      "externalId": "2145",
+      "name": "Medical"
+    },
+    {
+      "externalId": "2481",
+      "name": "Zombies"
+    },
+    {
+      "externalId": "2650",
+      "name": "Aviation / Flight"
+    },
+    {
+      "externalId": "2687",
+      "name": "Fan Expansion"
+    },
+    {
+      "externalId": "2710",
+      "name": "Post-Napoleonic"
+    },
+    {
+      "externalId": "2725",
+      "name": "Pike and Shot"
+    },
+    {
+      "externalId": "2726",
+      "name": "Age of Reason"
+    },
+    {
+      "externalId": "3129",
+      "name": "Third-party Expansion"
+    }
+  ]
+}

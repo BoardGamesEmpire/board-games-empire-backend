@@ -1,0 +1,722 @@
+{
+  "correlationId": "golden",
+  "status": "RESULT_STATUS_RESULT",
+  "game": {
+    "externalId": "126163",
+    "title": "Tzolk'in: The Mayan Calendar",
+    "contentType": "CONTENT_TYPE_BASE_GAME",
+    "description": "Tzolkin: The Mayan Calendar presents a new game mechanism: dynamic worker placement. Players representing different Mayan tribes place their workers on giant connected gears, and as the gears rotate they take the workers to different action spots.\n\nDuring a turn, players can either (a) place one or more workers on the lowest visible spot of the gears or (b) pick up one or more workers. When placing workers, they must pay corn, which is used as a currency in the game. When they pick up a worker, they perform certain actions depending on the position of the worker. Actions located \"later\" on the gears are more valuable, so it's wise to let the time work for you – but players cannot skip their turn; if they have all their workers on the gears, they have to pick some up. \n\nThe game ends after one full revolution of the central Tzolkin gear. There are many paths to victory. Pleasing the gods by placing crystal skulls in deep caves or building many temples are just two of those many paths...",
+    "yearPublished": 2012,
+    "thumbnailUrl": "https://cf.geekdo-images.com/kXf7mDyDYuHg6oe8yTUIEA__small/img/or9mAn4ClljY_wO_zvsLJDqs9tU=/fit-in/200x150/filters:strip_icc()/pic4604439.jpg",
+    "imageUrl": "https://cf.geekdo-images.com/kXf7mDyDYuHg6oe8yTUIEA__original/img/f6-Au0KTnNR4nugSu2U-wPNbZCU=/0x0/filters:format(jpeg)/pic4604439.jpg",
+    "sourceUrl": "https://boardgamegeek.com/boardgame/126163",
+    "designers": [
+      {
+        "externalId": "35418",
+        "name": "Simone Luciani"
+      },
+      {
+        "externalId": "59986",
+        "name": "Daniele Tascini"
+      }
+    ],
+    "artists": [
+      {
+        "externalId": "11961",
+        "name": "Milan Vavroň"
+      }
+    ],
+    "publishers": [
+      {
+        "externalId": "7345",
+        "name": "Czech Games Edition (CGE)"
+      },
+      {
+        "externalId": "10768",
+        "name": "Cranio Creations"
+      },
+      {
+        "externalId": "2366",
+        "name": "Devir"
+      },
+      {
+        "externalId": "23205",
+        "name": "DiceTree Games"
+      },
+      {
+        "externalId": "36981",
+        "name": "Feelindigo"
+      },
+      {
+        "externalId": "29194",
+        "name": "GaGa Games"
+      },
+      {
+        "externalId": "2862",
+        "name": "The Game Master BV"
+      },
+      {
+        "externalId": "264",
+        "name": "Heidelberger Spieleverlag"
+      },
+      {
+        "externalId": "1391",
+        "name": "Hobby Japan"
+      },
+      {
+        "externalId": "8923",
+        "name": "IELLO"
+      },
+      {
+        "externalId": "25203",
+        "name": "Lex Games"
+      },
+      {
+        "externalId": "7992",
+        "name": "MINDOK"
+      },
+      {
+        "externalId": "22973",
+        "name": "More Fun Co., Ltd."
+      },
+      {
+        "externalId": "30552",
+        "name": "One Moment Games"
+      },
+      {
+        "externalId": "7466",
+        "name": "Rebel Sp. z o.o."
+      },
+      {
+        "externalId": "3",
+        "name": "Rio Grande Games"
+      },
+      {
+        "externalId": "25973",
+        "name": "Zacatrus"
+      }
+    ],
+    "mechanics": [
+      {
+        "externalId": "2957",
+        "name": "Bias"
+      },
+      {
+        "externalId": "2875",
+        "name": "End Game Bonuses"
+      },
+      {
+        "externalId": "2846",
+        "name": "Once-Per-Game Abilities"
+      },
+      {
+        "externalId": "2939",
+        "name": "Track Movement"
+      },
+      {
+        "externalId": "2829",
+        "name": "Turn Order: Claim Action"
+      },
+      {
+        "externalId": "2082",
+        "name": "Worker Placement"
+      }
+    ],
+    "categories": [
+      {
+        "externalId": "1050",
+        "name": "Ancient"
+      },
+      {
+        "externalId": "1015",
+        "name": "Civilization"
+      },
+      {
+        "externalId": "1021",
+        "name": "Economic"
+      },
+      {
+        "externalId": "1013",
+        "name": "Farming"
+      },
+      {
+        "externalId": "1082",
+        "name": "Mythology"
+      }
+    ],
+    "families": [
+      {
+        "externalId": "73184",
+        "name": "Calendars",
+        "familyType": "Components"
+      },
+      {
+        "externalId": "61274",
+        "name": "Gears",
+        "familyType": "Components"
+      },
+      {
+        "externalId": "12803",
+        "name": "Guatemala",
+        "familyType": "Country"
+      },
+      {
+        "externalId": "10642",
+        "name": "Mexico",
+        "familyType": "Country"
+      },
+      {
+        "externalId": "70360",
+        "name": "Board Game Arena",
+        "familyType": "Digital Implementations"
+      },
+      {
+        "externalId": "70361",
+        "name": "Boiteajeux",
+        "familyType": "Digital Implementations"
+      },
+      {
+        "externalId": "60542",
+        "name": "Tzolk'in – The Mayan Calendar",
+        "familyType": "Game"
+      },
+      {
+        "externalId": "113768",
+        "name": "Games with expansions that change player count",
+        "familyType": "Players"
+      },
+      {
+        "externalId": "111632",
+        "name": "T games (Daniele Tascini)",
+        "familyType": "Series"
+      },
+      {
+        "externalId": "62428",
+        "name": "Mayans",
+        "familyType": "Theme"
+      },
+      {
+        "externalId": "43639",
+        "name": "Native Americans / First Peoples",
+        "familyType": "Theme"
+      },
+      {
+        "externalId": "18319",
+        "name": "Tropical",
+        "familyType": "Theme"
+      }
+    ],
+    "averageRating": 7.84173,
+    "bayesRating": 7.67728,
+    "ratingsCount": 43019,
+    "minPlayers": 2,
+    "maxPlayers": 4,
+    "minPlaytime": 90,
+    "maxPlaytime": 90,
+    "minAge": 13,
+    "complexityWeight": 3663,
+    "platforms": [
+      {
+        "externalId": "bgg-tabletop",
+        "name": "Tabletop",
+        "abbreviation": "TT",
+        "platformType": "PLATFORM_TYPE_TABLETOP"
+      }
+    ],
+    "releases": [
+      {
+        "externalId": "250967",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "CGE-only English edition 2014",
+        "releaseYear": 2014,
+        "releaseDate": "2014-01-01",
+        "languages": [
+          {
+            "iso6393": "eng",
+            "iso6391": "en",
+            "name": "English"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "408947",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Chinese edition",
+        "releaseYear": 2017,
+        "releaseDate": "2017-01-01",
+        "languages": [
+          {
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "261341",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Czech edition",
+        "releaseYear": 2012,
+        "releaseDate": "2012-01-01",
+        "languages": [
+          {
+            "iso6393": "ces",
+            "iso6391": "cs",
+            "name": "Czech"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "192836",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Dutch edition",
+        "releaseYear": 2013,
+        "releaseDate": "2013-01-01",
+        "languages": [
+          {
+            "iso6393": "nld",
+            "iso6391": "nl",
+            "name": "Dutch"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "513820",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Dutch edition with award nomination logos",
+        "releaseYear": 2013,
+        "releaseDate": "2013-01-01",
+        "languages": [
+          {
+            "iso6393": "nld",
+            "iso6391": "nl",
+            "name": "Dutch"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "183846",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "French edition",
+        "releaseYear": 2012,
+        "releaseDate": "2012-01-01",
+        "languages": [
+          {
+            "iso6393": "fra",
+            "iso6391": "fr",
+            "name": "French"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "182429",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "German first edition",
+        "releaseYear": 2012,
+        "releaseDate": "2012-01-01",
+        "languages": [
+          {
+            "iso6393": "deu",
+            "iso6391": "de",
+            "name": "German"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "390004",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "German second edition",
+        "releaseYear": 2013,
+        "releaseDate": "2013-01-01",
+        "languages": [
+          {
+            "iso6393": "deu",
+            "iso6391": "de",
+            "name": "German"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "560716",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "German third edition",
+        "releaseYear": 2018,
+        "releaseDate": "2018-01-01",
+        "languages": [
+          {
+            "iso6393": "deu",
+            "iso6391": "de",
+            "name": "German"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "185724",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Italian first edition",
+        "releaseYear": 2012,
+        "releaseDate": "2012-01-01",
+        "languages": [
+          {
+            "iso6393": "ita",
+            "iso6391": "it",
+            "name": "Italian"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "569405",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Italian second edition",
+        "releaseYear": 2021,
+        "releaseDate": "2021-01-01",
+        "languages": [
+          {
+            "iso6393": "ita",
+            "iso6391": "it",
+            "name": "Italian"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "251272",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Japanese edition",
+        "releaseYear": 2014,
+        "releaseDate": "2014-01-01",
+        "languages": [
+          {
+            "iso6393": "jpn",
+            "iso6391": "ja",
+            "name": "Japanese"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "380904",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Korean edition",
+        "releaseYear": 2017,
+        "releaseDate": "2017-01-01",
+        "languages": [
+          {
+            "iso6393": "kor",
+            "iso6391": "ko",
+            "name": "Korean"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "183538",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Polish edition 2012",
+        "releaseYear": 2012,
+        "releaseDate": "2012-01-01",
+        "languages": [
+          {
+            "iso6393": "pol",
+            "iso6391": "pl",
+            "name": "Polish"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "747035",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Polish edition 2021",
+        "releaseYear": 2021,
+        "releaseDate": "2021-01-01",
+        "languages": [
+          {
+            "iso6393": "pol",
+            "iso6391": "pl",
+            "name": "Polish"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "393676",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Portuguese/Spanish edition",
+        "releaseYear": 2018,
+        "releaseDate": "2018-01-01",
+        "languages": [
+          {
+            "iso6393": "por",
+            "iso6391": "pt",
+            "name": "Portuguese"
+          },
+          {
+            "iso6393": "spa",
+            "iso6391": "es",
+            "name": "Spanish"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "168683",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Rio Grande/CGE English edition 2012",
+        "releaseYear": 2012,
+        "releaseDate": "2012-01-01",
+        "languages": [
+          {
+            "iso6393": "eng",
+            "iso6391": "en",
+            "name": "English"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "511473",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Rio Grande/CGE English edition 2014",
+        "releaseYear": 2014,
+        "releaseDate": "2014-01-01",
+        "languages": [
+          {
+            "iso6393": "eng",
+            "iso6391": "en",
+            "name": "English"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "209563",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Romanian edition",
+        "releaseYear": 2013,
+        "releaseDate": "2013-01-01",
+        "languages": [
+          {
+            "iso6393": "ron",
+            "iso6391": "ro",
+            "name": "Romanian"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "340167",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Russian edition",
+        "releaseYear": 2016,
+        "releaseDate": "2016-01-01",
+        "languages": [
+          {
+            "iso6393": "rus",
+            "iso6391": "ru",
+            "name": "Russian"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "605838",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Simplified Chinese edition",
+        "releaseYear": 2021,
+        "releaseDate": "2021-01-01",
+        "languages": [
+          {
+            "iso6393": "zho",
+            "iso6391": "zh",
+            "name": "Chinese"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "245254",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Spanish first edition",
+        "releaseYear": 2014,
+        "releaseDate": "2014-01-01",
+        "languages": [
+          {
+            "iso6393": "spa",
+            "iso6391": "es",
+            "name": "Spanish"
+          }
+        ],
+        "localizations": []
+      },
+      {
+        "externalId": "666890",
+        "platform": {
+          "externalId": "bgg-tabletop",
+          "name": "Tabletop",
+          "abbreviation": "TT",
+          "platformType": "PLATFORM_TYPE_TABLETOP"
+        },
+        "status": "RELEASE_STATUS_RELEASED",
+        "editionName": "Ukrainian edition",
+        "releaseYear": 2023,
+        "releaseDate": "2023-01-01",
+        "languages": [
+          {
+            "iso6393": "ukr",
+            "iso6391": "uk",
+            "name": "Ukrainian"
+          }
+        ],
+        "localizations": []
+      }
+    ],
+    "themes": [],
+    "ageRatings": [],
+    "metadataKeys": [],
+    "metadataValues": [],
+    "dlc": []
+  }
+}

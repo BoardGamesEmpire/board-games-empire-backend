@@ -1,0 +1,47 @@
+{
+  "correlationId": "golden",
+  "capabilities": [
+    "CAPABILITY_SEARCH",
+    "CAPABILITY_FETCH",
+    "CAPABILITY_FETCH_EXPANSIONS",
+    "CAPABILITY_LIST_LANGUAGES",
+    "CAPABILITY_LIST_PLATFORMS",
+    "CAPABILITY_LIST_CATEGORIES"
+  ],
+  "coverage": {
+    "platformTypes": [
+      "PLATFORM_TYPE_CONSOLE",
+      "PLATFORM_TYPE_ARCADE",
+      "PLATFORM_TYPE_OTHER",
+      "PLATFORM_TYPE_PC",
+      "PLATFORM_TYPE_PORTABLE",
+      "PLATFORM_TYPE_MOBILE"
+    ],
+    "contentTypes": [
+      "CONTENT_TYPE_BASE_GAME",
+      "CONTENT_TYPE_DLC",
+      "CONTENT_TYPE_EXPANSION",
+      "CONTENT_TYPE_BUNDLE",
+      "CONTENT_TYPE_STANDALONE_EXPANSION",
+      "CONTENT_TYPE_MOD",
+      "CONTENT_TYPE_REMAKE",
+      "CONTENT_TYPE_REMASTER",
+      "CONTENT_TYPE_EXPANDED_EDITION",
+      "CONTENT_TYPE_PORT"
+    ]
+  },
+  "filterableAxes": [
+    "SEARCH_FILTER_AXIS_PLATFORM_TYPE",
+    "SEARCH_FILTER_AXIS_CONTENT_TYPE",
+    "SEARCH_FILTER_AXIS_PUBLISH_YEAR"
+  ],
+  "languageCodeFormats": {
+    "acceptedRequestFormats": [
+      "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "LANGUAGE_CODE_FORMAT_ISO_639_1"
+    ],
+    "responseFormat": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+    "passthroughSearchLanguage": false
+  },
+  "contentFormat": "CONTENT_FORMAT_PLAIN_TEXT"
+}

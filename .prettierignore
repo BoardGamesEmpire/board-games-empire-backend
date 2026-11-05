@@ -19,3 +19,12 @@
 /libs/proto/gateway/src/gen
 /libs/common/i18n-core/src/lib/generated
 /libs/database/src/lib/generated
+
+# Recorded upstream answers and the golden outputs held to them (#1082). The
+# specs that record them write these files, never a person, and prettier would
+# re-lay-out IGDB's compact JSON and every golden's arrays, so each re-record
+# would fail `nx format:check --all` until someone reformatted it.
+**/src/testing/fixtures
+**/src/testing/golden
+**/src/app/testing/fixtures
+**/src/app/testing/golden

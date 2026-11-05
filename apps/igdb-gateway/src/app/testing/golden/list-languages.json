@@ -1,0 +1,256 @@
+{
+  "correlationId": "golden",
+  "languages": [
+    {
+      "value": "ar",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "ar",
+      "iso6393": "ara",
+      "iso6391": "ar",
+      "name": "Arabic",
+      "nativeName": "العربية"
+    },
+    {
+      "value": "zh-Hans",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "zh-Hans",
+      "iso6393": "zho",
+      "iso6391": "zh",
+      "name": "Chinese (Simplified)",
+      "nativeName": "简体中文"
+    },
+    {
+      "value": "zh-Hant",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "zh-Hant",
+      "iso6393": "zho",
+      "iso6391": "zh",
+      "name": "Chinese (Traditional)",
+      "nativeName": "繁體中文"
+    },
+    {
+      "value": "cs",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "cs",
+      "iso6393": "ces",
+      "iso6391": "cs",
+      "name": "Czech",
+      "nativeName": "čeština"
+    },
+    {
+      "value": "da",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "da",
+      "iso6393": "dan",
+      "iso6391": "da",
+      "name": "Danish",
+      "nativeName": "Dansk"
+    },
+    {
+      "value": "nl",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "nl",
+      "iso6393": "nld",
+      "iso6391": "nl",
+      "name": "Dutch",
+      "nativeName": "Nederlands"
+    },
+    {
+      "value": "en-US",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "en-US",
+      "iso6393": "eng",
+      "iso6391": "en",
+      "name": "English (US)",
+      "nativeName": "English (US)"
+    },
+    {
+      "value": "en-GB",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "en-GB",
+      "iso6393": "eng",
+      "iso6391": "en",
+      "name": "English (UK)",
+      "nativeName": "English (UK)"
+    },
+    {
+      "value": "es-ES",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "es-ES",
+      "iso6393": "spa",
+      "iso6391": "es",
+      "name": "Spanish (Spain)",
+      "nativeName": "Español (España)"
+    },
+    {
+      "value": "es-MX",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "es-MX",
+      "iso6393": "spa",
+      "iso6391": "es",
+      "name": "Spanish (Mexico)",
+      "nativeName": "Español (Mexico)"
+    },
+    {
+      "value": "fi",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "fi",
+      "iso6393": "fin",
+      "iso6391": "fi",
+      "name": "Finnish",
+      "nativeName": "Suomi"
+    },
+    {
+      "value": "fr",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "fr",
+      "iso6393": "fra",
+      "iso6391": "fr",
+      "name": "French",
+      "nativeName": "Français"
+    },
+    {
+      "value": "he",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "he",
+      "iso6393": "heb",
+      "iso6391": "he",
+      "name": "Hebrew",
+      "nativeName": "עברית"
+    },
+    {
+      "value": "hu",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "hu",
+      "iso6393": "hun",
+      "iso6391": "hu",
+      "name": "Hungarian",
+      "nativeName": "Magyar"
+    },
+    {
+      "value": "it",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "it",
+      "iso6393": "ita",
+      "iso6391": "it",
+      "name": "Italian",
+      "nativeName": "Italiano"
+    },
+    {
+      "value": "ja",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "ja",
+      "iso6393": "jpn",
+      "iso6391": "ja",
+      "name": "Japanese",
+      "nativeName": "日本語"
+    },
+    {
+      "value": "ko",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "ko",
+      "iso6393": "kor",
+      "iso6391": "ko",
+      "name": "Korean",
+      "nativeName": "한국어"
+    },
+    {
+      "value": "nb",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "nb",
+      "iso6393": "nor",
+      "name": "Norwegian",
+      "nativeName": "Norsk"
+    },
+    {
+      "value": "pl",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "pl",
+      "iso6393": "pol",
+      "iso6391": "pl",
+      "name": "Polish",
+      "nativeName": "Polski"
+    },
+    {
+      "value": "pt-PT",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "pt-PT",
+      "iso6393": "por",
+      "iso6391": "pt",
+      "name": "Portuguese (Portugal)",
+      "nativeName": "Português (Portugal)"
+    },
+    {
+      "value": "pt-BR",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "pt-BR",
+      "iso6393": "por",
+      "iso6391": "pt",
+      "name": "Portuguese (Brazil)",
+      "nativeName": "Português (Brasil)"
+    },
+    {
+      "value": "ru",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "ru",
+      "iso6393": "rus",
+      "iso6391": "ru",
+      "name": "Russian",
+      "nativeName": "Русский"
+    },
+    {
+      "value": "sv",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "sv",
+      "iso6393": "swe",
+      "iso6391": "sv",
+      "name": "Swedish",
+      "nativeName": "Svenska"
+    },
+    {
+      "value": "tr",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "tr",
+      "iso6393": "tur",
+      "iso6391": "tr",
+      "name": "Turkish",
+      "nativeName": "Türkçe"
+    },
+    {
+      "value": "th",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "th",
+      "iso6393": "tha",
+      "iso6391": "th",
+      "name": "Thai",
+      "nativeName": "ไทย"
+    },
+    {
+      "value": "vi",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "vi",
+      "iso6393": "vie",
+      "iso6391": "vi",
+      "name": "Vietnamese",
+      "nativeName": "Tiếng Việt"
+    },
+    {
+      "value": "de",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "de",
+      "iso6393": "deu",
+      "iso6391": "de",
+      "name": "German",
+      "nativeName": "Deutsch"
+    },
+    {
+      "value": "uk",
+      "format": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
+      "ietfTag": "uk",
+      "iso6393": "ukr",
+      "iso6391": "uk",
+      "name": "Ukrainian",
+      "nativeName": "українська"
+    }
+  ]
+}

@@ -1,0 +1,1231 @@
+{
+  "correlationId": "golden",
+  "platforms": [
+    {
+      "externalId": "3",
+      "name": "Linux",
+      "abbreviation": "Linux",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "4",
+      "name": "Nintendo 64",
+      "abbreviation": "N64",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "5",
+      "name": "Wii",
+      "abbreviation": "Wii",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "6",
+      "name": "PC (Microsoft Windows)",
+      "abbreviation": "PC",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "7",
+      "name": "PlayStation",
+      "abbreviation": "PS1",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "8",
+      "name": "PlayStation 2",
+      "abbreviation": "PS2",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "9",
+      "name": "PlayStation 3",
+      "abbreviation": "PS3",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "11",
+      "name": "Xbox",
+      "abbreviation": "XBOX",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "12",
+      "name": "Xbox 360",
+      "abbreviation": "X360",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "13",
+      "name": "DOS",
+      "abbreviation": "DOS",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "14",
+      "name": "Mac",
+      "abbreviation": "Mac",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "15",
+      "name": "Commodore C64/128/MAX",
+      "abbreviation": "C64",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "16",
+      "name": "Amiga",
+      "abbreviation": "Amiga",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "18",
+      "name": "Nintendo Entertainment System",
+      "abbreviation": "NES",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "19",
+      "name": "Super Nintendo Entertainment System",
+      "abbreviation": "SNES",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "20",
+      "name": "Nintendo DS",
+      "abbreviation": "NDS",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "21",
+      "name": "Nintendo GameCube",
+      "abbreviation": "NGC",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "22",
+      "name": "Game Boy Color",
+      "abbreviation": "GBC",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "23",
+      "name": "Dreamcast",
+      "abbreviation": "DC",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "24",
+      "name": "Game Boy Advance",
+      "abbreviation": "GBA",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "25",
+      "name": "Amstrad CPC",
+      "abbreviation": "ACPC",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "26",
+      "name": "ZX Spectrum",
+      "abbreviation": "ZXS",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "27",
+      "name": "MSX",
+      "abbreviation": "MSX",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "29",
+      "name": "Sega Mega Drive/Genesis",
+      "abbreviation": "Genesis/MegaDrive",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "30",
+      "name": "Sega 32X",
+      "abbreviation": "Sega32",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "32",
+      "name": "Sega Saturn",
+      "abbreviation": "Saturn",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "33",
+      "name": "Game Boy",
+      "abbreviation": "Game Boy",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "34",
+      "name": "Android",
+      "abbreviation": "Android",
+      "platformType": "PLATFORM_TYPE_MOBILE"
+    },
+    {
+      "externalId": "35",
+      "name": "Sega Game Gear",
+      "abbreviation": "Game Gear",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "37",
+      "name": "Nintendo 3DS",
+      "abbreviation": "3DS",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "38",
+      "name": "PlayStation Portable",
+      "abbreviation": "PSP",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "39",
+      "name": "iOS",
+      "abbreviation": "iOS",
+      "platformType": "PLATFORM_TYPE_MOBILE"
+    },
+    {
+      "externalId": "41",
+      "name": "Wii U",
+      "abbreviation": "WiiU",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "42",
+      "name": "N-Gage",
+      "abbreviation": "NGage",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "44",
+      "name": "Tapwave Zodiac",
+      "abbreviation": "zod",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "46",
+      "name": "PlayStation Vita",
+      "abbreviation": "Vita",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "47",
+      "name": "Virtual Console",
+      "abbreviation": "VC",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "48",
+      "name": "PlayStation 4",
+      "abbreviation": "PS4",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "49",
+      "name": "Xbox One",
+      "abbreviation": "XONE",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "50",
+      "name": "3DO Interactive Multiplayer",
+      "abbreviation": "3DO",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "51",
+      "name": "Family Computer Disk System",
+      "abbreviation": "fds",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "52",
+      "name": "Arcade",
+      "abbreviation": "Arcade",
+      "platformType": "PLATFORM_TYPE_ARCADE"
+    },
+    {
+      "externalId": "53",
+      "name": "MSX2",
+      "abbreviation": "MSX2",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "55",
+      "name": "Legacy Mobile Device",
+      "abbreviation": "Mobile",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "57",
+      "name": "WonderSwan",
+      "abbreviation": "WonderSwan",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "58",
+      "name": "Super Famicom",
+      "abbreviation": "SFAM",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "59",
+      "name": "Atari 2600",
+      "abbreviation": "Atari2600",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "60",
+      "name": "Atari 7800",
+      "abbreviation": "Atari7800",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "61",
+      "name": "Atari Lynx",
+      "abbreviation": "Lynx",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "62",
+      "name": "Atari Jaguar",
+      "abbreviation": "Jaguar",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "63",
+      "name": "Atari ST/STE",
+      "abbreviation": "Atari-ST",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "64",
+      "name": "Sega Master System/Mark III",
+      "abbreviation": "SMS",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "65",
+      "name": "Atari 8-bit",
+      "abbreviation": "Atari8bit",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "66",
+      "name": "Atari 5200",
+      "abbreviation": "Atari5200",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "67",
+      "name": "Intellivision",
+      "abbreviation": "intellivision",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "68",
+      "name": "ColecoVision",
+      "abbreviation": "colecovision",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "69",
+      "name": "BBC Microcomputer System",
+      "abbreviation": "bbcmicro",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "70",
+      "name": "Vectrex",
+      "abbreviation": "vectrex",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "71",
+      "name": "Commodore VIC-20",
+      "abbreviation": "vic-20",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "72",
+      "name": "Ouya",
+      "abbreviation": "Ouya",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "73",
+      "name": "BlackBerry OS",
+      "abbreviation": "blackberry",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "74",
+      "name": "Windows Phone",
+      "abbreviation": "Win Phone",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "75",
+      "name": "Apple II",
+      "abbreviation": "Apple][",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "77",
+      "name": "Sharp X1",
+      "abbreviation": "x1",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "78",
+      "name": "Sega CD",
+      "abbreviation": "Sega CD",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "79",
+      "name": "Neo Geo MVS",
+      "abbreviation": "neogeomvs",
+      "platformType": "PLATFORM_TYPE_ARCADE"
+    },
+    {
+      "externalId": "80",
+      "name": "Neo Geo AES",
+      "abbreviation": "neogeoaes",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "82",
+      "name": "Web browser",
+      "abbreviation": "browser",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "84",
+      "name": "SG-1000",
+      "abbreviation": "sg1000",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "85",
+      "name": "Donner Model 30",
+      "abbreviation": "donner30",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "86",
+      "name": "TurboGrafx-16/PC Engine",
+      "abbreviation": "turbografx16",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "87",
+      "name": "Virtual Boy",
+      "abbreviation": "virtualboy",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "88",
+      "name": "Odyssey",
+      "abbreviation": "odyssey",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "89",
+      "name": "Microvision",
+      "abbreviation": "microvision",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "90",
+      "name": "Commodore PET",
+      "abbreviation": "cpet",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "91",
+      "name": "Bally Astrocade",
+      "abbreviation": "astrocade",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "93",
+      "name": "Commodore 16",
+      "abbreviation": "C16",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "94",
+      "name": "Commodore Plus/4",
+      "abbreviation": "C+4",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "95",
+      "name": "PDP-1",
+      "abbreviation": "pdp1",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "96",
+      "name": "PDP-10",
+      "abbreviation": "pdp10",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "97",
+      "name": "PDP-8",
+      "abbreviation": "pdp-8",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "98",
+      "name": "DEC GT40",
+      "abbreviation": "gt40",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "99",
+      "name": "Family Computer",
+      "abbreviation": "famicom",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "100",
+      "name": "Analogue electronics",
+      "abbreviation": "analogueelectronics",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "101",
+      "name": "Ferranti Nimrod Computer",
+      "abbreviation": "nimrod",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "102",
+      "name": "EDSAC",
+      "abbreviation": "edsac",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "103",
+      "name": "PDP-7",
+      "abbreviation": "pdp-7",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "104",
+      "name": "HP 2100",
+      "abbreviation": "hp2100",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "105",
+      "name": "HP 3000",
+      "abbreviation": "hp3000",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "106",
+      "name": "SDS Sigma 7",
+      "abbreviation": "sdssigma7",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "107",
+      "name": "Call-A-Computer time-shared mainframe computer system",
+      "abbreviation": "call-a-computer",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "108",
+      "name": "PDP-11",
+      "abbreviation": "pdp11",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "109",
+      "name": "CDC Cyber 70",
+      "abbreviation": "cdccyber70",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "110",
+      "name": "PLATO",
+      "abbreviation": "plato",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "111",
+      "name": "Imlac PDS-1",
+      "abbreviation": "imlac-pds1",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "112",
+      "name": "Microcomputer",
+      "abbreviation": "microcomputer",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "113",
+      "name": "OnLive Game System",
+      "abbreviation": "OnLive",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "114",
+      "name": "Amiga CD32",
+      "abbreviation": "Amiga CD32",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "115",
+      "name": "Apple IIGS",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "116",
+      "name": "Acorn Archimedes",
+      "abbreviation": "Acorn Archimedes",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "117",
+      "name": "Philips CD-i",
+      "abbreviation": "Philips CDI",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "118",
+      "name": "FM Towns",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "119",
+      "name": "Neo Geo Pocket",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "120",
+      "name": "Neo Geo Pocket Color",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "121",
+      "name": "Sharp X68000",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "122",
+      "name": "Nuon",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "123",
+      "name": "WonderSwan Color",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "124",
+      "name": "SwanCrystal",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "125",
+      "name": "PC-8800 Series",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "126",
+      "name": "TRS-80",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "127",
+      "name": "Fairchild Channel F",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "128",
+      "name": "PC Engine SuperGrafx",
+      "abbreviation": "supergrafx",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "129",
+      "name": "Texas Instruments TI-99",
+      "abbreviation": "ti-99",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "130",
+      "name": "Nintendo Switch",
+      "abbreviation": "Switch",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "131",
+      "name": "Super NES CD-ROM System",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "132",
+      "name": "Amazon Fire TV",
+      "abbreviation": "FireTV",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "133",
+      "name": "Odyssey 2 / Videopac G7000",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "134",
+      "name": "Acorn Electron",
+      "abbreviation": "Acorn Electron",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "135",
+      "name": "Hyper Neo Geo 64",
+      "platformType": "PLATFORM_TYPE_ARCADE"
+    },
+    {
+      "externalId": "136",
+      "name": "Neo Geo CD",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "137",
+      "name": "New Nintendo 3DS",
+      "abbreviation": "New 3DS",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "138",
+      "name": "VC 4000",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "139",
+      "name": "1292 Advanced Programmable Video System",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "140",
+      "name": "AY-3-8500",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "141",
+      "name": "AY-3-8610",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "142",
+      "name": "PC-50X Family",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "143",
+      "name": "AY-3-8760",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "144",
+      "name": "AY-3-8710",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "145",
+      "name": "AY-3-8603",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "146",
+      "name": "AY-3-8605",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "147",
+      "name": "AY-3-8606",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "148",
+      "name": "AY-3-8607",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "149",
+      "name": "PC-9800 Series",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "150",
+      "name": "Turbografx-16/PC Engine CD",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "151",
+      "name": "TRS-80 Color Computer",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "152",
+      "name": "FM-7",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "153",
+      "name": "Dragon 32/64",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "154",
+      "name": "Amstrad PCW",
+      "abbreviation": "APCW",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "155",
+      "name": "Tatung Einstein",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "156",
+      "name": "Thomson MO5",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "157",
+      "name": "NEC PC-6000 Series",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "158",
+      "name": "Commodore CDTV",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "159",
+      "name": "Nintendo DSi",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "161",
+      "name": "Windows Mixed Reality",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "162",
+      "name": "Oculus VR",
+      "abbreviation": "Oculus VR",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "163",
+      "name": "SteamVR",
+      "abbreviation": "Steam VR",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "164",
+      "name": "Daydream",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "165",
+      "name": "PlayStation VR",
+      "abbreviation": "PSVR",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "166",
+      "name": "Pokémon mini",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "167",
+      "name": "PlayStation 5",
+      "abbreviation": "PS5",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "169",
+      "name": "Xbox Series X|S",
+      "abbreviation": "Series X|S",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "170",
+      "name": "Google Stadia",
+      "abbreviation": "Stadia",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "203",
+      "name": "DUPLICATE Stadia",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "236",
+      "name": "Exidy Sorcerer",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "237",
+      "name": "Sol-20",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "238",
+      "name": "DVD Player",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "239",
+      "name": "Blu-ray Player",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "240",
+      "name": "Zeebo",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "274",
+      "name": "PC-FX",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "306",
+      "name": "Satellaview",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "307",
+      "name": "Game & Watch",
+      "abbreviation": "G&W",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "308",
+      "name": "Playdia",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "309",
+      "name": "Evercade",
+      "abbreviation": "Evercade",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "339",
+      "name": "Sega Pico",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "372",
+      "name": "OOParts",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "373",
+      "name": "Sinclair ZX81",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "374",
+      "name": "Sharp MZ-2200",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "375",
+      "name": "Epoch Cassette Vision",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "376",
+      "name": "Epoch Super Cassette Vision",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "377",
+      "name": "Plug & Play",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "378",
+      "name": "Gamate",
+      "abbreviation": "Gamate",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "379",
+      "name": "Game.com",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "380",
+      "name": "Casio Loopy",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "381",
+      "name": "Playdate",
+      "abbreviation": "Playdate",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "382",
+      "name": "Intellivision Amico",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "384",
+      "name": "Oculus Quest",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "385",
+      "name": "Oculus Rift",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "386",
+      "name": "Meta Quest 2",
+      "abbreviation": "Meta Quest 2",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "387",
+      "name": "Oculus Go",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "388",
+      "name": "Gear VR",
+      "abbreviation": "Gear VR",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "389",
+      "name": "AirConsole",
+      "platformType": "PLATFORM_TYPE_OTHER"
+    },
+    {
+      "externalId": "390",
+      "name": "PlayStation VR2",
+      "abbreviation": "PSVR2",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "405",
+      "name": "Windows Mobile",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "406",
+      "name": "Sinclair QL",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "407",
+      "name": "HyperScan",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "408",
+      "name": "Mega Duck/Cougar Boy",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "409",
+      "name": "Legacy Computer",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "410",
+      "name": "Atari Jaguar CD",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "411",
+      "name": "Handheld Electronic LCD",
+      "abbreviation": "Handheld",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "412",
+      "name": "Leapster",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "413",
+      "name": "Leapster Explorer/LeadPad Explorer",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "414",
+      "name": "LeapTV",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "415",
+      "name": "Watara/QuickShot Supervision",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "416",
+      "name": "64DD",
+      "abbreviation": "64DD",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "417",
+      "name": "Palm OS",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "438",
+      "name": "Arduboy",
+      "abbreviation": "Arduboy",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "439",
+      "name": "V.Smile",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "440",
+      "name": "Visual Memory Unit / Visual Memory System",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "441",
+      "name": "PocketStation",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "471",
+      "name": "Meta Quest 3",
+      "abbreviation": "Meta Quest 3",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "472",
+      "name": "visionOS",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "473",
+      "name": "Arcadia 2001",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "474",
+      "name": "Gizmondo",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "475",
+      "name": "R-Zone",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "476",
+      "name": "Apple Pippin",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "477",
+      "name": "Panasonic Jungle",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "478",
+      "name": "Panasonic M2",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "479",
+      "name": "Terebikko / See 'n Say Video Phone",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "480",
+      "name": "Super A'Can",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "481",
+      "name": "Tomy Tutor / Pyuta / Grandstand Tutor",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "482",
+      "name": "Sega CD 32X",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "486",
+      "name": "Digiblast",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    },
+    {
+      "externalId": "487",
+      "name": "LaserActive",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "504",
+      "name": "Uzebox",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "505",
+      "name": "Elektor TV Games Computer",
+      "platformType": "PLATFORM_TYPE_PC"
+    },
+    {
+      "externalId": "506",
+      "name": "Amstrad GX4000",
+      "abbreviation": "GX4000",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "507",
+      "name": "Advanced Pico Beena",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "508",
+      "name": "Nintendo Switch 2",
+      "abbreviation": "Switch 2",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "509",
+      "name": "Polymega",
+      "platformType": "PLATFORM_TYPE_CONSOLE"
+    },
+    {
+      "externalId": "510",
+      "name": "e-Reader / Card-e Reader",
+      "platformType": "PLATFORM_TYPE_PORTABLE"
+    }
+  ]
+}
