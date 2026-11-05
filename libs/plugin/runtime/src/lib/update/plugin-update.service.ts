@@ -15,7 +15,7 @@ import {
   type PluginGrant,
   type UserPlugin,
 } from '@bge/database';
-import type { InstalledPluginDirectory } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import {
   PluginManifestValidationError,
   resolveLocalizedString,
@@ -156,7 +156,7 @@ export interface PluginUpdateProvenance {
 
 export interface PluginUpdateStageInput {
   /** The NEW version's resolved directory — placed by #84; this service never opens the plugin artifact itself (#59). */
-  readonly directory: InstalledPluginDirectory;
+  readonly directory: PluginArtifactDirectory;
   readonly provenance: PluginUpdateProvenance;
   /** The staging admin — server-admin authority is verified, never assumed, exactly as install verifies it. */
   readonly initiatorId: string;
@@ -705,7 +705,7 @@ export class PluginUpdateService {
   }
 
   private async validateNextManifest(
-    directory: InstalledPluginDirectory,
+    directory: PluginArtifactDirectory,
     plugin: Plugin,
   ): Promise<PluginManifestValidationResult> {
     let raw: unknown;

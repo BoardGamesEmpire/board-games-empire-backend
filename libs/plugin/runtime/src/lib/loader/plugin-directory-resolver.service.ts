@@ -1,9 +1,9 @@
 import {
   PLUGIN_MANIFEST_FILENAME,
   PLUGIN_PACKAGE_JSON_FILENAME,
-  type InstalledPluginDirectory,
+  type PluginArtifactDirectory,
 } from '@boardgamesempire/plugin-contract';
-import { PLUGIN_SLUG_PATTERN } from '@boardgamesempire/plugin-manifest';
+import { PLUGIN_ARTIFACT_SHA256_PATTERN, PLUGIN_SLUG_PATTERN } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -13,12 +13,14 @@ import { PluginDirectoryLayoutError, PluginDirectoryNotFoundError } from './load
 import { isContained, realpathOrNull } from './path-containment';
 
 /**
- * Maps a `Plugin` row to its on-disk `InstalledPluginDirectory`,
- * `pluginsRoot/<slug>`, populated by the #84 pipeline. There is one root,
- * because no plugin ships inside the server (#696).
+ * Maps a plugin artifact to its on-disk `PluginArtifactDirectory`,
+ * `<pluginsRoot>/<slug>/<sha256>/`, where the install ingress is to place it (planned, #1094). The
+ * loader asks for the artifact a row's `installedSha256` names; a staged
+ * update's files are the directory its `pendingSha256` names. There is one
+ * root, because no plugin ships inside the server (#696).
  *
- * The slug is re-checked against `PLUGIN_SLUG_PATTERN` even though every DB
- * row originated from a validated manifest: the slug becomes a filesystem
+ * The slug and the checksum are re-checked against their patterns even
+ * though both reached the row through validation: each becomes a filesystem
  * path segment here, and a corrupted/hand-edited row must fail loudly
  * rather than traverse (`../../…`) out of the root.
  */
@@ -26,11 +28,18 @@ import { isContained, realpathOrNull } from './path-containment';
 export class PluginDirectoryResolverService {
   constructor(@Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions) {}
 
-  async resolve(slug: string): Promise<InstalledPluginDirectory> {
+  async resolve(slug: string, sha256: string): Promise<PluginArtifactDirectory> {
     if (!PLUGIN_SLUG_PATTERN.test(slug)) {
       throw new PluginDirectoryLayoutError(
         slug,
         `slug fails ${String(PLUGIN_SLUG_PATTERN)} and cannot be a path segment`,
+      );
+    }
+
+    if (!PLUGIN_ARTIFACT_SHA256_PATTERN.test(sha256)) {
+      throw new PluginDirectoryLayoutError(
+        slug,
+        `checksum fails ${String(PLUGIN_ARTIFACT_SHA256_PATTERN)} and cannot be a path segment`,
       );
     }
 
@@ -41,16 +50,18 @@ export class PluginDirectoryResolverService {
       throw new PluginDirectoryLayoutError(slug, `configured plugin root '${configuredRoot}' cannot be resolved`);
     }
 
-    const rootStat = await stat(join(realRoot, slug)).catch(() => null);
+    const artifactPath = join(realRoot, slug, sha256);
+    const rootStat = await stat(artifactPath).catch(() => null);
 
     if (rootStat === null || !rootStat.isDirectory()) {
-      throw new PluginDirectoryNotFoundError(slug, join(realRoot, slug));
+      throw new PluginDirectoryNotFoundError(slug, artifactPath);
     }
 
-    // The plugin directory itself may be a symlink; a link out of the
-    // configured root would otherwise let every subsequent layout check pass
-    // against a host location.
-    const rootDir = await realpathOrNull(join(realRoot, slug));
+    // The slug directory or the artifact directory may be a symlink; a link
+    // out of the configured root would otherwise let every subsequent layout
+    // check pass against a host location. Checking the final realpath covers
+    // a link at either segment.
+    const rootDir = await realpathOrNull(artifactPath);
 
     if (rootDir === null || !isContained(realRoot, rootDir)) {
       throw new PluginDirectoryLayoutError(slug, `directory resolves outside the configured plugin root ${realRoot}`);
@@ -62,7 +73,7 @@ export class PluginDirectoryResolverService {
     await this.assertContainedFile(slug, manifestPath, PLUGIN_MANIFEST_FILENAME, rootDir);
     await this.assertContainedFile(slug, packageJsonPath, PLUGIN_PACKAGE_JSON_FILENAME, rootDir);
 
-    return { slug, rootDir, manifestPath, packageJsonPath };
+    return { slug, sha256, rootDir, manifestPath, packageJsonPath };
   }
 
   /**

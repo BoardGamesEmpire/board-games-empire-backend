@@ -95,7 +95,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
 
   private async loadOne(plugin: Plugin): Promise<void> {
     const manifest = this.validateManifest(plugin);
-    const directory = await this.directories.resolve(plugin.slug);
+    const directory = await this.directories.resolve(plugin.slug, plugin.installedSha256);
     const diskVersion = await this.readDiskVersion(directory.manifestPath);
     const descriptor = await this.readPackageDescriptor(plugin.slug, directory.packageJsonPath);
     const entrypoint = resolvePluginEntrypoint(plugin.slug, descriptor, directory.rootDir);

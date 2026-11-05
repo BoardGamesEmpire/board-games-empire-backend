@@ -15,7 +15,7 @@ import {
   type PluginPermission,
 } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
-import type { InstalledPluginDirectory } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -140,8 +140,9 @@ describe('PluginInstallerService', () => {
   let emitter: { emit: jest.Mock };
   let service: PluginInstallerService;
 
-  const directory = (): InstalledPluginDirectory => ({
+  const directory = (): PluginArtifactDirectory => ({
     slug: 'demo-sink',
+    sha256: 'a'.repeat(64),
     rootDir,
     manifestPath: join(rootDir, 'manifest.json'),
     packageJsonPath: join(rootDir, 'package.json'),

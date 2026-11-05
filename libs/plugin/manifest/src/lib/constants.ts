@@ -13,6 +13,14 @@
 export const PLUGIN_SLUG_PATTERN = /^[a-z][a-z0-9-]{2,63}$/;
 
 /**
+ * A plugin artifact's SHA-256 as the server stores and names it: 64 lowercase
+ * hex characters (#224). It names the artifact's directory,
+ * `<pluginsRoot>/<slug>/<sha256>/`, so nothing else may pass: no traversal,
+ * and no second spelling of the same digest.
+ */
+export const PLUGIN_ARTIFACT_SHA256_PATTERN = /^[0-9a-f]{64}$/;
+
+/**
  * Slugs a plugin may NOT claim : the kebab-cased suffixes of the
  * lifecycle routing keys (`PluginEvent` in `@bge/plugin`). A plugin slugged
  * `installed` would emit under `plugin.installed.*`, making wildcard

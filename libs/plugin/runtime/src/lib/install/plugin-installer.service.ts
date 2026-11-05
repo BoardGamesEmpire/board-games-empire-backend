@@ -10,7 +10,7 @@ import {
   type PluginGrant,
   type PluginPermission,
 } from '@bge/database';
-import type { InstalledPluginDirectory } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import {
   PluginManifestValidationError,
   resolveLocalizedString,
@@ -75,7 +75,7 @@ export interface PluginInstallProvenance {
 
 export interface PluginInstallInput {
   /** Populated by the #84 pipeline — the installer never opens the plugin artifact itself (#59). */
-  readonly directory: InstalledPluginDirectory;
+  readonly directory: PluginArtifactDirectory;
   readonly provenance: PluginInstallProvenance;
   /** The installing admin — server-admin authority is verified, never assumed. */
   readonly installerId: string;
@@ -222,7 +222,7 @@ export class PluginInstallerService {
    * (`PluginGrantService`), install DOES gate on `bgeCompat`: a plugin that
    * cannot load under the running BGE must not be installable.
    */
-  private async validateManifest(directory: InstalledPluginDirectory): Promise<PluginManifestValidationResult> {
+  private async validateManifest(directory: PluginArtifactDirectory): Promise<PluginManifestValidationResult> {
     let raw: unknown;
 
     try {

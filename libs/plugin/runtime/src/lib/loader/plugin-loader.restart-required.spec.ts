@@ -1,7 +1,7 @@
 import { PluginActorScope, SystemActorScope } from '@bge/actor-context';
 import { DatabaseService, PluginCategory, PluginScope, type Plugin } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
-import type { InstalledPluginDirectory, PluginContext } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactDirectory, PluginContext } from '@boardgamesempire/plugin-contract';
 import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -64,7 +64,7 @@ describe('PluginLoaderService — restart-required and tombstones', () => {
       ...overrides,
     }) as Plugin;
 
-  const scaffoldDirectory = async (slug: string, diskVersion: string | null): Promise<InstalledPluginDirectory> => {
+  const scaffoldDirectory = async (slug: string, diskVersion: string | null): Promise<PluginArtifactDirectory> => {
     const rootDir = join(workDir, slug);
     await mkdir(join(rootDir, 'dist'), { recursive: true });
     await writeFile(join(rootDir, 'package.json'), JSON.stringify({ exports: './dist/index.js' }));
@@ -76,6 +76,7 @@ describe('PluginLoaderService — restart-required and tombstones', () => {
 
     return {
       slug,
+      sha256: 'a'.repeat(64),
       rootDir,
       manifestPath: join(rootDir, 'manifest.json'),
       packageJsonPath: join(rootDir, 'package.json'),

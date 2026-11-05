@@ -21,7 +21,7 @@ import {
   readPrismaModels,
   type MockDatabaseService,
 } from '@bge/testing';
-import type { InstalledPluginDirectory } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -179,8 +179,9 @@ describe('PluginUpdateService', () => {
   /** The row the plugin-config lock (D-CN) answers with — defaults to an empty retained config. */
   let setPluginConfigLock: (config: unknown) => void;
 
-  const directory = (): InstalledPluginDirectory => ({
+  const directory = (): PluginArtifactDirectory => ({
     slug: 'demo-sink',
+    sha256: 'b'.repeat(64),
     rootDir,
     manifestPath: join(rootDir, 'manifest.json'),
     packageJsonPath: join(rootDir, 'package.json'),

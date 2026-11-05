@@ -1,7 +1,7 @@
 import { PluginActorScope, SystemActorScope } from '@bge/actor-context';
 import { DatabaseService, PluginCategory, PluginScope, type Plugin } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
-import type { InstalledPluginDirectory, PluginContext } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactDirectory, PluginContext } from '@boardgamesempire/plugin-contract';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { validatePluginManifest } from '@boardgamesempire/plugin-manifest';
@@ -54,6 +54,7 @@ describe('PluginLoaderService', () => {
       category: PluginCategory.FeedbackSink,
       scope: PluginScope.Server,
       enabled: true,
+      installedSha256: 'a'.repeat(64),
       manifestJson: { slug: 'demo-sink' },
       config: { apiKey: 'k' },
       loadFailed: false,
@@ -62,7 +63,7 @@ describe('PluginLoaderService', () => {
     }) as Plugin;
 
   /** Scaffolds a real on-disk plugin dir so descriptor reading + entrypoint resolution run unmocked. */
-  const scaffoldDirectory = async (slug: string): Promise<InstalledPluginDirectory> => {
+  const scaffoldDirectory = async (slug: string): Promise<PluginArtifactDirectory> => {
     const rootDir = join(workDir, slug);
     await mkdir(join(rootDir, 'dist'), { recursive: true });
     await writeFile(join(rootDir, 'package.json'), JSON.stringify({ exports: './dist/index.js' }));
@@ -73,6 +74,7 @@ describe('PluginLoaderService', () => {
 
     return {
       slug,
+      sha256: 'a'.repeat(64),
       rootDir,
       manifestPath: join(rootDir, 'manifest.json'),
       packageJsonPath: join(rootDir, 'package.json'),
@@ -204,16 +206,17 @@ describe('PluginLoaderService', () => {
       expect(registry.resolve(row.slug).instance).toBe(instance);
     });
 
-    it('resolves the plugin directory by slug alone (#696)', async () => {
-      const row = makePluginRow();
+    it('resolves the artifact directory the row installed, by slug and checksum (#224)', async () => {
+      const row = makePluginRow({ installedSha256: 'c'.repeat(64) });
       db.plugin.findMany.mockResolvedValue([row]);
       directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
       importer.importModule.mockResolvedValue({ default: jest.fn().mockReturnValue({}) });
 
       await loader.loadAllEnabled();
 
-      // No plugin ships inside the server, so there is no second root to choose between.
-      expect(directories.resolve).toHaveBeenCalledWith('demo-sink');
+      // A staged update's artifact sits beside the installed one; the row's
+      // installedSha256 is what says which of them is running.
+      expect(directories.resolve).toHaveBeenCalledWith('demo-sink', 'c'.repeat(64));
     });
 
     it('clears stale failure flags when a previously quarantined plugin loads cleanly after re-enable', async () => {
