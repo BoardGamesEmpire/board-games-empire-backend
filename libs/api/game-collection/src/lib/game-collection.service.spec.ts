@@ -177,23 +177,77 @@ describe('GameCollectionService', () => {
       expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     });
 
-    it('applies medium, favorite, and updatedSince filters', async () => {
-      db.gameCollection.findMany.mockResolvedValue([]);
-      const updatedSince = new Date('2026-06-01');
-
-      await service.listOwn(
+    describe('with updatedSince (#1070)', () => {
+      const since = new Date('2026-06-01');
+      const query = () =>
         Object.assign(paginationQuery({ limit: 20 }), {
           medium: GameMedium.Digital,
           favorite: false,
-          updatedSince,
-        }),
-      );
+          updatedSince: since,
+        });
 
-      expect(db.gameCollection.findMany.mock.calls[0][0]?.where).toEqual({
-        AND: [
-          { userId: ME, AND: [COND] },
-          { deletedAt: null, medium: GameMedium.Digital, favorite: false, updatedAt: { gte: updatedSince } },
+      // The catch-up drain resends a row when the entry changed or a value it
+      // embeds did: the platform game, its platform, the game, the game's links
+      // as an expansion, those links' base games, and the release. Written out
+      // rather than built from the code under test, so a dropped arm fails here.
+      const changedSinceShape = {
+        OR: [
+          { updatedAt: { gte: since } },
+          {
+            platformGame: {
+              is: {
+                OR: [
+                  { updatedAt: { gte: since } },
+                  { platform: { is: { updatedAt: { gte: since } } } },
+                  {
+                    game: {
+                      is: {
+                        OR: [
+                          { updatedAt: { gte: since } },
+                          {
+                            expansionEntries: {
+                              some: {
+                                OR: [
+                                  { updatedAt: { gte: since } },
+                                  { baseGame: { is: { updatedAt: { gte: since } } } },
+                                ],
+                              },
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          { release: { is: { updatedAt: { gte: since } } } },
         ],
+      };
+
+      it('applies the medium and favorite filters, and resends a row whose entry or embedded values changed', async () => {
+        db.gameCollection.findMany.mockResolvedValue([]);
+
+        await service.listOwn(query());
+
+        expect(db.gameCollection.findMany.mock.calls[0][0]?.where).toEqual({
+          AND: [
+            { userId: ME, AND: [COND] },
+            { deletedAt: null, medium: GameMedium.Digital, favorite: false, ...changedSinceShape },
+          ],
+        });
+      });
+
+      it('counts over the same changed-since where it reads', async () => {
+        db.gameCollection.findMany.mockResolvedValue([]);
+        db.gameCollection.count.mockResolvedValue(0);
+
+        await service.listOwn(query());
+
+        expect(db.gameCollection.count).toHaveBeenCalledWith({
+          where: db.gameCollection.findMany.mock.calls[0][0]?.where,
+        });
       });
     });
   });

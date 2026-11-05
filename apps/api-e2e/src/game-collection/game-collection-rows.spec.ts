@@ -1,6 +1,7 @@
 import { ContentType, GameMedium, Reach, type Prisma } from '@bge/database';
 import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
+import { setTimeout } from 'node:timers/promises';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
@@ -267,6 +268,107 @@ describe('collection rows (#1070)', () => {
 
       const removed = await request(baseUrl).delete(`${COLLECTIONS_PATH}/${entryId}`).set(owner.headers).expect(200);
       expect(theRow(removed, `DELETE ${COLLECTIONS_PATH}/:id`).game.baseGames).toEqual(expected);
+    });
+  });
+
+  /**
+   * The catch-up drain (#1070): `updatedSince` resends a row when the entry
+   * changed or a value it embeds did, so a client that pulls only changes
+   * still sees a new link or an edited base game.
+   *
+   * `since` is taken after every row is arranged, and the changes are made
+   * after a pause, so each arranged `updatedAt` is strictly before it and each
+   * change at or after it. Prisma stamps `updatedAt` with this machine's clock,
+   * the one `since` is read from.
+   */
+  describe('the catch-up drain', () => {
+    const drainedRows = async (owner: AuthenticatedActor, since: Date) => {
+      const description = `GET ${COLLECTIONS_PATH}?updatedSince as the owner`;
+      const response = await request(baseUrl)
+        .get(COLLECTIONS_PATH)
+        .query({ updatedSince: since.toISOString() })
+        .set(owner.headers)
+        .expect(200);
+
+      return listCollectionsEnvelope(response, description).collections.map((row) => ({
+        id: row.id,
+        baseGames: collectionRowPlatformGame(row, description).game.baseGames,
+      }));
+    };
+
+    const startOfChanges = async () => {
+      const since = new Date(Date.now() + 1);
+      await setTimeout(10);
+
+      return since;
+    };
+
+    it('resends a row when its game gains a link or its base game changes, and not an untouched neighbor (#1070)', async () => {
+      const owner = await actors.user();
+      const linked = await arrangeRow(owner.user.id, { reach: Reach.Private });
+      const linkedBase = await arrangeGame(owner.user.id, Reach.Public, `e2e base ${token()}`);
+      await arrangeLink(linkedBase.id, linked.gameId, false);
+      const unlinked = await arrangeRow(owner.user.id, { reach: Reach.Private });
+      const untouched = await arrangeRow(owner.user.id, { reach: Reach.Private });
+
+      const since = await startOfChanges();
+      await db.client.game.update({ where: { id: linkedBase.id }, data: { title: `e2e renamed base ${token()}` } });
+      const newBase = await arrangeGame(owner.user.id, Reach.Public, `e2e new base ${token()}`);
+      await arrangeLink(newBase.id, unlinked.gameId, true);
+
+      const drained = await drainedRows(owner, since);
+
+      // The untouched row is the control: the drain is not every row.
+      expect(drained.map((row) => row.id).sort()).toEqual([linked.entryId, unlinked.entryId].sort());
+      expect(drained.find((row) => row.id === unlinked.entryId)?.baseGames).toEqual([
+        { gameId: newBase.id, isStandalone: true },
+      ]);
+      expect(drained.map((row) => row.id)).not.toContain(untouched.entryId);
+    });
+
+    // The release is embedded too, and a re-import rewrites it in place.
+    it('resends a row when its release changes, and not an untouched neighbor (#1070)', async () => {
+      const owner = await actors.user();
+      const released = await arrangeRow(owner.user.id, { reach: Reach.Private });
+      const untouched = await arrangeRow(owner.user.id, { reach: Reach.Private });
+      const { platformGameId } = await db.client.gameCollection.findUniqueOrThrow({
+        where: { id: released.entryId },
+        select: { platformGameId: true },
+      });
+      const release = await db.client.gameRelease.create({
+        data: { platformGameId, editionKey: `e2e edition ${token()}`, editionName: 'First edition' },
+        select: { id: true },
+      });
+      await db.client.gameCollection.update({ where: { id: released.entryId }, data: { releaseId: release.id } });
+
+      const since = await startOfChanges();
+      await db.client.gameRelease.update({ where: { id: release.id }, data: { editionName: 'Second edition' } });
+
+      // The untouched row is the control: the drain is not every row.
+      const drained = (await drainedRows(owner, since)).map((row) => row.id);
+      expect(drained).toEqual([released.entryId]);
+      expect(drained).not.toContain(untouched.entryId);
+    });
+
+    // A base game deleted outright takes its link with it (cascade), so no
+    // embedded row is left whose `updatedAt` could be tested, and the client
+    // keeps the stale id until it reloads in full. Games are hard-deleted
+    // (#476); this test pins the gap as recorded on #1070, and a fix there
+    // flips it on purpose.
+    it('resends nothing when a base game is hard-deleted, the gap #476 records (#1070)', async () => {
+      const owner = await actors.user();
+      const row = await arrangeRow(owner.user.id, { reach: Reach.Private });
+      const base = await arrangeGame(owner.user.id, Reach.Public, `e2e base ${token()}`);
+      await arrangeLink(base.id, row.gameId, false);
+
+      const since = await startOfChanges();
+      await db.client.game.delete({ where: { id: base.id } });
+
+      expect(await drainedRows(owner, since)).toEqual([]);
+      // The full read is how a client learns the base game is gone.
+      expect(
+        theRow(await readEntry(owner, row.entryId).expect(200), `GET ${COLLECTIONS_PATH}/:id`).game.baseGames,
+      ).toEqual([]);
     });
   });
 });

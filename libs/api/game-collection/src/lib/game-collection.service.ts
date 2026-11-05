@@ -10,7 +10,12 @@ import { t } from '@bge/i18n';
 import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { COLLECTION_INCLUDE, type GameCollectionRow, type GameCollectionWithRelations } from './collection-row';
+import {
+  changedSince,
+  COLLECTION_INCLUDE,
+  type GameCollectionRow,
+  type GameCollectionWithRelations,
+} from './collection-row';
 import {
   CreateGameCollectionDto,
   GameCollectionDto,
@@ -60,7 +65,7 @@ export class GameCollectionService {
           ...(deletedOnly ? { deletedAt: { not: null } } : includeDeleted ? {} : { deletedAt: null }),
           ...(medium ? { medium } : {}),
           ...(favorite !== undefined ? { favorite } : {}),
-          ...(updatedSince ? { updatedAt: { gte: updatedSince } } : {}),
+          ...(updatedSince ? changedSince(updatedSince) : {}),
         },
       ],
     } satisfies Prisma.GameCollectionWhereInput;

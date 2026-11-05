@@ -46,7 +46,13 @@ export class ListGameCollectionsQueryDto extends GameCollectionPaginationQueryDt
   @ApiPropertyOptional({
     type: String,
     format: 'date-time',
-    description: 'Only entries updated at or after this time — delta-sync support (combine with includeDeleted)',
+    description:
+      'Only entries changed at or after this time, for catching up on changes (combine with includeDeleted). ' +
+      'An entry counts as changed when it did or a value it embeds did: the game, its platform game and ' +
+      "platform, an expansion's links and their base games, and the release. Two changes are not seen: a " +
+      "link deleted outright, as when its base game is deleted, and a change to the viewer's friendships, " +
+      'blocks, shares or household memberships that decides whether they may open a base game. Reload in ' +
+      'full to pick those up.',
   })
   @IsOptional()
   @IsDate({ message: i18nValidationMessage('validation.isDate') })
