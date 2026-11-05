@@ -3,30 +3,21 @@ import { t } from '@bge/i18n';
 import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { COLLECTION_INCLUDE, type GameCollectionWithRelations } from './collection-row';
 import {
   CreateGameCollectionDto,
+  GameCollectionDto,
   ListGameCollectionsQueryDto,
   ListUserGameCollectionsQueryDto,
   RemoveGameCollectionQueryDto,
   UpdateGameCollectionDto,
 } from './dto';
 
-/** Joined summary needed to render a collection list/detail without extra fetches. */
-const COLLECTION_INCLUDE = {
-  platformGame: {
-    select: {
-      id: true,
-      image: true,
-      thumbnail: true,
-      platform: { select: { id: true, name: true, slug: true } },
-      game: { select: { id: true, title: true, subtitle: true, image: true, thumbnail: true } },
-    },
-  },
-  release: { select: { id: true, editionName: true, releaseYear: true } },
-} satisfies Prisma.GameCollectionInclude;
-
-export type GameCollectionWithRelations = Prisma.GameCollectionGetPayload<{ include: typeof COLLECTION_INCLUDE }>;
-
+/**
+ * Each method that returns collection rows is annotated with the DTO the
+ * routes document, and the DTO's nested classes implement the row's types, so
+ * a field missing on either side fails the typecheck (#1070).
+ */
 @Injectable()
 export class GameCollectionService {
   private readonly logger = new Logger(GameCollectionService.name);
@@ -51,7 +42,7 @@ export class GameCollectionService {
    * "my collection" has no meaning without a user, and the refusal must never
    * soften into an empty page. PROVISIONAL — #395.
    */
-  async listOwn(query: ListGameCollectionsQueryDto) {
+  async listOwn(query: ListGameCollectionsQueryDto): Promise<PaginatedRows<GameCollectionDto>> {
     const { includeDeleted, deletedOnly, medium, favorite, updatedSince } = query;
     const userId = resolveScopeSubjectId(this.abilityService);
 
@@ -81,7 +72,10 @@ export class GameCollectionService {
    * clips them (#514), so the viewer need not be a user at all. The medium
    * filter is caller input and sits beside the composed clause.
    */
-  async listForUser(targetUserId: string, query: ListUserGameCollectionsQueryDto) {
+  async listForUser(
+    targetUserId: string,
+    query: ListUserGameCollectionsQueryDto,
+  ): Promise<PaginatedRows<GameCollectionDto>> {
     const where = {
       AND: [
         this.scopeComposer.compose(ResourceType.GameCollection, Action.read, { userId: targetUserId, deletedAt: null }),
@@ -125,7 +119,7 @@ export class GameCollectionService {
   }
 
   /** A single entry the acting user may read (owner sees own tombstones). */
-  async getById(id: string) {
+  async getById(id: string): Promise<GameCollectionDto> {
     const collection = await this.db.gameCollection.findUnique({
       where: {
         id,
@@ -149,7 +143,7 @@ export class GameCollectionService {
    * tombstone is cleared while server-managed play history (`playCount`,
    * `lastPlayed`) and any unspecified fields survive the remove→re-add cycle.
    */
-  async addToCollection(dto: CreateGameCollectionDto) {
+  async addToCollection(dto: CreateGameCollectionDto): Promise<GameCollectionDto> {
     const userId = this.abilityService.getActingUserId();
     const { platformGameId, medium, releaseId, ...attributes } = dto;
 
@@ -191,7 +185,7 @@ export class GameCollectionService {
    * (`platformGameId`/`medium`) and play history (`playCount`/`lastPlayed`)
    * are not writable here.
    */
-  async update(id: string, dto: UpdateGameCollectionDto) {
+  async update(id: string, dto: UpdateGameCollectionDto): Promise<GameCollectionDto> {
     const data = pickDefined(dto);
     if (Object.keys(data).length === 0) {
       throw new BadRequestException(t('common.at_least_one_field'));
@@ -237,7 +231,7 @@ export class GameCollectionService {
    * remove→re-add cycle, and child rows (locations, event game lists, loans)
    * would otherwise cascade away.
    */
-  async remove(id: string, { reason }: RemoveGameCollectionQueryDto) {
+  async remove(id: string, { reason }: RemoveGameCollectionQueryDto): Promise<GameCollectionDto> {
     const now = new Date();
 
     // Single scoped write: `deletedAt: null` in the filter makes a repeat

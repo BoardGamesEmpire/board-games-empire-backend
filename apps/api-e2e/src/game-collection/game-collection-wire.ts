@@ -1,4 +1,5 @@
-import type { GameCollection } from '@bge/database';
+import type { Game, GameCollection, Platform, PlatformGame } from '@bge/database';
+import type { ExpansionLinkWire } from '../game/game-wire';
 import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
 
 /**
@@ -9,6 +10,32 @@ import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescripti
  */
 
 export type GameCollectionWire = Wire<GameCollection>;
+
+/** The game a collection row embeds (#1070). */
+export type CollectionRowGameWire = Wire<
+  Pick<
+    Game,
+    | 'id'
+    | 'title'
+    | 'subtitle'
+    | 'image'
+    | 'thumbnail'
+    | 'contentType'
+    | 'publishYear'
+    | 'minPlayers'
+    | 'maxPlayers'
+    | 'minPlayTime'
+    | 'maxPlayTime'
+  >
+> & { readonly baseGames: readonly ExpansionLinkWire[] };
+
+/** The platform game a collection row embeds, with its platform and game (#1070). */
+export type CollectionRowPlatformGameWire = Wire<
+  Pick<PlatformGame, 'id' | 'image' | 'thumbnail' | 'minPlayers' | 'maxPlayers' | 'minPlayTime' | 'maxPlayTime'>
+> & {
+  readonly platform: Pick<Platform, 'id' | 'name' | 'slug' | 'platformType'>;
+  readonly game: CollectionRowGameWire;
+};
 
 export interface ListCollectionsEnvelope {
   readonly collections: readonly GameCollectionWire[];
@@ -68,6 +95,26 @@ export function listCollectionsEnvelope(
   }
 
   return { collections: rows, total };
+}
+
+/**
+ * A collection row's embedded platform game (#1070). An absent platform game or
+ * game would make every fact on it read as missing, so either fails here
+ * rather than as an assertion against `undefined`.
+ */
+export function collectionRowPlatformGame(
+  row: GameCollectionWire,
+  request: RequestDescription,
+): CollectionRowPlatformGameWire {
+  const platformGame = (row as unknown as Record<string, unknown>)['platformGame'];
+  if (!isRecord(platformGame) || !isRecord(platformGame['game'])) {
+    throw new Error(
+      `${request}: collection row ${row.id} carried no 'platformGame.game' object. The row's embedded ` +
+        'platform game has changed — update apps/api-e2e/src/game-collection/game-collection-wire.ts to match.',
+    );
+  }
+
+  return platformGame as unknown as CollectionRowPlatformGameWire;
 }
 
 /** `GET /api/game-collections/:id`: `{ collection }`. */
