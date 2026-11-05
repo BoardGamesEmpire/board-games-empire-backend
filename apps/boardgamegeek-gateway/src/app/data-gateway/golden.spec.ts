@@ -1,3 +1,4 @@
+import { bggFixtureKey, type BggClientLike } from '@bge/gateway-driver-boardgamegeek';
 import {
   expectGolden,
   isRecordingUpstream,
@@ -6,11 +7,9 @@ import {
 } from '@boardgamesempire/gateway-driver-contract-testing';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { BggClient } from 'bgg-ts-client';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { firstValueFrom, lastValueFrom, toArray } from 'rxjs';
 import { BggService } from '../bgg/bgg.service';
-import type { BggClientLike } from '../bgg/interfaces';
-import { bggFixtureKey } from '../testing/bgg-fixture-key';
 import { DataGatewayService } from './data-gateway.service';
 
 /**
@@ -21,8 +20,9 @@ import { DataGatewayService } from './data-gateway.service';
  * and the goldens with them, run this spec with `BGE_RECORD_UPSTREAM=true`,
  * `BGE_RECORD_GOLDEN=true` and `BOARDGAMEGEEK_API_KEY` set.
  */
-const FIXTURES = join(__dirname, '../testing/fixtures');
-const GOLDEN = join(__dirname, '../testing/golden');
+const DRIVER_LIBRARY = dirname(require.resolve('@bge/gateway-driver-boardgamegeek/package.json'));
+const FIXTURES = join(DRIVER_LIBRARY, 'src/testing/fixtures');
+const GOLDEN = join(DRIVER_LIBRARY, 'src/testing/golden');
 
 /** BGG asks for a pause between calls; recording keeps to it, so a 429 can't end up in a golden. */
 const RECORDING_PAUSE_MS = 2500;

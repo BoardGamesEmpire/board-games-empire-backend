@@ -1,18 +1,12 @@
+import type { BggClientLike, BggRequest } from '@bge/gateway-driver-boardgamegeek';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Http } from '@status/codes';
 import { BggApiError, BggClientError } from 'bgg-ts-client';
 import { Observable, throwError, timer } from 'rxjs';
 import { catchError, switchMap } from 'rxjs/operators';
 import { BGG_CLIENT } from './constants';
-import type { BggClientLike } from './interfaces';
 
-/**
- * A unit of work that takes the BGG client and produces an Observable of
- * its result. Request factories must be lazy — each subscription
- * (initial or retry) re-invokes the underlying client method, typically
- * via an internal `defer(() => client.method(...))`.
- */
-export type BggRequest<T> = (client: BggClientLike) => Observable<T>;
+export type { BggRequest };
 
 /**
  * Wrapper around the BoardGameGeek client. Each `call()` is an

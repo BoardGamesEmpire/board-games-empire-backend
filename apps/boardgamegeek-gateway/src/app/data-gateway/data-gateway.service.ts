@@ -1,3 +1,26 @@
+import {
+  BggThingType,
+  chunk,
+  DEFAULT_BGG_SEARCH_TYPES,
+  fetchThingRequest,
+  fetchThingsRequest,
+  getOutboundExpansionIds,
+  MAX_THINGS_PER_BATCH,
+  parseExternalId,
+  searchGamesRequest,
+  searchItemToGameSearchData,
+  TABLETOP_PLATFORM,
+  thingToGameData,
+  thingToGameSearchData,
+  toCategoryList,
+  toContentTypes,
+  toGatewayLanguageEntries,
+  toMechanicList,
+  toThingTypes,
+  type BggSearchItem,
+  type BggThing,
+  type ThingFetchOptions,
+} from '@bge/gateway-driver-boardgamegeek';
 import { GatewayServiceHost } from '@bge/gateway-host';
 import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
@@ -5,28 +28,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import { defer, EMPTY, from, Observable, of, throwError } from 'rxjs';
 import { catchError, endWith, map, mergeMap, tap, timeout, toArray } from 'rxjs/operators';
-import {
-  chunk,
-  fetchThingRequest,
-  fetchThingsRequest,
-  parseExternalId,
-  searchGamesRequest,
-  type ThingFetchOptions,
-} from '../bgg-requests/game.requests';
 import { BggService } from '../bgg/bgg.service';
-import { BggThingType, DEFAULT_BGG_SEARCH_TYPES, MAX_THINGS_PER_BATCH } from '../constants';
-import {
-  getOutboundExpansionIds,
-  searchItemToGameSearchData,
-  TABLETOP_PLATFORM,
-  thingToGameData,
-  thingToGameSearchData,
-  toContentTypes,
-  toThingTypes,
-} from '../mappers/game.mapper';
-import { toGatewayLanguageEntries } from '../mappers/language.mapper';
-import { toCategoryList, toMechanicList } from '../mappers/taxonomy.mapper';
-import type { BggSearchItem, BggThing } from '../types';
 
 const FETCH_GAME_TYPES = [BggThingType.BoardGame, BggThingType.BoardGameExpansion] as const;
 const EXPANSION_BATCH_TYPES = [BggThingType.BoardGameExpansion] as const;

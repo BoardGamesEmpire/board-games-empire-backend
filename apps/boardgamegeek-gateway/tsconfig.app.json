@@ -31,13 +31,16 @@
       "path": "../../libs/gateway/driver/contract-testing/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/proto/gateway/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/version/tsconfig.lib.json"
     },
     {
       "path": "../../libs/api/gateway-host/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/proto/gateway/tsconfig.lib.json"
+      "path": "../../libs/gateway/driver/boardgamegeek/tsconfig.lib.json"
     },
     {
       "path": "../../libs/common/env/tsconfig.lib.json"

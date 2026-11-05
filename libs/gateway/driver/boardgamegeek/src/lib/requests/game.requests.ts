@@ -1,7 +1,7 @@
 import type * as proto from '@boardgamesempire/proto-gateway';
 import { defer } from 'rxjs';
 import { map } from 'rxjs/operators';
-import type { BggRequest } from '../bgg/bgg.service';
+import type { BggRequest } from '../client/bgg-client.interface';
 import { BggThingType, DEFAULT_BGG_SEARCH_TYPES, DEFAULT_SEARCH_LIMIT } from '../constants';
 import { toPublishYear } from '../mappers/game.mapper';
 import type { BggSearchItem, BggThing } from '../types';

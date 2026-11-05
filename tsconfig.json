@@ -239,6 +239,9 @@
     },
     {
       "path": "./libs/api/vocabulary"
+    },
+    {
+      "path": "./libs/gateway/driver/boardgamegeek"
     }
   ]
 }

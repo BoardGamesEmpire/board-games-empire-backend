@@ -1,4 +1,3 @@
-import { isTrue } from '@bge/env';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { BggLinkType, BggNameType, BggThingType, DEFAULT_EDITION_KEY } from '../constants';
 import type { BggLink, BggName, BggSearchItem, BggText, BggThing, BggVersion } from '../types';
@@ -100,12 +99,12 @@ function selectThingTitle(thing: Pick<BggThing, 'names' | 'name' | 'alternateNam
 
 /**
  * BGG link `inbound` may surface as a boolean or the literal string
- * `'true'` depending on client-library JSON conversion. Delegates to the
- * shared {@link isTrue} coercion so this stays a single-purpose named
- * wrapper rather than a third copy of the literal-`'true'` logic.
+ * `'true'` depending on client-library JSON conversion. Compared as text,
+ * as the server's own `isTrue` does: this library can't import the host's
+ * packages, since a plugin DataGateway loads it (#1082).
  */
 export function isInbound(value: boolean | string | undefined): boolean {
-  return isTrue(value);
+  return value?.toString().toLowerCase() === 'true';
 }
 
 /**

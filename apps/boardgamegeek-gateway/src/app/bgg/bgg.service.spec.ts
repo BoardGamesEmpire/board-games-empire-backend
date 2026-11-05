@@ -1,11 +1,10 @@
+import type { BggClientLike, BggThing } from '@bge/gateway-driver-boardgamegeek';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Http } from '@status/codes';
 import { BggApiError, BggClient, BggClientError } from 'bgg-ts-client';
 import { defer, firstValueFrom, of, throwError } from 'rxjs';
-import type { BggThing } from '../types';
 import { BggRequest, BggService } from './bgg.service';
 import { BGG_CLIENT } from './constants';
-import type { BggClientLike } from './interfaces';
 
 /**
  * The network under the real `bgg-ts-client`, whose fetcher goes through

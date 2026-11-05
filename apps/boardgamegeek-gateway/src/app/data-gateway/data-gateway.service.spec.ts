@@ -1,3 +1,13 @@
+import {
+  BggLinkType,
+  BggNameType,
+  BggThingType,
+  MAX_THINGS_PER_BATCH,
+  toCategoryList,
+  toMechanicList,
+  type BggSearchItem,
+  type BggThing,
+} from '@bge/gateway-driver-boardgamegeek';
 import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Logger } from '@nestjs/common';
@@ -5,9 +15,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { firstValueFrom, NEVER, of, throwError, timer } from 'rxjs';
 import { map, takeUntil, toArray } from 'rxjs/operators';
 import { BggService, type BggRequest } from '../bgg/bgg.service';
-import { BggLinkType, BggNameType, BggThingType, MAX_THINGS_PER_BATCH } from '../constants';
-import { toCategoryList, toMechanicList } from '../mappers/taxonomy.mapper';
-import type { BggSearchItem, BggThing } from '../types';
 import { DataGatewayService } from './data-gateway.service';
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import { BggClient } from 'bgg-ts-client';
 import { firstValueFrom } from 'rxjs';
-import type { BggClientLike } from '../bgg/interfaces';
+import type { BggClientLike } from '../client/bgg-client.interface';
 import { BggThingType, DEFAULT_BGG_SEARCH_TYPES } from '../constants';
 import type { BggSearchItem, BggSearchResult, BggThing } from '../types';
 import {

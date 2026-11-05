@@ -1,4 +1,5 @@
-import type { BggSearchResult, BggThing } from '../../types';
+import type { Observable } from 'rxjs';
+import type { BggSearchResult, BggThing } from '../types';
 
 /**
  * Parameters for the BGG `/thing` endpoint.
@@ -45,3 +46,11 @@ export interface BggClientLike {
     query(params: BggSearchQueryParams): Promise<BggSearchResult[]>;
   };
 }
+
+/**
+ * A unit of work that takes the BGG client and produces an Observable of
+ * its result. Request factories must be lazy — each subscription
+ * (initial or retry) re-invokes the underlying client method, typically
+ * via an internal `defer(() => client.method(...))`.
+ */
+export type BggRequest<T> = (client: BggClientLike) => Observable<T>;
