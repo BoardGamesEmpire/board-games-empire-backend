@@ -242,6 +242,9 @@
     },
     {
       "path": "./libs/gateway/driver/boardgamegeek"
+    },
+    {
+      "path": "./libs/gateway/driver/igdb"
     }
   ]
 }

@@ -1,4 +1,4 @@
-import type { IGDBClient } from '../igdb/interfaces';
+import type { IGDBClient } from '../client/igdb-client.interface';
 import { listGenresRequest, listPlatformsRequest } from './vocabulary.requests';
 
 describe('VocabularyRequests (#718)', () => {

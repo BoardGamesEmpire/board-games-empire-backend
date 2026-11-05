@@ -1,24 +1,28 @@
+import {
+  fetchExpansionsRequest,
+  fetchGameRequest,
+  IGDB_CONTENT_TYPES,
+  IGDB_LIST_PAGE_SIZE,
+  IGDB_PLATFORM_TYPES,
+  listGenresRequest,
+  listPlatformsRequest,
+  searchGamesRequest,
+  toCategoryData,
+  toGameData,
+  toGameSearchData,
+  toGatewayLanguageEntries,
+  toPlatformData,
+  toSearchNarrowing,
+  type IgdbGame,
+} from '@bge/gateway-driver-igdb';
 import { GatewayServiceHost } from '@bge/gateway-host';
 import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
-import { EMPTY, Observable, from, merge, of } from 'rxjs';
+import { EMPTY, from, merge, Observable, of } from 'rxjs';
 import { catchError, endWith, expand, filter, map, mergeMap, reduce, shareReplay, tap } from 'rxjs/operators';
-import { fetchExpansionsRequest, fetchGameRequest, searchGamesRequest } from '../igdb-requests/game.requests';
-import { IGDB_LIST_PAGE_SIZE, listGenresRequest, listPlatformsRequest } from '../igdb-requests/vocabulary.requests';
 import { IGDBService, type IgdbRequest } from '../igdb/igdb.service';
-import {
-  IGDB_CONTENT_TYPES,
-  IGDB_PLATFORM_TYPES,
-  toCategoryData,
-  toGameData,
-  toGameSearchData,
-  toPlatformData,
-  toSearchNarrowing,
-} from '../mappers/game.mapper';
-import { toGatewayLanguageEntries } from '../mappers/language.mapper';
-import { IgdbGame } from '../types';
 
 @Injectable()
 export class DataGatewayService extends GatewayServiceHost {

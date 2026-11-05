@@ -1,3 +1,4 @@
+import { igdbFixtureKey, type IGDBClient } from '@bge/gateway-driver-igdb';
 import {
   expectGolden,
   isRecordingUpstream,
@@ -9,14 +10,12 @@ import type { ConfigService } from '@nestjs/config';
 import { RpcException } from '@nestjs/microservices';
 import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import igdb from 'igdb-api-node';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { firstValueFrom, lastValueFrom, toArray } from 'rxjs';
 import type { IGDBConfig } from '../igdb/configuration/igdb.config';
 import { IgdbAuthService } from '../igdb/igdb-auth.service';
 import { IGDBService } from '../igdb/igdb.service';
-import type { IGDBClient } from '../igdb/interfaces';
 import { TWITCH_TOKEN_URL } from '../igdb/lib/fetch-access-token';
-import { igdbFixtureKey } from '../testing/igdb-fixture-key';
 import { DataGatewayService } from './data-gateway.service';
 
 /**
@@ -28,8 +27,9 @@ import { DataGatewayService } from './data-gateway.service';
  * goldens with them, run this spec with `BGE_RECORD_UPSTREAM=true`,
  * `BGE_RECORD_GOLDEN=true`, `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` set.
  */
-const FIXTURES = join(__dirname, '../testing/fixtures');
-const GOLDEN = join(__dirname, '../testing/golden');
+const DRIVER_LIBRARY = dirname(require.resolve('@bge/gateway-driver-igdb/package.json'));
+const FIXTURES = join(DRIVER_LIBRARY, 'src/testing/fixtures');
+const GOLDEN = join(DRIVER_LIBRARY, 'src/testing/golden');
 
 /** IGDB allows four requests a second; recording stays well under it. */
 const RECORDING_PAUSE_MS = 500;

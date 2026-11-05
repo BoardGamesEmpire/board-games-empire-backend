@@ -26,5 +26,3 @@
 # would fail `nx format:check --all` until someone reformatted it.
 **/src/testing/fixtures
 **/src/testing/golden
-**/src/app/testing/fixtures
-**/src/app/testing/golden

@@ -18,3 +18,10 @@ export interface IGDBClient {
   sort(field: string, direction?: 'asc' | 'desc'): this;
   request<T = unknown>(endpoint: string): Promise<{ data: T[] }>;
 }
+
+/**
+ * A unit of work against IGDB: it takes a fresh client and resolves with
+ * the result. Each attempt gets a new client, since a
+ * client keeps its query's state.
+ */
+export type IgdbRequest<T> = (igdb: IGDBClient) => Promise<T>;

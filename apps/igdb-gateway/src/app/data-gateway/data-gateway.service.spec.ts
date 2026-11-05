@@ -1,10 +1,10 @@
+import type { IgdbGame } from '@bge/gateway-driver-igdb';
 import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Test, TestingModule } from '@nestjs/testing';
 import { firstValueFrom, of, throwError } from 'rxjs';
 import { toArray } from 'rxjs/operators';
 import { IGDBService, type IgdbRequest } from '../igdb/igdb.service';
-import { IgdbGame } from '../types';
 import { DataGatewayService } from './data-gateway.service';
 
 // ---------------------------------------------------------------------------

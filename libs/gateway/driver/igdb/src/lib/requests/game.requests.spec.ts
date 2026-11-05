@@ -1,5 +1,5 @@
+import type { IGDBClient } from '../client/igdb-client.interface';
 import { GameType, PlatformType } from '../constants';
-import type { IGDBClient } from '../igdb/interfaces';
 import type { IgdbGame } from '../types';
 import {
   GAME_FETCH_FIELDS,

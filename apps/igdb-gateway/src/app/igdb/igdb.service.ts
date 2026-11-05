@@ -1,3 +1,4 @@
+import type { IGDBClient, IgdbRequest } from '@bge/gateway-driver-igdb';
 import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Http } from '@status/codes';
@@ -7,9 +8,8 @@ import { catchError, switchMap } from 'rxjs/operators';
 import type { IGDBConfig } from './configuration/igdb.config';
 import { IGDB_CLIENT_FACTORY } from './constants';
 import { IgdbAuthService } from './igdb-auth.service';
-import type { IGDBClient } from './interfaces';
 
-export type IgdbRequest<T> = (igdb: IGDBClient) => Promise<T>;
+export type { IgdbRequest };
 
 /**
  * Produces a fresh IGDB client bound to the supplied access token.

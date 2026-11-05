@@ -1,6 +1,5 @@
+import type { IGDBClient, IgdbRequest } from '../client/igdb-client.interface';
 import { GameType } from '../constants';
-import type { IgdbRequest } from '../igdb/igdb.service';
-import type { IGDBClient } from '../igdb/interfaces';
 import { resolveLanguageIds } from '../mappers/language.mapper';
 import type { IgdbGame, IgdbSearchNarrowing } from '../types';
 

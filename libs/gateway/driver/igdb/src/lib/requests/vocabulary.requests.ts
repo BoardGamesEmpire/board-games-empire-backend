@@ -1,5 +1,4 @@
-import type { IgdbRequest } from '../igdb/igdb.service';
-import type { IGDBClient } from '../igdb/interfaces';
+import type { IGDBClient, IgdbRequest } from '../client/igdb-client.interface';
 import type { IgdbNamedEntity, IgdbPlatform } from '../types';
 
 /** The most IGDB answers in one request, so a list is asked for a page at a time. */

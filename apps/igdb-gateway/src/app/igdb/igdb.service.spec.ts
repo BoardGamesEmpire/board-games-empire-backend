@@ -1,13 +1,12 @@
+import type { IGDBClient, IgdbGame } from '@bge/gateway-driver-igdb';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Http } from '@status/codes';
 import { AxiosError, AxiosHeaders } from 'axios';
 import { firstValueFrom } from 'rxjs';
-import type { IgdbGame } from '../types';
 import { IGDB_CLIENT_FACTORY } from './constants';
 import { IgdbAuthService } from './igdb-auth.service';
 import { IGDBService, type IgdbClientFactory, type IgdbRequest } from './igdb.service';
-import type { IGDBClient } from './interfaces/';
 
 describe('IGDBService', () => {
   let service: IGDBService;
