@@ -1,4 +1,4 @@
-import { BggClient } from 'bgg-ts-client';
+import { createBggClient } from '@bge/gateway-driver-boardgamegeek';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import process from 'node:process';
@@ -14,7 +14,7 @@ async function main() {
 
   await fs.mkdir(tmpDir, { recursive: true });
 
-  const client = BggClient.Create({ apiKey });
+  const client = createBggClient({ fetch, apiKey });
   const fetchResults = await client.thing.query({
     id: 421282,
     stats: 1,

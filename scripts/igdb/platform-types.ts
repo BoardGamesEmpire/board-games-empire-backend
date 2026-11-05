@@ -1,7 +1,5 @@
-/* eslint-disable @nx/enforce-module-boundaries */
-import igdb from 'igdb-api-node';
+import { fetchAccessToken, IgdbQuery } from '@bge/gateway-driver-igdb';
 import process from 'node:process';
-import { fetchAccessToken } from '../../apps/igdb-gateway/src/app/igdb/lib/fetch-access-token';
 
 // This script is for ad-hoc testing and exploration of the IGDB API and related codes
 
@@ -12,8 +10,8 @@ async function main() {
   if (!clientId || !clientSecret) {
     throw new Error('IGDB client ID and secret must be provided');
   }
-  const accessToken = await fetchAccessToken({ client_id: clientId!, client_secret: clientSecret! });
-  const client = igdb(clientId, accessToken.access_token);
+  const accessToken = await fetchAccessToken(fetch, { client_id: clientId!, client_secret: clientSecret! });
+  const client = new IgdbQuery({ fetch, clientId, accessToken: accessToken.access_token });
 
   client
     .fields(['*'])

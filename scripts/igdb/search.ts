@@ -1,10 +1,11 @@
-/* eslint-disable @nx/enforce-module-boundaries */
-import igdb from 'igdb-api-node';
+import {
+  fetchAccessToken,
+  GAME_FETCH_FIELDS,
+  type IGDBClient,
+  IgdbQuery,
+  resolveLanguageIds,
+} from '@bge/gateway-driver-igdb';
 import process from 'node:process';
-import { GAME_FETCH_FIELDS } from '../../apps/igdb-gateway/src/app/igdb-requests/game.requests';
-import { IGDBClient } from '../../apps/igdb-gateway/src/app/igdb/interfaces';
-import { fetchAccessToken } from '../../apps/igdb-gateway/src/app/igdb/lib/fetch-access-token';
-import { resolveLanguageIds } from '../../apps/igdb-gateway/src/app/mappers/language.mapper';
 
 // This script is for ad-hoc testing and exploration of the IGDB API and related codes
 
@@ -15,8 +16,8 @@ async function main() {
   if (!clientId || !clientSecret) {
     throw new Error('IGDB client ID and secret must be provided');
   }
-  const accessToken = await fetchAccessToken({ client_id: clientId!, client_secret: clientSecret! });
-  const client = igdb(clientId, accessToken.access_token);
+  const accessToken = await fetchAccessToken(fetch, { client_id: clientId!, client_secret: clientSecret! });
+  const client = new IgdbQuery({ fetch, clientId, accessToken: accessToken.access_token });
   // const gameData = await searchGamesRequest('catan', 10, 0, 'en-US')(client);
 
   // console.log(JSON.stringify(gameData, null, 2));
@@ -32,7 +33,7 @@ async function main() {
   //     console.log(JSON.stringify(response.data, null, 2));
   //   });
 
-  let builder = client
+  let builder: IGDBClient = client
     .limit(1)
     // .offset(0)
     .fields([...GAME_FETCH_FIELDS]);

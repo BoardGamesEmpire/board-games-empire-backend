@@ -10,15 +10,28 @@ import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
  * Isolated from the main analyzer spec on purpose: that suite runs the REAL
  * parsers because the service's value is what they actually surface, while
  * this one substitutes the parser to exercise the environments the
- * capability probe exists to refuse (#219) — a build that honours
- * neither module option key, and the genuine stale major (required from its
- * nesting in the dependency tree) that honours the keys but chokes on
+ * capability probe exists to refuse (#219) — a build that honours neither
+ * module option key, and a stale major that honours the keys but chokes on
  * modern syntax.
+ *
+ * The stale major was the genuine meriyah 1.9.15, nested under `jackson-js`
+ * by way of `bgg-ts-client`, until both left the tree (#1082). It is now
+ * simulated from the partition `PARSER_CAPABILITY_PROBES` records against
+ * that release: the two floor probes pass, and the rest fail.
  */
 type MeriyahModule = typeof import('meriyah');
 type ParseImplementation = MeriyahModule['parse'];
 
 const actualMeriyah = jest.requireActual<MeriyahModule>('meriyah');
+
+/** The probes meriyah 1.9.15 passes under the analyzer's parse options (#219). */
+const LEGACY_FLOOR_CAPABILITIES = ['esm-module-parsing', 'dynamic-import'] as const;
+
+const LEGACY_FLOOR_SOURCES = new Set(
+  PARSER_CAPABILITY_PROBES.filter((probe) =>
+    (LEGACY_FLOOR_CAPABILITIES as readonly string[]).includes(probe.capability),
+  ).map((probe) => probe.source),
+);
 
 let parseImplementation: ParseImplementation;
 let mockedVersion: string | undefined;
@@ -29,27 +42,6 @@ jest.mock('meriyah', () => ({
     return mockedVersion;
   },
 }));
-
-/**
- * The REAL meriyah 1.9.15 — the stale major #219 is about — required from
- * where the dependency tree actually keeps it: nested under `jackson-js`
- * (via `bgg-ts-client`), which is what freed the root slot for the pinned
- * 7.x. Running the guard against the genuine article instead of a
- * simulation keeps the spec's claims about 1.x behaviour unfakeable —
- * notably that 1.x parses optional chaining ONLY behind its `next` flag,
- * which the service never passes. If this require ever fails, `jackson-js`
- * stopped nesting a 1.x meriyah; delete the stale-major cases below along
- * with it — the guard they exercise is covered structurally by the
- * total-incapability suite either way.
- */
-interface LegacyParserModule {
-  readonly parse: (source: string, options?: object) => unknown;
-  readonly version: string;
-}
-
-const legacyMeriyah = jest.requireActual<LegacyParserModule>('jackson-js/node_modules/meriyah');
-
-const LEGACY_FLOOR_CAPABILITIES = ['esm-module-parsing', 'dynamic-import'] as const;
 
 describe('PluginStaticAnalysisService parser guard', () => {
   let rootDir: string;
@@ -132,8 +124,14 @@ describe('PluginStaticAnalysisService parser guard', () => {
 
   describe('the stale major that parses plain imports but fails modern syntax — the #219 scenario', () => {
     beforeEach(() => {
-      mockedVersion = legacyMeriyah.version;
-      parseImplementation = ((source, options) => legacyMeriyah.parse(source, options)) as ParseImplementation;
+      mockedVersion = '1.9.15';
+      parseImplementation = ((source, options) => {
+        if (!LEGACY_FLOOR_SOURCES.has(source)) {
+          throw new SyntaxError('[1:0]: Unexpected token');
+        }
+
+        return actualMeriyah.parse(source, options);
+      }) as ParseImplementation;
     });
 
     it('is refused: passing the legacy floor is not capability for a full scan', async () => {
