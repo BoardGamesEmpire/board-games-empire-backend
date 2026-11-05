@@ -350,8 +350,9 @@ export class PluginsController {
   @ApiOperation({
     summary: 'Reject the staged pending update',
     description:
-      'Clears the pending columns and emits plugin.update_rejected — the #84 distribution pipeline keys staged-file ' +
-      'cleanup off that event; this endpoint never touches the filesystem.',
+      'Clears the staged-update columns and emits plugin.update_rejected. The staged plugin artifact stays on ' +
+      'disk until the planned artifact sweep (#1094) removes every artifact directory no living plugin names; ' +
+      'this endpoint never touches the filesystem.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })

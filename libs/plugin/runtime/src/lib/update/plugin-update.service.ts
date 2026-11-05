@@ -587,14 +587,13 @@ export class PluginUpdateService {
 
     // Conditional on the EXACT staging the rejector saw, like every other
     // staged-update writer: an unconditional clear racing an approve would
-    // report "rejected" for an update that in fact activated — and emit the
-    // update_rejected event #84 keys staged-file cleanup off, against files
-    // that just became the active version's code. Racing a replacement
-    // stage, it would wipe a staged version nobody decided on — and because
-    // a rejected version can be re-staged under the SAME number (only the
-    // ACTIVE version is refused), the version is not identity enough:
-    // pendingSince, written fresh by every staging, is what pins the
-    // staging this rejection targets.
+    // report "rejected" for an update that in fact activated, and emit
+    // update_rejected for code that had just become the active version's.
+    // Racing a replacement stage, it would wipe a staged version nobody
+    // decided on — and because a rejected version can be re-staged under the
+    // SAME number (only the ACTIVE version is refused), the version is not
+    // identity enough: pendingSince, written fresh by every staging, is what
+    // pins the staging this rejection targets.
     const rejected = await this.db.$transaction(async (tx) => {
       const cleared = await tx.plugin.updateMany({
         where: {
@@ -623,15 +622,15 @@ export class PluginUpdateService {
       // The clear leaves `pendingVersion` null, which is exactly the slot
       // stage() claims on, so an outside read-back can observe a NEWLY
       // staged version — handing this response, and the rejected event's
-      // `after` snapshot that #84 keys staged-file cleanup off, a pending
-      // update nobody rejected. The atomic single-statement update this
-      // replaced could not express that state; the guarded updateMany can.
+      // `after` snapshot, a staged update nobody rejected. The atomic
+      // single-statement update this replaced could not express that state;
+      // the guarded updateMany can.
       return tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
     });
 
-    // #84 seam: the staged version's on-disk files are the distribution
-    // pipeline's to remove — this service never touches the filesystem
-    // beyond reading manifests (#59).
+    // Removing the staged artifact's directory, once no living row names it,
+    // is the planned artifact sweep's job (#1094, #224); this service never
+    // touches the filesystem beyond reading manifests (#59).
     this.emitter.emit(
       PluginUpdateRejectedEvent.eventName,
       new PluginUpdateRejectedEvent(this.stagingSnapshot(plugin), this.stagingSnapshot(rejected), initiatedAt),

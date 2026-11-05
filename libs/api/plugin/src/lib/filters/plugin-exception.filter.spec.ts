@@ -621,6 +621,7 @@ describe('PluginExceptionFilter', () => {
       'PluginDirectoryLayoutError',
       'PluginEntrypointError',
       'PluginModuleShapeError',
+      'PluginDiskVersionMismatchError',
       'PluginEmitNotDeclaredError',
       'UnknownActorKindError',
     ]);

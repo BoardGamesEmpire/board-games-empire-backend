@@ -305,7 +305,7 @@ describe('PluginUpdateService', () => {
       expect(failure).toBeInstanceOf(PluginUpdatePendingConflictError);
       expect(failure).toMatchObject({ pendingVersion: '1.3.0', incomingVersion: '1.4.0' });
       // Nothing written: the staged version stays intact for whoever is
-      // looking at it, and #84 keeps its cleanup signal.
+      // looking at it.
       expect(db.plugin.update).not.toHaveBeenCalled();
       expect(db.plugin.updateMany).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();

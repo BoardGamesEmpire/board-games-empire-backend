@@ -68,8 +68,9 @@ export interface PluginUninstallResult {
  * Uninstall (tombstone, not delete): purges every `PluginGrant` (durable
  * denials included — reinstall is fresh consent) and the `PluginPermission`
  * catalog, retains the row and, by default, unit config rows; clears any
- * staged update (the cleared columns are the staged-file cleanup signal for
- * the #84 ingress pipeline); force-disables alongside the tombstone — the
+ * staged update (once cleared, no row names the staged artifact's directory,
+ * so the planned artifact sweep, #1094, is to remove it); force-disables in
+ * the same write — the
  * loader's boot query treats that as an invariant — and sets
  * `restartRequired` so diagnostics show the running instance still holds
  * the old module until next boot. No hot unload, by design.

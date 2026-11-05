@@ -93,10 +93,9 @@ export class PluginUpdateVersionConflictError extends Error {
 /**
  * A pending update is already staged. Refused rather than superseded: the
  * staged version may already be sitting in front of an admin, and silently
- * replacing it would discard an in-flight consent decision, orphan the
- * previous version's staged files (#84 keys cleanup off the resolution
- * events), and leave the lifecycle timeline claiming a version was staged
- * and never resolved. Reject the pending one, then stage this.
+ * replacing it would discard an in-flight consent decision and leave the
+ * lifecycle timeline claiming a version was staged and never resolved.
+ * Reject the pending one, then stage this.
  */
 export class PluginUpdatePendingConflictError extends Error {
   override readonly name = 'PluginUpdatePendingConflictError';
