@@ -9,18 +9,6 @@ import type { StaticAnalysisFinding } from './static-analysis.types';
  * a single transaction and every check runs before it.
  */
 
-/** The provenance input and the resolved directory disagree about `bundled` — corrupted pipeline state, never an author error. */
-export class PluginInstallProvenanceMismatchError extends Error {
-  override readonly name = 'PluginInstallProvenanceMismatchError';
-
-  constructor(
-    public readonly slug: string,
-    detail: string,
-  ) {
-    super(`Plugin '${slug}' provenance is inconsistent with its directory: ${detail}`);
-  }
-}
-
 /** The manifest is unreadable, invalid, or does not describe the directory it arrived in. */
 export class PluginInstallManifestError extends Error {
   override readonly name = 'PluginInstallManifestError';

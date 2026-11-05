@@ -325,7 +325,6 @@
     "grant_consent_scope_mismatch": "'{permissionSlug}' is consented at {expected} scope; this decision was made at {received} scope",
     "grant_scope_id": "The decision scope identifier is invalid for {scopeType} scope",
     "grant_scope_not_revocable": "{scopeType}-scope grants are not revocable — they are removed with the plugin",
-    "state_corrupted": "The plugin is in an inconsistent state on this server — an administrator must investigate",
     "stored_manifest_invalid": "The stored manifest for plugin '{slug}' is invalid or inconsistent with its installed record — an administrator must investigate",
     "static_analysis_unavailable": "Plugin static analysis is unavailable on this server — installs and updates are refused until an operator resolves the parser installation",
     "lifecycle_authority": "Enabling, disabling, configuring, or uninstalling a plugin requires a server administrator",

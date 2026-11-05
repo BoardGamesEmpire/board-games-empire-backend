@@ -10,18 +10,6 @@ import type { StaticAnalysisFinding } from '../install/static-analysis.types';
  * check runs before it.
  */
 
-/** The provenance input and the resolved directory disagree about `bundled` — corrupted pipeline state, never an author error. */
-export class PluginUpdateProvenanceMismatchError extends Error {
-  override readonly name = 'PluginUpdateProvenanceMismatchError';
-
-  constructor(
-    public readonly slug: string,
-    detail: string,
-  ) {
-    super(`Plugin '${slug}' update provenance is inconsistent with its directory: ${detail}`);
-  }
-}
-
 /** No `Plugin` row exists for the slug an update arrived for. */
 export class PluginUpdatePluginNotFoundError extends Error {
   override readonly name = 'PluginUpdatePluginNotFoundError';

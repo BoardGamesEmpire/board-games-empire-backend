@@ -25,7 +25,6 @@ describe('PluginStaticAnalysisService', () => {
     rootDir,
     manifestPath: join(rootDir, 'manifest.json'),
     packageJsonPath: join(rootDir, 'package.json'),
-    bundled: false,
   });
 
   const write = async (relativePath: string, content: string): Promise<void> => {

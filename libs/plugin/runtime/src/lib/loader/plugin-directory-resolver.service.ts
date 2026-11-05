@@ -13,26 +13,20 @@ import { PluginDirectoryLayoutError, PluginDirectoryNotFoundError } from './load
 import { isContained, realpathOrNull } from './path-containment';
 
 /**
- * Maps a `Plugin` row to its on-disk `InstalledPluginDirectory`. Two roots:
- *
- * - `pluginsRoot/<slug>` — tarball installs, populated by the #84 pipeline.
- * - `bundledRoot/<slug>` — plugins shipped in-tree with BGE. Rows are
- *   seeded by the consuming issues (#61/#194) — this branch carries no
- *   seeds itself, only the resolution + layout validation. Uninstall
- *   refusal for bundled plugins is enforced where uninstall lands (Phase C);
- *   the loader-side invariant is simply that bundled rows never resolve
- *   into the install root.
+ * Maps a `Plugin` row to its on-disk `InstalledPluginDirectory`,
+ * `pluginsRoot/<slug>`, populated by the #84 pipeline. There is one root,
+ * because no plugin ships inside the server (#696).
  *
  * The slug is re-checked against `PLUGIN_SLUG_PATTERN` even though every DB
  * row originated from a validated manifest: the slug becomes a filesystem
  * path segment here, and a corrupted/hand-edited row must fail loudly
- * rather than traverse (`../../…`) out of the roots.
+ * rather than traverse (`../../…`) out of the root.
  */
 @Injectable()
 export class PluginDirectoryResolverService {
   constructor(@Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions) {}
 
-  async resolve(slug: string, bundled: boolean): Promise<InstalledPluginDirectory> {
+  async resolve(slug: string): Promise<InstalledPluginDirectory> {
     if (!PLUGIN_SLUG_PATTERN.test(slug)) {
       throw new PluginDirectoryLayoutError(
         slug,
@@ -40,7 +34,7 @@ export class PluginDirectoryResolverService {
       );
     }
 
-    const configuredRoot = resolve(bundled ? this.options.bundledRoot : this.options.pluginsRoot);
+    const configuredRoot = resolve(this.options.pluginsRoot);
     const realRoot = await realpathOrNull(configuredRoot);
 
     if (realRoot === null) {
@@ -68,7 +62,7 @@ export class PluginDirectoryResolverService {
     await this.assertContainedFile(slug, manifestPath, PLUGIN_MANIFEST_FILENAME, rootDir);
     await this.assertContainedFile(slug, packageJsonPath, PLUGIN_PACKAGE_JSON_FILENAME, rootDir);
 
-    return { slug, rootDir, manifestPath, packageJsonPath, bundled };
+    return { slug, rootDir, manifestPath, packageJsonPath };
   }
 
   /**

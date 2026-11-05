@@ -23,7 +23,6 @@ import {
 describe('PluginInventoryService', () => {
   const options: PluginModuleOptions = {
     pluginsRoot: '/var/lib/bge/plugins',
-    bundledRoot: '/srv/bge/plugins/bundled',
     bgeVersion: '0.3.0',
     defaultLocale: 'en',
   };

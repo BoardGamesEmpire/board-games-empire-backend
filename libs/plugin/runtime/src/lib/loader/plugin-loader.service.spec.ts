@@ -27,7 +27,6 @@ describe('PluginLoaderService', () => {
   const manifest = { events: { subscribes: [], emits: [] } } as unknown as PluginManifest;
   const options: PluginModuleOptions = {
     pluginsRoot: '/unused-in-spec/installed',
-    bundledRoot: '/unused-in-spec/bundled',
     bgeVersion: '0.1.0',
     defaultLocale: 'en',
   };
@@ -78,7 +77,6 @@ describe('PluginLoaderService', () => {
       rootDir,
       manifestPath: join(rootDir, 'manifest.json'),
       packageJsonPath: join(rootDir, 'package.json'),
-      bundled: false,
     };
   };
 
@@ -207,15 +205,16 @@ describe('PluginLoaderService', () => {
       expect(registry.resolve(row.slug).instance).toBe(instance);
     });
 
-    it('forwards the bundled flag to directory resolution', async () => {
-      const row = makePluginRow({ slug: 'local-disk', bundled: true });
+    it('resolves the plugin directory by slug alone (#696)', async () => {
+      const row = makePluginRow();
       db.plugin.findMany.mockResolvedValue([row]);
       directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
       importer.importModule.mockResolvedValue({ default: jest.fn().mockReturnValue({}) });
 
       await loader.loadAllEnabled();
 
-      expect(directories.resolve).toHaveBeenCalledWith('local-disk', true);
+      // No plugin ships inside the server, so there is no second root to choose between.
+      expect(directories.resolve).toHaveBeenCalledWith('demo-sink');
     });
 
     it('clears stale failure flags when a previously quarantined plugin loads cleanly after re-enable', async () => {

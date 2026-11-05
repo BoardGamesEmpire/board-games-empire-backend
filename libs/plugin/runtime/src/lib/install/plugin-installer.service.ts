@@ -49,7 +49,6 @@ import {
   PluginInstallForbiddenPermissionError,
   PluginInstallManifestError,
   PluginInstallPermissionCollisionError,
-  PluginInstallProvenanceMismatchError,
   PluginInstallStaticAnalysisError,
   PluginInstallUnknownCorePermissionError,
 } from './install.errors';
@@ -62,25 +61,20 @@ import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
 import { gatingFindings, type StaticAnalysisFinding, type StaticAnalysisReport } from './static-analysis.types';
 
 /**
- * Typed provenance: `bundled = false ⇒ installedSha256` is
- * unrepresentable-when-violated rather than a runtime throw — the compile-
- * time analog of the `bundled = false ⇒ installed_sha256 IS NOT NULL`
- * pipeline invariant, consistent with the `PermissionSeedDefinition`
- * precedent.
+ * Where the plugin artifact came from: its checksum, link and registry (#84).
+ * Every plugin is installed from an artifact, because none ships inside the
+ * server (#696), so the checksum is always present.
  */
-export type PluginInstallProvenance =
-  | { readonly bundled: true }
-  | {
-      readonly bundled: false;
-      readonly installedSha256: string;
-      /** Absent for manual uploads (checksum without a source URL). */
-      readonly installedFromUrl?: string;
-      /** `PluginRegistrySource.slug` the artifact was discovered through (#84). */
-      readonly registrySlug?: string;
-    };
+export interface PluginInstallProvenance {
+  readonly installedSha256: string;
+  /** Absent for a manual upload, which has a checksum but no link. */
+  readonly installedFromUrl?: string;
+  /** `PluginRegistrySource.slug` the artifact was discovered through (#84). */
+  readonly registrySlug?: string;
+}
 
 export interface PluginInstallInput {
-  /** Populated by the #84 pipeline (or the bundled resolver) — the installer never touches a tarball (#59). */
+  /** Populated by the #84 pipeline — the installer never opens the plugin artifact itself (#59). */
   readonly directory: InstalledPluginDirectory;
   readonly provenance: PluginInstallProvenance;
   /** The installing admin — server-admin authority is verified, never assumed. */
@@ -160,13 +154,6 @@ export class PluginInstallerService {
   async install(input: PluginInstallInput): Promise<PluginInstallResult> {
     const initiatedAt = new Date();
     const { directory, provenance } = input;
-
-    if (provenance.bundled !== directory.bundled) {
-      throw new PluginInstallProvenanceMismatchError(
-        directory.slug,
-        `provenance says bundled=${provenance.bundled}, the directory resolved as bundled=${directory.bundled}`,
-      );
-    }
 
     const validated = await this.validateManifest(directory);
     this.assertNoForbiddenPluginPermissions(validated);
@@ -467,10 +454,9 @@ export class PluginInstallerService {
         // The VALIDATED manifest object — the canonical form every later
         // re-validation (loader, grants, C3 comparison) starts from.
         manifestJson: manifest as Prisma.InputJsonValue,
-        bundled: provenance.bundled,
-        installedFromUrl: provenance.bundled ? null : (provenance.installedFromUrl ?? null),
-        installedSha256: provenance.bundled ? null : provenance.installedSha256,
-        registrySlug: provenance.bundled ? null : (provenance.registrySlug ?? null),
+        installedFromUrl: provenance.installedFromUrl ?? null,
+        installedSha256: provenance.installedSha256,
+        registrySlug: provenance.registrySlug ?? null,
         installedById: installerId,
         installedAt: initiatedAt,
       };
@@ -636,13 +622,11 @@ export class PluginInstallerService {
     retainedConfigReset: boolean,
     initiatedAt: Date,
   ): void {
-    const eventProvenance: PluginProvenance = provenance.bundled
-      ? { installedFromUrl: null, installedSha256: null, registrySlug: null }
-      : {
-          installedFromUrl: provenance.installedFromUrl ?? null,
-          installedSha256: provenance.installedSha256,
-          registrySlug: provenance.registrySlug ?? null,
-        };
+    const eventProvenance: PluginProvenance = {
+      installedFromUrl: provenance.installedFromUrl ?? null,
+      installedSha256: provenance.installedSha256,
+      registrySlug: provenance.registrySlug ?? null,
+    };
 
     const grantedPermissions: GrantedPermissionRecord[] = serverChecks.map((check) => ({
       slug: check.canonicalSlug,

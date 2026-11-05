@@ -32,7 +32,6 @@ describe('PluginLoaderService — restart-required and tombstones', () => {
   const manifest = { events: { subscribes: [], emits: [] } } as unknown as PluginManifest;
   const options: PluginModuleOptions = {
     pluginsRoot: '/unused-in-spec/installed',
-    bundledRoot: '/unused-in-spec/bundled',
     bgeVersion: '0.1.0',
     defaultLocale: 'en',
   };
@@ -81,7 +80,6 @@ describe('PluginLoaderService — restart-required and tombstones', () => {
       rootDir,
       manifestPath: join(rootDir, 'manifest.json'),
       packageJsonPath: join(rootDir, 'package.json'),
-      bundled: false,
     };
   };
 

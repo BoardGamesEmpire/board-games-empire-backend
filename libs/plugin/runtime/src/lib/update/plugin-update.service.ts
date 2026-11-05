@@ -72,7 +72,6 @@ import {
   PluginUpdateNoPendingError,
   PluginUpdatePendingConflictError,
   PluginUpdatePluginNotFoundError,
-  PluginUpdateProvenanceMismatchError,
   PluginUpdateStaticAnalysisError,
   PluginUpdateTombstonedError,
   PluginUpdateUnknownCorePermissionError,
@@ -146,17 +145,17 @@ function requestedSlugsDropped(
 }
 
 /**
- * Typed update provenance, mirroring install's shape: `bundled = false
- * ⇒ pendingSha256` is unrepresentable-when-violated. URL/registry
+ * The staged update's plugin artifact, by its checksum. Every update names
+ * one, because no plugin ships inside the server (#696). URL/registry
  * provenance columns keep describing the INSTALL; #84 extends this when its
  * ingress metadata needs to ride an update.
  */
-export type PluginUpdateProvenance =
-  | { readonly bundled: true }
-  | { readonly bundled: false; readonly pendingSha256: string };
+export interface PluginUpdateProvenance {
+  readonly pendingSha256: string;
+}
 
 export interface PluginUpdateStageInput {
-  /** The NEW version's resolved directory — placed by #84 (or the bundled resolver); this service never touches a tarball (#59). */
+  /** The NEW version's resolved directory — placed by #84; this service never opens the plugin artifact itself (#59). */
   readonly directory: InstalledPluginDirectory;
   readonly provenance: PluginUpdateProvenance;
   /** The staging admin — server-admin authority is verified, never assumed, exactly as install verifies it. */
@@ -340,30 +339,11 @@ export class PluginUpdateService {
     const initiatedAt = new Date();
     const { directory, provenance } = input;
 
-    if (provenance.bundled !== directory.bundled) {
-      throw new PluginUpdateProvenanceMismatchError(
-        directory.slug,
-        `provenance says bundled=${provenance.bundled}, the directory resolved as bundled=${directory.bundled}`,
-      );
-    }
-
     if (!(await this.authority.isServerAdmin(input.initiatorId))) {
       throw new PluginUpdateAuthorityError(input.initiatorId);
     }
 
     const plugin = await this.loadUpdatablePlugin(directory.slug);
-
-    // The row's `bundled` decides which root the loader resolves, so an
-    // update may not change it: bundled ↔ sideloaded is a reinstall, not a
-    // new version. Writing the column instead would point the row at a
-    // version the resolved root does not contain.
-    if (provenance.bundled !== plugin.bundled) {
-      throw new PluginUpdateProvenanceMismatchError(
-        directory.slug,
-        `provenance says bundled=${provenance.bundled} but the installed plugin is bundled=${plugin.bundled} — ` +
-          'changing distribution kind is a reinstall, not an update',
-      );
-    }
 
     const next = await this.validateNextManifest(directory, plugin);
 
@@ -434,7 +414,7 @@ export class PluginUpdateService {
         data: {
           pendingVersion: next.manifest.version,
           pendingManifestJson: next.manifest as Prisma.InputJsonValue,
-          pendingSha256: provenance.bundled ? null : provenance.pendingSha256,
+          pendingSha256: provenance.pendingSha256,
           pendingSince: initiatedAt,
         },
       });
@@ -496,7 +476,9 @@ export class PluginUpdateService {
       throw new PluginUpdateAuthorityError(input.approverId);
     }
 
-    const { plugin, active, next, corePermissions, comparison } = await this.resolvePendingUpdate(input.slug);
+    const { plugin, active, next, corePermissions, comparison, pendingSha256 } = await this.resolvePendingUpdate(
+      input.slug,
+    );
 
     if (comparison.blockedByDenial.length > 0) {
       throw new PluginUpdateBlockedByDenialError(plugin.slug, comparison.blockedByDenial);
@@ -531,7 +513,7 @@ export class PluginUpdateService {
       plugin,
       active,
       next,
-      plugin.pendingSha256 === null ? { bundled: true } : { bundled: false, pendingSha256: plugin.pendingSha256 },
+      { pendingSha256 },
       comparison,
       checksToSeed,
       corePermissions,
@@ -685,10 +667,14 @@ export class PluginUpdateService {
     readonly next: PluginManifestValidationResult;
     readonly corePermissions: ReadonlyMap<string, Permission>;
     readonly comparison: UpdateEscalationComparison;
+    /** The staged plugin artifact's checksum, which activation records as `installedSha256`. */
+    readonly pendingSha256: string;
   }> {
     const plugin = await this.loadUpdatablePlugin(slug);
 
-    if (plugin.pendingVersion === null || plugin.pendingManifestJson === null) {
+    // A staged row without its checksum names no plugin artifact, so there
+    // is nothing approval could activate (#696): it is not a staged update.
+    if (plugin.pendingVersion === null || plugin.pendingManifestJson === null || plugin.pendingSha256 === null) {
       throw new PluginUpdateNoPendingError(plugin.slug);
     }
 
@@ -700,7 +686,7 @@ export class PluginUpdateService {
     const corePermissions = await this.loadCorePermissions(next);
     const comparison = await this.compare(plugin, active, next, corePermissions);
 
-    return { plugin, active, next, corePermissions, comparison };
+    return { plugin, active, next, corePermissions, comparison, pendingSha256: plugin.pendingSha256 };
   }
 
   /** A tombstoned row is not an update target, and the distinction deserves its own error (#59). */
@@ -1126,7 +1112,7 @@ export class PluginUpdateService {
           // so activation is not the one manifest-replacing path that leaves
           // a stale server config in force.
           config: retainedConfig.config as Prisma.InputJsonValue,
-          ...(provenance.bundled ? {} : { installedSha256: provenance.pendingSha256 }),
+          installedSha256: provenance.pendingSha256,
           ...CLEARED_STAGED_UPDATE,
           // The running instance is still the prior code; the loader
           // clears this on the boot that actually loads the new version.

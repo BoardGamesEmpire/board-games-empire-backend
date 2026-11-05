@@ -3,42 +3,39 @@ import { pluginsConfigValidationSchema } from './plugins.config';
 
 interface PluginsEnvironment {
   PLUGINS_ROOT?: string;
-  PLUGINS_BUNDLED_ROOT?: string;
 }
 
 const schema = Joi.object<PluginsEnvironment>(pluginsConfigValidationSchema);
 
-const rootKeys = ['PLUGINS_ROOT', 'PLUGINS_BUNDLED_ROOT'] as const;
-
 describe('pluginsConfigValidationSchema', () => {
+  it('declares PLUGINS_ROOT as its only variable: there is one plugin root (#696)', () => {
+    // No plugin ships inside the server, so the root plugins are installed
+    // into is the only plugin directory there is.
+    expect(Object.keys(pluginsConfigValidationSchema)).toEqual(['PLUGINS_ROOT']);
+  });
+
   describe('optionality', () => {
-    it('accepts a config with neither root set', () => {
+    it('accepts a config with no plugin root set (#259)', () => {
       const { error } = schema.validate({});
 
       expect(error).toBeUndefined();
     });
 
-    it.each(rootKeys)('accepts %s on its own', (key) => {
-      const { error } = schema.validate({ [key]: '/var/lib/bge/plugins' });
+    it('accepts PLUGINS_ROOT set to a path (#259)', () => {
+      const { error } = schema.validate({ PLUGINS_ROOT: '/var/lib/bge/plugins' });
 
       expect(error).toBeUndefined();
     });
   });
 
-  describe('empty placeholders', () => {
-    // `.env.example` ships `PLUGINS_ROOT=` and `PLUGINS_BUNDLED_ROOT=` empty:
-    // that is the documented way to opt into the code defaults. `@bge/env` is
-    // created with `allowEmptyString: false` and substitutes `defaultValue`,
-    // but only if validation lets the empty value reach it — a bare
-    // `Joi.string()` here rejects `''` and kills boot instead.
-    it.each(rootKeys)('accepts %s as an empty string', (key) => {
-      const { error } = schema.validate({ [key]: '' });
-
-      expect(error).toBeUndefined();
-    });
-
-    it('accepts both roots empty, exactly as .env.example ships them', () => {
-      const { error } = schema.validate({ PLUGINS_ROOT: '', PLUGINS_BUNDLED_ROOT: '' });
+  describe('empty placeholder', () => {
+    // `.env.example` ships `PLUGINS_ROOT=` empty: that is the documented way to
+    // opt into the code defaults. `@bge/env` is created with
+    // `allowEmptyString: false` and substitutes `defaultValue`, but only if
+    // validation lets the empty value reach it — a bare `Joi.string()` here
+    // rejects `''` and kills boot instead.
+    it('accepts PLUGINS_ROOT as an empty string, exactly as .env.example ships it (#259)', () => {
+      const { error } = schema.validate({ PLUGINS_ROOT: '' });
 
       expect(error).toBeUndefined();
     });
@@ -54,8 +51,8 @@ describe('pluginsConfigValidationSchema', () => {
   });
 
   describe('rejections', () => {
-    it.each(rootKeys)('rejects a non-string %s', (key) => {
-      const { error } = schema.validate({ [key]: 42 });
+    it('rejects a non-string PLUGINS_ROOT (#259)', () => {
+      const { error } = schema.validate({ PLUGINS_ROOT: 42 });
 
       expect(error).toBeDefined();
     });

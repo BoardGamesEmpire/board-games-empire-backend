@@ -37,7 +37,6 @@ import {
   PluginInstallForbiddenPermissionError,
   PluginInstallManifestError,
   PluginInstallPermissionCollisionError,
-  PluginInstallProvenanceMismatchError,
   PluginInstallStaticAnalysisError,
   PluginInstallUnknownCorePermissionError,
 } from './install.errors';
@@ -49,7 +48,6 @@ import type { StaticAnalysisFinding, StaticAnalysisReport } from './static-analy
 describe('PluginInstallerService', () => {
   const options: PluginModuleOptions = {
     pluginsRoot: '/var/lib/bge/plugins',
-    bundledRoot: '/srv/bge/plugins/bundled',
     bgeVersion: '0.3.0',
     defaultLocale: 'en',
   };
@@ -143,12 +141,11 @@ describe('PluginInstallerService', () => {
   let emitter: { emit: jest.Mock };
   let service: PluginInstallerService;
 
-  const directory = (bundled = false): InstalledPluginDirectory => ({
+  const directory = (): InstalledPluginDirectory => ({
     slug: 'demo-sink',
     rootDir,
     manifestPath: join(rootDir, 'manifest.json'),
     packageJsonPath: join(rootDir, 'package.json'),
-    bundled,
   });
 
   const writeManifest = async (manifest: PluginManifest): Promise<void> => {
@@ -165,7 +162,6 @@ describe('PluginInstallerService', () => {
   const input = (overrides: Partial<PluginInstallInput> = {}): PluginInstallInput => ({
     directory: directory(),
     provenance: {
-      bundled: false,
       installedSha256: 'sha-256-digest',
       installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
       registrySlug: 'bge-official',
@@ -240,7 +236,6 @@ describe('PluginInstallerService', () => {
           category: 'FeedbackSink',
           scope: 'Server',
           executionMode: 'InProcess',
-          bundled: false,
           installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
           installedSha256: 'sha-256-digest',
           registrySlug: 'bge-official',
@@ -251,6 +246,24 @@ describe('PluginInstallerService', () => {
       expect(result.plugin.id).toBe('plugin-1');
       expect(result.warnings).toEqual([]);
       expect(result.analysis).toBe(emptyReport);
+    });
+
+    it('writes the provenance checksum, link and registry to the row (#696)', async () => {
+      // Every plugin is installed from an artifact, so its checksum always
+      // reaches the row. A link or registry the provenance leaves out is stored as null.
+      await service.install(input({ provenance: { installedSha256: 'a'.repeat(64) } }));
+
+      const [{ data }] = db.plugin.create.mock.calls[0] as [{ data: Record<string, unknown> }];
+      expect(data).toEqual(
+        expect.objectContaining({ installedSha256: 'a'.repeat(64), installedFromUrl: null, registrySlug: null }),
+      );
+      // No plugin ships inside the server, so the installer has no flag to write.
+      expect('bundled' in data).toBe(false);
+      expect(installedEvent().provenance).toEqual({
+        installedFromUrl: null,
+        installedSha256: 'a'.repeat(64),
+        registrySlug: null,
+      });
     });
 
     it('creates one PluginPermission row per declare, classified explicit Low', async () => {
@@ -359,39 +372,6 @@ describe('PluginInstallerService', () => {
 
       const [{ data }] = db.plugin.create.mock.calls[0] as [{ data: Record<string, unknown> }];
       expect('executionMode' in data).toBe(false);
-    });
-  });
-
-  describe('bundled installs', () => {
-    it('persists null provenance columns and a null-field event provenance', async () => {
-      await service.install(input({ directory: directory(true), provenance: { bundled: true } }));
-
-      expect(db.plugin.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          bundled: true,
-          installedFromUrl: null,
-          installedSha256: null,
-          registrySlug: null,
-        }),
-      });
-      expect(installedEvent().provenance).toEqual({
-        installedFromUrl: null,
-        installedSha256: null,
-        registrySlug: null,
-      });
-    });
-
-    it('still runs static analysis — first-party code obeys the same import rules', async () => {
-      await service.install(input({ directory: directory(true), provenance: { bundled: true } }));
-
-      expect(analyzer.analyze).toHaveBeenCalledWith(directory(true), { deepScan: false });
-    });
-
-    it('rejects a provenance/directory bundled mismatch as corrupted pipeline state', async () => {
-      await expect(service.install(input({ directory: directory(true) }))).rejects.toBeInstanceOf(
-        PluginInstallProvenanceMismatchError,
-      );
-      expect(db.$transaction).not.toHaveBeenCalled();
     });
   });
 

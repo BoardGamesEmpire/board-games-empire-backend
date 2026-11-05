@@ -232,7 +232,6 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       emitter as never,
       {
         pluginsRoot: '/var/lib/bge/plugins',
-        bundledRoot: '/srv/bge/plugins/bundled',
         bgeVersion: '0.3.0',
         defaultLocale: 'en',
       },
