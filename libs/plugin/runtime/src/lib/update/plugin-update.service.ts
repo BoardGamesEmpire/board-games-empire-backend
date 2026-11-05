@@ -144,20 +144,15 @@ function requestedSlugsDropped(
   ];
 }
 
-/**
- * The staged update's plugin artifact, by its checksum. Every update names
- * one, because no plugin ships inside the server (#696). URL/registry
- * provenance columns keep describing the INSTALL; #84 extends this when its
- * ingress metadata needs to ride an update.
- */
-export interface PluginUpdateProvenance {
-  readonly pendingSha256: string;
-}
-
 export interface PluginUpdateStageInput {
-  /** The NEW version's resolved directory — placed by #84; this service never opens the plugin artifact itself (#59). */
+  /**
+   * The NEW version's plugin artifact directory, which update staging is to
+   * place (planned, #1096). Its checksum is the one the staging records as
+   * `pendingSha256` (#224); the link and
+   * registry columns keep describing the INSTALL. This service never opens
+   * the plugin artifact itself (#59).
+   */
   readonly directory: PluginArtifactDirectory;
-  readonly provenance: PluginUpdateProvenance;
   /** The staging admin — server-admin authority is verified, never assumed, exactly as install verifies it. */
   readonly initiatorId: string;
   /** Admin opt-in: extend static analysis into node_modules; findings advisory only. */
@@ -337,7 +332,7 @@ export class PluginUpdateService {
 
   async stage(input: PluginUpdateStageInput): Promise<PluginUpdateStageResult> {
     const initiatedAt = new Date();
-    const { directory, provenance } = input;
+    const { directory } = input;
 
     if (!(await this.authority.isServerAdmin(input.initiatorId))) {
       throw new PluginUpdateAuthorityError(input.initiatorId);
@@ -377,7 +372,7 @@ export class PluginUpdateService {
         plugin,
         active,
         next,
-        provenance,
+        directory.sha256,
         comparison,
         [],
         corePermissions,
@@ -414,7 +409,7 @@ export class PluginUpdateService {
         data: {
           pendingVersion: next.manifest.version,
           pendingManifestJson: next.manifest as Prisma.InputJsonValue,
-          pendingSha256: provenance.pendingSha256,
+          pendingSha256: directory.sha256,
           pendingSince: initiatedAt,
         },
       });
@@ -444,7 +439,7 @@ export class PluginUpdateService {
       new PluginUpdatePendingEvent(
         this.stagingSnapshot(plugin),
         this.stagingSnapshot(staged),
-        provenance.pendingSha256,
+        directory.sha256,
         comparison.escalations,
         acknowledgedForbiddenImports,
         initiatedAt,
@@ -513,7 +508,7 @@ export class PluginUpdateService {
       plugin,
       active,
       next,
-      { pendingSha256 },
+      pendingSha256,
       comparison,
       checksToSeed,
       corePermissions,
@@ -945,7 +940,8 @@ export class PluginUpdateService {
     plugin: Plugin,
     active: PluginManifestValidationResult,
     next: PluginManifestValidationResult,
-    provenance: PluginUpdateProvenance,
+    /** The checksum of the plugin artifact being activated, which becomes `installedSha256` (#224). */
+    artifactSha256: string,
     comparison: UpdateEscalationComparison,
     checksToSeed: readonly NormalizedPermissionRequest[],
     corePermissions: ReadonlyMap<string, Permission>,
@@ -971,7 +967,7 @@ export class PluginUpdateService {
         plugin,
         active,
         next,
-        provenance,
+        artifactSha256,
         comparison,
         checksToSeed,
         corePermissions,
@@ -1028,7 +1024,7 @@ export class PluginUpdateService {
     plugin: Plugin,
     active: PluginManifestValidationResult,
     next: PluginManifestValidationResult,
-    provenance: PluginUpdateProvenance,
+    artifactSha256: string,
     comparison: UpdateEscalationComparison,
     checksToSeed: readonly NormalizedPermissionRequest[],
     corePermissions: ReadonlyMap<string, Permission>,
@@ -1112,7 +1108,10 @@ export class PluginUpdateService {
           // so activation is not the one manifest-replacing path that leaves
           // a stale server config in force.
           config: retainedConfig.config as Prisma.InputJsonValue,
-          installedSha256: provenance.pendingSha256,
+          // Activation switches which artifact directory the row names, and
+          // nothing on disk moves: the loader finds the new code by this
+          // checksum on the next boot (#224).
+          installedSha256: artifactSha256,
           ...CLEARED_STAGED_UPDATE,
           // The running instance is still the prior code; the loader
           // clears this on the boot that actually loads the new version.

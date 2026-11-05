@@ -197,7 +197,6 @@ describe('PluginUpdateService', () => {
 
   const input = (overrides: Partial<PluginUpdateStageInput> = {}): PluginUpdateStageInput => ({
     directory: directory(),
-    provenance: { pendingSha256: 'new-sha' },
     initiatorId: 'admin-1',
     ...overrides,
   });
@@ -377,7 +376,7 @@ describe('PluginUpdateService', () => {
           data: expect.objectContaining({
             version: '1.3.0',
             restartRequired: true,
-            installedSha256: 'new-sha',
+            installedSha256: 'b'.repeat(64),
             pendingVersion: null,
             pendingSha256: null,
             pendingSince: null,
@@ -389,6 +388,17 @@ describe('PluginUpdateService', () => {
         expect.any(PluginUpdateApprovedEvent),
       );
       expect(emitter.emit).not.toHaveBeenCalledWith(PluginUpdatePendingEvent.eventName, expect.anything());
+    });
+
+    it("an update that activates at once records the artifact directory's checksum (#224)", async () => {
+      await writeManifest(nextManifest());
+
+      const result = await service.stage(input({ directory: { ...directory(), sha256: 'd'.repeat(64) } }));
+
+      expect(result.activated).toBe(true);
+      expect(db.plugin.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ installedSha256: 'd'.repeat(64) }) }),
+      );
     });
 
     it('refuses to activate onto a row uninstalled mid-flight — the whole transaction rolls back', async () => {
@@ -527,13 +537,29 @@ describe('PluginUpdateService', () => {
         where: { id: 'plugin-1', pendingVersion: null, uninstalledAt: null },
         data: expect.objectContaining({
           pendingVersion: '1.3.0',
-          pendingSha256: 'new-sha',
+          pendingSha256: 'b'.repeat(64),
           pendingSince: expect.any(Date),
         }),
       });
       expect(emitter.emit).toHaveBeenCalledWith(
         PluginUpdatePendingEvent.eventName,
         expect.objectContaining({ escalations: result.comparison.escalations }),
+      );
+    });
+
+    it("stages the artifact directory's checksum as pendingSha256 (#224)", async () => {
+      // The staged update's files are the directory its pendingSha256 names,
+      // so the checksum comes from that directory and from nowhere else.
+      await writeManifest(nextManifest({ storage: { ...activeManifest.storage, writesCore: ['GameNight'] } }));
+
+      await service.stage(input({ directory: { ...directory(), sha256: 'd'.repeat(64) } }));
+
+      expect(db.plugin.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ pendingSha256: 'd'.repeat(64) }) }),
+      );
+      expect(emitter.emit).toHaveBeenCalledWith(
+        PluginUpdatePendingEvent.eventName,
+        expect.objectContaining({ pendingSha256: 'd'.repeat(64) }),
       );
     });
 
@@ -600,6 +626,18 @@ describe('PluginUpdateService', () => {
     it('refuses without a staged pending update', async () => {
       await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
         PluginUpdateNoPendingError,
+      );
+    });
+
+    it('approval records the staged checksum as installedSha256 (#224)', async () => {
+      // Activation switches which artifact directory the row names: the
+      // staged artifact becomes the installed one, and nothing on disk moves.
+      db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest(), { pendingSha256: 'e'.repeat(64) }));
+
+      await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+
+      expect(db.plugin.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ installedSha256: 'e'.repeat(64) }) }),
       );
     });
 

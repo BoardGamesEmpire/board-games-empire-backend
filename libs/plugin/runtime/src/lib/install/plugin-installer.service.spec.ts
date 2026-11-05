@@ -162,7 +162,6 @@ describe('PluginInstallerService', () => {
   const input = (overrides: Partial<PluginInstallInput> = {}): PluginInstallInput => ({
     directory: directory(),
     provenance: {
-      installedSha256: 'sha-256-digest',
       installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
       registrySlug: 'bge-official',
     },
@@ -237,7 +236,7 @@ describe('PluginInstallerService', () => {
           scope: 'Server',
           executionMode: 'InProcess',
           installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
-          installedSha256: 'sha-256-digest',
+          installedSha256: 'a'.repeat(64),
           registrySlug: 'bge-official',
           installedById: 'admin-1',
           manifestJson: expect.objectContaining({ slug: 'demo-sink', version: '1.2.0' }),
@@ -248,20 +247,19 @@ describe('PluginInstallerService', () => {
       expect(result.analysis).toBe(emptyReport);
     });
 
-    it('writes the provenance checksum, link and registry to the row (#696)', async () => {
-      // Every plugin is installed from an artifact, so its checksum always
-      // reaches the row. A link or registry the provenance leaves out is stored as null.
-      await service.install(input({ provenance: { installedSha256: 'a'.repeat(64) } }));
+    it("records the artifact directory's checksum as installedSha256 (#224)", async () => {
+      // The directory's name is the artifact's checksum, so the install takes
+      // it from there rather than from a second input that could disagree. A
+      // link or registry the provenance leaves out is stored as null (#696).
+      await service.install(input({ directory: { ...directory(), sha256: 'c'.repeat(64) }, provenance: undefined }));
 
       const [{ data }] = db.plugin.create.mock.calls[0] as [{ data: Record<string, unknown> }];
       expect(data).toEqual(
-        expect.objectContaining({ installedSha256: 'a'.repeat(64), installedFromUrl: null, registrySlug: null }),
+        expect.objectContaining({ installedSha256: 'c'.repeat(64), installedFromUrl: null, registrySlug: null }),
       );
-      // No plugin ships inside the server, so the installer has no flag to write.
-      expect('bundled' in data).toBe(false);
       expect(installedEvent().provenance).toEqual({
         installedFromUrl: null,
-        installedSha256: 'a'.repeat(64),
+        installedSha256: 'c'.repeat(64),
         registrySlug: null,
       });
     });
@@ -334,7 +332,7 @@ describe('PluginInstallerService', () => {
       });
       expect(event.provenance).toEqual({
         installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
-        installedSha256: 'sha-256-digest',
+        installedSha256: 'a'.repeat(64),
         registrySlug: 'bge-official',
       });
       expect(event.grantedPermissions).toEqual([
