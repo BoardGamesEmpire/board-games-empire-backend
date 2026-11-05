@@ -3,6 +3,7 @@ import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
+import { tabletopPlatform } from '../support/seeded-platforms';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { localSearchGameIds } from './game-wire';
 
@@ -95,8 +96,7 @@ describe('game search filter', () => {
 
   it('narrows the local half by platform type and content type, and leaves out a game on no platform', async () => {
     const user = await actors.user();
-    const tabletop = (await db.client.platform.findUniqueOrThrow({ where: { slug: 'tabletop' }, select: { id: true } }))
-      .id;
+    const tabletop = (await tabletopPlatform(db.client)).id;
     const portable = await platformId(PORTABLE_SLUG, PlatformType.Portable);
 
     const token = randomUUID().slice(0, 8);

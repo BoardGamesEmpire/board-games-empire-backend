@@ -1,9 +1,11 @@
-import { ContentType, GameMedium, Reach, type Prisma } from '@bge/database';
+import { ContentType, GameMedium, Reach, ResourceType, type Prisma } from '@bge/database';
 import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
 import request from 'supertest';
+import { mintApiKey, type Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
+import { tabletopPlatform } from '../support/seeded-platforms';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import type { HttpResponseLike, RequestDescription } from '../support/wire';
 import {
@@ -11,6 +13,7 @@ import {
   listCollectionsEnvelope,
   readCollectionEnvelope,
   type CollectionRowPlatformGameWire,
+  type PlayerAndPlayTimeField,
 } from './game-collection-wire';
 
 /**
@@ -39,23 +42,16 @@ describe('collection rows (#1070)', () => {
 
   const token = () => randomUUID().slice(0, 8);
 
-  /**
-   * One collection entry for `ownerId` on a game of its own, held on the
-   * seeded `tabletop` platform, which survives the sweep. `reach` is the
-   * entry's; the game's own values, its reach included, come in `game`.
-   */
-  const arrangeRow = async (
-    ownerId: string,
-    options: {
-      readonly reach: Reach;
-      readonly game?: Partial<Prisma.GameUncheckedCreateInput>;
-      readonly platformGame?: Pick<
-        Prisma.PlatformGameUncheckedCreateInput,
-        'minPlayers' | 'maxPlayers' | 'minPlayTime' | 'maxPlayTime'
-      >;
-    },
-  ) => {
-    const tabletop = await db.client.platform.findUniqueOrThrow({ where: { slug: 'tabletop' }, select: { id: true } });
+  interface PlatformGameOptions {
+    /** The game's own values, its reach included. */
+    readonly game?: Partial<Prisma.GameUncheckedCreateInput>;
+    /** The platform game's overrides of the game's players and play time. */
+    readonly platformGame?: Pick<Prisma.PlatformGameUncheckedCreateInput, PlayerAndPlayTimeField>;
+  }
+
+  /** A game of its own and its platform game on the seeded Tabletop platform. */
+  const arrangePlatformGame = async (options: PlatformGameOptions = {}) => {
+    const tabletop = await tabletopPlatform(db.client);
     const game = await db.client.game.create({
       data: { title: `e2e game ${token()}`, ...options.game },
       select: { id: true },
@@ -64,21 +60,31 @@ describe('collection rows (#1070)', () => {
       data: { gameId: game.id, platformId: tabletop.id, ...options.platformGame },
       select: { id: true },
     });
+
+    return { gameId: game.id, platformGameId: platformGame.id };
+  };
+
+  /** One collection entry for `ownerId` on a platform game of its own. `reach` is the entry's. */
+  const arrangeRow = async (
+    ownerId: string,
+    { reach, ...options }: PlatformGameOptions & { readonly reach: Reach },
+  ) => {
+    const { gameId, platformGameId } = await arrangePlatformGame(options);
     const entry = await db.client.gameCollection.create({
-      data: { userId: ownerId, platformGameId: platformGame.id, medium: GameMedium.Physical, reach: options.reach },
+      data: { userId: ownerId, platformGameId, medium: GameMedium.Physical, reach },
       select: { id: true },
     });
 
-    return { entryId: entry.id, gameId: game.id };
+    return { entryId: entry.id, gameId };
   };
 
-  const listOwn = (actor: AuthenticatedActor) => request(baseUrl).get(COLLECTIONS_PATH).set(actor.headers);
+  const listOwn = (caller: Caller) => request(baseUrl).get(COLLECTIONS_PATH).set(caller.headers);
 
   const readEntry = (actor: AuthenticatedActor, id: string) =>
     request(baseUrl).get(`${COLLECTIONS_PATH}/${id}`).set(actor.headers);
 
-  /** The embedded platform game of the row for `entryId` on a page of collection rows. */
-  const rowOnPage = (
+  /** The platform game embedded in the row for `entryId` on a page of collection rows. */
+  const embeddedOnPage = (
     response: HttpResponseLike,
     entryId: string,
     description: RequestDescription,
@@ -91,8 +97,8 @@ describe('collection rows (#1070)', () => {
     return collectionRowPlatformGame(row, description);
   };
 
-  /** The embedded platform game of the one row a response carries. */
-  const theRow = (response: HttpResponseLike, description: RequestDescription): CollectionRowPlatformGameWire =>
+  /** The platform game embedded in the one row a response carries. */
+  const embeddedIn = (response: HttpResponseLike, description: RequestDescription): CollectionRowPlatformGameWire =>
     collectionRowPlatformGame(readCollectionEnvelope(response, description).collection, description);
 
   /** The entry's embedded platform game, from the owner's list and from its own read, in that order. */
@@ -100,8 +106,8 @@ describe('collection rows (#1070)', () => {
     owner: AuthenticatedActor,
     entryId: string,
   ): Promise<readonly CollectionRowPlatformGameWire[]> => [
-    rowOnPage(await listOwn(owner).expect(200), entryId, `GET ${COLLECTIONS_PATH} as the owner`),
-    theRow(await readEntry(owner, entryId).expect(200), `GET ${COLLECTIONS_PATH}/:id as the owner`),
+    embeddedOnPage(await listOwn(owner).expect(200), entryId, `GET ${COLLECTIONS_PATH} as the owner`),
+    embeddedIn(await readEntry(owner, entryId).expect(200), `GET ${COLLECTIONS_PATH}/:id as the owner`),
   ];
 
   const arrangeGame = (createdById: string, reach: Reach, title: string, deletedAt: Date | null = null) =>
@@ -127,10 +133,7 @@ describe('collection rows (#1070)', () => {
       platformGame: { minPlayers: 1, maxPlayers: 5, minPlayTime: 20, maxPlayTime: 90 },
     });
     const bare = await arrangeRow(owner.user.id, { reach: Reach.Private });
-    const { platformType } = await db.client.platform.findUniqueOrThrow({
-      where: { slug: 'tabletop' },
-      select: { platformType: true },
-    });
+    const { platformType } = await tabletopPlatform(db.client);
 
     for (const platformGame of await embeddedEverywhere(owner, full.entryId)) {
       expect(platformGame.game).toMatchObject({
@@ -184,12 +187,12 @@ describe('collection rows (#1070)', () => {
       await arrangeLink(publicBase.id, expansion.gameId, true);
 
       // The control: the owner's row names both, in base game title order.
-      const ownRow = rowOnPage(
+      const owners = embeddedOnPage(
         await listOwn(owner).expect(200),
         expansion.entryId,
         `GET ${COLLECTIONS_PATH} as the owner`,
       );
-      expect(ownRow.game.baseGames).toEqual([
+      expect(owners.game.baseGames).toEqual([
         { gameId: privateBase.id, isStandalone: false },
         { gameId: publicBase.id, isStandalone: true },
       ]);
@@ -206,11 +209,46 @@ describe('collection rows (#1070)', () => {
           .get(`/api/users/${owner.user.id}/game-collections`)
           .set(viewer.headers)
           .expect(200);
-        const row = rowOnPage(response, expansion.entryId, `GET /api/users/:userId/game-collections as ${who}`);
+        const seen = embeddedOnPage(response, expansion.entryId, `GET /api/users/:userId/game-collections as ${who}`);
 
-        expect(row.game.baseGames).toEqual([{ gameId: publicBase.id, isStandalone: true }]);
+        expect(seen.game.baseGames).toEqual([{ gameId: publicBase.id, isStandalone: true }]);
         expect(JSON.stringify(response.body)).not.toContain(privateBase.id);
       }
+    });
+
+    // A key's Game ceiling is a deny-all when it holds no game read. That
+    // deny-all sits in the link read's own `where`, so the read fails closed
+    // to no base games rather than refusing the rows the key may list.
+    it('lists a key holding only the collection read its rows with no base game named, rather than refusing them (#1070)', async () => {
+      const owner = await actors.user();
+      const base = await arrangeGame(owner.user.id, Reach.Public, `e2e base ${token()}`);
+      const expansion = await arrangeRow(owner.user.id, {
+        reach: Reach.Private,
+        game: { contentType: ContentType.Expansion },
+      });
+      await arrangeLink(base.id, expansion.gameId, false);
+      const collectionRead = { slugs: ['read:game_collection'], resourceType: ResourceType.GameCollection };
+      const collectionOnly = await mintApiKey(baseUrl, db.client, owner, collectionRead);
+      const withGameRead = await mintApiKey(baseUrl, db.client, owner, [
+        collectionRead,
+        { slugs: ['read:game'], resourceType: ResourceType.Game },
+      ]);
+
+      // The control: the same owner's key, with their own-games read beside
+      // it, names the base game they created.
+      const named = embeddedOnPage(
+        await listOwn(withGameRead).expect(200),
+        expansion.entryId,
+        `GET ${COLLECTIONS_PATH} with a key holding read:game`,
+      );
+      expect(named.game.baseGames).toEqual([{ gameId: base.id, isStandalone: false }]);
+
+      const unnamed = embeddedOnPage(
+        await listOwn(collectionOnly).expect(200),
+        expansion.entryId,
+        `GET ${COLLECTIONS_PATH} with a key holding the collection read alone`,
+      );
+      expect(unnamed.game.baseGames).toEqual([]);
     });
 
     it('leaves a soft-deleted base game off a row even for staff, who can still open it by id (#1070)', async () => {
@@ -224,8 +262,12 @@ describe('collection rows (#1070)', () => {
       await arrangeLink(liveBase.id, expansion.gameId, false);
       await arrangeLink(deletedBase.id, expansion.gameId, false);
 
-      const row = rowOnPage(await listOwn(admin).expect(200), expansion.entryId, `GET ${COLLECTIONS_PATH} as an admin`);
-      expect(row.game.baseGames).toEqual([{ gameId: liveBase.id, isStandalone: false }]);
+      const admins = embeddedOnPage(
+        await listOwn(admin).expect(200),
+        expansion.entryId,
+        `GET ${COLLECTIONS_PATH} as an admin`,
+      );
+      expect(admins.game.baseGames).toEqual([{ gameId: liveBase.id, isStandalone: false }]);
 
       // The control: staff read every game unconditioned, and the admin opens
       // the deleted base game by id. So the read ceiling did not leave it off
@@ -236,27 +278,17 @@ describe('collection rows (#1070)', () => {
     it('names the base game on the rows POST, PATCH and DELETE return (#1070)', async () => {
       const owner = await actors.user();
       const base = await arrangeGame(owner.user.id, Reach.Public, `e2e base ${token()}`);
-      const tabletop = await db.client.platform.findUniqueOrThrow({
-        where: { slug: 'tabletop' },
-        select: { id: true },
-      });
-      const expansion = await db.client.game.create({
-        data: { title: `e2e expansion ${token()}`, contentType: ContentType.Expansion },
-        select: { id: true },
-      });
-      const platformGame = await db.client.platformGame.create({
-        data: { gameId: expansion.id, platformId: tabletop.id },
-        select: { id: true },
-      });
-      await arrangeLink(base.id, expansion.id, true);
+      // No entry yet: the POST makes it.
+      const expansion = await arrangePlatformGame({ game: { contentType: ContentType.Expansion } });
+      await arrangeLink(base.id, expansion.gameId, true);
       const expected = [{ gameId: base.id, isStandalone: true }];
 
       const created = await request(baseUrl)
         .post(COLLECTIONS_PATH)
         .set(owner.headers)
-        .send({ platformGameId: platformGame.id, medium: GameMedium.Physical })
+        .send({ platformGameId: expansion.platformGameId, medium: GameMedium.Physical })
         .expect(201);
-      expect(theRow(created, `POST ${COLLECTIONS_PATH}`).game.baseGames).toEqual(expected);
+      expect(embeddedIn(created, `POST ${COLLECTIONS_PATH}`).game.baseGames).toEqual(expected);
       const entryId = readCollectionEnvelope(created, `POST ${COLLECTIONS_PATH}`).collection.id;
 
       const patched = await request(baseUrl)
@@ -264,10 +296,10 @@ describe('collection rows (#1070)', () => {
         .set(owner.headers)
         .send({ quantity: 2 })
         .expect(200);
-      expect(theRow(patched, `PATCH ${COLLECTIONS_PATH}/:id`).game.baseGames).toEqual(expected);
+      expect(embeddedIn(patched, `PATCH ${COLLECTIONS_PATH}/:id`).game.baseGames).toEqual(expected);
 
       const removed = await request(baseUrl).delete(`${COLLECTIONS_PATH}/${entryId}`).set(owner.headers).expect(200);
-      expect(theRow(removed, `DELETE ${COLLECTIONS_PATH}/:id`).game.baseGames).toEqual(expected);
+      expect(embeddedIn(removed, `DELETE ${COLLECTIONS_PATH}/:id`).game.baseGames).toEqual(expected);
     });
   });
 
@@ -367,7 +399,7 @@ describe('collection rows (#1070)', () => {
       expect(await drainedRows(owner, since)).toEqual([]);
       // The full read is how a client learns the base game is gone.
       expect(
-        theRow(await readEntry(owner, row.entryId).expect(200), `GET ${COLLECTIONS_PATH}/:id`).game.baseGames,
+        embeddedIn(await readEntry(owner, row.entryId).expect(200), `GET ${COLLECTIONS_PATH}/:id`).game.baseGames,
       ).toEqual([]);
     });
   });

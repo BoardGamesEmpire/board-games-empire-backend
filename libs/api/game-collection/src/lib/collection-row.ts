@@ -1,6 +1,17 @@
 import type { ExpansionLink, Prisma } from '@bge/database';
 
 /**
+ * The players and play time a game carries and its platform game may
+ * override, selected the same way on both (#1070).
+ */
+const PLAYERS_AND_PLAY_TIME = {
+  minPlayers: true,
+  maxPlayers: true,
+  minPlayTime: true,
+  maxPlayTime: true,
+} as const satisfies Prisma.GameSelect & Prisma.PlatformGameSelect;
+
+/**
  * What a collection row embeds, so a client can render, filter, sort and nest
  * a collection without further fetches (#1070): the platform game with its
  * overrides of players and play time, its platform's type, and the game's
@@ -13,10 +24,7 @@ export const COLLECTION_INCLUDE = {
       id: true,
       image: true,
       thumbnail: true,
-      minPlayers: true,
-      maxPlayers: true,
-      minPlayTime: true,
-      maxPlayTime: true,
+      ...PLAYERS_AND_PLAY_TIME,
       platform: { select: { id: true, name: true, slug: true, platformType: true } },
       game: {
         select: {
@@ -27,10 +35,7 @@ export const COLLECTION_INCLUDE = {
           thumbnail: true,
           contentType: true,
           publishYear: true,
-          minPlayers: true,
-          maxPlayers: true,
-          minPlayTime: true,
-          maxPlayTime: true,
+          ...PLAYERS_AND_PLAY_TIME,
         },
       },
     },

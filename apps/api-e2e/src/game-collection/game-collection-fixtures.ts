@@ -1,5 +1,6 @@
 import { GameMedium, type PrismaClient, type Reach } from '@bge/database';
 import { randomUUID } from 'node:crypto';
+import { tabletopPlatform } from '../support/seeded-platforms';
 
 /**
  * One collection entry for `ownerId`, arranged directly in the database, on a
@@ -11,7 +12,7 @@ import { randomUUID } from 'node:crypto';
  * `../support/wire.ts` describes.
  */
 export async function arrangeCollectionEntry(prisma: PrismaClient, ownerId: string, reach: Reach): Promise<string> {
-  const platform = await prisma.platform.findUniqueOrThrow({ where: { slug: 'tabletop' }, select: { id: true } });
+  const platform = await tabletopPlatform(prisma);
   const game = await prisma.game.create({
     data: { title: `e2e game ${randomUUID().slice(0, 8)}` },
     select: { id: true },

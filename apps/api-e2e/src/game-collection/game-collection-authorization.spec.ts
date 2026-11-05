@@ -3,6 +3,7 @@ import { befriend, createActors, type Actors, type AuthenticatedActor } from '@b
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
+import { tabletopPlatform } from '../support/seeded-platforms';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { listCollectionsEnvelope, readCollectionEnvelope } from './game-collection-wire';
 
@@ -55,7 +56,7 @@ describe('game collection authorization', () => {
    * game is created per test.
    */
   const arrangeCollection = async (ownerId: string) => {
-    const platform = await db.client.platform.findUniqueOrThrow({ where: { slug: 'tabletop' }, select: { id: true } });
+    const platform = await tabletopPlatform(db.client);
     const game = await db.client.game.create({
       data: { title: `e2e game ${randomUUID().slice(0, 8)}` },
       select: { id: true },

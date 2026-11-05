@@ -127,7 +127,7 @@ export class GameCollectionService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    return { rows: await this.withBaseGames(rows), total };
+    return { rows: await this.rowsWithBaseGames(rows), total };
   }
 
   /** A single entry the acting user may read (owner sees own tombstones). */
@@ -145,7 +145,7 @@ export class GameCollectionService {
       throw new NotFoundException(t('errors.game_collection.not_found', { id }));
     }
 
-    return this.withRowBaseGames(collection);
+    return this.rowWithBaseGames(collection);
   }
 
   /**
@@ -174,26 +174,22 @@ export class GameCollectionService {
     const provided = pickDefined({ ...attributes, releaseId });
     const lastUpdated = new Date();
 
-    let collection: GameCollectionWithRelations;
-    try {
-      collection = await this.db.gameCollection.upsert({
-        where: { userId_platformGameId_medium: { userId, platformGameId, medium } },
-        create: { userId, platformGameId, medium, ...provided, lastUpdated },
-        update: { ...provided, deletedAt: null, deleteReason: null, lastUpdated },
-        include: COLLECTION_INCLUDE,
-      });
-    } catch (error) {
-      this.logger.error(`Error adding platform game ${platformGameId} to collection for user ${userId}`, error);
-      if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new NotFoundException(t('errors.platform_game.not_found', { id: platformGameId }));
-      }
+    return this.writtenRow(
+      () =>
+        this.db.gameCollection.upsert({
+          where: { userId_platformGameId_medium: { userId, platformGameId, medium } },
+          create: { userId, platformGameId, medium, ...provided, lastUpdated },
+          update: { ...provided, deletedAt: null, deleteReason: null, lastUpdated },
+          include: COLLECTION_INCLUDE,
+        }),
+      (error) => {
+        this.logger.error(`Error adding platform game ${platformGameId} to collection for user ${userId}`, error);
 
-      throw error;
-    }
-
-    // After the write's catch, so a failed link read is not taken for a
-    // missing platform game (#1070).
-    return this.withRowBaseGames(collection);
+        return isPrismaDependentRecordNotFoundError(error)
+          ? new NotFoundException(t('errors.platform_game.not_found', { id: platformGameId }))
+          : error;
+      },
+    );
   }
 
   /**
@@ -227,24 +223,19 @@ export class GameCollectionService {
       await this.assertReleaseBelongsTo(data.releaseId, existing.platformGameId);
     }
 
-    let collection: GameCollectionWithRelations;
-    try {
-      collection = await this.db.gameCollection.update({
-        where: {
-          id,
-          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.update),
-        },
-        data: { ...data, lastUpdated: new Date() },
-        include: COLLECTION_INCLUDE,
-      });
-    } catch (error) {
-      throw this.mapMissingToNotFound(error, id);
-    }
-
-    // After the write's catch, so a failed link read is never mapped to 404
-    // (#1070).
-    return this.withRowBaseGames(collection);
+    return this.writtenRow(
+      () =>
+        this.db.gameCollection.update({
+          where: {
+            id,
+            // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.update),
+          },
+          data: { ...data, lastUpdated: new Date() },
+          include: COLLECTION_INCLUDE,
+        }),
+      (error) => this.mapMissingToNotFound(error, id),
+    );
   }
 
   /**
@@ -258,25 +249,20 @@ export class GameCollectionService {
 
     // Single scoped write: `deletedAt: null` in the filter makes a repeat
     // delete (or a foreign/missing row) miss and surface as 404.
-    let collection: GameCollectionWithRelations;
-    try {
-      collection = await this.db.gameCollection.update({
-        where: {
-          id,
-          deletedAt: null,
-          // eslint-disable-next-line no-restricted-syntax -- single-row soft delete by id, not a collection read
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.delete),
-        },
-        data: { deletedAt: now, deleteReason: reason ?? null, lastUpdated: now },
-        include: COLLECTION_INCLUDE,
-      });
-    } catch (error) {
-      throw this.mapMissingToNotFound(error, id);
-    }
-
-    // After the write's catch, so a failed link read is never mapped to 404
-    // (#1070).
-    return this.withRowBaseGames(collection);
+    return this.writtenRow(
+      () =>
+        this.db.gameCollection.update({
+          where: {
+            id,
+            deletedAt: null,
+            // eslint-disable-next-line no-restricted-syntax -- single-row soft delete by id, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.delete),
+          },
+          data: { deletedAt: now, deleteReason: reason ?? null, lastUpdated: now },
+          include: COLLECTION_INCLUDE,
+        }),
+      (error) => this.mapMissingToNotFound(error, id),
+    );
   }
 
   /**
@@ -292,7 +278,7 @@ export class GameCollectionService {
    * - The ceiling needs no user, so an anonymous viewer of another user's
    *   collection gets the base games it could open, the Public ones.
    */
-  private async withBaseGames(rows: readonly GameCollectionWithRelations[]): Promise<GameCollectionRow[]> {
+  private async rowsWithBaseGames(rows: readonly GameCollectionWithRelations[]): Promise<GameCollectionRow[]> {
     const links = await readBaseGameLinks(
       this.db,
       [...new Set(rows.map((row) => row.platformGame.game.id))],
@@ -308,11 +294,31 @@ export class GameCollectionService {
     }));
   }
 
-  /** One row with its game's base games, as {@link withBaseGames} reads them. */
-  private async withRowBaseGames(row: GameCollectionWithRelations): Promise<GameCollectionRow> {
-    const [withLinks] = await this.withBaseGames([row]);
+  /** One row with its game's base games, as {@link rowsWithBaseGames} reads them. */
+  private async rowWithBaseGames(row: GameCollectionWithRelations): Promise<GameCollectionRow> {
+    const [withLinks] = await this.rowsWithBaseGames([row]);
 
     return withLinks;
+  }
+
+  /**
+   * The row a write returns, with its game's base games (#1070). `toError`
+   * maps the write's own failure, a missing row to 404 in every caller. The
+   * link read runs after that mapping, never inside it, so a failed link read
+   * reaches the client as itself.
+   */
+  private async writtenRow(
+    write: () => Promise<GameCollectionWithRelations>,
+    toError: (error: unknown) => unknown,
+  ): Promise<GameCollectionRow> {
+    let row: GameCollectionWithRelations;
+    try {
+      row = await write();
+    } catch (error) {
+      throw toError(error);
+    }
+
+    return this.rowWithBaseGames(row);
   }
 
   /**

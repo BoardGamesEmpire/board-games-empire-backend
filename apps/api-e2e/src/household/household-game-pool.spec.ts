@@ -4,6 +4,7 @@ import request from 'supertest';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
 import { gamePoolSampleEnvelope } from '../game/game-wire';
 import { requireBaseUrl } from '../support/e2e-env';
+import { tabletopPlatform } from '../support/seeded-platforms';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 
 /**
@@ -232,7 +233,7 @@ describe('household game pool sample', () => {
   it("leaves out a game the caller can't open, though a member collected it", async () => {
     const [viewer, m1, stranger] = [await actors.user(), await actors.user(), await actors.user()];
     await household(viewer, [m1]);
-    const platform = await db.client.platform.findUniqueOrThrow({ where: { slug: 'tabletop' }, select: { id: true } });
+    const platform = await tabletopPlatform(db.client);
     const hidden = await db.client.game.create({
       data: { title: "A stranger's, Private", reach: Reach.Private, createdById: stranger.user.id },
       select: { id: true },

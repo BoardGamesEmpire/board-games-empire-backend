@@ -4,6 +4,7 @@ import { arrangeFriendship, befriend, createActors, type Actors, type Authentica
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
+import { tabletopPlatform } from '../support/seeded-platforms';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { gameEnvelope, gamePlatformGames, listGamesEnvelope, localSearchGameIds } from './game-wire';
 
@@ -147,10 +148,7 @@ describe('game authorization', () => {
       const token = randomUUID().slice(0, 8);
       const publicGame = await arrangeGame(creator.user.id, Reach.Public, `e2e anonymous public ${token}`);
       const privateGame = await arrangeGame(creator.user.id, Reach.Private, `e2e anonymous private ${token}`);
-      const tabletop = await db.client.platform.findUniqueOrThrow({
-        where: { slug: 'tabletop' },
-        select: { id: true },
-      });
+      const tabletop = await tabletopPlatform(db.client);
       const platformGame = await db.client.platformGame.create({
         data: { gameId: publicGame.id, platformId: tabletop.id },
         select: { id: true },

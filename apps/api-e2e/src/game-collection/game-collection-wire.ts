@@ -11,27 +11,20 @@ import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescripti
 
 export type GameCollectionWire = Wire<GameCollection>;
 
+/** The players and play time a game carries and its platform game may override (#1070). */
+export type PlayerAndPlayTimeField = 'minPlayers' | 'maxPlayers' | 'minPlayTime' | 'maxPlayTime';
+
 /** The game a collection row embeds (#1070). */
 export type CollectionRowGameWire = Wire<
   Pick<
     Game,
-    | 'id'
-    | 'title'
-    | 'subtitle'
-    | 'image'
-    | 'thumbnail'
-    | 'contentType'
-    | 'publishYear'
-    | 'minPlayers'
-    | 'maxPlayers'
-    | 'minPlayTime'
-    | 'maxPlayTime'
+    'id' | 'title' | 'subtitle' | 'image' | 'thumbnail' | 'contentType' | 'publishYear' | PlayerAndPlayTimeField
   >
 > & { readonly baseGames: readonly ExpansionLinkWire[] };
 
 /** The platform game a collection row embeds, with its platform and game (#1070). */
 export type CollectionRowPlatformGameWire = Wire<
-  Pick<PlatformGame, 'id' | 'image' | 'thumbnail' | 'minPlayers' | 'maxPlayers' | 'minPlayTime' | 'maxPlayTime'>
+  Pick<PlatformGame, 'id' | 'image' | 'thumbnail' | PlayerAndPlayTimeField>
 > & {
   readonly platform: Pick<Platform, 'id' | 'name' | 'slug' | 'platformType'>;
   readonly game: CollectionRowGameWire;
