@@ -19,11 +19,12 @@ import {
   GAME_DESCRIPTION_MAX_LENGTH,
   ListGamesQueryDto,
   UpdateGameDto,
+  type GameDetailDto,
   type GameListItemDto,
   type GameSort,
-  type PlatformGameDetailDto,
 } from './dto';
 import { gameListScope } from './game-list-scope';
+import { LINKED_GAME_SELECT } from './linked-game.select';
 import { PLATFORM_GAME_DETAIL_SELECT } from './platform-game-detail.select';
 
 /** A game's ranges, each as its minimum's field and its maximum's. */
@@ -136,20 +137,101 @@ export class GameService {
     );
   }
 
-  async getGame(id: string) {
+  /**
+   * A game the actor may read, with its platform games (#791), its expansions
+   * and, for an expansion, its base games (#1069).
+   *
+   * Each relation is a read of its own, not a filter in the game's `include`:
+   * a deny-all condition is dropped there, so a key with no
+   * `read:platform_game` would get every platform game, and a link would name
+   * a game the actor may not open. They run only once the actor has been
+   * allowed to read the game, which is what protects a private game's
+   * platform games, and outside the game read's `try`, so a failure of one is
+   * never reported as a 404 or 403 of the game.
+   */
+  async getGame(id: string): Promise<GameDetailDto> {
     const game = await this.readGame(id);
+    const linkedGameWhere = this.linkedGameWhere();
 
-    // A second read, not a filter in the game's `include`: a deny-all condition
-    // is dropped there, and a key with no `read:platform_game` would get every
-    // row. It runs only once the actor has been allowed to read the game, which
-    // is what protects a private game's platform games (#791).
-    const platformGames: PlatformGameDetailDto[] = await this.db.platformGame.findMany({
-      where: this.scopeComposer.compose(ResourceType.PlatformGame, Action.read, { gameId: id }),
-      select: PLATFORM_GAME_DETAIL_SELECT,
+    const [platformGames, expansionRows, baseGameRows] = await Promise.all([
+      this.db.platformGame.findMany({
+        where: this.scopeComposer.compose(ResourceType.PlatformGame, Action.read, { gameId: id }),
+        select: PLATFORM_GAME_DETAIL_SELECT,
+        orderBy: { platform: { name: 'asc' } },
+      }),
+
+      this.db.gameExpansion.findMany({
+        where: { baseGameId: id, expansionGame: { is: linkedGameWhere } },
+        select: { isStandalone: true, expansionGame: { select: LINKED_GAME_SELECT } },
+        orderBy: [{ expansionGame: { title: 'asc' } }, { expansionGameId: 'asc' }],
+      }),
+
+      this.db.gameExpansion.findMany({
+        where: { expansionGameId: id, baseGame: { is: linkedGameWhere } },
+        select: { isStandalone: true, baseGame: { select: LINKED_GAME_SELECT } },
+        orderBy: [{ baseGame: { title: 'asc' } }, { baseGameId: 'asc' }],
+      }),
+    ]);
+
+    const platformIds = await this.readPlatformIds(expansionRows.map(({ expansionGame }) => expansionGame.id));
+
+    return {
+      ...game,
+      platformGames,
+      expansions: expansionRows.map(({ isStandalone, expansionGame }) => ({
+        gameId: expansionGame.id,
+        isStandalone,
+        game: expansionGame,
+        platformIds: platformIds.get(expansionGame.id) ?? [],
+      })),
+      baseGames: baseGameRows.map(({ isStandalone, baseGame }) => ({
+        gameId: baseGame.id,
+        isStandalone,
+        game: baseGame,
+      })),
+    };
+  }
+
+  /**
+   * The games a link on `GET /games/:id` may name: the live games the actor
+   * could open by id, the ceiling over `deletedAt: null` (#1069). `GET /games`
+   * names fewer, those in its intrinsic scope under the ceiling, but that
+   * scope needs a user, and this route also serves plugin, system and
+   * external actors.
+   *
+   * The scope is the liveness test alone. Every user role's read rules carry
+   * it already, but staff read every game unconditioned, so the ceiling alone
+   * would show them a soft-deleted expansion as one to get, which `GET /games`
+   * never lists.
+   */
+  private linkedGameWhere(): Prisma.GameWhereInput {
+    return this.scopeComposer.compose(ResourceType.Game, Action.read, { deletedAt: null });
+  }
+
+  /**
+   * The platforms each of `gameIds` has a platform game on, in platform name
+   * order, through the platform game ceiling (#1069). Empty for an API key
+   * with no `read:platform_game`, as its platform games are (#791).
+   */
+  private async readPlatformIds(gameIds: readonly string[]): Promise<ReadonlyMap<string, string[]>> {
+    const byGame = new Map<string, string[]>();
+    if (gameIds.length === 0) {
+      return byGame;
+    }
+
+    const rows = await this.db.platformGame.findMany({
+      where: this.scopeComposer.compose(ResourceType.PlatformGame, Action.read, { gameId: { in: [...gameIds] } }),
+      select: { gameId: true, platformId: true },
       orderBy: { platform: { name: 'asc' } },
     });
 
-    return { ...game, platformGames };
+    for (const { gameId, platformId } of rows) {
+      const forGame = byGame.get(gameId) ?? [];
+      forGame.push(platformId);
+      byGame.set(gameId, forGame);
+    }
+
+    return byGame;
   }
 
   private async readGame(id: string) {
@@ -258,14 +340,6 @@ export class GameService {
                   name: true,
                 },
               },
-            },
-          },
-
-          expansions: {
-            select: {
-              id: true,
-              baseGameId: true,
-              expansionGameId: true,
             },
           },
         },

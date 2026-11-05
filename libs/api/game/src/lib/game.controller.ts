@@ -99,7 +99,10 @@ export class GameController {
     description:
       'A game the actor may read, with its `platformGames`: the ids `POST /game-collections` takes, in platform ' +
       'name order. The list is empty when the game has no platform or the actor may not read its platform games, ' +
-      'such as an API key with no `read:platform_game`. See #791.',
+      'such as an API key with no `read:platform_game`. See #791. `expansions` lists the game’s expansions the ' +
+      'actor may read, each with `platformIds`, the platforms it has a platform game on (empty for an API key ' +
+      'without `read:platform_game`); `baseGames` lists, for an expansion, the base games it attaches to that the ' +
+      'actor may read. Both are in title order, and each link carries its own `isStandalone`. See #1069.',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, type: GameResponseDto })

@@ -1,6 +1,7 @@
 import type { ExpansionLink, Game } from '@bge/database';
 import { ContentType, PlatformType, Reach } from '@bge/database';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import type { LinkedGame } from '../linked-game.select';
 import type { PlatformGameDetail } from '../platform-game-detail.select';
 
 export class GameDto implements Pick<
@@ -198,6 +199,49 @@ export class PlatformGameDetailDto implements PlatformGameDetail {
   platform!: GamePlatformDto;
 }
 
+/**
+ * The game at the far end of an expansion link (#1069). This class implements
+ * the read's row type and the service annotates that read with this class, so
+ * a column missing from either the select or this class fails the typecheck.
+ */
+export class LinkedGameDto implements LinkedGame {
+  @ApiProperty({ description: 'Unique game identifier' })
+  id!: string;
+
+  @ApiProperty({ description: 'Title of the game' })
+  title!: string;
+
+  @ApiProperty({ type: String, nullable: true, description: 'Thumbnail image URL. The title labels it.' })
+  thumbnail!: string | null;
+
+  @ApiProperty({
+    enum: ContentType,
+    enumName: 'ContentType',
+    description: 'Content classification (base game, expansion, etc.)',
+  })
+  contentType!: ContentType;
+}
+
+/** One of a game's expansions on `GET /games/:id` (#1069). */
+export class LinkedExpansionDto extends ExpansionLinkDto {
+  @ApiProperty({ type: LinkedGameDto, description: 'The expansion' })
+  game!: LinkedGameDto;
+
+  @ApiProperty({
+    type: [String],
+    description:
+      'IDs of the platforms the expansion has a platform game on, in platform name order. Empty when it has ' +
+      'none, or when the actor may not read its platform games, such as an API key with no `read:platform_game`.',
+  })
+  platformIds!: string[];
+}
+
+/** One of an expansion's base games on `GET /games/:id` (#1069). */
+export class LinkedBaseGameDto extends ExpansionLinkDto {
+  @ApiProperty({ type: LinkedGameDto, description: 'The base game' })
+  game!: LinkedGameDto;
+}
+
 export class GameDetailDto extends GameDto {
   @ApiProperty({
     type: [PlatformGameDetailDto],
@@ -206,6 +250,22 @@ export class GameDetailDto extends GameDto {
       'when the actor may not read them.',
   })
   platformGames!: PlatformGameDetailDto[];
+
+  @ApiProperty({
+    type: [LinkedExpansionDto],
+    description:
+      'The game’s expansions the actor may read, in title order, then game id. Each link carries its own ' +
+      '`isStandalone`.',
+  })
+  expansions!: LinkedExpansionDto[];
+
+  @ApiProperty({
+    type: [LinkedBaseGameDto],
+    description:
+      'For an expansion, the base games it attaches to that the actor may read, in title order, then game id. ' +
+      'Each link carries its own `isStandalone`. Empty for any other game.',
+  })
+  baseGames!: LinkedBaseGameDto[];
 }
 
 export class GameResponseDto {

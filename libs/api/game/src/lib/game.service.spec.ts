@@ -18,6 +18,7 @@ import { BadRequestException, ForbiddenException, Logger, NotFoundException } fr
 import { GAME_DESCRIPTION_MAX_LENGTH, ListGamesQueryDto, type CreateGameDto, type UpdateGameDto } from './dto';
 import { gameListScope } from './game-list-scope';
 import { GameService } from './game.service';
+import { LINKED_GAME_SELECT } from './linked-game.select';
 import { PLATFORM_GAME_DETAIL_SELECT } from './platform-game-detail.select';
 
 const COND = { id: 'sentinel-condition' };
@@ -59,6 +60,8 @@ describe('GameService', () => {
     db = ctx.db;
     service = ctx.module.get(GameService);
     compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
+    // Both game routes read expansion links (#1069); a game with none is the default.
+    db.gameExpansion.findMany.mockResolvedValue([]);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -83,7 +86,6 @@ describe('GameService', () => {
     beforeEach(() => {
       db.game.findMany.mockResolvedValue([]);
       db.game.count.mockResolvedValue(0);
-      db.gameExpansion.findMany.mockResolvedValue([]);
     });
 
     it('asks the composer for its where clause, declaring the list scope of the acting user', async () => {
@@ -379,7 +381,7 @@ describe('GameService', () => {
         select: PLATFORM_GAME_DETAIL_SELECT,
         orderBy: { platform: { name: 'asc' } },
       });
-      expect(game).toEqual({ id: 'game-1', platformGames: [row] });
+      expect(game).toEqual({ id: 'game-1', platformGames: [row], expansions: [], baseGames: [] });
     });
 
     // Being allowed to read the game is what protects a private game's platform
@@ -394,20 +396,146 @@ describe('GameService', () => {
       await expect(service.getGame('game-1')).rejects.toThrow(exception);
 
       expect(db.platformGame.findMany).not.toHaveBeenCalled();
+      // Nor its expansion links (#1069): they would name the games linked to
+      // a game the actor was refused.
+      expect(db.gameExpansion.findMany).not.toHaveBeenCalled();
     });
 
     // The log line and the 404/403 mapping are written for the game read, and
-    // this read has already got past it.
-    it('does not report a failure of this read as a failure of the game read', async () => {
-      const failure = new Error('connection lost');
-      const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
-      db.game.findUniqueOrThrow.mockResolvedValue({ id: 'game-1' } as Game);
-      db.platformGame.findMany.mockRejectedValue(failure);
+    // these reads have already got past it: the platform games (#791), and the
+    // expansion links and platform ids (#1069).
+    it.each([
+      ['its platform games or platform ids', (db: MockDatabaseService) => db.platformGame.findMany],
+      ['its expansion links', (db: MockDatabaseService) => db.gameExpansion.findMany],
+    ])(
+      'does not report a failure of a read of %s as a failure of the game read (#791, #1069)',
+      async (_read, delegate) => {
+        const failure = new Error('connection lost');
+        const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+        db.game.findUniqueOrThrow.mockResolvedValue({ id: 'game-1' } as Game);
+        db.platformGame.findMany.mockResolvedValue([]);
+        delegate(db).mockRejectedValue(failure);
 
-      await expect(service.getGame('game-1')).rejects.toBe(failure);
+        await expect(service.getGame('game-1')).rejects.toBe(failure);
 
-      expect(errorSpy).not.toHaveBeenCalled();
-      errorSpy.mockRestore();
+        expect(errorSpy).not.toHaveBeenCalled();
+        errorSpy.mockRestore();
+      },
+    );
+  });
+
+  /**
+   * #1069. A game's expansions and, for an expansion, its base games. Each is
+   * filtered to the live games the actor could open by id, in the
+   * `where` of its own read: Prisma drops a deny-all condition inside an
+   * `include` filter, which would name every linked game. The reads run only
+   * once the game read has passed.
+   */
+  describe('getGame, with its expansions and base games (#1069)', () => {
+    // The real composer over the mocked ability service: the live games under
+    // the read ceiling. Staff read every game unconditioned, so the liveness
+    // test is what keeps a soft-deleted game off their links (#1069).
+    const linkedGameWhere = { deletedAt: null, AND: [COND] };
+
+    const linkedGame = (id: string, title: string, contentType: string) => ({
+      id,
+      title,
+      thumbnail: null,
+      contentType,
+    });
+
+    // Each link read is told apart by the end it starts from.
+    const stubLinks = (expansions: unknown[], baseGames: unknown[]) =>
+      db.gameExpansion.findMany.mockImplementation(((args: { where: Record<string, unknown> }) =>
+        Promise.resolve('baseGameId' in args.where ? expansions : baseGames)) as never);
+
+    // The detail's platform games and the expansions' platform ids are told
+    // apart by their select.
+    const stubPlatformIds = (rows: unknown[]) =>
+      db.platformGame.findMany.mockImplementation(((args: { select: unknown }) =>
+        Promise.resolve(args.select === PLATFORM_GAME_DETAIL_SELECT ? [] : rows)) as never);
+
+    beforeEach(() => {
+      db.game.findUniqueOrThrow.mockResolvedValue({ id: 'g1' } as Game);
+      stubPlatformIds([]);
+    });
+
+    it('reads the game’s live expansions through the read ceiling, in title then id order (#1069)', async () => {
+      await service.getGame('g1');
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.Game, Action.read, { deletedAt: null });
+      expect(db.gameExpansion.findMany).toHaveBeenCalledWith({
+        where: { baseGameId: 'g1', expansionGame: { is: linkedGameWhere } },
+        select: { isStandalone: true, expansionGame: { select: LINKED_GAME_SELECT } },
+        orderBy: [{ expansionGame: { title: 'asc' } }, { expansionGameId: 'asc' }],
+      });
+    });
+
+    it('reads the game’s base games the same way, from the other end of the link (#1069)', async () => {
+      await service.getGame('g1');
+
+      expect(db.gameExpansion.findMany).toHaveBeenCalledWith({
+        where: { expansionGameId: 'g1', baseGame: { is: linkedGameWhere } },
+        select: { isStandalone: true, baseGame: { select: LINKED_GAME_SELECT } },
+        orderBy: [{ baseGame: { title: 'asc' } }, { baseGameId: 'asc' }],
+      });
+    });
+
+    // An API key with no `read:platform_game` gets empty lists, as it gets no
+    // platform games (#791).
+    it('reads the expansions’ platform ids through the platform game ceiling, in platform name order (#1069)', async () => {
+      stubLinks(
+        [
+          { isStandalone: false, expansionGame: linkedGame('e1', 'A', 'Expansion') },
+          { isStandalone: true, expansionGame: linkedGame('e2', 'B', 'Expansion') },
+        ],
+        [],
+      );
+      stubPlatformIds([
+        { gameId: 'e1', platformId: 'p2' },
+        { gameId: 'e1', platformId: 'p1' },
+      ]);
+
+      const game = await service.getGame('g1');
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.PlatformGame, Action.read, {
+        gameId: { in: ['e1', 'e2'] },
+      });
+      expect(db.platformGame.findMany).toHaveBeenCalledWith({
+        where: { gameId: { in: ['e1', 'e2'] }, AND: [COND] },
+        select: { gameId: true, platformId: true },
+        orderBy: { platform: { name: 'asc' } },
+      });
+      expect(game.expansions.map(({ gameId, platformIds }) => ({ gameId, platformIds }))).toEqual([
+        { gameId: 'e1', platformIds: ['p2', 'p1'] },
+        { gameId: 'e2', platformIds: [] },
+      ]);
+    });
+
+    it('skips the platform id read when the game has no visible expansion (#1069)', async () => {
+      await service.getGame('g1');
+
+      expect(db.platformGame.findMany).toHaveBeenCalledTimes(1);
+      expect(db.platformGame.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ select: PLATFORM_GAME_DETAIL_SELECT }),
+      );
+    });
+
+    it('returns expansions and baseGames as links carrying the linked game (#1069)', async () => {
+      stubLinks(
+        [{ isStandalone: true, expansionGame: linkedGame('e1', 'A', 'Expansion') }],
+        [{ isStandalone: false, baseGame: linkedGame('b1', 'Base', 'BaseGame') }],
+      );
+      stubPlatformIds([{ gameId: 'e1', platformId: 'p1' }]);
+
+      const game = await service.getGame('g1');
+
+      expect(game.expansions).toEqual([
+        { gameId: 'e1', isStandalone: true, game: linkedGame('e1', 'A', 'Expansion'), platformIds: ['p1'] },
+      ]);
+      expect(game.baseGames).toEqual([
+        { gameId: 'b1', isStandalone: false, game: linkedGame('b1', 'Base', 'BaseGame') },
+      ]);
     });
   });
 
