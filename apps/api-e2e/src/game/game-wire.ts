@@ -15,6 +15,26 @@ export type PlatformGameWire = Wire<Omit<PlatformGame, 'platformId' | 'enrichmen
   readonly platform: Pick<Platform, 'id' | 'name' | 'abbreviation' | 'platformType'>;
 };
 
+/** One expansion link as the game routes send it (#1069). */
+export interface ExpansionLinkWire {
+  readonly gameId: string;
+  readonly isStandalone: boolean;
+}
+
+/** The game at the far end of a link on `GET /api/games/:id` (#1069). */
+export type LinkedGameWire = Pick<GameWire, 'id' | 'title' | 'thumbnail' | 'contentType'>;
+
+/** One of `GET /api/games/:id`'s `game.expansions` (#1069). */
+export interface LinkedExpansionWire extends ExpansionLinkWire {
+  readonly game: LinkedGameWire;
+  readonly platformIds: readonly string[];
+}
+
+/** One of `GET /api/games/:id`'s `game.baseGames` (#1069). */
+export interface LinkedBaseGameWire extends ExpansionLinkWire {
+  readonly game: LinkedGameWire;
+}
+
 export interface ListGamesEnvelope {
   readonly games: readonly GameWire[];
   readonly total: number;
@@ -166,6 +186,50 @@ export function gamePlatformGames(
   }
 
   return platformGames as PlatformGameWire[];
+}
+
+/**
+ * `GET /api/games`: the `baseGames` of the row for `gameId` (#1069). An absent
+ * list would read as an expansion with no visible base game, so it fails, as
+ * does a page without the row: every caller here expects the game listed.
+ */
+export function listRowBaseGames(
+  response: HttpResponseLike,
+  gameId: string,
+  request: RequestDescription,
+): readonly ExpansionLinkWire[] {
+  const row = listGamesEnvelope(response, request).games.find((game) => game.id === gameId);
+  if (row === undefined) {
+    return fail(`its page carried no row for game ${gameId}`, request, response);
+  }
+
+  const baseGames = (row as unknown as Record<string, unknown>)['baseGames'];
+  if (!Array.isArray(baseGames)) {
+    return fail(`its row for game ${gameId} carried no 'baseGames' array`, request, response);
+  }
+
+  return baseGames as ExpansionLinkWire[];
+}
+
+/**
+ * `GET /api/games/:id`: the game's `expansions` and `baseGames` (#1069). As
+ * with its platform games, an absent list fails rather than reading as empty.
+ */
+export function gameExpansionLinks(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): { readonly expansions: readonly LinkedExpansionWire[]; readonly baseGames: readonly LinkedBaseGameWire[] } {
+  const { game } = gameEnvelope(response, request);
+  const { expansions, baseGames } = game as unknown as Record<string, unknown>;
+  if (!Array.isArray(expansions)) {
+    return fail("its 'game' carried no 'expansions' array", request, response);
+  }
+
+  if (!Array.isArray(baseGames)) {
+    return fail("its 'game' carried no 'baseGames' array", request, response);
+  }
+
+  return { expansions: expansions as LinkedExpansionWire[], baseGames: baseGames as LinkedBaseGameWire[] };
 }
 
 /**

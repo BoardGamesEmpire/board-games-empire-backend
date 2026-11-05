@@ -1,7 +1,17 @@
-import type { Game } from '@bge/database';
+import type { ExpansionLink, Game } from '@bge/database';
 import { ContentType, PlatformType, Reach } from '@bge/database';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import type { LinkedGame } from '../linked-game.select';
 import type { PlatformGameDetail } from '../platform-game-detail.select';
+import {
+  GameArtistDto,
+  GameCategoryDto,
+  GameDesignerDto,
+  GameFamilyDto,
+  GameMechanicDto,
+  GamePublisherDto,
+  GameTagDto,
+} from './game-detail-relations.dto';
 
 export class GameDto implements Pick<
   Game,
@@ -94,6 +104,30 @@ export class GameDto implements Pick<
   updatedAt!: Date;
 }
 
+/**
+ * One expansion link, seen from the game at one end (#1069): `gameId` names
+ * the game at the other end. The value is the link's own, since an expansion
+ * can be standalone for one base game and not another.
+ */
+export class ExpansionLinkDto implements ExpansionLink {
+  @ApiProperty({ description: 'ID of the game at the other end of the link' })
+  gameId!: string;
+
+  @ApiProperty({ description: 'Whether the expansion plays without this base game' })
+  isStandalone!: boolean;
+}
+
+/** A row of `GET /games` (#1069). */
+export class GameListItemDto extends GameDto {
+  @ApiProperty({
+    type: [ExpansionLinkDto],
+    description:
+      'For an expansion, the base games it attaches to that this list also contains, in title order, then game ' +
+      'id, each with that link’s `isStandalone`. Empty for any other game.',
+  })
+  baseGames!: ExpansionLinkDto[];
+}
+
 export class GamePlatformDto {
   @ApiProperty({ description: 'Unique platform identifier' })
   id!: string;
@@ -174,7 +208,71 @@ export class PlatformGameDetailDto implements PlatformGameDetail {
   platform!: GamePlatformDto;
 }
 
+/**
+ * The game at the far end of an expansion link (#1069). This class implements
+ * the read's row type and the service annotates that read with this class, so
+ * a column missing from either the select or this class fails the typecheck.
+ */
+export class LinkedGameDto implements LinkedGame {
+  @ApiProperty({ description: 'Unique game identifier' })
+  id!: string;
+
+  @ApiProperty({ description: 'Title of the game' })
+  title!: string;
+
+  @ApiProperty({ type: String, nullable: true, description: 'Thumbnail image URL. The title labels it.' })
+  thumbnail!: string | null;
+
+  @ApiProperty({
+    enum: ContentType,
+    enumName: 'ContentType',
+    description: 'Content classification (base game, expansion, etc.)',
+  })
+  contentType!: ContentType;
+}
+
+/** One of a game's expansions on `GET /games/:id` (#1069). */
+export class LinkedExpansionDto extends ExpansionLinkDto {
+  @ApiProperty({ type: LinkedGameDto, description: 'The expansion' })
+  game!: LinkedGameDto;
+
+  @ApiProperty({
+    type: [String],
+    description:
+      'IDs of the platforms the expansion has a platform game on, in platform name order. Empty when it has ' +
+      'none, or when the actor may not read its platform games, such as an API key with no `read:platform_game`.',
+  })
+  platformIds!: string[];
+}
+
+/** One of an expansion's base games on `GET /games/:id` (#1069). */
+export class LinkedBaseGameDto extends ExpansionLinkDto {
+  @ApiProperty({ type: LinkedGameDto, description: 'The base game' })
+  game!: LinkedGameDto;
+}
+
 export class GameDetailDto extends GameDto {
+  @ApiProperty({ type: [GameArtistDto], description: 'The game’s artists, each with their role (#1036)' })
+  artists!: GameArtistDto[];
+
+  @ApiProperty({ type: [GameCategoryDto], description: 'The game’s categories, the primary one marked (#1036)' })
+  categories!: GameCategoryDto[];
+
+  @ApiProperty({ type: [GameDesignerDto], description: 'The game’s designers, each with their role (#1036)' })
+  designers!: GameDesignerDto[];
+
+  @ApiProperty({ type: [GameFamilyDto], description: 'The families the game belongs to (#1036)' })
+  families!: GameFamilyDto[];
+
+  @ApiProperty({ type: [GameMechanicDto], description: 'The game’s mechanics (#1036)' })
+  mechanics!: GameMechanicDto[];
+
+  @ApiProperty({ type: [GamePublisherDto], description: 'The game’s publishers, each with their role (#1036)' })
+  publishers!: GamePublisherDto[];
+
+  @ApiProperty({ type: [GameTagDto], description: 'The game’s tags (#1036)' })
+  tags!: GameTagDto[];
+
   @ApiProperty({
     type: [PlatformGameDetailDto],
     description:
@@ -182,6 +280,22 @@ export class GameDetailDto extends GameDto {
       'when the actor may not read them.',
   })
   platformGames!: PlatformGameDetailDto[];
+
+  @ApiProperty({
+    type: [LinkedExpansionDto],
+    description:
+      'The game’s expansions the actor may read, in title order, then game id. Each link carries its own ' +
+      '`isStandalone`.',
+  })
+  expansions!: LinkedExpansionDto[];
+
+  @ApiProperty({
+    type: [LinkedBaseGameDto],
+    description:
+      'For an expansion, the base games it attaches to that the actor may read, in title order, then game id. ' +
+      'Each link carries its own `isStandalone`. Empty for any other game.',
+  })
+  baseGames!: LinkedBaseGameDto[];
 }
 
 export class GameResponseDto {

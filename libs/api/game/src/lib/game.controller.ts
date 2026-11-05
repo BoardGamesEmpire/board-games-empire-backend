@@ -9,7 +9,7 @@ import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
 import {
   CreateGameDto,
-  GameDto,
+  GameListItemDto,
   GameResponseDto,
   ListGamesQueryDto,
   RandomGamesResponseDto,
@@ -17,7 +17,7 @@ import {
 } from './dto';
 import { GameService } from './game.service';
 
-const PaginatedGamesResponse = PaginatedResponseDto(GameDto, 'games');
+const PaginatedGamesResponse = PaginatedResponseDto(GameListItemDto, 'games');
 
 @ApiBearerAuth()
 @ApiSecurity('api_key')
@@ -44,7 +44,9 @@ export class GameController {
       'list is unchanged. Pages are offsets: a game added or removed between two requests shifts the pages after ' +
       'it, and under `?sort=newest` an added game lands on page 1. Paginated: `?page=` (1-based) and `?limit=`, ' +
       'with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` counts the same set. ' +
-      'See #230.',
+      'See #230. Each row’s `baseGames` names, for an expansion, the base games it attaches to that this list ' +
+      'also contains, each with that link’s `isStandalone`; empty for any other game. The server does not group ' +
+      'expansions with their base games; see #1069.',
   })
   @ApiResponse({ status: Http.Ok, type: PaginatedGamesResponse })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
@@ -97,7 +99,10 @@ export class GameController {
     description:
       'A game the actor may read, with its `platformGames`: the ids `POST /game-collections` takes, in platform ' +
       'name order. The list is empty when the game has no platform or the actor may not read its platform games, ' +
-      'such as an API key with no `read:platform_game`. See #791.',
+      'such as an API key with no `read:platform_game`. See #791. `expansions` lists the game’s expansions the ' +
+      'actor may read, each with `platformIds`, the platforms it has a platform game on (empty for an API key ' +
+      'without `read:platform_game`); `baseGames` lists, for an expansion, the base games it attaches to that the ' +
+      'actor may read. Both are in title order, and each link carries its own `isStandalone`. See #1069.',
   })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, type: GameResponseDto })
