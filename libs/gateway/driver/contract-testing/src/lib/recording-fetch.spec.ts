@@ -62,4 +62,17 @@ describe('createRecordingFetch', () => {
     expect(answered).toEqual([202, 429, 502]);
     expect(record).not.toHaveBeenCalled();
   });
+
+  // A Response refuses a body, even an empty one, for these statuses, so the
+  // answer handed back is built without one rather than throwing (#1082).
+  it.each([204, 304])('hands back a %i answer with no body', async (status) => {
+    const fetch = createRecordingFetch(
+      () => undefined,
+      createFakeFetch(() => ({ status })),
+    );
+
+    const response = await fetch('https://api.igdb.com/v4/games', { method: 'POST', headers: {} });
+
+    expect([response.status, response.body]).toEqual([status, null]);
+  });
 });

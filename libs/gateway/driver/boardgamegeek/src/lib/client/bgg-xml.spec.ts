@@ -137,6 +137,22 @@ describe('parseSearch', () => {
     });
   });
 
+  // BGG names a search item by the name the query matched, so an item found
+  // by an alternate name carries only that one (#1082).
+  it('names an item by its alternate name when it has no primary one, and leaves a nameless item unnamed', () => {
+    const result = parseSearch(
+      '<items total="2" termsofuse="">' +
+        '<item type="boardgame" id="54"><name type="alternate" value="Tikal (DE)"/></item>' +
+        '<item type="boardgame" id="55"></item>' +
+        '</items>',
+    );
+
+    expect(result.items?.map(({ id, name }) => ({ id, name }))).toEqual([
+      { id: 54, name: 'Tikal (DE)' },
+      { id: 55, name: undefined },
+    ]);
+  });
+
   it('refuses an answer that is not an <items> document (#1082)', () => {
     expect(() => parseSearch('<html><body>Service unavailable</body></html>')).toThrow(
       'BGG answered without an <items> document',
@@ -148,5 +164,6 @@ describe('parseSearch', () => {
       total: 0,
       items: undefined,
     });
+    expect(parseSearch('<items></items>')).toEqual({ total: 0, items: undefined });
   });
 });

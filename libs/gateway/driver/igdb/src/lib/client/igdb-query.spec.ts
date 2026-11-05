@@ -31,6 +31,14 @@ describe('IgdbQuery', () => {
     ]);
   });
 
+  it('leaves out a clause given nothing, a zero limit too, and sends an empty query when none is left', async () => {
+    const fetch = createFakeFetch(() => ({ body: '[]' }));
+
+    await query(fetch).fields('').search('').where('').sort('').limit(0).offset(0).request('/games');
+
+    expect(fetch.requests[0].body).toBe('');
+  });
+
   it('POSTs the query to the endpoint with the client id and the access token', async () => {
     const fetch = createFakeFetch(() => ({ body: '[{"id":1}]' }));
 
