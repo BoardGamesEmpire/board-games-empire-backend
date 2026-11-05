@@ -72,23 +72,17 @@ function normalizeTitle(value: BggText | undefined): string | undefined {
 }
 
 /**
- * Supports both common BGG client shapes:
- * - canonical `names: [{ type: 'primary', value: '...' }]`
- * - flattened `name: '...'` with optional `alternateNames: string[]`
+ * A thing's title: its primary name, picked by type (#1082), or, when that's
+ * blank, the first of its other names that isn't (#716).
  */
-function selectThingTitle(thing: Pick<BggThing, 'names' | 'name' | 'alternateNames'>): string {
-  const directName = normalizeTitle(thing.name);
-  if (directName) {
-    return directName;
+function selectThingTitle(thing: Pick<BggThing, 'names'>): string {
+  const primary = normalizeTitle(selectPrimaryName(thing.names));
+  if (primary) {
+    return primary;
   }
 
-  const fromNames = normalizeTitle(selectPrimaryName(thing.names));
-  if (fromNames) {
-    return fromNames;
-  }
-
-  for (const alternateName of thing.alternateNames ?? []) {
-    const normalized = normalizeTitle(alternateName);
+  for (const name of thing.names ?? []) {
+    const normalized = normalizeTitle(name.value);
     if (normalized) {
       return normalized;
     }
@@ -304,8 +298,8 @@ function toReleases(thing: BggThing): proto.GameReleaseData[] {
  * empty, since search items have no release data.
  */
 export function searchItemToGameSearchData(item: BggSearchItem, thing?: BggThing): proto.GameSearchData {
-  // Trimmed, and a blank name falls back to `names`, as a fetched thing's title does (#716).
-  const title = normalizeTitle(item.name) ?? normalizeTitle(selectPrimaryName(item.names)) ?? '';
+  // Trimmed; a blank one takes the thing's title below (#716).
+  const title = normalizeTitle(item.name) ?? '';
 
   const found = {
     externalId: String(item.id),

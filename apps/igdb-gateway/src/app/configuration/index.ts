@@ -7,7 +7,7 @@ export const configuration = {
 };
 
 /**
- * The igdb module loads its own config through `ConfigModule.forFeature`,
+ * The data gateway module loads the igdb config through `ConfigModule.forFeature`,
  * which validates nothing. Only `forRoot` runs a schema, so the igdb keys are
  * checked here or not at all.
  */

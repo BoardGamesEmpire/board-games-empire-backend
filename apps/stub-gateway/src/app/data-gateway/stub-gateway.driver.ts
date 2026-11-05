@@ -1,5 +1,5 @@
-import { GatewayServiceHost } from '@bge/gateway-host';
 import { BGE_VERSION } from '@bge/version';
+import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable } from '@nestjs/common';
 import * as crypto from 'node:crypto';
@@ -80,14 +80,14 @@ function toSearchData(game: proto.GameData): proto.GameSearchData {
  * error.
  */
 @Injectable()
-export class StubGatewayService extends GatewayServiceHost {
-  ping(request: proto.GatewayPingRequest): proto.GatewayPingResponse {
-    return {
+export class StubGatewayDriver implements DataGatewayDriver {
+  ping(request: proto.GatewayPingRequest): Observable<proto.GatewayPingResponse> {
+    return of({
       correlationId: request.correlationId ?? crypto.randomUUID(),
       timestampMs: BigInt(Date.now()),
       gatewayName: 'StubGateway',
       gatewayVersion: BGE_VERSION,
-    };
+    });
   }
 
   /**
@@ -97,8 +97,8 @@ export class StubGatewayService extends GatewayServiceHost {
    * e2e suites. It doesn't declare play time, though its results carry play
    * times, so they also cover a DataGateway a play-time search skips (#869).
    */
-  describe(request: proto.DescribeRequest): proto.DescribeResponse {
-    return {
+  describe(request: proto.DescribeRequest): Observable<proto.DescribeResponse> {
+    return of({
       correlationId: request.correlationId ?? crypto.randomUUID(),
       capabilities: [
         proto.Capability.CAPABILITY_SEARCH,
@@ -124,30 +124,30 @@ export class StubGatewayService extends GatewayServiceHost {
         passthroughSearchLanguage: false,
       },
       contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
-    };
+    });
   }
 
-  healthCheck(): proto.HealthCheckResponse {
-    return { status: proto.HealthCheckResponse_ServingStatus.SERVING };
+  check(_request: proto.HealthCheckRequest): Observable<proto.HealthCheckResponse> {
+    return of({ status: proto.HealthCheckResponse_ServingStatus.SERVING });
   }
 
-  listLanguages(request: proto.ListLanguagesRequest): proto.ListLanguagesResponse {
-    return {
+  listLanguages(request: proto.ListLanguagesRequest): Observable<proto.ListLanguagesResponse> {
+    return of({
       correlationId: request.correlationId ?? crypto.randomUUID(),
       languages: STUB_LANGUAGES,
-    };
+    });
   }
 
   /** Serves every list, so each list job runs against it in the e2e suites (#718). */
-  override listPlatforms(request: proto.ListPlatformsRequest): Observable<proto.ListPlatformsResponse> {
+  listPlatforms(request: proto.ListPlatformsRequest): Observable<proto.ListPlatformsResponse> {
     return of({ correlationId: request.correlationId ?? crypto.randomUUID(), platforms: STUB_PLATFORMS });
   }
 
-  override listCategories(request: proto.ListCategoriesRequest): Observable<proto.ListCategoriesResponse> {
+  listCategories(request: proto.ListCategoriesRequest): Observable<proto.ListCategoriesResponse> {
     return of({ correlationId: request.correlationId ?? crypto.randomUUID(), categories: STUB_CATEGORIES });
   }
 
-  override listMechanics(request: proto.ListMechanicsRequest): Observable<proto.ListMechanicsResponse> {
+  listMechanics(request: proto.ListMechanicsRequest): Observable<proto.ListMechanicsResponse> {
     return of({ correlationId: request.correlationId ?? crypto.randomUUID(), mechanics: STUB_MECHANICS });
   }
 
@@ -205,5 +205,10 @@ export class StubGatewayService extends GatewayServiceHost {
       })),
       { correlationId, status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE },
     ]);
+  }
+
+  /** Nothing to release: the stub answers from its fixtures (#1082). */
+  dispose(): void {
+    return undefined;
   }
 }

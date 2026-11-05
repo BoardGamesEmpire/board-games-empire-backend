@@ -90,9 +90,7 @@ export interface BggStatistics {
 /**
  * Item returned by the `/thing` endpoint.
  *
- * `links` and `names` default to empty arrays when not present in the
- * response; consumers should still tolerate the optional shape because
- * some client libraries omit empty collections entirely.
+ * `links` and `names` are absent when the answer has no such element.
  */
 export interface BggThing {
   id: number;
@@ -118,18 +116,12 @@ export interface BggThing {
   minage?: number;
 
   /**
-   * Primary + alternate names. Consumers should pick the entry with
-   * `type === 'primary'` for display, falling back to the first entry.
+   * Primary + alternate names, each with its type, in the order BGG sent
+   * them. Consumers pick the entry with `type === 'primary'` for display,
+   * falling back to the first entry, since BGG's order is no promise
+   * (#1082). An alternate name of "0" is kept (#863).
    */
   names?: BggName[];
-
-  /**
-   * `parseThings` puts every name's value in `alternateNames`, in the order
-   * BGG sent them, primary first, and the first of them in `name`. An
-   * alternate name of "0" is kept (#863).
-   */
-  name?: BggText;
-  alternateNames?: BggText[];
 
   /**
    * Relational links — categories, mechanics, designers, expansions, etc.
@@ -162,15 +154,10 @@ export interface BggSearchItem {
   type: BggThingType | string;
 
   /**
-   * Search results carry a single `name` element rather than an array.
+   * The name search matched, which can be an alternate one. A search result
+   * carries a single `name` element rather than an array.
    */
   name?: BggText;
-
-  /**
-   * Some client libraries surface search results with a `names` array
-   * instead of a flat `name`. Both shapes are tolerated.
-   */
-  names?: BggName[];
 
   yearpublished?: number;
 }

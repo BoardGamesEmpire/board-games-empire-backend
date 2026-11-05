@@ -1,9 +1,9 @@
-import { DataGatewayController, GatewayServiceHost } from '@bge/gateway-host';
+import { DATA_GATEWAY_DRIVER, DataGatewayController } from '@bge/gateway-host';
 import { Module } from '@nestjs/common';
-import { StubGatewayService } from './stub-gateway.service';
+import { StubGatewayDriver } from './stub-gateway.driver';
 
 @Module({
   controllers: [DataGatewayController],
-  providers: [{ provide: GatewayServiceHost, useClass: StubGatewayService }],
+  providers: [{ provide: DATA_GATEWAY_DRIVER, useClass: StubGatewayDriver }],
 })
 export class DataGatewayModule {}

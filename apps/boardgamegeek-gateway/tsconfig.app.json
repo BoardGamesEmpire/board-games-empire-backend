@@ -28,12 +28,6 @@
   ],
   "references": [
     {
-      "path": "../../libs/gateway/driver/contract-testing/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/proto/gateway/tsconfig.lib.json"
-    },
-    {
       "path": "../../libs/common/version/tsconfig.lib.json"
     },
     {

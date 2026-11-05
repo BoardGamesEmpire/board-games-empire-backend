@@ -12,13 +12,17 @@ import * as ts from 'typescript';
  */
 const LIB_ROOT = join(__dirname, '..', '..');
 
-/** Every file the library ships: its TypeScript under src/, specs aside. */
+/**
+ * Every file the library ships: its TypeScript under src/, aside from specs
+ * and the `testing/` helpers only specs use, which its lib build leaves out
+ * too (#1082).
+ */
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
 
     if (entry.isDirectory()) {
-      return sourceFiles(path);
+      return entry.name === 'testing' ? [] : sourceFiles(path);
     }
 
     return entry.name.endsWith('.ts') && !entry.name.endsWith('.spec.ts') ? [path] : [];

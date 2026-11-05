@@ -1,5 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
-import type { BggLink, BggRatings, BggSearchItem, BggSearchResult, BggThing, BggVersion } from '../types';
+import { BggNameType } from '../constants';
+import type { BggLink, BggName, BggRatings, BggSearchItem, BggSearchResult, BggThing, BggVersion } from '../types';
 
 /** An element as the parser hands it over: attributes under `@_`, children by tag. */
 type XmlElement = Record<string, unknown>;
@@ -54,13 +55,22 @@ const textOf = (parent: XmlElement, tag: string): string | undefined => {
   return typeof text === 'string' ? text : undefined;
 };
 
-/** Every name's value, in the order BGG sent them, or none when there's no `<name>`. */
-const namesOf = (item: XmlElement): string[] | undefined =>
+/** Every name with its type, in the order BGG sent them, or none when there's no `<name>`. */
+const namesOf = (item: XmlElement): BggName[] | undefined =>
   item['name'] === undefined
     ? undefined
-    : elements(item['name'])
-        .map((name) => attribute(name, 'value'))
-        .filter((value): value is string => value !== undefined);
+    : elements(item['name']).flatMap((name) => {
+        const value = attribute(name, 'value');
+        return value === undefined
+          ? []
+          : [{ type: attribute(name, 'type') ?? '', sortindex: toNumber(attribute(name, 'sortindex')), value }];
+      });
+
+/** The name BGG marks primary, or the first one when none is marked. */
+const primaryNameOf = (item: XmlElement): string | undefined => {
+  const names = namesOf(item);
+  return (names?.find((name) => name.type === BggNameType.Primary) ?? names?.[0])?.value;
+};
 
 const toLink = (link: XmlElement): BggLink => ({
   type: attribute(link, 'type') ?? '',
@@ -84,7 +94,7 @@ const toVersion = (version: XmlElement): BggVersion => ({
   type: attribute(version, 'type') ?? '',
   id: Number(attribute(version, 'id')),
   links: linksOf(version) ?? [],
-  name: namesOf(version)?.[0] ?? '',
+  name: primaryNameOf(version) ?? '',
   yearpublished: Number(valueOf(version, 'yearpublished')),
   productcode: valueOf(version, 'productcode') ?? '',
   width: Number(valueOf(version, 'width')),
@@ -94,7 +104,6 @@ const toVersion = (version: XmlElement): BggVersion => ({
 });
 
 const toThing = (item: XmlElement): BggThing => {
-  const names = namesOf(item);
   const statistics = asElement(item['statistics']);
   const ratings = statistics && asElement(statistics['ratings']);
   const versions = asElement(item['versions'])?.['item'];
@@ -112,8 +121,7 @@ const toThing = (item: XmlElement): BggThing => {
     minplaytime: toNumber(valueOf(item, 'minplaytime')),
     maxplaytime: toNumber(valueOf(item, 'maxplaytime')),
     minage: toNumber(valueOf(item, 'minage')),
-    name: names?.[0],
-    alternateNames: names,
+    names: namesOf(item),
     links: linksOf(item),
     statistics: statistics && { ratings: ratings && toRatings(ratings) },
     versions: versions === undefined ? undefined : elements(versions).map(toVersion),
@@ -123,7 +131,7 @@ const toThing = (item: XmlElement): BggThing => {
 const toSearchItem = (item: XmlElement): BggSearchItem => ({
   id: Number(attribute(item, 'id')),
   type: attribute(item, 'type') ?? '',
-  name: namesOf(item)?.[0],
+  name: primaryNameOf(item),
   yearpublished: toNumber(valueOf(item, 'yearpublished')),
 });
 
@@ -152,7 +160,8 @@ const itemsOf = (xml: string): XmlElement => {
 
 /**
  * The things in a `/thing` answer. The fields mean what `bgg-ts-client`
- * 0.2.0's made them mean, except that text stays text (#863).
+ * 0.2.0's made them mean, except that text stays text (#863) and each name
+ * keeps its type, so the mappers pick the primary one by its type (#1082).
  */
 export function parseThings(xml: string): BggThing[] {
   return elements(itemsOf(xml)['item']).map(toThing);

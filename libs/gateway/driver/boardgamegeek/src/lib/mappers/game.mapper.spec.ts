@@ -174,24 +174,8 @@ describe('searchItemToGameSearchData', () => {
     expect(result.sourceUrl).toBe('https://boardgamegeek.com/boardgameexpansion/11');
   });
 
-  it('uses the names array when name is absent', () => {
-    const result = searchItemToGameSearchData({
-      id: 1,
-      type: BggThingType.BoardGame,
-      names: [{ type: BggNameType.Primary, value: 'From Names' }],
-    });
-
-    expect(result.title).toBe('From Names');
-  });
-
   it('trims the title, as fetching the same game does (#716)', () => {
     expect(searchItemToGameSearchData(makeBggSearchItem({ name: '  Catan ' })).title).toBe('Catan');
-  });
-
-  it('uses the names array when name is blank (#716)', () => {
-    const item = makeBggSearchItem({ name: ' ', names: [makeBggName({ value: 'From Names' })] });
-
-    expect(searchItemToGameSearchData(item).title).toBe('From Names');
   });
 
   it('returns an empty title when no name is available', () => {
@@ -283,7 +267,7 @@ describe('searchItemToGameSearchData', () => {
   });
 
   it("takes the thing's title when search sent a blank name (#880)", () => {
-    const item = makeBggSearchItem({ name: '  ', names: undefined });
+    const item = makeBggSearchItem({ name: '  ' });
 
     expect(searchItemToGameSearchData(item, makeBggThing()).title).toBe('Gloomhaven');
   });
@@ -405,8 +389,12 @@ describe('thingToGameSearchData — synthetic release', () => {
     expect(result.availableReleases[0].parentEditionExternalId).toBeUndefined();
   });
 
-  it('uses flattened thing.name when names array is absent', () => {
-    const result = thingToGameSearchData(makeBggThing({ names: undefined, name: 'Catan' }));
+  it('titles it with its primary name, wherever BGG puts it (#1082)', () => {
+    const result = thingToGameSearchData(
+      makeBggThing({
+        names: [makeBggName({ type: BggNameType.Alternate, value: 'Catane' }), makeBggName({ value: 'Catan' })],
+      }),
+    );
 
     expect(result.title).toBe('Catan');
   });
@@ -436,22 +424,32 @@ describe('thingToGameData — synthetic default release (no versions)', () => {
     expect(result.releases[0].releaseDate).toBeUndefined();
   });
 
-  it('uses flattened thing.name when names array is absent', () => {
-    const result = thingToGameData(makeBggThing({ names: undefined, name: 'Catan' }));
+  it('titles it with its primary name, wherever BGG puts it (#1082)', () => {
+    const result = thingToGameData(
+      makeBggThing({
+        names: [makeBggName({ type: BggNameType.Alternate, value: 'Catane' }), makeBggName({ value: 'Catan' })],
+      }),
+    );
 
     expect(result.title).toBe('Catan');
   });
 
-  it('falls back to alternateNames when neither name nor names is present', () => {
+  it('falls back to the first other name that is not blank when the primary one is (#716)', () => {
     const result = thingToGameData(
       makeBggThing({
-        names: undefined,
-        name: undefined,
-        alternateNames: ['Catane', 'Die Siedler von Catan'],
+        names: [
+          makeBggName({ value: ' ' }),
+          makeBggName({ type: BggNameType.Alternate, value: '' }),
+          makeBggName({ type: BggNameType.Alternate, value: 'Die Siedler von Catan' }),
+        ],
       }),
     );
 
-    expect(result.title).toBe('Catane');
+    expect(result.title).toBe('Die Siedler von Catan');
+  });
+
+  it('returns an empty title when the thing has no names', () => {
+    expect(thingToGameData(makeBggThing({ names: undefined })).title).toBe('');
   });
 });
 

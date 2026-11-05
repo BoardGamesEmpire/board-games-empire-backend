@@ -16,11 +16,11 @@ describe('parseThings', () => {
   describe("Tzolk'in's answer", () => {
     const [thing] = parseThings(TZOLKIN_XML);
 
-    it('reads the thing, its primary name first', () => {
+    it('reads the thing, and each name with its type', () => {
       expect(thing.id).toBe(126163);
       expect(thing.type).toBe('boardgame');
-      expect(thing.name).toBe('Tzolk&#039;in: The Mayan Calendar');
-      expect(thing.alternateNames?.[0]).toBe(thing.name);
+      expect(thing.names?.[0]).toEqual({ type: 'primary', sortindex: 1, value: 'Tzolk&#039;in: The Mayan Calendar' });
+      expect(thing.names?.slice(1).every((name) => name.type === 'alternate')).toBe(true);
       expect(thing.yearpublished).toBe(2012);
     });
 
@@ -61,13 +61,39 @@ describe('parseThings', () => {
     );
 
     it('keeps a name as BGG sent it', () => {
-      expect(thing.name).toBe('007');
-      expect(thing.alternateNames).toEqual(['007', '1e3', '2.0', 'true', '0']);
+      expect(thing.names?.map((name) => name.value)).toEqual(['007', '1e3', '2.0', 'true', '0']);
     });
 
     it('keeps a link value as BGG sent it', () => {
       expect(thing.links).toEqual([{ type: 'boardgamepublisher', id: 5, value: '1830', inbound: undefined }]);
     });
+  });
+
+  // BGG's order is the only thing that puts the primary name first; the
+  // type says which it is (#1082).
+  it('keeps the type of a primary name that comes after an alternate one', () => {
+    const [thing] = parseThings(
+      thingXml(
+        '<name type="alternate" sortindex="1" value="Tikal (DE)"/><name type="primary" sortindex="1" value="Tikal"/>',
+      ),
+    );
+
+    expect(thing.names).toEqual([
+      { type: 'alternate', sortindex: 1, value: 'Tikal (DE)' },
+      { type: 'primary', sortindex: 1, value: 'Tikal' },
+    ]);
+  });
+
+  it('names a version by its primary name, wherever BGG puts it', () => {
+    const [thing] = parseThings(
+      thingXml(
+        '<versions><item type="boardgameversion" id="9">' +
+          '<name type="alternate" value="Second"/><name type="primary" value="First edition"/>' +
+          '</item></versions>',
+      ),
+    );
+
+    expect(thing.versions?.[0].name).toBe('First edition');
   });
 
   it('reads an answer with no thing as none', () => {
@@ -93,7 +119,7 @@ describe('parseThings', () => {
 });
 
 describe('parseSearch', () => {
-  it('reads each item with its first name and its year', () => {
+  it('reads each item with its name and its year', () => {
     const result = parseSearch(
       '<?xml version="1.0" encoding="utf-8"?><items total="2" termsofuse="">' +
         '<item type="boardgame" id="126163"><name type="primary" value="Tzolk&#039;in: The Mayan Calendar"/>' +

@@ -1,6 +1,6 @@
 import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
-import { lastValueFrom, toArray, type Observable } from 'rxjs';
+import { firstValueFrom, lastValueFrom, toArray, type Observable } from 'rxjs';
 import {
   STUB_BASE_GAME,
   STUB_CATEGORIES,
@@ -10,41 +10,41 @@ import {
   STUB_MECHANICS,
   STUB_PLATFORMS,
 } from '../fixtures/catalog';
-import { StubGatewayService } from './stub-gateway.service';
+import { StubGatewayDriver } from './stub-gateway.driver';
 
 const collect = <T>(source: Observable<T>) => lastValueFrom(source.pipe(toArray()));
 
 const search = (query: string, options: { limit?: number; offset?: number; filter?: proto.SearchFilter } = {}) =>
-  collect(new StubGatewayService().searchGames({ correlationId: 'search-1', query, ...options }));
+  collect(new StubGatewayDriver().searchGames({ correlationId: 'search-1', query, ...options }));
 
 const titlesOf = (frames: readonly proto.GatewaySearchResult[]) =>
   frames.filter((frame) => frame.status === proto.ResultStatus.RESULT_STATUS_RESULT).map((frame) => frame.game?.title);
 
-describe('StubGatewayService', () => {
-  const service = new StubGatewayService();
+describe('StubGatewayDriver', () => {
+  const driver = new StubGatewayDriver();
 
   describe('ping', () => {
-    it('identifies the stub and echoes the correlation id', () => {
+    it('identifies the stub and echoes the correlation id', async () => {
       const before = Date.now();
-      const reply = service.ping({ correlationId: 'ping-1' });
+      const reply = await firstValueFrom(driver.ping({ correlationId: 'ping-1' }));
 
       expect(reply).toMatchObject({ correlationId: 'ping-1', gatewayName: 'StubGateway' });
       expect(Number(reply.timestampMs)).toBeGreaterThanOrEqual(before);
       expect(Number(reply.timestampMs)).toBeLessThanOrEqual(Date.now());
     });
 
-    it('makes up a correlation id when the request carries none', () => {
-      expect(service.ping({}).correlationId).toEqual(expect.any(String));
+    it('makes up a correlation id when the request carries none', async () => {
+      expect((await firstValueFrom(driver.ping({}))).correlationId).toEqual(expect.any(String));
     });
 
-    it('reports the product version it was built at', () => {
-      expect(service.ping({}).gatewayVersion).toBe(BGE_VERSION);
+    it('reports the product version it was built at', async () => {
+      expect((await firstValueFrom(driver.ping({}))).gatewayVersion).toBe(BGE_VERSION);
     });
   });
 
   describe('describe', () => {
-    it('declares every operation, tabletop base games and expansions, BCP 47 tags and plain text', () => {
-      expect(service.describe({ correlationId: 'describe-1' })).toEqual({
+    it('declares every operation, tabletop base games and expansions, BCP 47 tags and plain text', async () => {
+      expect(await firstValueFrom(driver.describe({ correlationId: 'describe-1' }))).toEqual({
         correlationId: 'describe-1',
         capabilities: [
           proto.Capability.CAPABILITY_SEARCH,
@@ -74,8 +74,8 @@ describe('StubGatewayService', () => {
       } satisfies proto.DescribeResponse);
     });
 
-    it('covers every game it serves', () => {
-      const { coverage } = service.describe({});
+    it('covers every game it serves', async () => {
+      const { coverage } = await firstValueFrom(driver.describe({}));
 
       for (const game of STUB_GAMES) {
         expect(coverage?.contentTypes).toContain(game.contentType);
@@ -85,42 +85,49 @@ describe('StubGatewayService', () => {
       }
     });
 
-    it('makes up a correlation id when the request carries none', () => {
-      expect(service.describe({}).correlationId).toEqual(expect.any(String));
+    it('makes up a correlation id when the request carries none', async () => {
+      expect((await firstValueFrom(driver.describe({}))).correlationId).toEqual(expect.any(String));
     });
   });
 
-  it('reports itself SERVING', () => {
-    expect(service.healthCheck()).toEqual({
+  it('reports itself SERVING', async () => {
+    expect(await firstValueFrom(driver.check({ service: '' }))).toEqual({
       status: proto.HealthCheckResponse_ServingStatus.SERVING,
     });
   });
 
+  it('has nothing to release, however often it is disposed of', () => {
+    expect(() => {
+      driver.dispose();
+      driver.dispose();
+    }).not.toThrow();
+  });
+
   describe('listLanguages', () => {
-    it('lists its languages by BCP 47 tag', () => {
-      expect(service.listLanguages({ correlationId: 'languages-1' })).toEqual({
+    it('lists its languages by BCP 47 tag', async () => {
+      expect(await firstValueFrom(driver.listLanguages({ correlationId: 'languages-1' }))).toEqual({
         correlationId: 'languages-1',
         languages: STUB_LANGUAGES,
       });
     });
 
-    it('makes up a correlation id when the request carries none', () => {
-      expect(service.listLanguages({}).correlationId).toEqual(expect.any(String));
+    it('makes up a correlation id when the request carries none', async () => {
+      expect((await firstValueFrom(driver.listLanguages({}))).correlationId).toEqual(expect.any(String));
     });
   });
 
   // The stub serves every list, so each list job runs in the e2e suites (#718).
   describe('the vocabulary lists (#718)', () => {
     it('lists its platforms, categories and mechanics', async () => {
-      await expect(lastValueFrom(service.listPlatforms({ correlationId: 'platforms-1' }))).resolves.toEqual({
+      await expect(lastValueFrom(driver.listPlatforms({ correlationId: 'platforms-1' }))).resolves.toEqual({
         correlationId: 'platforms-1',
         platforms: STUB_PLATFORMS,
       });
-      await expect(lastValueFrom(service.listCategories({ correlationId: 'categories-1' }))).resolves.toEqual({
+      await expect(lastValueFrom(driver.listCategories({ correlationId: 'categories-1' }))).resolves.toEqual({
         correlationId: 'categories-1',
         categories: STUB_CATEGORIES,
       });
-      await expect(lastValueFrom(service.listMechanics({ correlationId: 'mechanics-1' }))).resolves.toEqual({
+      await expect(lastValueFrom(driver.listMechanics({ correlationId: 'mechanics-1' }))).resolves.toEqual({
         correlationId: 'mechanics-1',
         mechanics: STUB_MECHANICS,
       });
@@ -242,7 +249,7 @@ describe('StubGatewayService', () => {
   describe('fetchGame', () => {
     it('returns the game the external id names', async () => {
       await expect(
-        lastValueFrom(service.fetchGame({ correlationId: 'fetch-1', externalId: STUB_BASE_GAME.externalId })),
+        lastValueFrom(driver.fetchGame({ correlationId: 'fetch-1', externalId: STUB_BASE_GAME.externalId })),
       ).resolves.toEqual({
         correlationId: 'fetch-1',
         status: proto.ResultStatus.RESULT_STATUS_RESULT,
@@ -252,7 +259,7 @@ describe('StubGatewayService', () => {
 
     it('answers an external id it does not know with an ERROR, as the real gateways do', async () => {
       await expect(
-        lastValueFrom(service.fetchGame({ correlationId: 'fetch-2', externalId: 'stub-0' })),
+        lastValueFrom(driver.fetchGame({ correlationId: 'fetch-2', externalId: 'stub-0' })),
       ).resolves.toEqual({
         correlationId: 'fetch-2',
         status: proto.ResultStatus.RESULT_STATUS_ERROR,
@@ -264,7 +271,7 @@ describe('StubGatewayService', () => {
   describe('fetchExpansions', () => {
     it("streams the base game's expansions, then SOURCE_DONE", async () => {
       const frames = await collect(
-        service.fetchExpansions({ correlationId: 'expansions-1', baseExternalId: STUB_BASE_GAME.externalId }),
+        driver.fetchExpansions({ correlationId: 'expansions-1', baseExternalId: STUB_BASE_GAME.externalId }),
       );
 
       expect(titlesOf(frames)).toEqual([STUB_EXPANSION.title]);
@@ -274,7 +281,7 @@ describe('StubGatewayService', () => {
 
     it('answers a game with no expansions with SOURCE_DONE alone', async () => {
       await expect(
-        collect(service.fetchExpansions({ correlationId: 'expansions-2', baseExternalId: STUB_EXPANSION.externalId })),
+        collect(driver.fetchExpansions({ correlationId: 'expansions-2', baseExternalId: STUB_EXPANSION.externalId })),
       ).resolves.toEqual([{ correlationId: 'expansions-2', status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE }]);
     });
   });
