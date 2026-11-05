@@ -33,6 +33,9 @@ describe('plugin update consent (approve/reject/pending)', () => {
   const baseUrl = requireBaseUrl(process.env);
   const PLUGINS_PATH = '/api/plugins';
   const STAGED_AT = new Date('2026-08-01T12:00:00Z');
+  /** The staged plugin artifact's checksum, and the staging's id (#357), on every row this spec stages. */
+  const STAGED_SHA = 'b'.repeat(64);
+  const STAGING_ID = 'e2e-staging-1';
 
   let db: TestDatabase;
   let actors: Actors;
@@ -137,8 +140,9 @@ describe('plugin update consent (approve/reject/pending)', () => {
         config: (overrides.activeConfig ?? {}) as never,
         pendingVersion: pending.version,
         pendingManifestJson: pending as never,
-        pendingSha256: 'e2e-new-sha',
+        pendingSha256: STAGED_SHA,
         pendingSince: STAGED_AT,
+        pendingStagingId: STAGING_ID,
       },
     });
 
@@ -224,7 +228,8 @@ describe('plugin update consent (approve/reject/pending)', () => {
       expect(row.pendingManifestJson).toBeNull();
       expect(row.pendingSha256).toBeNull();
       expect(row.pendingSince).toBeNull();
-      expect(row.installedSha256).toBe('e2e-new-sha');
+      expect(row.pendingStagingId).toBeNull();
+      expect(row.installedSha256).toBe(STAGED_SHA);
 
       const grants = await db.client.pluginGrant.findMany({ where: { pluginId: plugin.id } });
       expect(grants).toHaveLength(2);
@@ -463,12 +468,74 @@ describe('plugin update consent (approve/reject/pending)', () => {
       expect(row.pendingManifestJson).toBeNull();
       expect(row.pendingSha256).toBeNull();
       expect(row.pendingSince).toBeNull();
+      expect(row.pendingStagingId).toBeNull();
       // Rejection is not an activation: nothing to reload, nothing seeded.
       expect(row.restartRequired).toBe(false);
       await expect(db.client.pluginGrant.count({ where: { pluginId: plugin.id } })).resolves.toBe(0);
 
       const rows = await awaitLifecycleRow(plugin, PluginLifecycleEventType.UpdateRejected);
       expect(rows).toHaveLength(1);
+    });
+  });
+
+  describe('the staged-update columns (#357)', () => {
+    /**
+     * Every string an error carries, own properties included (`message`,
+     * `cause`, Prisma's `meta`), so the assertion doesn't depend on which
+     * layer the driver adapter put Postgres's words in.
+     */
+    const errorText = (value: unknown, depth = 0): string => {
+      if (depth > 4 || value === null || value === undefined) {
+        return '';
+      }
+
+      if (typeof value !== 'object') {
+        return String(value);
+      }
+
+      return Object.getOwnPropertyNames(value)
+        .map((key) => errorText((value as Record<string, unknown>)[key], depth + 1))
+        .join(' ');
+    };
+
+    it('the database refuses a half-staged plugin row (#357)', async () => {
+      // Both guarded writes key on the staging id. A row with some staged
+      // columns set and others null would let their predicates match the
+      // wrong staging, or a degenerate one, so Postgres refuses the shape.
+      const active = activeManifest();
+      const plugin = await db.client.plugin.create({
+        data: {
+          slug: active.slug,
+          version: active.version,
+          category: PluginCategory.FeedbackSink,
+          scope: PluginScope.Server,
+          manifestJson: active as never,
+          enabled: true,
+          installedSha256: 'a'.repeat(64),
+        },
+      });
+
+      const failure = await db.client.plugin
+        .update({ where: { id: plugin.id }, data: { pendingVersion: '9.9.9' } })
+        .catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(errorText(failure)).toContain('plugins_staged_update_all_or_nothing');
+      const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      expect(row.pendingVersion).toBeNull();
+    });
+
+    it('the database refuses clearing only part of a staged update (#357)', async () => {
+      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK]);
+
+      const failure = await db.client.plugin
+        .update({ where: { id: plugin.id }, data: { pendingStagingId: null } })
+        .catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(errorText(failure)).toContain('plugins_staged_update_all_or_nothing');
+      const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      expect(row.pendingStagingId).toBe(STAGING_ID);
     });
   });
 

@@ -96,6 +96,7 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
     pendingManifestJson: null,
     pendingSha256: null,
     pendingSince: null,
+    pendingStagingId: null,
     restartRequired: false,
     uninstalledAt: null,
     createdAt: new Date(0),

@@ -18,4 +18,5 @@ export const CLEARED_STAGED_UPDATE = {
   pendingManifestJson: Prisma.DbNull,
   pendingSha256: null,
   pendingSince: null,
+  pendingStagingId: null,
 };

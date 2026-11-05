@@ -99,6 +99,7 @@ describe('PluginUpdateService', () => {
     pendingManifestJson: null,
     pendingSha256: null,
     pendingSince: null,
+    pendingStagingId: null,
     restartRequired: false,
     uninstalledAt: null,
     createdAt: new Date(0),
@@ -372,7 +373,7 @@ describe('PluginUpdateService', () => {
           // take the whole activation with it) AND on the pending slot still
           // being empty — the immediate path must not clobber a concurrently
           // staged update with its cleared columns.
-          where: { id: 'plugin-1', uninstalledAt: null, pendingVersion: null, pendingSince: null },
+          where: { id: 'plugin-1', uninstalledAt: null, pendingVersion: null, pendingStagingId: null },
           data: expect.objectContaining({
             version: '1.3.0',
             restartRequired: true,
@@ -380,6 +381,7 @@ describe('PluginUpdateService', () => {
             pendingVersion: null,
             pendingSha256: null,
             pendingSince: null,
+            pendingStagingId: null,
           }),
         }),
       );
@@ -547,6 +549,23 @@ describe('PluginUpdateService', () => {
       );
     });
 
+    it('stage writes a fresh staging id (#357)', async () => {
+      // The id is the staging's identity in both guarded writes, so it must
+      // differ between two stagings of the same version from the same bytes.
+      await writeManifest(nextManifest({ storage: { ...activeManifest.storage, writesCore: ['GameNight'] } }));
+
+      await service.stage(input());
+      await service.stage(input());
+
+      const stagingIds = (db.plugin.updateMany.mock.calls as [{ data: { pendingStagingId?: unknown } }][]).map(
+        ([args]) => args.data.pendingStagingId,
+      );
+      expect(stagingIds).toHaveLength(2);
+      expect(stagingIds[0]).toMatch(/^[a-z0-9]{24}$/);
+      expect(stagingIds[1]).toMatch(/^[a-z0-9]{24}$/);
+      expect(stagingIds[0]).not.toBe(stagingIds[1]);
+    });
+
     it("stages the artifact directory's checksum as pendingSha256 (#224)", async () => {
       // The staged update's files are the directory its pendingSha256 names,
       // so the checksum comes from that directory and from nowhere else.
@@ -620,6 +639,7 @@ describe('PluginUpdateService', () => {
         pendingManifestJson: nextJson as unknown as Prisma.JsonValue,
         pendingSha256: 'new-sha',
         pendingSince: new Date('2026-07-29T00:00:00Z'),
+        pendingStagingId: 'staging-a',
         ...overrides,
       });
 
@@ -627,6 +647,23 @@ describe('PluginUpdateService', () => {
       await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
         PluginUpdateNoPendingError,
       );
+    });
+
+    it('activation claims only the staging it loaded, by its staging id (#357)', async () => {
+      // A staging's timestamp is not an identity: two stagings can share a
+      // millisecond, and a clock can step back onto an old one. The id can't
+      // repeat, so the claim names it and nothing else.
+      db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
+
+      await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+
+      const [claim] = db.plugin.updateMany.mock.calls[0];
+      expect(claim.where).toEqual({
+        id: 'plugin-1',
+        uninstalledAt: null,
+        pendingVersion: '1.3.0',
+        pendingStagingId: 'staging-a',
+      });
     });
 
     it('approval records the staged checksum as installedSha256 (#224)', async () => {
@@ -657,11 +694,11 @@ describe('PluginUpdateService', () => {
     it('loses a concurrent-approve race with the typed no-pending refusal, before writing a single grant', async () => {
       // Both approves load the same staged row; the other one commits first,
       // consuming the pending state. The claim — keyed on the exact staging
-      // this approval computed from (version AND the pendingSince stamp: a
-      // rejected version can be re-staged under the same number, so the
-      // version alone is a reusable identity), running before any other
-      // write — is what turns the loser into a 409 instead of a unique-index
-      // crash on the grants the winner just seeded.
+      // this approval computed from (version AND staging id: a rejected
+      // version can be re-staged under the same number, so the version alone
+      // is a reusable identity), running before any other write — is what
+      // turns the loser into a 409 instead of a unique-index crash on the
+      // grants the winner just seeded.
       db.plugin.findUnique
         .mockResolvedValueOnce(pendingPlugin(nextManifest())) // this approve's load
         .mockResolvedValue(makePlugin()); // the guard's re-read: pending already consumed
@@ -677,7 +714,7 @@ describe('PluginUpdateService', () => {
             id: 'plugin-1',
             uninstalledAt: null,
             pendingVersion: '1.3.0',
-            pendingSince: new Date('2026-07-29T00:00:00Z'),
+            pendingStagingId: 'staging-a',
           },
         }),
       );
@@ -2053,20 +2090,30 @@ describe('PluginUpdateService', () => {
   });
 
   describe('reject()', () => {
-    it('clears the pending columns — conditionally on the exact staging the rejector saw — and emits update_rejected', async () => {
-      // The staging stamp joins the version in the predicate: a rejected
-      // version can be re-staged under the same number, and this clear must
-      // never take a replacement staging with it.
-      const stagedAt = new Date('2026-08-10T09:00:00Z');
+    it('reject clears only the staging it loaded, by its staging id (#357)', async () => {
+      // The staging id joins the version in the predicate: a rejected
+      // version can be re-staged under the same number from the same bytes,
+      // and this clear must never take a replacement staging with it.
       db.plugin.findUnique.mockResolvedValue(
-        makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha', pendingSince: stagedAt }),
+        makePlugin({
+          pendingVersion: '1.3.0',
+          pendingSha256: 'new-sha',
+          pendingSince: new Date('2026-08-10T09:00:00Z'),
+          pendingStagingId: 'staging-a',
+        }),
       );
 
       await service.reject({ slug: 'demo-sink', rejectorId: 'admin-1' });
 
       expect(db.plugin.updateMany).toHaveBeenCalledWith({
-        where: { id: 'plugin-1', pendingVersion: '1.3.0', pendingSince: stagedAt, uninstalledAt: null },
-        data: { pendingVersion: null, pendingManifestJson: Prisma.DbNull, pendingSha256: null, pendingSince: null },
+        where: { id: 'plugin-1', pendingVersion: '1.3.0', pendingStagingId: 'staging-a', uninstalledAt: null },
+        data: {
+          pendingVersion: null,
+          pendingManifestJson: Prisma.DbNull,
+          pendingSha256: null,
+          pendingSince: null,
+          pendingStagingId: null,
+        },
       });
       expect(emitter.emit).toHaveBeenCalledWith(
         PluginUpdateRejectedEvent.eventName,

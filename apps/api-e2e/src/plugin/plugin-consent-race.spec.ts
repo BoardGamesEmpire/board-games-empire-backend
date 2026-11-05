@@ -230,8 +230,9 @@ describe('consent decisions under concurrency (#360)', () => {
       const plugin = await arrangePlugin(undefined, {
         pendingVersion: pending.version,
         pendingManifestJson: pending as never,
-        pendingSha256: 'e2e-new-sha',
+        pendingSha256: 'b'.repeat(64),
         pendingSince: STAGED_AT,
+        pendingStagingId: 'e2e-staging-1',
       });
 
       const [denial, activation] = await Promise.all([

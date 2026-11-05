@@ -68,13 +68,19 @@ model Plugin {
 
   /// Staged update awaiting consent (#59 update flow): validated but not
   /// active. Cleared on approve (columns promote) or reject (discarded).
+  /// The five columns are set and cleared as one set; the migration's
+  /// `plugins_staged_update_all_or_nothing` CHECK refuses a row with only
+  /// some of them (#357).
   pendingVersion      String?   @map("pending_version")
   pendingManifestJson Json?     @map("pending_manifest_json")
   pendingSha256       String?   @map("pending_sha256")
-  /// When the pending update was staged — the "waiting since" the
-  /// admin surface and #79 diagnostics sort on; `updatedAt` moves on any
-  /// row touch and cannot serve.
+  /// When the update was staged, for display and sorting only — the
+  /// "waiting since" the admin surface and #79 diagnostics sort on;
+  /// `updatedAt` moves on any row touch and cannot serve. Not an identity:
+  /// `pendingStagingId` is (#357).
   pendingSince        DateTime? @map("pending_since") @db.Timestamptz(3)
+  /// The staging's identity (#357): written fresh by every staging, cleared with the rest of the staged columns.
+  pendingStagingId    String?   @map("pending_staging_id")
 
   /// An update ACTIVATED in the DB but the running instance still executes
   /// the prior code. Set by activation, cleared by the loader's

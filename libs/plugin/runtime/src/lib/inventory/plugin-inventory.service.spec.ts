@@ -47,6 +47,7 @@ describe('PluginInventoryService', () => {
     pendingVersion: null,
     pendingSince: null,
     pendingSha256: null,
+    pendingStagingId: null,
     manifestJson: manifest,
     ...overrides,
   });

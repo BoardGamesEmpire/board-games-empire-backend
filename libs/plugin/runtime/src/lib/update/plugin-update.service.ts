@@ -26,6 +26,7 @@ import {
 } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { createId } from '@paralleldrive/cuid2';
 import { readFile } from 'node:fs/promises';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { retainedServerConfig } from '../config/retained-server-config';
@@ -411,6 +412,10 @@ export class PluginUpdateService {
           pendingManifestJson: next.manifest as Prisma.InputJsonValue,
           pendingSha256: directory.sha256,
           pendingSince: initiatedAt,
+          // The staging's identity (#357): fresh for every staging, even one
+          // of the same version from the same artifact, so a rejection or an
+          // approval aimed at an earlier staging can never match this one.
+          pendingStagingId: createId(),
         },
       });
 
@@ -592,14 +597,16 @@ export class PluginUpdateService {
     // Racing a replacement stage, it would wipe a staged version nobody
     // decided on — and because a rejected version can be re-staged under the
     // SAME number (only the ACTIVE version is refused), the version is not
-    // identity enough: pendingSince, written fresh by every staging, is what
-    // pins the staging this rejection targets.
+    // identity enough, and neither is the checksum, since staging the same
+    // artifact again gives the same one. pendingStagingId, written fresh by
+    // every staging, is what pins the staging this rejection targets (#357);
+    // pendingSince is for display, and two stagings can share its millisecond.
     const rejected = await this.db.$transaction(async (tx) => {
       const cleared = await tx.plugin.updateMany({
         where: {
           id: plugin.id,
           pendingVersion: plugin.pendingVersion,
-          pendingSince: plugin.pendingSince,
+          pendingStagingId: plugin.pendingStagingId,
           uninstalledAt: null,
         },
         data: CLEARED_STAGED_UPDATE,
@@ -1079,20 +1086,20 @@ export class PluginUpdateService {
       // die on that same unique index (an untyped 500) or silently
       // re-activate; on the immediate stage() path (pending columns null)
       // the same predicate keeps a concurrently staged update from being
-      // clobbered by this write's cleared columns. pendingSince rides the
-      // predicate as the staging IDENTITY: a rejected version can be
-      // re-staged under the same number with different content, so the
-      // version alone would let this claim promote a payload the approver
-      // never reviewed — the staging timestamp is fresh per staging write
-      // and cannot be re-entered. Claiming before any other write means
-      // the loser exits with a typed refusal while the transaction has
-      // touched nothing.
+      // clobbered by this write's cleared columns. pendingStagingId rides
+      // the predicate as the staging IDENTITY (#357): a rejected version can
+      // be re-staged under the same number, with different content or from
+      // the same artifact, so neither the version nor the checksum would
+      // stop this claim promoting a payload the approver never reviewed, and
+      // a timestamp can repeat. The staging id is fresh per staging write
+      // and never reused. Claiming before any other write means the loser
+      // exits with a typed refusal while the transaction has touched nothing.
       const claimed = await tx.plugin.updateMany({
         where: {
           id: plugin.id,
           uninstalledAt: null,
           pendingVersion: plugin.pendingVersion,
-          pendingSince: plugin.pendingSince,
+          pendingStagingId: plugin.pendingStagingId,
         },
         data: {
           version: next.manifest.version,

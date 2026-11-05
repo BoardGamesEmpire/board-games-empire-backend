@@ -50,8 +50,9 @@ export const arrangeInventoryPlugin = async (
       : {
           pendingVersion: options.stagedVersion,
           pendingManifestJson: { ...manifest, version: options.stagedVersion } as never,
-          pendingSha256: 'e2e-staged',
+          pendingSha256: 'b'.repeat(64),
           pendingSince: new Date(),
+          pendingStagingId: 'e2e-staging-1',
         };
 
   const plugin = await prisma.plugin.create({

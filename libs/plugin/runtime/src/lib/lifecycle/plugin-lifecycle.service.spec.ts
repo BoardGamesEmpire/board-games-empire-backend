@@ -59,6 +59,7 @@ describe('PluginLifecycleService', () => {
     pendingManifestJson: null,
     pendingSha256: null,
     pendingSince: null,
+    pendingStagingId: null,
     restartRequired: false,
     uninstalledAt: null,
     createdAt: new Date(0),
@@ -471,6 +472,7 @@ describe('PluginLifecycleService', () => {
           pendingManifestJson: Prisma.DbNull,
           pendingSha256: null,
           pendingSince: null,
+          pendingStagingId: null,
         },
       });
     });

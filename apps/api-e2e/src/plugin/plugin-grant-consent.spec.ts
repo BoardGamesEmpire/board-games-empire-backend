@@ -205,8 +205,9 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       const plugin = await arrangePlugin(DEFAULT_CHECKS, {
         pendingVersion: pending.version,
         pendingManifestJson: pending as never,
-        pendingSha256: 'e2e-new-sha',
+        pendingSha256: 'b'.repeat(64),
         pendingSince: STAGED_AT,
+        pendingStagingId: 'e2e-staging-1',
       });
 
       await decideServer(admin, plugin.slug, denied('read:safe_http_policy')).expect(200);

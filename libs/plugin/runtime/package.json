@@ -27,6 +27,7 @@
     "@nestjs/common": "^11.0.0",
     "@nestjs/event-emitter": "^3.0.0",
     "@nestjs/schedule": "^6.0.0",
+    "@paralleldrive/cuid2": "^3.3.0",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "es-module-lexer": "^2.3.1",

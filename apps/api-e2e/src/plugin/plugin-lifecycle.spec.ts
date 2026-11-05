@@ -189,8 +189,10 @@ describe('plugin lifecycle (server-level)', () => {
       const plugin = await arrangePlugin({
         enabled: true,
         pendingVersion: '1.3.0',
-        pendingSha256: 'stale-sha',
+        pendingManifestJson: { ...buildPluginManifest(), version: '1.3.0' } as never,
+        pendingSha256: 'b'.repeat(64),
         pendingSince: new Date(),
+        pendingStagingId: 'e2e-staging-1',
       });
       await arrangeConsentSurface(plugin);
       await db.client.userPlugin.create({ data: { userId: admin.user.id, pluginId: plugin.id, enabled: true } });
@@ -206,6 +208,7 @@ describe('plugin lifecycle (server-level)', () => {
       expect(row.pendingVersion).toBeNull();
       expect(row.pendingSha256).toBeNull();
       expect(row.pendingSince).toBeNull();
+      expect(row.pendingStagingId).toBeNull();
 
       await expect(db.client.pluginGrant.count({ where: { pluginId: plugin.id } })).resolves.toBe(0);
       await expect(db.client.pluginPermission.count({ where: { pluginId: plugin.id } })).resolves.toBe(0);
