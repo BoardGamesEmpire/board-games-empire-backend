@@ -23,7 +23,6 @@ import {
 describe('PluginInventoryService', () => {
   const options: PluginModuleOptions = {
     pluginsRoot: '/var/lib/bge/plugins',
-    bundledRoot: '/srv/bge/plugins/bundled',
     bgeVersion: '0.3.0',
     defaultLocale: 'en',
   };
@@ -39,7 +38,6 @@ describe('PluginInventoryService', () => {
     category: PluginCategory.FeedbackSink,
     scope: PluginScope.Server,
     enabled: true,
-    bundled: false,
     restartRequired: false,
     installedAt: INSTALLED_AT,
     uninstalledAt: null,
@@ -48,6 +46,7 @@ describe('PluginInventoryService', () => {
     registrySlug: 'community',
     pendingVersion: null,
     pendingSince: null,
+    pendingSha256: null,
     manifestJson: manifest,
     ...overrides,
   });
@@ -153,39 +152,46 @@ describe('PluginInventoryService', () => {
       expect(rows[0].displayName).toBe('Demo Sink');
     });
 
-    it('renders installed provenance from the artifact columns', async () => {
-      db.plugin.findMany.mockResolvedValue([row()] as never);
-      db.plugin.count.mockResolvedValue(1 as never);
-
-      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
-
-      expect(rows[0].provenance).toEqual({
-        kind: 'installed',
-        sha256: 'a'.repeat(64),
-        url: 'https://registry.test/demo-sink-1.2.0.tgz',
-        registrySlug: 'community',
-      });
-    });
-
-    it('a bundled plugin carries no artifact fields at all', async () => {
+    it('reports where the artifact came from, in one shape (#696)', async () => {
+      // Every plugin is installed from a plugin artifact, so provenance has no
+      // kind to tell apart: it is the artifact's checksum, link and registry.
       db.plugin.findMany.mockResolvedValue([
-        row({ bundled: true, installedSha256: null, installedFromUrl: null, registrySlug: null }),
+        row({ installedFromUrl: 'https://registry.example/x.tgz', registrySlug: 'bge-official' }),
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
       const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
 
-      expect(rows[0].provenance).toEqual({ kind: 'bundled' });
+      expect(rows[0].provenance).toStrictEqual({
+        sha256: 'a'.repeat(64),
+        url: 'https://registry.example/x.tgz',
+        registrySlug: 'bge-official',
+      });
     });
 
     it('surfaces a staged update with pendingSince, never updatedAt', async () => {
       const since = new Date('2026-08-20T10:00:00Z');
-      db.plugin.findMany.mockResolvedValue([row({ pendingVersion: '1.3.0', pendingSince: since })] as never);
+      db.plugin.findMany.mockResolvedValue([
+        row({ pendingVersion: '1.3.0', pendingSince: since, pendingSha256: 'b'.repeat(64) }),
+      ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
       const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
 
       expect(rows[0].pendingUpdate).toEqual({ version: '1.3.0', since });
+    });
+
+    // #696: approval answers 409 no staged update for a staged row without a
+    // checksum, so the list must not offer that row an update to approve.
+    it('reports a staged row without a checksum as no staged update, as approval does', async () => {
+      db.plugin.findMany.mockResolvedValue([
+        row({ pendingVersion: '1.3.0', pendingSince: new Date('2026-08-20T10:00:00Z'), pendingSha256: null }),
+      ] as never);
+      db.plugin.count.mockResolvedValue(1 as never);
+
+      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
+
+      expect(rows[0].pendingUpdate).toBeNull();
     });
 
     it('reports no staged update as null rather than an empty object', async () => {
@@ -587,6 +593,7 @@ describe('PluginInventoryService', () => {
         'registrySlug',
         'pendingVersion',
         'pendingSince',
+        'pendingSha256',
         'installedAt',
         'restartRequired',
         'uninstalledAt',

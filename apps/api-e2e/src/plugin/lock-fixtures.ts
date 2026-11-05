@@ -153,7 +153,7 @@ export async function arrangePlugin(prisma: PrismaClient): Promise<PluginLockFix
       scope: PluginScope.Household,
       manifestJson: { slug, version },
       enabled: true,
-      bundled: false,
+      installedSha256: 'a'.repeat(64),
     },
     select: { id: true },
   });

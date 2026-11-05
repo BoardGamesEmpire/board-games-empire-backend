@@ -86,7 +86,13 @@ describe('installed-plugin inventory (#354)', () => {
         enabled: true,
         displayName: 'Inventory Fixture',
         manifestUnreadable: false,
-        provenance: { kind: 'installed', sha256: 'a'.repeat(64), url: 'https://registry.test/fixture.tgz' },
+      });
+      // One provenance shape, with no kind to tell apart, because every plugin
+      // is installed from a plugin artifact (#696).
+      expect(entryFor(response.body, plugin.slug)?.['provenance']).toStrictEqual({
+        sha256: 'a'.repeat(64),
+        url: 'https://registry.test/fixture.tgz',
+        registrySlug: null,
       });
     });
 

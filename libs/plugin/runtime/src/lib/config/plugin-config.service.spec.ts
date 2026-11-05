@@ -12,7 +12,6 @@ const makePluginRow = (overrides: Partial<Plugin> = {}): Plugin =>
     category: PluginCategory.FeedbackSink,
     scope: PluginScope.Server,
     enabled: true,
-    bundled: false,
     manifestJson: {},
     config: {},
     loadFailed: false,

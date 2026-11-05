@@ -215,7 +215,6 @@ import { createThrottlers } from './lib/throttlers';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         pluginsRoot: config.getOrThrow<string>('plugins.pluginsRoot'),
-        bundledRoot: config.getOrThrow<string>('plugins.bundledRoot'),
         // Build-time codegen constant (`@bge/version`) — the version is a
         // property of the artifact, not of the environment it runs in.
         bgeVersion: BGE_VERSION,

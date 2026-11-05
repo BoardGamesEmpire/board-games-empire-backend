@@ -110,7 +110,6 @@ describe('the pre-row races (#360)', () => {
         scope: PluginScope.Household,
         manifestJson: manifest as never,
         enabled: true,
-        bundled: false,
         installedSha256: randomUUID(),
       },
     });

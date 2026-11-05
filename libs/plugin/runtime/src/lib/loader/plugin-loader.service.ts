@@ -30,7 +30,6 @@ import { PLUGIN_MODULE_IMPORTER, type PluginModuleImporter } from './plugin-modu
  * Fail-loud targets silent fallbacks; a lifecycle row, a disabled flag, and
  * an error log are loud, while a broken third-party plugin bricking a
  * self-hosted server would punish the operator for the plugin author's bug.
- * Bundled plugins are treated identically at this phase.
  *
  * The whole pass runs inside a `system` actor scope (`plugin-boot-load`) so
  * the quarantine mutations and their lifecycle rows are attributed; each
@@ -96,7 +95,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
 
   private async loadOne(plugin: Plugin): Promise<void> {
     const manifest = this.validateManifest(plugin);
-    const directory = await this.directories.resolve(plugin.slug, plugin.bundled);
+    const directory = await this.directories.resolve(plugin.slug);
     const diskVersion = await this.readDiskVersion(directory.manifestPath);
     const descriptor = await this.readPackageDescriptor(plugin.slug, directory.packageJsonPath);
     const entrypoint = resolvePluginEntrypoint(plugin.slug, descriptor, directory.rootDir);
@@ -133,13 +132,11 @@ export class PluginLoaderService implements OnApplicationBootstrap {
 
     // A restart clears `restartRequired` only when the code on disk is
     // actually the activated version. Advisory, never fatal: the directory
-    // resolver exposes ONE path per plugin, so a pending update's files
+    // resolver exposes ONE path per plugin, so a staged update's files
     // legitimately occupy that path before anyone approves it — quarantining
-    // on a mismatch would force-disable a healthy plugin awaiting consent,
-    // and for a bundled plugin (whose path is BGE's own) that is
-    // unavoidable rather than exceptional. A staged-file location is #84's
-    // to define; until it exists, the honest posture is to load the plugin
-    // and refuse to claim the restart happened.
+    // on a mismatch would force-disable a healthy plugin awaiting consent.
+    // A staged-file location is #84's to define; until it exists, the honest
+    // posture is to load the plugin and refuse to claim the restart happened.
     const diskMatchesRow = diskVersion === plugin.version;
     const clearRestartRequired = plugin.restartRequired && diskMatchesRow;
 

@@ -40,7 +40,6 @@ import {
 describe('PluginUnitLifecycleService', () => {
   const options: PluginModuleOptions = {
     pluginsRoot: '/var/lib/bge/plugins',
-    bundledRoot: '/srv/bge/plugins/bundled',
     bgeVersion: '0.3.0',
     defaultLocale: 'en',
   };
@@ -81,7 +80,6 @@ describe('PluginUnitLifecycleService', () => {
     scope: PluginScope.Household,
     executionMode: PluginExecutionMode.InProcess,
     enabled: true,
-    bundled: false,
     manifestJson: householdManifest() as unknown as Prisma.JsonValue,
     config: {},
     loadFailed: false,

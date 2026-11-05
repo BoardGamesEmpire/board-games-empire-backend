@@ -83,25 +83,15 @@ export interface PluginServerInventoryOptions extends PluginInventoryOptions {
 }
 
 /**
- * Where the installed artifact came from — D-AG's typed provenance as read
- * back off the row, rather than the eleven-nullable-columns shape the table
- * stores. `bundled` carries no artifact fields at all, which is the
- * invariant (`bundled ⇒ no tarball`) made visible instead of implied by
- * nulls.
- *
- * `sha256` stays nullable on the `installed` arm even though the installer
- * enforces `bundled = false ⇒ installedSha256 IS NOT NULL`: this type
- * describes what a read found, and asserting the invariant here would turn
- * corrupt state into a non-null lie rather than something a screen can show.
+ * Where the installed plugin artifact came from, as read back off the row.
+ * There is one shape, with no kind to tell apart, because every plugin is
+ * installed from an artifact (#696), and the database requires its checksum.
  */
-export type PluginInventoryProvenance =
-  | { readonly kind: 'bundled' }
-  | {
-      readonly kind: 'installed';
-      readonly sha256: string | null;
-      readonly url: string | null;
-      readonly registrySlug: string | null;
-    };
+export interface PluginInventoryProvenance {
+  readonly sha256: string;
+  readonly url: string | null;
+  readonly registrySlug: string | null;
+}
 
 /** A staged update awaiting consent, as the list surfaces it. */
 export interface PluginInventoryPendingUpdate {
@@ -260,7 +250,6 @@ const SERVER_SELECT = {
   ...IDENTITY_SELECT,
   enabled: true,
   uninstalledAt: true,
-  bundled: true,
   restartRequired: true,
   installedAt: true,
   installedFromUrl: true,
@@ -268,6 +257,8 @@ const SERVER_SELECT = {
   registrySlug: true,
   pendingVersion: true,
   pendingSince: true,
+  // Read only to decide whether an update is staged; never served.
+  pendingSha256: true,
 } satisfies Prisma.PluginSelect;
 
 /** `enabled` only, surfaced as `serverEnabled` — no provenance, no staging. */
@@ -600,15 +591,13 @@ export class PluginInventoryService {
       uninstalledAt: row.uninstalledAt,
       restartRequired: row.restartRequired,
       installedAt: row.installedAt,
-      provenance: row.bundled
-        ? { kind: 'bundled' }
-        : {
-            kind: 'installed',
-            sha256: row.installedSha256,
-            url: row.installedFromUrl,
-            registrySlug: row.registrySlug,
-          },
-      pendingUpdate: row.pendingVersion === null ? null : { version: row.pendingVersion, since: row.pendingSince },
+      provenance: { sha256: row.installedSha256, url: row.installedFromUrl, registrySlug: row.registrySlug },
+      // A staged row without a checksum is no staged update, as approval and the
+      // pending read treat it (#696): the list must not offer one to approve.
+      pendingUpdate:
+        row.pendingVersion === null || row.pendingSha256 === null
+          ? null
+          : { version: row.pendingVersion, since: row.pendingSince },
     };
   }
 

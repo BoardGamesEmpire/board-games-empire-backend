@@ -1,7 +1,7 @@
 /// An installed plugin — a first-class PRINCIPAL with its own granted
 /// authority (#59), not a delegation of the installing user's permissions.
-/// Rows are created by the install pipeline (#59 Phase C / #84) or seeded
-/// for `bundled` plugins that ship with BGE (#61, #194).
+/// Rows are created by the install pipeline (#59 Phase C / #84). No plugin
+/// ships inside the server (#696), so every row runs a plugin artifact.
 ///
 /// Actor/provenance columns (`installedById`) are plain String ids, not FK
 /// relations, per the AuditLog precedent: provenance must survive principal
@@ -27,18 +27,12 @@ model Plugin {
   /// HouseholdPlugin.enabled.
   enabled Boolean @default(false)
 
-  /// Ships with BGE core (#61/#194): no tarball, no provenance columns,
-  /// uninstall blocked (disable only), upgraded with BGE itself.
-  bundled Boolean @default(false)
-
-  /// Ingress provenance (#84). Null for `bundled` and manual-upload installs
-  /// (upload keeps the checksum but has no source URL).
+  /// The link the plugin artifact was installed from (#84). Null for a
+  /// manual upload, which keeps the checksum but has no link.
   installedFromUrl String? @map("installed_from_url")
 
-  /// SHA-256 of the installed tarball. Nullable ONLY because bundled plugins
-  /// have no tarball — the install pipeline enforces the invariant
-  /// `bundled = false ⇒ installedSha256 IS NOT NULL` (#59 Phase C).
-  installedSha256 String? @map("installed_sha256")
+  /// SHA-256 of the plugin artifact this row runs (#84).
+  installedSha256 String @map("installed_sha256")
 
   /// PluginRegistrySource.slug the artifact was discovered through (#84);
   /// null for direct URL / manual-upload installs. Plain String by design —

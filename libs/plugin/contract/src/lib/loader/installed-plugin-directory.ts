@@ -1,8 +1,7 @@
 /**
  * Layout contract for a plugin on disk (#59 loader ↔ distribution boundary).
  * The loader consumes ONLY this interface; #84's install pipeline populates
- * directories satisfying it, and the bundled branch resolves in-tree
- * directories into the same shape, so the load path is source-agnostic.
+ * directories satisfying it.
  *
  * Minimal by design: directory root, `manifest.json` at the root, and the
  * package descriptor the entrypoint is resolved from (`exports`-first,
@@ -16,8 +15,6 @@ export interface InstalledPluginDirectory {
   readonly manifestPath: string;
   /** Absolute path to `package.json` (always at the root). */
   readonly packageJsonPath: string;
-  /** True when resolved from the in-tree bundled root rather than the install root. */
-  readonly bundled: boolean;
 }
 
 export const PLUGIN_MANIFEST_FILENAME = 'manifest.json';

@@ -22,7 +22,6 @@ import {
   PluginLifecycleNotFoundError,
   PluginLifecyclePluginChangedError,
   PluginLifecycleTombstonedError,
-  PluginUninstallBundledError,
 } from './lifecycle.errors';
 
 export interface PluginLifecycleActionInput {
@@ -186,10 +185,6 @@ export class PluginLifecycleService {
     await this.assertServerAdmin(input.actorId);
     const plugin = await this.loadLiving(input.slug);
 
-    if (plugin.bundled) {
-      throw new PluginUninstallBundledError(plugin.slug);
-    }
-
     const { updated, affectedUnits } = await this.db.$transaction(async (tx) => {
       const claimed = await tx.plugin.updateMany({
         where: { id: plugin.id, uninstalledAt: null },
@@ -253,7 +248,7 @@ export class PluginLifecycleService {
     this.emitter.emit(
       PluginUninstalledEvent.eventName,
       new PluginUninstalledEvent(
-        { id: plugin.id, slug: plugin.slug, version: plugin.version, bundled: plugin.bundled },
+        { id: plugin.id, slug: plugin.slug, version: plugin.version },
         affectedUnits,
         initiatedAt,
       ),

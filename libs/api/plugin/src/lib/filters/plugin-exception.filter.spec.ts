@@ -26,7 +26,6 @@ import {
   PluginInstallForbiddenPermissionError,
   PluginInstallManifestError,
   PluginInstallPermissionCollisionError,
-  PluginInstallProvenanceMismatchError,
   PluginInstallStaticAnalysisError,
   PluginInstallUnknownCorePermissionError,
   PluginLifecyclePluginChangedError,
@@ -48,7 +47,6 @@ import {
   PluginUpdateNoPendingError,
   PluginUpdatePendingConflictError,
   PluginUpdatePluginNotFoundError,
-  PluginUpdateProvenanceMismatchError,
   PluginUpdateStaticAnalysisError,
   PluginUpdateTombstonedError,
   PluginUpdateUnknownCorePermissionError,
@@ -543,19 +541,6 @@ describe('PluginExceptionFilter', () => {
   });
 
   describe('500 — corrupted server state, logged loud, generic copy', () => {
-    it.each([
-      [new PluginInstallProvenanceMismatchError('sample', 'bundled row, sideloaded directory')],
-      [new PluginUpdateProvenanceMismatchError('sample', 'bundled row, sideloaded directory')],
-    ])('maps %s to 500 without leaking the detail', (exception) => {
-      filter.catch(exception, host);
-
-      expect(rendered().getStatus()).toBe(Http.InternalServerError);
-      expect(body()['message']).toBe('t:errors.plugin.state_corrupted');
-      // The corruption detail stays in server logs (via cause), never the body.
-      expect(JSON.stringify(body())).not.toContain('sideloaded');
-      expect(Logger.prototype.error).toHaveBeenCalled();
-    });
-
     it.each([
       [new PluginGrantManifestInvalidError('sample', 'schema drift', [SCHEMA_ISSUE])],
       [new PluginFeatureStateManifestError('sample', 'schema drift', [SCHEMA_ISSUE])],

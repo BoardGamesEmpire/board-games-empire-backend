@@ -100,8 +100,8 @@ export class PluginsController {
     summary: 'List the plugins installed on this server',
     description:
       "The plugin management screen's first read, and the only plugin read that answers before a slug is known: " +
-      'installed set, server enablement, restart-required and pending-update state, and typed provenance ' +
-      '(bundled vs installed). Paginated per #230 — `?page=` (1-based) and `?limit=`, with a `pagination` ' +
+      'installed set, server enablement, restart-required and staged-update state, and where each plugin ' +
+      'artifact came from. Paginated per #230 — `?page=` (1-based) and `?limit=`, with a `pagination` ' +
       'envelope. Tombstoned plugins are excluded unless `?includeUninstalled=true`. A plugin whose stored ' +
       'manifest cannot be read is still listed, marked `manifestUnreadable` with its localized fields null, ' +
       'rather than failing the page.',
@@ -266,13 +266,12 @@ export class PluginsController {
     description:
       'Purges all consent (grants and the declared-permission catalog — reinstall is fresh consent), retains the row ' +
       'and unit configuration unless purgeData is true, and clears any staged update. The loaded module keeps running ' +
-      'until restart but is no longer served; restartRequired records that. Bundled plugins refuse with 409.',
+      'until restart but is no longer served; restartRequired records that.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was already uninstalled' })
-  @ApiResponse({ status: Http.Conflict, description: 'Bundled plugins cannot be uninstalled' })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
   @HttpCode(Http.Ok)
   @Post(':slug/uninstall')

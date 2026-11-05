@@ -98,7 +98,6 @@ describe('consent decisions under concurrency (#360)', () => {
         scope: PluginScope.Household,
         manifestJson: active as never,
         enabled: true,
-        bundled: false,
         installedSha256: randomUUID(),
         ...overrides,
       },

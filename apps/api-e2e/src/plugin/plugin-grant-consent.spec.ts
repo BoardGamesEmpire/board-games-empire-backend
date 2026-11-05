@@ -113,7 +113,6 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
         scope: PluginScope.Household,
         manifestJson: active as never,
         enabled: true,
-        bundled: false,
         installedSha256: randomUUID(),
         ...overrides,
       },

@@ -29,7 +29,6 @@ import {
   PluginInstallForbiddenPermissionError,
   PluginInstallManifestError,
   PluginInstallPermissionCollisionError,
-  PluginInstallProvenanceMismatchError,
   PluginInstallStaticAnalysisError,
   PluginInstallUnknownCorePermissionError,
   PluginInventoryManifestError,
@@ -41,7 +40,6 @@ import {
   PluginLifecyclePluginChangedError,
   PluginLifecycleTombstonedError,
   PluginStaticAnalysisUnavailableError,
-  PluginUninstallBundledError,
   PluginUnitAuthorityError,
   PluginUnitConfigRequiredError,
   PluginUnitHouseholdNotFoundError,
@@ -59,7 +57,6 @@ import {
   PluginUpdateNoPendingError,
   PluginUpdatePendingConflictError,
   PluginUpdatePluginNotFoundError,
-  PluginUpdateProvenanceMismatchError,
   PluginUpdateStaticAnalysisError,
   PluginUpdateTombstonedError,
   PluginUpdateUnknownCorePermissionError,
@@ -86,9 +83,9 @@ import { STATUS_CODES } from 'node:http';
  * identify no plugin at all.
  *
  * `operatorActionable: true` marks errors an operator must act on —
- * server-state failures the caller cannot fix (provenance drift,
- * stored-manifest re-validation failure, a shadowed parser build): they log
- * loud at error level.
+ * server-state failures the caller cannot fix (stored-manifest
+ * re-validation failure, a shadowed parser build): they log loud at error
+ * level.
  */
 interface PluginErrorRendering {
   status: Http;
@@ -200,15 +197,6 @@ function buildRenderers(): RendererMap {
     status: Http.NotFound,
     message: t('errors.household.not_found', { id: exception.householdId }),
     fields: { householdId: exception.householdId },
-  });
-
-  const provenanceMismatch = (
-    exception: PluginInstallProvenanceMismatchError | PluginUpdateProvenanceMismatchError,
-  ): PluginErrorRendering => ({
-    status: Http.InternalServerError,
-    message: t('errors.plugin.state_corrupted'),
-    fields: { slug: exception.slug },
-    operatorActionable: true,
   });
 
   // The re-validation issues describe the plugin's own stored manifest, not
@@ -410,12 +398,6 @@ function buildRenderers(): RendererMap {
     fields: { slug: exception.slug },
   }));
 
-  renders(PluginUninstallBundledError, (exception) => ({
-    status: Http.Conflict,
-    message: t('errors.plugin.uninstall_bundled', { slug: exception.slug }),
-    fields: { slug: exception.slug },
-  }));
-
   // The enable-time config gate (#323): enable refused because required household config was
   // neither supplied nor retained in valid form. Curable state conflict,
   // not a validation error — the request itself was well-formed; `issues`
@@ -545,9 +527,6 @@ function buildRenderers(): RendererMap {
   }));
 
   // ─── 500 — corrupted server state (never a caller error; logged loud) ────
-
-  renders(PluginInstallProvenanceMismatchError, provenanceMismatch);
-  renders(PluginUpdateProvenanceMismatchError, provenanceMismatch);
 
   renders(PluginGrantManifestInvalidError, storedManifestInvalid);
   renders(PluginFeatureStateManifestError, storedManifestInvalid);

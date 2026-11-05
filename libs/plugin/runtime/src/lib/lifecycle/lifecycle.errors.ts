@@ -69,19 +69,6 @@ export class PluginLifecyclePluginChangedError extends Error {
   }
 }
 
-/**
- * `bundled` plugins ship with BGE core: no tarball, no independent removal —
- * they upgrade with BGE itself, so uninstall is refused and disable is the
- * admin's kill switch.
- */
-export class PluginUninstallBundledError extends Error {
-  override readonly name = 'PluginUninstallBundledError';
-
-  constructor(public readonly slug: string) {
-    super(`Plugin '${slug}' is bundled with BGE and cannot be uninstalled — disable it instead`);
-  }
-}
-
 /** The stored active manifest failed re-validation on the config write path — corrupted server state, never a caller error. */
 export class PluginLifecycleManifestError extends Error {
   override readonly name = 'PluginLifecycleManifestError';

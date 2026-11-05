@@ -51,7 +51,6 @@ describe('PluginStaticAnalysisService parser guard', () => {
     rootDir,
     manifestPath: join(rootDir, 'manifest.json'),
     packageJsonPath: join(rootDir, 'package.json'),
-    bundled: false,
   });
 
   beforeEach(async () => {

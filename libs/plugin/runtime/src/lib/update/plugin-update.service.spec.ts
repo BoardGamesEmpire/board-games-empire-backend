@@ -51,7 +51,6 @@ import {
   PluginUpdateNoPendingError,
   PluginUpdatePendingConflictError,
   PluginUpdatePluginNotFoundError,
-  PluginUpdateProvenanceMismatchError,
   PluginUpdateStaticAnalysisError,
   PluginUpdateTombstonedError,
   PluginUpdateUnknownCorePermissionError,
@@ -61,7 +60,6 @@ import {
 describe('PluginUpdateService', () => {
   const options: PluginModuleOptions = {
     pluginsRoot: '/var/lib/bge/plugins',
-    bundledRoot: '/srv/bge/plugins/bundled',
     bgeVersion: '0.3.0',
     defaultLocale: 'en',
   };
@@ -83,7 +81,6 @@ describe('PluginUpdateService', () => {
     scope: PluginScope.Server,
     executionMode: PluginExecutionMode.InProcess,
     enabled: true,
-    bundled: false,
     manifestJson: activeManifest as unknown as Prisma.JsonValue,
     config: {},
     loadFailed: false,
@@ -182,12 +179,11 @@ describe('PluginUpdateService', () => {
   /** The row the plugin-config lock (D-CN) answers with — defaults to an empty retained config. */
   let setPluginConfigLock: (config: unknown) => void;
 
-  const directory = (bundled = false): InstalledPluginDirectory => ({
+  const directory = (): InstalledPluginDirectory => ({
     slug: 'demo-sink',
     rootDir,
     manifestPath: join(rootDir, 'manifest.json'),
     packageJsonPath: join(rootDir, 'package.json'),
-    bundled,
   });
 
   const writeManifest = async (manifest: PluginManifest): Promise<void> => {
@@ -200,7 +196,7 @@ describe('PluginUpdateService', () => {
 
   const input = (overrides: Partial<PluginUpdateStageInput> = {}): PluginUpdateStageInput => ({
     directory: directory(),
-    provenance: { bundled: false, pendingSha256: 'new-sha' },
+    provenance: { pendingSha256: 'new-sha' },
     initiatorId: 'admin-1',
     ...overrides,
   });
@@ -279,13 +275,6 @@ describe('PluginUpdateService', () => {
   });
 
   describe('stage() gates', () => {
-    it('rejects a provenance/directory bundled mismatch before touching anything', async () => {
-      await expect(service.stage(input({ provenance: { bundled: true } }))).rejects.toThrow(
-        PluginUpdateProvenanceMismatchError,
-      );
-      expect(authority.isServerAdmin).not.toHaveBeenCalled();
-    });
-
     it('requires server-admin authority', async () => {
       authority.isServerAdmin.mockResolvedValue(false);
       await writeManifest(nextManifest());
@@ -320,14 +309,6 @@ describe('PluginUpdateService', () => {
       expect(db.plugin.update).not.toHaveBeenCalled();
       expect(db.plugin.updateMany).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();
-    });
-
-    it('refuses an update that would change the distribution kind of the installed plugin', async () => {
-      db.plugin.findUnique.mockResolvedValue(makePlugin({ bundled: true }));
-      await writeManifest(nextManifest());
-
-      await expect(service.stage(input())).rejects.toThrow(PluginUpdateProvenanceMismatchError);
-      expect(db.plugin.update).not.toHaveBeenCalled();
     });
 
     it('rejects a manifest whose slug does not match the installed plugin', async () => {
@@ -446,16 +427,6 @@ describe('PluginUpdateService', () => {
 
       await expect(service.stage(input())).rejects.toThrow(PluginUpdatePendingConflictError);
       expect(emitter.emit).not.toHaveBeenCalled();
-    });
-
-    it('keeps installedSha256 untouched for bundled provenance', async () => {
-      db.plugin.findUnique.mockResolvedValue(makePlugin({ bundled: true, installedSha256: null }));
-      await writeManifest(nextManifest());
-
-      await service.stage(input({ directory: directory(true), provenance: { bundled: true } }));
-
-      const updateData = db.plugin.updateMany.mock.calls[0][0].data as Partial<Plugin>;
-      expect('installedSha256' in updateData).toBe(false);
     });
 
     it('applies the declares diff: added rows created Low, removed grants revoked with permission-removed', async () => {
@@ -629,6 +600,19 @@ describe('PluginUpdateService', () => {
       await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
         PluginUpdateNoPendingError,
       );
+    });
+
+    it('refuses to approve a staged row with no checksum (#696)', async () => {
+      // Every staging names a plugin artifact, so a staged row without its
+      // checksum is not an update anyone can activate: activation would have
+      // no artifact to record.
+      db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest(), { pendingSha256: null }));
+
+      await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
+        PluginUpdateNoPendingError,
+      );
+      expect(db.plugin.updateMany).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
     });
 
     it('loses a concurrent-approve race with the typed no-pending refusal, before writing a single grant', async () => {

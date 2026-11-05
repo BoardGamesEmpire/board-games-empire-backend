@@ -6,18 +6,17 @@ import type {
   PluginInventoryFeature,
   PluginInventoryIdentity,
   PluginInventoryPendingUpdate,
+  PluginInventoryProvenance,
   PluginInventoryUnitState,
   PluginUnitInventoryEntry,
 } from '@bge/plugin';
-import { ApiExtraModels, ApiProperty, getSchemaPath } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 
 /**
  * OpenAPI models for the installed-plugin reads (#354).
  *
- * Every class that models a runtime shape `implements` it — including the two
- * arms of the provenance union, which are reached through `Extract` since the
- * runtime side is a union rather than a named interface per arm. That is the
- * whole point of declaring these: the row shapes are defined by the inventory
+ * Every class that models a runtime shape `implements` it. That is the whole
+ * point of declaring these: the row shapes are defined by the inventory
  * service, and a documented shape that merely resembles the served one drifts
  * silently — a field added to the service would leave the generated client
  * blind to it, with nothing failing. With `implements`, the omission is a
@@ -34,32 +33,10 @@ import { ApiExtraModels, ApiProperty, getSchemaPath } from '@nestjs/swagger';
  * guessing at.
  */
 
-/**
- * The provenance union's arms, named so the DTOs below can implement them.
- * The runtime side is a discriminated union, not two interfaces, so there is
- * nothing to reference directly — without these the drift guard would stop at
- * the union's edge and a new field on the `installed` arm could go
- * undocumented with nothing failing.
- */
-type BundledProvenance = Extract<PluginInventoryEntry['provenance'], { kind: 'bundled' }>;
-type InstalledProvenance = Extract<PluginInventoryEntry['provenance'], { kind: 'installed' }>;
-
-/** Bundled: ships with BGE, so there is no artifact to describe. */
-class BundledProvenanceDto implements BundledProvenance {
-  @ApiProperty({ enum: ['bundled'] })
-  kind!: 'bundled';
-}
-
-class InstalledProvenanceDto implements InstalledProvenance {
-  @ApiProperty({ enum: ['installed'] })
-  kind!: 'installed';
-
-  @ApiProperty({
-    type: String,
-    nullable: true,
-    description: 'SHA-256 of the installed tarball. Null only if the install invariant was violated.',
-  })
-  sha256!: string | null;
+/** Where the plugin artifact came from. One shape: every plugin is installed from an artifact (#696). */
+class PluginProvenanceDto implements PluginInventoryProvenance {
+  @ApiProperty({ description: 'SHA-256 of the installed plugin artifact' })
+  sha256!: string;
 
   @ApiProperty({ type: String, nullable: true, description: 'Ingress URL; null for a manual upload' })
   url!: string | null;
@@ -120,7 +97,6 @@ export class PluginInventoryIdentityDto implements PluginInventoryIdentity {
 }
 
 /** The server viewpoint (`read:plugin`): identity plus the operational picture. */
-@ApiExtraModels(BundledProvenanceDto, InstalledProvenanceDto)
 export class PluginInventoryEntryDto extends PluginInventoryIdentityDto implements PluginInventoryEntry {
   @ApiProperty({ description: 'Currently ACTIVE manifest version' })
   version!: string;
@@ -141,22 +117,8 @@ export class PluginInventoryEntryDto extends PluginInventoryIdentityDto implemen
   @ApiProperty()
   installedAt!: Date;
 
-  // The mapping is not optional here. An implicit discriminator resolves the
-  // property's value against SCHEMA NAMES, and 'bundled'/'installed' match
-  // neither `BundledProvenanceDto` nor `InstalledProvenanceDto` — a generated
-  // client would find the union unresolvable. This is the repo's first
-  // `discriminator`, so there was no precedent to inherit the mapping from.
-  @ApiProperty({
-    oneOf: [{ $ref: getSchemaPath(BundledProvenanceDto) }, { $ref: getSchemaPath(InstalledProvenanceDto) }],
-    discriminator: {
-      propertyName: 'kind',
-      mapping: {
-        bundled: getSchemaPath(BundledProvenanceDto),
-        installed: getSchemaPath(InstalledProvenanceDto),
-      },
-    },
-  })
-  provenance!: PluginInventoryEntry['provenance'];
+  @ApiProperty({ type: PluginProvenanceDto })
+  provenance!: PluginProvenanceDto;
 
   @ApiProperty({ type: PendingUpdateDto, nullable: true, description: 'Null when no update is staged' })
   pendingUpdate!: PendingUpdateDto | null;

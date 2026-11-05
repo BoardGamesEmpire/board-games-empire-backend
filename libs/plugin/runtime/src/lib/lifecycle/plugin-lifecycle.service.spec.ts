@@ -21,14 +21,12 @@ import {
   PluginLifecycleNotFoundError,
   PluginLifecyclePluginChangedError,
   PluginLifecycleTombstonedError,
-  PluginUninstallBundledError,
 } from './lifecycle.errors';
 import { PluginLifecycleService } from './plugin-lifecycle.service';
 
 describe('PluginLifecycleService', () => {
   const options: PluginModuleOptions = {
     pluginsRoot: '/var/lib/bge/plugins',
-    bundledRoot: '/srv/bge/plugins/bundled',
     bgeVersion: '0.3.0',
     defaultLocale: 'en',
   };
@@ -43,7 +41,6 @@ describe('PluginLifecycleService', () => {
     scope: PluginScope.Server,
     executionMode: PluginExecutionMode.InProcess,
     enabled: false,
-    bundled: false,
     manifestJson: activeManifest as unknown as Prisma.JsonValue,
     config: {},
     loadFailed: false,
@@ -461,16 +458,6 @@ describe('PluginLifecycleService', () => {
       );
     });
 
-    it('refuses a bundled plugin — disable is the kill switch, BGE upgrades carry the code', async () => {
-      db.plugin.findUnique.mockResolvedValue(makePlugin({ bundled: true }));
-
-      await expect(service.uninstall({ slug: 'demo-sink', actorId: 'admin-1' })).rejects.toThrow(
-        PluginUninstallBundledError,
-      );
-      expect(db.plugin.updateMany).not.toHaveBeenCalled();
-      expect(db.pluginGrant.deleteMany).not.toHaveBeenCalled();
-    });
-
     it('tombstones with force-disable, restartRequired, and the staged update cleared — one guarded write', async () => {
       await service.uninstall({ slug: 'demo-sink', actorId: 'admin-1' });
 
@@ -554,7 +541,7 @@ describe('PluginLifecycleService', () => {
       const event = emittedEvent<PluginUninstalledEvent>(PluginEvent.Uninstalled);
       expect(event).toBeInstanceOf(PluginUninstalledEvent);
       expect(event.affectedUnits).toEqual(expectedUnits);
-      expect(event.before).toEqual({ id: 'plugin-1', slug: 'demo-sink', version: '1.2.0', bundled: false });
+      expect(event.before).toEqual({ id: 'plugin-1', slug: 'demo-sink', version: '1.2.0' });
     });
 
     it('emits only the uninstalled event — the force-disable rides it, not a second disabled event', async () => {
