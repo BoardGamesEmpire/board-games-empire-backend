@@ -103,6 +103,12 @@ describe('GameRequests', () => {
       );
     });
 
+    it('asks only for games with no first release date when narrowed to them (#1082)', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, undefined, { undatedOnly: true })(client, signal);
+      expect(client.where).toHaveBeenCalledWith('version_parent = null & game_type != 14 & first_release_date = null');
+    });
+
     it('keeps games with no first release date when the range includes unknown ones (#719)', async () => {
       const both = buildMockClient();
       await searchGamesRequest('Hades', 20, 0, undefined, {

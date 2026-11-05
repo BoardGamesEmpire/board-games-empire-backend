@@ -156,26 +156,55 @@ export function utcYearStart(year: number): number {
   return date.getTime() / 1000;
 }
 
-/** A Unix-seconds bound, or undefined for one no date can reach, which narrows nothing on its side. */
-const reachable = (seconds: number): number | undefined => (Number.isFinite(seconds) ? seconds : undefined);
+/** IGDB holds a date as a signed 32-bit count of seconds: from late 1901 to early 2038. */
+const IGDB_EARLIEST_SECOND = -(2 ** 31);
+const IGDB_LATEST_SECOND = 2 ** 31 - 1;
 
 /**
- * A publish-year range as first release dates: from 1 January of the
- * minimum, up to but not including 1 January of the year after the maximum,
- * in UTC so it agrees with the year each result is sent with (#719).
+ * The first moment of `year` in Unix seconds, or an infinity on its side for
+ * a year past what a Date holds, so it still compares as the year would.
  */
-function toReleasedBetween(range: proto.IntRange | undefined): IgdbSearchNarrowing['releasedBetween'] {
-  const from = typeof range?.min === 'number' ? reachable(utcYearStart(range.min)) : undefined;
-  const before = typeof range?.max === 'number' ? reachable(utcYearStart(range.max + 1)) : undefined;
+const yearStartSeconds = (year: number): number => {
+  const seconds = utcYearStart(year);
+  return Number.isFinite(seconds) ? seconds : year > 1970 ? Infinity : -Infinity;
+};
 
-  if (from === undefined && before === undefined) {
+/**
+ * A publish-year range as IGDB narrowing: first release dates from 1 January
+ * of the minimum, up to but not including 1 January of the year after the
+ * maximum, in UTC so it agrees with the year each result is sent with (#719).
+ * Undefined narrows nothing; null means no game IGDB has can match.
+ *
+ * IGDB refuses a filter on a value outside the span it holds dates in with a
+ * 400 (#1082). A bound on the span's far side, a minimum before it or a
+ * maximum after it, holds for every date IGDB has, so it is left out. A bound
+ * on its near side, a minimum after it or a maximum before it, holds for
+ * none: only a game with no date can match, when the range includes those.
+ */
+function toYearNarrowing(
+  range: proto.IntRange | undefined,
+): Pick<IgdbSearchNarrowing, 'releasedBetween' | 'undatedOnly'> | null | undefined {
+  const from = typeof range?.min === 'number' ? yearStartSeconds(range.min) : undefined;
+  const before = typeof range?.max === 'number' ? yearStartSeconds(range.max + 1) : undefined;
+  const orUnknown = range?.includeUnknown === true;
+
+  if ((from !== undefined && from > IGDB_LATEST_SECOND) || (before !== undefined && before <= IGDB_EARLIEST_SECOND)) {
+    return orUnknown ? { undatedOnly: true } : null;
+  }
+
+  const lower = from !== undefined && from >= IGDB_EARLIEST_SECOND ? from : undefined;
+  const upper = before !== undefined && before <= IGDB_LATEST_SECOND ? before : undefined;
+
+  if (lower === undefined && upper === undefined) {
     return undefined;
   }
 
   return {
-    ...(from === undefined ? {} : { from }),
-    ...(before === undefined ? {} : { before }),
-    orUnknown: range?.includeUnknown === true,
+    releasedBetween: {
+      ...(lower === undefined ? {} : { from: lower }),
+      ...(upper === undefined ? {} : { before: upper }),
+      orUnknown,
+    },
   };
 }
 
@@ -191,16 +220,16 @@ export function toSearchNarrowing(filter: proto.SearchFilter | undefined): IgdbS
 
   const gameTypes = contentTypes.length > 0 ? igdbKeysOf(IGDB_CONTENT_TYPE_MAP, contentTypes) : undefined;
   const igdbPlatformTypes = platformTypes.length > 0 ? toIgdbPlatformTypes(platformTypes) : undefined;
-  const releasedBetween = toReleasedBetween(filter?.publishYear);
+  const years = toYearNarrowing(filter?.publishYear);
 
-  if (gameTypes?.length === 0 || igdbPlatformTypes?.length === 0) {
+  if (gameTypes?.length === 0 || igdbPlatformTypes?.length === 0 || years === null) {
     return null;
   }
 
   return {
     ...(gameTypes && { gameTypes }),
     ...(igdbPlatformTypes && { platformTypes: igdbPlatformTypes }),
-    ...(releasedBetween && { releasedBetween }),
+    ...years,
   };
 }
 

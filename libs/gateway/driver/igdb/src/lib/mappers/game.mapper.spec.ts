@@ -154,13 +154,47 @@ describe('game.mapper', () => {
       expect(toSearchNarrowing(filter({ publishYear: { includeUnknown: true } }))).toEqual({});
     });
 
-    // A Date holds about 275,000 years either side of 1970. A bound past that
-    // narrows nothing on its side, and the server still removes what it excludes.
+    // A Date holds about 275,000 years either side of 1970. A maximum past
+    // that holds for every date, so it narrows nothing (#719); a minimum past
+    // it holds for none (#1082).
     it('leaves out a bound no date can reach', () => {
       expect(toSearchNarrowing(filter({ publishYear: { min: 1990, max: 300_000 } }))).toEqual({
         releasedBetween: { from: 631152000, orUnknown: false },
       });
-      expect(toSearchNarrowing(filter({ publishYear: { min: 300_000 } }))).toEqual({});
+      expect(toSearchNarrowing(filter({ publishYear: { min: 300_000 } }))).toBeNull();
+    });
+
+    // IGDB holds a date as a signed 32-bit count of seconds, from late 1901 to
+    // early 2038, and refuses a filter on a value outside it with a 400. Every
+    // date it holds is inside, so a bound outside narrows nothing (#1082).
+    it("leaves out a bound IGDB's dates can't reach, which IGDB would refuse", () => {
+      expect(toSearchNarrowing(filter({ publishYear: { min: 1900, max: 1999 } }))).toEqual({
+        releasedBetween: { before: 946684800, orUnknown: false },
+      });
+      expect(toSearchNarrowing(filter({ publishYear: { min: 1990, max: 2040 } }))).toEqual({
+        releasedBetween: { from: 631152000, orUnknown: false },
+      });
+      expect(toSearchNarrowing(filter({ publishYear: { min: -10000, max: 10000, includeUnknown: true } }))).toEqual({});
+    });
+
+    // A minimum after the span, or a maximum before it, holds for no date
+    // IGDB has: only a game with no first release date can match, and when
+    // the range leaves those out, nothing can, so IGDB isn't asked (#1082).
+    it('asks only for undated games by a range IGDB has no date in, and nothing when it leaves them out', () => {
+      expect(toSearchNarrowing(filter({ publishYear: { min: 2039, includeUnknown: true } }))).toEqual({
+        undatedOnly: true,
+      });
+      expect(toSearchNarrowing(filter({ publishYear: { max: 1900, includeUnknown: true } }))).toEqual({
+        undatedOnly: true,
+      });
+      expect(toSearchNarrowing(filter({ publishYear: { min: 2039 } }))).toBeNull();
+      expect(toSearchNarrowing(filter({ publishYear: { max: 1900 } }))).toBeNull();
+    });
+
+    it('keeps a bound on the earliest second IGDB can hold', () => {
+      expect(toSearchNarrowing(filter({ publishYear: { min: 1902 } }))).toEqual({
+        releasedBetween: { from: -2145916800, orUnknown: false },
+      });
     });
   });
 

@@ -24,6 +24,12 @@ export interface IgdbSearchNarrowing {
    * `orUnknown` (#719).
    */
   releasedBetween?: { readonly from?: number; readonly before?: number; readonly orUnknown: boolean };
+
+  /**
+   * Only games with no first release date: the range a search asks for
+   * holds no date IGDB has, though it includes unknown ones (#1082).
+   */
+  undatedOnly?: true;
 }
 
 export interface IgdbCover {
