@@ -81,7 +81,9 @@ describe('GameSearchGateway', () => {
     abilityService.getCurrentResourceConditions.mockReturnValue([FRAME_READ]);
     // The frame's actor may ask the DataGateways unless a test says otherwise (#1076).
     abilityService.getCurrentAbilities.mockReturnValue([
-      { can: (action: Action, subject: unknown) => action === Action.read && subject === ResourceType.GameSearch },
+      {
+        can: (action: Action, subject: unknown) => action === Action.read && subject === ResourceType.DataGatewaySearch,
+      },
     ] as never);
 
     const { module, db: mockDb } = await createTestingModuleWithDb({

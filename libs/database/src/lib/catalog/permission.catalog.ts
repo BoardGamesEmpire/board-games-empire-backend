@@ -1469,19 +1469,24 @@ export const PERMISSION_CATALOG = [
     reason: 'Delete DataGateway connections',
   }),
 
-  // --- GameSearch ---
+  // --- DataGatewaySearch ---
   //
   // Asking the DataGateways sends a game search's query upstream on the
   // server's credentials, so it is a grant of its own, not a part of reading
   // games: an anonymous user searches the game catalog and never asks
-  // them (#1076). `GameSearch` has no table, so the grant takes no conditions and
-  // is checked by type alone. `Medium` for that outbound call.
+  // them (#1076). `DataGatewaySearch` has no table, so the grant takes no
+  // conditions and is checked by type alone. `Medium` for that outbound call.
+  //
+  // The slug spells out its subject, as `read:user:profile:*` does on
+  // `UserProfile`, and the subject stays apart from `DataGateway`: a read on
+  // `DataGateway` with no conditions would also pass the admin DataGateway
+  // routes. Listing a base game's expansions asks under it too (#1067).
   permission({
     action: Action.read,
-    subject: ResourceType.GameSearch,
-    slug: 'read:game_search:data_gateways',
+    subject: ResourceType.DataGatewaySearch,
+    slug: 'read:data_gateway:search',
     riskLevel: RiskLevel.Medium,
-    reason: 'Ask the DataGateways for games during a game search',
+    reason: "Ask the DataGateways for games, during a game search or for a base game's expansions",
   }),
 
   // --- Households ---

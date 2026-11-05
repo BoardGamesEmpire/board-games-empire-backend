@@ -35,8 +35,9 @@ enum ResourceType {
   GameCreationRequest
   GameCustomization
   DataGateway
-  /// Asking the DataGateways during a game search (#1076). No table behind it.
-  GameSearch
+  /// Asking the DataGateways, during a game search (#1076) or for a base game's
+  /// expansions (#1067). No table behind it.
+  DataGatewaySearch
   GamePlayResult
   GamePlaySession
   GameShare

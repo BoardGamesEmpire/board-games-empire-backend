@@ -187,19 +187,21 @@ describe('resourceTypeAccess', () => {
 });
 
 describe('everyAbilityCan', () => {
-  const allowing = createPrismaAbility([{ action: Action.read, subject: ResourceType.GameSearch }]) as AppAbility;
+  const allowing = createPrismaAbility([
+    { action: Action.read, subject: ResourceType.DataGatewaySearch },
+  ]) as AppAbility;
   const refusing = createPrismaAbility([]) as AppAbility;
 
   it('allows when every ability allows the action on the type (#1076)', () => {
-    expect(everyAbilityCan([allowing, allowing], Action.read, ResourceType.GameSearch)).toBe(true);
+    expect(everyAbilityCan([allowing, allowing], Action.read, ResourceType.DataGatewaySearch)).toBe(true);
   });
 
   it('refuses when any ability refuses, as an API key and its owner are checked together (#1076)', () => {
-    expect(everyAbilityCan([allowing, refusing], Action.read, ResourceType.GameSearch)).toBe(false);
+    expect(everyAbilityCan([allowing, refusing], Action.read, ResourceType.DataGatewaySearch)).toBe(false);
   });
 
   it('refuses an empty ability array rather than answering the vacuous yes (#1076)', () => {
-    expect(everyAbilityCan([], Action.read, ResourceType.GameSearch)).toBe(false);
+    expect(everyAbilityCan([], Action.read, ResourceType.DataGatewaySearch)).toBe(false);
   });
 
   it('counts a permission with a condition, as the type check does (#1076)', () => {

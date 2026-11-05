@@ -171,18 +171,19 @@ describe('the shipped catalogs', () => {
       expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).not.toContain('read:platform_game:public');
     });
 
-    // Asking the DataGateways sends a game search's query upstream on the
-    // server's credentials, so it is a grant of its own rather than part of
-    // reading games. Every signed-in user holds it. An anonymous user, who
-    // may search the game catalog, does not (#1076).
-    it('let User ask the DataGateways during a game search, and no anonymous user (#1076)', () => {
-      const entry = PERMISSION_CATALOG.find(({ slug }) => slug === 'read:game_search:data_gateways');
+    // Asking the DataGateways sends a request upstream on the server's
+    // credentials, so it is a grant of its own rather than part of reading
+    // games. Every signed-in user holds it. An anonymous user, who may search
+    // the game catalog, does not (#1076). A base game's expansions are asked
+    // for under the same grant (#1067).
+    it('let User ask the DataGateways, and no anonymous user (#1076, #1067)', () => {
+      const entry = PERMISSION_CATALOG.find(({ slug }) => slug === 'read:data_gateway:search');
 
       expect(entry?.action).toBe(Action.read);
-      expect(entry?.subject).toBe(ResourceType.GameSearch);
+      expect(entry?.subject).toBe(ResourceType.DataGatewaySearch);
       expect(entry?.conditions).toBeUndefined();
-      expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain('read:game_search:data_gateways');
-      expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain('read:game_search:data_gateways');
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain('read:data_gateway:search');
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain('read:data_gateway:search');
     });
 
     it('enumerate Admin rather than deriving it from the catalog', () => {

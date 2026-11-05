@@ -243,7 +243,7 @@ export abstract class SearchFieldsDto extends CappedOffsetPaginationQueryDto(100
   /**
    * Whether to include external sources in the search.
    * Defaults to true — external results are always fast-pathed in parallel.
-   * Asking the DataGateways takes `read:game_search:data_gateways`, which an
+   * Asking the DataGateways takes `read:data_gateway:search`, which an
    * anonymous user lacks, so such an actor sends `false` (#1076).
    */
   @ApiPropertyOptional({

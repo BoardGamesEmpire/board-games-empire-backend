@@ -81,7 +81,7 @@ function roleGraph(userId: string, canRead: boolean): UserWithRoles {
   };
   const askDataGateways = {
     action: Action.read,
-    subject: ResourceType.GameSearch,
+    subject: ResourceType.DataGatewaySearch,
     conditions: null,
     fields: [],
     inverted: false,

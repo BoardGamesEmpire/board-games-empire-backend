@@ -77,7 +77,7 @@ export class GameSearchService {
   /**
    * Refuses an actor who may not ask the DataGateways (#1076). Asking them
    * sends the query upstream on the server's credentials, so it takes
-   * `read:game_search:data_gateways`, which every signed-in user holds and an
+   * `read:data_gateway:search`, which every signed-in user holds and an
    * anonymous user does not. Like {@link localSearchScope}, each transport
    * calls it before its search begins, whenever the DataGateways are asked
    * for, which they are unless `includeExternal` is `false`.
@@ -86,7 +86,7 @@ export class GameSearchService {
    * checked together, as `PoliciesGuard` checks them (`everyAbilityCan`).
    */
   assertMayAskDataGateways(): void {
-    if (!everyAbilityCan(this.ability.getCurrentAbilities(), Action.read, ResourceType.GameSearch)) {
+    if (!everyAbilityCan(this.ability.getCurrentAbilities(), Action.read, ResourceType.DataGatewaySearch)) {
       throw new ForbiddenException(t('errors.game_search.data_gateways_forbidden'));
     }
   }

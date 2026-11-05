@@ -36,7 +36,7 @@ const userlessActor = () => {
 /** One primed ability that answers whether its actor may ask the DataGateways (#1076). */
 const abilityThatMayAskDataGateways = (may: boolean) => ({
   can: jest.fn(
-    (action: Action, subject: unknown) => may && action === Action.read && subject === ResourceType.GameSearch,
+    (action: Action, subject: unknown) => may && action === Action.read && subject === ResourceType.DataGatewaySearch,
   ),
 });
 
@@ -182,7 +182,7 @@ describe('GameSearchService', () => {
 
   /**
    * #1076. Asking the DataGateways sends the query upstream on the server's
-   * credentials, so it takes `read:game_search:data_gateways`, which an
+   * credentials, so it takes `read:data_gateway:search`, which an
    * anonymous user does not hold. It is checked before either half starts:
    * a refusal is an authorization failure, never "no games found".
    */
