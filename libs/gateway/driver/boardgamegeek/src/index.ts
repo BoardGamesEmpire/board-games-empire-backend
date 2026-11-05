@@ -1,3 +1,6 @@
+export * from './lib/boardgamegeek.driver';
+export * from './lib/client/bgg-client';
+
 // Everything the gateway app still imports while its code moves here (#1082).
 export * from './lib/client/bgg-client.interface';
 export * from './lib/constants';

@@ -1,84 +1,83 @@
-import {
-  BggLinkType,
-  BggNameType,
-  BggThingType,
-  MAX_THINGS_PER_BATCH,
-  toCategoryList,
-  toMechanicList,
-  type BggSearchItem,
-  type BggThing,
-} from '@bge/gateway-driver-boardgamegeek';
-import { BGE_VERSION } from '@bge/version';
+import type { DriverLogger } from '@boardgamesempire/gateway-driver-contract';
+import { createFakeFetch } from '@boardgamesempire/gateway-driver-contract-testing';
 import * as proto from '@boardgamesempire/proto-gateway';
-import { Logger } from '@nestjs/common';
-import { Test, TestingModule } from '@nestjs/testing';
 import { firstValueFrom, NEVER, of, throwError, timer } from 'rxjs';
 import { map, takeUntil, toArray } from 'rxjs/operators';
-import { BggService, type BggRequest } from '../bgg/bgg.service';
-import { DataGatewayService } from './data-gateway.service';
+import { BggCaller } from './bgg-caller';
+import { BoardGameGeekDriver } from './boardgamegeek.driver';
+import type { BggRequest } from './client/bgg-client.interface';
+import { BggLinkType, BggNameType, BggThingType, MAX_THINGS_PER_BATCH } from './constants';
+import { toCategoryList, toMechanicList } from './mappers/taxonomy.mapper';
+import type { BggSearchItem, BggThing } from './types';
 
 // ---------------------------------------------------------------------------
-// Mock BggService to isolate DataGatewayService from real API calls. Only the
-// `call` method is exercised by the gateway.
+// The driver's BggCaller is mocked, to isolate the driver from BGG. Only its
+// `call` method is exercised by the driver, and every BggCaller shares it.
 // ---------------------------------------------------------------------------
-function buildMockBggService(): jest.Mocked<Pick<BggService, 'call'>> {
-  return { call: jest.fn() };
-}
+jest.mock('./bgg-caller');
 
-describe('DataGatewayService', () => {
-  let service: DataGatewayService;
-  let bggService: jest.Mocked<Pick<BggService, 'call'>>;
+const VERSION = '1.2.3-test';
 
-  beforeEach(async () => {
-    bggService = buildMockBggService();
+describe('BoardGameGeekDriver', () => {
+  let driver: BoardGameGeekDriver;
+  let logger: jest.Mocked<DriverLogger>;
+  const bggCaller = { call: jest.mocked(BggCaller.prototype.call) };
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [DataGatewayService, { provide: BggService, useValue: bggService }],
-    }).compile();
+  beforeEach(() => {
+    bggCaller.call.mockReset();
+    logger = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() };
 
-    service = module.get<DataGatewayService>(DataGatewayService);
+    driver = new BoardGameGeekDriver({
+      fetch: createFakeFetch(() => ({})),
+      apiKey: 'test-key',
+      version: VERSION,
+      logger,
+    });
   });
 
   afterEach(() => jest.clearAllMocks());
 
   describe('ping', () => {
-    it('returns a response using the correlationId from the request', () => {
+    it('returns a response using the correlationId from the request', async () => {
       const request: proto.GatewayPingRequest = { correlationId: 'corr-ping-1' };
 
-      expect(service.ping(request).correlationId).toBe('corr-ping-1');
+      expect((await firstValueFrom(driver.ping(request))).correlationId).toBe('corr-ping-1');
     });
 
-    it('generates a correlationId when none is provided in the request', () => {
-      const response = service.ping({});
+    it('generates a correlationId when none is provided in the request', async () => {
+      const response = await firstValueFrom(driver.ping({}));
 
       expect(response.correlationId).toBeTruthy();
       expect(typeof response.correlationId).toBe('string');
     });
 
-    it('returns the gateway name "BoardGameGeekGateway"', () => {
-      expect(service.ping({}).gatewayName).toBe('BoardGameGeekGateway');
+    it('returns the gateway name "BoardGameGeekGateway"', async () => {
+      expect((await firstValueFrom(driver.ping({}))).gatewayName).toBe('BoardGameGeekGateway');
     });
 
-    it('reports the product version it was built at', () => {
-      expect(service.ping({}).gatewayVersion).toBe(BGE_VERSION);
+    // A remote DataGateway's app passes the BGE version, and the plugin form its plugin manifest's (#1082).
+    it('reports the version it was given', async () => {
+      expect((await firstValueFrom(driver.ping({}))).gatewayVersion).toBe(VERSION);
     });
 
-    it('returns a bigint timestampMs', () => {
-      expect(typeof service.ping({}).timestampMs).toBe('bigint');
+    it('returns a bigint timestampMs', async () => {
+      expect(typeof (await firstValueFrom(driver.ping({}))).timestampMs).toBe('bigint');
     });
   });
 
   describe('describe', () => {
-    it('returns a response using the correlationId from the request', () => {
-      expect(service.describe({ correlationId: 'corr-describe-1' }).correlationId).toBe('corr-describe-1');
+    const describeOnce = (request: proto.DescribeRequest) => firstValueFrom(driver.describe(request));
+
+    it('returns a response using the correlationId from the request', async () => {
+      expect((await describeOnce({ correlationId: 'corr-describe-1' })).correlationId).toBe('corr-describe-1');
     });
 
-    it('generates a correlationId when none is provided in the request', () => {
-      expect(service.describe({}).correlationId).toEqual(expect.any(String));
+    it('generates a correlationId when none is provided in the request', async () => {
+      expect((await describeOnce({})).correlationId).toEqual(expect.any(String));
     });
 
-    it('declares search, fetch, fetch expansions and the lists of languages, platforms, categories and mechanics', () => {
-      expect(new Set(service.describe({}).capabilities)).toEqual(
+    it('declares search, fetch, fetch expansions and the lists of languages, platforms, categories and mechanics', async () => {
+      expect(new Set((await describeOnce({})).capabilities)).toEqual(
         new Set([
           proto.Capability.CAPABILITY_SEARCH,
           proto.Capability.CAPABILITY_FETCH,
@@ -91,12 +90,12 @@ describe('DataGatewayService', () => {
       );
     });
 
-    it('declares list platforms', () => {
-      expect(service.describe({}).capabilities).toContain(proto.Capability.CAPABILITY_LIST_PLATFORMS);
+    it('declares list platforms', async () => {
+      expect((await describeOnce({})).capabilities).toContain(proto.Capability.CAPABILITY_LIST_PLATFORMS);
     });
 
-    it('covers tabletop base games and expansions', () => {
-      const { coverage } = service.describe({});
+    it('covers tabletop base games and expansions', async () => {
+      const { coverage } = await describeOnce({});
 
       expect(coverage?.platformTypes).toEqual([proto.PlatformType.PLATFORM_TYPE_TABLETOP]);
       expect(new Set(coverage?.contentTypes)).toEqual(
@@ -104,30 +103,30 @@ describe('DataGatewayService', () => {
       );
     });
 
-    it('declares publish year and content type as its filterable axes', () => {
-      expect(service.describe({}).filterableAxes).toEqual([
+    it('declares publish year and content type as its filterable axes', async () => {
+      expect((await describeOnce({})).filterableAxes).toEqual([
         proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE,
         proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR,
       ]);
     });
 
-    it('declares English language names, on requests and responses alike', () => {
-      expect(service.describe({}).languageCodeFormats).toEqual({
+    it('declares English language names, on requests and responses alike', async () => {
+      expect((await describeOnce({})).languageCodeFormats).toEqual({
         acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME],
         responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME,
         passthroughSearchLanguage: false,
       } satisfies proto.LanguageCodeFormats);
     });
 
-    it('declares its free text as plain text', () => {
-      expect(service.describe({}).contentFormat).toBe(proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT);
+    it('declares its free text as plain text', async () => {
+      expect((await describeOnce({})).contentFormat).toBe(proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT);
     });
   });
 
   describe('listPlatforms (#718)', () => {
     // Every game BGG sends is on its one platform, Tabletop.
     it('lists its one platform, Tabletop', async () => {
-      await expect(firstValueFrom(service.listPlatforms({ correlationId: 'corr-platforms' }))).resolves.toEqual({
+      await expect(firstValueFrom(driver.listPlatforms({ correlationId: 'corr-platforms' }))).resolves.toEqual({
         correlationId: 'corr-platforms',
         platforms: [
           {
@@ -138,72 +137,74 @@ describe('DataGatewayService', () => {
           },
         ],
       });
-      expect(bggService.call).not.toHaveBeenCalled();
+      expect(bggCaller.call).not.toHaveBeenCalled();
     });
   });
 
   describe('listCategories (#839)', () => {
     it('echoes the correlation id, or makes one', async () => {
-      const echoed = await firstValueFrom(service.listCategories({ correlationId: 'corr-categories' }));
-      const made = await firstValueFrom(service.listCategories({}));
+      const echoed = await firstValueFrom(driver.listCategories({ correlationId: 'corr-categories' }));
+      const made = await firstValueFrom(driver.listCategories({}));
 
       expect(echoed.correlationId).toBe('corr-categories');
       expect(made.correlationId).toEqual(expect.any(String));
     });
 
     it('lists the table', async () => {
-      const response = await firstValueFrom(service.listCategories({ correlationId: 'corr-categories' }));
+      const response = await firstValueFrom(driver.listCategories({ correlationId: 'corr-categories' }));
 
       expect(response.categories).toEqual(toCategoryList());
-      expect(bggService.call).not.toHaveBeenCalled();
+      expect(bggCaller.call).not.toHaveBeenCalled();
     });
   });
 
   describe('listMechanics (#839)', () => {
     it('echoes the correlation id, or makes one', async () => {
-      const echoed = await firstValueFrom(service.listMechanics({ correlationId: 'corr-mechanics' }));
-      const made = await firstValueFrom(service.listMechanics({}));
+      const echoed = await firstValueFrom(driver.listMechanics({ correlationId: 'corr-mechanics' }));
+      const made = await firstValueFrom(driver.listMechanics({}));
 
       expect(echoed.correlationId).toBe('corr-mechanics');
       expect(made.correlationId).toEqual(expect.any(String));
     });
 
     it('lists the table', async () => {
-      const response = await firstValueFrom(service.listMechanics({ correlationId: 'corr-mechanics' }));
+      const response = await firstValueFrom(driver.listMechanics({ correlationId: 'corr-mechanics' }));
 
       expect(response.mechanics).toEqual(toMechanicList());
-      expect(bggService.call).not.toHaveBeenCalled();
+      expect(bggCaller.call).not.toHaveBeenCalled();
     });
   });
 
-  describe('healthCheck', () => {
-    it('returns SERVING status', () => {
+  describe('check', () => {
+    it('returns SERVING status', async () => {
       const request: proto.HealthCheckRequest = { service: 'GatewayService' };
 
-      expect(service.healthCheck(request).status).toBe(proto.HealthCheckResponse_ServingStatus.SERVING);
+      expect((await firstValueFrom(driver.check(request))).status).toBe(
+        proto.HealthCheckResponse_ServingStatus.SERVING,
+      );
     });
   });
 
   describe('searchGames', () => {
     /**
-     * Answers `bggService.call` in call order: the search with `items`, then
+     * Answers `bggCaller.call` in call order: the search with `items`, then
      * each `/thing` batch with its things, or fails it with its error. Any
      * later call answers no things.
      */
     const answer = (items: BggSearchItem[], ...batches: Array<BggThing[] | Error>): void => {
-      bggService.call.mockReturnValueOnce(of(items));
+      bggCaller.call.mockReturnValueOnce(of(items));
 
       for (const batch of batches) {
-        bggService.call.mockReturnValueOnce(batch instanceof Error ? throwError(() => batch) : of(batch));
+        bggCaller.call.mockReturnValueOnce(batch instanceof Error ? throwError(() => batch) : of(batch));
       }
 
-      bggService.call.mockReturnValue(of([]));
+      bggCaller.call.mockReturnValue(of([]));
     };
 
     it('emits one RESULT frame per item followed by a single SOURCE_DONE', async () => {
       answer([CATAN_SEARCH, GLOOMHAVEN_SEARCH]);
 
-      const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'catan' }).pipe(toArray()));
+      const frames = await firstValueFrom(driver.searchGames({ correlationId: 'c', query: 'catan' }).pipe(toArray()));
 
       const resultFrames = frames.filter((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
       const doneFrames = frames.filter((f) => f.status === proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
@@ -217,7 +218,7 @@ describe('DataGatewayService', () => {
       answer([]);
 
       const frames = await firstValueFrom(
-        service.searchGames({ correlationId: 'c', query: 'nonexistent' }).pipe(toArray()),
+        driver.searchGames({ correlationId: 'c', query: 'nonexistent' }).pipe(toArray()),
       );
 
       expect(frames).toHaveLength(1);
@@ -227,7 +228,7 @@ describe('DataGatewayService', () => {
     it('maps the BGG id to externalId as a string', async () => {
       answer([CATAN_SEARCH]);
 
-      const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'catan' }).pipe(toArray()));
+      const frames = await firstValueFrom(driver.searchGames({ correlationId: 'c', query: 'catan' }).pipe(toArray()));
       const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
       expect(result?.game?.externalId).toBe(String(CATAN_SEARCH.id));
@@ -236,7 +237,7 @@ describe('DataGatewayService', () => {
     it('maps the BGG name to GameSearchData.title', async () => {
       answer([CATAN_SEARCH]);
 
-      const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'catan' }).pipe(toArray()));
+      const frames = await firstValueFrom(driver.searchGames({ correlationId: 'c', query: 'catan' }).pipe(toArray()));
       const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
       expect(result?.game?.title).toBe('Catan');
@@ -246,7 +247,7 @@ describe('DataGatewayService', () => {
       answer([CATAN_SEARCH]);
 
       const frames = await firstValueFrom(
-        service.searchGames({ correlationId: 'trace-abc', query: 'catan' }).pipe(toArray()),
+        driver.searchGames({ correlationId: 'trace-abc', query: 'catan' }).pipe(toArray()),
       );
 
       for (const frame of frames) {
@@ -254,11 +255,11 @@ describe('DataGatewayService', () => {
       }
     });
 
-    it('emits a single ERROR frame and does not throw when BggService rejects', async () => {
-      bggService.call.mockReturnValue(throwError(() => new Error('BGG unavailable')));
+    it('emits a single ERROR frame and does not throw when BggCaller rejects', async () => {
+      bggCaller.call.mockReturnValue(throwError(() => new Error('BGG unavailable')));
 
       const frames = await firstValueFrom(
-        service.searchGames({ correlationId: 'corr-err', query: 'catan' }).pipe(toArray()),
+        driver.searchGames({ correlationId: 'corr-err', query: 'catan' }).pipe(toArray()),
       );
 
       expect(frames).toHaveLength(1);
@@ -270,9 +271,9 @@ describe('DataGatewayService', () => {
       answer([]);
       const request: proto.GatewaySearchRequest = { correlationId: 'c', query: 'catan', limit: 5 };
 
-      await firstValueFrom(service.searchGames(request).pipe(toArray()));
+      await firstValueFrom(driver.searchGames(request).pipe(toArray()));
 
-      expect(bggService.call).toHaveBeenCalledTimes(1);
+      expect(bggCaller.call).toHaveBeenCalledTimes(1);
     });
 
     describe("filled in from each result's thing (#880)", () => {
@@ -280,7 +281,7 @@ describe('DataGatewayService', () => {
 
       /** Every frame the search sent. */
       const searched = async (request: proto.GatewaySearchRequest): Promise<proto.GatewaySearchResult[]> =>
-        firstValueFrom(service.searchGames(request).pipe(toArray()));
+        firstValueFrom(driver.searchGames(request).pipe(toArray()));
 
       /** The RESULT frames' games, in the order they were sent. */
       const games = (frames: proto.GatewaySearchResult[]) =>
@@ -306,9 +307,9 @@ describe('DataGatewayService', () => {
 
         await searched({ correlationId: 'c', query: 'catan', limit: 45 });
 
-        expect(bggService.call).toHaveBeenCalledTimes(4);
+        expect(bggCaller.call).toHaveBeenCalledTimes(4);
         const asked = await Promise.all(
-          bggService.call.mock.calls.slice(1).map(async ([bggRequest]) => {
+          bggCaller.call.mock.calls.slice(1).map(async ([bggRequest]) => {
             const thing = jest.fn().mockResolvedValue([]);
             await firstValueFrom((bggRequest as BggRequest<unknown>)({ thing: { query: thing } } as never));
             return thing.mock.calls[0][0];
@@ -340,7 +341,7 @@ describe('DataGatewayService', () => {
       });
 
       it("sends a result as search found it, with a warning, when BGG's answer leaves its thing out", async () => {
-        const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+        const warn = logger.warn;
         answer([CATAN_SEARCH, GLOOMHAVEN_SEARCH], [CATAN_THING]);
 
         const [catan, gloomhaven] = games(await searched({ correlationId: 'c', query: 'catan' }));
@@ -354,7 +355,7 @@ describe('DataGatewayService', () => {
 
       // The client passes a <link> with no attributes on as a string, which the mapper can't read.
       it("sends a result as search found it, with a warning, when its thing can't be read, and keeps the others' details", async () => {
-        const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+        const warn = logger.warn;
         const unreadable = { ...GLOOMHAVEN_THING, links: 'oops' } as unknown as BggThing;
         answer([CATAN_SEARCH, GLOOMHAVEN_SEARCH], [CATAN_THING, unreadable]);
 
@@ -371,8 +372,8 @@ describe('DataGatewayService', () => {
 
       it("sends a stalled batch's results as search found them 12 seconds after the search began, and ends with SOURCE_DONE", async () => {
         jest.useFakeTimers();
-        const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-        bggService.call.mockReturnValueOnce(of([CATAN_SEARCH])).mockReturnValueOnce(NEVER);
+        const warn = logger.warn;
+        bggCaller.call.mockReturnValueOnce(of([CATAN_SEARCH])).mockReturnValueOnce(NEVER);
 
         try {
           const frames$ = searched({ correlationId: 'c', query: 'catan' });
@@ -391,12 +392,11 @@ describe('DataGatewayService', () => {
       // One 202 from BGG costs its client 6 seconds, and the api's REST search stops listening at 15 (#880).
       it("gets a slow search's results to the api before REST stops listening, when its batch then stalls", async () => {
         jest.useFakeTimers();
-        jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-        bggService.call.mockReturnValueOnce(timer(6_000).pipe(map(() => [CATAN_SEARCH]))).mockReturnValueOnce(NEVER);
+        bggCaller.call.mockReturnValueOnce(timer(6_000).pipe(map(() => [CATAN_SEARCH]))).mockReturnValueOnce(NEVER);
 
         try {
           const frames$ = firstValueFrom(
-            service.searchGames({ correlationId: 'c', query: 'catan' }).pipe(takeUntil(timer(15_000)), toArray()),
+            driver.searchGames({ correlationId: 'c', query: 'catan' }).pipe(takeUntil(timer(15_000)), toArray()),
           );
 
           await jest.advanceTimersByTimeAsync(15_000);
@@ -411,8 +411,8 @@ describe('DataGatewayService', () => {
 
       it('asks BGG for no things when search used up the time, and sends its results as found', async () => {
         jest.useFakeTimers();
-        const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-        bggService.call.mockReturnValueOnce(timer(12_000).pipe(map(() => [CATAN_SEARCH])));
+        const warn = logger.warn;
+        bggCaller.call.mockReturnValueOnce(timer(12_000).pipe(map(() => [CATAN_SEARCH])));
 
         try {
           const frames$ = searched({ correlationId: 'c', query: 'catan' });
@@ -420,7 +420,7 @@ describe('DataGatewayService', () => {
           await jest.advanceTimersByTimeAsync(12_000);
           const frames = await frames$;
 
-          expect(bggService.call).toHaveBeenCalledTimes(1);
+          expect(bggCaller.call).toHaveBeenCalledTimes(1);
           expect(games(frames).map((game) => [game?.externalId, game?.thumbnailUrl])).toEqual([['13', undefined]]);
           expect(frames.at(-1)?.status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
           expect(warn).toHaveBeenCalledTimes(1);
@@ -430,7 +430,7 @@ describe('DataGatewayService', () => {
       });
 
       it("sends a failed batch's results as search found them, keeps the other batches' details, and ends with SOURCE_DONE", async () => {
-        const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+        const warn = logger.warn;
         const fillers = Array.from({ length: 20 }, (_, i) => ({ ...GLOOMHAVEN_SEARCH, id: 1001 + i }));
         answer([...fillers, CATAN_SEARCH], new Error('429 Too Many Requests'), [CATAN_THING]);
 
@@ -449,11 +449,11 @@ describe('DataGatewayService', () => {
     describe('filtered by content type', () => {
       /** The thing types the search asked BGG for, by running its request against a stand-in client. */
       const typesAskedFor = async (filter: proto.SearchFilter | undefined): Promise<unknown> => {
-        bggService.call.mockReturnValue(of([]));
-        await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'catan', filter }).pipe(toArray()));
+        bggCaller.call.mockReturnValue(of([]));
+        await firstValueFrom(driver.searchGames({ correlationId: 'c', query: 'catan', filter }).pipe(toArray()));
 
         const search = jest.fn().mockResolvedValue([]);
-        const [bggRequest] = bggService.call.mock.calls.at(-1) as unknown as [BggRequest<BggSearchItem[]>];
+        const [bggRequest] = bggCaller.call.mock.calls.at(-1) as unknown as [BggRequest<BggSearchItem[]>];
         await firstValueFrom(bggRequest({ search: { query: search } } as never));
 
         return search.mock.calls[0]?.[0]?.type;
@@ -494,12 +494,12 @@ describe('DataGatewayService', () => {
           },
         ]);
         const things = jest.fn().mockResolvedValue([]);
-        bggService.call.mockImplementation((bggRequest) =>
+        bggCaller.call.mockImplementation((bggRequest) =>
           (bggRequest as BggRequest<unknown>)({ search: { query: search }, thing: { query: things } } as never),
         );
 
         const frames = await firstValueFrom(
-          service
+          driver
             .searchGames({
               correlationId: 'c',
               query: 'catan',
@@ -514,7 +514,7 @@ describe('DataGatewayService', () => {
 
       it('ends at once, without asking BGG, when it names nothing BGG search has', async () => {
         const frames = await firstValueFrom(
-          service
+          driver
             .searchGames({
               correlationId: 'c',
               query: 'catan',
@@ -524,7 +524,7 @@ describe('DataGatewayService', () => {
         );
 
         expect(frames).toEqual([{ correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE }]);
-        expect(bggService.call).not.toHaveBeenCalled();
+        expect(bggCaller.call).not.toHaveBeenCalled();
       });
     });
 
@@ -541,12 +541,12 @@ describe('DataGatewayService', () => {
           },
         ]);
         const things = jest.fn().mockResolvedValue([]);
-        bggService.call.mockImplementation((bggRequest) =>
+        bggCaller.call.mockImplementation((bggRequest) =>
           (bggRequest as BggRequest<unknown>)({ search: { query: search }, thing: { query: things } } as never),
         );
 
         const frames = await firstValueFrom(
-          service
+          driver
             .searchGames({
               correlationId: 'c',
               query: 'catan',
@@ -566,10 +566,10 @@ describe('DataGatewayService', () => {
 
   describe('fetchGame', () => {
     it('returns RESULT status with populated game data', async () => {
-      bggService.call.mockReturnValue(of(CATAN_THING));
+      bggCaller.call.mockReturnValue(of(CATAN_THING));
 
       const request: proto.FetchGameRequest = { correlationId: 'c', externalId: String(CATAN_THING.id) };
-      const response = await firstValueFrom(service.fetchGame(request));
+      const response = await firstValueFrom(driver.fetchGame(request));
 
       expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_RESULT);
       expect(response.game?.externalId).toBe(String(CATAN_THING.id));
@@ -578,65 +578,65 @@ describe('DataGatewayService', () => {
     });
 
     it('returns ERROR status when no thing is found', async () => {
-      bggService.call.mockReturnValue(of(undefined));
+      bggCaller.call.mockReturnValue(of(undefined));
 
-      const response = await firstValueFrom(service.fetchGame({ correlationId: 'c', externalId: '999999' }));
+      const response = await firstValueFrom(driver.fetchGame({ correlationId: 'c', externalId: '999999' }));
 
       expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
       expect(response.message).toContain('999999');
     });
 
-    it('returns ERROR status when BggService throws', async () => {
-      bggService.call.mockReturnValue(throwError(() => new Error('API down')));
+    it('returns ERROR status when BggCaller throws', async () => {
+      bggCaller.call.mockReturnValue(throwError(() => new Error('API down')));
 
-      const response = await firstValueFrom(service.fetchGame({ correlationId: 'c', externalId: '174430' }));
+      const response = await firstValueFrom(driver.fetchGame({ correlationId: 'c', externalId: '174430' }));
 
       expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
       expect(response.message).toContain('API down');
     });
 
     it('returns ERROR with a parse-error message when externalId is malformed', async () => {
-      const response = await firstValueFrom(service.fetchGame({ correlationId: 'c', externalId: 'not-a-number' }));
+      const response = await firstValueFrom(driver.fetchGame({ correlationId: 'c', externalId: 'not-a-number' }));
 
       expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
       expect(response.message).toContain('not-a-number');
-      expect(bggService.call).not.toHaveBeenCalled();
+      expect(bggCaller.call).not.toHaveBeenCalled();
     });
 
     it('propagates the correlationId on success', async () => {
-      bggService.call.mockReturnValue(of(CATAN_THING));
+      bggCaller.call.mockReturnValue(of(CATAN_THING));
 
       const response = await firstValueFrom(
-        service.fetchGame({ correlationId: 'trace-fetch', externalId: String(CATAN_THING.id) }),
+        driver.fetchGame({ correlationId: 'trace-fetch', externalId: String(CATAN_THING.id) }),
       );
 
       expect(response.correlationId).toBe('trace-fetch');
     });
 
     it('propagates the correlationId on error', async () => {
-      bggService.call.mockReturnValue(throwError(() => new Error('boom')));
+      bggCaller.call.mockReturnValue(throwError(() => new Error('boom')));
 
       const response = await firstValueFrom(
-        service.fetchGame({ correlationId: 'trace-fetch-err', externalId: '174430' }),
+        driver.fetchGame({ correlationId: 'trace-fetch-err', externalId: '174430' }),
       );
 
       expect(response.correlationId).toBe('trace-fetch-err');
     });
 
-    it('issues exactly one bggService.call', async () => {
-      bggService.call.mockReturnValue(of(CATAN_THING));
+    it('issues exactly one bggCaller.call', async () => {
+      bggCaller.call.mockReturnValue(of(CATAN_THING));
 
-      await firstValueFrom(service.fetchGame({ correlationId: 'c', externalId: '13' }));
+      await firstValueFrom(driver.fetchGame({ correlationId: 'c', externalId: '13' }));
 
-      expect(bggService.call).toHaveBeenCalledTimes(1);
+      expect(bggCaller.call).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('fetchGame — locale handling', () => {
     it('emits a single default release when the thing has no version data', async () => {
-      bggService.call.mockReturnValue(of(CATAN_THING));
+      bggCaller.call.mockReturnValue(of(CATAN_THING));
 
-      const response = await firstValueFrom(service.fetchGame({ correlationId: 'c', externalId: '13' }));
+      const response = await firstValueFrom(driver.fetchGame({ correlationId: 'c', externalId: '13' }));
 
       expect(response.game?.releases).toHaveLength(1);
       expect(response.game?.releases[0].externalId).toBe('default');
@@ -644,41 +644,41 @@ describe('DataGatewayService', () => {
   });
 
   describe('fetchExpansions', () => {
-    it('issues one bggService.call for the base thing then one per batch', async () => {
-      bggService.call
+    it('issues one bggCaller.call for the base thing then one per batch', async () => {
+      bggCaller.call
         .mockReturnValueOnce(of(BASE_WITH_TWO_EXPANSIONS))
         .mockReturnValueOnce(of([SEAFARERS_EXPANSION_THING, CITIES_EXPANSION_THING]));
 
       await firstValueFrom(
-        service.fetchExpansions({ correlationId: 'c', baseExternalId: String(CATAN_THING.id) }).pipe(toArray()),
+        driver.fetchExpansions({ correlationId: 'c', baseExternalId: String(CATAN_THING.id) }).pipe(toArray()),
       );
 
       // 1 base lookup + 1 batch (both expansions fit in a single batch)
-      expect(bggService.call).toHaveBeenCalledTimes(2);
+      expect(bggCaller.call).toHaveBeenCalledTimes(2);
     });
 
     it('does not request version data on the expansion-streaming path', async () => {
-      bggService.call
+      bggCaller.call
         .mockReturnValueOnce(of(BASE_WITH_TWO_EXPANSIONS))
         .mockReturnValueOnce(of([SEAFARERS_EXPANSION_THING, CITIES_EXPANSION_THING]));
 
-      await firstValueFrom(service.fetchExpansions({ correlationId: 'c', baseExternalId: '13' }).pipe(toArray()));
+      await firstValueFrom(driver.fetchExpansions({ correlationId: 'c', baseExternalId: '13' }).pipe(toArray()));
 
       // The two calls: first fetches base (with stats, no versions), second fetches
       // expansion batch (no stats, no versions). Locking in this contract because
       // version data is fetched per-import via fetchGame, not at discovery time.
-      const expansionBatchCall = bggService.call.mock.calls[1];
+      const expansionBatchCall = bggCaller.call.mock.calls[1];
       // Implementation detail of fetchThingsRequest options shape — adjust to match.
       expect(expansionBatchCall).toBeDefined();
     });
 
     it('streams RESULT frames for each expansion across all batches followed by SOURCE_DONE', async () => {
-      bggService.call
+      bggCaller.call
         .mockReturnValueOnce(of(BASE_WITH_TWO_EXPANSIONS))
         .mockReturnValueOnce(of([SEAFARERS_EXPANSION_THING, CITIES_EXPANSION_THING]));
 
       const frames = await firstValueFrom(
-        service.fetchExpansions({ correlationId: 'c', baseExternalId: String(CATAN_THING.id) }).pipe(toArray()),
+        driver.fetchExpansions({ correlationId: 'c', baseExternalId: String(CATAN_THING.id) }).pipe(toArray()),
       );
 
       const resultFrames = frames.filter((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
@@ -688,12 +688,12 @@ describe('DataGatewayService', () => {
     });
 
     it('maps each expansion thing to GameSearchData with the base externalId', async () => {
-      bggService.call
+      bggCaller.call
         .mockReturnValueOnce(of(BASE_WITH_TWO_EXPANSIONS))
         .mockReturnValueOnce(of([SEAFARERS_EXPANSION_THING]));
 
       const frames = await firstValueFrom(
-        service.fetchExpansions({ correlationId: 'c', baseExternalId: String(CATAN_THING.id) }).pipe(toArray()),
+        driver.fetchExpansions({ correlationId: 'c', baseExternalId: String(CATAN_THING.id) }).pipe(toArray()),
       );
 
       const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
@@ -704,34 +704,34 @@ describe('DataGatewayService', () => {
     });
 
     it('emits only SOURCE_DONE when the base thing is not found, without a batch lookup', async () => {
-      bggService.call.mockReturnValueOnce(of(undefined));
+      bggCaller.call.mockReturnValueOnce(of(undefined));
 
       const frames = await firstValueFrom(
-        service.fetchExpansions({ correlationId: 'c', baseExternalId: '999999' }).pipe(toArray()),
+        driver.fetchExpansions({ correlationId: 'c', baseExternalId: '999999' }).pipe(toArray()),
       );
 
       expect(frames).toHaveLength(1);
       expect(frames[0].status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
-      expect(bggService.call).toHaveBeenCalledTimes(1);
+      expect(bggCaller.call).toHaveBeenCalledTimes(1);
     });
 
     it('emits only SOURCE_DONE when the base game has no outbound expansion links, without a batch lookup', async () => {
-      bggService.call.mockReturnValueOnce(of(BASE_WITH_NO_EXPANSIONS));
+      bggCaller.call.mockReturnValueOnce(of(BASE_WITH_NO_EXPANSIONS));
 
       const frames = await firstValueFrom(
-        service.fetchExpansions({ correlationId: 'c', baseExternalId: '13' }).pipe(toArray()),
+        driver.fetchExpansions({ correlationId: 'c', baseExternalId: '13' }).pipe(toArray()),
       );
 
       expect(frames).toHaveLength(1);
       expect(frames[0].status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
-      expect(bggService.call).toHaveBeenCalledTimes(1);
+      expect(bggCaller.call).toHaveBeenCalledTimes(1);
     });
 
     it('emits ERROR when the base lookup fails', async () => {
-      bggService.call.mockReturnValueOnce(throwError(() => new Error('BGG unreachable')));
+      bggCaller.call.mockReturnValueOnce(throwError(() => new Error('BGG unreachable')));
 
       const frames = await firstValueFrom(
-        service.fetchExpansions({ correlationId: 'c', baseExternalId: '13' }).pipe(toArray()),
+        driver.fetchExpansions({ correlationId: 'c', baseExternalId: '13' }).pipe(toArray()),
       );
 
       expect(frames).toHaveLength(1);
@@ -739,14 +739,14 @@ describe('DataGatewayService', () => {
       expect(frames[0].message).toContain('BGG unreachable');
     });
 
-    it('emits ERROR when baseExternalId is malformed and never calls BggService', async () => {
+    it('emits ERROR when baseExternalId is malformed and never calls BggCaller', async () => {
       const frames = await firstValueFrom(
-        service.fetchExpansions({ correlationId: 'c', baseExternalId: 'not-a-number' }).pipe(toArray()),
+        driver.fetchExpansions({ correlationId: 'c', baseExternalId: 'not-a-number' }).pipe(toArray()),
       );
 
       expect(frames).toHaveLength(1);
       expect(frames[0].status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
-      expect(bggService.call).not.toHaveBeenCalled();
+      expect(bggCaller.call).not.toHaveBeenCalled();
     });
 
     it('splits expansion lookups across multiple batches when the count exceeds MAX_THINGS_PER_BATCH', async () => {
@@ -776,16 +776,16 @@ describe('DataGatewayService', () => {
         versions: [],
       }));
 
-      bggService.call.mockReturnValueOnce(of(base)).mockReturnValueOnce(of(batchOne)).mockReturnValueOnce(of(batchTwo));
+      bggCaller.call.mockReturnValueOnce(of(base)).mockReturnValueOnce(of(batchOne)).mockReturnValueOnce(of(batchTwo));
 
       const frames = await firstValueFrom(
-        service.fetchExpansions({ correlationId: 'c', baseExternalId: '13' }).pipe(toArray()),
+        driver.fetchExpansions({ correlationId: 'c', baseExternalId: '13' }).pipe(toArray()),
       );
 
       // 1 base + 2 batches = 3 calls. This is the property that proves
       // each batch is its own retry boundary — they're separate call()
       // invocations, not bundled into one promise chain.
-      expect(bggService.call).toHaveBeenCalledTimes(3);
+      expect(bggCaller.call).toHaveBeenCalledTimes(3);
       expect(frames.filter((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT)).toHaveLength(
         expansionIds.length,
       );
@@ -799,10 +799,10 @@ describe('DataGatewayService', () => {
         links: [{ type: BggLinkType.BoardGameExpansion, id: 100, value: 'Expansion A' }],
         versions: [],
       };
-      bggService.call.mockReturnValueOnce(of(base)).mockReturnValueOnce(throwError(() => new Error('Batch 1 failed')));
+      bggCaller.call.mockReturnValueOnce(of(base)).mockReturnValueOnce(throwError(() => new Error('Batch 1 failed')));
 
       const frames = await firstValueFrom(
-        service.fetchExpansions({ correlationId: 'c', baseExternalId: '13' }).pipe(toArray()),
+        driver.fetchExpansions({ correlationId: 'c', baseExternalId: '13' }).pipe(toArray()),
       );
 
       const errorFrame = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_ERROR);
@@ -811,12 +811,12 @@ describe('DataGatewayService', () => {
     });
 
     it('propagates the correlationId in every emitted frame', async () => {
-      bggService.call
+      bggCaller.call
         .mockReturnValueOnce(of(BASE_WITH_TWO_EXPANSIONS))
         .mockReturnValueOnce(of([SEAFARERS_EXPANSION_THING, CITIES_EXPANSION_THING]));
 
       const frames = await firstValueFrom(
-        service.fetchExpansions({ correlationId: 'trace-exp', baseExternalId: String(CATAN_THING.id) }).pipe(toArray()),
+        driver.fetchExpansions({ correlationId: 'trace-exp', baseExternalId: String(CATAN_THING.id) }).pipe(toArray()),
       );
 
       for (const frame of frames) {
