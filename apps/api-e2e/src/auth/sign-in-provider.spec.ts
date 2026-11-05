@@ -475,12 +475,12 @@ describe('signing in through a sign-in provider', () => {
 
   /**
    * A provider that publishes a JWKS has its ID token checked against it, and
-   * against the nonce the sign-in sent, and its claims are read from that token
-   * rather than from `/userinfo` (#1016). The fake counts its `/userinfo`
-   * calls, so a count of none shows the claims came from the token. Each
-   * spoiled token has one thing wrong and otherwise carries a sound one's
-   * claims, which `/userinfo` would answer for too: refused with no call to it,
-   * the token's check is what refused it.
+   * against the nonce the sign-in sent (#1016). The claims are that token's
+   * merged with `/userinfo`'s answer; where both give a claim, the token's
+   * wins (#993). The token is checked before `/userinfo` is asked, and the fake
+   * counts its `/userinfo` calls. Each spoiled token has one thing wrong and
+   * otherwise carries a sound one's claims, which `/userinfo` would answer for
+   * too: refused with no call to it, the token's check is what refused it.
    */
   describe('a provider that signs its ID token', () => {
     // The control for the counts below: a provider with no JWKS has nothing to
@@ -512,7 +512,8 @@ describe('signing in through a sign-in provider', () => {
       await expect(accountRowCount(SIGNED_FAKE_PROVIDER_ID, sub)).resolves.toBe(1);
       const recorded = await ticketOf(result.ticket);
       expect(recorded.nonce).toEqual(expect.any(String));
-      expect(recorded.userInfoCalls).toBe(0);
+      // UserInfo is asked as well, for what the token leaves out (#993).
+      expect(recorded.userInfoCalls).toBe(1);
     });
 
     it.each(['forged', 'wrong-nonce', 'wrong-audience', 'wrong-issuer', 'expired'] as const)(
@@ -533,6 +534,80 @@ describe('signing in through a sign-in provider', () => {
         await expect(ticketOf(result.ticket)).resolves.toMatchObject({ userInfoCalls: 0 });
       },
     );
+
+    // A provider can leave `email_verified` out of the ID token and send it
+    // only from UserInfo, so the token alone refused its users.
+    it('takes email_verified from UserInfo when the ID token leaves it out (#993)', async () => {
+      const { sub, email, username } = freshIdentity();
+
+      const result = await signInThroughProvider(
+        baseUrl,
+        { sub, email, preferred_username: username },
+        { providerId: SIGNED_FAKE_PROVIDER_ID, userInfo: { sub, email, email_verified: true } },
+      );
+
+      expect(result.location.href).toBe(new URL('/', baseUrl).href);
+      const created = await userByEmail(email);
+      expect(created).toMatchObject({ username, emailVerified: true });
+      await expect(sessionUserId(result.cookie)).resolves.toBe(created.id);
+      await expect(ticketOf(result.ticket)).resolves.toMatchObject({ userInfoCalls: 1 });
+    });
+
+    // The username differs from the email's local part, which the mapping
+    // falls back to, so it can only have come from UserInfo.
+    it('takes the username and names from UserInfo when the ID token has only the subject and email (#993)', async () => {
+      const { sub, email, username } = freshIdentity();
+      const userInfoUsername = `${username}-userinfo`;
+
+      const result = await signInThroughProvider(
+        baseUrl,
+        { sub, email, email_verified: true },
+        {
+          providerId: SIGNED_FAKE_PROVIDER_ID,
+          userInfo: { sub, email, preferred_username: userInfoUsername, given_name: 'Ada', family_name: 'Lovelace' },
+        },
+      );
+
+      expect(result.location.href).toBe(new URL('/', baseUrl).href);
+      await expect(userByEmail(email)).resolves.toMatchObject({
+        username: userInfoUsername,
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        emailVerified: true,
+      });
+    });
+
+    it('refuses a sign-in whose UserInfo answers for another subject, creating nothing (#993)', async () => {
+      const { sub, email } = freshIdentity();
+
+      const result = await signInThroughProvider(
+        baseUrl,
+        { sub, email, email_verified: true },
+        { providerId: SIGNED_FAKE_PROVIDER_ID, userInfo: { sub: randomUUID(), email, email_verified: true } },
+      );
+
+      expect(result.location.searchParams.get('error')).toBe('unable_to_get_user_info');
+      expect(result.cookie).toBe('');
+      await expect(db.client.user.count({ where: { email } })).resolves.toBe(0);
+      await expect(accountRowCount(SIGNED_FAKE_PROVIDER_ID, sub)).resolves.toBe(0);
+    });
+
+    // A confirmation counts only beside its own address: UserInfo vouching
+    // for another one says nothing about the address the ID token gives.
+    it("doesn't count a UserInfo confirmation for another address (#993)", async () => {
+      const { sub, email } = freshIdentity();
+      const otherEmail = `other-${email}`;
+
+      const result = await signInThroughProvider(
+        baseUrl,
+        { sub, email },
+        { providerId: SIGNED_FAKE_PROVIDER_ID, userInfo: { sub, email: otherEmail, email_verified: true } },
+      );
+
+      expect(result.location.searchParams.get('error')).toBe('SIGN_IN_PROVIDER_EMAIL_UNVERIFIED');
+      expect(result.cookie).toBe('');
+      await expect(db.client.user.count({ where: { email: { in: [email, otherEmail] } } })).resolves.toBe(0);
+    });
   });
 
   /**

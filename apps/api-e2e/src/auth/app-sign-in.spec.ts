@@ -358,7 +358,8 @@ describe('signing in from a native app (#1019)', () => {
       const recorded = await ticketOf(result.ticket);
       expect(recorded.nonce).toEqual(expect.any(String));
       expect(recorded.nonce).toBe(result.authorization.searchParams.get('nonce'));
-      expect(recorded.userInfoCalls).toBe(0);
+      // UserInfo is asked as well, for what the token leaves out (#993).
+      expect(recorded.userInfoCalls).toBe(1);
     });
 
     it.each(ID_TOKEN_FAULTS)('tells the app when the provider’s ID token is refused: %s (#1019)', async (idToken) => {
