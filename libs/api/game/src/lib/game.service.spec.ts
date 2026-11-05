@@ -83,6 +83,7 @@ describe('GameService', () => {
     beforeEach(() => {
       db.game.findMany.mockResolvedValue([]);
       db.game.count.mockResolvedValue(0);
+      db.gameExpansion.findMany.mockResolvedValue([]);
     });
 
     it('asks the composer for its where clause, declaring the list scope of the acting user', async () => {
@@ -151,6 +152,55 @@ describe('GameService', () => {
       const [[byTitle], [byNewest]] = db.game.findMany.mock.calls as [[{ where: unknown }], [{ where: unknown }]];
       expect(byNewest.where).toEqual(byTitle.where);
       expect(db.game.count).toHaveBeenNthCalledWith(2, { where: byTitle.where });
+    });
+
+    describe("each row's base games (#1069)", () => {
+      const page = [{ id: 'g1' }, { id: 'g2' }] as Game[];
+
+      beforeEach(() => {
+        db.game.findMany.mockResolvedValue(page);
+        db.game.count.mockResolvedValue(2);
+      });
+
+      // A base-game id on a row then always means "this game is on some page
+      // of your list", so a client can tell a base game it hasn't paged to yet
+      // from one it will never see. The read runs after the page's
+      // transaction: the links describe rows already chosen, and a link
+      // removed between the two reads only removes a name.
+      it("reads the page's base-game links through the same where as the page, so a base game is named only when it is listed (#1069)", async () => {
+        await read();
+
+        const [findManyArgs] = db.game.findMany.mock.calls[0] as [{ where: unknown }];
+        expect(db.gameExpansion.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { expansionGameId: { in: ['g1', 'g2'] }, baseGame: { is: findManyArgs.where } },
+          }),
+        );
+        expect(batchTransactionCall(db).operations).toHaveLength(2);
+      });
+
+      it('gives every row baseGames, empty when it has no visible link (#1069)', async () => {
+        db.gameExpansion.findMany.mockResolvedValue([
+          { expansionGameId: 'g1', baseGameId: 'b1', isStandalone: false },
+        ] as never);
+
+        const result = await read();
+
+        expect(result.rows).toEqual([
+          { id: 'g1', baseGames: [{ gameId: 'b1', isStandalone: false }] },
+          { id: 'g2', baseGames: [] },
+        ]);
+      });
+
+      it('issues no link read for an empty page (#1069)', async () => {
+        db.game.findMany.mockResolvedValue([]);
+        db.game.count.mockResolvedValue(0);
+
+        const result = await read();
+
+        expect(result.rows).toEqual([]);
+        expect(db.gameExpansion.findMany).not.toHaveBeenCalled();
+      });
     });
 
     // PROVISIONAL (#395). Half of the scope is the caller's own games, which

@@ -1,4 +1,4 @@
-import type { Game } from '@bge/database';
+import type { ExpansionLink, Game } from '@bge/database';
 import { ContentType, PlatformType, Reach } from '@bge/database';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { PlatformGameDetail } from '../platform-game-detail.select';
@@ -92,6 +92,30 @@ export class GameDto implements Pick<
 
   @ApiProperty({ type: String, format: 'date-time' })
   updatedAt!: Date;
+}
+
+/**
+ * One expansion link, seen from the game at one end (#1069): `gameId` names
+ * the game at the other end. The value is the link's own, since an expansion
+ * can be standalone for one base game and not another.
+ */
+export class ExpansionLinkDto implements ExpansionLink {
+  @ApiProperty({ description: 'ID of the game at the other end of the link' })
+  gameId!: string;
+
+  @ApiProperty({ description: 'Whether the expansion plays without this base game' })
+  isStandalone!: boolean;
+}
+
+/** A row of `GET /games` (#1069). */
+export class GameListItemDto extends GameDto {
+  @ApiProperty({
+    type: [ExpansionLinkDto],
+    description:
+      'For an expansion, the base games it attaches to that this list also contains, in title order, then game ' +
+      'id, each with that link’s `isStandalone`. Empty for any other game.',
+  })
+  baseGames!: ExpansionLinkDto[];
 }
 
 export class GamePlatformDto {

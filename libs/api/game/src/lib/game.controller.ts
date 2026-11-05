@@ -9,7 +9,7 @@ import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
 import {
   CreateGameDto,
-  GameDto,
+  GameListItemDto,
   GameResponseDto,
   ListGamesQueryDto,
   RandomGamesResponseDto,
@@ -17,7 +17,7 @@ import {
 } from './dto';
 import { GameService } from './game.service';
 
-const PaginatedGamesResponse = PaginatedResponseDto(GameDto, 'games');
+const PaginatedGamesResponse = PaginatedResponseDto(GameListItemDto, 'games');
 
 @ApiBearerAuth()
 @ApiSecurity('api_key')
@@ -44,7 +44,9 @@ export class GameController {
       'list is unchanged. Pages are offsets: a game added or removed between two requests shifts the pages after ' +
       'it, and under `?sort=newest` an added game lands on page 1. Paginated: `?page=` (1-based) and `?limit=`, ' +
       'with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` counts the same set. ' +
-      'See #230.',
+      'See #230. Each row’s `baseGames` names, for an expansion, the base games it attaches to that this list ' +
+      'also contains, each with that link’s `isStandalone`; empty for any other game. The server does not group ' +
+      'expansions with their base games; see #1069.',
   })
   @ApiResponse({ status: Http.Ok, type: PaginatedGamesResponse })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })

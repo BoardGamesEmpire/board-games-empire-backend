@@ -6,8 +6,8 @@ import {
   isPrismaDependentRecordNotFoundError,
   Prisma,
   Reach,
+  readBaseGameLinks,
   ResourceType,
-  type Game,
   type GameSummary,
 } from '@bge/database';
 import { t } from '@bge/i18n';
@@ -19,6 +19,7 @@ import {
   GAME_DESCRIPTION_MAX_LENGTH,
   ListGamesQueryDto,
   UpdateGameDto,
+  type GameListItemDto,
   type GameSort,
   type PlatformGameDetailDto,
 } from './dto';
@@ -70,8 +71,15 @@ export class GameService {
    * half the scope is the caller's own games, which has no meaning without a
    * user, and the refusal must never soften into a page of Public games.
    * PROVISIONAL — #395.
+   *
+   * Each row's `baseGames` names, for an expansion, the base games it
+   * attaches to that pass the same `where` as the page (#1069). A base-game
+   * id on a row then always means "this game is on some page of your list".
+   * The links are read after the transaction: they describe rows already
+   * chosen, and a link or a base game's visibility that changes between the
+   * two reads only adds or removes a name, never a row.
    */
-  async getGames(query: ListGamesQueryDto): Promise<PaginatedRows<Game>> {
+  async getGames(query: ListGamesQueryDto): Promise<PaginatedRows<GameListItemDto>> {
     const userId = resolveScopeSubjectId(this.abilityService);
     const where = this.scopeComposer.compose(ResourceType.Game, Action.read, gameListScope(userId));
 
@@ -89,7 +97,13 @@ export class GameService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    return { rows, total };
+    const links = await readBaseGameLinks(
+      this.db,
+      rows.map((row) => row.id),
+      where,
+    );
+
+    return { rows: rows.map((row) => ({ ...row, baseGames: links.get(row.id) ?? [] })), total };
   }
 
   /**
