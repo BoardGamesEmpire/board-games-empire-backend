@@ -1,4 +1,4 @@
-import { bggFixtureKey, type BggClientLike } from '@bge/gateway-driver-boardgamegeek';
+import { bggFixtureKey } from '@bge/gateway-driver-boardgamegeek';
 import {
   expectGolden,
   isRecordingUpstream,
@@ -9,6 +9,7 @@ import * as proto from '@boardgamesempire/proto-gateway';
 import { BggClient } from 'bgg-ts-client';
 import { dirname, join } from 'node:path';
 import { firstValueFrom, lastValueFrom, toArray } from 'rxjs';
+import { adaptBggTsClient } from '../bgg/bgg-ts-client.adapter';
 import { BggService } from '../bgg/bgg.service';
 import { DataGatewayService } from './data-gateway.service';
 
@@ -62,10 +63,8 @@ describe('BoardGameGeek gateway golden outputs', () => {
 
   beforeAll(() => {
     const apiKey = isRecordingUpstream() ? (process.env.BOARDGAMEGEEK_API_KEY ?? '') : 'golden-key';
-    // BggModule binds the client through a token, which TypeScript doesn't
-    // check; its parameter types are narrower than BggClientLike's.
-    const client = BggClient.Create({ apiKey }) as unknown as BggClientLike;
-    service = new DataGatewayService(new BggService(client));
+    // As BggModule provides it.
+    service = new DataGatewayService(new BggService(adaptBggTsClient(BggClient.Create({ apiKey }))));
   });
 
   // Ping's timestamp changes on every call, so ping has no golden.

@@ -885,7 +885,7 @@ const SEAFARERS_EXPANSION_THING: BggThing = {
   thumbnail: 'https://cf.geekdo.com/seafarers-thumb.jpg',
   links: [
     // Inbound link points back at the base game (Catan).
-    { type: BggLinkType.BoardGameExpansion, id: 13, value: 'Catan', inbound: true },
+    { type: BggLinkType.BoardGameExpansion, id: 13, value: 'Catan', inbound: 'true' },
   ],
   versions: [],
 };
@@ -895,7 +895,7 @@ const CITIES_EXPANSION_THING: BggThing = {
   type: BggThingType.BoardGameExpansion,
   names: [{ type: BggNameType.Primary, value: 'Catan: Cities & Knights' }],
   yearpublished: 1998,
-  links: [{ type: BggLinkType.BoardGameExpansion, id: 13, value: 'Catan', inbound: true }],
+  links: [{ type: BggLinkType.BoardGameExpansion, id: 13, value: 'Catan', inbound: 'true' }],
   versions: [],
 };
 

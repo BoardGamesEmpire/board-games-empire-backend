@@ -1,20 +1,9 @@
-import { BggThingDtoParser } from 'bgg-ts-client/dist/cjs/dto/dtoparser/concrete/BggThingDtoParser.js';
-import { XmlResponseParser } from 'bgg-ts-client/dist/cjs/responseparser/concrete/XmlResponseParser.js';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { parseThings } from '../client/bgg-xml';
 import type { BggThing } from '../types';
 import { thingToGameData, thingToGameSearchData } from './game.mapper';
 import { ENTITY_RUN, stringsIn } from './testing/entity-runs';
-
-/**
- * Parses a `thing` response through the client's own parser, as BggClient
- * does. That parser leaves entities encoded, and turns a value that looks
- * like a number into a number (#716).
- */
-async function parseThings(xml: string): Promise<BggThing[]> {
-  const json = await new XmlResponseParser().parseResponse(xml);
-  return (await new BggThingDtoParser().jsonToDto(json)) as unknown as BggThing[];
-}
 
 function entityRunsIn(value: unknown): string[] {
   return stringsIn(value).filter((text) => ENTITY_RUN.test(text));
@@ -26,9 +15,9 @@ function entityRunsIn(value: unknown): string[] {
  */
 const TZOLKIN_XML = readFileSync(join(__dirname, 'fixtures/thing-126163.xml'), 'utf8');
 
-const DIGITS_ONLY_XML =
+const NUMBER_LIKE_XML =
   '<?xml version="1.0" encoding="utf-8"?><items><item type="boardgame" id="1">' +
-  '<name type="primary" sortindex="1" value="2048" /><description>x</description>' +
+  '<name type="primary" sortindex="1" value="007" /><description>x</description>' +
   '<link type="boardgamepublisher" id="5" value="1830" /></item></items>';
 
 const BOOLEAN_TITLE_XML =
@@ -38,8 +27,8 @@ const BOOLEAN_TITLE_XML =
 describe('the game mapper on a live BGG response (#716)', () => {
   let thing: BggThing;
 
-  beforeAll(async () => {
-    [thing] = await parseThings(TZOLKIN_XML);
+  beforeAll(() => {
+    [thing] = parseThings(TZOLKIN_XML);
   });
 
   it('leaves no entity in any string it maps from a live BGG response (#716)', () => {
@@ -66,18 +55,20 @@ describe('the game mapper on a live BGG response (#716)', () => {
   });
 });
 
-describe('the game mapper on values the client parses as numbers or booleans (#716)', () => {
-  it('keeps a title made only of digits', async () => {
-    const [thing] = await parseThings(DIGITS_ONLY_XML);
+// The old client's parser turned these into a number or a boolean, and "007"
+// came back as "7" (#716). The client now keeps BGG's text as sent (#863).
+describe('the game mapper on text that looks like a number or a boolean (#863)', () => {
+  it('keeps a title and a publisher as BGG sent them', () => {
+    const [thing] = parseThings(NUMBER_LIKE_XML);
 
     const game = thingToGameData(thing);
 
-    expect(game.title).toBe('2048');
+    expect(game.title).toBe('007');
     expect(game.publishers).toEqual([{ externalId: '5', name: '1830' }]);
   });
 
-  it('keeps a title of "true", which the client parses as a boolean', async () => {
-    const [thing] = await parseThings(BOOLEAN_TITLE_XML);
+  it('keeps a title of "true"', () => {
+    const [thing] = parseThings(BOOLEAN_TITLE_XML);
 
     expect(thingToGameData(thing).title).toBe('true');
   });

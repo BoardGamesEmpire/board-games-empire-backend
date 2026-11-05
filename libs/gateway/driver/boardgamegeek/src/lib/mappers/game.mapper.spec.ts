@@ -40,14 +40,6 @@ describe('selectPrimaryName', () => {
 });
 
 describe('isInbound', () => {
-  it('returns true for boolean true', () => {
-    expect(isInbound(true)).toBe(true);
-  });
-
-  it('returns false for boolean false', () => {
-    expect(isInbound(false)).toBe(false);
-  });
-
   it('returns true for the string "true"', () => {
     expect(isInbound('true')).toBe(true);
   });
@@ -83,7 +75,7 @@ describe('getOutboundExpansionIds', () => {
   it('excludes inbound expansion links (the thing IS-an-expansion-of)', () => {
     const thing: Pick<BggThing, 'links'> = {
       links: [
-        { type: BggLinkType.BoardGameExpansion, id: 13, value: 'Catan', inbound: true },
+        { type: BggLinkType.BoardGameExpansion, id: 13, value: 'Catan', inbound: 'true' },
         { type: BggLinkType.BoardGameExpansion, id: 200, value: 'Outbound' },
       ],
     };
@@ -121,7 +113,7 @@ describe('getOutboundExpansionIds', () => {
 
   it('returns an empty array when the thing has only inbound expansion links', () => {
     const thing: Pick<BggThing, 'links'> = {
-      links: [{ type: BggLinkType.BoardGameExpansion, id: 13, value: 'Parent', inbound: true }],
+      links: [{ type: BggLinkType.BoardGameExpansion, id: 13, value: 'Parent', inbound: 'true' }],
     };
 
     expect(getOutboundExpansionIds(thing)).toEqual([]);
@@ -144,12 +136,12 @@ describe('searchItemToGameSearchData', () => {
     expect(result.yearPublished).toBe(2017);
   });
 
-  it('decodes the title, and sends one the client parsed as a number as text (#716)', () => {
+  it('decodes the title, and keeps one that looks like a number as BGG sent it (#716, #863)', () => {
     const encoded = makeBggSearchItem({ name: 'Tzolk&#039;in: The Mayan Calendar' });
-    const digits = makeBggSearchItem({ name: 2048 });
+    const digits = makeBggSearchItem({ name: '007' });
 
     expect(searchItemToGameSearchData(encoded).title).toBe(`Tzolk'in: The Mayan Calendar`);
-    expect(searchItemToGameSearchData(digits).title).toBe('2048');
+    expect(searchItemToGameSearchData(digits).title).toBe('007');
   });
 
   it('maps boardgame type to BASE_GAME content type', () => {
@@ -231,7 +223,7 @@ describe('searchItemToGameSearchData', () => {
       maxplaytime: 120,
       description: 'Vanquish monsters.',
       statistics: { ratings: { average: 8.6 } },
-      links: [{ type: BggLinkType.BoardGameExpansion, id: 13, value: 'Catan', inbound: true }],
+      links: [{ type: BggLinkType.BoardGameExpansion, id: 13, value: 'Catan', inbound: 'true' }],
     });
 
     const result = searchItemToGameSearchData(makeBggSearchItem(), thing);

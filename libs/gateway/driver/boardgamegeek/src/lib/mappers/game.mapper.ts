@@ -97,14 +97,9 @@ function selectThingTitle(thing: Pick<BggThing, 'names' | 'name' | 'alternateNam
   return '';
 }
 
-/**
- * BGG link `inbound` may surface as a boolean or the literal string
- * `'true'` depending on client-library JSON conversion. Compared as text,
- * as the server's own `isTrue` does: this library can't import the host's
- * packages, since a plugin DataGateway loads it (#1082).
- */
-export function isInbound(value: boolean | string | undefined): boolean {
-  return value?.toString().toLowerCase() === 'true';
+/** Whether a link's `inbound`, as BGG sent it, says the link points back at this thing. */
+export function isInbound(value: string | undefined): boolean {
+  return value?.toLowerCase() === 'true';
 }
 
 /**

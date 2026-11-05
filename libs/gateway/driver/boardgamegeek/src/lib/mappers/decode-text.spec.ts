@@ -6,9 +6,9 @@ describe('decodeText (#716)', () => {
     expect(decodeText('a &amp;mdash; b')).toBe('a &mdash; b');
   });
 
-  it('sends a value that arrived as a number or a boolean as text', () => {
-    expect(decodeText(2048)).toBe('2048');
-    expect(decodeText(true)).toBe('true');
+  it('keeps text that looks like a number as BGG sent it (#863)', () => {
+    expect(decodeText('007')).toBe('007');
+    expect(decodeText('1e3')).toBe('1e3');
   });
 
   it('gives an absent value as empty text, never "undefined"', () => {

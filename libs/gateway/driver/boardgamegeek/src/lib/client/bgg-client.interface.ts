@@ -31,19 +31,17 @@ export interface BggSearchQueryParams {
 }
 
 /**
- * Subset of the BoardGameGeek client surface area BGE actually calls.
- *
- * Defining this interface — rather than depending on the full type
- * surface of `bgg-ts-client` — keeps the gateway decoupled from
- * package-internal type churn and makes tests trivially mockable.
+ * The BGG queries the driver makes. `createBggClient` answers them over the
+ * fetch the driver is handed, and tests stand in for it. A query's signal
+ * aborts the call (#1082).
  */
 export interface BggClientLike {
   thing: {
-    query(params: BggThingQueryParams): Promise<BggThing[]>;
+    query(params: BggThingQueryParams, signal?: AbortSignal): Promise<BggThing[]>;
   };
 
   search: {
-    query(params: BggSearchQueryParams): Promise<BggSearchResult[]>;
+    query(params: BggSearchQueryParams, signal?: AbortSignal): Promise<BggSearchResult[]>;
   };
 }
 

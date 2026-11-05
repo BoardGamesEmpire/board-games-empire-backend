@@ -1,7 +1,9 @@
+import type { BggClientLike } from '@bge/gateway-driver-boardgamegeek';
 import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BggClient } from 'bgg-ts-client';
 import type { BoardGameGeekConfig } from '../configuration/boardgamegeek.config';
+import { adaptBggTsClient } from './bgg-ts-client.adapter';
 import { BggService } from './bgg.service';
 import { BGG_CLIENT } from './constants';
 
@@ -15,9 +17,9 @@ import { BGG_CLIENT } from './constants';
     {
       provide: BGG_CLIENT,
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => {
+      useFactory: (configService: ConfigService): BggClientLike => {
         const bggConfig = configService.getOrThrow<BoardGameGeekConfig>('boardgamegeek');
-        return BggClient.Create(bggConfig);
+        return adaptBggTsClient(BggClient.Create(bggConfig));
       },
     },
     BggService,

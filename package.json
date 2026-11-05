@@ -130,6 +130,7 @@
     "entities": "7.0.1",
     "es-module-lexer": "2.3.1",
     "eventemitter2": "6.4.9",
+    "fast-xml-parser": "5.7.3",
     "hast-util-from-html": "2.0.3",
     "hast-util-to-mdast": "10.1.2",
     "helmet": "8.2.0",

@@ -1,23 +1,20 @@
 import type { BggLinkType, BggNameType, BggThingType } from '../constants';
 
 /**
- * Shapes returned by the BoardGameGeek XML API 2 (after JSON conversion by
- * the underlying client library). Only fields requested or consumed by
- * BGE are typed here. The full schema is documented at:
+ * Shapes returned by the BoardGameGeek XML API 2, as `parseThings` and
+ * `parseSearch` read them. Only fields requested or consumed by BGE are
+ * typed here. The full schema is documented at:
  *
  * @see https://boardgamegeek.com/wiki/page/BGG_XML_API2
  */
 
 /**
- * Text as the client's parser hands it over: still entity-encoded, a number
- * when the value looks like one (a game titled "2048", a publisher named
- * "1830"), and a boolean when it is "true" or "false". The mappers pass it
- * through `decodeText` or `decodeDescription` before sending it (#716).
- *
- * The parser's numbers can't always be turned back into what BGG sent: "007"
- * arrives as 7, and "1e3" as 1000.
+ * Text as BGG sent it: still entity-encoded, and never turned into a number
+ * or a boolean, so a game titled "007" keeps its name (#863). The mappers
+ * pass it through `decodeText` or `decodeDescription` before sending it
+ * (#716).
  */
-export type BggText = string | number | boolean;
+export type BggText = string;
 
 /**
  * `name` element. A thing carries one primary name and zero or more
@@ -50,12 +47,9 @@ export interface BggLink {
    * BGG returns `inbound="true"` when the link points back at this thing
    * from the related thing — used to distinguish "this game IS an expansion
    * of X" (inbound=true) from "this game HAS X as an expansion"
-   * (inbound undefined / false).
-   *
-   * Some client libraries surface this as a boolean, others as the raw
-   * string. Treat both shapes as truthy when present.
+   * (inbound undefined / false). The string as BGG sent it.
    */
-  inbound?: boolean | string;
+  inbound?: string;
 }
 
 /**
@@ -130,9 +124,9 @@ export interface BggThing {
   names?: BggName[];
 
   /**
-   * Some BGG client adapters flatten names into a direct title string
-   * with alternates split out separately. bgg-ts-client puts every name's
-   * value, primary first, in `alternateNames`, and the first of them in `name`.
+   * `parseThings` puts every name's value in `alternateNames`, in the order
+   * BGG sent them, primary first, and the first of them in `name`. An
+   * alternate name of "0" is kept (#863).
    */
   name?: BggText;
   alternateNames?: BggText[];
@@ -184,10 +178,7 @@ export interface BggSearchItem {
 export interface BggSearchResult {
   total: number;
 
-  /**
-   * Absent when nothing matched: BGG's answer has no `<item>`, and
-   * `bgg-ts-client` 0.2.0 then leaves this out (#967).
-   */
+  /** Absent when nothing matched: BGG's answer has no `<item>` (#967). */
   items?: BggSearchItem[];
 }
 
@@ -206,7 +197,7 @@ export interface BggVersion {
   length: number;
   links: BggLink[];
   name: BggText;
-  /** No mapper reads it yet. BggText, since a code made of digits arrives as a number (#716). */
+  /** No mapper reads it yet. */
   productcode: BggText;
   type: BggThingType | string;
   weight: number;

@@ -1,6 +1,7 @@
-import { BggClient } from 'bgg-ts-client';
-import { firstValueFrom } from 'rxjs';
-import type { BggClientLike } from '../client/bgg-client.interface';
+import { createFakeFetch } from '@boardgamesempire/gateway-driver-contract-testing';
+import { firstValueFrom, type Observable } from 'rxjs';
+import { createBggClient } from '../client/bgg-client';
+import type { BggClientLike, BggSearchQueryParams, BggThingQueryParams } from '../client/bgg-client.interface';
 import { BggThingType, DEFAULT_BGG_SEARCH_TYPES } from '../constants';
 import type { BggSearchItem, BggSearchResult, BggThing } from '../types';
 import {
@@ -11,15 +12,6 @@ import {
   parseExternalId,
   searchGamesRequest,
 } from './game.requests';
-
-/**
- * Stands in for the network under the real bgg-ts-client, which fetches
- * through isomorphic-unfetch, answering every request with no matches.
- */
-const mockFetch = jest.fn<Promise<Response>, [string]>(
-  async () => new Response('<items total="0" termsofuse=""></items>'),
-);
-jest.mock('isomorphic-unfetch', () => (url: string) => mockFetch(url));
 
 /** Item 2 is an expansion, which BGG answers twice: once under each label (#777). */
 const BOTH_LABELS = [
@@ -39,17 +31,19 @@ describe('searchGamesRequest', () => {
 
     await firstValueFrom(searchGamesRequest('Catan')(client));
 
-    expect(search).toHaveBeenCalledWith(expect.objectContaining({ query: 'Catan' }));
+    expect(search).toHaveBeenCalledWith(expect.objectContaining({ query: 'Catan' }), expect.any(AbortSignal));
   });
 
-  it('encodes the query, so & + and # reach BGG as typed (#969)', async () => {
+  // The client encodes every value it puts in the URL, so encoding here too
+  // would send BGG "%26" for "&" (#969, #1082).
+  it('hands the client the query as typed', async () => {
     const { client, search } = buildMockClient();
 
     for (const query of ['Dungeons & Dragons', '1+1', '#']) {
       await firstValueFrom(searchGamesRequest(query)(client));
     }
 
-    expect(search.mock.calls.map(([params]) => params.query)).toEqual(['Dungeons%20%26%20Dragons', '1%2B1', '%23']);
+    expect(search.mock.calls.map(([params]) => params.query)).toEqual(['Dungeons & Dragons', '1+1', '#']);
   });
 
   it('always asks BGG for base games and expansions, since a base-game search alone returns expansions labelled as base games (#777)', async () => {
@@ -57,7 +51,10 @@ describe('searchGamesRequest', () => {
 
     await firstValueFrom(searchGamesRequest('Catan', 20, 0, [BggThingType.BoardGame])(client));
 
-    expect(search).toHaveBeenCalledWith(expect.objectContaining({ type: [...DEFAULT_BGG_SEARCH_TYPES] }));
+    expect(search).toHaveBeenCalledWith(
+      expect.objectContaining({ type: [...DEFAULT_BGG_SEARCH_TYPES] }),
+      expect.any(AbortSignal),
+    );
   });
 
   it('drops expansions from a search kept to base games (#777)', async () => {
@@ -168,20 +165,42 @@ describe('searchGamesRequest', () => {
   });
 });
 
-// Pins the URL the real client builds, not just what it's handed. bgg-ts-client
-// joins parameters unencoded today; if an upgrade starts encoding them, the
-// gateway's own encoding doubles up and this fails (#969).
-describe('searchGamesRequest through bgg-ts-client (#969)', () => {
+// Pins the URL the client builds, not just what it's handed (#969).
+describe('searchGamesRequest through createBggClient (#969)', () => {
   it('sends the query in the URL so that BGG reads it as typed', async () => {
-    const client = BggClient.Create({ apiKey: 'test-key' }) as unknown as BggClientLike;
+    const fetch = createFakeFetch(() => ({ body: '<items total="0" termsofuse=""></items>' }));
+    const client = createBggClient({ fetch, apiKey: 'test-key' });
+    const queries = ['Dungeons & Dragons', '1+1', '#'];
 
-    for (const query of ['Dungeons & Dragons', '1+1', '#']) {
-      mockFetch.mockClear();
-
+    for (const query of queries) {
       await expect(firstValueFrom(searchGamesRequest(query)(client))).resolves.toEqual([]);
-
-      expect(new URL(mockFetch.mock.calls[0][0]).searchParams.get('query')).toBe(query);
     }
+
+    expect(fetch.requests.map(({ url }) => url.searchParams.get('query'))).toEqual(queries);
+  });
+});
+
+// A search or fetch nothing listens to any more stops reaching BGG (#1082).
+describe('requests and unsubscribing (#1082)', () => {
+  it.each<[string, (client: BggClientLike) => Observable<unknown>]>([
+    ['searchGamesRequest', (client: BggClientLike) => searchGamesRequest('Catan')(client)],
+    [
+      'fetchThingRequest',
+      (client: BggClientLike) => fetchThingRequest(13, { types: [BggThingType.BoardGame] })(client),
+    ],
+    [
+      'fetchThingsRequest',
+      (client: BggClientLike) => fetchThingsRequest([13], { types: [BggThingType.BoardGame] })(client),
+    ],
+  ])('%s aborts its call when unsubscribed', (_name, request) => {
+    const { client, thing, search } = buildMockClient();
+    thing.mockReturnValue(new Promise(() => undefined));
+    search.mockReturnValue(new Promise(() => undefined));
+
+    request(client).subscribe().unsubscribe();
+
+    const [, signal] = [...thing.mock.calls, ...search.mock.calls][0] as [unknown, AbortSignal | undefined];
+    expect(signal?.aborted).toBe(true);
   });
 });
 
@@ -248,7 +267,7 @@ describe('fetchThingRequest', () => {
 
     await firstValueFrom(fetchThingRequest(174430, { stats: 1, types: [BggThingType.BoardGame] })(client));
 
-    expect(thing).toHaveBeenCalledWith(expect.objectContaining({ id: 174430, stats: 1 }));
+    expect(thing).toHaveBeenCalledWith(expect.objectContaining({ id: 174430, stats: 1 }), expect.any(AbortSignal));
   });
 
   it('omits stats when not requested', async () => {
@@ -256,7 +275,7 @@ describe('fetchThingRequest', () => {
 
     await firstValueFrom(fetchThingRequest(13, { types: [BggThingType.BoardGame] })(client));
 
-    expect(thing).toHaveBeenCalledWith(expect.objectContaining({ stats: undefined }));
+    expect(thing).toHaveBeenCalledWith(expect.objectContaining({ stats: undefined }), expect.any(AbortSignal));
   });
 
   it('passes a single string when only one type is provided', async () => {
@@ -264,7 +283,10 @@ describe('fetchThingRequest', () => {
 
     await firstValueFrom(fetchThingRequest(13, { types: [BggThingType.BoardGame] })(client));
 
-    expect(thing).toHaveBeenCalledWith(expect.objectContaining({ type: BggThingType.BoardGame }));
+    expect(thing).toHaveBeenCalledWith(
+      expect.objectContaining({ type: BggThingType.BoardGame }),
+      expect.any(AbortSignal),
+    );
   });
 
   it('passes an array of types when multiple are provided', async () => {
@@ -276,6 +298,7 @@ describe('fetchThingRequest', () => {
 
     expect(thing).toHaveBeenCalledWith(
       expect.objectContaining({ type: [BggThingType.BoardGame, BggThingType.BoardGameExpansion] }),
+      expect.any(AbortSignal),
     );
   });
 
@@ -311,7 +334,7 @@ describe('fetchThingsRequest', () => {
 
     await firstValueFrom(fetchThingsRequest([1, 2, 3], { types: [BggThingType.BoardGameExpansion] })(client));
 
-    expect(thing).toHaveBeenCalledWith(expect.objectContaining({ id: [1, 2, 3] }));
+    expect(thing).toHaveBeenCalledWith(expect.objectContaining({ id: [1, 2, 3] }), expect.any(AbortSignal));
   });
 
   it('returns the full result list', async () => {
@@ -384,16 +407,16 @@ describe('chunk', () => {
 
 interface MockClientFixture {
   client: BggClientLike;
-  thing: jest.Mock<Promise<BggThing[]>, [{ id: number | number[]; type?: string | string[]; stats?: 0 | 1 }]>;
-  search: jest.Mock<Promise<BggSearchResult[]>, [{ query: string; type?: string | string[]; exact?: 0 | 1 }]>;
+  thing: jest.Mock<Promise<BggThing[]>, [BggThingQueryParams, AbortSignal?]>;
+  search: jest.Mock<Promise<BggSearchResult[]>, [BggSearchQueryParams, AbortSignal?]>;
 }
 
 function buildMockClient(options?: {
   thingResults?: BggThing[];
   searchResults?: BggSearchResult[];
 }): MockClientFixture {
-  const thing = jest.fn<Promise<BggThing[]>, [{ id: number | number[]; type?: string | string[]; stats?: 0 | 1 }]>();
-  const search = jest.fn<Promise<BggSearchResult[]>, [{ query: string; type?: string | string[]; exact?: 0 | 1 }]>();
+  const thing = jest.fn<Promise<BggThing[]>, [BggThingQueryParams, AbortSignal?]>();
+  const search = jest.fn<Promise<BggSearchResult[]>, [BggSearchQueryParams, AbortSignal?]>();
 
   thing.mockResolvedValue(options?.thingResults ?? []);
   search.mockResolvedValue(options?.searchResults ?? []);

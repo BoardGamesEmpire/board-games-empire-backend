@@ -1,5 +1,5 @@
+import { fromAbortable } from '@boardgamesempire/gateway-driver-contract';
 import type * as proto from '@boardgamesempire/proto-gateway';
-import { defer } from 'rxjs';
 import { map } from 'rxjs/operators';
 import type { BggRequest } from '../client/bgg-client.interface';
 import { BggThingType, DEFAULT_BGG_SEARCH_TYPES, DEFAULT_SEARCH_LIMIT } from '../constants';
@@ -43,9 +43,10 @@ export interface ThingFetchOptions {
  * BGG's `/search` endpoint does not paginate server-side; `offset` and
  * `limit` are applied client-side after the response is received.
  *
- * The `defer` wrapper ensures the underlying HTTP call is re-issued on
- * each subscription — required so `BggService.call` can retry a 429
- * cleanly by re-subscribing.
+ * `fromAbortable` re-issues the underlying HTTP call on each subscription —
+ * required so a 429 can be retried cleanly by re-subscribing — and
+ * aborts it when the subscriber unsubscribes (#1082). The query goes to the
+ * client as typed: the client encodes what it puts in the URL (#969).
  */
 export function searchGamesRequest(
   query: string,
@@ -58,15 +59,7 @@ export function searchGamesRequest(
   const inYearRange = publishYearMatcher(publishYear);
 
   return (client) =>
-    defer(() =>
-      client.search.query({
-        // bgg-ts-client joins parameters into the URL unencoded, in 0.2.0 and
-        // 0.3.0, so & + and # would cut or change the query. Should it ever
-        // encode them itself, this must go, or queries are encoded twice (#969).
-        query: encodeURIComponent(query),
-        type: [...DEFAULT_BGG_SEARCH_TYPES],
-      }),
-    ).pipe(
+    fromAbortable((signal) => client.search.query({ query, type: [...DEFAULT_BGG_SEARCH_TYPES] }, signal)).pipe(
       map((results) =>
         collapseSearchItems(results.flatMap((result) => result.items ?? []))
           .filter((item) => kept.has(item.type) && inYearRange(item))
@@ -127,13 +120,11 @@ export function collapseSearchItems(items: readonly BggSearchItem[]): BggSearchI
  */
 export function fetchThingRequest(id: number, options: ThingFetchOptions): BggRequest<BggThing | undefined> {
   return (client) =>
-    defer(() =>
-      client.thing.query({
-        id,
-        type: normalizeTypes(options.types),
-        stats: options.stats,
-        versions: options.versions,
-      }),
+    fromAbortable((signal) =>
+      client.thing.query(
+        { id, type: normalizeTypes(options.types), stats: options.stats, versions: options.versions },
+        signal,
+      ),
     ).pipe(map((results) => results[0]));
 }
 
@@ -147,13 +138,11 @@ export function fetchThingRequest(id: number, options: ThingFetchOptions): BggRe
  */
 export function fetchThingsRequest(ids: readonly number[], options: ThingFetchOptions): BggRequest<BggThing[]> {
   return (client) =>
-    defer(() =>
-      client.thing.query({
-        id: [...ids],
-        type: normalizeTypes(options.types),
-        stats: options.stats,
-        versions: options.versions,
-      }),
+    fromAbortable((signal) =>
+      client.thing.query(
+        { id: [...ids], type: normalizeTypes(options.types), stats: options.stats, versions: options.versions },
+        signal,
+      ),
     );
 }
 
