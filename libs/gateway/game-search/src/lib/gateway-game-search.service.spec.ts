@@ -1062,7 +1062,6 @@ describe('GatewayGameSearchService', () => {
     });
 
     it("sends an expansion's summary as Markdown too", async () => {
-      db.gameSource.findMany.mockResolvedValue([{ gatewayId: 'bgg', externalId: '13' }] as never);
       registry.register(
         'bgg',
         new InMemoryGatewayDriver({ expansionsByBaseExternalId: { '13': [summarized('<i>More</i> players')] } }),
@@ -1070,7 +1069,9 @@ describe('GatewayGameSearchService', () => {
         { contentFormat: ContentFormat.Html },
       );
 
-      const frames = await collect(service.fetchExpansions({ correlationId: 'corr-3', gameId: 'game-1' }));
+      const frames = await collect(
+        service.fetchExpansions({ correlationId: 'corr-3', gatewayId: 'bgg', baseExternalId: '13' }),
+      );
 
       expect(summaries(frames)).toEqual(['*More* players']);
     });
@@ -1164,52 +1165,39 @@ describe('GatewayGameSearchService', () => {
 
   describe('fetchExpansions', () => {
     const seafarers = searchHit('325', 'Catan: Seafarers');
-    const haloDlc = searchHit('7401', 'Halo: Firefight');
 
-    const expansionsRequest: proto.CoordinatorFetchExpansionsRequest = { correlationId: 'corr-3', gameId: 'game-1' };
+    /** Asks one DataGateway by the base game's external ID there, as the API does once per DataGateway link (#1067). */
+    const expansionsRequest: proto.CoordinatorFetchExpansionsRequest = {
+      correlationId: 'corr-3',
+      gatewayId: 'bgg',
+      baseExternalId: '13',
+    };
 
-    /** The gatewayId on a frame that no single gateway answers for. */
-    const NO_GATEWAY = '__no_gateway__';
-
-    it('asks each gateway the game is linked to for expansions of its own external id', async () => {
-      db.gameSource.findMany.mockResolvedValue([
-        { gatewayId: 'bgg', externalId: '13' },
-        { gatewayId: 'igdb', externalId: '740' },
-      ] as never);
+    it('asks the named DataGateway for expansions of the external ID it was given', async () => {
       registry
         .register('bgg', new InMemoryGatewayDriver({ expansionsByBaseExternalId: { '13': [seafarers] } }))
-        .register('igdb', new InMemoryGatewayDriver({ expansionsByBaseExternalId: { '740': [haloDlc] } }));
+        .register('igdb', new InMemoryGatewayDriver({ expansionsByBaseExternalId: { '13': [halo] } }));
       imported.set('bgg:325', 'game-seafarers');
 
       const frames = await collect(service.fetchExpansions(expansionsRequest));
 
-      expect(db.gameSource.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { gameId: 'game-1' } }));
-      expect(frames).toHaveLength(2);
-      expect(frames).toEqual(
-        expect.arrayContaining([
-          {
-            correlationId: 'corr-3',
-            gatewayId: 'bgg',
-            status: RESULT,
-            game: seafarers,
-            inSystem: true,
-            gameId: 'game-seafarers',
-          },
-          {
-            correlationId: 'corr-3',
-            gatewayId: 'igdb',
-            status: RESULT,
-            game: haloDlc,
-            inSystem: false,
-            gameId: undefined,
-          },
-        ]),
-      );
+      // The coordinator no longer reads a game's DataGateway links: it has no
+      // actor to check a read of the game against, so the API does (#1067).
+      expect(db.gameSource.findMany).not.toHaveBeenCalled();
+      expect(registry.resolved).toEqual(['bgg']);
+      expect(frames).toEqual([
+        {
+          correlationId: 'corr-3',
+          gatewayId: 'bgg',
+          status: RESULT,
+          game: seafarers,
+          inSystem: true,
+          gameId: 'game-seafarers',
+        },
+      ]);
     });
 
-    it('reports a linked gateway it cannot reach as UNAVAILABLE rather than as having no expansions', async () => {
-      db.gameSource.findMany.mockResolvedValue([{ gatewayId: 'bgg', externalId: '13' }] as never);
-
+    it('reports a DataGateway it cannot reach as UNAVAILABLE rather than as having no expansions', async () => {
       const frames = await collect(service.fetchExpansions(expansionsRequest));
 
       expect(frames).toEqual([
@@ -1222,8 +1210,7 @@ describe('GatewayGameSearchService', () => {
       ]);
     });
 
-    it('reports a linked DataGateway that may not fetch expansions as UNAVAILABLE, saying why', async () => {
-      db.gameSource.findMany.mockResolvedValue([{ gatewayId: 'bgg', externalId: '13' }] as never);
+    it('reports a DataGateway that may not fetch expansions as UNAVAILABLE, saying why', async () => {
       registry.register('bgg', new InMemoryGatewayDriver({ expansionsByBaseExternalId: { '13': [seafarers] } }), [
         DataGatewayCapability.Search,
         DataGatewayCapability.Fetch,
@@ -1241,8 +1228,7 @@ describe('GatewayGameSearchService', () => {
       ]);
     });
 
-    it('relays a gateway’s non-result frames with their message and retry hint', async () => {
-      db.gameSource.findMany.mockResolvedValue([{ gatewayId: 'bgg', externalId: '13' }] as never);
+    it('relays a DataGateway’s non-result frames with their message and retry hint', async () => {
       registry.register(
         'bgg',
         scriptedDriver({
@@ -1263,34 +1249,160 @@ describe('GatewayGameSearchService', () => {
       ]);
     });
 
-    it('answers a game linked to no gateway with one ERROR frame that names the game but no gateway', async () => {
-      db.gameSource.findMany.mockResolvedValue([] as never);
+    // An expansion list reads a DataGateway's frames as a search does (#1067):
+    // the two paths share one mapping, so neither relays what the other drops.
+    it('drops a RESULT frame that carries no game, as search does', async () => {
+      registry.register(
+        'bgg',
+        scriptedDriver({
+          fetchExpansions: [
+            { correlationId: 'corr-3', status: RESULT },
+            { correlationId: 'corr-3', status: SOURCE_DONE },
+          ],
+        }),
+      );
+
+      const frames = await collect(service.fetchExpansions(expansionsRequest));
+
+      expect(frames).toEqual([{ correlationId: 'corr-3', gatewayId: 'bgg', status: SOURCE_DONE }]);
+    });
+
+    it('reports a frame whose status it does not recognize as an ERROR, as search does', async () => {
+      registry.register('bgg', scriptedDriver({ fetchExpansions: [{ correlationId: 'corr-3', status: UNSPECIFIED }] }));
 
       const frames = await collect(service.fetchExpansions(expansionsRequest));
 
       expect(frames).toEqual([
         {
           correlationId: 'corr-3',
-          gatewayId: NO_GATEWAY,
+          gatewayId: 'bgg',
           status: ERROR,
-          message: 'No gateway sources found for gameId game-1',
+          message: 'Unknown status RESULT_STATUS_UNSPECIFIED',
         },
       ]);
     });
+  });
 
-    it('answers a failed source lookup with one ERROR frame that names no gateway', async () => {
-      db.gameSource.findMany.mockRejectedValue(new Error('connection pool exhausted'));
+  /**
+   * #1067. An expansion list is cached for 5 minutes, as a search's results
+   * are: the quick look asks for it each time it opens, and BGG spends one
+   * upstream call per 20 expansions on every uncached read.
+   */
+  describe('fetchExpansions cache', () => {
+    const seafarers = searchHit('325', 'Catan: Seafarers');
 
-      const frames = await collect(service.fetchExpansions(expansionsRequest));
+    const expansionsRequest = (
+      overrides: Partial<proto.CoordinatorFetchExpansionsRequest> = {},
+    ): proto.CoordinatorFetchExpansionsRequest => ({
+      correlationId: 'corr-3',
+      gatewayId: 'bgg',
+      baseExternalId: '13',
+      locale: 'en',
+      ...overrides,
+    });
+
+    /** A DataGateway that lists Seafarers and says it's done, as BGG and IGDB do; `asked` counts its calls. */
+    const listingSeafarers = () => {
+      const driver = scriptedDriver({
+        fetchExpansions: [
+          { correlationId: 'corr-3', status: RESULT, game: seafarers },
+          { correlationId: 'corr-3', status: SOURCE_DONE },
+        ],
+      });
+      const asked = jest.spyOn(driver, 'fetchExpansions');
+
+      return { driver, asked };
+    };
+
+    it('answers a completed expansion list from the cache without asking the DataGateway again', async () => {
+      const { driver, asked } = listingSeafarers();
+      registry.register('bgg', driver);
+
+      const live = await collect(service.fetchExpansions(expansionsRequest()));
+      const fromCache = await collect(service.fetchExpansions(expansionsRequest()));
+
+      expect(asked).toHaveBeenCalledTimes(1);
+      expect(fromCache).toEqual(live);
+      expect(fromCache).toEqual([
+        expect.objectContaining({ gatewayId: 'bgg', status: RESULT, game: seafarers }),
+        { correlationId: 'corr-3', gatewayId: 'bgg', status: SOURCE_DONE },
+      ]);
+    });
+
+    // The two empty slots are limit and offset, so a later paged request is
+    // never answered with the first page from the cache (#1067, #1092).
+    it('keys the cache by DataGateway, external ID and locale, with empty paging slots', async () => {
+      registry.register('bgg', listingSeafarers().driver);
+
+      await collect(service.fetchExpansions(expansionsRequest()));
+      await collect(service.fetchExpansions(expansionsRequest({ locale: 'de' })));
+
+      expect(cache.set).toHaveBeenCalledWith('bge:expansions:bgg:13:en::', [seafarers], 5 * 60 * 1000);
+      expect(cache.get).toHaveBeenCalledWith('bge:expansions:bgg:13:de::');
+      expect(cache.set).toHaveBeenCalledWith('bge:expansions:bgg:13:de::', [seafarers], 5 * 60 * 1000);
+    });
+
+    it('does not cache a list the DataGateway reported a problem in', async () => {
+      registry.register(
+        'bgg',
+        scriptedDriver({
+          fetchExpansions: [
+            { correlationId: 'corr-3', status: RESULT, game: seafarers },
+            { correlationId: 'corr-3', status: RATE_LIMITED, message: 'slow down', retryAfter: 30 },
+            { correlationId: 'corr-3', status: SOURCE_DONE },
+          ],
+        }),
+      );
+
+      await collect(service.fetchExpansions(expansionsRequest()));
+
+      expect(cache.set).not.toHaveBeenCalled();
+    });
+
+    it('marks an expansion imported since the list was cached', async () => {
+      const { driver, asked } = listingSeafarers();
+      registry.register('bgg', driver);
+      await collect(service.fetchExpansions(expansionsRequest()));
+
+      imported.set('bgg:325', 'game-seafarers');
+      const fromCache = await collect(service.fetchExpansions(expansionsRequest()));
+
+      expect(asked).toHaveBeenCalledTimes(1);
+      expect(fromCache).toContainEqual(
+        expect.objectContaining({ game: seafarers, inSystem: true, gameId: 'game-seafarers' }),
+      );
+    });
+
+    it('answers UNAVAILABLE, not the cached list, once the DataGateway may no longer fetch expansions', async () => {
+      registry.register('bgg', listingSeafarers().driver);
+      await collect(service.fetchExpansions(expansionsRequest()));
+      expect(cache.set).toHaveBeenCalledWith('bge:expansions:bgg:13:en::', [seafarers], expect.any(Number));
+
+      registry.register('bgg', listingSeafarers().driver, [DataGatewayCapability.Search, DataGatewayCapability.Fetch]);
+      cache.get.mockClear();
+      const frames = await collect(service.fetchExpansions(expansionsRequest()));
 
       expect(frames).toEqual([
         {
           correlationId: 'corr-3',
-          gatewayId: NO_GATEWAY,
-          status: ERROR,
-          message: 'connection pool exhausted',
+          gatewayId: 'bgg',
+          status: UNAVAILABLE,
+          message: `DataGateway bgg doesn't declare FetchExpansions`,
         },
       ]);
+      expect(cache.get).not.toHaveBeenCalled();
+    });
+
+    it('asks the DataGateway when the cache read fails', async () => {
+      const { driver, asked } = listingSeafarers();
+      registry.register('bgg', driver);
+      cache.get.mockRejectedValueOnce(new Error('redis down'));
+
+      const frames = await collect(service.fetchExpansions(expansionsRequest()));
+
+      expect(cache.get).toHaveBeenCalledWith('bge:expansions:bgg:13:en::');
+      expect(asked).toHaveBeenCalledTimes(1);
+      expect(frames).toContainEqual(expect.objectContaining({ status: RESULT, game: seafarers }));
     });
   });
 });

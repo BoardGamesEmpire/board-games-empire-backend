@@ -1,6 +1,6 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, ContentType, PlatformType, ResourceType } from '@bge/database';
-import { gameListScope } from '@bge/game';
+import { gameListScope, GameService } from '@bge/game';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
@@ -12,9 +12,10 @@ import {
   type MockDatabaseService,
 } from '@bge/testing';
 import * as proto from '@boardgamesempire/proto-gateway';
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
-import { EMPTY, firstValueFrom, of } from 'rxjs';
+import { concat, EMPTY, firstValueFrom, NEVER, of, throwError } from 'rxjs';
+import { ExpansionsQueryDto } from './dto/expansions-query.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { GameSearchService } from './game-search.service';
 
@@ -36,7 +37,7 @@ const userlessActor = () => {
 /** One primed ability that answers whether its actor may ask the DataGateways (#1076). */
 const abilityThatMayAskDataGateways = (may: boolean) => ({
   can: jest.fn(
-    (action: Action, subject: unknown) => may && action === Action.read && subject === ResourceType.GameSearch,
+    (action: Action, subject: unknown) => may && action === Action.read && subject === ResourceType.DataGatewaySearch,
   ),
 });
 
@@ -45,13 +46,15 @@ describe('GameSearchService', () => {
   let db: MockDatabaseService;
   let abilityService: MockAbilityService;
   let compose: jest.SpyInstance;
-  let coordinator: { searchGames: jest.Mock };
+  let coordinator: { searchGames: jest.Mock; fetchExpansions: jest.Mock };
+  let gameService: { readDataGatewayLinks: jest.Mock };
 
   beforeEach(async () => {
     abilityService = createMockAbilityService();
     abilityService.getCurrentResourceConditions.mockReturnValue([READ]);
     abilityService.getCurrentAbilities.mockReturnValue([abilityThatMayAskDataGateways(true)] as never);
-    coordinator = { searchGames: jest.fn() };
+    coordinator = { searchGames: jest.fn(), fetchExpansions: jest.fn() };
+    gameService = { readDataGatewayLinks: jest.fn() };
 
     const ctx = await createTestingModuleWithDb({
       providers: [
@@ -61,6 +64,7 @@ describe('GameSearchService', () => {
         ScopeComposer,
         { provide: AbilityService, useValue: abilityService },
         { provide: GatewayCoordinatorClientService, useValue: coordinator },
+        { provide: GameService, useValue: gameService },
       ],
     });
 
@@ -182,7 +186,7 @@ describe('GameSearchService', () => {
 
   /**
    * #1076. Asking the DataGateways sends the query upstream on the server's
-   * credentials, so it takes `read:game_search:data_gateways`, which an
+   * credentials, so it takes `read:data_gateway:search`, which an
    * anonymous user does not hold. It is checked before either half starts:
    * a refusal is an authorization failure, never "no games found".
    */
@@ -367,6 +371,263 @@ describe('GameSearchService', () => {
     });
   });
 
+  /**
+   * #1067. A base game's expansions at its DataGateways, named by a
+   * DataGateway and the game's external ID there, or by the game's ID on this
+   * server, which stands for each of its DataGateway links. Answered in
+   * search's response shape.
+   */
+  describe('fetchExpansions', () => {
+    const { RESULT_STATUS_RESULT: RESULT, RESULT_STATUS_SOURCE_DONE: SOURCE_DONE } = proto.ResultStatus;
+    const { RESULT_STATUS_UNAVAILABLE: UNAVAILABLE } = proto.ResultStatus;
+
+    const expansionsQuery = (fields: Record<string, unknown>): ExpansionsQueryDto =>
+      plainToInstance(ExpansionsQueryDto, fields);
+    const byExternalId = () => expansionsQuery({ gatewayId: 'bgg', externalId: '13', locale: 'en' });
+    const byGame = () => expansionsQuery({ gameId: 'game-1' });
+
+    const expansion = (gatewayId: string, externalId: string, title: string): proto.SearchGameResult => ({
+      correlationId: 'c1',
+      gatewayId,
+      status: RESULT,
+      game: {
+        externalId,
+        title,
+        contentType: proto.ContentType.CONTENT_TYPE_EXPANSION,
+        availablePlatforms: [],
+        availableReleases: [],
+      },
+      inSystem: false,
+    });
+    const frame = (gatewayId: string, status: proto.ResultStatus): proto.SearchGameResult => ({
+      correlationId: 'c1',
+      gatewayId,
+      status,
+    });
+
+    /** What `fn` threw, synchronously. */
+    const refusalOf = (fn: () => unknown) => {
+      try {
+        fn();
+      } catch (error: unknown) {
+        return error as BadRequestException | ForbiddenException;
+      }
+
+      throw new Error('expected a refusal');
+    };
+
+    it('refuses an actor who may not ask the DataGateways, before reading anything', () => {
+      abilityService.getCurrentAbilities.mockReturnValue([abilityThatMayAskDataGateways(false)] as never);
+
+      for (const dto of [byExternalId(), byGame()]) {
+        const refusal = refusalOf(() => service.fetchExpansions(dto));
+
+        expect(refusal).toBeInstanceOf(ForbiddenException);
+        expect(refusal.getResponse()).toEqual(t('errors.game_search.data_gateways_forbidden'));
+      }
+      expect(gameService.readDataGatewayLinks).not.toHaveBeenCalled();
+      expect(coordinator.fetchExpansions).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['both forms at once', { gatewayId: 'bgg', externalId: '13', gameId: 'game-1' }],
+      ['neither form', {}],
+      ['a DataGateway alone', { gatewayId: 'bgg' }],
+      ['an external ID alone', { externalId: '13' }],
+      ['a game id with an external ID', { gameId: 'game-1', externalId: '13' }],
+    ])('refuses %s, with a message saying what to name', (_case, fields) => {
+      const refusal = refusalOf(() => service.fetchExpansions(expansionsQuery(fields)));
+
+      expect(refusal).toBeInstanceOf(BadRequestException);
+      expect(refusal.getResponse()).toEqual(t('errors.game_search.expansions_target_exactly_one'));
+      expect(gameService.readDataGatewayLinks).not.toHaveBeenCalled();
+      expect(coordinator.fetchExpansions).not.toHaveBeenCalled();
+    });
+
+    it('counts a field sent as null as left out', async () => {
+      coordinator.fetchExpansions.mockReturnValue(of(frame('bgg', SOURCE_DONE)));
+
+      await firstValueFrom(
+        service.fetchExpansions(expansionsQuery({ gatewayId: 'bgg', externalId: '13', gameId: null })),
+      );
+
+      expect(coordinator.fetchExpansions).toHaveBeenCalledTimes(1);
+    });
+
+    it('asks the coordinator once for a DataGateway and external ID', async () => {
+      coordinator.fetchExpansions.mockReturnValue(
+        of(expansion('bgg', '325', 'Catan: Seafarers'), frame('bgg', SOURCE_DONE)),
+      );
+
+      const response = await firstValueFrom(service.fetchExpansions(byExternalId()));
+
+      expect(coordinator.fetchExpansions).toHaveBeenCalledTimes(1);
+      expect(coordinator.fetchExpansions).toHaveBeenCalledWith({
+        correlationId: response.correlationId,
+        gatewayId: 'bgg',
+        baseExternalId: '13',
+        locale: 'en',
+      });
+      expect(response.correlationId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(response.resultsBySource).toEqual({
+        bgg: [expect.objectContaining({ externalId: '325', title: 'Catan: Seafarers', inSystem: false })],
+      });
+      expect(gameService.readDataGatewayLinks).not.toHaveBeenCalled();
+    });
+
+    it('asks once per DataGateway link of a game, with one correlation id', async () => {
+      gameService.readDataGatewayLinks.mockResolvedValue([
+        { gatewayId: 'bgg', externalId: '13' },
+        { gatewayId: 'igdb', externalId: '740' },
+      ]);
+      coordinator.fetchExpansions.mockImplementation(({ gatewayId }: { gatewayId: string }) =>
+        of(frame(gatewayId, SOURCE_DONE)),
+      );
+
+      const response = await firstValueFrom(
+        service.fetchExpansions(expansionsQuery({ gameId: 'game-1', locale: 'de' })),
+      );
+
+      expect(gameService.readDataGatewayLinks).toHaveBeenCalledWith('game-1');
+      expect(coordinator.fetchExpansions.mock.calls.map(([request]) => request)).toEqual([
+        { correlationId: response.correlationId, gatewayId: 'bgg', baseExternalId: '13', locale: 'de' },
+        { correlationId: response.correlationId, gatewayId: 'igdb', baseExternalId: '740', locale: 'de' },
+      ]);
+    });
+
+    it('answers an empty result for a game with no DataGateway link, without asking the coordinator', async () => {
+      gameService.readDataGatewayLinks.mockResolvedValue([]);
+
+      const response = await firstValueFrom(service.fetchExpansions(byGame()));
+
+      expect(response).toEqual({ correlationId: expect.any(String), resultsBySource: {} });
+      expect(coordinator.fetchExpansions).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['404', new NotFoundException('missing')],
+      ['403', new ForbiddenException('refused')],
+    ])('lets a %s from reading the game through, rather than answering empty', async (_status, refusal) => {
+      gameService.readDataGatewayLinks.mockRejectedValue(refusal);
+
+      await expect(firstValueFrom(service.fetchExpansions(byGame()))).rejects.toBe(refusal);
+      expect(coordinator.fetchExpansions).not.toHaveBeenCalled();
+    });
+
+    it('keeps one DataGateway’s rows when another linked DataGateway is unavailable', async () => {
+      gameService.readDataGatewayLinks.mockResolvedValue([
+        { gatewayId: 'bgg', externalId: '13' },
+        { gatewayId: 'igdb', externalId: '740' },
+      ]);
+      coordinator.fetchExpansions.mockImplementation(({ gatewayId }: { gatewayId: string }) =>
+        gatewayId === 'igdb'
+          ? of(frame('igdb', UNAVAILABLE))
+          : of(expansion('bgg', '325', 'Catan: Seafarers'), frame('bgg', SOURCE_DONE)),
+      );
+
+      const response = await firstValueFrom(service.fetchExpansions(byGame()));
+
+      expect(response.unavailableSources).toEqual(['igdb']);
+      expect(response.resultsBySource['bgg']).toEqual([expect.objectContaining({ externalId: '325' })]);
+    });
+
+    it('lists an expansion once per DataGateway when the game has two links there', async () => {
+      gameService.readDataGatewayLinks.mockResolvedValue([
+        { gatewayId: 'bgg', externalId: '13' },
+        { gatewayId: 'bgg', externalId: '278' },
+      ]);
+      coordinator.fetchExpansions.mockImplementation(() =>
+        of(expansion('bgg', '325', 'Catan: Seafarers'), frame('bgg', SOURCE_DONE)),
+      );
+
+      const response = await firstValueFrom(service.fetchExpansions(byGame()));
+
+      expect(response.resultsBySource['bgg']).toHaveLength(1);
+    });
+
+    it('names a DataGateway once when two of the game’s links there are unavailable', async () => {
+      gameService.readDataGatewayLinks.mockResolvedValue([
+        { gatewayId: 'bgg', externalId: '13' },
+        { gatewayId: 'bgg', externalId: '278' },
+      ]);
+      coordinator.fetchExpansions.mockImplementation(() => of(frame('bgg', UNAVAILABLE)));
+
+      const response = await firstValueFrom(service.fetchExpansions(byGame()));
+
+      expect(response.unavailableSources).toEqual(['bgg']);
+    });
+
+    // A failed coordinator call is that DataGateway's answer only: the other
+    // links' rows still arrive, and it isn't read as having no expansions.
+    it('keeps the other DataGateways’ rows when one link’s coordinator call fails, and lists that one as unavailable', async () => {
+      gameService.readDataGatewayLinks.mockResolvedValue([
+        { gatewayId: 'bgg', externalId: '13' },
+        { gatewayId: 'igdb', externalId: '740' },
+      ]);
+      coordinator.fetchExpansions.mockImplementation(({ gatewayId }: { gatewayId: string }) =>
+        gatewayId === 'igdb'
+          ? throwError(() => new Error('14 UNAVAILABLE: connection reset'))
+          : of(expansion('bgg', '325', 'Catan: Seafarers'), frame('bgg', SOURCE_DONE)),
+      );
+
+      const response = await firstValueFrom(service.fetchExpansions(byGame()));
+
+      expect(response.resultsBySource['bgg']).toEqual([expect.objectContaining({ externalId: '325' })]);
+      expect(response.unavailableSources).toEqual(['igdb']);
+      expect(response).not.toHaveProperty('errors');
+    });
+
+    it('lists the DataGateway as unavailable, not as having no expansions, when the coordinator fails', async () => {
+      coordinator.fetchExpansions.mockReturnValue(throwError(() => new Error('coordinator down')));
+
+      const response = await firstValueFrom(service.fetchExpansions(byExternalId()));
+
+      expect(response).toEqual({ correlationId: expect.any(String), resultsBySource: {}, unavailableSources: ['bgg'] });
+    });
+
+    // A DataGateway still sending its list at 15 s has sent only part of it,
+    // and answers nothing more: the rows it sent are kept, and it's listed as
+    // unavailable, so the part doesn't read as the whole list or as "no
+    // expansions". One that finished in time isn't.
+    describe('at the 15-second deadline', () => {
+      beforeEach(() => jest.useFakeTimers());
+      afterEach(() => jest.useRealTimers());
+
+      it('lists a DataGateway still sending its list as unavailable, keeping the rows it sent', async () => {
+        gameService.readDataGatewayLinks.mockResolvedValue([
+          { gatewayId: 'bgg', externalId: '13' },
+          { gatewayId: 'igdb', externalId: '740' },
+        ]);
+        coordinator.fetchExpansions.mockImplementation(({ gatewayId }: { gatewayId: string }) =>
+          gatewayId === 'bgg'
+            ? concat(of(expansion('bgg', '325', 'Catan: Seafarers')), NEVER)
+            : of(expansion('igdb', '741', 'Halo: ODST'), frame('igdb', SOURCE_DONE)),
+        );
+
+        const response$ = firstValueFrom(service.fetchExpansions(byGame()));
+        await jest.advanceTimersByTimeAsync(15_000);
+        const response = await response$;
+
+        expect(response.resultsBySource['bgg']).toEqual([expect.objectContaining({ externalId: '325' })]);
+        expect(response.resultsBySource['igdb']).toEqual([expect.objectContaining({ externalId: '741' })]);
+        expect(response.unavailableSources).toEqual(['bgg']);
+      });
+
+      it('lists a DataGateway that sent nothing by then as unavailable, not as having no expansions', async () => {
+        coordinator.fetchExpansions.mockReturnValue(NEVER);
+
+        const response$ = firstValueFrom(service.fetchExpansions(byExternalId()));
+        await jest.advanceTimersByTimeAsync(15_000);
+
+        expect(await response$).toEqual({
+          correlationId: expect.any(String),
+          resultsBySource: {},
+          unavailableSources: ['bgg'],
+        });
+      });
+    });
+  });
+
   // #869: the coordinator answers a DataGateway that can't apply a player-count
   // or play-time range with one UNFILTERABLE frame, in place of asking it.
   // Without a note of it, every such DataGateway would read as "no results".
@@ -438,6 +699,44 @@ describe('GameSearchService', () => {
 
       expect(minimumOnly.minPlayTime).toBe(45);
       expect(minimumOnly.maxPlayTime).toBeUndefined();
+    });
+
+    // #862: the coordinator sends each summary as Markdown (#714), and the
+    // mapping used to drop it, so neither REST nor the WebSocket carried one.
+    it('carries a DataGateway result’s Markdown summary', () => {
+      expect(service.mapProtoGame(resultWith({ summary: '**Trade** and build' })).summary).toBe('**Trade** and build');
+    });
+
+    it('leaves summary out when the DataGateway sent none', () => {
+      expect(service.mapProtoGame(resultWith({})).summary).toBeUndefined();
+    });
+  });
+
+  describe('search (REST): a DataGateway result’s summary (#862)', () => {
+    it('carries the summary in resultsBySource', async () => {
+      const frames: proto.SearchGameResult[] = [
+        {
+          correlationId: 'c1',
+          gatewayId: 'bgg',
+          status: proto.ResultStatus.RESULT_STATUS_RESULT,
+          game: {
+            externalId: '13',
+            title: 'Catan',
+            contentType: proto.ContentType.CONTENT_TYPE_BASE_GAME,
+            availablePlatforms: [],
+            availableReleases: [],
+            summary: '**Trade** and build',
+          },
+        },
+        { correlationId: 'c1', gatewayId: 'bgg', status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE },
+      ];
+      coordinator.searchGames.mockReturnValue(of(...frames));
+
+      const response = await firstValueFrom(
+        service.search(plainToInstance(SearchQueryDto, { query: 'catan', includeLocal: false })),
+      );
+
+      expect(response.resultsBySource['bgg'][0].summary).toBe('**Trade** and build');
     });
   });
 });

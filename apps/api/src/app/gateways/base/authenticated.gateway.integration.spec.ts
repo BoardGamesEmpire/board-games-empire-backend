@@ -3,7 +3,7 @@ import { injectActorContextMetadata, WsActorScope } from '@bge/actor-context-tra
 import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, DatabaseModule, DatabaseService, ResourceType } from '@bge/database';
-import { gameListScope } from '@bge/game';
+import { gameListScope, GameService } from '@bge/game';
 import { GameSearchService, SearchEvents } from '@bge/game-search';
 import {
   FALLBACK_LOCALE,
@@ -81,7 +81,7 @@ function roleGraph(userId: string, canRead: boolean): UserWithRoles {
   };
   const askDataGateways = {
     action: Action.read,
-    subject: ResourceType.GameSearch,
+    subject: ResourceType.DataGatewaySearch,
     conditions: null,
     fields: [],
     inverted: false,
@@ -352,6 +352,8 @@ describe('AuthenticatedGateway (over a real socket)', () => {
         // Never read: the search's one query is spied below.
         { provide: DatabaseService, useValue: {} },
         { provide: GatewayCoordinatorClientService, useValue: { searchGames } },
+        // Never asked: a WebSocket search lists no expansions (#1067).
+        { provide: GameService, useValue: {} },
       ],
     })
       .overrideModule(DatabaseModule)

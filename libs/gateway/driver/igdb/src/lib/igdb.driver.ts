@@ -6,7 +6,7 @@ import {
 } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { randomUUID } from 'node:crypto';
-import { EMPTY, from, merge, Observable, of } from 'rxjs';
+import { defer, EMPTY, from, merge, Observable, of } from 'rxjs';
 import { catchError, endWith, expand, filter, map, mergeMap, reduce, shareReplay, tap } from 'rxjs/operators';
 import type { IgdbRequest } from './client/igdb-client.interface';
 import { IgdbCaller } from './igdb-caller';
@@ -215,7 +215,9 @@ export class IgdbDriver implements DataGatewayDriver {
   }
 
   fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {
-    const gameRequest$ = this.caller.call(fetchGameRequest(request.externalId, request.locale)).pipe(
+    // Deferred, so a malformed external ID, which fetchGameRequest refuses when
+    // it's built, lands in catchError as an ERROR frame (#1067).
+    const gameRequest$ = defer(() => this.caller.call(fetchGameRequest(request.externalId, request.locale))).pipe(
       tap((games) =>
         this.logger.info(`fetchGame found ${games.length} results for externalId '${request.externalId}'`),
       ),
@@ -265,7 +267,8 @@ export class IgdbDriver implements DataGatewayDriver {
   }
 
   fetchExpansions(request: proto.FetchExpansionsRequest): Observable<proto.GatewaySearchResult> {
-    return this.caller.call(fetchExpansionsRequest(request.baseExternalId, request.locale)).pipe(
+    // Deferred, as fetchGame is: a malformed base external ID answers an ERROR frame (#1067).
+    return defer(() => this.caller.call(fetchExpansionsRequest(request.baseExternalId, request.locale))).pipe(
       mergeMap((games) => from(games)),
       map((game) => ({
         correlationId: request.correlationId,

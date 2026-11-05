@@ -2210,9 +2210,9 @@ describe('AbilityFactory', () => {
         expect(ability.can(action, 'PlatformGame')).toBe(false);
       }
 
-      // `GameSearch` among them: an anonymous user searches the game catalog,
-      // and never asks the DataGateways on the server's credentials (#1076).
-      for (const subjectType of ['Household', 'Event', 'User', 'UserProfile', 'GameSearch'] as const) {
+      // `DataGatewaySearch` among them: an anonymous user searches the game
+      // catalog, and never asks the DataGateways on the server's credentials (#1076).
+      for (const subjectType of ['Household', 'Event', 'User', 'UserProfile', 'DataGatewaySearch'] as const) {
         expect(ability.can(Action.read, subjectType)).toBe(false);
       }
     });

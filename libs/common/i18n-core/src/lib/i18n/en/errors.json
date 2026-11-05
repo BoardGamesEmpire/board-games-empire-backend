@@ -290,6 +290,7 @@
     "no_source_selected": "At least one of includeLocal or includeExternal must be true",
     "already_active": "Search with correlationId {correlationId} is already active",
     "data_gateways_forbidden": "Searching beyond this server is not available to you. You can still search the games this server knows about.",
+    "expansions_target_exactly_one": "Name the base game whose expansions you want: a DataGateway and the game's external ID there, or the game's ID on this server, but not both.",
     "local_failed": "Local search failed",
     "external_failed": "External search failed",
     "rate_limited": "Rate limited — please try again shortly",

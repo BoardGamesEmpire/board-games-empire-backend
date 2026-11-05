@@ -2,7 +2,7 @@ import { AuditContextService } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, PlatformType, ResourceType, ContentType as StoredContentType } from '@bge/database';
-import { gameListScope } from '@bge/game';
+import { gameListScope, GameService } from '@bge/game';
 import type {
   WsClientData,
   WsRateLimitedPayload,
@@ -81,7 +81,9 @@ describe('GameSearchGateway', () => {
     abilityService.getCurrentResourceConditions.mockReturnValue([FRAME_READ]);
     // The frame's actor may ask the DataGateways unless a test says otherwise (#1076).
     abilityService.getCurrentAbilities.mockReturnValue([
-      { can: (action: Action, subject: unknown) => action === Action.read && subject === ResourceType.GameSearch },
+      {
+        can: (action: Action, subject: unknown) => action === Action.read && subject === ResourceType.DataGatewaySearch,
+      },
     ] as never);
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
@@ -107,6 +109,8 @@ describe('GameSearchGateway', () => {
           provide: GatewayCoordinatorClientService,
           useValue: coordinator,
         },
+        // Never asked: a WebSocket search lists no expansions (#1067).
+        { provide: GameService, useValue: {} },
         {
           provide: AuthService,
           useValue: { verifyToken: jest.fn() },
@@ -585,6 +589,28 @@ describe('GameSearchGateway', () => {
         expect(payload.source).toBe('bgg-gw-1');
         expect(payload.games[0].externalId).toBe('174430');
         expect(payload.games[0].title).toBe('Gloomhaven');
+      });
+
+      it('carries the DataGateway result’s Markdown summary in search:result (#862)', async () => {
+        const client = makeSocket(gateway);
+        coordinator.searchGames.mockReturnValue(
+          of(
+            makeResultFrame({
+              game: {
+                externalId: '174430',
+                title: 'Gloomhaven',
+                contentType: ContentType.CONTENT_TYPE_BASE_GAME,
+                summary: 'A *campaign* in a changing world',
+              } as GameSearchData,
+            }),
+            makeSourceDone(),
+          ),
+        );
+
+        await gateway.handleSearchStart(client, makeStartDto());
+
+        const payload = assertEmitted<WsSearchResultPayload>(room('corr-1'), SearchEvents.SearchResult);
+        expect(payload.games[0].summary).toBe('A *campaign* in a changing world');
       });
 
       it('sets inSystem=true on search:result when coordinator marks the game as in-system', async () => {
