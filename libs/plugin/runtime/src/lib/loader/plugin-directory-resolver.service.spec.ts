@@ -251,9 +251,48 @@ describe('PluginDirectoryResolverService', () => {
       await expect(resolver.confirm({ ...resolved })).resolves.toStrictEqual(resolved);
     });
 
+    it('accepts the artifact directory spelled through a symlinked plugins root, returning its real paths (#224)', async () => {
+      // A configured root behind a link (a bind mount, or macOS's /var →
+      // /private/var) is one the loader resolves at boot, so a caller that
+      // builds the path from the configured root names the right directory.
+      const linkParent = await realpath(await mkdtemp(join(tmpdir(), 'bge-plugins-link-')));
+
+      try {
+        await scaffold(pluginsRoot, 'demo-sink', ['manifest.json', 'package.json']);
+        const linkedRoot = join(linkParent, 'plugins');
+        await symlink(pluginsRoot, linkedRoot);
+        const linkedResolver = new PluginDirectoryResolverService({ ...options(), pluginsRoot: linkedRoot });
+        const spelled = join(linkedRoot, 'demo-sink', SHA_A);
+        const realDir = join(pluginsRoot, 'demo-sink', SHA_A);
+
+        await expect(
+          linkedResolver.confirm({
+            slug: 'demo-sink',
+            sha256: SHA_A,
+            rootDir: spelled,
+            manifestPath: join(spelled, 'manifest.json'),
+            packageJsonPath: join(spelled, 'package.json'),
+          }),
+        ).resolves.toStrictEqual({
+          slug: 'demo-sink',
+          sha256: SHA_A,
+          rootDir: realDir,
+          manifestPath: join(realDir, 'manifest.json'),
+          packageJsonPath: join(realDir, 'package.json'),
+        });
+      } finally {
+        await rm(linkParent, { recursive: true, force: true });
+      }
+    });
+
     it('refuses a directory that is not where its checksum names, such as a temporary extraction directory (#224)', async () => {
       await scaffold(pluginsRoot, 'demo-sink', ['manifest.json', 'package.json']);
+      // A real directory holding the same files, so the refusal is about
+      // where it is, not that its path fails to resolve.
       const elsewhere = join(pluginsRoot, '.incoming', randomUUID());
+      await mkdir(elsewhere, { recursive: true });
+      await writeFile(join(elsewhere, 'manifest.json'), '{}');
+      await writeFile(join(elsewhere, 'package.json'), '{}');
 
       const failure = await resolver
         .confirm({

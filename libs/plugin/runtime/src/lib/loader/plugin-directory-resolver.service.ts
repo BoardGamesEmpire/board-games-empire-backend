@@ -96,11 +96,17 @@ export class PluginDirectoryResolverService {
    * A caller's directory elsewhere (a temporary extraction directory, say)
    * is refused, as is a checksum that is not 64 lowercase hex characters.
    * Returns the resolved directory, whose paths the caller reads from.
+   *
+   * The two are compared as real paths: `resolve()` answers with one, and a
+   * caller that builds the path from a configured root behind a symlink (a
+   * bind mount, or macOS's `/var` → `/private/var`) names the same directory
+   * in a different spelling. Only the resolver's paths are returned, so the
+   * spelling a caller used is never read from.
    */
   async confirm(directory: PluginArtifactDirectory): Promise<PluginArtifactDirectory> {
     const resolved = await this.resolve(directory.slug, directory.sha256);
 
-    if (resolved.rootDir !== directory.rootDir) {
+    if ((await realpathOrNull(directory.rootDir)) !== resolved.rootDir) {
       throw new PluginDirectoryLayoutError(
         directory.slug,
         `directory ${directory.rootDir} is not the artifact directory ${resolved.rootDir} its checksum names`,
