@@ -340,8 +340,11 @@ export class EventNotificationListener {
           notificationType = NotificationType.GameNominationPassed;
           break;
         case NominationStatus.Failed:
-        case NominationStatus.QuorumNotMet:
           notificationType = NotificationType.GameNominationFailed;
+          break;
+        // Not Failed: everyone who voted may have voted For (#798).
+        case NominationStatus.QuorumNotMet:
+          notificationType = NotificationType.GameNominationQuorumNotMet;
           break;
         default:
           return; // Withdrawn etc. — no notification

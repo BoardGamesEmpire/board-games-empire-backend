@@ -26,8 +26,14 @@ export interface VoteTally {
   totalVotes: number;
 }
 
+/** The statuses a resolve can end a nomination in. */
+export type ResolvedStatus =
+  | typeof NominationStatus.Passed
+  | typeof NominationStatus.Failed
+  | typeof NominationStatus.QuorumNotMet;
+
 export interface ResolutionResult {
-  status: NominationStatus;
+  status: ResolvedStatus;
   tally: VoteTally;
   quorumMet: boolean;
   thresholdMet: boolean;

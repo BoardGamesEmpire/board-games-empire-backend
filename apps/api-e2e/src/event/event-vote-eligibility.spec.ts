@@ -5,6 +5,7 @@ import {
   NominationStatus,
   OccurrenceStatus,
   SystemRole,
+  VoteQuorumType,
   VoteThresholdType,
   VoteType,
 } from '@bge/database';
@@ -33,6 +34,8 @@ import {
  * - Everyone reading the votes sees the same marks: whether a voter's role
  *   holds the vote is read for the count, whatever the reader may read of
  *   roles.
+ * - A resolve stores the status the votes give, a nomination short of quorum
+ *   included, and says it in plain words (#798).
  */
 describe('vote eligibility', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -106,11 +109,14 @@ describe('vote eligibility', () => {
   const resolve = (actor: AuthenticatedActor, eventId: string, nominationId: string) =>
     request(baseUrl).post(`${EVENTS_PATH}/${eventId}/nominations/${nominationId}/resolve`).set(actor.headers);
 
-  const resolved = async (actor: AuthenticatedActor, eventId: string, nominationId: string) =>
-    resolutionEnvelope(
-      await resolve(actor, eventId, nominationId).expect(201),
-      'POST /api/events/:eventId/nominations/:nominationId/resolve',
-    );
+  const resolved = async (actor: AuthenticatedActor, eventId: string, nominationId: string) => {
+    const response = await resolve(actor, eventId, nominationId).expect(201);
+
+    return {
+      ...resolutionEnvelope(response, 'POST /api/events/:eventId/nominations/:nominationId/resolve'),
+      message: (response.body as { message?: unknown }).message,
+    };
+  };
 
   /** The host's own attendee row, which creating the event wrote. */
   const hostAttendeeId = async (host: AuthenticatedActor, eventId: string) =>
@@ -204,6 +210,35 @@ describe('vote eligibility', () => {
 
       expect(voteOf(read, await hostAttendeeId(host, eventId))?.eligible).toBe(true);
       expect(voteOf(read, participantId)?.eligible).toBe(true);
+    });
+
+    it('stores QuorumNotMet when too few voted, though every vote was For, and adds no game to the lineup (#798)', async () => {
+      const host = await actors.user();
+      const participants = await Promise.all([actors.user(), actors.user(), actors.user()]);
+      const eventId = await createdEventId(host, {
+        policy: {
+          gameAdditionMode: GameAdditionMode.RequiresVote,
+          voteQuorumType: VoteQuorumType.PercentOfAttendees,
+          voteQuorumValue: 50,
+        },
+      });
+      for (const participant of participants) {
+        await addedAttending(host, eventId, participant);
+      }
+
+      const nominationId = await nominatedByHost(host, eventId);
+      // One For of four voters, where a quorum of half is two.
+      await castVote(host, eventId, nominationId, VoteType.For);
+
+      const { nomination, resolution, message } = await resolved(host, eventId, nominationId);
+
+      expect(resolution.status).toBe(NominationStatus.QuorumNotMet);
+      expect(nomination.status).toBe(NominationStatus.QuorumNotMet);
+      expect(message).toBe("Not enough people voted for the result to count, so the nomination didn't pass.");
+      expect(await db.client.eventGame.count({ where: { nominationId } })).toBe(0);
+
+      // Final, like Failed: nominating the game again starts a new vote.
+      await resolve(host, eventId, nominationId).expect(400);
     });
   });
 

@@ -122,6 +122,11 @@ enum NotificationType {
   GameNominationRejected
   GameNominationFailed
   GameNominationPassed // e.g. after a vote
+  /**
+   * A vote too few took part in for its result to count (#798). Not
+   * GameNominationFailed: everyone who voted may have voted For.
+   */
+  GameNominationQuorumNotMet
 
   GameAddedToEvent
 

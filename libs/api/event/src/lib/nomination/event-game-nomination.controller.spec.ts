@@ -1,4 +1,5 @@
-import { ResourceType } from '@bge/database';
+import { NominationStatus, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
 import { ClsServiceManager } from 'nestjs-cls';
@@ -10,11 +11,12 @@ const PAGINATION = paginationQuery({ limit: 10 });
 
 describe('EventGameNominationController', () => {
   let controller: EventGameNominationController;
-  let service: jest.Mocked<Pick<EventGameNominationService, 'getNominations'>>;
+  let service: jest.Mocked<Pick<EventGameNominationService, 'getNominations' | 'resolveNomination'>>;
 
   beforeEach(() => {
     service = {
       getNominations: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
+      resolveNomination: jest.fn(),
     };
     controller = new EventGameNominationController(service as never);
   });
@@ -60,6 +62,31 @@ describe('EventGameNominationController', () => {
 
       await expect(envelope).rejects.toThrow(ListScopeNotComposedError);
       await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.EventGameNomination}'`);
+    });
+  });
+
+  // #798: the message said "Nomination resolved: QuorumNotMet", a status's
+  // code name. Each outcome gets a message of its own, in plain words.
+  describe('resolve', () => {
+    it.each([
+      { status: NominationStatus.Passed, key: 'success.nomination.passed' as const },
+      { status: NominationStatus.Failed, key: 'success.nomination.failed' as const },
+      { status: NominationStatus.QuorumNotMet, key: 'success.nomination.quorum_not_met' as const },
+    ])('says a $status outcome in words of its own', async ({ status, key }) => {
+      const nomination = { id: 'nom-1' } as NominationDetail;
+      const resolution = {
+        status,
+        tally: { forCount: 0, againstCount: 0, interestedCount: 0, totalVotes: 0 },
+        quorumMet: status !== NominationStatus.QuorumNotMet,
+        thresholdMet: status === NominationStatus.Passed,
+        eligibleVoterCount: 0,
+      };
+      service.resolveNomination.mockResolvedValue({ nomination, resolution });
+
+      const response = await firstValueFrom(controller.resolve('event-1', 'nom-1'));
+
+      expect(service.resolveNomination).toHaveBeenCalledWith('event-1', 'nom-1');
+      expect(response).toEqual({ message: t(key), nomination, resolution });
     });
   });
 });

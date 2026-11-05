@@ -7,7 +7,7 @@ import {
   VoteThresholdType,
   VoteType,
 } from '@bge/database';
-import type { ResolutionResult, VoteTally, VotingPolicy } from '../interfaces/vote.interface';
+import type { ResolutionResult, ResolvedStatus, VoteTally, VotingPolicy } from '../interfaces/vote.interface';
 import { countsAsVoter, type VoterGrant } from './vote-grant';
 
 export class VoteResolver {
@@ -26,7 +26,7 @@ export class VoteResolver {
     const quorumMet = this.checkQuorum(tally.totalVotes, eligibleCount, policy);
     const thresholdMet = this.checkThreshold(tally, eligibleCount, policy);
 
-    let status: NominationStatus;
+    let status: ResolvedStatus;
     if (!quorumMet) {
       status = NominationStatus.QuorumNotMet;
     } else if (thresholdMet) {

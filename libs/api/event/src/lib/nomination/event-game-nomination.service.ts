@@ -475,8 +475,10 @@ export class EventGameNominationService {
         async (tx, occurrenceId) => {
           const policy = await this.getEffectivePolicy(eventId, occurrenceId ?? undefined, tx);
           const resolution = await this.countVotes(tx, eventId, nomination.id, policy);
+          // The resolver's status is stored as it is, so a vote short of
+          // quorum doesn't pass, whatever its few votes say (#798).
           return {
-            outcome: resolution.thresholdMet ? NominationStatus.Passed : NominationStatus.Failed,
+            outcome: resolution.status,
             resolution,
             voteEligibility: policy.voteEligibility,
           };
@@ -499,7 +501,7 @@ export class EventGameNominationService {
 
       return {
         nomination: await this.withVoteEligibilityOf(eventId, updated, decision.voteEligibility),
-        resolution: { ...decision.resolution, status: decision.outcome },
+        resolution: decision.resolution,
       };
     } catch (error) {
       this.logger.error(`Error resolving nomination ${nominationId} for event ${eventId}`, error);

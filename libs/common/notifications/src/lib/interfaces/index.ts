@@ -152,7 +152,7 @@ export interface GameNominatedPayload extends EventRefPayload {
   nominatedGameTitle: string;
 }
 
-/** A nomination the recipient created was resolved (approved/rejected/passed/failed). */
+/** A nomination the recipient created was resolved (approved/rejected/passed/failed/short of quorum). */
 export interface NominationOutcomePayload {
   eventId: string;
   nominationId: string;
@@ -299,6 +299,7 @@ export type NotificationPayloadMap = {
   [NotificationType.GameNominationRejected]: NominationOutcomePayload;
   [NotificationType.GameNominationPassed]: NominationOutcomePayload;
   [NotificationType.GameNominationFailed]: NominationOutcomePayload;
+  [NotificationType.GameNominationQuorumNotMet]: NominationOutcomePayload;
   [NotificationType.GameAddedToEvent]: GameAddedToEventPayload;
   // Occurrence lifecycle — Confirmed/Canceled/Declined are emitted today;
   // Proposed/Rescheduled are not yet, but share the same shape.

@@ -312,6 +312,18 @@ describe('EventNotificationListener', () => {
       );
     });
 
+    // "Your nomination failed" misleads when everyone who voted voted For: too
+    // few voted for the result to count, and the type is how the client says so.
+    it('notifies the nominator with GameNominationQuorumNotMet when too few voted (#798)', async () => {
+      await listener.onNominationResolved(makeResolvedEvent(NominationStatus.QuorumNotMet, null));
+
+      expect(notifications.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: NotificationType.GameNominationQuorumNotMet,
+        }),
+      );
+    });
+
     it('does not notify on Withdrawn status', async () => {
       await listener.onNominationResolved(makeResolvedEvent(NominationStatus.Withdrawn, null));
 
