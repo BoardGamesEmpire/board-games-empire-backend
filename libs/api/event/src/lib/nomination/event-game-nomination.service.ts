@@ -38,6 +38,7 @@ import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary
 import { CastVoteDto } from '../dto/cast-vote.dto';
 import { assertEventExists, requireEvent, resolveActingAttendeeId } from '../event-access.helpers';
 import { ResolutionResult, VotingPolicy } from '../interfaces/vote.interface';
+import { GAME_VOTE_SLUG, voterGrantSelect } from '../vote/vote-grant';
 import { AttendeeStub, VoteResolver } from '../vote/vote-resolver';
 import { DirectAddGameDto } from './dto/direct-add-game.dto';
 import { NominateGameDto } from './dto/nominate-game.dto';
@@ -981,12 +982,14 @@ function effectivePolicy(eventPolicy: EventPolicy | null, occPolicy: EventOccurr
 /**
  * What decides whether a voter's vote counts (`VoteResolver.isEligibleVoter`).
  * One entry on their list is enough to tell whether they offer games, so no
- * more are read.
+ * more are read. Their account and their event role's grant of the game vote
+ * decide it too (#759).
  */
 const VOTER_SELECT = {
   status: true,
   removedAt: true,
   availableGames: { where: NOT_REMOVED, select: { id: true }, take: 1 },
+  ...voterGrantSelect(GAME_VOTE_SLUG),
 } as const satisfies Prisma.EventAttendeeSelect;
 
 const NOMINATION_INCLUDE = {

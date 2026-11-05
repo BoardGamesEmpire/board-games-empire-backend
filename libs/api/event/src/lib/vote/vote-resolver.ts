@@ -7,8 +7,8 @@ import {
   VoteThresholdType,
   VoteType,
 } from '@bge/database';
-import { isOutOfEvent } from '../attendee/attendance';
 import type { ResolutionResult, VoteTally, VotingPolicy } from '../interfaces/vote.interface';
+import { countsAsVoter, type VoterGrant } from './vote-grant';
 
 export class VoteResolver {
   /**
@@ -104,9 +104,11 @@ export class VoteResolver {
   /**
    * Whether an attendee's vote counts under the policy. No one who is out of
    * the event counts, under any rule: removed by a host, or not attending.
+   * Nor does anyone who can't cast the vote: an attendee without an account,
+   * or whose event role doesn't hold the vote (#759).
    */
   static isEligibleVoter(attendee: AttendeeStub, eligibility: VoteEligibility): boolean {
-    if (isOutOfEvent(attendee)) {
+    if (!countsAsVoter(attendee)) {
       return false;
     }
 
@@ -172,7 +174,7 @@ export class VoteResolver {
   }
 }
 
-export interface AttendeeStub {
+export interface AttendeeStub extends VoterGrant {
   status: EventParticipationStatus;
   removedAt: Date | null;
   /** The games they offer, without the ones taken back. */

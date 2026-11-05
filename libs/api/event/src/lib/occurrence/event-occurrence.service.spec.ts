@@ -1,6 +1,7 @@
 import {
   Action,
   AvailabilityResponse,
+  EventAttendee,
   EventAvailabilityVote,
   EventOccurrence,
   EventParticipationStatus,
@@ -18,6 +19,7 @@ import {
   createTestingModuleWithDb,
   makeEventAttendee,
   makeEventOccurrence,
+  makeVoterRole,
   MOCK_ACTING_USER_ID,
   paginationQuery,
   rawQueryText,
@@ -46,19 +48,52 @@ const isCancelRead = (query: unknown) => /cancelled_at/.test(rawQueryText(query)
 
 /**
  * A vote as the vote read selects it, with the occurrence it is matched back
- * to, cast by an attendee who is attending unless `attendee` says otherwise.
+ * to, cast by an attendee who is attending and whose event role holds the
+ * availability vote, unless `attendee` says otherwise.
  */
 const vote = (
   id: string,
   occurrenceId: string,
-  attendee: { status?: EventParticipationStatus; removedAt?: Date | null } = {},
+  attendee: {
+    status?: EventParticipationStatus;
+    removedAt?: Date | null;
+    role?: ReturnType<typeof makeVoterRole> | null;
+  } = {},
 ) => ({
   id,
   occurrenceId,
   attendeeId: `att-${id}`,
   response: AvailabilityResponse.Available,
-  attendee: { userId: `user-${id}`, status: EventParticipationStatus.Attending, removedAt: null, ...attendee },
+  attendee: {
+    userId: `user-${id}`,
+    status: EventParticipationStatus.Attending,
+    removedAt: null,
+    role: makeVoterRole(),
+    ...attendee,
+  },
 });
+
+/**
+ * What the attendee reads select to tell whether a voter's event role holds
+ * the availability vote, live, not retired and not a denial (#759). Written out rather than
+ * taken from `voterGrantSelect`, so the reads are checked against it.
+ */
+const AVAILABILITY_GRANT_SELECT = {
+  userId: true,
+  role: {
+    select: {
+      role: {
+        select: {
+          permissions: {
+            where: { permission: { is: { slug: 'create:event_availability_vote', retiredAt: null, inverted: false } } },
+            select: { id: true },
+            take: 1,
+          },
+        },
+      },
+    },
+  },
+};
 
 /** A vote as the occurrence routes serve it: the voter's user alone, and whether the vote counts. */
 const servedVote = (id: string, eligible = true) => ({
@@ -312,9 +347,26 @@ describe('EventOccurrenceService', () => {
       expect(rows[0].availabilityVotes).toEqual([servedVote('v1'), servedVote('v2', false), servedVote('v3', false)]);
       expect(db.eventAvailabilityVote.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          select: expect.objectContaining({ attendee: { select: { userId: true, status: true, removedAt: true } } }),
+          select: expect.objectContaining({
+            attendee: { select: { status: true, removedAt: true, ...AVAILABILITY_GRANT_SELECT } },
+          }),
         }),
       );
+    });
+
+    // #759: the same mark the availability summary gives. A vote cast under a
+    // role that has since lost the availability vote, such as a participant
+    // added back as a spectator, is served and marked as not counting.
+    it('marks the vote of a voter whose event role does not hold the availability vote as not counting (#759)', async () => {
+      db.eventAvailabilityVote.findMany.mockResolvedValue([
+        vote('v1', 'occ-1'),
+        vote('v2', 'occ-1', { role: makeVoterRole(false) }),
+        vote('v3', 'occ-1', { role: null }),
+      ] as never);
+
+      const { rows } = await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
+
+      expect(rows[0].availabilityVotes).toEqual([servedVote('v1'), servedVote('v2', false), servedVote('v3', false)]);
     });
 
     it('reads no votes or games for an empty page', async () => {
@@ -1179,12 +1231,14 @@ describe('EventOccurrenceService', () => {
     // and a `participationRate` above 1.
     it('counts only the votes of the attendees it counts, on the occurrences it returns', async () => {
       db.eventAttendee.findMany.mockResolvedValue([
-        makeEventAttendee({
-          id: 'att-1',
-          eventId: 'event-1',
-          userId: 'user-1',
-          status: EventParticipationStatus.Attending,
-        }),
+        withVoteGrant(
+          makeEventAttendee({
+            id: 'att-1',
+            eventId: 'event-1',
+            userId: 'user-1',
+            status: EventParticipationStatus.Attending,
+          }),
+        ),
       ]);
       db.eventOccurrence.findMany.mockResolvedValue([makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' })]);
       db.eventAvailabilityVote.findMany.mockResolvedValue([
@@ -1216,9 +1270,13 @@ describe('EventOccurrenceService', () => {
     // counting; no count includes it, and they are no eligible voter.
     it('lists the vote of an attendee not attending without counting it', async () => {
       db.eventAttendee.findMany.mockResolvedValue([
-        makeEventAttendee({ id: 'att-1', eventId: 'event-1', status: EventParticipationStatus.Attending }),
-        makeEventAttendee({ id: 'att-2', eventId: 'event-1', status: EventParticipationStatus.NotAttending }),
-        makeEventAttendee({ id: 'att-3', eventId: 'event-1', status: EventParticipationStatus.Maybe }),
+        withVoteGrant(
+          makeEventAttendee({ id: 'att-1', eventId: 'event-1', status: EventParticipationStatus.Attending }),
+        ),
+        withVoteGrant(
+          makeEventAttendee({ id: 'att-2', eventId: 'event-1', status: EventParticipationStatus.NotAttending }),
+        ),
+        withVoteGrant(makeEventAttendee({ id: 'att-3', eventId: 'event-1', status: EventParticipationStatus.Maybe })),
       ]);
       db.eventOccurrence.findMany.mockResolvedValue([makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' })]);
       db.eventAvailabilityVote.findMany.mockResolvedValue([
@@ -1244,6 +1302,52 @@ describe('EventOccurrenceService', () => {
         }),
       ]);
     });
+
+    // #759: a spectator or event moderator attends, but their event role can't vote
+    // on dates. A vote one of them cast under an earlier role is listed, and
+    // counts toward nothing.
+    it('counts no spectator or event moderator among the eligible voters, and marks their vote as not counting (#759)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([
+        withVoteGrant(
+          makeEventAttendee({ id: 'att-1', eventId: 'event-1', status: EventParticipationStatus.Attending }),
+        ),
+        {
+          ...makeEventAttendee({ id: 'att-2', eventId: 'event-1', status: EventParticipationStatus.Attending }),
+          role: makeVoterRole(false),
+        } as EventAttendee,
+      ]);
+      db.eventOccurrence.findMany.mockResolvedValue([makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' })]);
+      db.eventAvailabilityVote.findMany.mockResolvedValue([
+        { occurrenceId: 'occ-1', attendeeId: 'att-1', response: AvailabilityResponse.Available },
+        { occurrenceId: 'occ-1', attendeeId: 'att-2', response: AvailabilityResponse.Available },
+      ] as EventAvailabilityVote[]);
+
+      const summary = await service.getAvailabilitySummary('event-1');
+
+      expect(summary.eligibleVoters).toBe(1);
+      expect(summary.occurrences).toEqual([
+        expect.objectContaining({
+          available: 1,
+          totalVotes: 1,
+          pendingVotes: 0,
+          participationRate: 1,
+          voters: [
+            { attendeeId: 'att-1', response: AvailabilityResponse.Available, eligible: true },
+            { attendeeId: 'att-2', response: AvailabilityResponse.Available, eligible: false },
+          ],
+        }),
+      ]);
+    });
+
+    it("reads each attendee's role grant for the availability vote (#759)", async () => {
+      await service.getAvailabilitySummary('event-1');
+
+      expect(db.eventAttendee.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining(AVAILABILITY_GRANT_SELECT),
+        }),
+      );
+    });
   });
 
   it('propagates the ForbiddenException raised on empty conditions', async () => {
@@ -1255,3 +1359,8 @@ describe('EventOccurrenceService', () => {
     await expect(service.getOccurrences('event-1', paginationQuery({ limit: 10 }))).rejects.toThrow(ForbiddenException);
   });
 });
+
+/** An attendee whose event role holds the availability vote, as the summary reads them (#759). */
+function withVoteGrant(attendee: EventAttendee): EventAttendee {
+  return { ...attendee, role: makeVoterRole() } as EventAttendee;
+}

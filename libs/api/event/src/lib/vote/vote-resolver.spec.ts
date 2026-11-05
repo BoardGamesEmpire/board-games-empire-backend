@@ -7,6 +7,7 @@ import {
   VoteThresholdType,
   VoteType,
 } from '@bge/database';
+import { makeVoterRole } from '@bge/testing';
 import type { VotingPolicy } from '../interfaces/vote.interface';
 import { VoteResolver, type AttendeeStub } from './vote-resolver';
 
@@ -107,6 +108,34 @@ describe('VoteResolver', () => {
       const removed = { ...makeAttendee(EventParticipationStatus.Attending, 1), removedAt: new Date() };
 
       expect(VoteResolver.isEligibleVoter(removed, eligibility)).toBe(false);
+    });
+
+    // #759: an attendee counts as a voter only when their event role holds
+    // the vote, and they have an account someone can cast it as.
+    const eligibilities = Object.values(VoteEligibility).map((eligibility) => ({ eligibility }));
+
+    it.each(eligibilities)(
+      'counts no attendee whose event role does not hold the vote, under $eligibility',
+      ({ eligibility }) => {
+        const spectator = {
+          ...makeAttendee(EventParticipationStatus.Attending, 1),
+          role: makeVoterRole(false),
+        };
+
+        expect(VoteResolver.isEligibleVoter(spectator, eligibility)).toBe(false);
+      },
+    );
+
+    it.each(eligibilities)('counts no attendee without an event role, under $eligibility', ({ eligibility }) => {
+      const roleless = { ...makeAttendee(EventParticipationStatus.Attending, 1), role: null };
+
+      expect(VoteResolver.isEligibleVoter(roleless, eligibility)).toBe(false);
+    });
+
+    it.each(eligibilities)('counts no attendee without an account, under $eligibility', ({ eligibility }) => {
+      const withoutAccount = { ...makeAttendee(EventParticipationStatus.Attending, 1), userId: null };
+
+      expect(VoteResolver.isEligibleVoter(withoutAccount, eligibility)).toBe(false);
     });
   });
 
@@ -403,6 +432,34 @@ describe('VoteResolver', () => {
 
       expect(VoteResolver.resolve(ballot, policy, [voter]).status).toBe(NominationStatus.Passed);
     });
+
+    it('passes a Unanimous nomination when every attendee whose role votes voted For, with a spectator attending (#759)', () => {
+      const voter = makeAttendee();
+      const spectator = { ...makeAttendee(), role: makeVoterRole(false) };
+
+      const result = VoteResolver.resolve(
+        [vote(VoteType.For, voter)],
+        makePolicy({ voteThresholdType: VoteThresholdType.Unanimous }),
+        [voter, spectator],
+      );
+
+      expect(result.eligibleVoterCount).toBe(1);
+      expect(result.status).toBe(NominationStatus.Passed);
+    });
+
+    it('does not count the vote of a voter whose role has since lost the vote, and counts it again once the role has it back (#759)', () => {
+      const demoted: AttendeeStub = { ...makeAttendee(), role: makeVoterRole(false) };
+      const cast = [vote(VoteType.For, makeAttendee()), vote(VoteType.Against, demoted)];
+
+      const before = VoteResolver.resolve(cast, makePolicy(), [makeAttendee(), demoted]);
+
+      expect(before.status).toBe(NominationStatus.Passed);
+      expect(before.tally.totalVotes).toBe(1);
+
+      demoted.role = makeVoterRole();
+
+      expect(VoteResolver.resolve(cast, makePolicy(), [makeAttendee(), demoted]).status).toBe(NominationStatus.Failed);
+    });
   });
 });
 
@@ -418,11 +475,14 @@ function makePolicy(overrides: Partial<VotingPolicy> = {}): VotingPolicy {
   };
 }
 
+/** An attendee with an account, whose event role holds the vote. */
 function makeAttendee(
   status: EventParticipationStatus = EventParticipationStatus.Attending,
   gameCount = 0,
 ): AttendeeStub {
   return {
+    userId: 'user-x',
+    role: makeVoterRole(),
     status,
     removedAt: null,
     availableGames: Array.from({ length: gameCount }, (_, i) => ({

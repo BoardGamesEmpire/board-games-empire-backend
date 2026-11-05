@@ -108,6 +108,14 @@ export function makeEventAttendeeRole(
   };
 }
 
+/**
+ * An attendee's event role as the vote counts read it (#759): the role's grant
+ * of the vote's permission, or none when `holdsVote` is false.
+ */
+export function makeVoterRole(holdsVote = true): { role: { permissions: { id: string }[] } } {
+  return { role: { permissions: holdsVote ? [{ id: 'rp-1' }] : [] } };
+}
+
 export function makeEventAttendeeGameList(
   attendeeId: string,
   collectionId: string,

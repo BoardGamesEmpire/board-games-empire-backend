@@ -26,6 +26,7 @@ import {
   createMockAbilityService,
   createMockDatabaseService,
   createTestingModuleWithDb,
+  makeVoterRole,
   paginationQuery,
   rawQueryText,
   type MockAbilityService,
@@ -198,6 +199,54 @@ describe('EventGameNominationService', () => {
       expect(db.eventOccurrencePolicy.findMany).toHaveBeenCalledWith({ where: { occurrenceId: { in: ['occ-1'] } } });
       expect(nomination.votes).toEqual([expect.objectContaining({ id: 'vote-1', eligible: true })]);
     });
+
+    it('marks the vote of a voter whose event role does not hold the vote as not counting (#759)', async () => {
+      db.eventGameNomination.findUnique.mockResolvedValue(
+        nominationRow({ votes: [voteRow('vote-spectator', voter(EventParticipationStatus.Attending, null, false))] }),
+      );
+
+      const nomination = await service.getNomination('event-1', 'nom-1');
+
+      expect(nomination.votes).toEqual([expect.objectContaining({ id: 'vote-spectator', eligible: false })]);
+    });
+  });
+
+  // #759: whether a voter counts follows their event role's grant of the game
+  // vote as it is now, whichever role holds it and whoever added the edge. A
+  // retired permission confers nothing, nor does one an operator inverted into
+  // a denial.
+  it("resolveNomination reads each voter's role grant for the game vote, live, unretired and not a denial", async () => {
+    db.eventGameNomination.findUnique.mockResolvedValue(openNomination());
+    db.eventGameVote.findMany.mockResolvedValue([{ voteType: VoteType.For, attendeeId: 'att-in' }] as never);
+    db.eventAttendee.findMany.mockResolvedValue([
+      { id: 'att-in', ...voter(EventParticipationStatus.Attending) },
+    ] as never);
+    mockSettleLocks(db, lockedSupplier(), { status: NominationStatus.Open });
+    db.eventGameNomination.update.mockResolvedValue(nominationRow({ status: NominationStatus.Passed }));
+    db.eventGame.create.mockResolvedValue({ id: 'eg-1', nominationId: 'nom-1' } as EventGame);
+
+    await service.resolveNomination('event-1', 'nom-1');
+
+    expect(db.eventAttendee.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          userId: true,
+          role: {
+            select: {
+              role: {
+                select: {
+                  permissions: {
+                    where: { permission: { is: { slug: 'create:event_game_vote', retiredAt: null, inverted: false } } },
+                    select: { id: true },
+                    take: 1,
+                  },
+                },
+              },
+            },
+          },
+        }),
+      }),
+    );
   });
 
   // The resolver counts only the votes of eligible voters, and its pool is
@@ -1211,9 +1260,19 @@ function mockSettleLocks(
     .mockResolvedValueOnce([{ occurrenceId: null, ...nomination }] as never);
 }
 
-/** A voter as the reads select them: what decides whether their vote counts. */
-function voter(status: EventParticipationStatus, removedAt: Date | null = null) {
-  return { status, removedAt, availableGames: [] };
+/**
+ * A voter as the reads select them: what decides whether their vote counts.
+ * They have an account, and their event role holds the game vote unless
+ * `grant` is false.
+ */
+function voter(status: EventParticipationStatus, removedAt: Date | null = null, grant = true) {
+  return {
+    userId: 'user-x',
+    role: makeVoterRole(grant),
+    status,
+    removedAt,
+    availableGames: [],
+  };
 }
 
 /** A vote as the nomination include reads it, cast For by `attendee`. */
