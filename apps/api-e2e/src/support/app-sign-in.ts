@@ -126,7 +126,7 @@ export async function appSignInThroughProvider(
     throw new Error(`app sign-in did not reach the provider: ${start.status} ${start.location.href}`);
   }
 
-  const ticket = await registerTicket(fakeProviderUrl(), claims, options.idToken);
+  const ticket = await registerTicket(fakeProviderUrl(), claims, { idToken: options.idToken });
 
   const authorize = new URL(start.location);
   authorize.searchParams.set('ticket', ticket);

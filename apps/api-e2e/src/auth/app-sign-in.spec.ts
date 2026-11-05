@@ -384,7 +384,7 @@ describe('signing in from a native app (#1019)', () => {
     // cookie, and the app learns the sign-in must start again (#1050).
     it('tells the app when its sign-in outlived the state cookie (#1050)', async () => {
       const start = await startAppSignIn(baseUrl, { state: 'kept' });
-      const ticket = await registerTicket(fakeProviderUrl(), claimsOf(freshIdentity()), undefined);
+      const ticket = await registerTicket(fakeProviderUrl(), claimsOf(freshIdentity()));
       const authorize = new URL(start.location);
       authorize.searchParams.set('ticket', ticket);
       const callbackUrl = await nextLocation(baseUrl, authorize);

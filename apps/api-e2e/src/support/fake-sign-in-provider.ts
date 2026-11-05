@@ -17,14 +17,17 @@ import type { AddressInfo } from 'node:net';
  * nonce, and how many times `/userinfo` was asked.
  *
  * The main discovery document publishes no JWKS, and its token response carries
- * no ID token, so better-auth reads the claims from `/userinfo`. The one under
- * `/signed` publishes a JWKS, so better-auth sends a nonce and takes the claims
- * from the ID token the token response then carries, signed with the key the
- * JWKS lists, once it has checked the signature, issuer, audience, expiry and
- * nonce (#1016). A test spoils that token by registering its ticket with
- * `?idToken=` and one of {@link ID_TOKEN_FAULTS}. `POST /id-tokens` signs claims as
- * they are given, for a test that submits a token the API's own flow never
- * produced.
+ * no ID token, so the claims reach the API from `/userinfo` alone. The one under
+ * `/signed` publishes a JWKS, so better-auth sends a nonce and checks the ID
+ * token the token response then carries, signed with the key the JWKS lists:
+ * its signature, issuer, audience, expiry and nonce (#1016). A test spoils that
+ * token by registering its ticket with `?idToken=` and one of
+ * {@link ID_TOKEN_FAULTS}. `POST /id-tokens` signs claims as they are given, for
+ * a test that submits a token the API's own flow never produced.
+ *
+ * The ID token carries the ticket's claims. `/userinfo` answers them too,
+ * unless the ticket was registered with UserInfo claims of its own, so that a
+ * test can have the two sources disagree, as a real provider's can (#993).
  *
  * The API reaches this address because provider requests do not pass through
  * its outbound HTTP policy yet; when they do (#982), the harness must allow it.
@@ -62,7 +65,10 @@ function isIdTokenFault(value: string): value is IdTokenFault {
 
 /** What the API sent the provider, and asked of it, as one sign-in's ticket. */
 interface Ticket {
+  /** What the ID token says about the user, and `/userinfo` too unless {@link userInfoClaims} is set. */
   readonly claims: Record<string, unknown>;
+  /** What `/userinfo` answers in place of the claims, when the test gave it something else to say (#993). */
+  readonly userInfoClaims?: Record<string, unknown>;
   readonly idTokenFault?: IdTokenFault;
   /** The `scope` the authorization request asked for, once one has. */
   scope?: string;
@@ -138,6 +144,25 @@ async function readClaims(
   }
 
   return claims;
+}
+
+/**
+ * A ticket's claims and its UserInfo claims, if any (#993), or `undefined`
+ * once the request is answered with 400 because either is not a JSON object.
+ */
+async function readTicketClaims(
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<Pick<Ticket, 'claims' | 'userInfoClaims'> | undefined> {
+  const body: unknown = JSON.parse(await readBody(request));
+  const claims = isRecord(body) ? body['claims'] : undefined;
+  const userInfo = isRecord(body) ? body['userInfo'] : undefined;
+  if (!isRecord(claims) || (userInfo !== undefined && !isRecord(userInfo))) {
+    sendJson(response, 400, { error: 'claims and userInfo must be JSON objects' });
+    return undefined;
+  }
+
+  return { claims, userInfoClaims: userInfo };
 }
 
 /** A token request's fields, whether it was sent as a form or as JSON. */
@@ -226,8 +251,8 @@ export async function startFakeSignInProvider(): Promise<FakeSignInProvider> {
     }
 
     if (request.method === 'POST' && pathname === '/tickets') {
-      const claims = await readClaims(request, response);
-      if (claims === undefined) {
+      const registered = await readTicketClaims(request, response);
+      if (registered === undefined) {
         return;
       }
 
@@ -238,7 +263,7 @@ export async function startFakeSignInProvider(): Promise<FakeSignInProvider> {
       }
 
       const ticket = randomUUID();
-      tickets.set(ticket, { claims, idTokenFault: fault ?? undefined, userInfoCalls: 0 });
+      tickets.set(ticket, { ...registered, idTokenFault: fault ?? undefined, userInfoCalls: 0 });
       sendJson(response, 201, { ticket });
       return;
     }
@@ -334,7 +359,7 @@ export async function startFakeSignInProvider(): Promise<FakeSignInProvider> {
       }
 
       ticket.userInfoCalls += 1;
-      sendJson(response, 200, ticket.claims);
+      sendJson(response, 200, ticket.userInfoClaims ?? ticket.claims);
       return;
     }
 
