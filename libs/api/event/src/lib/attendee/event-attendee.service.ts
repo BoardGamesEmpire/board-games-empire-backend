@@ -11,7 +11,7 @@ import {
   SystemRole,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
+import { AbilityService, PermissionsService, resolveActingUserIdOrNull, ScopeComposer } from '@bge/permissions';
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import {
   BadRequestException,
@@ -285,10 +285,11 @@ export class EventAttendeeService {
    */
   async removeAttendee(eventId: string, attendeeId: string): Promise<EventAttendee> {
     const initiatedAt = new Date();
-    // Attribution guard, not payload data: removal must be performed by a
-    // user-attributed actor — system/external actors throw here instead of
-    // silently removing attendees. The value itself rides CLS for the audit row.
-    this.abilityService.getActingUserId();
+    // Attribution guard: removal must be performed by a user-attributed
+    // actor — system/external actors throw here instead of silently removing
+    // attendees. The id also rides the domain event, so the listener can tell the
+    // person removed unless they removed themselves (#802).
+    const actingUserId = this.abilityService.getActingUserId();
     await assertEventExists(this.db, eventId);
 
     const attendee = await this.db.eventAttendee.findUnique({
@@ -334,6 +335,7 @@ export class EventAttendeeService {
         new AttendeeRemovedEvent(
           { ...snapshot, removedAt: null },
           { ...snapshot, removedAt: removed.removedAt },
+          actingUserId,
           initiatedAt,
         ),
       );
@@ -355,11 +357,12 @@ export class EventAttendeeService {
 
   async updateStatus(eventId: string, attendeeId: string, dto: UpdateAttendeeStatusDto): Promise<EventAttendee> {
     const initiatedAt = new Date();
+    const actingUserId = resolveActingUserIdOrNull(this.abilityService);
     await assertEventExists(this.db, eventId);
 
     const existing = await this.db.eventAttendee.findUnique({
       where: { id: attendeeId, eventId, ...NOT_REMOVED },
-      select: { id: true, userId: true, status: true },
+      select: { id: true, userId: true },
     });
 
     if (!existing) {
@@ -375,7 +378,17 @@ export class EventAttendeeService {
       // Not attending takes the attendee out of the event, and any other
       // answer brings them back in (#551): the games they supply follow, in
       // the same transaction.
-      const { updated, changes } = await this.db.$transaction(async (tx) => {
+      const { previous, updated, changes } = await this.db.$transaction(async (tx) => {
+        // The status this write replaces, read under the row lock the update
+        // takes anyway. The read above runs before the lock, so two RSVPs
+        // racing each other would both report the status neither left, and
+        // the listener would take the second for an RSVP sent again
+        // unchanged and tell nobody (#802). A row gone by now fails the
+        // update below, as before.
+        const [previous] = await tx.$queryRaw<{ status: EventParticipationStatus }[]>(
+          Prisma.sql`SELECT status FROM event_attendees WHERE id = ${attendeeId} FOR NO KEY UPDATE`,
+        );
+
         const updated = await tx.eventAttendee.update({
           where: {
             id: attendeeId,
@@ -391,14 +404,15 @@ export class EventAttendeeService {
           include: ATTENDEE_INCLUDE,
         });
 
-        return { updated, changes: await syncSuppliedGames(tx, updated, initiatedAt) };
+        return { previous, updated, changes: await syncSuppliedGames(tx, updated, initiatedAt) };
       });
 
       this.eventEmitter.emit(
         AttendeeStatusUpdatedEvent.eventName,
         new AttendeeStatusUpdatedEvent(
-          { id: attendeeId, eventId, userId: existing.userId, status: existing.status },
+          { id: attendeeId, eventId, userId: existing.userId, status: previous.status },
           { id: updated.id, eventId: updated.eventId, userId: updated.userId, status: updated.status },
+          actingUserId,
           initiatedAt,
         ),
       );

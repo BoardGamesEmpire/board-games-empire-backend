@@ -1,4 +1,4 @@
-import type { DataGatewayCapability, JobType, ResourceType } from '@bge/database';
+import type { DataGatewayCapability, EventParticipationStatus, JobType, ResourceType } from '@bge/database';
 import { NotificationType } from '@bge/database';
 import type { I18nMessage } from '@bge/i18n';
 
@@ -135,7 +135,15 @@ export interface EventCancelledPayload extends EventRefPayload {
 
 /** Someone RSVP'd to an event the recipient hosts. */
 export interface EventRsvpReceivedPayload extends EventRefPayload {
-  attendeeName: string;
+  /** `null` is an attendee without an account, and the client words it. */
+  attendeeName: string | null;
+}
+
+/** Someone else changed the recipient's RSVP to an event (#802). */
+export interface EventRsvpChangedPayload extends EventRefPayload {
+  status: EventParticipationStatus;
+  /** `null` when the person who changed it is not a user, and the client words it. */
+  changedByName: string | null;
 }
 
 /** A game was nominated for an event (sent to fellow attendees). */
@@ -283,6 +291,9 @@ export type NotificationPayloadMap = {
   [NotificationType.EventCancelled]: EventCancelledPayload;
   [NotificationType.EventReopened]: EventRefPayload;
   [NotificationType.EventRsvpReceived]: EventRsvpReceivedPayload;
+  [NotificationType.EventRsvpChanged]: EventRsvpChangedPayload;
+  [NotificationType.EventDeleted]: EventRefPayload;
+  [NotificationType.EventAttendeeRemoved]: EventRefPayload;
   [NotificationType.GameNominated]: GameNominatedPayload;
   [NotificationType.GameNominationApproved]: NominationOutcomePayload;
   [NotificationType.GameNominationRejected]: NominationOutcomePayload;

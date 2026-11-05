@@ -64,7 +64,12 @@ export class EventDeletedEvent extends MutationEvent<Event> {
   readonly subject = ResourceType.Event;
   readonly subjectId: string;
 
-  constructor(before: EventDeletedSnapshot, initiatedAt: Date) {
+  constructor(
+    before: EventDeletedSnapshot,
+    /** The user who deleted it. Context for listeners, not audited, and not in webhook payloads (#802). */
+    public readonly actingUserId: string,
+    initiatedAt: Date,
+  ) {
     super(before, null, initiatedAt);
     this.subjectId = before.id;
   }

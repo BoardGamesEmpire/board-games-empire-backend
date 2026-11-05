@@ -50,6 +50,29 @@ export class OccurrenceUpdatedEvent extends MutationEvent<EventOccurrence> {
   }
 }
 
+type OccurrenceRemovedSnapshot = Readonly<
+  Pick<EventOccurrence, 'id' | 'eventId' | 'label' | 'startDate' | 'endDate' | 'status'>
+>;
+
+/**
+ * A hard delete of a date (#677), modeled before-only. The snapshot is the row
+ * as the delete returned it, so the audit entry keeps what the date was.
+ */
+export class OccurrenceRemovedEvent extends MutationEvent<EventOccurrence> {
+  static readonly eventName = OccurrenceEvents.OccurrenceRemoved;
+
+  declare readonly before: OccurrenceRemovedSnapshot;
+  declare readonly after: null;
+
+  readonly subject = ResourceType.EventOccurrence;
+  readonly subjectId: string;
+
+  constructor(before: OccurrenceRemovedSnapshot, initiatedAt: Date) {
+    super(before, null, initiatedAt);
+    this.subjectId = before.id;
+  }
+}
+
 /** Changed subset (`status`) plus `eventId`, which occurrence-change listeners key off. */
 type OccurrenceStatusSnapshot = Readonly<Pick<EventOccurrence, 'id' | 'eventId' | 'status'>>;
 
@@ -67,9 +90,23 @@ export class OccurrenceStatusChangedEvent extends MutationEvent<EventOccurrence>
   readonly subject = ResourceType.EventOccurrence;
   readonly subjectId: string;
 
-  constructor(before: OccurrenceStatusSnapshot, after: OccurrenceStatusSnapshot, initiatedAt: Date) {
+  readonly occurrenceLabel: string | null;
+  readonly actingUserId: string | null;
+
+  constructor(
+    before: OccurrenceStatusSnapshot,
+    after: OccurrenceStatusSnapshot,
+    /**
+     * Context for listeners, kept out of the audit entry: the date's label, and
+     * the user who acted, or `null` when the actor is not a user (#802).
+     */
+    context: { occurrenceLabel: string | null; actingUserId: string | null },
+    initiatedAt: Date,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
+    this.occurrenceLabel = context.occurrenceLabel;
+    this.actingUserId = context.actingUserId;
   }
 }
 

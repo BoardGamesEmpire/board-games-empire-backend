@@ -71,12 +71,16 @@ describe('event cancel, reopen and archive (#795)', () => {
       })
     ).id;
 
-  /** `actor` answers their invitation, which tells the event's creator: a later notification to wait for. */
-  const rsvp = async (actor: AuthenticatedActor, eventId: string) =>
+  /**
+   * `by` sets `attendee`'s RSVP to `status`; `attendee` is `by` unless a host
+   * sets another's. An RSVP tells the event's hosts, which makes it a later
+   * notification to wait for.
+   */
+  const rsvp = async (by: AuthenticatedActor, eventId: string, status = 'Attending', attendee = by) =>
     request(baseUrl)
-      .patch(`${EVENTS_PATH}/${eventId}/attendees/${await attendeeRowId(eventId, actor.user.id)}/status`)
-      .set(actor.headers)
-      .send({ status: 'Attending' })
+      .patch(`${EVENTS_PATH}/${eventId}/attendees/${await attendeeRowId(eventId, attendee.user.id)}/status`)
+      .set(by.headers)
+      .send({ status })
       .expect(200);
 
   const notificationsOf = (list: readonly UnreadNotificationWire[], type: NotificationType, eventId: string) =>
@@ -375,6 +379,145 @@ describe('event cancel, reopen and archive (#795)', () => {
       );
 
       expect((await readEvent(host, eventId)).status).toBe(EventStatus.Scheduled);
+    });
+  });
+
+  const onlyDateOf = async (eventId: string) =>
+    (await db.client.eventOccurrence.findFirstOrThrow({ where: { eventId }, select: { id: true } })).id;
+
+  const datePath = (eventId: string, occurrenceId: string) => `${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}`;
+
+  describe("a date's notifications (#802)", () => {
+    it("tells the attendees still coming when a Fixed event's date is cancelled, but not the host or anyone not attending (#802)", async () => {
+      const host = await actors.user();
+      const invitee = await actors.user();
+      const maybe = await actors.user();
+      const notComing = await actors.user();
+      const eventId = await createdEventId(host, {
+        inviteUserIds: [invitee.user.id, maybe.user.id, notComing.user.id],
+        occurrences: [{ label: 'Saturday', startDate: hoursFromNow(24) }],
+      });
+      await rsvp(maybe, eventId, 'Maybe');
+      await rsvp(notComing, eventId, 'NotAttending');
+      const occurrenceId = await onlyDateOf(eventId);
+
+      await request(baseUrl)
+        .post(`${datePath(eventId, occurrenceId)}/cancel`)
+        .set(host.headers)
+        .expect(201);
+
+      for (const attendee of [invitee, maybe]) {
+        const list = await unreadOnceHolding(attendee, NotificationType.EventOccurrenceCanceled, eventId);
+        expect(notificationsOf(list, NotificationType.EventOccurrenceCanceled, eventId)).toHaveLength(1);
+      }
+
+      // The listener sends every recipient's notification in one createMany,
+      // so once the attendees' notifications have arrived, the host's and the
+      // one for the attendee not coming would have arrived in the same write.
+      // The host heard only of the two RSVPs.
+      for (const absent of [host, notComing]) {
+        const list = await unreadWhen(baseUrl, absent, () => true);
+        expect(notificationsOf(list, NotificationType.EventOccurrenceCanceled, eventId)).toEqual([]);
+      }
+    });
+
+    it('tells the attendees of a date cancelled and removed straight after (#677)', async () => {
+      const host = await actors.user();
+      const invitee = await actors.user();
+      const eventId = await createdEventId(host, {
+        inviteUserIds: [invitee.user.id],
+        occurrences: [{ label: 'Saturday', startDate: hoursFromNow(24) }],
+      });
+      const occurrenceId = await onlyDateOf(eventId);
+
+      await request(baseUrl)
+        .post(`${datePath(eventId, occurrenceId)}/cancel`)
+        .set(host.headers)
+        .expect(201);
+      await request(baseUrl).delete(datePath(eventId, occurrenceId)).set(host.headers).expect(200);
+
+      const list = await unreadOnceHolding(invitee, NotificationType.EventOccurrenceCanceled, eventId);
+      expect(notificationsOf(list, NotificationType.EventOccurrenceCanceled, eventId)).toEqual([
+        expect.objectContaining({ payload: expect.objectContaining({ occurrenceId, occurrenceLabel: 'Saturday' }) }),
+      ]);
+    });
+  });
+
+  describe("an RSVP's notifications (#802)", () => {
+    it('tells a co-host of an RSVP, and not the attendee who answered (#802)', async () => {
+      const host = await actors.user();
+      const coHost = await actors.user();
+      const invitee = await actors.user();
+      const eventId = await createdEventId(host, { inviteUserIds: [invitee.user.id] });
+      await addAttendee(host, eventId, coHost.user.id, SystemRole.EventCoHost).expect(201);
+
+      await rsvp(invitee, eventId);
+
+      for (const recipient of [host, coHost]) {
+        const list = await unreadOnceHolding(recipient, NotificationType.EventRsvpReceived, eventId);
+        expect(notificationsOf(list, NotificationType.EventRsvpReceived, eventId)).toHaveLength(1);
+      }
+
+      // The sentinel for the invitee: the host cancelling the event tells
+      // them. Once that arrives, an RSVP notification would have too.
+      await cancel(host, eventId).expect(200);
+      const inviteeList = await unreadOnceHolding(invitee, NotificationType.EventCancelled, eventId);
+      expect(notificationsOf(inviteeList, NotificationType.EventRsvpReceived, eventId)).toEqual([]);
+    });
+  });
+
+  describe('the notifications of a changed RSVP, a deleted event and a removed attendee (#802)', () => {
+    it("tells an attendee whose RSVP a host changed, with the host's name (#802)", async () => {
+      const host = await actors.user();
+      const invitee = await actors.user();
+      const eventId = await createdEventId(host, { inviteUserIds: [invitee.user.id] });
+
+      await rsvp(host, eventId, 'Attending', invitee);
+
+      // The name as the server resolves it: the display name, else the username.
+      const hostRecord = await db.client.user.findUniqueOrThrow({
+        where: { id: host.user.id },
+        select: { username: true, profile: { select: { displayName: true } } },
+      });
+      const list = await unreadOnceHolding(invitee, NotificationType.EventRsvpChanged, eventId);
+      expect(notificationsOf(list, NotificationType.EventRsvpChanged, eventId)).toEqual([
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            status: 'Attending',
+            changedByName: hostRecord.profile?.displayName ?? hostRecord.username,
+          }),
+        }),
+      ]);
+    });
+
+    it('tells the attendees of a deleted event, and not the host who deleted it (#802)', async () => {
+      const host = await actors.user();
+      const invitee = await actors.user();
+      const eventId = await createdEventId(host, { inviteUserIds: [invitee.user.id] });
+
+      await request(baseUrl).delete(`${EVENTS_PATH}/${eventId}`).set(host.headers).expect(200);
+
+      await unreadOnceHolding(invitee, NotificationType.EventDeleted, eventId);
+
+      // The listener sends every recipient's notification in one write, so a
+      // host's would have arrived with the invitee's. A later notification
+      // can't be the sentinel here: a deleted event takes no more writes.
+      const hostList = await unreadWhen(baseUrl, host, () => true);
+      expect(notificationsOf(hostList, NotificationType.EventDeleted, eventId)).toEqual([]);
+    });
+
+    it('tells an attendee a host removed (#802)', async () => {
+      const host = await actors.user();
+      const invitee = await actors.user();
+      const eventId = await createdEventId(host, { inviteUserIds: [invitee.user.id] });
+
+      await request(baseUrl)
+        .delete(`${EVENTS_PATH}/${eventId}/attendees/${await attendeeRowId(eventId, invitee.user.id)}`)
+        .set(host.headers)
+        .expect(200);
+
+      const list = await unreadOnceHolding(invitee, NotificationType.EventAttendeeRemoved, eventId);
+      expect(notificationsOf(list, NotificationType.EventAttendeeRemoved, eventId)).toHaveLength(1);
     });
   });
 });

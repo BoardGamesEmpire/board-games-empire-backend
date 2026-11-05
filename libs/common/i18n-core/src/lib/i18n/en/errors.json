@@ -62,6 +62,7 @@
   },
   "occurrence": {
     "not_found": "Occurrence {occurrenceId} not found for event {eventId}",
+    "confirmed_remove": "This date is confirmed. Cancel it first, then remove it.",
     "fixed_mode_single": "Fixed scheduling mode allows at most one occurrence. Change the event scheduling mode to Poll or MultiDay first.",
     "invalid_transition": "Cannot transition from \"{from}\" to \"{to}\". Allowed source statuses: {allowed}.",
     "availability_proposed_only": "Availability votes are only accepted for Proposed occurrences. Current status: \"{status}\"."

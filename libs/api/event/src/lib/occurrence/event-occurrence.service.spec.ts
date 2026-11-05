@@ -34,6 +34,7 @@ import { EventOccurrenceService } from './event-occurrence.service';
 import {
   AvailabilityVoteSubmittedEvent,
   OccurrenceAddedEvent,
+  OccurrenceRemovedEvent,
   OccurrenceStatusChangedEvent,
   OccurrenceUpdatedEvent,
 } from './events/occurrence.events';
@@ -368,6 +369,8 @@ describe('EventOccurrenceService', () => {
       db.eventOccurrence.create.mockResolvedValue(row);
       db.eventOccurrence.update.mockResolvedValue(row);
       db.eventOccurrence.delete.mockResolvedValue(row);
+      // The status read a removal makes under the event's lock.
+      db.eventOccurrence.findFirst.mockResolvedValue({ status: OccurrenceStatus.Proposed } as never);
       db.eventAvailabilityVote.findMany.mockResolvedValue([vote('v1', 'occ-1')] as never);
       // The answer's read finds the game. A date write's read after the
       // write, for the games nobody is bringing, finds none.
@@ -572,6 +575,10 @@ describe('EventOccurrenceService', () => {
   });
 
   describe('removeOccurrence', () => {
+    beforeEach(() => {
+      db.eventOccurrence.findFirst.mockResolvedValue({ status: OccurrenceStatus.Proposed } as never);
+    });
+
     it('filters by DELETE conditions', async () => {
       db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
       db.eventOccurrence.delete.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
@@ -582,6 +589,99 @@ describe('EventOccurrenceService', () => {
         ResourceType.EventOccurrence,
         Action.delete,
       );
+    });
+
+    it('emits the removal with the date as it stood, after the delete (#677)', async () => {
+      const row = makeEventOccurrence({
+        id: 'occ-1',
+        eventId: 'event-1',
+        label: 'Saturday',
+        startDate: new Date('2026-12-05T18:00:00Z'),
+        endDate: new Date('2026-12-05T22:00:00Z'),
+        status: OccurrenceStatus.Proposed,
+      });
+      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
+      let deletedAt = 0;
+      let removalEmittedBeforeDelete = false;
+      db.eventOccurrence.delete.mockImplementation((() => {
+        deletedAt = Date.now();
+        removalEmittedBeforeDelete = emitter.emit.mock.calls.some(
+          ([name]) => name === OccurrenceEvents.OccurrenceRemoved,
+        );
+        return Promise.resolve(row);
+      }) as never);
+
+      await service.removeOccurrence('event-1', 'occ-1');
+
+      const removals = emitter.emit.mock.calls.filter(([name]) => name === OccurrenceEvents.OccurrenceRemoved);
+      expect(removals).toHaveLength(1);
+      const [, emitted] = removals[0];
+      expect(emitted).toBeInstanceOf(OccurrenceRemovedEvent);
+      expect(emitted.before).toEqual({
+        id: 'occ-1',
+        eventId: 'event-1',
+        label: 'Saturday',
+        startDate: row.startDate,
+        endDate: row.endDate,
+        status: OccurrenceStatus.Proposed,
+      });
+      expect(emitted.after).toBeNull();
+      expect(emitted.subjectId).toBe('occ-1');
+      expect(emitted.initiatedAt).toBeInstanceOf(Date);
+      expect(emitted.initiatedAt.getTime()).toBeLessThanOrEqual(deletedAt);
+      // Emitted after the delete returned.
+      expect(removalEmittedBeforeDelete).toBe(false);
+    });
+
+    it('refuses a Confirmed date 400 and removes nothing (#677)', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
+      db.eventOccurrence.findFirst.mockResolvedValue({ status: OccurrenceStatus.Confirmed } as never);
+
+      await expect(service.removeOccurrence('event-1', 'occ-1')).rejects.toThrow(BadRequestException);
+
+      expect(db.eventOccurrence.delete).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('reads the status under the lock, with the delete conditions (#677)', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
+      db.eventOccurrence.delete.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
+
+      await service.removeOccurrence('event-1', 'occ-1');
+
+      expect(db.eventOccurrence.findFirst).toHaveBeenCalledWith({
+        where: { id: 'occ-1', eventId: 'event-1', AND: [COND] },
+        select: { status: true },
+      });
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        db.eventOccurrence.findFirst.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('answers 404 when the date is gone by the time the lock is held (#1064)', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
+      db.eventOccurrence.findFirst.mockResolvedValue(null);
+
+      await expect(service.removeOccurrence('event-1', 'occ-1')).rejects.toThrow(NotFoundException);
+
+      expect(db.eventOccurrence.delete).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it("answers 403 before reading the status of a date outside the caller's grant (#677)", async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
+      // The grant-filtered read finds nothing; the unfiltered one finds a
+      // Confirmed date, whose status the caller must not learn.
+      db.eventOccurrence.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ status: OccurrenceStatus.Confirmed } as never);
+
+      const rejection = await service.removeOccurrence('event-1', 'occ-1').catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(ForbiddenException);
+      expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.remove'));
+      expect(db.eventOccurrence.delete).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
     });
   });
 
@@ -636,6 +736,7 @@ describe('EventOccurrenceService', () => {
       db.eventOccurrence.create.mockResolvedValue(row);
       db.eventOccurrence.update.mockResolvedValue(row);
       db.eventOccurrence.delete.mockResolvedValue(row);
+      db.eventOccurrence.findFirst.mockResolvedValue({ status: OccurrenceStatus.Proposed } as never);
     });
 
     // FOR NO KEY UPDATE conflicts with the FOR SHARE a supplier leaving, or
@@ -766,6 +867,46 @@ describe('EventOccurrenceService', () => {
       expect(emitted.subjectId).toBe('occ-1');
       expect(emitted.before).toEqual({ id: 'occ-1', eventId: 'event-1', status: OccurrenceStatus.Proposed });
       expect(emitted.after).toEqual({ id: 'occ-1', eventId: 'event-1', status: OccurrenceStatus.Confirmed });
+    });
+
+    it("carries the date's label and who acted on a status change (#802)", async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue({
+        id: 'occ-1',
+        status: OccurrenceStatus.Proposed,
+      } as EventOccurrence);
+      db.eventOccurrence.update.mockResolvedValue(
+        makeEventOccurrence({
+          id: 'occ-1',
+          eventId: 'event-1',
+          status: OccurrenceStatus.Confirmed,
+          label: 'Saturday evening',
+        }),
+      );
+
+      await service.confirmOccurrence('event-1', 'occ-1');
+
+      const [, emitted] = emitter.emit.mock.calls[0];
+      expect(emitted.occurrenceLabel).toBe('Saturday evening');
+      expect(emitted.actingUserId).toBe(MOCK_ACTING_USER_ID);
+    });
+
+    // getActingUserId answers 403 for an actor with no user behind it.
+    it('carries a null actor when the actor is not a user (#802)', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+      db.eventOccurrence.findUnique.mockResolvedValue({
+        id: 'occ-1',
+        status: OccurrenceStatus.Proposed,
+      } as EventOccurrence);
+      db.eventOccurrence.update.mockResolvedValue(
+        makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status: OccurrenceStatus.Confirmed }),
+      );
+
+      await service.confirmOccurrence('event-1', 'occ-1');
+
+      const [, emitted] = emitter.emit.mock.calls[0];
+      expect(emitted.actingUserId).toBeNull();
     });
 
     it('rejects an illegal source status', async () => {

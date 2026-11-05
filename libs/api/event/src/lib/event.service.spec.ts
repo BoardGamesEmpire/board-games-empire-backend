@@ -844,6 +844,7 @@ describe('EventService', () => {
     });
 
     it('deleteEvent emits an EventDeletedEvent (before-only)', async () => {
+      abilityService.getActingUserId.mockReturnValue('user-1');
       tx.event.update.mockResolvedValue(
         withDates(makeEvent({ id: 'event-1', title: 'Doomed', createdById: 'user-1' })),
       );
@@ -857,6 +858,7 @@ describe('EventService', () => {
       expect(emitted.subjectId).toBe('event-1');
       expect(emitted.before).toEqual(expect.objectContaining({ id: 'event-1', title: 'Doomed' }));
       expect(emitted.after).toBeNull();
+      expect(emitted.actingUserId).toBe('user-1');
     });
 
     it('deleteEvent sends event.event.deleted.v1 with ids only, keyed on the event', async () => {

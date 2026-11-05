@@ -1,6 +1,7 @@
 import {
   AvailabilityResponse,
   EventParticipationStatus,
+  EventSchedulingMode,
   NominationStatus,
   OccurrenceStatus,
   SystemRole,
@@ -417,11 +418,15 @@ describe('event write authorization', () => {
   });
 
   describe('removing an occurrence (#558)', () => {
+    // These are about who may remove a date, not its status: a Poll event's
+    // date is Proposed, which a Fixed event's is not (#677).
+    const POLL = { schedulingMode: EventSchedulingMode.Poll };
+
     it("refuses the host of one event the removal of another event's occurrence, and removes nothing", async () => {
       const host = await actors.user();
       const victim = await actors.user();
-      const ownId = await createdEventId(host);
-      const targetId = await createdEventId(victim);
+      const ownId = await createdEventId(host, POLL);
+      const targetId = await createdEventId(victim, POLL);
       const ownOccurrence = await addedOccurrenceId(host, ownId);
       const targetOccurrence = await addedOccurrenceId(victim, targetId);
 
@@ -450,7 +455,7 @@ describe('event write authorization', () => {
           ],
         });
         const actor = roleName === SystemRole.HouseholdOwner ? owner : admin;
-        const eventId = await createdEventId(member, { householdId: household.id });
+        const eventId = await createdEventId(member, { ...POLL, householdId: household.id });
         const occurrenceId = await addedOccurrenceId(member, eventId);
 
         // Control: the same actor edits the household's event.

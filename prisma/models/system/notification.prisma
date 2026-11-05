@@ -96,6 +96,24 @@ enum NotificationType {
   EventReopened
 
   /**
+   * An attendee's RSVP was changed by someone else, such as a host. Goes to
+   * that attendee, never to the person who changed it (#802).
+   */
+  EventRsvpChanged
+
+  /**
+   * An event was deleted. Goes to its attendees who were not removed, except
+   * the person deleting it (#802).
+   */
+  EventDeleted
+
+  /**
+   * An attendee was removed from an event by a host. Goes to the person
+   * removed, unless they removed themselves (#802).
+   */
+  EventAttendeeRemoved
+
+  /**
    * Nominations are created when a user nominates a game for an event, and resolved when a host approves/rejects it or it fails/passes a vote.
    * The same notification is sent to the nominator for all resolution outcomes, with the type indicating the outcome.
    */

@@ -1,6 +1,7 @@
 export enum OccurrenceEvents {
   OccurrenceAdded = 'event.occurrence.added',
   OccurrenceUpdated = 'event.occurrence.updated',
+  OccurrenceRemoved = 'event.occurrence.removed',
   OccurrenceConfirmed = 'event.occurrence.confirmed',
   OccurrenceDeclined = 'event.occurrence.declined',
   OccurrenceCancelled = 'event.occurrence.cancelled',
