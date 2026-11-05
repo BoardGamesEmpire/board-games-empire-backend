@@ -2,6 +2,7 @@ import { convertToMarkdown } from '@bge/content-format';
 import { type ContentFormat, DatabaseService, DataGatewayCapability, type SearchFilterAxis } from '@bge/database';
 import {
   GatewayRegistryService,
+  type GatewayResolution,
   GatewayRoutingRefusedError,
   type SearchResolution,
   type SearchRoute,
@@ -11,7 +12,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
 import { defer, EMPTY, from, Observable, of } from 'rxjs';
-import { catchError, concatMap, endWith, filter, map, mergeMap, tap, throwIfEmpty } from 'rxjs/operators';
+import { catchError, concatMap, endWith, map, mergeMap, tap } from 'rxjs/operators';
 import { filterFor, matchesFilter, type ResultFilter, toResultFilter, unfilterableAxes } from './search-filter';
 
 /**
@@ -21,14 +22,6 @@ import { filterFor, matchesFilter, type ResultFilter, toResultFilter, unfilterab
  * connection pool.
  */
 const DEDUP_CONCURRENCY = 10;
-
-/**
- * gatewayId placed on fetchExpansions' error frames that no single gateway
- * answers for — the game's GameSource lookup itself failed, or the game has
- * no sources at all. Deliberately not a valid gateway id so consumers and
- * logs never mis-attribute an aggregate failure to a real source.
- */
-const NO_GATEWAY_ATTRIBUTION = '__no_gateway__';
 
 /**
  * One live gateway stream's games, cached when the gateway sends SOURCE_DONE.
@@ -53,18 +46,21 @@ interface SearchAccumulator {
  *  - RESULT/SOURCE_DONE ordering: per-gateway frames flow through concatMap
  *    so the synchronous SOURCE_DONE frame can no longer overtake RESULT
  *    frames whose dedup lookups are still in flight.
- *  - fetchExpansions no longer pre-filters on isConnected — resolve()
- *    lazily connects, and genuine unavailability surfaces as an UNAVAILABLE
- *    frame instead of a silent skip.
+ *  - fetchExpansions doesn't pre-filter on isConnected — resolve() lazily
+ *    connects, and genuine unavailability surfaces as an UNAVAILABLE frame
+ *    instead of a silent skip. It asks the one DataGateway it's named, by
+ *    the base game's external ID there (#1067).
  *  - Cache-replay dedup concurrency is bounded (DEDUP_CONCURRENCY).
  */
 @Injectable()
 export class GatewayGameSearchService {
   private readonly logger = new Logger(GatewayGameSearchService.name);
   private readonly searchCachePrefix = 'bge:search';
+  private readonly expansionsCachePrefix = 'bge:expansions';
 
   /**
-   * TTL for cached search results per DataGateway and request sent to it — 5 minutes
+   * TTL for cached search results per DataGateway and request sent to it, and
+   * for a DataGateway's expansion list of a base game (#1067) — 5 minutes
    */
   private readonly searchCacheTTL = 5 * 60 * 1000;
 
@@ -170,45 +166,17 @@ export class GatewayGameSearchService {
   }
 
   /**
-   * Fetch expansions for a base game by resolving its linked gateways from
-   * GameSource and calling FetchExpansions on each.
+   * Asks one DataGateway for a base game's expansions, by the base game's
+   * external ID there. A game on this server is asked for by the API, once
+   * per DataGateway link, after it checks the actor may read the game: this
+   * service has no actor to check that against (#1067).
    */
   fetchExpansions(request: proto.CoordinatorFetchExpansionsRequest): Observable<proto.SearchGameResult> {
-    const sources$ = from(
-      this.db.gameSource.findMany({
-        where: { gameId: request.gameId },
-        select: { gatewayId: true, externalId: true },
-      }),
-    );
-
-    return sources$.pipe(
-      filter((sources) => sources.length > 0),
-      throwIfEmpty(() => new Error(`No gateway sources found for gameId ${request.gameId}`)),
-      tap((sources) =>
-        this.logger.debug(
-          `Found ${sources.length} gateways for gameId ${request.gameId}: ${sources
-            .map((s) => s.gatewayId)
-            .join(', ')}`,
-        ),
-      ),
-
-      mergeMap((sources) => sources),
-      // No isConnected pre-filter: resolve() lazily connects cold gateways,
-      // and a genuinely unavailable one yields an UNAVAILABLE frame below —
-      // never a silent skip that masquerades as "no expansions".
-      filter((source) => Boolean(source.gatewayId && source.externalId)),
-      // fetchExpansionsFromGateway answers its own failures with a frame for
-      // that gateway, so only the source lookup reaches the catch below.
-      mergeMap((source) =>
-        this.fetchExpansionsFromGateway(source.gatewayId, source.externalId, request.correlationId, request.locale),
-      ),
-
-      catchError((err) => {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.error(`FetchExpansions failed for gameId ${request.gameId}: ${message}`);
-
-        return this.errorGameSearchResult(NO_GATEWAY_ATTRIBUTION, request.correlationId, message);
-      }),
+    return this.fetchExpansionsFromGateway(
+      request.gatewayId,
+      request.baseExternalId,
+      request.correlationId,
+      request.locale,
     );
   }
 
@@ -321,7 +289,15 @@ export class GatewayGameSearchService {
           // source early. Serializing preserves gateway emission order (and
           // caps dedup concurrency on the live path as a side effect).
           concatMap((result: proto.GatewaySearchResult) =>
-            this.mapGatewayResult(gatewayId, result, accumulator, cacheKey, resultFilter, resolved.contentFormat),
+            this.mapGatewayResult(
+              'Search',
+              gatewayId,
+              result,
+              accumulator,
+              cacheKey,
+              resultFilter,
+              resolved.contentFormat,
+            ),
           ),
           catchError((err) => {
             const message = err instanceof Error ? err.message : String(err);
@@ -348,7 +324,14 @@ export class GatewayGameSearchService {
     );
   }
 
+  /**
+   * One frame of a DataGateway's live stream, for a search or an expansion
+   * list (#1067) alike: its game accumulated for the cache and sent if the
+   * filter matches, a status frame relayed and marking the list partial, and
+   * the list cached on SOURCE_DONE. `what` only names the stream in the logs.
+   */
   private mapGatewayResult(
+    what: 'Search' | 'Expansions',
     gatewayId: string,
     result: proto.GatewaySearchResult,
     accumulator: SearchAccumulator,
@@ -393,15 +376,7 @@ export class GatewayGameSearchService {
 
         // Persist accumulated results to cache once the gateway signals
         // completion, unless it reported a problem first
-        if (!accumulator.partial) {
-          void this.cache
-            .set(cacheKey, accumulator.games, this.searchCacheTTL)
-            .catch((err) =>
-              this.logger.warn(
-                `Search cache write failed for gateway ${gatewayId}: ${err instanceof Error ? err.message : err}`,
-              ),
-            );
-        }
+        this.cacheUnlessPartial(what, gatewayId, cacheKey, accumulator);
         return of<proto.SearchGameResult>({
           ...base,
           status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE,
@@ -480,29 +455,39 @@ export class GatewayGameSearchService {
     );
   }
 
+  /**
+   * Asks the DataGateway for a base game's expansions, or answers from the
+   * cache with the list it gave within the last 5 minutes (#1067). It's resolved before the cache is
+   * read, so one disabled, or no longer allowed to fetch expansions, since its
+   * list was cached answers UNAVAILABLE, never the cached rows. Which rows are
+   * already in the catalog is looked up fresh either way.
+   */
   private fetchExpansionsFromGateway(
     gatewayId: string,
     baseExternalId: string,
     correlationId: string,
     locale?: string,
   ): Observable<proto.SearchGameResult> {
+    const gatewayRequest: proto.FetchExpansionsRequest = { correlationId, baseExternalId, locale };
+    const cacheKey = this.buildExpansionsCacheKey(gatewayId, gatewayRequest);
+
     return from(this.registry.resolveWithContentFormat(gatewayId, DataGatewayCapability.FetchExpansions)).pipe(
-      mergeMap(({ driver, contentFormat }) =>
-        driver.fetchExpansions({ correlationId, baseExternalId, locale }).pipe(
-          // Same ordering rationale as fetchFromGateway: async RESULT frames
-          // must not be overtaken by synchronously-mapped status frames.
-          concatMap((result: proto.GatewaySearchResult) => {
-            if (result.status !== proto.ResultStatus.RESULT_STATUS_RESULT || !result.game) {
-              return of<proto.SearchGameResult>({
-                correlationId,
-                gatewayId,
-                status: result.status,
-                message: result.message,
-                retryAfter: result.retryAfter,
-              });
-            }
-            return this.toResultFrame(gatewayId, correlationId, result.game, contentFormat);
+      mergeMap((resolution) =>
+        from(this.cache.get<proto.GameSearchData[]>(cacheKey)).pipe(
+          catchError((err) => {
+            this.logger.warn(
+              `Expansions cache read failed for gateway ${gatewayId}; falling through to live fetch: ${
+                err instanceof Error ? err.message : err
+              }`,
+            );
+            return of(undefined);
           }),
+          // An expansion list has no search filter, so every cached row is sent.
+          mergeMap((cached) =>
+            cached === undefined
+              ? this.fetchExpansionsLive(gatewayId, resolution, gatewayRequest, cacheKey)
+              : this.emitCachedResults(gatewayId, correlationId, cached, {}, resolution.contentFormat),
+          ),
           catchError((err) => {
             const message = err instanceof Error ? err.message : String(err);
             return this.errorGameSearchResult(gatewayId, correlationId, message);
@@ -522,6 +507,50 @@ export class GatewayGameSearchService {
         );
       }),
     );
+  }
+
+  /**
+   * The DataGateway's expansion list, live. Its frames are read as a search's
+   * are, with no filter: an expansion list has none, so every row is sent.
+   */
+  private fetchExpansionsLive(
+    gatewayId: string,
+    { driver, contentFormat }: GatewayResolution,
+    request: proto.FetchExpansionsRequest,
+    cacheKey: string,
+  ): Observable<proto.SearchGameResult> {
+    const accumulator: SearchAccumulator = { games: [], partial: false };
+
+    return driver.fetchExpansions(request).pipe(
+      // Same ordering rationale as fetchFromGateway: async RESULT frames
+      // must not be overtaken by synchronously-mapped status frames.
+      concatMap((result: proto.GatewaySearchResult) =>
+        this.mapGatewayResult('Expansions', gatewayId, result, accumulator, cacheKey, {}, contentFormat),
+      ),
+    );
+  }
+
+  /**
+   * Writes one live stream's games to the cache, unless the DataGateway
+   * reported a problem before it was done. A failed write is only logged.
+   */
+  private cacheUnlessPartial(
+    what: 'Search' | 'Expansions',
+    gatewayId: string,
+    cacheKey: string,
+    accumulator: SearchAccumulator,
+  ): void {
+    if (accumulator.partial) {
+      return;
+    }
+
+    void this.cache
+      .set(cacheKey, accumulator.games, this.searchCacheTTL)
+      .catch((err) =>
+        this.logger.warn(
+          `${what} cache write failed for gateway ${gatewayId}: ${err instanceof Error ? err.message : err}`,
+        ),
+      );
   }
 
   /**
@@ -689,6 +718,23 @@ export class GatewayGameSearchService {
       request.filter?.playTime?.min ?? '',
       request.filter?.playTime?.max ?? '',
       request.filter?.playTime?.includeUnknown ? 'u' : '',
+    ].join(':');
+  }
+
+  /**
+   * Keyed by the DataGateway, the base game's external ID there and the
+   * locale. The last two slots are for `limit` and `offset`, empty until the
+   * request carries paging, so a later paged request is never answered with
+   * the first page from the cache (#1067, #1092).
+   */
+  private buildExpansionsCacheKey(gatewayId: string, request: proto.FetchExpansionsRequest): string {
+    return [
+      this.expansionsCachePrefix,
+      gatewayId,
+      encodeURIComponent(request.baseExternalId),
+      encodeURIComponent(request.locale ?? ''),
+      '',
+      '',
     ].join(':');
   }
 }

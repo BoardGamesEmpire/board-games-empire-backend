@@ -33,8 +33,9 @@ service CoordinatorService {
   // Used by the import worker and game detail page.
   rpc FetchGame(CoordinatorFetchGameRequest) returns (CoordinatorFetchGameResponse);
 
-  // Fetch expansions for a base game. Coordinator resolves relevant gateways
-  // from GameSource and merges their streams.
+  // Asks one DataGateway for a base game's expansions, by its external ID.
+  // A game on this server is asked for once per DataGateway link, by the API,
+  // which checks first that the actor may read the game (#1067).
   rpc FetchExpansions(CoordinatorFetchExpansionsRequest) returns (stream SearchGameResult);
 
   // Enqueues an import flow for a base game and optional expansions.
@@ -138,10 +139,16 @@ message CoordinatorFetchGameResponse {
 }
 
 message CoordinatorFetchExpansionsRequest {
+  // The server game id the coordinator once resolved to DataGateway links,
+  // with no actor to check a read against. The API resolves them now (#1067).
+  reserved 2;
+  reserved "game_id";
   string correlation_id = 1;
-  // Local DB Game.id — coordinator resolves gateway links internally
-  string game_id = 2;
   optional string locale = 3;
+  // The DataGateway to ask.
+  string gateway_id = 4;
+  // The base game's external ID at that DataGateway.
+  string base_external_id = 5;
 }
 
 message StartGameImportRequest {
