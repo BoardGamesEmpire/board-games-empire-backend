@@ -23,7 +23,7 @@
 # /web, published from the client repository. Renovate moves the digest when
 # the client's `edge` moves (#599). The BGE image records this reference as a
 # label, so it names the client it carries.
-ARG CLIENT_WEB_IMAGE=ghcr.io/boardgamesempire/bge-client-web:edge@sha256:cae190afeffca04f52790759f610f844d26452a5134f23dc71355e25d932b64d
+ARG CLIENT_WEB_IMAGE=ghcr.io/boardgamesempire/bge-client-web:edge@sha256:fbfc96d8cb1a559e1fbae4ea6a019b8610dbc5f8332482e2a9832f231e1fe8aa
 # The client's image is a single linux/amd64 manifest, and its files are the
 # same on every platform, so every build takes that one. Naming the platform
 # keeps BuildKit from warning that an arm64 build pulled an amd64 image; it is
