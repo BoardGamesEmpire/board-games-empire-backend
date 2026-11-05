@@ -1,0 +1,708 @@
+[
+  {
+    "id": 365651,
+    "cover": {
+      "id": 485689,
+      "url": "//images.igdb.com/igdb/image/upload/t_thumb/coaerd.jpg"
+    },
+    "first_release_date": 1615075200,
+    "name": "Hollow Knight Multiplayer",
+    "parent_game": 14593,
+    "platforms": [
+      {
+        "id": 6,
+        "abbreviation": "PC",
+        "name": "PC (Microsoft Windows)",
+        "platform_type": 4
+      }
+    ],
+    "summary": "As the name might suggest, Hollow Knight Multiplayer (HKMP) is a multiplayer mod for the popular 2D action-adventure game Hollow Knight. The main purpose of this mod is to allow people to host games and let others join them in their adventures. There is a dedicated Discord server for the mod where you can ask questions or generally talk about the mod.",
+    "url": "https://www.igdb.com/games/hollow-knight-multiplayer",
+    "game_type": 5
+  },
+  {
+    "id": 341654,
+    "cover": {
+      "id": 504128,
+      "url": "//images.igdb.com/igdb/image/upload/t_thumb/coaszk.jpg"
+    },
+    "first_release_date": 1641600000,
+    "name": "Hollow Knight Randomizer",
+    "parent_game": 14593,
+    "platforms": [
+      {
+        "id": 6,
+        "abbreviation": "PC",
+        "name": "PC (Microsoft Windows)",
+        "platform_type": 4
+      }
+    ],
+    "summary": "Welcome to Randomizer 4, the newest version of the Hollow Knight item and transition randomizer released for the Hollow Knight 1.5 update.",
+    "url": "https://www.igdb.com/games/hollow-knight-randomizer",
+    "game_type": 5
+  },
+  {
+    "id": 116151,
+    "cover": {
+      "id": 157542,
+      "url": "//images.igdb.com/igdb/image/upload/t_thumb/co3dk6.jpg"
+    },
+    "first_release_date": 1559260800,
+    "name": "Hollow Knight: Collector\u0027s Edition",
+    "platforms": [
+      {
+        "id": 48,
+        "abbreviation": "PS4",
+        "name": "PlayStation 4",
+        "platform_type": 1
+      },
+      {
+        "id": 6,
+        "abbreviation": "PC",
+        "name": "PC (Microsoft Windows)",
+        "platform_type": 4
+      },
+      {
+        "id": 130,
+        "abbreviation": "Switch",
+        "name": "Nintendo Switch",
+        "platform_type": 1
+      }
+    ],
+    "summary": "A 2D metroidvania with an emphasis on close combat and exploration in which the player enters the once-prosperous now-bleak insect kingdom of Hallownest, travels through its various districts, meets friendly inhabitants, fights hostile ones and uncovers the kingdom\u0027s history while improving their combat abilities and movement arsenal by fighting bosses and accessing out-of-the-way areas.\n\nThe Collector’s Edition includes a metal brooch with display stand, a wall hook, a dual-pronged fastener, a 14-page Quirrel comic book, a gift-box-style case with gold-foil filigree and a clear printed sleeve, a Switch-exclusive bonus cleaning cloth, a gold-foil art print set by Ari Gibson and a physical copy of the game including all DLC: Hidden Dreams, The Grimm Troupe, Lifeblood, and Godmaster.",
+    "url": "https://www.igdb.com/games/hollow-knight-collectors-edition",
+    "version_parent": 14593,
+    "language_supports": [
+      {
+        "id": 743098,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 743099,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 743100,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 743101,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 743102,
+        "language": {
+          "id": 9,
+          "name": "Spanish (Spain)",
+          "native_name": "Español (España)",
+          "locale": "es-ES",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "62657819-b6f2-2beb-786e-78455af2de8f"
+        }
+      },
+      {
+        "id": 743103,
+        "language": {
+          "id": 17,
+          "name": "Korean",
+          "native_name": "한국어",
+          "locale": "ko-KR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "9ba648bf-f5fa-fa3c-3c6a-2fc7e1510cd6"
+        }
+      },
+      {
+        "id": 743104,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      },
+      {
+        "id": 743105,
+        "language": {
+          "id": 15,
+          "name": "Italian",
+          "native_name": "Italiano",
+          "locale": "it-IT",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "52074797-ab02-c337-a805-a3e9969fc0eb"
+        }
+      },
+      {
+        "id": 743106,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 743107,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      },
+      {
+        "id": 743108,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 743109,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 743110,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 743111,
+        "language": {
+          "id": 9,
+          "name": "Spanish (Spain)",
+          "native_name": "Español (España)",
+          "locale": "es-ES",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "62657819-b6f2-2beb-786e-78455af2de8f"
+        }
+      },
+      {
+        "id": 743112,
+        "language": {
+          "id": 17,
+          "name": "Korean",
+          "native_name": "한국어",
+          "locale": "ko-KR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "9ba648bf-f5fa-fa3c-3c6a-2fc7e1510cd6"
+        }
+      },
+      {
+        "id": 743113,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      },
+      {
+        "id": 743114,
+        "language": {
+          "id": 15,
+          "name": "Italian",
+          "native_name": "Italiano",
+          "locale": "it-IT",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "52074797-ab02-c337-a805-a3e9969fc0eb"
+        }
+      },
+      {
+        "id": 743115,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 743116,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      },
+      {
+        "id": 743117,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 743118,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 743119,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 743120,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 743121,
+        "language": {
+          "id": 9,
+          "name": "Spanish (Spain)",
+          "native_name": "Español (España)",
+          "locale": "es-ES",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "62657819-b6f2-2beb-786e-78455af2de8f"
+        }
+      },
+      {
+        "id": 743122,
+        "language": {
+          "id": 17,
+          "name": "Korean",
+          "native_name": "한국어",
+          "locale": "ko-KR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "9ba648bf-f5fa-fa3c-3c6a-2fc7e1510cd6"
+        }
+      },
+      {
+        "id": 743123,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      },
+      {
+        "id": 743124,
+        "language": {
+          "id": 15,
+          "name": "Italian",
+          "native_name": "Italiano",
+          "locale": "it-IT",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "52074797-ab02-c337-a805-a3e9969fc0eb"
+        }
+      },
+      {
+        "id": 743125,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 743126,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      },
+      {
+        "id": 743127,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      }
+    ],
+    "game_type": 3
+  },
+  {
+    "id": 106818,
+    "cover": {
+      "id": 141294,
+      "url": "//images.igdb.com/igdb/image/upload/t_thumb/co310u.jpg"
+    },
+    "first_release_date": 1501718400,
+    "name": "Hollow Knight: Hidden Dreams",
+    "parent_game": 14593,
+    "platforms": [
+      {
+        "id": 3,
+        "abbreviation": "Linux",
+        "name": "Linux",
+        "platform_type": 4
+      },
+      {
+        "id": 6,
+        "abbreviation": "PC",
+        "name": "PC (Microsoft Windows)",
+        "platform_type": 4
+      },
+      {
+        "id": 14,
+        "abbreviation": "Mac",
+        "name": "Mac",
+        "platform_type": 4
+      },
+      {
+        "id": 130,
+        "abbreviation": "Switch",
+        "name": "Nintendo Switch",
+        "platform_type": 1
+      }
+    ],
+    "summary": "Hidden Dreams is the first of four free content packs for Hollow Knight.",
+    "total_rating": 81.5790890179494,
+    "url": "https://www.igdb.com/games/hollow-knight-hidden-dreams",
+    "game_type": 14
+  },
+  {
+    "id": 255660,
+    "cover": {
+      "id": 313151,
+      "url": "//images.igdb.com/igdb/image/upload/t_thumb/co6pmn.jpg"
+    },
+    "first_release_date": 1688169600,
+    "name": "Hollow Knight: Pale Court",
+    "parent_game": 14593,
+    "platforms": [
+      {
+        "id": 6,
+        "abbreviation": "PC",
+        "name": "PC (Microsoft Windows)",
+        "platform_type": 4
+      }
+    ],
+    "summary": "The unofficial expansion mod is finally here!\nChallenge Hallownest\u0027s mightiest champions in grand combat!\nOvercome your opponents with powerful new charms!\nDiscover new secrets and stories!\nAll with an incredible new soundtrack!",
+    "url": "https://www.igdb.com/games/hollow-knight-pale-court",
+    "game_type": 5
+  },
+  {
+    "id": 106817,
+    "cover": {
+      "id": 141295,
+      "url": "//images.igdb.com/igdb/image/upload/t_thumb/co310v.jpg"
+    },
+    "first_release_date": 1508976000,
+    "name": "Hollow Knight: The Grimm Troupe",
+    "parent_game": 14593,
+    "platforms": [
+      {
+        "id": 3,
+        "abbreviation": "Linux",
+        "name": "Linux",
+        "platform_type": 4
+      },
+      {
+        "id": 6,
+        "abbreviation": "PC",
+        "name": "PC (Microsoft Windows)",
+        "platform_type": 4
+      },
+      {
+        "id": 14,
+        "abbreviation": "Mac",
+        "name": "Mac",
+        "platform_type": 4
+      },
+      {
+        "id": 130,
+        "abbreviation": "Switch",
+        "name": "Nintendo Switch",
+        "platform_type": 1
+      }
+    ],
+    "summary": "The Grimm Troupe is the second of the four free content pack for Hollow Knight, following Hidden Dreams on the 13th June, 2017. It was released on the 26th October, 2017. It will be followed by Gods \u0026 Glory on the 26th August, 2018.",
+    "total_rating": 86.99805397399788,
+    "url": "https://www.igdb.com/games/hollow-knight-the-grimm-troupe",
+    "game_type": 14
+  },
+  {
+    "id": 136396,
+    "cover": {
+      "id": 163581,
+      "url": "//images.igdb.com/igdb/image/upload/t_thumb/co3i7x.jpg"
+    },
+    "first_release_date": 1524182400,
+    "name": "Hollow Knight: Lifeblood",
+    "parent_game": 14593,
+    "platforms": [
+      {
+        "id": 3,
+        "abbreviation": "Linux",
+        "name": "Linux",
+        "platform_type": 4
+      },
+      {
+        "id": 6,
+        "abbreviation": "PC",
+        "name": "PC (Microsoft Windows)",
+        "platform_type": 4
+      },
+      {
+        "id": 14,
+        "abbreviation": "Mac",
+        "name": "Mac",
+        "platform_type": 4
+      },
+      {
+        "id": 130,
+        "abbreviation": "Switch",
+        "name": "Nintendo Switch",
+        "platform_type": 1
+      }
+    ],
+    "summary": "Lifeblood is a DLC for Hollow Knight and is the third out of the four free contents that were released. This DLC was announced on the 23rd of March 2018 and was released on the 20th of April, 2018.\n\nLifeblood Overview\nLifeblood mainly focused on enhancing certain aspects of the game such as:\n\nAn optimizable theme, allowing players to change the background of the title screen.\nVisual Changes to the game such as using charms, locations, and new animations.\nBuffs and Nerfs to Combat, Enemies, and Bosses such as:\nAdded two new attacks to the Traitor Lord.\nHivelings appearance is larger and has increased health.\nA stagger can be performed on The Collector\nHive Guardians deals two masks of damage to The Knight.\nUpon Death, a Volatile Mosskin quickly explodes.\nA Husk Hive grew in size, is faster, and summons Hivelings in a shorter period of time.\nA Desolate Dive can no longer be used on a Flukemarm.\nThe Knight must wear the Grimmchild charm to gain access into facing Nightmare King Grimm.\nStagger Animation of the False Knight is faster.\nThe spore cloud released by a Fungified Husk is bigger.\nAdded dialogue to NPCs\nAdded and optimized sound effects in the game.\nChanges made to some Charms:\nThe damage dealt by the Flukenest has been reduced and costs 3 notches.\nWeaverlings from the Weaversong deals more damage, has a new animation and can inflict stagger on bosses.\nJoni\u0027s Blessing has decreased its value of providing 50% +1 HP to 40% +1 HP.\nFury of the Fallen now has a red smoke when it is used instead of a red aura.\nOther than the changes done and added, Lifeblood also introduces a boss and a new mapping tool listed below:",
+    "total_rating": 70.81334874110301,
+    "url": "https://www.igdb.com/games/hollow-knight-lifeblood",
+    "game_type": 14
+  },
+  {
+    "id": 341658,
+    "cover": {
+      "id": 453912,
+      "url": "//images.igdb.com/igdb/image/upload/t_thumb/co9q8o.jpg"
+    },
+    "first_release_date": 1601683200,
+    "name": "Hollow Knight Gun Mod",
+    "parent_game": 14593,
+    "platforms": [
+      {
+        "id": 6,
+        "abbreviation": "PC",
+        "name": "PC (Microsoft Windows)",
+        "platform_type": 4
+      }
+    ],
+    "summary": "A Hollow Knight mod that gives the Knight the ability to wield a modern day assault rifle. Why did I make this? I wish I knew too.\n\nWhile this mod is not to be taken seriously, It still aims to make a semi-serious fun ranged weapon mod to capitalize on Hollow Knight\u0027s movement system.",
+    "url": "https://www.igdb.com/games/hollow-knight-gun-mod",
+    "game_type": 5
+  },
+  {
+    "id": 375989,
+    "name": "Hollow Knight: The Glimmering Realm",
+    "parent_game": 14593,
+    "summary": "A mod for the game Hollow Knight that adds a game mode with a whole new world to explore - the Glimmering Realm!\n\nChanges the layout, items and lore of Hallownest into a whole new realm\nNo map included, draw your own or venture forth without guidance\nAdds a new game mode, all old save files will remain unchanged",
+    "url": "https://www.igdb.com/games/hollow-knight-the-glimmering-realm",
+    "game_type": 5
+  },
+  {
+    "id": 105420,
+    "cover": {
+      "id": 209090,
+      "url": "//images.igdb.com/igdb/image/upload/t_thumb/co4hc2.jpg"
+    },
+    "first_release_date": 1534982400,
+    "name": "Hollow Knight: Godmaster",
+    "parent_game": 14593,
+    "platforms": [
+      {
+        "id": 48,
+        "abbreviation": "PS4",
+        "name": "PlayStation 4",
+        "platform_type": 1
+      },
+      {
+        "id": 3,
+        "abbreviation": "Linux",
+        "name": "Linux",
+        "platform_type": 4
+      },
+      {
+        "id": 6,
+        "abbreviation": "PC",
+        "name": "PC (Microsoft Windows)",
+        "platform_type": 4
+      },
+      {
+        "id": 14,
+        "abbreviation": "Mac",
+        "name": "Mac",
+        "platform_type": 4
+      },
+      {
+        "id": 49,
+        "abbreviation": "XONE",
+        "name": "Xbox One",
+        "platform_type": 1
+      },
+      {
+        "id": 130,
+        "abbreviation": "Switch",
+        "name": "Nintendo Switch",
+        "platform_type": 1
+      }
+    ],
+    "summary": "Godmaster was the fourth and final free content pack for Hollow Knight.",
+    "total_rating": 89.96032617912053,
+    "url": "https://www.igdb.com/games/hollow-knight-godmaster",
+    "game_type": 14
+  },
+  {
+    "id": 365702,
+    "cover": {
+      "id": 592689,
+      "url": "//images.igdb.com/igdb/image/upload/t_thumb/cocpbl.jpg"
+    },
+    "first_release_date": 1699833600,
+    "name": "Hollow Knight",
+    "parent_game": 14593,
+    "platforms": [
+      {
+        "id": 46,
+        "abbreviation": "Vita",
+        "name": "PlayStation Vita",
+        "platform_type": 5
+      }
+    ],
+    "summary": "Unofficial port of the hit game Hollow Knight for PlayStation Vita.",
+    "url": "https://www.igdb.com/games/hollow-knight--1",
+    "language_supports": [
+      {
+        "id": 1364404,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 1364405,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      }
+    ],
+    "game_type": 5
+  }
+]

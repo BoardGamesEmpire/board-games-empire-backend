@@ -1,73 +1,81 @@
-import type { IgdbGame } from '@bge/gateway-driver-igdb';
-import { BGE_VERSION } from '@bge/version';
+import type { DriverLogger } from '@boardgamesempire/gateway-driver-contract';
+import { createFakeFetch } from '@boardgamesempire/gateway-driver-contract-testing';
 import * as proto from '@boardgamesempire/proto-gateway';
-import { Test, TestingModule } from '@nestjs/testing';
 import { firstValueFrom, of, throwError } from 'rxjs';
 import { toArray } from 'rxjs/operators';
-import { IGDBService, type IgdbRequest } from '../igdb/igdb.service';
-import { DataGatewayService } from './data-gateway.service';
+import type { IgdbRequest } from './client/igdb-client.interface';
+import { IgdbCaller } from './igdb-caller';
+import { IgdbDriver } from './igdb.driver';
+import type { IgdbGame } from './types';
 
 // ---------------------------------------------------------------------------
-// Mock IGDBService to isolate DataGatewayService tests and avoid real API calls. We only need to
-// mock the 'call' method since that's what DataGatewayService uses.
+// The driver's IgdbCaller is mocked, to isolate the driver from IGDB. Only its
+// `call` method is exercised by the driver, and every IgdbCaller shares it.
 // ---------------------------------------------------------------------------
-function buildMockIgdbService(): jest.Mocked<Pick<IGDBService, 'call'>> {
-  return { call: jest.fn() };
-}
+jest.mock('./igdb-caller');
 
-describe('DataGatewayService', () => {
-  let service: DataGatewayService;
-  let igdbService: jest.Mocked<Pick<IGDBService, 'call'>>;
+const VERSION = '1.2.3-test';
 
-  beforeEach(async () => {
-    igdbService = buildMockIgdbService();
+describe('IgdbDriver', () => {
+  let driver: IgdbDriver;
+  let logger: jest.Mocked<DriverLogger>;
+  const igdbService = { call: jest.mocked(IgdbCaller.prototype.call) };
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [DataGatewayService, { provide: IGDBService, useValue: igdbService }],
-    }).compile();
+  beforeEach(() => {
+    igdbService.call.mockReset();
+    logger = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() };
 
-    service = module.get<DataGatewayService>(DataGatewayService);
+    driver = new IgdbDriver({
+      fetch: createFakeFetch(() => ({})),
+      clientId: 'test-client-id',
+      clientSecret: 'test-client-secret',
+      version: VERSION,
+      logger,
+    });
   });
 
   afterEach(() => jest.clearAllMocks());
 
   describe('ping', () => {
-    it('returns a response using the correlationId from the request', () => {
+    it('returns a response using the correlationId from the request', async () => {
       const request: proto.GatewayPingRequest = { correlationId: 'corr-ping-1' };
-      const response = service.ping(request);
+      const response = await firstValueFrom(driver.ping(request));
       expect(response.correlationId).toBe('corr-ping-1');
     });
 
-    it('generates a correlationId when none is provided in the request', () => {
-      const response = service.ping({});
+    it('generates a correlationId when none is provided in the request', async () => {
+      const response = await firstValueFrom(driver.ping({}));
       expect(response.correlationId).toBeTruthy();
       expect(typeof response.correlationId).toBe('string');
     });
 
-    it('returns the gateway name "IgdbGateway"', () => {
-      expect(service.ping({}).gatewayName).toBe('IgdbGateway');
+    it('returns the gateway name "IgdbGateway"', async () => {
+      expect((await firstValueFrom(driver.ping({}))).gatewayName).toBe('IgdbGateway');
     });
 
-    it('reports the product version it was built at', () => {
-      expect(service.ping({}).gatewayVersion).toBe(BGE_VERSION);
+    // A remote DataGateway's app passes the BGE version, and the plugin form its plugin manifest's (#1082).
+    it('reports the version it was given', async () => {
+      expect((await firstValueFrom(driver.ping({}))).gatewayVersion).toBe(VERSION);
     });
 
-    it('returns a bigint timestampMs', () => {
-      expect(typeof service.ping({}).timestampMs).toBe('bigint');
+    it('returns a bigint timestampMs', async () => {
+      expect(typeof (await firstValueFrom(driver.ping({}))).timestampMs).toBe('bigint');
     });
   });
 
   describe('describe', () => {
-    it('returns a response using the correlationId from the request', () => {
-      expect(service.describe({ correlationId: 'corr-describe-1' }).correlationId).toBe('corr-describe-1');
+    const describeOnce = (request: proto.DescribeRequest) => firstValueFrom(driver.describe(request));
+
+    it('returns a response using the correlationId from the request', async () => {
+      expect((await describeOnce({ correlationId: 'corr-describe-1' })).correlationId).toBe('corr-describe-1');
     });
 
-    it('generates a correlationId when none is provided in the request', () => {
-      expect(service.describe({}).correlationId).toEqual(expect.any(String));
+    it('generates a correlationId when none is provided in the request', async () => {
+      expect((await describeOnce({})).correlationId).toEqual(expect.any(String));
     });
 
-    it('declares search, fetch, fetch expansions and the lists of languages, platforms and categories', () => {
-      expect(new Set(service.describe({}).capabilities)).toEqual(
+    it('declares search, fetch, fetch expansions and the lists of languages, platforms and categories', async () => {
+      expect(new Set((await describeOnce({})).capabilities)).toEqual(
         new Set([
           proto.Capability.CAPABILITY_SEARCH,
           proto.Capability.CAPABILITY_FETCH,
@@ -80,8 +88,8 @@ describe('DataGatewayService', () => {
     });
 
     // IGDB has no mechanics to list (#718).
-    it('declares list platforms and list categories, but not list mechanics', () => {
-      const { capabilities } = service.describe({});
+    it('declares list platforms and list categories, but not list mechanics', async () => {
+      const { capabilities } = await describeOnce({});
 
       expect(capabilities).toEqual(
         expect.arrayContaining([
@@ -92,8 +100,8 @@ describe('DataGatewayService', () => {
       expect(capabilities).not.toContain(proto.Capability.CAPABILITY_LIST_MECHANICS);
     });
 
-    it('covers every video platform type, never tabletop', () => {
-      expect(new Set(service.describe({}).coverage?.platformTypes)).toEqual(
+    it('covers every video platform type, never tabletop', async () => {
+      expect(new Set((await describeOnce({})).coverage?.platformTypes)).toEqual(
         new Set([
           proto.PlatformType.PLATFORM_TYPE_CONSOLE,
           proto.PlatformType.PLATFORM_TYPE_PC,
@@ -105,8 +113,8 @@ describe('DataGatewayService', () => {
       );
     });
 
-    it('covers every content type its game types map to, and no accessories', () => {
-      expect(new Set(service.describe({}).coverage?.contentTypes)).toEqual(
+    it('covers every content type its game types map to, and no accessories', async () => {
+      expect(new Set((await describeOnce({})).coverage?.contentTypes)).toEqual(
         new Set([
           proto.ContentType.CONTENT_TYPE_BASE_GAME,
           proto.ContentType.CONTENT_TYPE_EXPANSION,
@@ -122,16 +130,16 @@ describe('DataGatewayService', () => {
       );
     });
 
-    it('declares publish year with platform type and content type', () => {
-      expect(service.describe({}).filterableAxes).toEqual([
+    it('declares publish year with platform type and content type', async () => {
+      expect((await describeOnce({})).filterableAxes).toEqual([
         proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLATFORM_TYPE,
         proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE,
         proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR,
       ]);
     });
 
-    it('accepts BCP 47 tags before ISO 639-1 codes, sends BCP 47 tags, and wants the search language translated', () => {
-      expect(service.describe({}).languageCodeFormats).toEqual({
+    it('accepts BCP 47 tags before ISO 639-1 codes, sends BCP 47 tags, and wants the search language translated', async () => {
+      expect((await describeOnce({})).languageCodeFormats).toEqual({
         acceptedRequestFormats: [
           proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
           proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_ISO_639_1,
@@ -141,8 +149,8 @@ describe('DataGatewayService', () => {
       } satisfies proto.LanguageCodeFormats);
     });
 
-    it('declares its free text as plain text', () => {
-      expect(service.describe({}).contentFormat).toBe(proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT);
+    it('declares its free text as plain text', async () => {
+      expect((await describeOnce({})).contentFormat).toBe(proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT);
     });
   });
 
@@ -175,7 +183,7 @@ describe('DataGatewayService', () => {
       const short = [platform(501), platform(502), platform(503)];
       igdbService.call.mockReturnValueOnce(of(full)).mockReturnValueOnce(of(short));
 
-      const response = await firstValueFrom(service.listPlatforms({ correlationId: 'corr-platforms' }));
+      const response = await firstValueFrom(driver.listPlatforms({ correlationId: 'corr-platforms' }));
 
       expect(response.correlationId).toBe('corr-platforms');
       expect(response.platforms).toHaveLength(503);
@@ -189,7 +197,7 @@ describe('DataGatewayService', () => {
     it('asks once when the first page comes back short', async () => {
       igdbService.call.mockReturnValueOnce(of([platform(1)]));
 
-      const response = await firstValueFrom(service.listPlatforms({}));
+      const response = await firstValueFrom(driver.listPlatforms({}));
 
       expect(response.platforms).toHaveLength(1);
       expect(igdbService.call).toHaveBeenCalledTimes(1);
@@ -198,7 +206,7 @@ describe('DataGatewayService', () => {
     it('maps a listed platform as a game’s platform is mapped', async () => {
       igdbService.call.mockReturnValueOnce(of([{ id: 39, name: 'iOS', abbreviation: 'iOS', platform_type: 4 }]));
 
-      const response = await firstValueFrom(service.listPlatforms({}));
+      const response = await firstValueFrom(driver.listPlatforms({}));
 
       expect(response.platforms).toEqual([
         { externalId: '39', name: 'iOS', abbreviation: 'iOS', platformType: proto.PlatformType.PLATFORM_TYPE_MOBILE },
@@ -213,7 +221,7 @@ describe('DataGatewayService', () => {
         ]),
       );
 
-      const response = await firstValueFrom(service.listCategories({ correlationId: 'corr-categories' }));
+      const response = await firstValueFrom(driver.listCategories({ correlationId: 'corr-categories' }));
 
       expect(response).toEqual({
         correlationId: 'corr-categories',
@@ -228,14 +236,28 @@ describe('DataGatewayService', () => {
       const full = Array.from({ length: 500 }, (_, index) => platform(index + 1));
       igdbService.call.mockReturnValueOnce(of(full)).mockReturnValueOnce(throwError(() => new Error('IGDB 503')));
 
-      await expect(firstValueFrom(service.listPlatforms({}))).rejects.toThrow('IGDB 503');
+      await expect(firstValueFrom(driver.listPlatforms({}))).rejects.toThrow('IGDB 503');
     });
   });
 
-  describe('healthCheck', () => {
-    it('returns SERVING status', () => {
+  // IGDB has no mechanics, so the driver declares none, and the server never
+  // asks; a request that asks anyway is told UNIMPLEMENTED (#718, #1082).
+  describe('listMechanics', () => {
+    it('answers UNIMPLEMENTED, since IGDB has no mechanics', async () => {
+      await expect(firstValueFrom(driver.listMechanics({ correlationId: 'corr-mechanics' }))).rejects.toMatchObject({
+        code: 12,
+        message: 'ListMechanics is not served by this DataGateway',
+      });
+      expect(igdbService.call).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('check', () => {
+    it('returns SERVING status', async () => {
       const request: proto.HealthCheckRequest = { service: 'GatewayService' };
-      expect(service.healthCheck(request).status).toBe(proto.HealthCheckResponse_ServingStatus.SERVING);
+      expect((await firstValueFrom(driver.check(request))).status).toBe(
+        proto.HealthCheckResponse_ServingStatus.SERVING,
+      );
     });
   });
 
@@ -243,7 +265,7 @@ describe('DataGatewayService', () => {
     it('narrows the IGDB query by the request’s filter', async () => {
       igdbService.call.mockReturnValue(of([]));
       await firstValueFrom(
-        service
+        driver
           .searchGames({
             correlationId: 'c',
             query: 'Hades',
@@ -272,7 +294,7 @@ describe('DataGatewayService', () => {
 
     it('ends at once, without asking IGDB, when the filter names nothing IGDB has', async () => {
       const frames = await firstValueFrom(
-        service
+        driver
           .searchGames({
             correlationId: 'c',
             query: 'Catan',
@@ -288,7 +310,7 @@ describe('DataGatewayService', () => {
     it('emits one RESULT frame per game followed by a single SOURCE_DONE', async () => {
       igdbService.call.mockReturnValue(of([BASE_GAME, DLC_GAME]));
 
-      const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'Hades' }).pipe(toArray()));
+      const frames = await firstValueFrom(driver.searchGames({ correlationId: 'c', query: 'Hades' }).pipe(toArray()));
 
       const resultFrames = frames.filter((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
       const doneFrames = frames.filter((f) => f.status === proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
@@ -302,7 +324,7 @@ describe('DataGatewayService', () => {
       igdbService.call.mockReturnValue(of([]));
 
       const frames = await firstValueFrom(
-        service.searchGames({ correlationId: 'c', query: 'nonexistent' }).pipe(toArray()),
+        driver.searchGames({ correlationId: 'c', query: 'nonexistent' }).pipe(toArray()),
       );
 
       expect(frames).toHaveLength(1);
@@ -312,7 +334,7 @@ describe('DataGatewayService', () => {
     it('maps the IGDB id to externalId as a string', async () => {
       igdbService.call.mockReturnValue(of([BASE_GAME]));
 
-      const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'Hades' }).pipe(toArray()));
+      const frames = await firstValueFrom(driver.searchGames({ correlationId: 'c', query: 'Hades' }).pipe(toArray()));
       const resultFrame = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
       expect(resultFrame?.game?.externalId).toBe(String(BASE_GAME.id));
@@ -322,7 +344,7 @@ describe('DataGatewayService', () => {
       igdbService.call.mockReturnValue(of([BASE_GAME]));
 
       const frames = await firstValueFrom(
-        service.searchGames({ correlationId: 'trace-abc', query: 'Hades' }).pipe(toArray()),
+        driver.searchGames({ correlationId: 'trace-abc', query: 'Hades' }).pipe(toArray()),
       );
 
       for (const frame of frames) {
@@ -334,7 +356,7 @@ describe('DataGatewayService', () => {
       igdbService.call.mockReturnValue(throwError(() => new Error('IGDB unavailable')));
 
       const frames = await firstValueFrom(
-        service.searchGames({ correlationId: 'corr-err', query: 'Hades' }).pipe(toArray()),
+        driver.searchGames({ correlationId: 'corr-err', query: 'Hades' }).pipe(toArray()),
       );
 
       expect(frames).toHaveLength(1);
@@ -345,7 +367,7 @@ describe('DataGatewayService', () => {
     it('prefixes protocol-relative cover URLs with "https:"', async () => {
       igdbService.call.mockReturnValue(of([BASE_GAME]));
 
-      const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'Hades' }).pipe(toArray()));
+      const frames = await firstValueFrom(driver.searchGames({ correlationId: 'c', query: 'Hades' }).pipe(toArray()));
       const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
       expect(result?.game?.thumbnailUrl).toMatch(/^https:/);
@@ -355,7 +377,7 @@ describe('DataGatewayService', () => {
     it('sets baseGameExternalId from parent_game for DLC games', async () => {
       igdbService.call.mockReturnValue(of([DLC_GAME]));
 
-      const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'dlc' }).pipe(toArray()));
+      const frames = await firstValueFrom(driver.searchGames({ correlationId: 'c', query: 'dlc' }).pipe(toArray()));
       const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
       expect(result?.game?.baseGameExternalId).toBe(String(DLC_GAME.parent_game));
@@ -365,7 +387,7 @@ describe('DataGatewayService', () => {
       igdbService.call.mockReturnValue(of([STANDALONE_EXPANSION]));
 
       const frames = await firstValueFrom(
-        service.searchGames({ correlationId: 'c', query: 'standalone' }).pipe(toArray()),
+        driver.searchGames({ correlationId: 'c', query: 'standalone' }).pipe(toArray()),
       );
       const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
@@ -375,7 +397,7 @@ describe('DataGatewayService', () => {
     it('does not set baseGameExternalId for base games', async () => {
       igdbService.call.mockReturnValue(of([BASE_GAME]));
 
-      const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'Hades' }).pipe(toArray()));
+      const frames = await firstValueFrom(driver.searchGames({ correlationId: 'c', query: 'Hades' }).pipe(toArray()));
       const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
       expect(result?.game?.baseGameExternalId).toBeUndefined();
@@ -387,7 +409,7 @@ describe('DataGatewayService', () => {
       igdbService.call.mockReturnValue(of([BASE_GAME]));
 
       const request: proto.FetchGameRequest = { correlationId: 'c', externalId: String(BASE_GAME.id) };
-      const response = await firstValueFrom(service.fetchGame(request));
+      const response = await firstValueFrom(driver.fetchGame(request));
 
       expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_RESULT);
       expect(response.game?.externalId).toBe(String(BASE_GAME.id));
@@ -397,7 +419,7 @@ describe('DataGatewayService', () => {
     it('returns ERROR status when no game is found', async () => {
       igdbService.call.mockReturnValue(of([]));
 
-      const response = await firstValueFrom(service.fetchGame({ correlationId: 'c', externalId: '9999' }));
+      const response = await firstValueFrom(driver.fetchGame({ correlationId: 'c', externalId: '9999' }));
 
       expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
     });
@@ -405,7 +427,7 @@ describe('DataGatewayService', () => {
     it('returns ERROR status when IGDBService throws', async () => {
       igdbService.call.mockReturnValue(throwError(() => new Error('API down')));
 
-      const response = await firstValueFrom(service.fetchGame({ correlationId: 'c', externalId: '9999' }));
+      const response = await firstValueFrom(driver.fetchGame({ correlationId: 'c', externalId: '9999' }));
 
       expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
       expect(response.message).toContain('API down');
@@ -417,7 +439,7 @@ describe('DataGatewayService', () => {
       igdbService.call.mockReturnValue(of([DLC_GAME]));
 
       const request: proto.FetchExpansionsRequest = { correlationId: 'c', baseExternalId: String(BASE_GAME.id) };
-      const frames = await firstValueFrom(service.fetchExpansions(request).pipe(toArray()));
+      const frames = await firstValueFrom(driver.fetchExpansions(request).pipe(toArray()));
 
       expect(frames.filter((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT)).toHaveLength(1);
       expect(frames[frames.length - 1].status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
@@ -427,7 +449,7 @@ describe('DataGatewayService', () => {
       igdbService.call.mockReturnValue(throwError(() => new Error('IGDB unreachable')));
 
       const frames = await firstValueFrom(
-        service.fetchExpansions({ correlationId: 'c', baseExternalId: '1942' }).pipe(toArray()),
+        driver.fetchExpansions({ correlationId: 'c', baseExternalId: '1942' }).pipe(toArray()),
       );
 
       expect(frames).toHaveLength(1);

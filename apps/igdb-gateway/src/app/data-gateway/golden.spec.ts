@@ -169,4 +169,54 @@ describe('IGDB gateway golden outputs', () => {
 
     expectGolden(golden('expansions-1942.json'), frames);
   });
+
+  // What runDataGatewayDriverContract asks of IGDB (#1082). IGDB pages and
+  // filters on its side, so each request is a query of its own, with its own
+  // fixture. The filters are the ones the contract builds from describe's
+  // coverage.
+  describe('as the driver contract asks', () => {
+    const searched = (filter?: proto.SearchFilter) =>
+      lastValueFrom(service.searchGames({ correlationId, query: 'Hollow Knight', filter }).pipe(toArray()));
+
+    it('searchGames for Hollow Knight', async () => {
+      expectGolden(golden('search-hollow-knight-contract.json'), await searched());
+    });
+
+    it('searchGames for Hollow Knight on its first platform type', async () => {
+      const [platformType] = service.describe({ correlationId }).coverage?.platformTypes ?? [];
+
+      expectGolden(
+        golden('search-hollow-knight-contract-platform-type.json'),
+        await searched({ platformTypes: [platformType], contentTypes: [] }),
+      );
+    });
+
+    it('searchGames for Hollow Knight on its first content type', async () => {
+      const [contentType] = service.describe({ correlationId }).coverage?.contentTypes ?? [];
+
+      expectGolden(
+        golden('search-hollow-knight-contract-content-type.json'),
+        await searched({ platformTypes: [], contentTypes: [contentType] }),
+      );
+    });
+
+    it('searchGames for Hollow Knight published in any year', async () => {
+      expectGolden(
+        golden('search-hollow-knight-contract-publish-year.json'),
+        await searched({
+          platformTypes: [],
+          contentTypes: [],
+          publishYear: { includeUnknown: true, min: -10000, max: 10000 },
+        }),
+      );
+    });
+
+    it("fetchExpansions for Hollow Knight's expansions", async () => {
+      const frames = await lastValueFrom(
+        service.fetchExpansions({ correlationId, baseExternalId: '14593' }).pipe(toArray()),
+      );
+
+      expectGolden(golden('expansions-14593.json'), frames);
+    });
+  });
 });

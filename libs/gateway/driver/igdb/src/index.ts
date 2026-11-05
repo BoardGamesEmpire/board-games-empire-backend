@@ -1,5 +1,6 @@
 export * from './lib/client/fetch-access-token';
 export * from './lib/client/igdb-query';
+export * from './lib/igdb.driver';
 
 // Everything the gateway app still imports while its code moves here (#1082).
 export * from './lib/client/igdb-client.interface';

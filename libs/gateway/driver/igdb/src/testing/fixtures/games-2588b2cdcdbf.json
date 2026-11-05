@@ -1,0 +1,988 @@
+[
+  {
+    "id": 14593,
+    "cover": {
+      "id": 533941,
+      "url": "//images.igdb.com/igdb/image/upload/t_thumb/cobfzp.jpg"
+    },
+    "first_release_date": 1487894400,
+    "name": "Hollow Knight",
+    "platforms": [
+      {
+        "id": 169,
+        "abbreviation": "Series X|S",
+        "name": "Xbox Series X|S",
+        "platform_type": 1
+      },
+      {
+        "id": 48,
+        "abbreviation": "PS4",
+        "name": "PlayStation 4",
+        "platform_type": 1
+      },
+      {
+        "id": 3,
+        "abbreviation": "Linux",
+        "name": "Linux",
+        "platform_type": 4
+      },
+      {
+        "id": 508,
+        "abbreviation": "Switch 2",
+        "name": "Nintendo Switch 2",
+        "platform_type": 1
+      },
+      {
+        "id": 6,
+        "abbreviation": "PC",
+        "name": "PC (Microsoft Windows)",
+        "platform_type": 4
+      },
+      {
+        "id": 167,
+        "abbreviation": "PS5",
+        "name": "PlayStation 5",
+        "platform_type": 1
+      },
+      {
+        "id": 14,
+        "abbreviation": "Mac",
+        "name": "Mac",
+        "platform_type": 4
+      },
+      {
+        "id": 41,
+        "abbreviation": "WiiU",
+        "name": "Wii U",
+        "platform_type": 1
+      },
+      {
+        "id": 49,
+        "abbreviation": "XONE",
+        "name": "Xbox One",
+        "platform_type": 1
+      },
+      {
+        "id": 130,
+        "abbreviation": "Switch",
+        "name": "Nintendo Switch",
+        "platform_type": 1
+      }
+    ],
+    "summary": "A 2D metroidvania with an emphasis on close combat and exploration in which the player enters the once-prosperous now-bleak insect kingdom of Hallownest, travels through its various districts, meets friendly inhabitants, fights hostile ones and uncovers the kingdom\u0027s history while improving their combat abilities and movement arsenal by fighting bosses and accessing out-of-the-way areas.",
+    "total_rating": 91.52377623821606,
+    "url": "https://www.igdb.com/games/hollow-knight",
+    "language_supports": [
+      {
+        "id": 30196,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 30192,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 30193,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 30194,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 30197,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 30198,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 30200,
+        "language": {
+          "id": 9,
+          "name": "Spanish (Spain)",
+          "native_name": "Español (España)",
+          "locale": "es-ES",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "62657819-b6f2-2beb-786e-78455af2de8f"
+        }
+      },
+      {
+        "id": 30217,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      },
+      {
+        "id": 30218,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 30219,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 30220,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 30213,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 30216,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      },
+      {
+        "id": 30204,
+        "language": {
+          "id": 17,
+          "name": "Korean",
+          "native_name": "한국어",
+          "locale": "ko-KR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "9ba648bf-f5fa-fa3c-3c6a-2fc7e1510cd6"
+        }
+      },
+      {
+        "id": 30203,
+        "language": {
+          "id": 17,
+          "name": "Korean",
+          "native_name": "한국어",
+          "locale": "ko-KR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "9ba648bf-f5fa-fa3c-3c6a-2fc7e1510cd6"
+        }
+      },
+      {
+        "id": 30207,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      },
+      {
+        "id": 30191,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 30195,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 30208,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      },
+      {
+        "id": 30209,
+        "language": {
+          "id": 15,
+          "name": "Italian",
+          "native_name": "Italiano",
+          "locale": "it-IT",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "52074797-ab02-c337-a805-a3e9969fc0eb"
+        }
+      },
+      {
+        "id": 30210,
+        "language": {
+          "id": 15,
+          "name": "Italian",
+          "native_name": "Italiano",
+          "locale": "it-IT",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "52074797-ab02-c337-a805-a3e9969fc0eb"
+        }
+      },
+      {
+        "id": 30199,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 30205,
+        "language": {
+          "id": 17,
+          "name": "Korean",
+          "native_name": "한국어",
+          "locale": "ko-KR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "9ba648bf-f5fa-fa3c-3c6a-2fc7e1510cd6"
+        }
+      },
+      {
+        "id": 30201,
+        "language": {
+          "id": 9,
+          "name": "Spanish (Spain)",
+          "native_name": "Español (España)",
+          "locale": "es-ES",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "62657819-b6f2-2beb-786e-78455af2de8f"
+        }
+      },
+      {
+        "id": 30202,
+        "language": {
+          "id": 9,
+          "name": "Spanish (Spain)",
+          "native_name": "Español (España)",
+          "locale": "es-ES",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "62657819-b6f2-2beb-786e-78455af2de8f"
+        }
+      },
+      {
+        "id": 30211,
+        "language": {
+          "id": 15,
+          "name": "Italian",
+          "native_name": "Italiano",
+          "locale": "it-IT",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "52074797-ab02-c337-a805-a3e9969fc0eb"
+        }
+      },
+      {
+        "id": 30212,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 30214,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 30215,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      },
+      {
+        "id": 30206,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      },
+      {
+        "id": 516033,
+        "language": {
+          "id": 20,
+          "name": "Portuguese (Portugal)",
+          "native_name": "Português (Portugal)",
+          "locale": "pt-PT",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "0ba51fb0-09a1-8603-583d-0c0f635854c4"
+        }
+      },
+      {
+        "id": 1619734,
+        "language": {
+          "id": 3,
+          "name": "Chinese (Traditional)",
+          "native_name": "繁體中文",
+          "locale": "zh-TW",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e7a793e9-d117-bc98-a000-67e444c0893d"
+        }
+      },
+      {
+        "id": 1619735,
+        "language": {
+          "id": 3,
+          "name": "Chinese (Traditional)",
+          "native_name": "繁體中文",
+          "locale": "zh-TW",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e7a793e9-d117-bc98-a000-67e444c0893d"
+        }
+      },
+      {
+        "id": 1619736,
+        "language": {
+          "id": 3,
+          "name": "Chinese (Traditional)",
+          "native_name": "繁體中文",
+          "locale": "zh-TW",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e7a793e9-d117-bc98-a000-67e444c0893d"
+        }
+      }
+    ],
+    "game_type": 0
+  },
+  {
+    "id": 115289,
+    "cover": {
+      "id": 531786,
+      "url": "//images.igdb.com/igdb/image/upload/t_thumb/cobebu.jpg"
+    },
+    "first_release_date": 1756944000,
+    "name": "Hollow Knight: Silksong",
+    "platforms": [
+      {
+        "id": 169,
+        "abbreviation": "Series X|S",
+        "name": "Xbox Series X|S",
+        "platform_type": 1
+      },
+      {
+        "id": 48,
+        "abbreviation": "PS4",
+        "name": "PlayStation 4",
+        "platform_type": 1
+      },
+      {
+        "id": 3,
+        "abbreviation": "Linux",
+        "name": "Linux",
+        "platform_type": 4
+      },
+      {
+        "id": 508,
+        "abbreviation": "Switch 2",
+        "name": "Nintendo Switch 2",
+        "platform_type": 1
+      },
+      {
+        "id": 6,
+        "abbreviation": "PC",
+        "name": "PC (Microsoft Windows)",
+        "platform_type": 4
+      },
+      {
+        "id": 167,
+        "abbreviation": "PS5",
+        "name": "PlayStation 5",
+        "platform_type": 1
+      },
+      {
+        "id": 14,
+        "abbreviation": "Mac",
+        "name": "Mac",
+        "platform_type": 4
+      },
+      {
+        "id": 49,
+        "abbreviation": "XONE",
+        "name": "Xbox One",
+        "platform_type": 1
+      },
+      {
+        "id": 130,
+        "abbreviation": "Switch",
+        "name": "Nintendo Switch",
+        "platform_type": 1
+      }
+    ],
+    "summary": "Hollow Knight: Silksong is the epic sequel to Hollow Knight, the epic action-adventure of bugs and heroes. As the lethal hunter Hornet, journey to all-new lands, discover new powers, battle vast hordes of bugs and beasts and uncover ancient secrets tied to your nature and your past.",
+    "total_rating": 90.98680928292235,
+    "url": "https://www.igdb.com/games/hollow-knight-silksong",
+    "language_supports": [
+      {
+        "id": 13471,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 13469,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 13490,
+        "language": {
+          "id": 9,
+          "name": "Spanish (Spain)",
+          "native_name": "Español (España)",
+          "locale": "es-ES",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "62657819-b6f2-2beb-786e-78455af2de8f"
+        }
+      },
+      {
+        "id": 13520,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      },
+      {
+        "id": 13498,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 13503,
+        "language": {
+          "id": 17,
+          "name": "Korean",
+          "native_name": "한국어",
+          "locale": "ko-KR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "9ba648bf-f5fa-fa3c-3c6a-2fc7e1510cd6"
+        }
+      },
+      {
+        "id": 13482,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 13506,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 13512,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      },
+      {
+        "id": 13494,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 13516,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      },
+      {
+        "id": 13476,
+        "language": {
+          "id": 15,
+          "name": "Italian",
+          "native_name": "Italiano",
+          "locale": "it-IT",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "52074797-ab02-c337-a805-a3e9969fc0eb"
+        }
+      },
+      {
+        "id": 13480,
+        "language": {
+          "id": 15,
+          "name": "Italian",
+          "native_name": "Italiano",
+          "locale": "it-IT",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "52074797-ab02-c337-a805-a3e9969fc0eb"
+        }
+      },
+      {
+        "id": 13492,
+        "language": {
+          "id": 9,
+          "name": "Spanish (Spain)",
+          "native_name": "Español (España)",
+          "locale": "es-ES",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "62657819-b6f2-2beb-786e-78455af2de8f"
+        }
+      },
+      {
+        "id": 13470,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 13488,
+        "language": {
+          "id": 9,
+          "name": "Spanish (Spain)",
+          "native_name": "Español (España)",
+          "locale": "es-ES",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "62657819-b6f2-2beb-786e-78455af2de8f"
+        }
+      },
+      {
+        "id": 13514,
+        "language": {
+          "id": 22,
+          "name": "Russian",
+          "native_name": "Русский",
+          "locale": "ru-RU",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "a9cb4d56-9180-df0b-cd5f-ad8c9b820b64"
+        }
+      },
+      {
+        "id": 13474,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 13486,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 13501,
+        "language": {
+          "id": 17,
+          "name": "Korean",
+          "native_name": "한국어",
+          "locale": "ko-KR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "9ba648bf-f5fa-fa3c-3c6a-2fc7e1510cd6"
+        }
+      },
+      {
+        "id": 13504,
+        "language": {
+          "id": 17,
+          "name": "Korean",
+          "native_name": "한국어",
+          "locale": "ko-KR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "9ba648bf-f5fa-fa3c-3c6a-2fc7e1510cd6"
+        }
+      },
+      {
+        "id": 13468,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      },
+      {
+        "id": 13484,
+        "language": {
+          "id": 27,
+          "name": "German",
+          "native_name": "Deutsch",
+          "locale": "de-DE",
+          "created_at": 1666085793,
+          "updated_at": 1666085793,
+          "checksum": "fc4eae54-cc3c-bcaa-bbc8-580c87d5951c"
+        }
+      },
+      {
+        "id": 13496,
+        "language": {
+          "id": 16,
+          "name": "Japanese",
+          "native_name": "日本語",
+          "locale": "ja-JP",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6e46a214-1fc9-e097-bf2b-b5d3f1187a48"
+        }
+      },
+      {
+        "id": 13521,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      },
+      {
+        "id": 13508,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 13472,
+        "language": {
+          "id": 12,
+          "name": "French",
+          "native_name": "Français",
+          "locale": "fr-FR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "6a477f36-9248-eae8-6626-5932d6384dbe"
+        }
+      },
+      {
+        "id": 13478,
+        "language": {
+          "id": 15,
+          "name": "Italian",
+          "native_name": "Italiano",
+          "locale": "it-IT",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "52074797-ab02-c337-a805-a3e9969fc0eb"
+        }
+      },
+      {
+        "id": 13510,
+        "language": {
+          "id": 21,
+          "name": "Portuguese (Brazil)",
+          "native_name": "Português (Brasil)",
+          "locale": "pt-BR",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "c62e5a15-99dc-0cd8-de04-fe6021ca78f8"
+        }
+      },
+      {
+        "id": 13518,
+        "language": {
+          "id": 2,
+          "name": "Chinese (Simplified)",
+          "native_name": "简体中文",
+          "locale": "zh-CN",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "ddcc7457-8939-17a3-9826-ef92d0d72371"
+        }
+      },
+      {
+        "id": 1619737,
+        "language": {
+          "id": 3,
+          "name": "Chinese (Traditional)",
+          "native_name": "繁體中文",
+          "locale": "zh-TW",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e7a793e9-d117-bc98-a000-67e444c0893d"
+        }
+      },
+      {
+        "id": 1619738,
+        "language": {
+          "id": 3,
+          "name": "Chinese (Traditional)",
+          "native_name": "繁體中文",
+          "locale": "zh-TW",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e7a793e9-d117-bc98-a000-67e444c0893d"
+        }
+      },
+      {
+        "id": 1619739,
+        "language": {
+          "id": 3,
+          "name": "Chinese (Traditional)",
+          "native_name": "繁體中文",
+          "locale": "zh-TW",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e7a793e9-d117-bc98-a000-67e444c0893d"
+        }
+      }
+    ],
+    "game_type": 0
+  },
+  {
+    "id": 231055,
+    "cover": {
+      "id": 281388,
+      "url": "//images.igdb.com/igdb/image/upload/t_thumb/co614c.jpg"
+    },
+    "first_release_date": 1672876800,
+    "name": "Hollow World: Dark Knight",
+    "platforms": [
+      {
+        "id": 130,
+        "abbreviation": "Switch",
+        "name": "Nintendo Switch",
+        "platform_type": 1
+      }
+    ],
+    "summary": "Use various hand-to-hand combat skills to defeat hordes of mystical enemies and save the world!",
+    "url": "https://www.igdb.com/games/hollow-world-dark-knight",
+    "language_supports": [
+      {
+        "id": 507922,
+        "language": {
+          "id": 7,
+          "name": "English",
+          "native_name": "English (US)",
+          "locale": "en-US",
+          "created_at": 1664803639,
+          "updated_at": 1664803639,
+          "checksum": "e2f64b8d-425f-28a3-3552-217aa1a955eb"
+        }
+      }
+    ],
+    "game_type": 0
+  }
+]
