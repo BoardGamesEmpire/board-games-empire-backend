@@ -106,12 +106,12 @@ export function searchGamesRequest(
     clauses.push(releasedBetweenClause(narrowing.releasedBetween));
   }
 
-  return (client: IGDBClient) => {
+  return (client: IGDBClient, signal: AbortSignal) => {
     const builder = client.fields(GAME_SEARCH_FIELDS).search(escapeSearchQuery(query));
     return includeLanguageFilter(builder, locale, clauses.join(' & '))
       .limit(limit)
       .offset(offset)
-      .request<IgdbGame>(GAMES_ENDPOINT)
+      .request<IgdbGame>(GAMES_ENDPOINT, signal)
       .then((response) => response.data);
   };
 }
@@ -166,11 +166,11 @@ function includeLanguageFilter(builder: IGDBClient, locale?: string, whereQuery?
  * Fetch a single game by its IGDB numeric id, returning full GameData fields.
  */
 export function fetchGameRequest(externalId: string, locale?: string): IgdbRequest<IgdbGame[]> {
-  return (client: IGDBClient) => {
+  return (client: IGDBClient, signal: AbortSignal) => {
     const builder = client.fields(GAME_FETCH_FIELDS);
     return includeLanguageFilter(builder, locale, `id = '${externalId}'`)
       .limit(1)
-      .request<IgdbGame>(GAMES_ENDPOINT)
+      .request<IgdbGame>(GAMES_ENDPOINT, signal)
       .then((response) => response.data);
   };
 }
@@ -184,7 +184,7 @@ export function fetchGameRequest(externalId: string, locale?: string): IgdbReque
  *   - Standalone expansions (category 4): version_parent set
  */
 export function fetchExpansionsRequest(baseExternalId: string, locale?: string): IgdbRequest<IgdbGame[]> {
-  return (client: IGDBClient) => {
+  return (client: IGDBClient, signal: AbortSignal) => {
     const builder = client.fields(GAME_SEARCH_FIELDS);
 
     return includeLanguageFilter(
@@ -193,7 +193,7 @@ export function fetchExpansionsRequest(baseExternalId: string, locale?: string):
       `(parent_game = '${baseExternalId}' | version_parent = '${baseExternalId}')`,
     )
       .limit(50)
-      .request<IgdbGame>(GAMES_ENDPOINT)
+      .request<IgdbGame>(GAMES_ENDPOINT, signal)
       .then((response) => response.data);
   };
 }

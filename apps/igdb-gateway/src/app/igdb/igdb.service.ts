@@ -1,4 +1,5 @@
 import type { IGDBClient, IgdbRequest } from '@bge/gateway-driver-igdb';
+import { fromAbortable } from '@boardgamesempire/gateway-driver-contract';
 import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Http } from '@status/codes';
@@ -59,20 +60,21 @@ export class IGDBService implements OnModuleInit {
    * Each attempt receives its own client instance — see {@link IgdbClientFactory}.
    */
   call<T>(request: IgdbRequest<T>): Observable<T> {
-    return from(request(this.client())).pipe(
+    // Each attempt runs on subscription, and unsubscribing aborts it (#1082).
+    const attempt = () => fromAbortable((signal) => request(this.client(), signal));
+
+    return attempt().pipe(
       catchError((err) => {
         if (isAxiosError(err)) {
           if (err.response?.status === Http.Unauthorized) {
             this.logger.warn('Unauthorized error received, refreshing access token...');
-            return from(this.refreshAccessToken()).pipe(switchMap(() => request(this.client())));
+            return from(this.refreshAccessToken()).pipe(switchMap(() => attempt()));
           }
 
           if (err.response?.status === Http.TooManyRequests) {
             this.logger.warn('Rate limit exceeded, retrying request...');
             // TODO: Are there headers for rate limit reset time? - investigate
-            return from(new Promise((resolve) => setTimeout(resolve, 1000))).pipe(
-              switchMap(() => request(this.client())),
-            );
+            return from(new Promise((resolve) => setTimeout(resolve, 1000))).pipe(switchMap(() => attempt()));
           }
         }
 

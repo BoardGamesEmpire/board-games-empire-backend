@@ -1,4 +1,4 @@
-import { igdbFixtureKey, type IGDBClient } from '@bge/gateway-driver-igdb';
+import { igdbFixtureKey, TWITCH_TOKEN_URL, type IGDBClient } from '@bge/gateway-driver-igdb';
 import {
   expectGolden,
   isRecordingUpstream,
@@ -15,7 +15,6 @@ import { firstValueFrom, lastValueFrom, toArray } from 'rxjs';
 import type { IGDBConfig } from '../igdb/configuration/igdb.config';
 import { IgdbAuthService } from '../igdb/igdb-auth.service';
 import { IGDBService } from '../igdb/igdb.service';
-import { TWITCH_TOKEN_URL } from '../igdb/lib/fetch-access-token';
 import { DataGatewayService } from './data-gateway.service';
 
 /**

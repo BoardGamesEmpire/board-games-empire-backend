@@ -21,6 +21,9 @@
       "path": "../../../plugin/manifest/tsconfig.lib.json"
     },
     {
+      "path": "../contract-testing/tsconfig.lib.json"
+    },
+    {
       "path": "../../../proto/gateway/tsconfig.lib.json"
     },
     {

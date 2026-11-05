@@ -18,12 +18,12 @@ export function listGenresRequest(offset: number): IgdbRequest<IgdbNamedEntity[]
 }
 
 function listPage<T>(endpoint: string, fields: readonly string[], offset: number): IgdbRequest<T[]> {
-  return (client: IGDBClient) =>
+  return (client: IGDBClient, signal: AbortSignal) =>
     client
       .fields(fields)
       .sort('id', 'asc')
       .limit(IGDB_LIST_PAGE_SIZE)
       .offset(offset)
-      .request<T>(endpoint)
+      .request<T>(endpoint, signal)
       .then((response) => response.data);
 }

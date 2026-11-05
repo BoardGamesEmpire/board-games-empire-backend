@@ -1,9 +1,9 @@
 /**
- * Fluent builder interface for igdb-api-node.
+ * The fluent query the requests write, which `IgdbQuery` sends to IGDB.
  *
  * Each chain method returns `this` so calls can be composed. `request` is the
- * terminal operation that executes the HTTP call and resolves with the raw
- * axios response; callers should read `.data` for the result array.
+ * terminal operation: it sends the query to the endpoint and resolves with
+ * the answer's rows under `data`. Its signal aborts the call (#1082).
  *
  * Generic parameter T is the expected element type of the response array
  * (e.g. IgdbGame). Defaults to `unknown` to enforce explicit typing at
@@ -16,12 +16,12 @@ export interface IGDBClient {
   search(query: string): this;
   where(clause: string): this;
   sort(field: string, direction?: 'asc' | 'desc'): this;
-  request<T = unknown>(endpoint: string): Promise<{ data: T[] }>;
+  request<T = unknown>(endpoint: string, signal?: AbortSignal): Promise<{ data: T[] }>;
 }
 
 /**
- * A unit of work against IGDB: it takes a fresh client and resolves with
- * the result. Each attempt gets a new client, since a
- * client keeps its query's state.
+ * A unit of work against IGDB: it takes a fresh client, and the signal that
+ * aborts it, and resolves with the result. IgdbCaller builds a new client
+ * for each attempt, since a client keeps its query's state.
  */
-export type IgdbRequest<T> = (igdb: IGDBClient) => Promise<T>;
+export type IgdbRequest<T> = (igdb: IGDBClient, signal: AbortSignal) => Promise<T>;

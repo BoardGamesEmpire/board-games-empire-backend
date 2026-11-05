@@ -164,7 +164,7 @@ describe('DataGatewayService', () => {
                 },
         },
       );
-      await request(client as never);
+      await request(client as never, new AbortController().signal);
       return offset.mock.calls[0]?.[0];
     };
 
@@ -265,7 +265,7 @@ describe('DataGatewayService', () => {
         request: jest.fn().mockResolvedValue({ data: [] }),
       };
       const [igdbRequest] = igdbService.call.mock.calls[0] as unknown as [IgdbRequest<IgdbGame[]>];
-      await igdbRequest(client as never);
+      await igdbRequest(client as never, new AbortController().signal);
 
       expect(where).toHaveBeenCalledWith(expect.stringContaining('game_type = (2) & platforms.platform_type = (1)'));
     });

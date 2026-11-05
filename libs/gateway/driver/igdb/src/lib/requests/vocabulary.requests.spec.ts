@@ -1,19 +1,22 @@
 import type { IGDBClient } from '../client/igdb-client.interface';
 import { listGenresRequest, listPlatformsRequest } from './vocabulary.requests';
 
+/** The signal IgdbCaller hands each request, which the request passes on to the client (#1082). */
+const signal = new AbortController().signal;
+
 describe('VocabularyRequests (#718)', () => {
   describe('listPlatformsRequest', () => {
     it('asks /platforms for one page of platforms, by id, from the given offset', async () => {
       const platforms = [{ id: 6, name: 'PC (Microsoft Windows)', abbreviation: 'PC', platform_type: 6 }];
       const client = buildMockClient(platforms);
 
-      await expect(listPlatformsRequest(500)(client)).resolves.toEqual(platforms);
+      await expect(listPlatformsRequest(500)(client, signal)).resolves.toEqual(platforms);
 
       expect(client.fields).toHaveBeenCalledWith(['id', 'name', 'abbreviation', 'platform_type']);
       expect(client.sort).toHaveBeenCalledWith('id', 'asc');
       expect(client.limit).toHaveBeenCalledWith(500);
       expect(client.offset).toHaveBeenCalledWith(500);
-      expect(client.request).toHaveBeenCalledWith('/platforms');
+      expect(client.request).toHaveBeenCalledWith('/platforms', signal);
     });
   });
 
@@ -22,13 +25,13 @@ describe('VocabularyRequests (#718)', () => {
       const genres = [{ id: 15, name: 'Strategy' }];
       const client = buildMockClient(genres);
 
-      await expect(listGenresRequest(0)(client)).resolves.toEqual(genres);
+      await expect(listGenresRequest(0)(client, signal)).resolves.toEqual(genres);
 
       expect(client.fields).toHaveBeenCalledWith(['id', 'name']);
       expect(client.sort).toHaveBeenCalledWith('id', 'asc');
       expect(client.limit).toHaveBeenCalledWith(500);
       expect(client.offset).toHaveBeenCalledWith(0);
-      expect(client.request).toHaveBeenCalledWith('/genres');
+      expect(client.request).toHaveBeenCalledWith('/genres', signal);
     });
   });
 });
