@@ -3,6 +3,15 @@ import { ContentType, PlatformType, Reach } from '@bge/database';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { LinkedGame } from '../linked-game.select';
 import type { PlatformGameDetail } from '../platform-game-detail.select';
+import {
+  GameArtistDto,
+  GameCategoryDto,
+  GameDesignerDto,
+  GameFamilyDto,
+  GameMechanicDto,
+  GamePublisherDto,
+  GameTagDto,
+} from './game-detail-relations.dto';
 
 export class GameDto implements Pick<
   Game,
@@ -243,6 +252,27 @@ export class LinkedBaseGameDto extends ExpansionLinkDto {
 }
 
 export class GameDetailDto extends GameDto {
+  @ApiProperty({ type: [GameArtistDto], description: 'The game’s artists, each with their role (#1036)' })
+  artists!: GameArtistDto[];
+
+  @ApiProperty({ type: [GameCategoryDto], description: 'The game’s categories, the primary one marked (#1036)' })
+  categories!: GameCategoryDto[];
+
+  @ApiProperty({ type: [GameDesignerDto], description: 'The game’s designers, each with their role (#1036)' })
+  designers!: GameDesignerDto[];
+
+  @ApiProperty({ type: [GameFamilyDto], description: 'The families the game belongs to (#1036)' })
+  families!: GameFamilyDto[];
+
+  @ApiProperty({ type: [GameMechanicDto], description: 'The game’s mechanics (#1036)' })
+  mechanics!: GameMechanicDto[];
+
+  @ApiProperty({ type: [GamePublisherDto], description: 'The game’s publishers, each with their role (#1036)' })
+  publishers!: GamePublisherDto[];
+
+  @ApiProperty({ type: [GameTagDto], description: 'The game’s tags (#1036)' })
+  tags!: GameTagDto[];
+
   @ApiProperty({
     type: [PlatformGameDetailDto],
     description:

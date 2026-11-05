@@ -23,6 +23,7 @@ import {
   type GameListItemDto,
   type GameSort,
 } from './dto';
+import { GAME_DETAIL_INCLUDE } from './game-detail.include';
 import { gameListScope } from './game-list-scope';
 import { LINKED_GAME_SELECT } from './linked-game.select';
 import { PLATFORM_GAME_DETAIL_SELECT } from './platform-game-detail.select';
@@ -243,106 +244,7 @@ export class GameService {
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.read),
         },
 
-        include: {
-          artists: {
-            select: {
-              id: true,
-              role: true,
-              details: true,
-
-              artist: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-
-          categories: {
-            select: {
-              id: true,
-              isPrimary: true,
-
-              category: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-
-          designers: {
-            select: {
-              id: true,
-              role: true,
-
-              designer: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-
-          families: {
-            select: {
-              id: true,
-
-              family: {
-                select: {
-                  id: true,
-                  name: true,
-                  familyType: true,
-                },
-              },
-            },
-          },
-
-          mechanics: {
-            select: {
-              id: true,
-
-              mechanic: {
-                select: {
-                  id: true,
-                  name: true,
-                  description: true,
-                  complexity: true,
-                },
-              },
-            },
-          },
-
-          publishers: {
-            select: {
-              id: true,
-              role: true,
-
-              publisher: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-
-          tags: {
-            select: {
-              id: true,
-
-              tag: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-        },
+        include: GAME_DETAIL_INCLUDE,
       });
     } catch (error) {
       this.logger.error(`Error fetching game with id ${id}`, error);

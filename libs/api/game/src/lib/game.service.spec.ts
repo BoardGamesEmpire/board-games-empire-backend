@@ -16,6 +16,7 @@ import {
 } from '@bge/testing';
 import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { GAME_DESCRIPTION_MAX_LENGTH, ListGamesQueryDto, type CreateGameDto, type UpdateGameDto } from './dto';
+import { GAME_DETAIL_INCLUDE } from './game-detail.include';
 import { gameListScope } from './game-list-scope';
 import { GameService } from './game.service';
 import { LINKED_GAME_SELECT } from './linked-game.select';
@@ -346,9 +347,11 @@ describe('GameService', () => {
     await service.getGame('game-1');
 
     expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Game, Action.read);
-    expect(db.game.findUniqueOrThrow).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ id: 'game-1', AND: [COND] }) }),
-    );
+    // The include is the one `GameDetailDto` documents (#1036).
+    expect(db.game.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { id: 'game-1', AND: [COND] },
+      include: GAME_DETAIL_INCLUDE,
+    });
     // No pre-flight count: telling 404 from 403 is spent only on a refused read.
     expect(db.game.count).not.toHaveBeenCalled();
   });
