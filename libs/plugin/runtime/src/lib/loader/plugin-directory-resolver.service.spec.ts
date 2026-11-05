@@ -207,6 +207,29 @@ describe('PluginDirectoryResolverService', () => {
       }
     });
 
+    it("refuses an artifact directory linked to another slug's artifact inside the root (#224)", async () => {
+      // Both stay inside the root, so containment alone would pass, and
+      // plugin-b's code would load under plugin-a's row.
+      await scaffold(pluginsRoot, 'plugin-b', ['manifest.json', 'package.json'], SHA_B);
+      await mkdir(join(pluginsRoot, 'plugin-a'), { recursive: true });
+      await symlink(join(pluginsRoot, 'plugin-b', SHA_B), join(pluginsRoot, 'plugin-a', SHA_A));
+
+      const failure = await resolver.resolve('plugin-a', SHA_A).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginDirectoryLayoutError);
+      expect((failure as Error).message).toMatch(/is a link to .*plugin-b/);
+    });
+
+    it("refuses a slug directory linked to another slug's directory inside the root (#224)", async () => {
+      await scaffold(pluginsRoot, 'plugin-b', ['manifest.json', 'package.json'], SHA_A);
+      await symlink(join(pluginsRoot, 'plugin-b'), join(pluginsRoot, 'plugin-a'));
+
+      const failure = await resolver.resolve('plugin-a', SHA_A).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginDirectoryLayoutError);
+      expect((failure as Error).message).toMatch(/is a link to .*plugin-b/);
+    });
+
     it('rejects when the configured root itself cannot be resolved', async () => {
       const missingRootResolver = new PluginDirectoryResolverService({
         pluginsRoot: join(pluginsRoot, 'does-not-exist'),
@@ -217,6 +240,47 @@ describe('PluginDirectoryResolverService', () => {
       await expect(missingRootResolver.resolve('demo-sink', SHA_A)).rejects.toThrow(
         /configured plugin root .* cannot be resolved/,
       );
+    });
+  });
+
+  describe('confirm', () => {
+    it('returns the resolved directory for the one its slug and checksum name (#224)', async () => {
+      await scaffold(pluginsRoot, 'demo-sink', ['manifest.json', 'package.json']);
+      const resolved = await resolver.resolve('demo-sink', SHA_A);
+
+      await expect(resolver.confirm({ ...resolved })).resolves.toStrictEqual(resolved);
+    });
+
+    it('refuses a directory that is not where its checksum names, such as a temporary extraction directory (#224)', async () => {
+      await scaffold(pluginsRoot, 'demo-sink', ['manifest.json', 'package.json']);
+      const elsewhere = join(pluginsRoot, '.incoming', randomUUID());
+
+      const failure = await resolver
+        .confirm({
+          slug: 'demo-sink',
+          sha256: SHA_A,
+          rootDir: elsewhere,
+          manifestPath: join(elsewhere, 'manifest.json'),
+          packageJsonPath: join(elsewhere, 'package.json'),
+        })
+        .catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginDirectoryLayoutError);
+      expect((failure as Error).message).toMatch(/is not the artifact directory/);
+    });
+
+    it('refuses a checksum that is not 64 lowercase hex characters (#224)', async () => {
+      const rootDir = join(pluginsRoot, 'demo-sink', SHA_A);
+
+      await expect(
+        resolver.confirm({
+          slug: 'demo-sink',
+          sha256: `sha256:${'A'.repeat(64)}`,
+          rootDir,
+          manifestPath: join(rootDir, 'manifest.json'),
+          packageJsonPath: join(rootDir, 'package.json'),
+        }),
+      ).rejects.toThrow(PluginDirectoryLayoutError);
     });
   });
 });

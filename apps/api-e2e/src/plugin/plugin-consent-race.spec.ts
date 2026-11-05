@@ -8,7 +8,6 @@ import {
 } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
-import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
@@ -98,7 +97,7 @@ describe('consent decisions under concurrency (#360)', () => {
         scope: PluginScope.Household,
         manifestJson: active as never,
         enabled: true,
-        installedSha256: randomUUID(),
+        installedSha256: 'a'.repeat(64),
         ...overrides,
       },
     });

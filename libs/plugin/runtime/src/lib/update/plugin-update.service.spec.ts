@@ -41,6 +41,8 @@ import {
 import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import type { PluginStaticAnalysisService } from '../install/plugin-static-analysis.service';
 import type { StaticAnalysisFinding, StaticAnalysisReport } from '../install/static-analysis.types';
+import { PluginDirectoryLayoutError } from '../loader/loader.errors';
+import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import type { PluginModuleOptions } from '../plugin-module.options';
 import { PluginUpdateService, type PluginUpdateStageInput } from './plugin-update.service';
 import {
@@ -168,6 +170,7 @@ describe('PluginUpdateService', () => {
   let db: MockDatabaseService;
   let authority: jest.Mocked<Pick<PluginGrantAuthorityService, 'isServerAdmin'>>;
   let analyzer: jest.Mocked<Pick<PluginStaticAnalysisService, 'analyze'>>;
+  let directories: { confirm: jest.Mock };
   let emitter: { emit: jest.Mock };
   let service: PluginUpdateService;
   /**
@@ -214,6 +217,7 @@ describe('PluginUpdateService', () => {
     db = createMockDatabaseService();
     authority = { isServerAdmin: jest.fn().mockResolvedValue(true) };
     analyzer = { analyze: jest.fn().mockResolvedValue(emptyReport) };
+    directories = { confirm: jest.fn((dir: PluginArtifactDirectory) => Promise.resolve(dir)) };
     emitter = { emit: jest.fn() };
     service = new PluginUpdateService(
       db as never,
@@ -222,6 +226,9 @@ describe('PluginUpdateService', () => {
       new PluginConfigSchemaService(),
       emitter as never,
       options,
+      // The resolver's own spec covers the layout; here it confirms whatever
+      // directory the case hands over.
+      directories as unknown as PluginDirectoryResolverService,
     );
 
     db.plugin.findUnique.mockResolvedValue(makePlugin());
@@ -277,6 +284,17 @@ describe('PluginUpdateService', () => {
   });
 
   describe('stage() gates', () => {
+    it('refuses a directory the loader could not resolve at the next boot, and records nothing (#224)', async () => {
+      directories.confirm.mockRejectedValue(new PluginDirectoryLayoutError('demo-sink', 'checksum fails the pattern'));
+      await writeManifest(nextManifest());
+
+      await expect(
+        service.stage(input({ directory: { ...directory(), sha256: `sha256:${'A'.repeat(64)}` } })),
+      ).rejects.toBeInstanceOf(PluginDirectoryLayoutError);
+      expect(db.plugin.updateMany).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
     it('requires server-admin authority', async () => {
       authority.isServerAdmin.mockResolvedValue(false);
       await writeManifest(nextManifest());

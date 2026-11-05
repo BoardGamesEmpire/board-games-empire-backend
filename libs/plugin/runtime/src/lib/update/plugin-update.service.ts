@@ -53,6 +53,7 @@ import {
 import { MANIFEST_SCOPE_TO_PRISMA } from '../install/manifest-enum.maps';
 import { PluginStaticAnalysisService } from '../install/plugin-static-analysis.service';
 import { gatingFindings, type StaticAnalysisReport } from '../install/static-analysis.types';
+import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
 import {
@@ -339,15 +340,20 @@ export class PluginUpdateService {
     private readonly configSchema: PluginConfigSchemaService,
     private readonly emitter: EventEmitter2,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
+    private readonly directories: PluginDirectoryResolverService,
   ) {}
 
   async stage(input: PluginUpdateStageInput): Promise<PluginUpdateStageResult> {
     const initiatedAt = new Date();
-    const { directory } = input;
 
     if (!(await this.authority.isServerAdmin(input.initiatorId))) {
       throw new PluginUpdateAuthorityError(input.initiatorId);
     }
+
+    // Before anything is read from it or recorded: approval is to make this
+    // checksum the one the loader resolves, so a directory the resolver would
+    // refuse at that boot is refused now, with the same error (#224).
+    const directory = await this.directories.confirm(input.directory);
 
     const plugin = await this.loadUpdatablePlugin(directory.slug);
 

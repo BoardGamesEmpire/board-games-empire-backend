@@ -73,7 +73,10 @@ export interface PluginUninstallResult {
  * the same write — the
  * loader's boot query treats that as an invariant — and sets
  * `restartRequired` so diagnostics show the running instance still holds
- * the old module until next boot. No hot unload, by design.
+ * the old module until next boot. No hot unload, by design. No living row
+ * names the installed artifact's directory after this either, but the
+ * running module still reads from it, so the sweep is to keep it until
+ * that boot.
  */
 @Injectable()
 export class PluginLifecycleService {

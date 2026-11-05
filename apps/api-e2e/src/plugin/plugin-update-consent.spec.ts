@@ -136,7 +136,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
         scope: scope === 'server' ? PluginScope.Server : PluginScope.Household,
         manifestJson: active as never,
         enabled: true,
-        installedSha256: randomUUID(),
+        installedSha256: 'a'.repeat(64),
         config: (overrides.activeConfig ?? {}) as never,
         pendingVersion: pending.version,
         pendingManifestJson: pending as never,

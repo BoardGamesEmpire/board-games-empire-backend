@@ -29,6 +29,8 @@ import {
   PluginInstalledEvent,
 } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
+import { PluginDirectoryLayoutError } from '../loader/loader.errors';
+import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import type { PluginModuleOptions } from '../plugin-module.options';
 import {
   PluginInstallAuthorityError,
@@ -139,6 +141,7 @@ describe('PluginInstallerService', () => {
   let authority: jest.Mocked<Pick<PluginGrantAuthorityService, 'isServerAdmin'>>;
   let analyzer: jest.Mocked<Pick<PluginStaticAnalysisService, 'analyze'>>;
   let emitter: { emit: jest.Mock };
+  let directories: { confirm: jest.Mock };
   let service: PluginInstallerService;
 
   const directory = (): PluginArtifactDirectory => ({
@@ -209,6 +212,9 @@ describe('PluginInstallerService', () => {
     analyzer.analyze.mockResolvedValue(emptyReport);
 
     emitter = { emit: jest.fn() };
+    // The resolver's own spec covers the layout; here it confirms whatever
+    // directory the case hands over.
+    directories = { confirm: jest.fn((dir: PluginArtifactDirectory) => Promise.resolve(dir)) };
 
     service = new PluginInstallerService(
       db as unknown as DatabaseService,
@@ -217,6 +223,7 @@ describe('PluginInstallerService', () => {
       new PluginConfigSchemaService(),
       emitter as unknown as EventEmitter2,
       options,
+      directories as unknown as PluginDirectoryResolverService,
     );
   });
 
@@ -374,6 +381,26 @@ describe('PluginInstallerService', () => {
   });
 
   describe('manifest gate', () => {
+    it('refuses a directory the loader could not resolve at the next boot, and records nothing (#224)', async () => {
+      directories.confirm.mockRejectedValue(new PluginDirectoryLayoutError('demo-sink', 'checksum fails the pattern'));
+
+      await expect(
+        service.install(input({ directory: { ...directory(), sha256: `sha256:${'A'.repeat(64)}` } })),
+      ).rejects.toBeInstanceOf(PluginDirectoryLayoutError);
+      expect(db.plugin.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('reads the manifest from the directory the resolver confirms (#224)', async () => {
+      // The handed-over manifest path names nothing; the install succeeds
+      // only by reading the manifest at the path the resolver gives.
+      const handed = { ...directory(), manifestPath: join(rootDir, 'elsewhere.json') };
+      directories.confirm.mockResolvedValue(directory());
+
+      await expect(service.install(input({ directory: handed }))).resolves.toBeDefined();
+      expect(directories.confirm).toHaveBeenCalledWith(handed);
+    });
+
     it('rejects unreadable manifest JSON', async () => {
       await writeFile(join(rootDir, 'manifest.json'), '{ not json', 'utf-8');
 

@@ -355,7 +355,8 @@ export class PluginsController {
     summary: 'Reject the staged pending update',
     description:
       'Clears the staged-update columns and emits plugin.update_rejected. The staged plugin artifact stays on ' +
-      'disk until the planned artifact sweep (#1094) removes every artifact directory no living plugin names; ' +
+      'disk until the planned artifact sweep (#1094) removes it: no living plugin names it, and no running plugin ' +
+      'was loaded from it; ' +
       'this endpoint never touches the filesystem. The body names the staging it answers with the stagingId the ' +
       'staged-update read, or the plugin read, reported (#357).',
   })

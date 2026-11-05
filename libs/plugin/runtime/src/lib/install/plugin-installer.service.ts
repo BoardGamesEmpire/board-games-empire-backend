@@ -26,6 +26,7 @@ import { PluginConfigSchemaService } from '../config/plugin-config-schema.servic
 import { retainedServerConfig } from '../config/retained-server-config';
 import { PluginInstalledEvent, type GrantedPermissionRecord, type PluginProvenance } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
+import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
 import {
@@ -155,11 +156,15 @@ export class PluginInstallerService {
     private readonly configSchema: PluginConfigSchemaService,
     private readonly emitter: EventEmitter2,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
+    private readonly directories: PluginDirectoryResolverService,
   ) {}
 
   async install(input: PluginInstallInput): Promise<PluginInstallResult> {
     const initiatedAt = new Date();
-    const { directory } = input;
+    // Before anything is read from it or recorded: the row is to name a
+    // checksum the loader resolves at the next boot, so a directory the
+    // resolver would refuse then is refused now, with the same error (#224).
+    const directory = await this.directories.confirm(input.directory);
     // What the row and the installed event record: the checksum is the
     // artifact directory's own (#224), and a link or registry the provenance
     // leaves out is stored as null.

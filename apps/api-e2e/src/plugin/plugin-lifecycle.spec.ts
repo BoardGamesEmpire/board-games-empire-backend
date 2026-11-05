@@ -57,7 +57,7 @@ describe('plugin lifecycle (server-level)', () => {
         scope: PluginScope.Server,
         manifestJson: manifest as never,
         enabled: false,
-        installedSha256: randomUUID(),
+        installedSha256: 'a'.repeat(64),
         ...(overrides as Record<string, never>),
       },
     });

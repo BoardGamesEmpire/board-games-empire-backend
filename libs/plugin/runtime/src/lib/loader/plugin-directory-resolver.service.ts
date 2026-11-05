@@ -60,11 +60,24 @@ export class PluginDirectoryResolverService {
     // The slug directory or the artifact directory may be a symlink; a link
     // out of the configured root would otherwise let every subsequent layout
     // check pass against a host location. Checking the final realpath covers
-    // a link at either segment.
+    // a link out of the root at either segment.
     const rootDir = await realpathOrNull(artifactPath);
 
     if (rootDir === null || !isContained(realRoot, rootDir)) {
       throw new PluginDirectoryLayoutError(slug, `directory resolves outside the configured plugin root ${realRoot}`);
+    }
+
+    // A link that stays inside the root is refused too. The directory's name
+    // is its identity (#224): `<root>/plugin-a/<sha>` linked to plugin-b's
+    // artifact would load plugin-b's code under plugin-a's row, its grants and
+    // its config, and the loader's version check can't tell the two apart
+    // when the versions agree. `realRoot` is already real, so the artifact
+    // path is its own realpath exactly when neither segment is a link.
+    if (rootDir !== artifactPath) {
+      throw new PluginDirectoryLayoutError(
+        slug,
+        `artifact directory ${artifactPath} is a link to ${rootDir}; it must be the directory its checksum names`,
+      );
     }
 
     const manifestPath = join(rootDir, PLUGIN_MANIFEST_FILENAME);
@@ -74,6 +87,27 @@ export class PluginDirectoryResolverService {
     await this.assertContainedFile(slug, packageJsonPath, PLUGIN_PACKAGE_JSON_FILENAME, rootDir);
 
     return { slug, sha256, rootDir, manifestPath, packageJsonPath };
+  }
+
+  /**
+   * The artifact directory a caller handed over, checked against the one
+   * this resolver finds for its slug and checksum, so install and stage
+   * record only a checksum the loader can resolve at the next boot (#224).
+   * A caller's directory elsewhere (a temporary extraction directory, say)
+   * is refused, as is a checksum that is not 64 lowercase hex characters.
+   * Returns the resolved directory, whose paths the caller reads from.
+   */
+  async confirm(directory: PluginArtifactDirectory): Promise<PluginArtifactDirectory> {
+    const resolved = await this.resolve(directory.slug, directory.sha256);
+
+    if (resolved.rootDir !== directory.rootDir) {
+      throw new PluginDirectoryLayoutError(
+        directory.slug,
+        `directory ${directory.rootDir} is not the artifact directory ${resolved.rootDir} its checksum names`,
+      );
+    }
+
+    return resolved;
   }
 
   /**
