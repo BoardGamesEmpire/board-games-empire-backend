@@ -362,7 +362,7 @@ export class EventAttendeeService {
 
     const existing = await this.db.eventAttendee.findUnique({
       where: { id: attendeeId, eventId, ...NOT_REMOVED },
-      select: { id: true, userId: true, status: true },
+      select: { id: true, userId: true },
     });
 
     if (!existing) {
@@ -378,7 +378,17 @@ export class EventAttendeeService {
       // Not attending takes the attendee out of the event, and any other
       // answer brings them back in (#551): the games they supply follow, in
       // the same transaction.
-      const { updated, changes } = await this.db.$transaction(async (tx) => {
+      const { previous, updated, changes } = await this.db.$transaction(async (tx) => {
+        // The status this write replaces, read under the row lock the update
+        // takes anyway. The read above runs before the lock, so two RSVPs
+        // racing each other would both report the status neither left, and
+        // the listener would take the second for an RSVP sent again
+        // unchanged and tell nobody (#802). A row gone by now fails the
+        // update below, as before.
+        const [previous] = await tx.$queryRaw<{ status: EventParticipationStatus }[]>(
+          Prisma.sql`SELECT status FROM event_attendees WHERE id = ${attendeeId} FOR NO KEY UPDATE`,
+        );
+
         const updated = await tx.eventAttendee.update({
           where: {
             id: attendeeId,
@@ -394,13 +404,13 @@ export class EventAttendeeService {
           include: ATTENDEE_INCLUDE,
         });
 
-        return { updated, changes: await syncSuppliedGames(tx, updated, initiatedAt) };
+        return { previous, updated, changes: await syncSuppliedGames(tx, updated, initiatedAt) };
       });
 
       this.eventEmitter.emit(
         AttendeeStatusUpdatedEvent.eventName,
         new AttendeeStatusUpdatedEvent(
-          { id: attendeeId, eventId, userId: existing.userId, status: existing.status },
+          { id: attendeeId, eventId, userId: existing.userId, status: previous.status },
           { id: updated.id, eventId: updated.eventId, userId: updated.userId, status: updated.status },
           actingUserId,
           initiatedAt,

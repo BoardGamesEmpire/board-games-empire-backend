@@ -91,6 +91,15 @@ describe('EventAttendeeService', () => {
   const attendeeRow = (overrides: Partial<EventAttendee> = {}) =>
     makeEventAttendee({ id: 'att-1', eventId: 'event-1', userId: 'user-1', ...overrides });
 
+  /**
+   * The status an RSVP's transaction reads under the attendee row's lock, as
+   * the status it replaces (#802). Every other raw query resolves no rows, as
+   * the mock's default does.
+   */
+  const lockedStatus = (status: EventParticipationStatus) =>
+    db.$queryRaw.mockImplementation(((query: unknown) =>
+      Promise.resolve(/FROM event_attendees/.test(rawQueryText(query)) ? [{ status }] : [])) as never);
+
   afterEach(() => jest.clearAllMocks());
 
   describe('EventAttendee resource', () => {
@@ -289,8 +298,8 @@ describe('EventAttendeeService', () => {
       db.eventAttendee.findUnique.mockResolvedValue({
         id: 'att-1',
         userId: 'user-1',
-        status: 'Invited',
       } as EventAttendee);
+      lockedStatus(EventParticipationStatus.Invited);
       db.eventAttendee.update.mockResolvedValue(attendeeRow({ status: EventParticipationStatus.Attending }));
 
       await service.updateStatus('event-1', 'att-1', { status: 'Attending' } as never);
@@ -312,8 +321,8 @@ describe('EventAttendeeService', () => {
       db.eventAttendee.findUnique.mockResolvedValue({
         id: 'att-1',
         userId: 'user-1',
-        status: EventParticipationStatus.Attending,
       } as EventAttendee);
+      lockedStatus(EventParticipationStatus.Attending);
       db.eventAttendee.update.mockResolvedValue(attendeeRow({ status: EventParticipationStatus.NotAttending }));
       db.eventGameNomination.updateManyAndReturn.mockImplementation((async (args: {
         where: { status: NominationStatus };
@@ -356,19 +365,20 @@ describe('EventAttendeeService', () => {
       db.eventAttendee.findUnique.mockResolvedValue({
         id: 'att-1',
         userId: 'user-1',
-        status: EventParticipationStatus.Attending,
       } as EventAttendee);
+      lockedStatus(EventParticipationStatus.Attending);
       db.eventAttendee.update.mockResolvedValue(attendeeRow({ status: EventParticipationStatus.NotAttending }));
 
       await service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.NotAttending });
 
-      const [[datesLock]] = db.$queryRaw.mock.calls;
+      // The first raw query is the attendee row's lock (#802).
+      const [, [datesLock]] = db.$queryRaw.mock.calls;
       expect(rawQueryText(datesLock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR SHARE$/);
       expect((datesLock as unknown as Prisma.Sql).values).toEqual(['event-1']);
-      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeGreaterThan(
+      expect(db.$queryRaw.mock.invocationCallOrder[1]).toBeGreaterThan(
         db.eventAttendee.update.mock.invocationCallOrder[0],
       );
-      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      expect(db.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
         db.eventGameNomination.updateManyAndReturn.mock.invocationCallOrder[0],
       );
     });
@@ -380,8 +390,8 @@ describe('EventAttendeeService', () => {
       db.eventAttendee.findUnique.mockResolvedValue({
         id: 'att-1',
         userId: 'user-1',
-        status: EventParticipationStatus.NotAttending,
       } as EventAttendee);
+      lockedStatus(EventParticipationStatus.NotAttending);
       db.eventAttendee.update.mockResolvedValue(attendeeRow({ status: EventParticipationStatus.Attending }));
       db.eventGameNomination.updateManyAndReturn.mockImplementation((async (args: {
         where: { pausedFrom: NominationStatus };
@@ -415,8 +425,8 @@ describe('EventAttendeeService', () => {
       db.eventAttendee.findUnique.mockResolvedValue({
         id: 'att-1',
         userId: 'user-1',
-        status: EventParticipationStatus.Invited,
       } as EventAttendee);
+      lockedStatus(EventParticipationStatus.Invited);
       db.eventAttendee.update.mockResolvedValue(attendeeRow({ status: EventParticipationStatus.Attending }));
 
       await service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.Attending });
@@ -440,13 +450,37 @@ describe('EventAttendeeService', () => {
       });
     });
 
+    // Read before the lock, two RSVPs racing each other would both report the
+    // status neither left, and the listener would take the second for an RSVP
+    // sent again unchanged (#802).
+    it("updateStatus reports the status it replaced as read under the attendee row's lock, before the write (#802)", async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+      lockedStatus(EventParticipationStatus.NotAttending);
+      db.eventAttendee.update.mockResolvedValue(attendeeRow({ status: EventParticipationStatus.Attending }));
+
+      await service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.Attending });
+
+      const [[attendeeLock]] = db.$queryRaw.mock.calls;
+      expect(rawQueryText(attendeeLock)).toMatch(
+        /^SELECT status FROM event_attendees WHERE id = \? FOR NO KEY UPDATE$/,
+      );
+      expect((attendeeLock as unknown as Prisma.Sql).values).toEqual(['att-1']);
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        db.eventAttendee.update.mock.invocationCallOrder[0],
+      );
+
+      const [, emitted] = emitter.emit.mock.calls[0];
+      expect(emitted.before.status).toBe(EventParticipationStatus.NotAttending);
+    });
+
     it('updateStatus carries who acted on the RSVP (#802)', async () => {
       db.event.count.mockResolvedValue(1);
       db.eventAttendee.findUnique.mockResolvedValue({
         id: 'att-1',
         userId: 'user-1',
-        status: EventParticipationStatus.Invited,
       } as EventAttendee);
+      lockedStatus(EventParticipationStatus.Invited);
       db.eventAttendee.update.mockResolvedValue(attendeeRow({ status: EventParticipationStatus.Attending }));
 
       await service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.Attending });

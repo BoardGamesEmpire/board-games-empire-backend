@@ -1,6 +1,15 @@
-import { EventSchedulingMode, GameAdditionMode, NominationStatus, OccurrenceStatus } from '@bge/database';
+import {
+  EventParticipationStatus,
+  EventSchedulingMode,
+  GameAdditionMode,
+  NominationStatus,
+  NotificationType,
+  OccurrenceStatus,
+} from '@bge/database';
 import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import request from 'supertest';
+import type { UnreadNotificationWire } from '../notification/notification-wire';
+import { unreadWhen } from '../notification/unread-poll';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
@@ -17,7 +26,8 @@ import { nominationEnvelope } from './event-wire';
  * after the first change would, and the row keeps the first change alone. A
  * date's confirm and decline read the status again under the event's row lock
  * (#795), and an approval under the nomination's (#551); a withdraw is the
- * last of them to do so.
+ * last of them to do so. An RSVP reads the status it replaces under the
+ * attendee's row lock (#802), so the notice it sends names a real change.
  *
  * The barrier holds the row the first request locks, so it queues inside its
  * transaction. The second is fired and seen queued behind it, which means it
@@ -43,6 +53,12 @@ describe('status changes racing on one date or nomination (#621)', () => {
   const NOMINATION_ROW = {
     sql: 'SELECT id FROM event_game_nominations WHERE id = $1 FOR UPDATE',
     lockedBy: /FROM event_game_nominations WHERE id = \$1 FOR UPDATE/,
+  };
+
+  /** The attendee's row, which an RSVP locks to read the status it replaces (#802). */
+  const ATTENDEE_ROW = {
+    sql: 'SELECT id FROM event_attendees WHERE id = $1 FOR UPDATE',
+    lockedBy: /FROM event_attendees WHERE id = \$1 FOR NO KEY UPDATE/,
   };
 
   let db: TestDatabase;
@@ -283,6 +299,46 @@ describe('status changes racing on one date or nomination (#621)', () => {
       // 201, not the unique nomination's 500, so a count by nomination alone
       // need not see the game it added.
       expect(await db.client.eventGame.count({ where: { eventId } })).toBe(1);
+    });
+  });
+
+  describe("an attendee's RSVP and a host's change to it (#802)", () => {
+    const setStatus = (actor: AuthenticatedActor, eventId: string, attendeeId: string, status: string) =>
+      request(baseUrl)
+        .patch(`${EVENTS_PATH}/${eventId}/attendees/${attendeeId}/status`)
+        .set(actor.headers)
+        .send({ status });
+
+    // Read before the lock, both requests would report Attending as the
+    // status they replaced, and the host's change would read as an RSVP sent
+    // again unchanged, which tells nobody.
+    it("tells the attendee of a host's change queued behind their own RSVP", async () => {
+      const host = await actors.user();
+      const invitee = await actors.user();
+      const eventId = await createdEventId(host, { inviteUserIds: [invitee.user.id] });
+      const { id: attendeeId } = await db.client.eventAttendee.findUniqueOrThrow({
+        where: { eventId_userId: { eventId, userId: invitee.user.id } },
+        select: { id: true },
+      });
+      await setStatus(invitee, eventId, attendeeId, EventParticipationStatus.Attending).expect(200);
+
+      const statuses = await race(
+        ATTENDEE_ROW,
+        attendeeId,
+        () => setStatus(invitee, eventId, attendeeId, EventParticipationStatus.NotAttending),
+        () => setStatus(host, eventId, attendeeId, EventParticipationStatus.Attending),
+      );
+
+      expect(statuses).toEqual([200, 200]);
+      const rsvpChanged = (unread: readonly UnreadNotificationWire[]) =>
+        unread.filter(
+          (notification) =>
+            notification.type === NotificationType.EventRsvpChanged && notification.payload['eventId'] === eventId,
+        );
+      const unread = await unreadWhen(baseUrl, invitee, (list) => rsvpChanged(list).length > 0);
+      expect(rsvpChanged(unread)).toEqual([
+        expect.objectContaining({ payload: expect.objectContaining({ status: EventParticipationStatus.Attending }) }),
+      ]);
     });
   });
 });

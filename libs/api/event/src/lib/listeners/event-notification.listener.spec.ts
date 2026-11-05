@@ -433,6 +433,26 @@ describe('EventNotificationListener', () => {
       expect(notifications.createMany).not.toHaveBeenCalled();
     });
 
+    it('names the attendee by their username when they have no display name (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }] as never);
+      db.user.findUnique.mockResolvedValue({ username: 'ada', profile: null } as never);
+
+      await listener.onAttendeeRsvp(rsvp('u-a', 'u-a'));
+
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        expect.objectContaining({ userId: 'u-host', payload: expect.objectContaining({ attendeeName: 'ada' }) }),
+      ]);
+    });
+
+    it('warns and tells nobody when the event is gone (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }] as never);
+      db.event.findUnique.mockResolvedValue(null);
+
+      await listener.onAttendeeRsvp(rsvp('u-a', 'u-cohost'));
+
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+
     it('tells a host once when two rows name them (#802)', async () => {
       db.eventAttendee.findMany.mockResolvedValue([{ userId: 'u-host' }, { userId: 'u-host' }] as never);
 
@@ -580,6 +600,24 @@ describe('EventNotificationListener', () => {
 
     it('notifies each user once (#802)', async () => {
       db.eventAttendee.findMany.mockResolvedValue([{ userId: 'user-a' }, { userId: 'user-a' }] as never);
+
+      await listener.onOccurrenceConfirmed(change('user-host'));
+
+      expect(notifications.createMany).toHaveBeenCalledWith([expect.objectContaining({ userId: 'user-a' })]);
+    });
+
+    it('tells nobody when the person acting is the only one still coming (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'user-host' }] as never);
+
+      await listener.onOccurrenceConfirmed(change('user-host'));
+
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+
+    // The read asks only for rows with an account; an attendee without one
+    // has nobody to tell, whatever the read hands back.
+    it('never addresses an attendee without an account (#802)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'user-a' }, { userId: null }] as never);
 
       await listener.onOccurrenceConfirmed(change('user-host'));
 
@@ -771,6 +809,20 @@ describe('EventNotificationListener', () => {
       await listener.onAttendeeRemoved(removal('u-host', 'u-host'));
 
       expect(notifications.create).not.toHaveBeenCalled();
+    });
+
+    it('warns and tells nobody when the event is gone (#802)', async () => {
+      db.event.findUnique.mockResolvedValue(null);
+
+      await listener.onAttendeeRemoved(removal('u-a', 'u-host'));
+
+      expect(notifications.create).not.toHaveBeenCalled();
+    });
+
+    it('logs a failed write rather than throwing it (#802)', async () => {
+      notifications.create.mockRejectedValue(new Error('db down'));
+
+      await expect(listener.onAttendeeRemoved(removal('u-a', 'u-host'))).resolves.toBeUndefined();
     });
   });
 
