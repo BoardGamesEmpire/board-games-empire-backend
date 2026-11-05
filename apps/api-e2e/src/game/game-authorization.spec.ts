@@ -172,6 +172,26 @@ describe('game authorization', () => {
 
       await readGame(anonymousUser, privateGame.id).expect(403);
     });
+
+    it('refuses an anonymous user a search that asks the DataGateways, while the same search of the game catalog alone is served (#1076)', async () => {
+      // Asking the DataGateways sends the query upstream on the server's
+      // credentials, and `includeExternal` defaults to true, so the default
+      // search is refused rather than run on the game catalog alone unannounced.
+      const anonymousUser = await actors.anonymous();
+      const creator = await actors.user();
+      const token = randomUUID().slice(0, 8);
+      const publicGame = await arrangeGame(creator.user.id, Reach.Public, `e2e anonymous search ${token}`);
+
+      // The control: the same query, the game catalog alone.
+      expect(await searchedIds(anonymousUser, token, 'an anonymous user')).toContain(publicGame.id);
+
+      await request(baseUrl).get(`${GAMES_PATH}/search`).query({ query: token }).set(anonymousUser.headers).expect(403);
+      await request(baseUrl)
+        .get(`${GAMES_PATH}/search`)
+        .query({ query: token, includeLocal: false, includeExternal: true })
+        .set(anonymousUser.headers)
+        .expect(403);
+    });
   });
 
   describe("a friend's game", () => {

@@ -116,6 +116,12 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     // registered, rather than sent as a local search that failed (#513).
     const localScope = dto.includeLocal === false ? null : this.gameSearch.localSearchScope();
 
+    // The same, when the DataGateways are asked for: asking them takes a grant
+    // of its own, which an anonymous user lacks (#1076).
+    if (dto.includeExternal !== false) {
+      this.gameSearch.assertMayAskDataGateways();
+    }
+
     // Registered before the first await and for the whole search, local half
     // included, so the check above refuses a second search with this id
     // however the first was asked for. The gateway half adds its stream to it.

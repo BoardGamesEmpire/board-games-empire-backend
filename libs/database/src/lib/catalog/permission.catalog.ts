@@ -1469,6 +1469,21 @@ export const PERMISSION_CATALOG = [
     reason: 'Delete DataGateway connections',
   }),
 
+  // --- GameSearch ---
+  //
+  // Asking the DataGateways sends a game search's query upstream on the
+  // server's credentials, so it is a grant of its own, not a part of reading
+  // games: an anonymous user searches the game catalog and never asks
+  // them (#1076). `GameSearch` has no table, so the grant takes no conditions and
+  // is checked by type alone. `Medium` for that outbound call.
+  permission({
+    action: Action.read,
+    subject: ResourceType.GameSearch,
+    slug: 'read:game_search:data_gateways',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Ask the DataGateways for games during a game search',
+  }),
+
   // --- Households ---
   //
   // `Low`, though it takes `reach` as `update:household` does. A new

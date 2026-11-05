@@ -33,6 +33,13 @@ const userlessActor = () => {
   throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
 };
 
+/** One primed ability that answers whether its actor may ask the DataGateways (#1076). */
+const abilityThatMayAskDataGateways = (may: boolean) => ({
+  can: jest.fn(
+    (action: Action, subject: unknown) => may && action === Action.read && subject === ResourceType.GameSearch,
+  ),
+});
+
 describe('GameSearchService', () => {
   let service: GameSearchService;
   let db: MockDatabaseService;
@@ -43,6 +50,7 @@ describe('GameSearchService', () => {
   beforeEach(async () => {
     abilityService = createMockAbilityService();
     abilityService.getCurrentResourceConditions.mockReturnValue([READ]);
+    abilityService.getCurrentAbilities.mockReturnValue([abilityThatMayAskDataGateways(true)] as never);
     coordinator = { searchGames: jest.fn() };
 
     const ctx = await createTestingModuleWithDb({
@@ -169,6 +177,66 @@ describe('GameSearchService', () => {
       // private and deleted alike (#472).
       // @ts-expect-error -- a plain `where` is not a LocalSearchScope
       await service.queryLocalGames('brass', {}, 10, 5, {});
+    });
+  });
+
+  /**
+   * #1076. Asking the DataGateways sends the query upstream on the server's
+   * credentials, so it takes `read:game_search:data_gateways`, which an
+   * anonymous user does not hold. It is checked before either half starts:
+   * a refusal is an authorization failure, never "no games found".
+   */
+  describe('search (REST): asking the DataGateways', () => {
+    const withDataGateways = () => plainToInstance(SearchQueryDto, { query: 'brass' });
+
+    it('refuses an actor who may not ask the DataGateways, before either half starts', () => {
+      abilityService.getCurrentAbilities.mockReturnValue([abilityThatMayAskDataGateways(false)] as never);
+
+      expect(() => service.search(withDataGateways())).toThrow(ForbiddenException);
+      expect(coordinator.searchGames).not.toHaveBeenCalled();
+      expect(compose).not.toHaveBeenCalled();
+    });
+
+    it('refuses with a message of its own, not the generic refusal', () => {
+      abilityService.getCurrentAbilities.mockReturnValue([abilityThatMayAskDataGateways(false)] as never);
+
+      const refusal = (() => {
+        try {
+          service.search(withDataGateways());
+        } catch (error: unknown) {
+          return error;
+        }
+
+        return undefined;
+      })();
+
+      expect((refusal as ForbiddenException).getResponse()).toEqual(t('errors.game_search.data_gateways_forbidden'));
+    });
+
+    it('refuses when any primed ability refuses, as an API key and its owner are checked together', () => {
+      abilityService.getCurrentAbilities.mockReturnValue([
+        abilityThatMayAskDataGateways(true),
+        abilityThatMayAskDataGateways(false),
+      ] as never);
+
+      expect(() => service.search(withDataGateways())).toThrow(ForbiddenException);
+    });
+
+    it('asks the DataGateways for an actor who may', async () => {
+      coordinator.searchGames.mockReturnValue(EMPTY);
+
+      await firstValueFrom(service.search(withDataGateways()));
+
+      expect(coordinator.searchGames).toHaveBeenCalledTimes(1);
+    });
+
+    it('still searches the game catalog alone for an actor who may not ask the DataGateways', async () => {
+      abilityService.getCurrentAbilities.mockReturnValue([abilityThatMayAskDataGateways(false)] as never);
+
+      await firstValueFrom(service.search(localOnly()));
+
+      expect(db.game.findMany).toHaveBeenCalledTimes(1);
+      expect(coordinator.searchGames).not.toHaveBeenCalled();
     });
   });
 

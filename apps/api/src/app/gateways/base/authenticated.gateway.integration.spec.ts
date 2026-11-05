@@ -67,8 +67,9 @@ const THROTTLE_CONFIG: Record<string, number> = {
 };
 
 /**
- * A role graph whose only grant reads the games its holder created, so the
- * conditions a query receives name the user whose abilities built them.
+ * A role graph whose one game read is of the games its holder created, so the
+ * conditions a query receives name the user whose abilities built them. It
+ * also asks the DataGateways, as every `User` may (#1076).
  */
 function roleGraph(userId: string, canRead: boolean): UserWithRoles {
   const readOwnGames = {
@@ -78,13 +79,22 @@ function roleGraph(userId: string, canRead: boolean): UserWithRoles {
     fields: [],
     inverted: false,
   };
+  const askDataGateways = {
+    action: Action.read,
+    subject: ResourceType.GameSearch,
+    conditions: null,
+    fields: [],
+    inverted: false,
+  };
 
   return {
     id: userId,
     householdMember: [],
     eventsAttended: [],
     permissions: [],
-    roles: canRead ? [{ role: { name: 'User', permissions: [{ permission: readOwnGames }] } }] : [],
+    roles: canRead
+      ? [{ role: { name: 'User', permissions: [{ permission: readOwnGames }, { permission: askDataGateways }] } }]
+      : [],
   } as unknown as UserWithRoles;
 }
 

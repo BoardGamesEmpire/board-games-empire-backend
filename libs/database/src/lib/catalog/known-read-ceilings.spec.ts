@@ -156,6 +156,9 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
   DataGateway: {
     Admin: { 'read:data_gateway': 'every row' },
   },
+  GameSearch: {
+    User: { 'read:game_search:data_gateways': 'every row' },
+  },
   GamePlayResult: {},
   GamePlaySession: {
     User: { 'read:game_play_session': 'every row' },

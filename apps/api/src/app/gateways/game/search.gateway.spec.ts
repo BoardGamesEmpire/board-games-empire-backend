@@ -79,6 +79,10 @@ describe('GameSearchGateway', () => {
 
     abilityService = createMockAbilityService();
     abilityService.getCurrentResourceConditions.mockReturnValue([FRAME_READ]);
+    // The frame's actor may ask the DataGateways unless a test says otherwise (#1076).
+    abilityService.getCurrentAbilities.mockReturnValue([
+      { can: (action: Action, subject: unknown) => action === Action.read && subject === ResourceType.GameSearch },
+    ] as never);
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
       overrideGuards: [WsThrottlerGuard, WsSessionGuard, WsFrameScopeGuard, PoliciesGuard],
@@ -217,6 +221,34 @@ describe('GameSearchGateway', () => {
         expect(running.unsubscribe).not.toHaveBeenCalled();
         expect(clientData(gateway, client).activeSearches.get('corr-1')).toBe(running);
         expect(mockEmit).not.toHaveBeenCalled();
+        expect(coordinator.searchGames).not.toHaveBeenCalled();
+      });
+
+      // #1076. Asking the DataGateways takes its own grant, which an anonymous
+      // user lacks. Refused on the socket like the two above, with nothing
+      // registered, rather than run as a search whose DataGateways failed.
+      it('refuses a frame that asks the DataGateways for an actor who may not, before joining a room (#1076)', async () => {
+        abilityService.getCurrentAbilities.mockReturnValue([{ can: () => false }] as never);
+        const client = makeSocket(gateway);
+
+        const refusal = gateway.handleSearchStart(client, makeStartDto({ includeLocal: true }));
+
+        await expect(refusal).rejects.toBeInstanceOf(ForbiddenException);
+        await expect(markerOf(refusal)).resolves.toEqual({ key: 'errors.game_search.data_gateways_forbidden' });
+        expect(client.join).not.toHaveBeenCalled();
+        expect(clientData(gateway, client).activeSearches.size).toBe(0);
+        expect(coordinator.searchGames).not.toHaveBeenCalled();
+        expect(db.game.findMany).not.toHaveBeenCalled();
+      });
+
+      it('searches the game catalog alone for that actor when the frame skips the DataGateways (#1076)', async () => {
+        abilityService.getCurrentAbilities.mockReturnValue([{ can: () => false }] as never);
+        db.game.findMany.mockResolvedValue([]);
+        const client = makeSocket(gateway);
+
+        await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
+
+        expect(db.game.findMany).toHaveBeenCalledTimes(1);
         expect(coordinator.searchGames).not.toHaveBeenCalled();
       });
 

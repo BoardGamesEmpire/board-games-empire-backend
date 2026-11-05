@@ -36,7 +36,9 @@ export class GameSearchController {
     status: 403,
     description:
       'Insufficient permissions, or, when the local half is asked for, an actor kind with no games of its ' +
-      'own (plugin, system, external) — new with #513, and provisional: see #395',
+      'own (plugin, system, external) — new with #513, and provisional: see #395. Also when the ' +
+      'DataGateways are asked for (the default) by an actor who may not ask them, such as an anonymous user ' +
+      '(#1076).',
   })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Game))
   @Get()

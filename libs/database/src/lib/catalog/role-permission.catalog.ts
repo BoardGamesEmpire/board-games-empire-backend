@@ -368,6 +368,7 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:game:friends-of-friends',
     'read:game:public',
     'read:game:shared',
+    'read:game_search:data_gateways',
     'read:job',
     'update:game:own',
 

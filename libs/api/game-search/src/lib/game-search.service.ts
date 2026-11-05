@@ -1,9 +1,10 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, DatabaseService, type Prisma, ResourceType } from '@bge/database';
 import { gameListScope } from '@bge/game';
+import { t } from '@bge/i18n';
 import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { ResultStatus, type SearchGameResult } from '@boardgamesempire/proto-gateway';
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import { forkJoin, from, Observable, of, timer } from 'rxjs';
 import { catchError, map, takeUntil, toArray } from 'rxjs/operators';
@@ -39,8 +40,12 @@ export class GameSearchService {
   search(dto: SearchQueryDto): Observable<SearchResponseDto> {
     const correlationId = crypto.randomUUID();
 
-    // Built here, outside the local half's catchError: a failure to build it
-    // is an authorization failure and must not come back as "no games found".
+    // Both checked here, outside each half's catchError: a refusal is an
+    // authorization failure and must not come back as "no games found".
+    if (dto.includeExternal !== false) {
+      this.assertMayAskDataGateways();
+    }
+
     const local$ = dto.includeLocal !== false ? this.searchLocal(dto, this.localSearchScope()) : of([]);
     const external$ = dto.includeExternal !== false ? this.searchExternal(correlationId, dto) : of(null);
 
@@ -67,6 +72,26 @@ export class GameSearchService {
     const userId = resolveScopeSubjectId(this.ability);
 
     return this.scopeComposer.compose(ResourceType.Game, Action.read, gameListScope(userId)) as LocalSearchScope;
+  }
+
+  /**
+   * Refuses an actor who may not ask the DataGateways (#1076). Asking them
+   * sends the query upstream on the server's credentials, so it takes
+   * `read:game_search:data_gateways`, which every signed-in user holds and an
+   * anonymous user does not. Like {@link localSearchScope}, each transport
+   * calls it before its search begins, whenever the DataGateways are asked
+   * for, which they are unless `includeExternal` is `false`.
+   *
+   * Every primed ability must allow it, so an API key and its owner are
+   * checked together, as `PoliciesGuard` checks them.
+   */
+  assertMayAskDataGateways(): void {
+    const abilities = this.ability.getCurrentAbilities();
+    const may = abilities.length > 0 && abilities.every((ability) => ability.can(Action.read, ResourceType.GameSearch));
+
+    if (!may) {
+      throw new ForbiddenException(t('errors.game_search.data_gateways_forbidden'));
+    }
   }
 
   private searchLocal(dto: SearchQueryDto, scope: LocalSearchScope): Observable<WsGameSearchResult[]> {
