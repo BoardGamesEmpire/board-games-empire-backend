@@ -40,7 +40,6 @@ import {
   PluginLifecyclePluginChangedError,
   PluginLifecycleTombstonedError,
   PluginStaticAnalysisUnavailableError,
-  PluginUninstallBundledError,
   PluginUnitAuthorityError,
   PluginUnitConfigRequiredError,
   PluginUnitHouseholdNotFoundError,
@@ -396,12 +395,6 @@ function buildRenderers(): RendererMap {
   renders(PluginUpdateNoPendingError, (exception) => ({
     status: Http.Conflict,
     message: t('errors.plugin.update_no_pending', { slug: exception.slug }),
-    fields: { slug: exception.slug },
-  }));
-
-  renders(PluginUninstallBundledError, (exception) => ({
-    status: Http.Conflict,
-    message: t('errors.plugin.uninstall_bundled', { slug: exception.slug }),
     fields: { slug: exception.slug },
   }));
 

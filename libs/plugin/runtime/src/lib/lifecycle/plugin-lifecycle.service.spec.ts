@@ -21,7 +21,6 @@ import {
   PluginLifecycleNotFoundError,
   PluginLifecyclePluginChangedError,
   PluginLifecycleTombstonedError,
-  PluginUninstallBundledError,
 } from './lifecycle.errors';
 import { PluginLifecycleService } from './plugin-lifecycle.service';
 
@@ -460,14 +459,18 @@ describe('PluginLifecycleService', () => {
       );
     });
 
-    it('refuses a bundled plugin — disable is the kill switch, BGE upgrades carry the code', async () => {
+    it('uninstalls a row whose bundled column is still set (#696)', async () => {
+      // No plugin ships inside the server, so any of them can be uninstalled.
+      // The column survives until the schema change drops it, and a set flag
+      // must not hold the uninstall back.
       db.plugin.findUnique.mockResolvedValue(makePlugin({ bundled: true }));
 
-      await expect(service.uninstall({ slug: 'demo-sink', actorId: 'admin-1' })).rejects.toThrow(
-        PluginUninstallBundledError,
+      await service.uninstall({ slug: 'demo-sink', actorId: 'admin-1' });
+
+      expect(db.plugin.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'plugin-1', uninstalledAt: null } }),
       );
-      expect(db.plugin.updateMany).not.toHaveBeenCalled();
-      expect(db.pluginGrant.deleteMany).not.toHaveBeenCalled();
+      expect(db.pluginGrant.deleteMany).toHaveBeenCalledWith({ where: { pluginId: 'plugin-1' } });
     });
 
     it('tombstones with force-disable, restartRequired, and the staged update cleared — one guarded write', async () => {

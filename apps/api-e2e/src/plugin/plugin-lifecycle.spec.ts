@@ -295,16 +295,5 @@ describe('plugin lifecycle (server-level)', () => {
 
       await patchConfig(admin, plugin.slug, { config: {} }).expect(410);
     });
-
-    it('refuses a bundled plugin with 409 — disable is the kill switch', async () => {
-      const admin = await actors.admin();
-      const plugin = await arrangePlugin({ bundled: true, installedSha256: null });
-
-      const response = await post(admin, `/${plugin.slug}/uninstall`).expect(409);
-
-      expect(response.body.code).toBe('PluginUninstallBundledError');
-      const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
-      expect(row.uninstalledAt).toBeNull();
-    });
   });
 });

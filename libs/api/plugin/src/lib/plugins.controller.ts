@@ -266,13 +266,12 @@ export class PluginsController {
     description:
       'Purges all consent (grants and the declared-permission catalog — reinstall is fresh consent), retains the row ' +
       'and unit configuration unless purgeData is true, and clears any staged update. The loaded module keeps running ' +
-      'until restart but is no longer served; restartRequired records that. Bundled plugins refuse with 409.',
+      'until restart but is no longer served; restartRequired records that.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was already uninstalled' })
-  @ApiResponse({ status: Http.Conflict, description: 'Bundled plugins cannot be uninstalled' })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
   @HttpCode(Http.Ok)
   @Post(':slug/uninstall')
