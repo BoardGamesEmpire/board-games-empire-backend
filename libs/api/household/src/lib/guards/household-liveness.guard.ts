@@ -1,5 +1,5 @@
 import { Action, DatabaseService, ResourceType } from '@bge/database';
-import { AbilityService, type AppAbility } from '@bge/permissions';
+import { AbilityService, type AppAbility, everyAbilityCan } from '@bge/permissions';
 import { CanActivate, ExecutionContext, Injectable, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { assertHouseholdExists } from '../household-access.helpers';
@@ -105,5 +105,5 @@ export class HouseholdLivenessGuard implements CanActivate {
  * this guard would have told it.
  */
 export function alreadyTellsHouseholdsApart(abilities: readonly AppAbility[]): boolean {
-  return abilities.length > 0 && abilities.every((ability) => ability.can(Action.read, ResourceType.Household));
+  return everyAbilityCan(abilities, Action.read, ResourceType.Household);
 }

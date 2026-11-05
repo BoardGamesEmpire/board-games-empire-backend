@@ -2,7 +2,7 @@ import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, DatabaseService, type Prisma, ResourceType } from '@bge/database';
 import { gameListScope } from '@bge/game';
 import { t } from '@bge/i18n';
-import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
+import { AbilityService, everyAbilityCan, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { ResultStatus, type SearchGameResult } from '@boardgamesempire/proto-gateway';
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
@@ -83,13 +83,10 @@ export class GameSearchService {
    * for, which they are unless `includeExternal` is `false`.
    *
    * Every primed ability must allow it, so an API key and its owner are
-   * checked together, as `PoliciesGuard` checks them.
+   * checked together, as `PoliciesGuard` checks them (`everyAbilityCan`).
    */
   assertMayAskDataGateways(): void {
-    const abilities = this.ability.getCurrentAbilities();
-    const may = abilities.length > 0 && abilities.every((ability) => ability.can(Action.read, ResourceType.GameSearch));
-
-    if (!may) {
+    if (!everyAbilityCan(this.ability.getCurrentAbilities(), Action.read, ResourceType.GameSearch)) {
       throw new ForbiddenException(t('errors.game_search.data_gateways_forbidden'));
     }
   }
