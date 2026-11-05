@@ -38,7 +38,14 @@ const entry = (overrides: Partial<GameCollection> = {}): GameCollection =>
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
+    // Of the embedded rows, the service reads only the game's id, which keys
+    // the base-game link read (#1070).
+    platformGame: { id: 'pg-1', game: { id: 'g-1' } },
   }) as GameCollection;
+
+/** An entry on the game `gameId`, as the collection include returns it (#1070). */
+const entryOn = (gameId: string, overrides: Partial<GameCollection> = {}): GameCollection =>
+  ({ ...entry(overrides), platformGame: { id: `pg-${gameId}`, game: { id: gameId } } }) as GameCollection;
 
 describe('GameCollectionService', () => {
   let service: GameCollectionService;
@@ -63,6 +70,8 @@ describe('GameCollectionService', () => {
     });
 
     db = ctx.db;
+    // Each read that returns rows also reads their base-game links (#1070).
+    db.gameExpansion.findMany.mockResolvedValue([]);
     service = ctx.module.get(GameCollectionService);
     compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
   });
@@ -151,7 +160,7 @@ describe('GameCollectionService', () => {
       expect(db.gameCollection.count).toHaveBeenCalledWith({
         where: db.gameCollection.findMany.mock.calls[0][0]?.where,
       });
-      expect(page).toEqual({ rows: [row], total: 37 });
+      expect(page).toEqual({ rows: [expect.objectContaining({ id: row.id })], total: 37 });
     });
 
     // The count only agrees with the rows because both read one snapshot, and
@@ -168,23 +177,77 @@ describe('GameCollectionService', () => {
       expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     });
 
-    it('applies medium, favorite, and updatedSince filters', async () => {
-      db.gameCollection.findMany.mockResolvedValue([]);
-      const updatedSince = new Date('2026-06-01');
-
-      await service.listOwn(
+    describe('with updatedSince (#1070)', () => {
+      const since = new Date('2026-06-01');
+      const query = () =>
         Object.assign(paginationQuery({ limit: 20 }), {
           medium: GameMedium.Digital,
           favorite: false,
-          updatedSince,
-        }),
-      );
+          updatedSince: since,
+        });
 
-      expect(db.gameCollection.findMany.mock.calls[0][0]?.where).toEqual({
-        AND: [
-          { userId: ME, AND: [COND] },
-          { deletedAt: null, medium: GameMedium.Digital, favorite: false, updatedAt: { gte: updatedSince } },
+      // The catch-up drain resends a row when the entry changed or a value it
+      // embeds did: the platform game, its platform, the game, the game's links
+      // as an expansion, those links' base games, and the release. Written out
+      // rather than built from the code under test, so a dropped arm fails here.
+      const changedSinceShape = {
+        OR: [
+          { updatedAt: { gte: since } },
+          {
+            platformGame: {
+              is: {
+                OR: [
+                  { updatedAt: { gte: since } },
+                  { platform: { is: { updatedAt: { gte: since } } } },
+                  {
+                    game: {
+                      is: {
+                        OR: [
+                          { updatedAt: { gte: since } },
+                          {
+                            expansionEntries: {
+                              some: {
+                                OR: [
+                                  { updatedAt: { gte: since } },
+                                  { baseGame: { is: { updatedAt: { gte: since } } } },
+                                ],
+                              },
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          { release: { is: { updatedAt: { gte: since } } } },
         ],
+      };
+
+      it('applies the medium and favorite filters, and resends a row whose entry or embedded values changed', async () => {
+        db.gameCollection.findMany.mockResolvedValue([]);
+
+        await service.listOwn(query());
+
+        expect(db.gameCollection.findMany.mock.calls[0][0]?.where).toEqual({
+          AND: [
+            { userId: ME, AND: [COND] },
+            { deletedAt: null, medium: GameMedium.Digital, favorite: false, ...changedSinceShape },
+          ],
+        });
+      });
+
+      it('counts over the same changed-since where it reads', async () => {
+        db.gameCollection.findMany.mockResolvedValue([]);
+        db.gameCollection.count.mockResolvedValue(0);
+
+        await service.listOwn(query());
+
+        expect(db.gameCollection.count).toHaveBeenCalledWith({
+          where: db.gameCollection.findMany.mock.calls[0][0]?.where,
+        });
       });
     });
   });
@@ -456,5 +519,114 @@ describe('GameCollectionService', () => {
         Action.delete,
       );
     });
+  });
+
+  /**
+   * #1070. A row names its game's base games that are live and that the viewer
+   * could open by id, the rule `GET /games/:id` uses. The filter sits in the
+   * `where` of a link read of its own: in the collection include Prisma would
+   * drop a deny-all and name every base game.
+   */
+  describe('base games on collection rows (#1070)', () => {
+    const LINK = { expansionGameId: 'g-1', baseGameId: 'b-1', isStandalone: true };
+
+    // The real composer over the mocked ability: the live games under the
+    // viewer's read ceiling.
+    const LIVE_GAMES_THE_VIEWER_COULD_OPEN = { deletedAt: null, AND: [COND] };
+
+    const singleRowReads = {
+      getById: () => service.getById('gc-1'),
+      addToCollection: () => service.addToCollection({ platformGameId: 'pg-1', medium: GameMedium.Physical }),
+      update: () => service.update('gc-1', { quantity: 2 }),
+      remove: () => service.remove('gc-1', {}),
+    } as const;
+
+    beforeEach(() => {
+      db.gameExpansion.findMany.mockResolvedValue([LINK] as never);
+      db.gameCollection.count.mockResolvedValue(1);
+      db.gameCollection.findUnique.mockResolvedValue(entryOn('g-1'));
+      db.platformGame.findUnique.mockResolvedValue({ id: 'pg-1' } as PlatformGame);
+      db.gameCollection.upsert.mockResolvedValue(entryOn('g-1'));
+      db.gameCollection.update.mockResolvedValue(entryOn('g-1'));
+    });
+
+    it('names each row’s base games through one link read, over the live games the viewer could open by id', async () => {
+      db.gameCollection.findMany.mockResolvedValue([entryOn('g-1')]);
+
+      const page = await service.listOwn(paginationQuery({ limit: 20 }));
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.Game, Action.read, { deletedAt: null });
+      expect(db.gameExpansion.findMany).toHaveBeenCalledTimes(1);
+      expect(db.gameExpansion.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { expansionGameId: { in: ['g-1'] }, baseGame: { is: LIVE_GAMES_THE_VIEWER_COULD_OPEN } },
+        }),
+      );
+      expect(page.rows[0]?.platformGame.game.baseGames).toEqual([{ gameId: 'b-1', isStandalone: true }]);
+    });
+
+    it('reads a game held twice on one page once, and gives both rows its base games', async () => {
+      db.gameCollection.findMany.mockResolvedValue([
+        entryOn('g-1', { id: 'gc-1', medium: GameMedium.Physical }),
+        entryOn('g-1', { id: 'gc-2', medium: GameMedium.Digital }),
+      ]);
+
+      const page = await service.listForUser('user-2', paginationQuery({ limit: 20 }));
+
+      expect(db.gameExpansion.findMany).toHaveBeenCalledTimes(1);
+      expect(db.gameExpansion.findMany.mock.calls[0][0]?.where).toMatchObject({ expansionGameId: { in: ['g-1'] } });
+      expect(page.rows.map((returned) => returned.platformGame.game.baseGames)).toEqual([
+        [{ gameId: 'b-1', isStandalone: true }],
+        [{ gameId: 'b-1', isStandalone: true }],
+      ]);
+    });
+
+    it('gives a game with no visible link baseGames: [], never an absent key', async () => {
+      db.gameCollection.findMany.mockResolvedValue([entryOn('g-1', { id: 'gc-1' }), entryOn('g-2', { id: 'gc-2' })]);
+
+      const page = await service.listOwn(paginationQuery({ limit: 20 }));
+
+      expect(db.gameExpansion.findMany.mock.calls[0][0]?.where).toMatchObject({
+        expansionGameId: { in: ['g-1', 'g-2'] },
+      });
+      expect(page.rows[1]?.platformGame.game).toHaveProperty('baseGames', []);
+    });
+
+    it('issues no link read for an empty page', async () => {
+      db.gameCollection.findMany.mockResolvedValue([]);
+      db.gameCollection.count.mockResolvedValue(0);
+
+      await service.listOwn(paginationQuery({ limit: 20 }));
+
+      expect(db.gameExpansion.findMany).not.toHaveBeenCalled();
+    });
+
+    it.each(Object.keys(singleRowReads) as (keyof typeof singleRowReads)[])(
+      '%s returns the row with its base games',
+      async (method) => {
+        const returned = await singleRowReads[method]();
+
+        expect(db.gameExpansion.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { expansionGameId: { in: ['g-1'] }, baseGame: { is: LIVE_GAMES_THE_VIEWER_COULD_OPEN } },
+          }),
+        );
+        expect(returned.platformGame.game.baseGames).toEqual([{ gameId: 'b-1', isStandalone: true }]);
+      },
+    );
+
+    // The writes map a missing row (P2025) to 404. The link read runs after
+    // the write, outside that mapping, so a failure there reaches the client
+    // as itself. A P2025 is the one error the mapping would rewrite, so it is
+    // what tells the two placements apart.
+    it.each(['addToCollection', 'update', 'remove'] as const)(
+      '%s lets a failed link read through as itself, not as a 404',
+      async (method) => {
+        const failure = dependentRecordNotFound();
+        db.gameExpansion.findMany.mockRejectedValue(failure);
+
+        await expect(singleRowReads[method]()).rejects.toBe(failure);
+      },
+    );
   });
 });

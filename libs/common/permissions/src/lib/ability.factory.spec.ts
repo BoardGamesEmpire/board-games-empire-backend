@@ -2190,14 +2190,29 @@ describe('AbilityFactory', () => {
       });
     });
 
+    // An anonymous user reads Public games, and their platform games through
+    // the game's reach, since a platform game has none of its own (#1076).
+    it('reads the live Public games and their platform games, and no other row of either (#1076)', () => {
+      const ability = anonymous();
+
+      expect(accessibleBy(ability, Action.read).ofType('Game')).toEqual({ OR: [{ deletedAt: null, reach: 'Public' }] });
+      expect(accessibleBy(ability, Action.read).ofType('PlatformGame')).toEqual({
+        OR: [{ game: { is: { deletedAt: null, reach: 'Public' } } }],
+      });
+    });
+
     it('writes nothing, and reads no other subject', () => {
       const ability = anonymous();
 
       for (const action of [Action.create, Action.update, Action.delete]) {
         expect(ability.can(action, 'GameCollection')).toBe(false);
+        expect(ability.can(action, 'Game')).toBe(false);
+        expect(ability.can(action, 'PlatformGame')).toBe(false);
       }
 
-      for (const subjectType of ['Game', 'Household', 'Event', 'User', 'UserProfile'] as const) {
+      // `GameSearch` among them: an anonymous user searches the game catalog,
+      // and never asks the DataGateways on the server's credentials (#1076).
+      for (const subjectType of ['Household', 'Event', 'User', 'UserProfile', 'GameSearch'] as const) {
         expect(ability.can(Action.read, subjectType)).toBe(false);
       }
     });

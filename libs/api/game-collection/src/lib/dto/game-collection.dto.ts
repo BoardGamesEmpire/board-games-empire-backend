@@ -1,8 +1,19 @@
 import type { GameCollection } from '@bge/database';
-import { GameMedium, GameRemovalReason, Reach } from '@bge/database';
+import { ContentType, GameMedium, GameRemovalReason, PlatformType, Reach } from '@bge/database';
+import { ExpansionLinkDto } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import type { GameCollectionRow } from '../collection-row';
 
-export class CollectionGameSummaryDto {
+type CollectionPlatformGame = GameCollectionRow['platformGame'];
+type CollectionPlatform = CollectionPlatformGame['platform'];
+type CollectionGame = CollectionPlatformGame['game'];
+
+/**
+ * The game a collection row embeds: what a list shows, filters and sorts on
+ * (#1070). It implements the row's type, and the service returns this DTO, so
+ * a field on one side only fails the typecheck.
+ */
+export class CollectionGameSummaryDto implements CollectionGame {
   @ApiProperty({ description: 'Unique game identifier' })
   id!: string;
 
@@ -17,9 +28,39 @@ export class CollectionGameSummaryDto {
 
   @ApiPropertyOptional({ description: 'Thumbnail image URL', nullable: true })
   thumbnail!: string | null;
+
+  @ApiProperty({
+    enum: ContentType,
+    enumName: 'ContentType',
+    description: 'Content classification (base game, expansion, etc.)',
+  })
+  contentType!: ContentType;
+
+  @ApiProperty({ type: Number, nullable: true, description: 'Year the game was published' })
+  publishYear!: number | null;
+
+  @ApiProperty({ type: Number, nullable: true, description: 'Minimum number of players' })
+  minPlayers!: number | null;
+
+  @ApiProperty({ type: Number, nullable: true, description: 'Maximum number of players' })
+  maxPlayers!: number | null;
+
+  @ApiProperty({ type: Number, nullable: true, description: 'Minimum play time, in minutes' })
+  minPlayTime!: number | null;
+
+  @ApiProperty({ type: Number, nullable: true, description: 'Maximum play time, in minutes' })
+  maxPlayTime!: number | null;
+
+  @ApiProperty({
+    type: [ExpansionLinkDto],
+    description:
+      'For an expansion, the base games it attaches to that are live and that the viewer could open by id, in ' +
+      'title order, then game id, each with that link’s `isStandalone`. Empty for any other game.',
+  })
+  baseGames!: ExpansionLinkDto[];
 }
 
-export class CollectionPlatformSummaryDto {
+export class CollectionPlatformSummaryDto implements CollectionPlatform {
   @ApiProperty({ description: 'Unique platform identifier' })
   id!: string;
 
@@ -28,9 +69,12 @@ export class CollectionPlatformSummaryDto {
 
   @ApiProperty({ description: 'Platform slug' })
   slug!: string;
+
+  @ApiProperty({ enum: PlatformType, enumName: 'PlatformType', description: 'Kind of platform' })
+  platformType!: PlatformType;
 }
 
-export class CollectionPlatformGameSummaryDto {
+export class CollectionPlatformGameSummaryDto implements CollectionPlatformGame {
   @ApiProperty({ description: 'Unique platform-game identifier' })
   id!: string;
 
@@ -39,6 +83,34 @@ export class CollectionPlatformGameSummaryDto {
 
   @ApiPropertyOptional({ description: 'Platform-specific thumbnail override', nullable: true })
   thumbnail!: string | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: "Minimum number of players, a platform-specific override; when null, use the game's value",
+  })
+  minPlayers!: number | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: "Maximum number of players, a platform-specific override; when null, use the game's value",
+  })
+  maxPlayers!: number | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: "Minimum play time in minutes, a platform-specific override; when null, use the game's value",
+  })
+  minPlayTime!: number | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: "Maximum play time in minutes, a platform-specific override; when null, use the game's value",
+  })
+  maxPlayTime!: number | null;
 
   @ApiProperty({ type: CollectionPlatformSummaryDto })
   platform!: CollectionPlatformSummaryDto;

@@ -59,6 +59,20 @@ export function accessExtent(
 }
 
 /**
+ * Whether every ability allows `action` on `resourceType` at all, before any
+ * record is named: the type check `PoliciesGuard` makes, for an API key the
+ * key and its owner together (#1076). An empty array is no, never the vacuous
+ * yes `[].every()` would give.
+ *
+ * A permission with a condition still counts, as it does for the guard: the
+ * record's own check comes later. A resource type with no table, which no
+ * record check can follow, is decided here alone.
+ */
+export function everyAbilityCan(abilities: readonly AppAbility[], action: Action, resourceType: ResourceType): boolean {
+  return abilities.length > 0 && abilities.every((ability) => ability.can(action, resourceType));
+}
+
+/**
  * {@link accessExtent} for every action on `resourceType`, in `Action` order
  * (#757). An action whose permissions the matcher cannot read is reported to
  * `onUnreadable` and answered `none`, so the other actions keep their answer.

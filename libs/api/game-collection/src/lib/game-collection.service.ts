@@ -1,32 +1,35 @@
-import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
+import {
+  Action,
+  DatabaseService,
+  isPrismaDependentRecordNotFoundError,
+  Prisma,
+  readBaseGameLinks,
+  ResourceType,
+} from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
+  changedSince,
+  COLLECTION_INCLUDE,
+  type GameCollectionRow,
+  type GameCollectionWithRelations,
+} from './collection-row';
+import {
   CreateGameCollectionDto,
+  GameCollectionDto,
   ListGameCollectionsQueryDto,
   ListUserGameCollectionsQueryDto,
   RemoveGameCollectionQueryDto,
   UpdateGameCollectionDto,
 } from './dto';
 
-/** Joined summary needed to render a collection list/detail without extra fetches. */
-const COLLECTION_INCLUDE = {
-  platformGame: {
-    select: {
-      id: true,
-      image: true,
-      thumbnail: true,
-      platform: { select: { id: true, name: true, slug: true } },
-      game: { select: { id: true, title: true, subtitle: true, image: true, thumbnail: true } },
-    },
-  },
-  release: { select: { id: true, editionName: true, releaseYear: true } },
-} satisfies Prisma.GameCollectionInclude;
-
-export type GameCollectionWithRelations = Prisma.GameCollectionGetPayload<{ include: typeof COLLECTION_INCLUDE }>;
-
+/**
+ * Each method that returns collection rows is annotated with the DTO the
+ * routes document, and the DTO's nested classes implement the row's types, so
+ * a field missing on either side fails the typecheck (#1070).
+ */
 @Injectable()
 export class GameCollectionService {
   private readonly logger = new Logger(GameCollectionService.name);
@@ -51,7 +54,7 @@ export class GameCollectionService {
    * "my collection" has no meaning without a user, and the refusal must never
    * soften into an empty page. PROVISIONAL — #395.
    */
-  async listOwn(query: ListGameCollectionsQueryDto) {
+  async listOwn(query: ListGameCollectionsQueryDto): Promise<PaginatedRows<GameCollectionDto>> {
     const { includeDeleted, deletedOnly, medium, favorite, updatedSince } = query;
     const userId = resolveScopeSubjectId(this.abilityService);
 
@@ -62,7 +65,7 @@ export class GameCollectionService {
           ...(deletedOnly ? { deletedAt: { not: null } } : includeDeleted ? {} : { deletedAt: null }),
           ...(medium ? { medium } : {}),
           ...(favorite !== undefined ? { favorite } : {}),
-          ...(updatedSince ? { updatedAt: { gte: updatedSince } } : {}),
+          ...(updatedSince ? changedSince(updatedSince) : {}),
         },
       ],
     } satisfies Prisma.GameCollectionWhereInput;
@@ -81,7 +84,10 @@ export class GameCollectionService {
    * clips them (#514), so the viewer need not be a user at all. The medium
    * filter is caller input and sits beside the composed clause.
    */
-  async listForUser(targetUserId: string, query: ListUserGameCollectionsQueryDto) {
+  async listForUser(
+    targetUserId: string,
+    query: ListUserGameCollectionsQueryDto,
+  ): Promise<PaginatedRows<GameCollectionDto>> {
     const where = {
       AND: [
         this.scopeComposer.compose(ResourceType.GameCollection, Action.read, { userId: targetUserId, deletedAt: null }),
@@ -105,7 +111,7 @@ export class GameCollectionService {
   private async paginate(
     where: Prisma.GameCollectionWhereInput,
     pagination: PaginationQueryDto,
-  ): Promise<PaginatedRows<GameCollectionWithRelations>> {
+  ): Promise<PaginatedRows<GameCollectionRow>> {
     const [rows, total] = await this.db.$transaction(
       [
         this.db.gameCollection.findMany({
@@ -121,11 +127,11 @@ export class GameCollectionService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    return { rows, total };
+    return { rows: await this.rowsWithBaseGames(rows), total };
   }
 
   /** A single entry the acting user may read (owner sees own tombstones). */
-  async getById(id: string) {
+  async getById(id: string): Promise<GameCollectionDto> {
     const collection = await this.db.gameCollection.findUnique({
       where: {
         id,
@@ -139,7 +145,7 @@ export class GameCollectionService {
       throw new NotFoundException(t('errors.game_collection.not_found', { id }));
     }
 
-    return collection;
+    return this.rowWithBaseGames(collection);
   }
 
   /**
@@ -149,7 +155,7 @@ export class GameCollectionService {
    * tombstone is cleared while server-managed play history (`playCount`,
    * `lastPlayed`) and any unspecified fields survive the remove→re-add cycle.
    */
-  async addToCollection(dto: CreateGameCollectionDto) {
+  async addToCollection(dto: CreateGameCollectionDto): Promise<GameCollectionDto> {
     const userId = this.abilityService.getActingUserId();
     const { platformGameId, medium, releaseId, ...attributes } = dto;
 
@@ -168,21 +174,22 @@ export class GameCollectionService {
     const provided = pickDefined({ ...attributes, releaseId });
     const lastUpdated = new Date();
 
-    try {
-      return await this.db.gameCollection.upsert({
-        where: { userId_platformGameId_medium: { userId, platformGameId, medium } },
-        create: { userId, platformGameId, medium, ...provided, lastUpdated },
-        update: { ...provided, deletedAt: null, deleteReason: null, lastUpdated },
-        include: COLLECTION_INCLUDE,
-      });
-    } catch (error) {
-      this.logger.error(`Error adding platform game ${platformGameId} to collection for user ${userId}`, error);
-      if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new NotFoundException(t('errors.platform_game.not_found', { id: platformGameId }));
-      }
+    return this.writtenRow(
+      () =>
+        this.db.gameCollection.upsert({
+          where: { userId_platformGameId_medium: { userId, platformGameId, medium } },
+          create: { userId, platformGameId, medium, ...provided, lastUpdated },
+          update: { ...provided, deletedAt: null, deleteReason: null, lastUpdated },
+          include: COLLECTION_INCLUDE,
+        }),
+      (error) => {
+        this.logger.error(`Error adding platform game ${platformGameId} to collection for user ${userId}`, error);
 
-      throw error;
-    }
+        return isPrismaDependentRecordNotFoundError(error)
+          ? new NotFoundException(t('errors.platform_game.not_found', { id: platformGameId }))
+          : error;
+      },
+    );
   }
 
   /**
@@ -191,7 +198,7 @@ export class GameCollectionService {
    * (`platformGameId`/`medium`) and play history (`playCount`/`lastPlayed`)
    * are not writable here.
    */
-  async update(id: string, dto: UpdateGameCollectionDto) {
+  async update(id: string, dto: UpdateGameCollectionDto): Promise<GameCollectionDto> {
     const data = pickDefined(dto);
     if (Object.keys(data).length === 0) {
       throw new BadRequestException(t('common.at_least_one_field'));
@@ -216,19 +223,19 @@ export class GameCollectionService {
       await this.assertReleaseBelongsTo(data.releaseId, existing.platformGameId);
     }
 
-    try {
-      return await this.db.gameCollection.update({
-        where: {
-          id,
-          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.update),
-        },
-        data: { ...data, lastUpdated: new Date() },
-        include: COLLECTION_INCLUDE,
-      });
-    } catch (error) {
-      throw this.mapMissingToNotFound(error, id);
-    }
+    return this.writtenRow(
+      () =>
+        this.db.gameCollection.update({
+          where: {
+            id,
+            // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.update),
+          },
+          data: { ...data, lastUpdated: new Date() },
+          include: COLLECTION_INCLUDE,
+        }),
+      (error) => this.mapMissingToNotFound(error, id),
+    );
   }
 
   /**
@@ -237,25 +244,81 @@ export class GameCollectionService {
    * remove→re-add cycle, and child rows (locations, event game lists, loans)
    * would otherwise cascade away.
    */
-  async remove(id: string, { reason }: RemoveGameCollectionQueryDto) {
+  async remove(id: string, { reason }: RemoveGameCollectionQueryDto): Promise<GameCollectionDto> {
     const now = new Date();
 
     // Single scoped write: `deletedAt: null` in the filter makes a repeat
     // delete (or a foreign/missing row) miss and surface as 404.
+    return this.writtenRow(
+      () =>
+        this.db.gameCollection.update({
+          where: {
+            id,
+            deletedAt: null,
+            // eslint-disable-next-line no-restricted-syntax -- single-row soft delete by id, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.delete),
+          },
+          data: { deletedAt: now, deleteReason: reason ?? null, lastUpdated: now },
+          include: COLLECTION_INCLUDE,
+        }),
+      (error) => this.mapMissingToNotFound(error, id),
+    );
+  }
+
+  /**
+   * Each row with its game's base games (#1070): the links whose base game is
+   * live and the viewer could open by id, the rule `GET /games/:id` uses. A
+   * game held more than once on the page is read once.
+   *
+   * - A link read of its own, with the filter in its `where`: in
+   *   `COLLECTION_INCLUDE` Prisma would drop a deny-all ceiling and name every
+   *   base game (`docs/agents/gotchas.md`).
+   * - The link's direction, not the game's content type, says which game is
+   *   the base, so a row whose game is no expansion gets `[]`.
+   * - The ceiling needs no user, so an anonymous viewer of another user's
+   *   collection gets the base games it could open, the Public ones.
+   */
+  private async rowsWithBaseGames(rows: readonly GameCollectionWithRelations[]): Promise<GameCollectionRow[]> {
+    const links = await readBaseGameLinks(
+      this.db,
+      [...new Set(rows.map((row) => row.platformGame.game.id))],
+      this.scopeComposer.compose(ResourceType.Game, Action.read, { deletedAt: null }),
+    );
+
+    return rows.map(({ platformGame, ...row }) => ({
+      ...row,
+      platformGame: {
+        ...platformGame,
+        game: { ...platformGame.game, baseGames: links.get(platformGame.game.id) ?? [] },
+      },
+    }));
+  }
+
+  /** One row with its game's base games, as {@link rowsWithBaseGames} reads them. */
+  private async rowWithBaseGames(row: GameCollectionWithRelations): Promise<GameCollectionRow> {
+    const [withLinks] = await this.rowsWithBaseGames([row]);
+
+    return withLinks;
+  }
+
+  /**
+   * The row a write returns, with its game's base games (#1070). `toError`
+   * maps the write's own failure, a missing row to 404 in every caller. The
+   * link read runs after that mapping, never inside it, so a failed link read
+   * reaches the client as itself.
+   */
+  private async writtenRow(
+    write: () => Promise<GameCollectionWithRelations>,
+    toError: (error: unknown) => unknown,
+  ): Promise<GameCollectionRow> {
+    let row: GameCollectionWithRelations;
     try {
-      return await this.db.gameCollection.update({
-        where: {
-          id,
-          deletedAt: null,
-          // eslint-disable-next-line no-restricted-syntax -- single-row soft delete by id, not a collection read
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.delete),
-        },
-        data: { deletedAt: now, deleteReason: reason ?? null, lastUpdated: now },
-        include: COLLECTION_INCLUDE,
-      });
+      row = await write();
     } catch (error) {
-      throw this.mapMissingToNotFound(error, id);
+      throw toError(error);
     }
+
+    return this.rowWithBaseGames(row);
   }
 
   /**

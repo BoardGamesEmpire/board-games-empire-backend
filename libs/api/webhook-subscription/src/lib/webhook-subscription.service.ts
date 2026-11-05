@@ -11,6 +11,7 @@ import { I18nMessage, t } from '@bge/i18n';
 import {
   AbilityFactory,
   AbilityService,
+  everyAbilityCan,
   PermissionsService,
   resolveScopeSubjectId,
   ScopeComposer,
@@ -451,8 +452,7 @@ export class WebhookSubscriptionService {
     for (const type of types) {
       const descriptor = this.registry.require(type);
 
-      const permitted = abilities.every((ability) => ability.can(descriptor.requiredAction, descriptor.subject));
-      if (!permitted) {
+      if (!everyAbilityCan(abilities, descriptor.requiredAction, descriptor.subject)) {
         throw new ForbiddenException(
           t('errors.webhook_subscription.forbidden_subject_access', {
             action: descriptor.requiredAction,

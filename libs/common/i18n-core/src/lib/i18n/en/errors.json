@@ -289,6 +289,7 @@
   "game_search": {
     "no_source_selected": "At least one of includeLocal or includeExternal must be true",
     "already_active": "Search with correlationId {correlationId} is already active",
+    "data_gateways_forbidden": "Searching beyond this server is not available to you. You can still search the games this server knows about.",
     "local_failed": "Local search failed",
     "external_failed": "External search failed",
     "rate_limited": "Rate limited — please try again shortly",

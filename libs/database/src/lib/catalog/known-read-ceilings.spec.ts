@@ -139,6 +139,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
       'read:game:public': 'fixed filter',
       'read:game:shared': 'binds user.id',
     },
+    AnonymousUser: { 'read:game:public': 'fixed filter' },
   },
   GameCollection: {
     User: {
@@ -155,6 +156,9 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
   DataGateway: {
     Admin: { 'read:data_gateway': 'every row' },
   },
+  GameSearch: {
+    User: { 'read:game_search:data_gateways': 'every row' },
+  },
   GamePlayResult: {},
   GamePlaySession: {
     User: { 'read:game_play_session': 'every row' },
@@ -169,6 +173,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
   },
   PlatformGame: {
     User: { 'read:platform_game': 'every row' },
+    AnonymousUser: { 'read:platform_game:public': 'fixed filter' },
   },
   RuleVariant: {},
   SessionPlayer: {},

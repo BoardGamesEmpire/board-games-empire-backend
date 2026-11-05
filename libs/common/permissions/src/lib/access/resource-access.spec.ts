@@ -2,7 +2,7 @@ import { Action, ResourceType } from '@bge/database';
 import type { ExtractSubjectType, SubjectRawRule } from '@casl/ability';
 import { createPrismaAbility, type PrismaQuery } from '@casl/prisma';
 import type { AppAbility, Subjects } from '../interfaces';
-import { accessExtent, resourceTypeAccess } from './resource-access';
+import { accessExtent, everyAbilityCan, resourceTypeAccess } from './resource-access';
 
 describe('accessExtent', () => {
   const abilityOf = (rules: SubjectRawRule<Action, ExtractSubjectType<Subjects>, PrismaQuery>[]): AppAbility =>
@@ -183,5 +183,30 @@ describe('resourceTypeAccess', () => {
     expect(access).toEqual({ create: 'all', read: 'all', update: 'all', delete: 'none', manage: 'all' });
     expect(onUnreadable).toHaveBeenCalledTimes(1);
     expect(onUnreadable).toHaveBeenCalledWith(Action.delete, expect.any(Error));
+  });
+});
+
+describe('everyAbilityCan', () => {
+  const allowing = createPrismaAbility([{ action: Action.read, subject: ResourceType.GameSearch }]) as AppAbility;
+  const refusing = createPrismaAbility([]) as AppAbility;
+
+  it('allows when every ability allows the action on the type (#1076)', () => {
+    expect(everyAbilityCan([allowing, allowing], Action.read, ResourceType.GameSearch)).toBe(true);
+  });
+
+  it('refuses when any ability refuses, as an API key and its owner are checked together (#1076)', () => {
+    expect(everyAbilityCan([allowing, refusing], Action.read, ResourceType.GameSearch)).toBe(false);
+  });
+
+  it('refuses an empty ability array rather than answering the vacuous yes (#1076)', () => {
+    expect(everyAbilityCan([], Action.read, ResourceType.GameSearch)).toBe(false);
+  });
+
+  it('counts a permission with a condition, as the type check does (#1076)', () => {
+    const conditioned = createPrismaAbility([
+      { action: Action.read, subject: ResourceType.Household, conditions: { id: 'h1' } },
+    ]) as AppAbility;
+
+    expect(everyAbilityCan([conditioned], Action.read, ResourceType.Household)).toBe(true);
   });
 });

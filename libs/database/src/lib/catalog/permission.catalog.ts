@@ -753,6 +753,17 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Low,
     reason: 'View platform-specific game entries',
   }),
+  // The anonymous user's copy, through the game's reach: `AnonymousUser` may
+  // hold no unconditioned grant, and a platform game has no reach of its own
+  // (#1076).
+  permission({
+    action: Action.read,
+    subject: ResourceType.PlatformGame,
+    conditions: { game: { is: { deletedAt: null, reach: 'Public' } } },
+    slug: 'read:platform_game:public',
+    riskLevel: RiskLevel.Low,
+    reason: 'View the platform games of public games',
+  }),
   permission({
     action: Action.create,
     subject: ResourceType.PlatformGame,
@@ -1456,6 +1467,21 @@ export const PERMISSION_CATALOG = [
     slug: 'delete:data_gateway',
     riskLevel: RiskLevel.High,
     reason: 'Delete DataGateway connections',
+  }),
+
+  // --- GameSearch ---
+  //
+  // Asking the DataGateways sends a game search's query upstream on the
+  // server's credentials, so it is a grant of its own, not a part of reading
+  // games: an anonymous user searches the game catalog and never asks
+  // them (#1076). `GameSearch` has no table, so the grant takes no conditions and
+  // is checked by type alone. `Medium` for that outbound call.
+  permission({
+    action: Action.read,
+    subject: ResourceType.GameSearch,
+    slug: 'read:game_search:data_gateways',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Ask the DataGateways for games during a game search',
   }),
 
   // --- Households ---

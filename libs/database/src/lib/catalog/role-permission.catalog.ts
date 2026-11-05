@@ -103,7 +103,9 @@ import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
  * so its list is everything such a user can do rather than an addition to
  * anything (#484). Anyone can open an anonymous session, which is why that list
  * is pinned and why every entry on it must carry a condition, whatever `User`
- * holds.
+ * holds. It reads Public collection entries, and Public games with their
+ * platform games: the game routes, and the base games named on the collection
+ * rows an anonymous user reads (#1076).
  *
  * Insertion order is the seed's assignment order.
  */
@@ -366,6 +368,7 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:game:friends-of-friends',
     'read:game:public',
     'read:game:shared',
+    'read:game_search:data_gateways',
     'read:job',
     'update:game:own',
 
@@ -432,7 +435,7 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'manage:webhook_subscription:own',
     'read:webhook_subscription:own',
   ],
-  [SystemRole.AnonymousUser]: ['read:game_collection:public'],
+  [SystemRole.AnonymousUser]: ['read:game_collection:public', 'read:game:public', 'read:platform_game:public'],
   [SystemRole.HouseholdOwner]: HOUSEHOLD_OWNER,
   [SystemRole.HouseholdAdmin]: [
     ...HOUSEHOLD_OWNER.filter((slug) => !HOUSEHOLD_OWNER_ONLY.includes(slug)),

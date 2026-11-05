@@ -243,8 +243,15 @@ export abstract class SearchFieldsDto extends CappedOffsetPaginationQueryDto(100
   /**
    * Whether to include external sources in the search.
    * Defaults to true — external results are always fast-pathed in parallel.
+   * Asking the DataGateways takes `read:game_search:data_gateways`, which an
+   * anonymous user lacks, so such an actor sends `false` (#1076).
    */
-  @ApiPropertyOptional({ description: 'Include external gateway results', default: true })
+  @ApiPropertyOptional({
+    description:
+      'Ask the DataGateways as well. An actor who may not ask them, such as an anonymous user, is refused ' +
+      'unless this is false.',
+    default: true,
+  })
   @IsOptional()
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @TransformBoolean()
