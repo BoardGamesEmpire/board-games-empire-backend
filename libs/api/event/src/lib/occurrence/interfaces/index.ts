@@ -27,7 +27,7 @@ export interface AvailabilitySummaryEntry {
   available: number;
   maybe: number;
   unavailable: number;
-  /** Votes that count: from attendees who are in the event */
+  /** Votes that count: from attendees who are in the event and whose event role can vote on dates */
   totalVotes: number;
 
   /**
@@ -44,7 +44,10 @@ export interface AvailabilitySummaryEntry {
   voters: {
     attendeeId: string;
     response: AvailabilityResponse;
-    /** False when the voter is not attending; the counts above leave the vote out */
+    /**
+     * False when the voter is not attending, or their event role can't vote
+     * on dates (#759); the counts above leave the vote out
+     */
     eligible: boolean;
   }[];
 }
@@ -52,7 +55,10 @@ export interface AvailabilitySummaryEntry {
 /** Full availability summary returned by getAvailabilitySummary. */
 export interface AvailabilitySummary {
   attendees: AttendeeContext;
-  /** Registered attendees whose votes count: the ones not marked NotAttending */
+  /**
+   * Registered attendees whose votes count: the ones not marked NotAttending,
+   * whose event role can vote on dates (#759)
+   */
   eligibleVoters: number;
   occurrences: AvailabilitySummaryEntry[];
 }

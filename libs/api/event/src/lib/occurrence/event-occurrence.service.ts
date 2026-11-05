@@ -16,13 +16,14 @@ import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
-import { emitRemovedGames, isOutOfEvent, writeEventDates } from '../attendee/attendance';
+import { emitRemovedGames, writeEventDates } from '../attendee/attendance';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
 import { assertEventNotCancelled } from '../lifecycle/event-lifecycle.helpers';
 import { pickSnapshot } from '../utils/pick-snapshot.util';
+import { AVAILABILITY_VOTE_SLUG, countsAsVoter, voterGrantSelect } from '../vote/vote-grant';
 import { OccurrenceEvents } from './constants';
 import { AddOccurrenceDto } from './dto/add-occurrence.dto';
 import { SubmitAvailabilityDto } from './dto/submit-availability.dto';
@@ -646,7 +647,7 @@ export class EventOccurrenceService {
     const [attendees, occurrences, votes] = await Promise.all([
       this.db.eventAttendee.findMany({
         where: this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { eventId, ...NOT_REMOVED }),
-        select: { id: true, userId: true, status: true, removedAt: true },
+        select: { id: true, status: true, removedAt: true, ...voterGrantSelect(AVAILABILITY_VOTE_SLUG) },
       }),
       this.db.eventOccurrence.findMany({
         where: this.scopeComposer.compose(ResourceType.EventOccurrence, Action.read, { eventId }),
@@ -662,18 +663,20 @@ export class EventOccurrenceService {
 
     // An attendee who is not attending keeps their votes, and the summary
     // lists them, marked as not counting; none of the counts includes them
-    // (#551). A removed attendee is not read at all.
+    // (#551). Nor does it count an attendee whose event role can't vote on
+    // dates, such as a spectator: their votes are listed the same way (#759).
+    // A removed attendee is not read at all.
     const attendeeById = new Map(attendees.map((a) => [a.id, a]));
     const votesByOccurrence = groupByOccurrence(
       votes.flatMap((vote) => {
         const attendee = attendeeById.get(vote.attendeeId);
-        return attendee ? [{ ...vote, eligible: !isOutOfEvent(attendee) }] : [];
+        return attendee ? [{ ...vote, eligible: countsAsVoter(attendee) }] : [];
       }),
     );
 
     const registered = attendees.filter((a) => a.userId !== null);
     const guests = attendees.filter((a) => a.userId === null);
-    const eligibleVoters = registered.filter((a) => !isOutOfEvent(a)).length;
+    const eligibleVoters = attendees.filter(countsAsVoter).length;
 
     const byStatus = {
       attending: 0,
@@ -758,7 +761,8 @@ export class EventOccurrenceService {
 
 /**
  * Each vote as the occurrence routes read it: the response, the attendee who
- * cast it, their user, and whether they are still in the event, which
+ * cast it, their user, whether they are still in the event, and whether their
+ * event role holds the availability vote (#759), which
  * {@link toOccurrenceVote} turns into the vote's `eligible` mark.
  */
 const OCCURRENCE_VOTE_SELECT = {
@@ -767,7 +771,7 @@ const OCCURRENCE_VOTE_SELECT = {
   response: true,
 
   attendee: {
-    select: { userId: true, status: true, removedAt: true },
+    select: { status: true, removedAt: true, ...voterGrantSelect(AVAILABILITY_VOTE_SLUG) },
   },
 } as const satisfies Prisma.EventAvailabilityVoteSelect;
 
@@ -776,7 +780,9 @@ type OccurrenceVoteRow = Prisma.EventAvailabilityVoteGetPayload<{ select: typeof
 /**
  * A vote as the occurrence routes serve it: the response, the attendee who
  * cast it and their user, and whether it counts. It counts while its voter
- * is in the event (#551); one who left keeps the vote, marked as not counting.
+ * is in the event (#551) and their event role holds the availability vote
+ * (#759), as in the availability summary; one who left, or whose role lost
+ * the vote, keeps the vote, marked as not counting.
  */
 export type OccurrenceVote = Omit<OccurrenceVoteRow, 'attendee'> & {
   attendee: Pick<OccurrenceVoteRow['attendee'], 'userId'>;
@@ -784,10 +790,10 @@ export type OccurrenceVote = Omit<OccurrenceVoteRow, 'attendee'> & {
 };
 
 function toOccurrenceVote<TRow extends OccurrenceVoteRow>({
-  attendee: { userId, status, removedAt },
+  attendee,
   ...vote
 }: TRow): Omit<TRow, 'attendee'> & Pick<OccurrenceVote, 'attendee' | 'eligible'> {
-  return { ...vote, attendee: { userId }, eligible: !isOutOfEvent({ status, removedAt }) };
+  return { ...vote, attendee: { userId: attendee.userId }, eligible: countsAsVoter(attendee) };
 }
 
 // In the order each attendee first voted. A changed vote keeps its place, and

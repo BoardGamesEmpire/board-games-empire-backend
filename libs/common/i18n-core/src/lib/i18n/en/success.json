@@ -57,7 +57,9 @@
     "created": "Nomination created",
     "withdrawn": "Nomination withdrawn",
     "vote_recorded": "Vote recorded",
-    "resolved": "Nomination resolved: {status}",
+    "passed": "The nomination passed, and its game is in the lineup.",
+    "failed": "The nomination didn't get enough votes for it to pass.",
+    "quorum_not_met": "Not enough people voted for the result to count, so the nomination didn't pass.",
     "approved": "Nomination approved",
     "rejected": "Nomination rejected",
     "game_added": "Game added to event"

@@ -17,6 +17,7 @@ import {
   ResourceType,
   ScheduledGameRole,
   VoteEligibility,
+  VoteQuorumType,
   VoteType,
 } from '@bge/database';
 import { t } from '@bge/i18n';
@@ -26,6 +27,7 @@ import {
   createMockAbilityService,
   createMockDatabaseService,
   createTestingModuleWithDb,
+  makeVoterRole,
   paginationQuery,
   rawQueryText,
   type MockAbilityService,
@@ -198,6 +200,54 @@ describe('EventGameNominationService', () => {
       expect(db.eventOccurrencePolicy.findMany).toHaveBeenCalledWith({ where: { occurrenceId: { in: ['occ-1'] } } });
       expect(nomination.votes).toEqual([expect.objectContaining({ id: 'vote-1', eligible: true })]);
     });
+
+    it('marks the vote of a voter whose event role does not hold the vote as not counting (#759)', async () => {
+      db.eventGameNomination.findUnique.mockResolvedValue(
+        nominationRow({ votes: [voteRow('vote-spectator', voter(EventParticipationStatus.Attending, null, false))] }),
+      );
+
+      const nomination = await service.getNomination('event-1', 'nom-1');
+
+      expect(nomination.votes).toEqual([expect.objectContaining({ id: 'vote-spectator', eligible: false })]);
+    });
+  });
+
+  // #759: whether a voter counts follows their event role's grant of the game
+  // vote as it is now, whichever role holds it and whoever added the edge. A
+  // retired permission confers nothing, nor does one an operator inverted into
+  // a denial.
+  it("resolveNomination reads each voter's role grant for the game vote, live, unretired and not a denial", async () => {
+    db.eventGameNomination.findUnique.mockResolvedValue(openNomination());
+    db.eventGameVote.findMany.mockResolvedValue([{ voteType: VoteType.For, attendeeId: 'att-in' }] as never);
+    db.eventAttendee.findMany.mockResolvedValue([
+      { id: 'att-in', ...voter(EventParticipationStatus.Attending) },
+    ] as never);
+    mockSettleLocks(db, lockedSupplier(), { status: NominationStatus.Open });
+    db.eventGameNomination.update.mockResolvedValue(nominationRow({ status: NominationStatus.Passed }));
+    db.eventGame.create.mockResolvedValue({ id: 'eg-1', nominationId: 'nom-1' } as EventGame);
+
+    await service.resolveNomination('event-1', 'nom-1');
+
+    expect(db.eventAttendee.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          userId: true,
+          role: {
+            select: {
+              role: {
+                select: {
+                  permissions: {
+                    where: { permission: { is: { slug: 'create:event_game_vote', retiredAt: null, inverted: false } } },
+                    select: { id: true },
+                    take: 1,
+                  },
+                },
+              },
+            },
+          },
+        }),
+      }),
+    );
   });
 
   // The resolver counts only the votes of eligible voters, and its pool is
@@ -286,6 +336,35 @@ describe('EventGameNominationService', () => {
     expect(gameName).toBe(GameAddedToEventEvent.eventName);
     expect(gameEvent.subjectId).toBe('eg-1');
     expect(gameEvent.addedByAttendeeId).toBe('att-nominator');
+  });
+
+  // #798: the outcome was read off the threshold alone, so a nomination short
+  // of quorum whose few votes met the threshold passed, and its game entered
+  // the lineup. The resolver's own status is stored and returned as it is.
+  it('resolveNomination stores QuorumNotMet when quorum fails though the threshold is met, and adds nothing to the lineup (#798)', async () => {
+    db.eventPolicy.findUnique.mockResolvedValue({
+      voteQuorumType: VoteQuorumType.PercentOfAttendees,
+      voteQuorumValue: 50,
+    } as EventPolicy);
+    db.eventGameNomination.findUnique.mockResolvedValue(openNomination());
+    db.eventGameVote.findMany.mockResolvedValue([{ voteType: VoteType.For, attendeeId: 'att-1' }] as never);
+    db.eventAttendee.findMany.mockResolvedValue(
+      ['att-1', 'att-2', 'att-3', 'att-4'].map((id) => ({ id, ...voter(EventParticipationStatus.Attending) })) as never,
+    );
+    mockSettleLocks(db, lockedSupplier(), { status: NominationStatus.Open });
+    db.eventGameNomination.update.mockResolvedValue(nominationRow({ status: NominationStatus.QuorumNotMet }));
+    // Answered, so a resolve that wrongly adds the game fails on the assertions below.
+    db.eventGame.create.mockResolvedValue({ id: 'eg-1', nominationId: 'nom-1' } as EventGame);
+
+    const { resolution } = await service.resolveNomination('event-1', 'nom-1');
+
+    expect(db.eventGameNomination.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: NominationStatus.QuorumNotMet } }),
+    );
+    expect(resolution.status).toBe(NominationStatus.QuorumNotMet);
+    expect(resolution.quorumMet).toBe(false);
+    expect(resolution.thresholdMet).toBe(true);
+    expect(db.eventGame.create).not.toHaveBeenCalled();
   });
 
   // The status is first checked outside the transaction; the supplier leaving
@@ -734,23 +813,28 @@ describe('EventGameNominationService', () => {
     expect(resolvedEvent.after).toEqual(expect.objectContaining({ id: 'nom-1', status: NominationStatus.Rejected }));
   });
 
-  it('resolveNomination rejects a non-Open nomination', async () => {
-    db.eventGameNomination.findUnique.mockResolvedValue({
-      id: 'nom-1',
-      eventId: 'event-1',
-      status: NominationStatus.Passed,
-      platformGameId: 'pg-1',
-      occurrenceId: null,
-      releaseId: null,
-      votingDeadline: null,
-      nominatedById: 'att-1',
-      suppliedFromId: 'gl-1',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    } as EventGameNomination);
+  // A nomination resolved short of quorum is final, like one that failed:
+  // nominating the game again starts a new vote (#798).
+  it.each([NominationStatus.Passed, NominationStatus.Failed, NominationStatus.QuorumNotMet])(
+    'resolveNomination rejects a %s nomination',
+    async (status) => {
+      db.eventGameNomination.findUnique.mockResolvedValue({
+        id: 'nom-1',
+        eventId: 'event-1',
+        status,
+        platformGameId: 'pg-1',
+        occurrenceId: null,
+        releaseId: null,
+        votingDeadline: null,
+        nominatedById: 'att-1',
+        suppliedFromId: 'gl-1',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as EventGameNomination);
 
-    await expect(service.resolveNomination('event-1', 'nom-1')).rejects.toThrow(BadRequestException);
-  });
+      await expect(service.resolveNomination('event-1', 'nom-1')).rejects.toThrow(BadRequestException);
+    },
+  );
 
   it('castVote emits a create-shaped VoteCastEvent on the first vote', async () => {
     db.eventGameNomination.findUnique.mockResolvedValue({
@@ -1211,9 +1295,19 @@ function mockSettleLocks(
     .mockResolvedValueOnce([{ occurrenceId: null, ...nomination }] as never);
 }
 
-/** A voter as the reads select them: what decides whether their vote counts. */
-function voter(status: EventParticipationStatus, removedAt: Date | null = null) {
-  return { status, removedAt, availableGames: [] };
+/**
+ * A voter as the reads select them: what decides whether their vote counts.
+ * They have an account, and their event role holds the game vote unless
+ * `grant` is false.
+ */
+function voter(status: EventParticipationStatus, removedAt: Date | null = null, grant = true) {
+  return {
+    userId: 'user-x',
+    role: makeVoterRole(grant),
+    status,
+    removedAt,
+    availableGames: [],
+  };
 }
 
 /** A vote as the nomination include reads it, cast For by `attendee`. */

@@ -1,5 +1,5 @@
-import { Action, ResourceType } from '@bge/database';
-import { t } from '@bge/i18n';
+import { Action, NominationStatus, ResourceType } from '@bge/database';
+import { t, type I18nPath } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated } from '@bge/shared';
 import { Body, Controller, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
@@ -8,9 +8,17 @@ import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
 import { CastVoteDto } from '../dto/cast-vote.dto';
+import type { ResolvedStatus } from '../interfaces/vote.interface';
 import { DirectAddGameDto } from './dto/direct-add-game.dto';
 import { NominateGameDto } from './dto/nominate-game.dto';
 import { EventGameNominationService } from './event-game-nomination.service';
+
+/** What the resolve route says of each outcome, in plain words rather than the status's name (#798). */
+const RESOLVED_MESSAGES = {
+  [NominationStatus.Passed]: 'success.nomination.passed',
+  [NominationStatus.Failed]: 'success.nomination.failed',
+  [NominationStatus.QuorumNotMet]: 'success.nomination.quorum_not_met',
+} as const satisfies Readonly<Record<ResolvedStatus, I18nPath>>;
 
 @ApiBearerAuth()
 @ApiSecurity('api_key')
@@ -112,7 +120,7 @@ export class EventGameNominationController {
     return from(this.nominationService.resolveNomination(eventId, nominationId)).pipe(
       tap(({ resolution }) => this.logger.log(`Nomination ${nominationId} resolved: ${resolution.status}`)),
       map(({ nomination, resolution }) => ({
-        message: t('success.nomination.resolved', { status: resolution.status }),
+        message: t(RESOLVED_MESSAGES[resolution.status]),
         nomination,
         resolution,
       })),

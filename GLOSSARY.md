@@ -561,7 +561,7 @@ How much support a nomination needs to pass: a simple majority, a set percentage
 _Avoid_: pass mark
 
 **Vote eligibility**:
-Which attendees may vote on nominations: everyone on the list, only those attending, or only those offering games.
+Which attendees may vote on nominations: everyone on the list, only those attending, or only those offering games. In every case, only an attendee with an account whose event role can vote counts.
 _Avoid_: confirmed (to mean attending), pool participants
 
 **Quorum**:
