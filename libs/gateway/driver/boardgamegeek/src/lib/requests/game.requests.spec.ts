@@ -384,6 +384,16 @@ describe('parseExternalId', () => {
   it('rejects an empty string', () => {
     expect(() => parseExternalId('')).toThrow();
   });
+
+  // Any signed-in user names an external ID through the expansions route
+  // (#1067). Number() reads each of these as an id, so BGG would be asked for
+  // another thing than the one named, and its list cached under this spelling.
+  it.each(['0x10', '1e3', ' 16', '16 ', '016', '1.0', '99999999999999999999'])(
+    'rejects %p, which is not a BGG id written in digits (#1067)',
+    (externalId) => {
+      expect(() => parseExternalId(externalId)).toThrow(/expected positive integer/);
+    },
+  );
 });
 
 describe('chunk', () => {

@@ -432,6 +432,17 @@ describe('IgdbDriver', () => {
       expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
       expect(response.message).toContain('API down');
     });
+
+    it('answers ERROR for a malformed external ID without calling IGDB', async () => {
+      // The external ID comes from a user's request, and IGDB's query language doesn't escape it (#1067).
+      igdbService.call.mockReturnValue(of([BASE_GAME]));
+
+      const response = await firstValueFrom(driver.fetchGame({ correlationId: 'c', externalId: "1' | id > 0" }));
+
+      expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
+      expect(response.message).toMatch(/expected positive integer/);
+      expect(igdbService.call).not.toHaveBeenCalled();
+    });
   });
 
   describe('fetchExpansions', () => {
@@ -455,6 +466,20 @@ describe('IgdbDriver', () => {
       expect(frames).toHaveLength(1);
       expect(frames[0].status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
       expect(frames[0].message).toContain('IGDB unreachable');
+    });
+
+    it('answers ERROR for a malformed external ID without calling IGDB', async () => {
+      // As fetchGame does: the base game's external ID comes from a user's request too (#1067).
+      igdbService.call.mockReturnValue(of([DLC_GAME]));
+
+      const frames = await firstValueFrom(
+        driver.fetchExpansions({ correlationId: 'c', baseExternalId: "1' | id > 0" }).pipe(toArray()),
+      );
+
+      expect(frames).toHaveLength(1);
+      expect(frames[0].status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
+      expect(frames[0].message).toMatch(/expected positive integer/);
+      expect(igdbService.call).not.toHaveBeenCalled();
     });
   });
 });

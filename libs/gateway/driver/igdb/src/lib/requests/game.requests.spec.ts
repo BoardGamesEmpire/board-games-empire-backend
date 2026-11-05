@@ -6,6 +6,7 @@ import {
   GAME_SEARCH_FIELDS,
   fetchExpansionsRequest,
   fetchGameRequest,
+  parseIgdbExternalId,
   searchGamesRequest,
 } from './game.requests';
 
@@ -225,6 +226,11 @@ describe('GameRequests', () => {
         `id = '1942' & (language_supports.language = (7) | language_supports.language = null)`,
       );
     });
+
+    it('refuses a malformed external ID when the request is built, before any client call', () => {
+      // The external ID comes from a user's request, and IGDB's query language doesn't escape it (#1067).
+      expect(() => fetchGameRequest("1' | id > 0")).toThrow(/expected positive integer/);
+    });
   });
 
   describe('fetchExpansionsRequest', () => {
@@ -273,6 +279,24 @@ describe('GameRequests', () => {
       // Dropping this filter would return up to 50 unrelated games.
       expect(client.where).toHaveBeenCalledWith(`(parent_game = '1942' | version_parent = '1942')`);
     });
+
+    it('refuses a malformed external ID when the request is built, before any client call', () => {
+      // As fetchGameRequest does: the base game's external ID comes from a user's request too (#1067).
+      expect(() => fetchExpansionsRequest("1' | id > 0")).toThrow(/expected positive integer/);
+    });
+  });
+
+  describe('parseIgdbExternalId', () => {
+    it('answers the number an IGDB id names', () => {
+      expect(parseIgdbExternalId('1942')).toBe(1942);
+    });
+
+    it.each(['0', '-1', '1.5', '', "1' | id > 0", 'abc', '99999999999999999999', '0x10', '1e3', ' 16', '016'])(
+      'refuses %p, which is not a positive integer IGDB could hold (#1067)',
+      (externalId) => {
+        expect(() => parseIgdbExternalId(externalId)).toThrow(/expected positive integer/);
+      },
+    );
   });
 });
 

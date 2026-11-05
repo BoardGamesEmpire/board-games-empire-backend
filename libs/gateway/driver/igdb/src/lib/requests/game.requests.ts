@@ -171,12 +171,30 @@ function includeLanguageFilter(builder: IGDBClient, locale?: string, whereQuery?
 }
 
 /**
+ * The IGDB id an external ID names. Throws unless it's a positive integer,
+ * written in digits as IGDB gives it: the external ID comes from a user's
+ * request (#1067), and IGDB's query language doesn't escape what's put into
+ * a `where` clause. A spelling `Number` would also read, such as `0x10`,
+ * `1e3` or ` 16`, is refused rather than asked for under another id.
+ */
+export function parseIgdbExternalId(externalId: string): number {
+  const id = Number(externalId);
+  if (!/^[1-9]\d*$/.test(externalId) || !Number.isSafeInteger(id)) {
+    throw new Error(`Invalid IGDB externalId: '${externalId}' — expected positive integer`);
+  }
+  return id;
+}
+
+/**
  * Fetch a single game by its IGDB numeric id, returning full GameData fields.
+ * A malformed id throws here, when the request is built, before any call.
  */
 export function fetchGameRequest(externalId: string, locale?: string): IgdbRequest<IgdbGame[]> {
+  const id = parseIgdbExternalId(externalId);
+
   return (client: IGDBClient, signal: AbortSignal) => {
     const builder = client.fields(GAME_FETCH_FIELDS);
-    return includeLanguageFilter(builder, locale, `id = '${externalId}'`)
+    return includeLanguageFilter(builder, locale, `id = '${id}'`)
       .limit(1)
       .request<IgdbGame>(GAMES_ENDPOINT, signal)
       .then((response) => response.data);
@@ -190,16 +208,16 @@ export function fetchGameRequest(externalId: string, locale?: string): IgdbReque
  *   - DLC (category 1): parent_game set
  *   - Expansions (category 2): parent_game set
  *   - Standalone expansions (category 4): version_parent set
+ *
+ * A malformed base id throws here, when the request is built, before any call.
  */
 export function fetchExpansionsRequest(baseExternalId: string, locale?: string): IgdbRequest<IgdbGame[]> {
+  const id = parseIgdbExternalId(baseExternalId);
+
   return (client: IGDBClient, signal: AbortSignal) => {
     const builder = client.fields(GAME_SEARCH_FIELDS);
 
-    return includeLanguageFilter(
-      builder,
-      locale,
-      `(parent_game = '${baseExternalId}' | version_parent = '${baseExternalId}')`,
-    )
+    return includeLanguageFilter(builder, locale, `(parent_game = '${id}' | version_parent = '${id}')`)
       .limit(50)
       .request<IgdbGame>(GAMES_ENDPOINT, signal)
       .then((response) => response.data);

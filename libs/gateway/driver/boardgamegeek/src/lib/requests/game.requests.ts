@@ -159,13 +159,17 @@ function normalizeTypes(types: readonly BggThingType[]): BggThingType | BggThing
  * Validate and parse a stringified BGG thing id from the proto request
  * envelope into a positive integer.
  *
+ * Only digits with no leading zero pass, as IGDB's ids do (#1067): Number()
+ * alone reads `1e3` or `0x10` as an id, so BGG would be asked for another
+ * thing than the one named, and its list cached under that other spelling.
+ *
  * Errors are thrown synchronously for use inside `defer(() => ...)`
  * factories — they will surface as Observable errors rather than
  * unhandled exceptions when the request is subscribed.
  */
 export function parseExternalId(externalId: string): number {
   const id = Number(externalId);
-  if (!Number.isInteger(id) || id <= 0) {
+  if (!/^[1-9]\d*$/.test(externalId) || !Number.isSafeInteger(id)) {
     throw new Error(`Invalid BGG externalId: '${externalId}' — expected positive integer`);
   }
   return id;
