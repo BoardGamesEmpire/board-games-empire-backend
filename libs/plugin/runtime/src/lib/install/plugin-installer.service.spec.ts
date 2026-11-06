@@ -14,7 +14,7 @@ import {
   type PluginGrant,
   type PluginPermission,
 } from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, UNIT_BOUND_RULES, type MockDatabaseService } from '@bge/testing';
 import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
@@ -979,15 +979,13 @@ describe('PluginInstallerService', () => {
         // unit-conditioned variants.
         {
           slug: 'update:calendar',
-          subject: 'calendar',
+          ...UNIT_BOUND_RULES.Household,
           riskLevel: RiskLevel.Low,
-          conditions: { householdId: '{{ unit.householdId }}' },
         } as unknown as Permission,
         {
           slug: 'read:public_content',
-          subject: 'public_content',
+          ...UNIT_BOUND_RULES.User,
           riskLevel: RiskLevel.Low,
-          conditions: { ownerId: '{{ unit.userId }}' },
         } as unknown as Permission,
       ]);
 

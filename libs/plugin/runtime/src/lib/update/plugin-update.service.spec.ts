@@ -19,6 +19,7 @@ import {
   prismaColumn,
   prismaTable,
   readPrismaModels,
+  UNIT_BOUND_RULES,
   type MockDatabaseService,
 } from '@bge/testing';
 import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
@@ -161,9 +162,8 @@ describe('PluginUpdateService', () => {
   // gate (#60); harmless for the server-scope scenarios.
   const feedbackRead = {
     slug: 'feedback:read',
-    subject: 'feedback',
+    ...UNIT_BOUND_RULES.Household,
     riskLevel: RiskLevel.Medium,
-    conditions: { householdId: '{{ unit.householdId }}' },
   } as unknown as Permission;
 
   let rootDir: string;
@@ -1182,9 +1182,8 @@ describe('PluginUpdateService', () => {
         { slug: 'user:impersonate', subject: 'user', riskLevel: RiskLevel.Critical } as Permission,
         {
           slug: 'calendar:read',
-          subject: 'calendar',
+          ...UNIT_BOUND_RULES.Household,
           riskLevel: RiskLevel.Low,
-          conditions: { householdId: '{{ unit.householdId }}' },
         } as unknown as Permission,
       ]);
       const seeded = makeGrant({
@@ -1670,9 +1669,8 @@ describe('PluginUpdateService', () => {
         db.permission.findMany.mockResolvedValue([
           {
             slug: 'feedback:read',
-            subject: 'feedback',
+            ...UNIT_BOUND_RULES.Household,
             riskLevel: RiskLevel.Critical,
-            conditions: { householdId: '{{ unit.householdId }}' },
           } as unknown as Permission,
         ]);
         db.pluginGrant.findMany.mockResolvedValue([
@@ -1811,9 +1809,8 @@ describe('PluginUpdateService', () => {
       db.permission.findMany.mockResolvedValue([
         {
           slug: 'feedback:read',
-          subject: 'feedback',
+          ...UNIT_BOUND_RULES.Household,
           riskLevel: RiskLevel.Critical,
-          conditions: { householdId: '{{ unit.householdId }}' },
         } as unknown as Permission,
       ]);
       // compare() → serverChecksToSeed() → activate() grouped household read
@@ -1915,9 +1912,8 @@ describe('PluginUpdateService', () => {
       db.permission.findMany.mockResolvedValue([
         {
           slug: 'feedback:read',
-          subject: 'feedback',
+          ...UNIT_BOUND_RULES.Household,
           riskLevel: RiskLevel.Medium,
-          conditions: { householdId: '{{ unit.householdId }}' },
         } as unknown as Permission,
       ]);
       db.pluginGrant.findMany
@@ -1952,9 +1948,8 @@ describe('PluginUpdateService', () => {
         feedbackRead,
         {
           slug: 'calendar:read',
-          subject: 'calendar',
+          ...UNIT_BOUND_RULES.Household,
           riskLevel: RiskLevel.Low,
-          conditions: { householdId: '{{ unit.householdId }}' },
         } as unknown as Permission,
       ]);
       // Call order: compare() → serverChecksToSeed() → activate() household loop
@@ -2022,9 +2017,8 @@ describe('PluginUpdateService', () => {
         feedbackRead,
         {
           slug: 'read:user_digest',
-          subject: 'digest',
+          ...UNIT_BOUND_RULES.User,
           riskLevel: RiskLevel.Low,
-          conditions: { ownerId: '{{ unit.userId }}' },
         } as unknown as Permission,
       ]);
     });
@@ -2125,9 +2119,8 @@ describe('PluginUpdateService', () => {
         feedbackRead,
         {
           slug: 'read:user_digest',
-          subject: 'digest',
+          ...UNIT_BOUND_RULES.User,
           riskLevel: RiskLevel.High,
-          conditions: { ownerId: '{{ unit.userId }}' },
         } as unknown as Permission,
       ]);
       const staleUserGrant = makeGrant({

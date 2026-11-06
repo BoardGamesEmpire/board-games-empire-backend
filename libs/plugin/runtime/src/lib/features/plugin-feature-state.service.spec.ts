@@ -7,7 +7,7 @@ import {
   PluginUnitDormantReason,
   RiskLevel,
 } from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, UNIT_BOUND_RULES, type MockDatabaseService } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { PluginConsentCheckClassifier } from '../consent/plugin-consent-check-classifier.service';
 import type { PluginModuleOptions } from '../plugin-module.options';
@@ -140,15 +140,15 @@ describe('PluginFeatureStateService', () => {
     decidedRiskLevel: decidedRiskLevel ?? RiskLevel.Low,
   });
 
-  const riskRow = (slug: string, riskLevel: RiskLevel = RiskLevel.Low, subject = 'Game') => ({
+  const riskRow = (slug: string, riskLevel: RiskLevel = RiskLevel.Low, subject?: string) => ({
     slug,
     riskLevel,
-    subject,
     // Unit-consented rows confer only when they name the consenting unit's
-    // own id (#60, #591): the user's for the one permission the manifest
-    // requests at user scope, the household's otherwise.
-    conditions:
-      slug === 'read:public_content' ? { ownerId: '{{ unit.userId }}' } : { householdId: '{{ unit.householdId }}' },
+    // own id on a column that holds it (#60, #591, #994): the user's for the
+    // one permission the manifest requests at user scope, the household's
+    // otherwise.
+    ...(slug === 'read:public_content' ? UNIT_BOUND_RULES.User : UNIT_BOUND_RULES.Household),
+    ...(subject === undefined ? {} : { subject }),
   });
 
   /** Every bound core slug at Low — the catalog state the happy paths assume. */

@@ -1,4 +1,5 @@
-import { PERMISSION_CATALOG, RiskLevel, type Permission } from '@bge/database';
+import { CONSENT_UNIT_BINDING_REFUSAL, PERMISSION_CATALOG, RiskLevel, type Permission } from '@bge/database';
+import { UNIT_BOUND_RULES, UNIT_ID_OFF_ID_COLUMN_RULES } from '@bge/testing';
 import { buildPluginManifest, validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import {
   collectForbiddenPermissionViolations,
@@ -120,9 +121,8 @@ describe('consent-gates', () => {
           'update:calendar',
           {
             slug: 'update:calendar',
-            subject: 'calendar',
+            ...UNIT_BOUND_RULES.Household,
             riskLevel: RiskLevel.Low,
-            conditions: { householdId: '{{ unit.householdId }}' },
           } as unknown as Permission,
         ],
       ]);
@@ -241,6 +241,33 @@ describe('consent-gates', () => {
           ),
         ).toEqual([]);
       });
+
+      // The unit's id on a field that holds no unit id binds nothing, directly
+      // or through a relation filter: a row whose text is set to the id would
+      // fall inside the unit's consent (#994).
+      it.each(
+        (['household', 'user'] as const).flatMap((consentScope) =>
+          UNIT_ID_OFF_ID_COLUMN_RULES[consentScope === 'household' ? 'Household' : 'User'].map((rule) => ({
+            consentScope,
+            ...rule,
+          })),
+        ),
+      )(
+        "refuses the consent unit's id on $label at $consentScope scope (#994)",
+        ({ consentScope, subject, conditions }) => {
+          const slug = 'read:household_member';
+          const permissions = new Map<string, Permission>([
+            [slug, { slug, subject, riskLevel: RiskLevel.Low, conditions } as unknown as Permission],
+          ]);
+
+          expect(collectUnboundedUnitConsentViolations(withUnitRequest(slug, consentScope), permissions)).toEqual([
+            expect.objectContaining({
+              permissionSlug: slug,
+              detail: expect.stringContaining(CONSENT_UNIT_BINDING_REFUSAL),
+            }),
+          ]);
+        },
+      );
     });
   });
 

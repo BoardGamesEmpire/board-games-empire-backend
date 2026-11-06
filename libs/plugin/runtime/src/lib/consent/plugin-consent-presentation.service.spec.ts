@@ -1,6 +1,6 @@
 import type { PluginUnit } from '@bge/actor-context';
 import { DatabaseService, PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, UNIT_BOUND_RULES, type MockDatabaseService } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import type { PluginModuleOptions } from '../plugin-module.options';
 import {
@@ -104,14 +104,12 @@ describe('PluginConsentPresentationService', () => {
     {
       slug: 'create:notification',
       riskLevel: RiskLevel.Medium,
-      subject: 'Notification',
-      conditions: { householdId: '{{ unit.householdId }}' },
+      ...UNIT_BOUND_RULES.Household,
     },
     {
       slug: 'read:public_content',
       riskLevel: RiskLevel.Low,
-      subject: 'Content',
-      conditions: { ownerId: '{{ unit.userId }}' },
+      ...UNIT_BOUND_RULES.User,
     },
   ];
 

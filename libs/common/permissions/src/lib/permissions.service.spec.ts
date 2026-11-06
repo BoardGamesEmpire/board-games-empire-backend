@@ -1,6 +1,7 @@
 import type { PluginUnit } from '@bge/actor-context';
 import {
   Action,
+  CONSENT_UNIT_BINDING_REFUSAL,
   PERMISSION_CATALOG,
   PLUGIN_REQUESTED_PERMISSIONS_READER,
   PluginGrantScope,
@@ -11,7 +12,13 @@ import {
   User,
   type PluginRequestedPermissions,
 } from '@bge/database';
-import { createTestingModuleWithDb, makePermission, type MockDatabaseService } from '@bge/testing';
+import {
+  createTestingModuleWithDb,
+  makePermission,
+  UNIT_BOUND_RULES,
+  UNIT_ID_OFF_ID_COLUMN_RULES,
+  type MockDatabaseService,
+} from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { createCache, type Cache } from 'cache-manager';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
@@ -869,7 +876,7 @@ describe('PermissionsService', () => {
       it("a household-scope grant confers a core permission when its row names the household's own id (#591)", async () => {
         grantRows([grantRow('update:calendar', RiskLevel.Low, PluginGrantScope.Household)]);
         db.permission.findMany.mockResolvedValue([
-          makePermission({ slug: 'update:calendar', conditions: { householdId: '{{ unit.householdId }}' } }),
+          makePermission({ slug: 'update:calendar', ...UNIT_BOUND_RULES.Household }),
         ] as never);
 
         const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
@@ -936,6 +943,32 @@ describe('PermissionsService', () => {
             await expect(conferredAt('read:game:public', scopeType)).resolves.toEqual(['read:game:public']);
           },
         );
+
+        // The unit's id on a field that holds no unit id binds nothing,
+        // directly or through a relation filter: a row whose text is set to the
+        // id would fall inside the unit's consent (#994).
+        it.each(
+          ([PluginGrantScope.Household, PluginGrantScope.User] as const).flatMap((consentScope) =>
+            UNIT_ID_OFF_ID_COLUMN_RULES[consentScope].map((rule) => ({ consentScope, ...rule })),
+          ),
+        )(
+          "refuses the consent unit's id on $label at $consentScope scope (#994)",
+          async ({ consentScope, subject, conditions }) => {
+            const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+            grantRows([grantRow('update:calendar', RiskLevel.Low, consentScope)]);
+            db.permission.findMany.mockResolvedValue([
+              makePermission({ slug: 'update:calendar', subject, conditions }),
+            ] as never);
+
+            const snapshot = await service.getPluginGrantSnapshot(
+              'plugin-1',
+              consentScope === PluginGrantScope.Household ? HOUSEHOLD_UNIT : USER_UNIT,
+            );
+
+            expect(snapshot?.corePermissions).toEqual([]);
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining(CONSENT_UNIT_BINDING_REFUSAL));
+          },
+        );
       });
 
       it('excludes a granted core permission whose subject drifted to the all wildcard (the wildcard re-check)', async () => {
@@ -975,7 +1008,7 @@ describe('PermissionsService', () => {
           grantRow('update:calendar', RiskLevel.Low, PluginGrantScope.Household),
         ] as never);
         db.permission.findMany.mockResolvedValue([
-          makePermission({ slug: 'update:calendar', conditions: { householdId: '{{ unit.householdId }}' } }),
+          makePermission({ slug: 'update:calendar', ...UNIT_BOUND_RULES.Household }),
         ] as never);
         reader.read.mockReturnValue({
           valid: true,

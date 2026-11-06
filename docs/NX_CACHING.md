@@ -242,3 +242,11 @@ add the `dependentTasksOutputFiles` entry back. To check that it works, run the
 target twice so that the second run is a cache hit, then add a migration
 directory with a `migration.sql` (for `@bge/database`) or a message to a `.proto` file and run it
 again: it should execute rather than restore.
+
+`@bge/database`'s `test` target gets the same entry, on the list `@nx/jest`
+infers; re-derive it the same way after an `@nx/jest` upgrade. Its specs read
+what `generate` writes into the gitignored directory, the client and, since
+#994, `unit-id-columns.ts`, so without the entry a schema-only change replayed
+a cached pass. Its `dependsOn` already holds `generate`. The `test` targets of
+the projects that depend on `@bge/database` do not have it yet, so a
+schema-only change still replays theirs.

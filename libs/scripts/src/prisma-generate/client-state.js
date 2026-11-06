@@ -10,16 +10,25 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { listFiles } = require('./list-files');
 const { MANIFEST_FILE } = require('./migrations-manifest');
+const { UNIT_ID_COLUMNS_FILE } = require('./unit-id-columns');
 
-function listFiles(dir, predicate) {
-  const found = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true, recursive: true })) {
-    if (!entry.isFile()) continue;
-    const full = path.join(entry.parentPath ?? entry.path, entry.name);
-    if (predicate(full)) found.push(full);
+/**
+ * The installed version of a package, from the first `<pkg>/package.json` on
+ * Node's search path for it. Neither `require('<pkg>/package.json')` nor
+ * resolving the entry point works for every package here:
+ * `@prisma/get-dmmf`'s exports map leaves `./package.json` out, and
+ * `prisma`'s names an entry file the package does not ship.
+ */
+function installedVersion(pkg) {
+  for (const dir of require.resolve.paths(pkg) ?? []) {
+    const manifest = path.join(dir, pkg, 'package.json');
+
+    if (fs.existsSync(manifest)) return JSON.parse(fs.readFileSync(manifest, 'utf8')).version;
   }
-  return found.sort();
+
+  throw new Error(`prisma generate: ${pkg} is not installed`);
 }
 
 function createClientState(workspaceRoot) {
@@ -29,11 +38,13 @@ function createClientState(workspaceRoot) {
 
   /**
    * Everything that changes what this target writes: the schema, the config
-   * that points at it, the generator's own version — and the migration
-   * directory names, because the migrations manifest (#236) is written
-   * alongside the client and a SQL-only migration changes it without touching
-   * any `.prisma`. Names only: nothing generated reads a migration's body, so
-   * editing one in place (routine before alpha) must not rebuild the client.
+   * that points at it, the code of these generate scripts, the versions of the
+   * generator and of the schema parser that writes the unit-id columns (#994)
+   * — and the migration directory
+   * names, because the migrations manifest (#236) is written alongside the
+   * client and a SQL-only migration changes it without touching any `.prisma`.
+   * Names only: nothing generated reads a migration's body, so editing one in
+   * place (routine before alpha) must not rebuild the client.
    */
   function fingerprint() {
     const hash = crypto.createHash('sha256');
@@ -49,8 +60,24 @@ function createClientState(workspaceRoot) {
 
     hash.update(fs.readFileSync(path.join(workspaceRoot, 'prisma.config.ts')));
 
-    for (const pkg of ['prisma', '@prisma/client']) {
-      hash.update(`${pkg}@${require(`${pkg}/package.json`).version}`);
+    // The generator's own code, the set the generate target's Nx inputs name:
+    // the unit-id columns are derived by it, so an edit to it must rebuild them
+    // (#994). Specs are left out, as there. A missing file or directory throws
+    // rather than dropping out of the hash: a moved generator would otherwise
+    // stop rebuilding the map without a word.
+    const scriptsDir = path.join(workspaceRoot, 'libs', 'scripts', 'src');
+    const generatorFiles = [
+      ...listFiles(path.join(scriptsDir, 'prisma-generate'), (f) => f.endsWith('.js') && !f.endsWith('.spec.js')),
+      path.join(scriptsDir, 'bin', 'prisma-generate.js'),
+    ];
+
+    for (const file of generatorFiles) {
+      hash.update(path.relative(workspaceRoot, file));
+      hash.update(fs.readFileSync(file));
+    }
+
+    for (const pkg of ['prisma', '@prisma/client', '@prisma/get-dmmf']) {
+      hash.update(`${pkg}@${installedVersion(pkg)}`);
     }
 
     return hash.digest('hex');
@@ -79,7 +106,8 @@ function createClientState(workspaceRoot) {
       stamp.fileCount > 0 &&
       stamp.fileCount === outputFileCount() &&
       fs.existsSync(path.join(outputDir, 'client.ts')) &&
-      fs.existsSync(path.join(outputDir, MANIFEST_FILE))
+      fs.existsSync(path.join(outputDir, MANIFEST_FILE)) &&
+      fs.existsSync(path.join(outputDir, UNIT_ID_COLUMNS_FILE))
     );
   }
 
