@@ -116,4 +116,15 @@ describe('PluginArtifactStore (#1094)', () => {
       expect(db.pluginArtifact.deleteMany).toHaveBeenCalledWith({ where: { sha256 } });
     });
   });
+
+  describe('removeExpired', () => {
+    it('deletes every row whose expiry has come, the instant itself included, and says how many (#1094)', async () => {
+      db.pluginArtifact.deleteMany.mockResolvedValue({ count: 2 });
+
+      await expect(store.removeExpired(now)).resolves.toBe(2);
+      // `lte`, where findLive and refreshForInstall read `gt`: the three agree
+      // on the instant a row expires.
+      expect(db.pluginArtifact.deleteMany).toHaveBeenCalledWith({ where: { expiresAt: { lte: now } } });
+    });
+  });
 });

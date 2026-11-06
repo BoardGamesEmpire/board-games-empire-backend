@@ -169,7 +169,7 @@ Only the hostname is compared, ignoring case, so ports don't matter. `TRUSTED_OR
 Two directories hold state that must outlive a container:
 
 - **`/var/lib/bge/media`** is where media is stored (the production default of `MEDIA_LOCAL_DISK_ROOT`, which staging has no default for). The api and the worker both read and write it, so they need the same volume: `ReadWriteMany` in Kubernetes. The api and the worker refuse to boot when it is missing, rather than write where nobody provisioned storage.
-- **`/var/lib/bge/plugins`** holds the plugins the api installs (`PLUGINS_ROOT`).
+- **`/var/lib/bge/plugins`** holds the plugins the api installs (`PLUGINS_ROOT`), one directory per plugin artifact, `<slug>/<sha256>/`. At boot and then every hour, the api removes each such directory that nothing needs once it is an hour old: no installed plugin or staged update uses it, no received plugin artifact is waiting in it to be installed, and no running process has it loaded. It also removes upload scratch under `.incoming/` once that is an hour old. Keep nothing else in this directory, and back it up and restore it together with the database, which records what each directory is for. If the database holds no plugin at all, as when the api is pointed by mistake at a new, empty database, the api removes none of these directories and logs a warning instead. So a server that has never installed a plugin keeps the directories of the plugin artifacts it has received, even after they expire, until its first install.
 
 The image creates both, owned by `node`, so a new named volume mounted on either starts out writable by the role. In Kubernetes, set `fsGroup: 1000` so a mounted volume is too. Without a volume, writes land in the container and are lost with it.
 

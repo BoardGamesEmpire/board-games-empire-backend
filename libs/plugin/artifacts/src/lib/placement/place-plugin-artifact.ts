@@ -4,6 +4,27 @@ import { lstat, mkdir, rename, rm, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /**
+ * Renames the extracted directory to its checksum path. The artifact sweep
+ * leaves slug directories alone, but something else, such as a manual
+ * `rmdir`, may still remove the slug directory between the `mkdir` before
+ * this and the rename (#1094). A rename that finds no slug directory makes it
+ * again and tries once more; a second failure propagates, as any other
+ * failure does.
+ */
+const renameIntoSlugDirectory = async (extractDir: string, slugDir: string, target: string): Promise<void> => {
+  try {
+    await rename(extractDir, target);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw err;
+    }
+
+    await mkdir(slugDir, { recursive: true });
+    await rename(extractDir, target);
+  }
+};
+
+/**
  * Moves an extracted plugin artifact to `<root>/<slug>/<sha256>/` (#1094). The
  * rename is atomic, so of two identical posts at once one wins and the other
  * copy is discarded.
@@ -42,7 +63,7 @@ export const placePluginArtifact = async (
   }
 
   try {
-    await rename(extractDir, target);
+    await renameIntoSlugDirectory(extractDir, slugDir, target);
     return 'placed';
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
