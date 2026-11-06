@@ -424,6 +424,31 @@ describe('signing in through a sign-in provider', () => {
   });
 
   /**
+   * The gate lets a flow through whose OAuth state carries `link`, because only
+   * a signed-in user's `/link-social` puts it there (#913). A client chooses the
+   * `additionalData` that rides the same state, so a sign-in that names a
+   * registered user under `link` there must meet the policy like any other.
+   * better-auth writes its own `link` after the client's data today; this pins
+   * that against an upgrade.
+   */
+  it('refuses a provider sign-in that names a registered user as its link in additionalData (#913)', async () => {
+    const existing = await actors.user();
+    await db.client.user.update({ where: { id: existing.user.id }, data: { emailVerified: true } });
+    const { sub } = freshIdentity();
+
+    const result = await signInThroughProvider(
+      baseUrl,
+      { sub, email: existing.user.email, email_verified: true, preferred_username: 'someone' },
+      { additionalData: { link: { userId: existing.user.id, email: existing.user.email } } },
+    );
+
+    expect(result.location.searchParams.get('error')).toBe('account_not_linked');
+    expect(result.location.searchParams.get('error_description')).toBe(LINK_NEEDS_SIGN_IN_DESCRIPTION);
+    expect(result.cookie).toBe('');
+    await expect(accountRowCount(FAKE_PROVIDER_ID, sub)).resolves.toBe(0);
+  });
+
+  /**
    * A provider sign-in with a registered user's email links itself to that
    * user when the provider linking policy allows it (#913). Each test starts
    * under `SignedIn`, and sets the policy it needs.
