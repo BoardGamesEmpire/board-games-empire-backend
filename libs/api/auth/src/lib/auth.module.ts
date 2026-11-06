@@ -2,6 +2,7 @@ import { AuditContextModule, AuditContextService, SystemActorScope } from '@bge/
 import { DatabaseModule, DatabaseService } from '@bge/database';
 import type { I18nTranslations } from '@bge/i18n';
 import { NotificationsServiceModule } from '@bge/notifications-service';
+import { MailDispatcherService, MailQueueProducerModule } from '@bge/queue-mail';
 import { CACHE_REDIS_CLIENT, type Redis } from '@bge/redis';
 import { ServicesModule } from '@bge/services';
 import { Module } from '@nestjs/common';
@@ -27,6 +28,8 @@ import { fallbackLocaleRenderer } from './setting-gates';
     DatabaseModule,
     ServicesModule,
     NotificationsServiceModule,
+    // Queues the reset mails the worker sends (#654).
+    MailQueueProducerModule,
     // AuditContextModule supplies the CLS reader + SystemActorScope used by
     // the user-created database hook (#57 emit-site migration).
     AuditContextModule,
@@ -65,6 +68,7 @@ import { fallbackLocaleRenderer } from './setting-gates';
         // Global: the app's I18nConfigModule registers it. It renders the
         // settings gates' refusals (#585).
         i18n: I18nService<I18nTranslations>,
+        mailDispatcher: MailDispatcherService,
       ) =>
         authFactory(
           databaseClient,
@@ -74,6 +78,7 @@ import { fallbackLocaleRenderer } from './setting-gates';
           auditContext,
           systemActorScope,
           i18n,
+          mailDispatcher,
         ),
       inject: [
         DatabaseService,
@@ -83,6 +88,7 @@ import { fallbackLocaleRenderer } from './setting-gates';
         AuditContextService,
         SystemActorScope,
         I18nService,
+        MailDispatcherService,
       ],
     },
     {

@@ -181,6 +181,9 @@
       "path": "./libs/queue/feedback"
     },
     {
+      "path": "./libs/queue/mail"
+    },
+    {
       "path": "./libs/common/locale"
     },
     {
@@ -218,6 +221,9 @@
     },
     {
       "path": "./libs/common/i18n-core"
+    },
+    {
+      "path": "./libs/common/mail"
     },
     {
       "path": "./apps/launcher"

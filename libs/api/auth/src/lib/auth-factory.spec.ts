@@ -602,3 +602,39 @@ describe("authFactory's app sign-in", () => {
     expect(ids.filter((id) => id === 'app-sign-in')).toHaveLength(1);
   });
 });
+
+/**
+ * Password resets go out through the mail queue only when the factory is given
+ * a dispatcher (#654). The better-auth CLI builds an instance without one and
+ * must keep better-auth's own refusal.
+ */
+describe("authFactory's password reset mail", () => {
+  const dispatcher = { enqueue: async () => undefined };
+  const withDispatcher = () =>
+    authFactory({} as PrismaClient, config, undefined, undefined, undefined, undefined, undefined, dispatcher);
+
+  it('sends reset links, revokes sessions on a reset and sets the reset token lifetime with a dispatcher (#654)', () => {
+    const auth = withDispatcher();
+
+    expect(auth.options.emailAndPassword?.sendResetPassword).toEqual(expect.any(Function));
+    expect(auth.options.emailAndPassword?.revokeSessionsOnPasswordReset).toBe(true);
+    expect(auth.options.databaseHooks?.verification?.create?.before).toEqual(expect.any(Function));
+  });
+
+  it('sets none of it without a dispatcher (#654)', () => {
+    const auth = authFactory({} as PrismaClient, config);
+
+    expect(auth.options.emailAndPassword?.sendResetPassword).toBeUndefined();
+    expect(auth.options.emailAndPassword?.revokeSessionsOnPasswordReset).toBeUndefined();
+    expect(auth.options.databaseHooks?.verification?.create?.before).toBeUndefined();
+  });
+
+  // The hook matches the `reset-password:` prefix, which a hashed identifier
+  // would hide (better-auth dist/db/verification-token-storage.mjs).
+  it('leaves verification identifiers stored in plain text (#654)', () => {
+    // Cast: the factory sets no `verification` option, so its type has none.
+    const options = withDispatcher().options as { verification?: { storeIdentifier?: unknown } };
+
+    expect(options.verification?.storeIdentifier).toBeUndefined();
+  });
+});

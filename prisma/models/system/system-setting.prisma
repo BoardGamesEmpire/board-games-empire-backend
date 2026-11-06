@@ -50,10 +50,35 @@ model SystemSetting {
   /// its collection, while an event is one evening.
   eventInviteePolicy Reach @default(Public) @map("event_invitee_policy")
 
+  /// Mail settings (#654): how the server sends outgoing mail. Nothing is sent
+  /// until `smtpHost` and `mailFromAddress` are both set. They live only on
+  /// this row, so a change applies to the next email without a restart.
+  smtpHost        String?      @map("smtp_host")
+  smtpPort        Int          @default(587) @map("smtp_port")
+  smtpSecurity    SmtpSecurity @default(StartTls) @map("smtp_security")
+  smtpUser        String?      @map("smtp_user")
+  smtpPassword    String?      @map("smtp_password") // encrypted at rest (EncryptionService)
+  mailFromAddress String?      @map("mail_from_address")
+
+  /// How long a password reset link works, in minutes.
+  passwordResetLinkLifetimeMinutes Int @default(1440) @map("password_reset_link_lifetime_minutes")
+
   // The three day counts (feedbackReportRetentionDays, contributionReclaimDays
   // and auditLogRetentionDays) are held to 1..36500 by CHECK constraints in
   // hand-written migration SQL (20261005000000_system_setting_day_bounds),
   // because Prisma cannot express them here. Null still passes for
-  // auditLogRetentionDays.
+  // auditLogRetentionDays. passwordResetLinkLifetimeMinutes (15..10080) and
+  // smtpPort (1..65535) are held the same way, in 20261106140000_outgoing_mail.
   @@map("system_settings")
+}
+
+/// How the server secures its connection to the SMTP server (#654).
+/// `StartTls` upgrades a plain connection, `ImplicitTls` is encrypted from the
+/// first byte, and `None` is for a trusted local relay.
+enum SmtpSecurity {
+  StartTls
+  ImplicitTls
+  None
+
+  @@map("smtp_security_types")
 }

@@ -1,6 +1,6 @@
 # `@boardgamesempire/api-e2e`
 
-Black-box end-to-end suite for the API (#254, #255, #259). The test process never imports application code: `globalSetup` provisions real Postgres and Redis (testcontainers), applies the real migration chain and reference seeds, launches the built bundle (`apps/api/dist/main.js`) as a child process, gates on `/health/ready`, and every assertion travels over HTTP to that server.
+Black-box end-to-end suite for the API (#254, #255, #259). The test process never imports application code: `globalSetup` provisions real Postgres and Redis, and a Mailpit SMTP server (testcontainers), applies the real migration chain and reference seeds, launches the built bundle (`apps/api/dist/main.js`) as a child process, gates on `/health/ready`, and every assertion travels over HTTP to that server.
 
 ## Running locally
 
@@ -24,6 +24,16 @@ Escape hatches, both optional and both treating the endpoint as **disposable** (
 
 One database, one Jest worker (`maxWorkers: 1`), truncate sweep between tests (#255). This is deliberate: it is the simplest model that makes cross-test interference structurally impossible. CI gets its speed by splitting the spec files across parallel jobs instead (see [CI](#ci)), each a runner with its own containers, API child and single worker, so the model holds within each.
 
+## Outgoing mail and Mailpit
+
+`globalSetup` starts a Mailpit container beside Postgres and Redis, the SMTP server the suite's outgoing mail reaches (#654). It accepts any SMTP user and password, or none, over a plain connection, and keeps every message it accepts. It publishes its SMTP host and port and its API's URL as JSON in `BGE_E2E_MAILPIT`. It has no escape hatch.
+
+Neither child is told about it: the API and the worker read the mail settings from the settings row, as a real server does. A spec that sends mail:
+
+- **`useMailSettings(database)`** (`src/support/mail-settings.ts`) puts the mail settings back after each test, as `useSettingSwitch` does for a switch, because the settings row survives the truncate sweep. Its `pointAtMailpit()` points them at Mailpit with no connection security, and `set()` writes any other value.
+- **`mailpit()`** (`src/support/mailpit.ts`) reads the mail back: `messagesTo(address)`, `waitForMessagesTo(address, timeoutMs)` and `clear()`. Mailpit is shared by the whole run, so clear it before each test.
+- **`useWorker()`** runs the sender. Without it, a mail job waits in the queue, and the file needs `isolateQueue` for the mail queue instead.
+
 ## Queues and the worker child
 
 The baseline is **no consumer**: the API registers producers only, so a job a spec causes sits in `waiting`, where the spec can assert on it. Two opt-in helpers in `src/support/` change that for one spec file (#268):
@@ -43,7 +53,7 @@ The `e2e` job in `.github/workflows/ci.yml` runs for every PR to `master` and ev
 - **Verbose by default in CI.** The job sets `BGE_E2E_VERBOSE=true`, so the API's full output lands in the (foldable) job log. On a spec failure, find the failing request's server lines there. If this proves too noisy to diagnose from in practice, #274 (failure-scoped log surfacing) is the filed alternative — say so on that issue rather than suffering quietly.
 - **Boot failures**: in buffered (non-verbose) runs the harness replays the child's last 120 output lines. In verbose runs — which CI is — the output has already streamed live, so there is nothing to replay; the failure message says so and the lines are above it in the log.
 - **The gateway e2e apps run whole, in the first shard.** Jest fails a run that finds no tests, so a project can't be split more ways than it has spec files. Each gateway app has two, enough for two shards but not for three, so the suite step excludes them by name and a step of their own runs them. Both steps choose projects by exclusion (`nx affected` has no `--projects`), so a new e2e app runs in both until it joins one list.
-- The container images are pulled anonymously from Docker Hub by each shard, on every affecting run. If a shared-runner-IP rate limit ever reds the gate, that is a provisioning failure, not a flake — do not quarantine a test for it. First remedy: repoint `POSTGRES_IMAGE` / `REDIS_IMAGE` in `src/support/e2e-env.ts` at a mirror of the official images (e.g. `public.ecr.aws/docker/library/...`). #683 tracks a lasting fix for these pulls.
+- The container images are pulled anonymously from Docker Hub by each shard, on every affecting run. If a shared-runner-IP rate limit ever reds the gate, that is a provisioning failure, not a flake — do not quarantine a test for it. First remedy: repoint `POSTGRES_IMAGE` / `REDIS_IMAGE` in `src/support/e2e-env.ts` at a mirror of the official images (e.g. `public.ecr.aws/docker/library/...`), and `MAILPIT_IMAGE` at Mailpit's own copy on GitHub's registry (`ghcr.io/axllent/mailpit`). #683 tracks a lasting fix for these pulls.
 - **Advisory for now.** Making it required in branch protection, once its flake is characterised (#259), means requiring a summary job with `needs: e2e`, or every shard's check by name: a matrix reports one check per shard.
 
 ## Wall-clock budget

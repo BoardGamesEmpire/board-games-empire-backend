@@ -9,6 +9,7 @@ import {
   decideProvisioning,
   E2E_BASE_URL_VAR,
   E2E_DATABASE_URL_VAR,
+  E2E_MAILPIT_VAR,
   E2E_OWNS_REDIS_VAR,
   E2E_REDIS_URL_VAR,
   fakeProviderEnv,
@@ -18,6 +19,7 @@ import {
   redisEnvOverrides,
   redisOwnershipOverride,
   requireBaseUrl,
+  requireMailpit,
   schemaFromDatabaseUrl,
   workerEnvOverrides,
   type RedisEndpoint,
@@ -296,6 +298,27 @@ describe('e2e-env (pure logic)', () => {
     it('fails loudly when globalSetup never ran', () => {
       expect(() => requireBaseUrl({})).toThrow(new RegExp(E2E_BASE_URL_VAR));
       expect(() => requireBaseUrl({ [E2E_BASE_URL_VAR]: '   ' })).toThrow(new RegExp(E2E_BASE_URL_VAR));
+    });
+  });
+
+  describe('requireMailpit', () => {
+    const endpoint = { smtpHost: 'localhost', smtpPort: 55025, apiUrl: 'http://localhost:55080' };
+
+    it('returns the Mailpit endpoint published by globalSetup (#654)', () => {
+      expect(requireMailpit({ [E2E_MAILPIT_VAR]: JSON.stringify(endpoint) })).toEqual(endpoint);
+    });
+
+    it('fails loudly when globalSetup never started Mailpit (#654)', () => {
+      expect(() => requireMailpit({})).toThrow(new RegExp(E2E_MAILPIT_VAR));
+      expect(() => requireMailpit({ [E2E_MAILPIT_VAR]: '  ' })).toThrow(new RegExp(E2E_MAILPIT_VAR));
+    });
+
+    it('names the variable when its JSON lacks a field, rather than handing back undefined (#654)', () => {
+      const withoutPort = { smtpHost: endpoint.smtpHost, apiUrl: endpoint.apiUrl };
+
+      expect(() => requireMailpit({ [E2E_MAILPIT_VAR]: JSON.stringify(withoutPort) })).toThrow(
+        new RegExp(E2E_MAILPIT_VAR),
+      );
     });
   });
 });

@@ -6,7 +6,8 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
 
 /**
  * What the settings PATCH accepts (#571) and what both settings routes return
- * (#572).
+ * (#572). The mail settings' writes are `auth/password-reset-mail.spec.ts`'s
+ * (#654); here they appear only in the read shape.
  *
  * Every setting can be changed through the PATCH, within the bounds its reader
  * can act on. Anything else answers 400 or 404, never a 500 from the database.
@@ -45,6 +46,20 @@ describe('system settings update', () => {
     householdInviteePolicy: true,
     eventInviteePolicy: true,
   } as const;
+
+  /**
+   * The mail settings both routes publish (#654). The SMTP password is
+   * write-only: a read carries `smtpPasswordSet` in its place.
+   */
+  const MAIL_SETTINGS_READ = [
+    'smtpHost',
+    'smtpPort',
+    'smtpSecurity',
+    'smtpUser',
+    'mailFromAddress',
+    'passwordResetLinkLifetimeMinutes',
+    'smtpPasswordSet',
+  ];
 
   const NOT_NULLABLE = Object.keys(WRITABLE).filter((key) => key !== 'auditLogRetentionDays');
   const DAY_COUNTS = ['feedbackReportRetentionDays', 'contributionReclaimDays', 'auditLogRetentionDays'];
@@ -87,8 +102,8 @@ describe('system settings update', () => {
     request(baseUrl).patch(`${SETTINGS_PATH}/${id}`).set(actor.headers).send(body);
 
   const expectReadShape = (settings: Record<string, unknown>) => {
-    expect(Object.keys(settings).sort()).toEqual(['id', ...Object.keys(WRITABLE)].sort());
-    for (const withheld of ['mediaSigningSecret', 'identifier', 'singleton']) {
+    expect(Object.keys(settings).sort()).toEqual(['id', ...Object.keys(WRITABLE), ...MAIL_SETTINGS_READ].sort());
+    for (const withheld of ['mediaSigningSecret', 'smtpPassword', 'identifier', 'singleton']) {
       expect(settings).not.toHaveProperty(withheld);
     }
   };

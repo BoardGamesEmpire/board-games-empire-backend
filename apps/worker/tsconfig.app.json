@@ -43,6 +43,9 @@
       "path": "../../libs/queue/feedback/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/queue/mail/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/media/tsconfig.lib.json"
     },
     {
