@@ -3,6 +3,7 @@ export * from './lib/config/plugin-config-events.service';
 export * from './lib/config/plugin-config-schema.service';
 export * from './lib/config/plugin-config.constants';
 export * from './lib/config/plugin-config.service';
+export * from './lib/consent/artifact-check-presentation';
 export * from './lib/consent/consent-classification.types';
 export * from './lib/consent/consent-presentation.errors';
 export * from './lib/consent/consent-presentation.types';

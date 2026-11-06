@@ -97,6 +97,22 @@ export interface PluginInstallInput {
   readonly acknowledgeForbiddenImports?: readonly string[];
 }
 
+/**
+ * What `assess()` found in a plugin artifact: the validated manifest and
+ * everything an install would ask the admin to confirm (#1094).
+ */
+export interface PluginInstallAssessment {
+  readonly validated: PluginManifestValidationResult;
+  /** The checks the install would seed `Granted` at server scope. */
+  readonly serverChecks: readonly NormalizedPermissionRequest[];
+  readonly corePermissions: ReadonlyMap<string, Permission>;
+  /** Critical slugs `install()` wants re-entered, sorted. */
+  readonly criticalSlugsToReenter: readonly string[];
+  readonly analysis: StaticAnalysisReport;
+  /** Forbidden import specifiers `install()` wants acknowledged, distinct. */
+  readonly forbiddenImportsToAccept: readonly string[];
+}
+
 export interface PluginInstallResult {
   readonly plugin: Plugin;
   readonly declaredPermissions: readonly PluginPermission[];
@@ -111,12 +127,13 @@ export interface PluginInstallResult {
 }
 
 /**
- * The install orchestration seam (#59 Phase C2): manifest validation →
- * categorical exclusions → installer authority → core-permission
- * existence (step 3, DB half) → Critical second factor → static
- * analysis → one transaction persisting the `Plugin` row, its
- * `PluginPermission` catalog (fresh-install rows only), and the
- * server-scope grant seed → post-commit `plugin.installed` provenance.
+ * The install orchestration seam (#59 Phase C2): installer authority →
+ * `assess()` (manifest validation → categorical exclusions →
+ * core-permission existence (step 3, DB half) → static analysis) → Critical
+ * second factor → forbidden-import acknowledgement → one transaction
+ * persisting the `Plugin` row, its `PluginPermission` catalog (fresh-install
+ * rows only), and the server-scope grant seed → post-commit
+ * `plugin.installed` provenance.
  *
  * Input is a resolved artifact directory plus its link and registry. The
  * install ingress, SHA-256 verification, extraction and placing the
@@ -154,6 +171,14 @@ export class PluginInstallerService {
 
   async install(input: PluginInstallInput): Promise<PluginInstallResult> {
     const initiatedAt = new Date();
+
+    // Authority first, before the resolver stats the plugins root or the
+    // directory, and before the manifest is read or analyzed: a non-admin
+    // gets no file-system signal at all (#1094).
+    if (!(await this.authority.isServerAdmin(input.installerId))) {
+      throw new PluginInstallAuthorityError(input.installerId);
+    }
+
     // Before anything is read from it or recorded: the row is to name a
     // checksum the loader resolves at the next boot, so a directory the
     // resolver would refuse then is refused now, with the same error (#224).
@@ -167,20 +192,10 @@ export class PluginInstallerService {
       registrySlug: input.registrySlug ?? null,
     };
 
-    const validated = await this.validateManifest(directory);
-    this.assertNoForbiddenPluginPermissions(validated);
+    const assessment = await this.assess(directory, { deepScan: input.deepScan });
+    const { validated, serverChecks, corePermissions, analysis } = assessment;
 
-    if (!(await this.authority.isServerAdmin(input.installerId))) {
-      throw new PluginInstallAuthorityError(input.installerId);
-    }
-
-    const corePermissions = await this.loadCorePermissions(validated);
-    this.assertNoForbiddenCorePermissions(validated, corePermissions);
-
-    const serverChecks = validated.permissionChecks.filter((check) => check.consentScope === 'server');
-    this.assertCriticalConfirmation(validated, serverChecks, corePermissions, input.confirmCriticalSlugs ?? []);
-
-    const analysis = await this.staticAnalysis.analyze(directory, { deepScan: input.deepScan ?? false });
+    this.assertCriticalConfirmation(validated, assessment.criticalSlugsToReenter, input.confirmCriticalSlugs ?? []);
     const acknowledgedForbiddenImports = this.resolveForbiddenAcknowledgement(
       directory.slug,
       gatingFindings(analysis),
@@ -227,6 +242,42 @@ export class PluginInstallerService {
     );
 
     return { ...persistedResult, analysis, warnings: validated.warnings, acknowledgedForbiddenImports };
+  }
+
+  /**
+   * Everything an install would check about a plugin artifact, short of the
+   * admin's confirmations: manifest validation, the categorical exclusions,
+   * core-permission existence and static analysis (#1094). The artifact step
+   * calls it to show an admin what the artifact asks for, and `install()`
+   * calls it before it enforces the two confirmation gates, so both see one
+   * assessment.
+   *
+   * It throws what those steps throw. It does not throw for a missing
+   * confirmation: it reports what `install()` will ask the admin to re-enter.
+   * It writes nothing, emits nothing and takes no actor, so the caller is
+   * the one to check authority first.
+   */
+  async assess(
+    directory: PluginArtifactDirectory,
+    options: { readonly deepScan?: boolean } = {},
+  ): Promise<PluginInstallAssessment> {
+    const validated = await this.validateManifest(directory);
+    this.assertNoForbiddenPluginPermissions(validated);
+
+    const corePermissions = await this.loadCorePermissions(validated);
+    this.assertNoForbiddenCorePermissions(validated, corePermissions);
+
+    const serverChecks = validated.permissionChecks.filter((check) => check.consentScope === 'server');
+    const analysis = await this.staticAnalysis.analyze(directory, { deepScan: options.deepScan ?? false });
+
+    return {
+      validated,
+      serverChecks,
+      corePermissions,
+      criticalSlugsToReenter: criticalConfirmationExpectation(serverChecks, corePermissions),
+      analysis,
+      forbiddenImportsToAccept: resolveForbiddenSpecifierAcknowledgement(gatingFindings(analysis), []).reported,
+    };
   }
 
   /**
@@ -356,11 +407,9 @@ export class PluginInstallerService {
    */
   private assertCriticalConfirmation(
     validated: PluginManifestValidationResult,
-    serverChecks: readonly NormalizedPermissionRequest[],
-    corePermissions: ReadonlyMap<string, Permission>,
+    expected: readonly string[],
     confirmed: readonly string[],
   ): void {
-    const expected = criticalConfirmationExpectation(serverChecks, corePermissions);
     const reentry = compareExactReentry(expected, confirmed);
 
     if (!reentry.exact) {

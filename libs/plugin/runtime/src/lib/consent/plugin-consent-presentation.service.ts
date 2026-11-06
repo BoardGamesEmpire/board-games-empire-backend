@@ -1,5 +1,5 @@
 import { assertPluginUnit, type PluginUnit } from '@bge/actor-context';
-import { DatabaseService, Prisma, RiskLevel } from '@bge/database';
+import { DatabaseService, Prisma } from '@bge/database';
 import {
   resolveLocalizedStringDetailed,
   type LocalizedString,
@@ -17,6 +17,7 @@ import {
 } from './consent-presentation.errors';
 import type { PluginCheckPresentation, PluginConsentPresentation } from './consent-presentation.types';
 import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
+import { presentedRiskLevel } from './presented-risk-level';
 
 /**
  * The `Plugin` columns both presentation paths read. Exported so callers
@@ -240,12 +241,9 @@ export class PluginConsentPresentationService {
         feature: check.feature ?? null,
         decidableByUnit: unitOwnsConsentScope(check.consentScope, unit),
         decision: classified?.decision ?? 'per-unit',
-        // An own-namespace check with no catalog row yet (a pending update's
-        // new declare) presents the locked Low every plugin-declared row
-        // carries (#59) — the row activation creates can hold nothing else.
-        // A CORE check with no row stays null: its risk is unknowable, and
-        // its decision reads pending.
-        riskLevel: catalogRisk ?? (check.origin === 'plugin' ? RiskLevel.Low : null),
+        // A check with no catalog row yet (a staged update's new declare) is
+        // judged by the shared rule; a CORE one's decision reads pending.
+        riskLevel: presentedRiskLevel(check.origin, catalogRisk),
         decidedRiskLevel: classified?.decidedRiskLevel ?? null,
         staleRisk: classified?.staleRisk ?? false,
         reason: resolveText(check.reason),
