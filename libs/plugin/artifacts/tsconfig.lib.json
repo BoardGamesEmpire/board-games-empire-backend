@@ -16,6 +16,12 @@
       "path": "../../common/testing/tsconfig.lib.json"
     },
     {
+      "path": "../../common/secure-http/tsconfig.lib.json"
+    },
+    {
+      "path": "../runtime/tsconfig.lib.json"
+    },
+    {
       "path": "../manifest/tsconfig.lib.json"
     },
     {
