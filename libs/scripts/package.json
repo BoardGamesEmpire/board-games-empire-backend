@@ -15,12 +15,14 @@
           "^production",
           "{workspaceRoot}/jest.preset.js",
           "{workspaceRoot}/eslint.config.mjs",
+          "{workspaceRoot}/prisma/**/*.prisma",
           {
             "externalDependencies": [
               "jest",
               "@nx/jest",
               "reflect-metadata",
               "@swc/jest",
+              "@prisma/get-dmmf",
               "eslint",
               "typescript-eslint",
               "@nx/eslint-plugin"
