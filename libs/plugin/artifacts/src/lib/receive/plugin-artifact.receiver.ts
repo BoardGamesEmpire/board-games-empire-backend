@@ -43,13 +43,18 @@ import { PluginArtifactStore } from '../store/plugin-artifact.store';
 import { allocateIncoming, INCOMING_DIRNAME, type IncomingWorkspace } from '../workspace/incoming';
 import { parseRequestedSha256 } from './requested-sha256';
 
-/** One 15-minute limit for the whole download: every hop and the body together (#1094). */
+/**
+ * One 15-minute limit for the whole download, counted from its start (#1094).
+ * It cuts off every hop's connection and the body; the outbound HTTP policy's
+ * address lookups count toward it but are bounded by the resolver's own
+ * timeouts.
+ */
 export const PLUGIN_ARTIFACT_DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 
 /**
  * What the server knows about a received plugin artifact (#1094): its row,
- * its directory, what installing it would ask the admin to confirm, and
- * whether a plugin with its slug is installed already.
+ * its directory, what installing it would ask the server admin to confirm,
+ * and whether a plugin with its slug is installed already.
  */
 export interface PluginArtifactReceipt {
   readonly artifact: PluginArtifact;
@@ -64,7 +69,7 @@ export interface PluginArtifactReceipt {
 
 export interface ReceivePluginArtifactByLinkInput {
   readonly url: string;
-  /** The checksum the admin expects, in either case, with or without spaces around it. */
+  /** The checksum the server admin expects, in either case, with or without spaces around it. */
   readonly expectedSha256: string;
   readonly actorId: string;
 }
@@ -75,15 +80,16 @@ export interface ReceivePluginArtifactUploadInput {
   /** The archive's checksum and size, which the upload storage counted as the bytes arrived. */
   readonly sha256: string;
   readonly bytes: number;
-  /** The checksum the admin expects, in either case, with or without spaces around it. */
+  /** The checksum the server admin expects, in either case, with or without spaces around it. */
   readonly expectedSha256: string;
   readonly actorId: string;
 }
 
 /**
- * The checksum an admin expects, trimmed and lowercased, so a value copied in
- * capitals or with spaces around it still compares (#1094). A value that is
- * not a checksum at all is a mismatch with nothing to compare it against.
+ * The checksum a server admin expects, trimmed and lowercased, so a value
+ * copied in capitals or with spaces around it still compares (#1094). A value
+ * that is not a checksum at all is a mismatch with nothing to compare it
+ * against.
  */
 export const normalizeExpectedSha256 = (raw: string): PluginArtifactSha256 => {
   const parsed = parseRequestedSha256(raw);
@@ -162,7 +168,7 @@ const isIncomingArchive = (archivePath: string, pluginsRoot: string): boolean =>
   dirname(resolve(archivePath)) === resolve(pluginsRoot, INCOMING_DIRNAME);
 
 /**
- * The outbound policy reports a host that does not resolve (no such name, a
+ * The outbound HTTP policy reports a host that does not resolve (no such name, a
  * resolver that is down, an empty or malformed answer) as a rejection with
  * the reason `dns-failure`, on the first hop or on a redirect's. No rule
  * refused an address there: there was no address to judge.
@@ -173,7 +179,7 @@ const unresolvable = (err: unknown): boolean =>
 
 /**
  * What a failed download means for a plugin artifact (#1094). A link the
- * outbound policy or URL parsing refuses is refused before anything is kept;
+ * outbound HTTP policy or URL parsing refuses is refused before anything is kept;
  * a download that fails once allowed failed at the remote end or on the way.
  * A host that does not resolve is unreachable, not refused, so a mistyped
  * link or a resolver outage does not read as the policy's doing. The
@@ -213,15 +219,16 @@ const artifactDownloadError = (err: unknown): unknown => {
 };
 
 /**
- * Receives a plugin artifact, by link or by upload, so an admin can review
- * what it asks for before installing it by its checksum (#1094).
+ * Receives a plugin artifact, by link or by upload, so a server admin can
+ * review what it asks for before installing it by its checksum (#1094).
  *
  * Every path checks the actor's authority first, before it reads a byte of
  * input. Both receive paths then take the same steps: compare the checksum
- * the admin expects with the bytes that arrived, extract the archive under
- * the archive rules, place it at `<pluginsRoot>/<slug>/<sha256>/`, confirm
- * and assess the directory, and record the artifact with an expiry. Scratch
- * files under `<pluginsRoot>/.incoming/` are removed whatever happens.
+ * the server admin expects with the bytes that arrived, extract the archive
+ * under the archive rules, place it at `<pluginsRoot>/<slug>/<sha256>/`,
+ * confirm and assess the directory, and record the artifact with an expiry.
+ * Scratch files under `<pluginsRoot>/.incoming/` are removed whatever
+ * happens.
  *
  * A failure before placement keeps nothing. A failure after it leaves the
  * placed directory, with no row, for the sweep to remove once it has aged:
@@ -243,7 +250,7 @@ export class PluginArtifactReceiver {
   ) {}
 
   /**
-   * Downloads the plugin artifact through the outbound policy, under the
+   * Downloads the plugin artifact through the outbound HTTP policy, under the
    * 100 MiB cap and one 15-minute limit, and receives it. A link with a
    * username or password in it is refused before anything is fetched or
    * written: the link becomes the plugin's provenance, which others read.
@@ -347,7 +354,7 @@ export class PluginArtifactReceiver {
     return { artifact, directory, assessment, installedPlugin: await this.installedPlugin(artifact.slug) };
   }
 
-  /** Before anything else, on every path: a non-admin triggers no read, write or download (#1094). */
+  /** Before anything else, on every path: anyone but a server admin triggers no read, write or download (#1094). */
   private async assertServerAdmin(actorId: string): Promise<void> {
     if (!(await this.authority.isServerAdmin(actorId))) {
       throw new PluginInstallAuthorityError(actorId);
@@ -376,12 +383,16 @@ export class PluginArtifactReceiver {
         timeoutMs: PLUGIN_ARTIFACT_DOWNLOAD_TIMEOUT_MS,
       })
       .catch((err: unknown) => {
-        throw artifactDownloadError(err);
+        const mapped = artifactDownloadError(err);
+        this.logDownloadFailure(url, mapped, err);
+        throw mapped;
       });
 
     // Any status but 2xx: the service wrote nothing.
     if (result.written === null) {
-      throw new PluginArtifactDownloadFailedError('upstream-status', result.status);
+      const refused = new PluginArtifactDownloadFailedError('upstream-status', result.status);
+      this.logDownloadFailure(url, refused);
+      throw refused;
     }
 
     return result.written;
@@ -449,6 +460,52 @@ export class PluginArtifactReceiver {
     }
 
     return { state: plugin.uninstalledAt === null ? 'installed' : 'uninstalled', version: plugin.version };
+  }
+
+  /**
+   * The HTTP error carries only the reason a server admin reads, so the
+   * secure-http error behind it, which says whether a TLS or DNS failure sat
+   * behind `unreachable`, is logged here for the operator (#1094). Only the
+   * link's host and the cause's name and code go in: the full link may carry
+   * a query token. A file-system error on the destination passes through
+   * unmapped and is not a download failure.
+   */
+  private logDownloadFailure(url: string, mapped: unknown, cause?: unknown): void {
+    if (!(mapped instanceof PluginArtifactDownloadFailedError) && !(mapped instanceof PluginArtifactLinkRefusedError)) {
+      return;
+    }
+
+    let host = 'an unparsable link';
+    try {
+      host = new URL(url).host;
+    } catch {
+      // The link did not parse; the refusal says so.
+    }
+
+    // Name, code and reason only. The reason is a fixed vocabulary (a DNS
+    // failure reads differently from a policy block), where a message could
+    // quote the link.
+    const named = (value: unknown): string => {
+      if (!(value instanceof Error)) {
+        return 'a non-error value';
+      }
+      const { code, reason } = value as { code?: unknown; reason?: unknown };
+      const details = [
+        typeof code === 'string' ? `code ${code}` : null,
+        typeof reason === 'string' ? `reason ${reason}` : null,
+      ].filter((detail) => detail !== null);
+      return details.length > 0 ? `${value.name} (${details.join(', ')})` : value.name;
+    };
+    const inner = cause instanceof Error && cause.cause !== undefined ? `, caused by ${named(cause.cause)}` : '';
+    const hasUpstreamStatus = mapped instanceof PluginArtifactDownloadFailedError && mapped.upstreamStatus !== null;
+    const detail =
+      cause === undefined
+        ? hasUpstreamStatus
+          ? `HTTP status ${mapped.upstreamStatus}`
+          : ''
+        : `${named(cause)}${inner}`;
+
+    this.logger.warn(`Downloading a plugin artifact from ${host} failed as ${mapped.name}: ${detail}`);
   }
 
   /**

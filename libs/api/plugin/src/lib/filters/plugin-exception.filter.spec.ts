@@ -5,6 +5,8 @@ import {
   PluginConsentPresentationManifestError,
   PluginConsentPresentationNotFoundError,
   PluginConsentPresentationTombstonedError,
+  PluginDirectoryLayoutError,
+  PluginDirectoryNotFoundError,
   PluginFeatureStateManifestError,
   PluginFeatureStateNotFoundError,
   PluginFeatureStateTombstonedError,
@@ -55,10 +57,21 @@ import {
   PluginUpdateVersionConflictError,
   StaticAnalysisFinding,
 } from '@bge/plugin';
+import * as pluginArtifacts from '@bge/plugin-artifacts';
+import {
+  PluginArchiveRefusedError,
+  PluginArtifactChecksumMismatchError,
+  PluginArtifactDownloadFailedError,
+  PluginArtifactLinkRefusedError,
+  PluginArtifactNotFoundError,
+  PluginArtifactTooLargeError,
+} from '@bge/plugin-artifacts';
 import { ManifestErrorCode, ManifestIssue } from '@boardgamesempire/plugin-manifest';
 import { ArgumentsHost, HttpException, Logger } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { Http } from '@status/codes';
+import { PluginArtifactSourceError } from '../plugin-artifact-source.error';
+import { PluginArtifactUploadInvalidError } from '../upload/plugin-artifact-upload-invalid.error';
 import { PLUGIN_EXCEPTION_FILTER_CATCHES, PluginExceptionFilter } from './plugin-exception.filter';
 
 const AXIOS_FINDING: StaticAnalysisFinding = {
@@ -584,6 +597,32 @@ describe('PluginExceptionFilter', () => {
     });
   });
 
+  // The inventory reads, the staged update's approval and the install ingress
+  // all reach the directory resolver, so its two errors reach requests too.
+  describe("500 — a plugin's files on the server do not match its record (#1094)", () => {
+    const placed = `/var/lib/bge/plugins/sample/${'a'.repeat(64)}`;
+
+    it.each([
+      [new PluginDirectoryLayoutError('sample', 'manifest.json at directory root is missing'), 'directory_layout'],
+      [new PluginDirectoryNotFoundError('sample', placed), 'directory_not_found'],
+    ] as const)('renders %s as 500 with its own code and copy, and logs it loud (#1094)', (exception, key) => {
+      filter.catch(exception, host);
+
+      expect(rendered().getStatus()).toBe(Http.InternalServerError);
+      expect(body()['code']).toBe(exception.name);
+      expect(body()['message']).toBe(`t:errors.plugin.${key}`);
+      expect(body()['slug']).toBe('sample');
+      expect(Logger.prototype.error).toHaveBeenCalledWith(expect.stringContaining(exception.name), expect.any(String));
+    });
+
+    it('keeps the server path out of the body, for the log alone (#1094)', () => {
+      filter.catch(new PluginDirectoryNotFoundError('sample', placed), host);
+
+      expect(JSON.stringify(body())).not.toContain('/var/lib/bge');
+      expect(Logger.prototype.error).toHaveBeenCalledWith(expect.stringContaining(placed), expect.any(String));
+    });
+  });
+
   describe('delegation', () => {
     it('hands an unmapped error to the base filter untouched', () => {
       // Unreachable through @Catch (every caught class has a mapped ancestor),
@@ -628,23 +667,163 @@ describe('PluginExceptionFilter', () => {
     });
   });
 
+  describe('the install ingress: posting a plugin artifact and reading it back (#1094)', () => {
+    it('renders a checksum mismatch as 422 with both checksums (#1094)', () => {
+      filter.catch(new PluginArtifactChecksumMismatchError('a'.repeat(64), 'b'.repeat(64)), host);
+
+      expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
+      expect(body()['code']).toBe('PluginArtifactChecksumMismatchError');
+      expect(body()['message']).toBe('t:errors.plugin.artifact_checksum_mismatch');
+      expect(body()['expectedSha256']).toBe('a'.repeat(64));
+      expect(body()['actualSha256']).toBe('b'.repeat(64));
+    });
+
+    it('renders an expected value that is not a checksum with a null actual checksum (#1094)', () => {
+      filter.catch(new PluginArtifactChecksumMismatchError('nope', null), host);
+
+      expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
+      expect(body()['actualSha256']).toBeNull();
+    });
+
+    it('renders a plugin artifact over the limit as 413 with the limit (#1094)', () => {
+      filter.catch(new PluginArtifactTooLargeError(104857600), host);
+
+      expect(rendered().getStatus()).toBe(Http.PayloadTooLarge);
+      expect(body()['code']).toBe('PluginArtifactTooLargeError');
+      expect(body()['message']).toBe('t:errors.plugin.artifact_too_large');
+      expect(body()['limitBytes']).toBe(104857600);
+    });
+
+    it.each([
+      ['invalid-link', 'artifact_link_refused_invalid_link'],
+      ['blocked-by-policy', 'artifact_link_refused_blocked_by_policy'],
+      ['redirect-blocked', 'artifact_link_refused_redirect_blocked'],
+      ['too-many-redirects', 'artifact_link_refused_too_many_redirects'],
+    ] as const)('says why a %s link was refused, as 422 (#1094)', (reason, key) => {
+      filter.catch(new PluginArtifactLinkRefusedError(reason), host);
+
+      expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
+      expect(body()['code']).toBe('PluginArtifactLinkRefusedError');
+      expect(body()['message']).toBe(`t:errors.plugin.${key}`);
+      expect(body()['reason']).toBe(reason);
+    });
+
+    it.each([
+      ['upstream-status', 404, 'artifact_download_failed_upstream_status'],
+      ['unreachable', null, 'artifact_download_failed_unreachable'],
+      ['timeout', null, 'artifact_download_failed_timeout'],
+    ] as const)('says why a %s download failed, as 502 (#1094)', (reason, upstreamStatus, key) => {
+      filter.catch(new PluginArtifactDownloadFailedError(reason, upstreamStatus), host);
+
+      expect(rendered().getStatus()).toBe(Http.BadGateway);
+      expect(body()['code']).toBe('PluginArtifactDownloadFailedError');
+      expect(body()['message']).toBe(`t:errors.plugin.${key}`);
+      expect(body()['reason']).toBe(reason);
+      expect(body()['upstreamStatus']).toBe(upstreamStatus);
+      expect(translate).toHaveBeenCalledWith(
+        expect.stringContaining(`errors.plugin.${key}`),
+        expect.objectContaining({ args: { upstreamStatus } }),
+      );
+    });
+
+    it('cuts an archive entry name to 200 characters in the body (#1094)', () => {
+      filter.catch(new PluginArchiveRefusedError('unsafe-path', '../'.repeat(300)), host);
+
+      expect((body()['entry'] as string).length).toBe(200);
+    });
+
+    it('renders an unknown plugin artifact as 404 with the checksum asked for (#1094)', () => {
+      filter.catch(new PluginArtifactNotFoundError('c'.repeat(64)), host);
+
+      expect(rendered().getStatus()).toBe(Http.NotFound);
+      expect(body()['code']).toBe('PluginArtifactNotFoundError');
+      expect(body()['message']).toBe('t:errors.plugin.artifact_not_found');
+      expect(body()['sha256']).toBe('c'.repeat(64));
+    });
+
+    it.each([
+      ['none', 'artifact_source'],
+      ['both', 'artifact_source'],
+    ] as const)('renders a request with %s of link and file as 400 (#1094)', (reason, key) => {
+      filter.catch(new PluginArtifactSourceError(reason), host);
+
+      expect(rendered().getStatus()).toBe(Http.BadRequest);
+      expect(body()['code']).toBe('PluginArtifactSourceError');
+      expect(body()['message']).toBe(`t:errors.plugin.${key}`);
+      expect(body()['reason']).toBe(reason);
+    });
+
+    it("renders an upload in a form the route does not take as 400 with localized copy, never multer's (#1094)", () => {
+      filter.catch(new PluginArtifactUploadInvalidError({ cause: new Error('Unexpected field - other') }), host);
+
+      expect(rendered().getStatus()).toBe(Http.BadRequest);
+      expect(body()['code']).toBe('PluginArtifactUploadInvalidError');
+      expect(body()['message']).toBe('t:errors.plugin.artifact_upload_invalid');
+      expect(JSON.stringify(body())).not.toContain('Unexpected field');
+    });
+
+    it('says which archive rule refused it (#1094)', () => {
+      filter.catch(new PluginArchiveRefusedError('unsafe-path', '../x'), host);
+
+      expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
+      expect(body()['code']).toBe('PluginArchiveRefusedError');
+      expect(body()['message']).toBe('t:errors.plugin.artifact_archive_unsafe_path');
+      expect(body()['fields']).toBeUndefined();
+      expect(body()['rule']).toBe('unsafe-path');
+      expect(body()['entry']).toBe('../x');
+    });
+
+    it.each([
+      ['not-gzip', 'artifact_archive_not_gzip'],
+      ['corrupt', 'artifact_archive_corrupt'],
+      ['entry-type', 'artifact_archive_entry_type'],
+      ['unsafe-path', 'artifact_archive_unsafe_path'],
+      ['top-level', 'artifact_archive_top_level'],
+      ['entry-count', 'artifact_archive_entry_count'],
+      ['extracted-size', 'artifact_archive_extracted_size'],
+      ['required-file', 'artifact_archive_required_file'],
+      ['manifest-slug', 'artifact_archive_manifest_slug'],
+      ['manifest-size', 'artifact_archive_manifest_size'],
+    ] as const)('has its own copy for the %s archive rule (#1094)', (rule, key) => {
+      filter.catch(new PluginArchiveRefusedError(rule), host);
+
+      expect(body()['message']).toBe(`t:errors.plugin.${key}`);
+      expect(body()['rule']).toBe(rule);
+    });
+  });
+
   describe('vocabulary completeness', () => {
     /**
      * Error classes the runtime exports that never surface through the
      * consent-collection endpoints this filter serves:
-     * - the loader errors surface at boot and through #79 diagnostics — the
-     *   loader quarantines instead of throwing to a request path;
+     * - the loader errors below surface at boot and through #79 diagnostics —
+     *   the loader quarantines instead of throwing to a request path. The two
+     *   directory errors are not among them: the plugin inventory, the staged
+     *   update's approval and the install ingress reach the directory
+     *   resolver, so this filter maps both (#1094);
      * - UnknownActorKindError guards the CLS actor projection inside plugin
      *   code paths, not a consent request.
      */
     const NON_CONSENT_SURFACE_ERRORS = new Set([
-      'PluginDirectoryNotFoundError',
-      'PluginDirectoryLayoutError',
       'PluginEntrypointError',
       'PluginModuleShapeError',
       'PluginDiskVersionMismatchError',
       'PluginEmitNotDeclaredError',
       'UnknownActorKindError',
+    ]);
+
+    const artifactErrors = (): string[] =>
+      Object.entries(pluginArtifacts)
+        .filter(
+          ([, candidate]) =>
+            typeof candidate === 'function' && (candidate as { prototype?: unknown }).prototype instanceof Error,
+        )
+        .map(([exportName]) => exportName);
+
+    const INSTALL_INGRESS_ERRORS = new Set([
+      ...artifactErrors(),
+      PluginArtifactSourceError.name,
+      PluginArtifactUploadInvalidError.name,
     ]);
 
     it('maps every consent-surface error class the runtime exports', () => {
@@ -658,11 +837,33 @@ describe('PluginExceptionFilter', () => {
         .map(([exportName]) => exportName)
         .filter((exportName) => !NON_CONSENT_SURFACE_ERRORS.has(exportName));
 
-      const caught = new Set(PLUGIN_EXCEPTION_FILTER_CATCHES.map((ctor) => ctor.name));
+      // The install ingress's own classes have their completeness test below.
+      const caught = new Set(
+        PLUGIN_EXCEPTION_FILTER_CATCHES.map((ctor) => ctor.name).filter((name) => !INSTALL_INGRESS_ERRORS.has(name)),
+      );
 
       // A new consent-surface error exported from @bge/plugin fails here until
       // this filter maps it — the status decision must be made, not defaulted.
       expect(exported.sort()).toEqual([...caught].sort());
+    });
+  });
+
+  describe('install ingress completeness (#1094)', () => {
+    it('catches every Error class the plugin artifacts lib exports, and the API lib source and upload errors (#1094)', () => {
+      const exported = Object.entries(pluginArtifacts)
+        .filter(
+          ([, candidate]) =>
+            typeof candidate === 'function' && (candidate as { prototype?: unknown }).prototype instanceof Error,
+        )
+        .map(([exportName]) => exportName);
+      const caught = new Set(PLUGIN_EXCEPTION_FILTER_CATCHES.map((ctor) => ctor.name));
+
+      expect(exported.length).toBeGreaterThan(0);
+      // Collected, so a failure names the class that was left unmapped.
+      const unmapped = [...exported, PluginArtifactSourceError.name, PluginArtifactUploadInvalidError.name].filter(
+        (name) => !caught.has(name),
+      );
+      expect(unmapped).toEqual([]);
     });
   });
 });

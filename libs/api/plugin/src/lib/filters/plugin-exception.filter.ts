@@ -8,6 +8,8 @@ import {
   PluginConsentPresentationManifestError,
   PluginConsentPresentationNotFoundError,
   PluginConsentPresentationTombstonedError,
+  PluginDirectoryLayoutError,
+  PluginDirectoryNotFoundError,
   PluginFeatureStateManifestError,
   PluginFeatureStateNotFoundError,
   PluginFeatureStateTombstonedError,
@@ -64,11 +66,24 @@ import {
   PluginUpdateUnknownCorePermissionError,
   PluginUpdateVersionConflictError,
 } from '@bge/plugin';
+import {
+  PluginArchiveRefusedError,
+  PluginArtifactChecksumMismatchError,
+  PluginArtifactDownloadFailedError,
+  PluginArtifactLinkRefusedError,
+  PluginArtifactNotFoundError,
+  PluginArtifactTooLargeError,
+  type PluginArtifactDownloadFailure,
+  type PluginArtifactLinkRefusal,
+} from '@bge/plugin-artifacts';
+import type { PluginArchiveRule } from '@boardgamesempire/plugin-manifest';
 import { ArgumentsHost, Catch, HttpException, Logger } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { Http } from '@status/codes';
 import { I18nService } from 'nestjs-i18n';
 import { STATUS_CODES } from 'node:http';
+import { PluginArtifactSourceError } from '../plugin-artifact-source.error';
+import { PluginArtifactUploadInvalidError } from '../upload/plugin-artifact-upload-invalid.error';
 
 /**
  * How one plugin domain error renders over HTTP: the status, the localized
@@ -99,6 +114,40 @@ interface PluginErrorRendering {
 type ErrorCtor<E extends Error> = new (...args: never[]) => E;
 
 type RendererMap = ReadonlyMap<ErrorCtor<Error>, (exception: Error) => PluginErrorRendering>;
+
+/**
+ * One message per reason, so the copy tells the server admin what to fix
+ * (#1094). The keys are spelled out, not built from the reason, so a renamed
+ * key fails the type check; the record fails it for a reason added without
+ * copy.
+ */
+const ARCHIVE_RULE_COPY: Readonly<Record<PluginArchiveRule, I18nPath>> = {
+  'not-gzip': 'errors.plugin.artifact_archive_not_gzip',
+  corrupt: 'errors.plugin.artifact_archive_corrupt',
+  'entry-type': 'errors.plugin.artifact_archive_entry_type',
+  'unsafe-path': 'errors.plugin.artifact_archive_unsafe_path',
+  'top-level': 'errors.plugin.artifact_archive_top_level',
+  'entry-count': 'errors.plugin.artifact_archive_entry_count',
+  'extracted-size': 'errors.plugin.artifact_archive_extracted_size',
+  'required-file': 'errors.plugin.artifact_archive_required_file',
+  'manifest-slug': 'errors.plugin.artifact_archive_manifest_slug',
+  'manifest-size': 'errors.plugin.artifact_archive_manifest_size',
+};
+
+const ARCHIVE_ENTRY_FIELD_MAX_LENGTH = 200;
+
+const LINK_REFUSAL_COPY: Readonly<Record<PluginArtifactLinkRefusal, I18nPath>> = {
+  'invalid-link': 'errors.plugin.artifact_link_refused_invalid_link',
+  'blocked-by-policy': 'errors.plugin.artifact_link_refused_blocked_by_policy',
+  'redirect-blocked': 'errors.plugin.artifact_link_refused_redirect_blocked',
+  'too-many-redirects': 'errors.plugin.artifact_link_refused_too_many_redirects',
+};
+
+const DOWNLOAD_FAILURE_COPY: Readonly<Record<PluginArtifactDownloadFailure, I18nPath>> = {
+  'upstream-status': 'errors.plugin.artifact_download_failed_upstream_status',
+  unreachable: 'errors.plugin.artifact_download_failed_unreachable',
+  timeout: 'errors.plugin.artifact_download_failed_timeout',
+};
 
 /**
  * Assembles the class → rendering table in one expression, so the `@Catch`
@@ -565,6 +614,80 @@ function buildRenderers(): RendererMap {
     message: t('errors.plugin.config_schema_unusable', { slug: exception.slug }),
     fields: { slug: exception.slug, version: exception.version },
     operatorActionable: true,
+  }));
+
+  // A plugin's files on the server do not match its record (#1094): its
+  // directory is missing, or its layout, slug or checksum is not one the
+  // directory resolver accepts. The plugin inventory, the staged update's
+  // approval and the install ingress all reach the resolver. The server path
+  // and the reason go to the operator's log, never into the body.
+  renders(PluginDirectoryLayoutError, (exception) => ({
+    status: Http.InternalServerError,
+    message: t('errors.plugin.directory_layout', { slug: exception.slug }),
+    fields: { slug: exception.slug },
+    operatorActionable: true,
+  }));
+
+  renders(PluginDirectoryNotFoundError, (exception) => ({
+    status: Http.InternalServerError,
+    message: t('errors.plugin.directory_not_found', { slug: exception.slug }),
+    fields: { slug: exception.slug },
+    operatorActionable: true,
+  }));
+
+  // ─── The install ingress (#1094) ──────────────────────────────────────────
+  // Every field is the error's own. The receiver keeps client values in some
+  // (the checksum asked for), and the controller caps them before they get there.
+
+  renders(PluginArtifactChecksumMismatchError, (exception) => ({
+    status: Http.UnprocessableEntity,
+    message: t('errors.plugin.artifact_checksum_mismatch'),
+    fields: { expectedSha256: exception.expectedSha256, actualSha256: exception.actualSha256 },
+  }));
+
+  renders(PluginArchiveRefusedError, (exception) => ({
+    status: Http.UnprocessableEntity,
+    message: t(ARCHIVE_RULE_COPY[exception.rule]),
+    // An archive's own entry name: cut at the length the error's message cuts it.
+    fields: { rule: exception.rule, entry: exception.entry?.slice(0, ARCHIVE_ENTRY_FIELD_MAX_LENGTH) },
+  }));
+
+  renders(PluginArtifactLinkRefusedError, (exception) => ({
+    status: Http.UnprocessableEntity,
+    message: t(LINK_REFUSAL_COPY[exception.reason]),
+    fields: { reason: exception.reason },
+  }));
+
+  renders(PluginArtifactTooLargeError, (exception) => ({
+    status: Http.PayloadTooLarge,
+    message: t('errors.plugin.artifact_too_large'),
+    fields: { limitBytes: exception.limitBytes },
+  }));
+
+  renders(PluginArtifactDownloadFailedError, (exception) => ({
+    status: Http.BadGateway,
+    message: t(DOWNLOAD_FAILURE_COPY[exception.reason], {
+      upstreamStatus: exception.upstreamStatus,
+    }),
+    fields: { reason: exception.reason, upstreamStatus: exception.upstreamStatus },
+  }));
+
+  renders(PluginArtifactNotFoundError, (exception) => ({
+    status: Http.NotFound,
+    message: t('errors.plugin.artifact_not_found'),
+    fields: { sha256: exception.sha256 },
+  }));
+
+  renders(PluginArtifactSourceError, (exception) => ({
+    status: Http.BadRequest,
+    message: t('errors.plugin.artifact_source'),
+    fields: { reason: exception.reason },
+  }));
+
+  // Multer's own message names the field in English, so it stays on the cause.
+  renders(PluginArtifactUploadInvalidError, () => ({
+    status: Http.BadRequest,
+    message: t('errors.plugin.artifact_upload_invalid'),
   }));
 
   // ─── 503 — static analysis unavailable (operator must act) ───────────────
