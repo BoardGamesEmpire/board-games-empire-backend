@@ -1,5 +1,6 @@
 import * as Mustache from 'mustache';
 import { PluginGrantScope } from '../client';
+import { UNIT_ID_COLUMNS } from '../generated/unit-id-columns';
 import { parseTemplate } from './catalog-guards';
 import { matchesCatalogRule, type PermissionRuleColumns } from './catalog-reconcile-plan';
 import { PERMISSION_CATALOG } from './permission.catalog';
@@ -36,10 +37,15 @@ const PUBLIC_READ_RULES = new Map<string, PermissionSeedDefinition>(
   ),
 );
 
-/** The scope's own id, which a unit-scope template must name. */
-const UNIT_ID_VARIABLE: Readonly<Record<PluginUnitGrantScope, string>> = {
-  [PluginGrantScope.Household]: 'unit.householdId',
-  [PluginGrantScope.User]: 'unit.userId',
+/** The scope's own id: the variable a unit-scope template must name, and the model it is the id of. */
+interface UnitId {
+  readonly variable: string;
+  readonly model: 'Household' | 'User';
+}
+
+const UNIT_ID: Readonly<Record<PluginUnitGrantScope, UnitId>> = {
+  [PluginGrantScope.Household]: { variable: 'unit.householdId', model: 'Household' },
+  [PluginGrantScope.User]: { variable: 'unit.userId', model: 'User' },
 };
 
 /**
@@ -74,7 +80,12 @@ export const CONSENT_UNIT_BINDING_REFUSAL =
  * supplies at that scope. Restricting means an equality on the id that every
  * matching row must satisfy: `field: '{{ unit.householdId }}'` or
  * `field: { equals: ... }`, at the top level or inside `AND`, directly or
- * through an `is` or `some` relation filter. Anything else binds nothing:
+ * through an `is` or `some` relation filter. The equality must be on a column
+ * that holds that unit's id: a foreign key to Household or User, or that
+ * model's own `id`. Each field is judged against the model its filter is on,
+ * the permission's subject at the top level and the related model under `is`
+ * or `some`, as the generated `UNIT_ID_COLUMNS` records them (#994). Anything
+ * else binds nothing:
  *
  * - No conditions: subject-wide authority, which only server consent confers.
  * - Fixed conditions, with no variable: every matching row install-wide. With
@@ -83,6 +94,11 @@ export const CONSENT_UNIT_BINDING_REFUSAL =
  * - The id named anywhere else: under `OR` beside a fixed branch, under `NOT`,
  *   `not`, `isNot`, `every` or `none`, or behind a range or text operator. The
  *   variable is there, but rows outside the unit still match.
+ * - The id on any other field: a text field, another model's own `id`, a
+ *   column that holds the other unit's id, or a field that holds an id by
+ *   convention but has no foreign key. A row whose text is set to the id would
+ *   match. So does a subject the schema has no model for (`all`, or a
+ *   resource type such as Campaign), which has no id column at all.
  * - A section anywhere in the conditions, even one that leaves the id alone:
  *   a section can span fields or keys, and rendering it can drop the equality.
  * - A tag in any key. Keys render too, and `JSON.parse` keeps the last of two
@@ -122,7 +138,7 @@ export function bindsConsentUnit(
     variables.every((variable) => context.has(variable)) &&
     !hasSection(permission.conditions) &&
     !hasTemplatedKey(permission.conditions) &&
-    restrictsToUnit(permission.conditions, UNIT_ID_VARIABLE[scope])
+    restrictsToUnit(permission.conditions, UNIT_ID[scope], permission.subject)
   );
 }
 
@@ -174,35 +190,50 @@ const isUnitIdTag = (value: unknown, variable: string): boolean => {
 };
 
 /**
- * Whether a `where` clause holds every row to the unit id: some clause every
- * row must satisfy is an equality on it. Each key of a `where` must hold, and
- * so must each element of `AND`, so one such clause is enough. `OR`, `NOT`
- * and every other operator are left unread, because a row can match them
- * without matching the id.
+ * Whether a `where` clause on `model` holds every row to the unit id: some
+ * clause every row must satisfy is an equality on it, on a column of `model`
+ * that holds that unit's id. Each key of a `where` must hold, and so must each
+ * element of `AND`, so one such clause is enough. `OR`, `NOT` and every other
+ * operator are left unread, because a row can match them without matching the
+ * id. An `is` or `some` filter is judged against the model its relation points
+ * to.
+ *
+ * Model and field names come from the permission row as stored, so every
+ * lookup is an own-property check: a subject or a key such as `toString` or
+ * `constructor` finds nothing and binds nothing.
  */
-function restrictsToUnit(where: unknown, variable: string): boolean {
-  if (!isRecord(where)) {
+function restrictsToUnit(where: unknown, unitId: UnitId, model: string): boolean {
+  if (!isRecord(where) || !Object.hasOwn(UNIT_ID_COLUMNS, model)) {
     return false;
   }
 
+  const columns = UNIT_ID_COLUMNS[model];
+
   return Object.entries(where).some(([key, value]) => {
     if (key === 'AND') {
-      return (Array.isArray(value) ? value : [value]).some((clause) => restrictsToUnit(clause, variable));
+      return (Array.isArray(value) ? value : [value]).some((clause) => restrictsToUnit(clause, unitId, model));
     }
 
     if (key === 'OR' || key === 'NOT') {
       return false;
     }
 
-    if (isUnitIdTag(value, variable)) {
-      return true;
+    // `equals` binds only alone: beside `mode: 'insensitive'` Prisma sends it
+    // as an unescaped ILIKE, which matches more than the one id (#994).
+    const isIdEquality =
+      isUnitIdTag(value, unitId.variable) ||
+      (isRecord(value) && Object.keys(value).length === 1 && isUnitIdTag(value['equals'], unitId.variable));
+
+    if (isIdEquality) {
+      return columns[unitId.model].includes(key);
     }
 
-    return (
-      isRecord(value) &&
-      (isUnitIdTag(value['equals'], variable) ||
-        restrictsToUnit(value['is'], variable) ||
-        restrictsToUnit(value['some'], variable))
-    );
+    if (!isRecord(value) || !Object.hasOwn(columns.relations, key)) {
+      return false;
+    }
+
+    const related = columns.relations[key];
+
+    return restrictsToUnit(value['is'], unitId, related) || restrictsToUnit(value['some'], unitId, related);
   });
 }

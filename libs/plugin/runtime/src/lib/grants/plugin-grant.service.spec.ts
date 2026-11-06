@@ -1,7 +1,20 @@
 import type { Permission, Plugin, PluginGrant, PluginPermission } from '@bge/database';
-import { DatabaseService, PERMISSION_CATALOG, PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
+import {
+  CONSENT_UNIT_BINDING_REFUSAL,
+  DatabaseService,
+  PERMISSION_CATALOG,
+  PluginGrantScope,
+  PluginGrantStatus,
+  RiskLevel,
+} from '@bge/database';
 import { deadlock } from '@bge/database/testing';
-import { createMockDatabaseService, rawQueryText, type MockDatabaseService } from '@bge/testing';
+import {
+  createMockDatabaseService,
+  rawQueryText,
+  UNIT_BOUND_RULES,
+  UNIT_ID_OFF_ID_COLUMN_RULES,
+  type MockDatabaseService,
+} from '@bge/testing';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
@@ -167,16 +180,13 @@ describe('PluginGrantService', () => {
     db.permission.findUnique.mockImplementation((({ where }: { where: { slug: string } }) =>
       Promise.resolve({
         slug: 'feedback:read',
-        subject: 'FeedbackSubmission',
+        // A subject and clause naming the consenting unit's own id on a column
+        // that holds it, so unit-scope decisions pass the unit-binding gate
+        // (#60, #591, #994): the user's id for the one permission the manifest
+        // requests at user scope, the household's otherwise. The refusals have
+        // their own explicit specs.
+        ...(where.slug === 'read:public_content' ? UNIT_BOUND_RULES.User : UNIT_BOUND_RULES.Household),
         riskLevel: RiskLevel.Medium,
-        // A clause naming the consenting unit's own id, so unit-scope
-        // decisions pass the unit-binding gate (#60, #591): the user's id for
-        // the one permission the manifest requests at user scope, the
-        // household's otherwise. The refusals have their own explicit specs.
-        conditions:
-          where.slug === 'read:public_content'
-            ? { ownerId: '{{ unit.userId }}' }
-            : { householdId: '{{ unit.householdId }}' },
       })) as never);
     db.pluginPermission.findUnique.mockResolvedValue({
       id: 'plgperm_1',
@@ -970,6 +980,38 @@ describe('PluginGrantService', () => {
       ).rejects.toThrow(PluginGrantExclusionError);
       expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
     });
+
+    // The unit's id on a field that holds no unit id binds nothing, directly
+    // or through a relation filter: a row whose text is set to the id would
+    // fall inside the unit's consent (#994).
+    it.each(
+      (['household', 'user'] as const).flatMap((consentScope) =>
+        UNIT_ID_OFF_ID_COLUMN_RULES[consentScope === 'household' ? 'Household' : 'User'].map((rule) => ({
+          consentScope,
+          ...rule,
+        })),
+      ),
+    )(
+      "refuses the consent unit's id on $label at $consentScope scope (#994)",
+      async ({ consentScope, subject, conditions }) => {
+        const slug = 'read:household_member';
+        db.plugin.findUnique.mockResolvedValue(requesting(slug, consentScope));
+        db.permission.findUnique.mockResolvedValue({
+          slug,
+          subject,
+          riskLevel: RiskLevel.Low,
+          conditions,
+        } as unknown as Permission);
+
+        const decided = service.decide(
+          unitDecision(slug, consentScope === 'household' ? PluginGrantScope.Household : PluginGrantScope.User),
+        );
+
+        await expect(decided).rejects.toThrow(PluginGrantExclusionError);
+        await expect(decided).rejects.toThrow(CONSENT_UNIT_BINDING_REFUSAL);
+        expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+      },
+    );
 
     it.each(['household', 'user'] as const)('records an allowlisted public read at %s scope', async (consentScope) => {
       db.plugin.findUnique.mockResolvedValue(requesting('read:game:public', consentScope));
