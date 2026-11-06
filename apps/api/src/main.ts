@@ -26,6 +26,7 @@ import { RedisIoAdapter } from './app/adapters/redis-io.adapter';
 import { AppModule } from './app/app.module';
 import { bootstrapCacheFlushPatterns } from './app/configuration/cache-flush';
 import redisConfig, { redisConfigValidationSchema } from './app/configuration/redis.config';
+import { API_REQUEST_TIMEOUT_MS, installRequestBodyRateGuard } from './app/http/request-body-rate-guard';
 import { createAuthClientIpHandler } from './app/lib/auth-client-ip';
 import { createHostCheck } from './app/lib/host-check';
 import { allowsEveryHost, createHostRule, type ServerNames } from './app/lib/host-rule';
@@ -225,6 +226,16 @@ async function bootstrap() {
     createAuthClientIpHandler(configService.getOrThrow<number>('throttle.trustedProxyHops')),
     toNodeHandler(app.get(AUTH_REQUEST_HANDLER)),
   );
+
+  // A plugin artifact upload may be 100 MiB from a slow connection, so a request
+  // may take up to an hour, which a 100 MiB body meets at an average of about
+  // 29 KB/s. Within that hour, the rate guard cuts off a body that stops
+  // arriving much sooner: at least 64 KiB must arrive in every 60 seconds, on
+  // every route including `/api/auth` (#1094). `headersTimeout` keeps Node's
+  // default of 60 seconds, which is below `requestTimeout` as Node requires.
+  const httpServer = app.getHttpServer();
+  httpServer.requestTimeout = API_REQUEST_TIMEOUT_MS;
+  installRequestBodyRateGuard(httpServer);
 
   registerShutdownHandlers(app, otel, bootstrapLogger);
 
