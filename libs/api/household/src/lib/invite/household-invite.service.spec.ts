@@ -700,6 +700,32 @@ describe('HouseholdInviteService', () => {
           inviterAddress('owner@example.test');
           await expect(service.createInvite('hh-1', byAddress())).rejects.toBeInstanceOf(ForbiddenException);
         });
+
+        // The PATCH doesn't offer the extended network as a policy (#497): at
+        // three friendship steps it is close to Public, and whether an invite
+        // went through would tell the inviter whether the invitee is in their
+        // extended network. Stored by a write that skips the PATCH, it lets
+        // nobody in, a friend included, and it asks nothing about friends of
+        // friends.
+        it('refuses every invite under an ExtendedNetwork policy, which no route accepts but a direct write could store (#497)', async () => {
+          serverPolicy(Reach.ExtendedNetwork);
+          friendship(FriendshipStatus.Accepted);
+          preference(Reach.Public);
+          const refusalOf = (dto: CreateHouseholdInviteDto) =>
+            service.createInvite('hh-1', dto).catch((reason: unknown) => reason);
+
+          userById();
+          const byIdError = await refusalOf(byId());
+          inviterAddress('owner@example.test');
+          const byAddressError = await refusalOf(byAddress());
+
+          for (const error of [byIdError, byAddressError]) {
+            expect(error).toBeInstanceOf(ForbiddenException);
+            expect((error as ForbiddenException).message).toContain('errors.household.invitee_friends_only');
+          }
+          expect(db.user.count).not.toHaveBeenCalled();
+          expect(invites.createWithin).not.toHaveBeenCalled();
+        });
       });
 
       describe('by id, a block and the invitee’s preference', () => {

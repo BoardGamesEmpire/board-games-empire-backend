@@ -7,7 +7,14 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
-import { arrangeFriendship, befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import {
+  arrangeExtendedNetwork,
+  arrangeFriendship,
+  befriend,
+  createActors,
+  type Actors,
+  type AuthenticatedActor,
+} from '@bge/testing-e2e';
 import request from 'supertest';
 import { mintApiKey, type Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -96,6 +103,32 @@ describe('browsing upcoming events (#962)', () => {
 
     expect(ids).toEqual(expect.arrayContaining([friendsId, friendsOfFriendsId]));
     expect(ids).not.toContain(notReachingId);
+  });
+
+  // The extended network rows stand in for the friendships the worker job reads, and
+  // the block is read from the friendships, before any job runs (#497). The
+  // events are created at `Friends` and moved to the rung in the database: the
+  // request bodies accept it only once its measurement is reviewed. A host's
+  // `FriendsOfFriends` event stays off a list the extended network rows alone reach.
+  it('lists an ExtendedNetwork event to a reader three steps from its host, and leaves it out for one the host blocked (#497)', async () => {
+    const [host, blockingHost, viewer] = await Promise.all([actors.user(), actors.user(), actors.user()]);
+    await arrangeExtendedNetwork(db.client, host, viewer, 3);
+    await arrangeExtendedNetwork(db.client, blockingHost, viewer, 3);
+    await arrangeFriendship(db.client, blockingHost, viewer, FriendshipStatus.Blocked);
+
+    const extendedNetworkId = await createdEventId(host, { reach: Reach.Friends, ...dated(2) });
+    const blockedId = await createdEventId(blockingHost, { reach: Reach.Friends, ...dated(2) });
+    await db.client.event.updateMany({
+      where: { id: { in: [extendedNetworkId, blockedId] } },
+      data: { reach: Reach.ExtendedNetwork },
+    });
+    const friendsOfFriendsId = await createdEventId(host, { reach: Reach.FriendsOfFriends, ...dated(2) });
+
+    const ids = await browse(viewer);
+
+    expect(ids).toContain(extendedNetworkId);
+    expect(ids).not.toContain(blockedId);
+    expect(ids).not.toContain(friendsOfFriendsId);
   });
 
   // The household arm needs a live household. A member holding the Admin

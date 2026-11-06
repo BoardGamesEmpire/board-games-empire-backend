@@ -1,0 +1,28 @@
+/// Who is in a user's extended network: one row for each other user up to
+/// three accepted friendship steps away, with the fewest steps between them
+/// (#497). Both directions of a pair are rows, so a permission finds the pair
+/// from the owner's side by the primary key alone.
+///
+/// No request writes it. A worker job rebuilds the rows near each friendship
+/// change, a few seconds after it, and a full rebuild from the friendships
+/// runs when the worker starts and daily. Blocks aren't stored here: the
+/// permissions that read it check them against the friendships, so a block
+/// takes effect at once.
+model ExtendedNetwork {
+  /// The user whose extended network the row belongs to.
+  user   User   @relation("ExtendedNetwork", fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id")
+
+  /// A user within three accepted friendship steps of `user`, never `user`.
+  otherUser   User   @relation("ExtendedNetworkOf", fields: [otherUserId], references: [id], onDelete: Cascade)
+  otherUserId String @map("other_user_id")
+
+  /// The fewest accepted friendship steps between the two, from 1 to 3. The
+  /// migration's CHECK constraints hold it there, and keep a row from pairing a
+  /// user with themselves.
+  steps Int
+
+  @@id([userId, otherUserId])
+  @@index([otherUserId])
+  @@map("extended_network")
+}

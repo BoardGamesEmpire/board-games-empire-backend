@@ -33,7 +33,8 @@ export class GameController {
     summary: 'List games',
     description:
       'The live Public games, the acting user’s own whatever their reach, their friends’ that reach ' +
-      'friends, their friends of friends’ that reach friends of friends, and the games shared with them or ' +
+      'friends, their friends of friends’ that reach friends of friends, those of users up to three ' +
+      'friendship steps away that reach the extended network (#497), and the games shared with them or ' +
       'with a household they belong to once the share is in effect — one rule for every role, ' +
       'and the set the local half of `GET /games/search` searches. Soft-deleted games are excluded. ' +
       '**Breaking change (#513).** Owner/Admin/Moderator previously also received every private game on the ' +

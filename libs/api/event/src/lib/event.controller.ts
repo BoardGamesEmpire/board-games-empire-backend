@@ -61,7 +61,8 @@ export class EventController {
     summary: "List upcoming events the acting user can read but doesn't attend",
     description:
       'Events the acting user could join (#962): public events, a friend’s events that reach friends, a ' +
-      'friend of a friend’s events that reach friends of friends, and the events of the acting user’s ' +
+      'friend of a friend’s events that reach friends of friends, the events of users up to three ' +
+      'friendship steps away that reach the extended network (#497), and the events of the acting user’s ' +
       'households. A public event is left out when either the acting user or its host has blocked the other; ' +
       'it stays readable by id. An event the acting user has any attendee row on is left out, whether they ' +
       'host it, were invited, declined or were removed. Only upcoming events are listed: not cancelled, ' +

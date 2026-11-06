@@ -1,4 +1,9 @@
-import { acceptedFriendOf, friendOfFriendOf, REACHES_ADMITTING_FRIENDS } from './friendship-conditions';
+import {
+  acceptedFriendOf,
+  friendOfFriendOf,
+  REACHES_ADMITTING_FRIENDS,
+  withinExtendedNetworkOf,
+} from './friendship-conditions';
 
 describe('acceptedFriendOf', () => {
   it('matches an accepted friendship in either direction of the single row', () => {
@@ -18,8 +23,10 @@ describe('acceptedFriendOf', () => {
 });
 
 describe('REACHES_ADMITTING_FRIENDS', () => {
+  // The extended network admits a direct friend through the friends
+  // permissions, as friends of friends does (#497).
   it('is Friends and every rung above it', () => {
-    expect(REACHES_ADMITTING_FRIENDS).toEqual(['Friends', 'FriendsOfFriends', 'Public']);
+    expect(REACHES_ADMITTING_FRIENDS).toEqual(['Friends', 'FriendsOfFriends', 'ExtendedNetwork', 'Public']);
   });
 
   it('cannot be changed at run time', () => {
@@ -49,5 +56,26 @@ describe('friendOfFriendOf', () => {
 
   it('builds a new clause on every call', () => {
     expect(friendOfFriendOf('u-1')).not.toBe(friendOfFriendOf('u-1'));
+  });
+});
+
+describe('withinExtendedNetworkOf', () => {
+  // One lookup on the extended network table's key, which a worker job keeps current.
+  // The block veto is read from the friendships, so a block takes effect before
+  // the job runs (#497).
+  it('matches the users the extended network table puts within three steps of userId, with no block between them (#497)', () => {
+    expect(withinExtendedNetworkOf('u-1')).toStrictEqual({
+      extendedNetwork: { some: { otherUserId: 'u-1', steps: { lte: 3 } } },
+      NOT: {
+        OR: [
+          { friendshipsRequested: { some: { addresseeId: 'u-1', status: 'Blocked' } } },
+          { friendshipsReceived: { some: { requesterId: 'u-1', status: 'Blocked' } } },
+        ],
+      },
+    });
+  });
+
+  it('builds a new clause on every call', () => {
+    expect(withinExtendedNetworkOf('u-1')).not.toBe(withinExtendedNetworkOf('u-1'));
   });
 });

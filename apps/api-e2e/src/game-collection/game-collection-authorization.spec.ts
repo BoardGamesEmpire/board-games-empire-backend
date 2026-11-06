@@ -1,5 +1,12 @@
-import { GameMedium, Reach } from '@bge/database';
-import { befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import { FriendshipStatus, GameMedium, Reach } from '@bge/database';
+import {
+  arrangeExtendedNetwork,
+  arrangeFriendship,
+  befriend,
+  createActors,
+  type Actors,
+  type AuthenticatedActor,
+} from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -189,6 +196,79 @@ describe('game collection authorization', () => {
 
       expect(await listedFor(hidingOwner.user.id, 'owner hiding it from friends')).toEqual([hiding.publicEntry.id]);
       await readEntry(viewer, hiding.friendsEntry.id).expect(404);
+    });
+
+    // The extended network permission keeps the owner's
+    // `showCollectionToFriends` too, and its block clause reads the
+    // friendships, so a block refuses before any job runs (#497). The extended network
+    // rows stand in for the friendships the worker job reads. Each owner's
+    // `Friends` entry is moved to `ExtendedNetwork` once the viewer has been
+    // shown it is left out.
+    it('serves a reader three steps away the ExtendedNetwork entry, and not when the owner’s preferences hide it from friends or a block stands between them (#497)', async () => {
+      const [showingOwner, hidingOwner, blockingOwner, viewer] = await Promise.all(
+        Array.from({ length: 4 }, () => actors.user()),
+      );
+
+      for (const owner of [showingOwner, hidingOwner, blockingOwner]) {
+        await arrangeExtendedNetwork(db.client, owner, viewer, 3);
+      }
+      await arrangeFriendship(db.client, blockingOwner, viewer, FriendshipStatus.Blocked);
+      await db.client.userPreferences.update({
+        where: { userId: hidingOwner.user.id },
+        data: { showCollectionToFriends: false },
+      });
+      const showing = await arrangeCollection(showingOwner.user.id);
+      const hiding = await arrangeCollection(hidingOwner.user.id);
+      const blocking = await arrangeCollection(blockingOwner.user.id);
+
+      const listedFor = async (ownerId: string, who: string) =>
+        listCollectionsEnvelope(
+          await listUserCollection(viewer, ownerId).expect(200),
+          `GET /api/users/:userId/game-collections as a reader three steps away, ${who}`,
+        ).collections.map((entry) => entry.id);
+
+      // A `Friends` entry is the owner's friends' alone.
+      expect(await listedFor(showingOwner.user.id, 'before')).toEqual([showing.publicEntry.id]);
+
+      for (const { friendsEntry } of [showing, hiding, blocking]) {
+        await db.client.gameCollection.update({
+          where: { id: friendsEntry.id },
+          data: { reach: Reach.ExtendedNetwork },
+        });
+      }
+
+      expect((await listedFor(showingOwner.user.id, 'owner showing it')).sort()).toEqual(
+        [showing.publicEntry.id, showing.friendsEntry.id].sort(),
+      );
+      await readEntry(viewer, showing.friendsEntry.id).expect(200);
+
+      expect(await listedFor(hidingOwner.user.id, 'owner hiding it from friends')).toEqual([hiding.publicEntry.id]);
+      await readEntry(viewer, hiding.friendsEntry.id).expect(404);
+
+      expect(await listedFor(blockingOwner.user.id, 'owner who blocked them')).not.toContain(blocking.friendsEntry.id);
+      await readEntry(viewer, blocking.friendsEntry.id).expect(404);
+    });
+
+    // Each wider rung keeps to its own permissions: friends of friends are
+    // read from the friendships, and the extended network rows open only the extended
+    // network's rung (#497).
+    it('serves no FriendsOfFriends entry to a reader only the extended network table puts three steps away (#497)', async () => {
+      const [owner, viewer] = await Promise.all([actors.user(), actors.user()]);
+      await arrangeExtendedNetwork(db.client, owner, viewer, 3);
+      const { friendsEntry } = await arrangeCollection(owner.user.id);
+      await db.client.gameCollection.update({
+        where: { id: friendsEntry.id },
+        data: { reach: Reach.FriendsOfFriends },
+      });
+
+      await readEntry(viewer, friendsEntry.id).expect(404);
+
+      // The control: the same reader reads it once it reaches the extended network.
+      await db.client.gameCollection.update({
+        where: { id: friendsEntry.id },
+        data: { reach: Reach.ExtendedNetwork },
+      });
+      await readEntry(viewer, friendsEntry.id).expect(200);
     });
 
     it('refuses a request with no session, where it used to serve the Public entries', async () => {
