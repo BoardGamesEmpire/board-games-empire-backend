@@ -397,6 +397,56 @@ describe('PluginInstallerService', () => {
     });
   });
 
+  describe('assess (#1094)', () => {
+    const forbidden: StaticAnalysisFinding = {
+      file: 'index.js',
+      kind: 'esm-import',
+      specifier: '@bge/database',
+      severity: 'forbidden',
+      scanScope: 'default',
+    };
+
+    it('assesses without confirmations and lists what install will ask for', async () => {
+      const manifest = buildPluginManifest();
+      manifest.permissions.checks = [
+        ...manifest.permissions.checks,
+        { slug: 'read:audit_log', required: true, reason: { en: 'Mirrors audit rows into the external sink.' } },
+      ];
+      await writeManifest(manifest);
+      db.permission.findMany.mockResolvedValue([
+        feedbackRead,
+        { slug: 'read:audit_log', subject: 'audit_log', riskLevel: RiskLevel.Critical } as Permission,
+      ]);
+      const report: StaticAnalysisReport = { ...emptyReport, findings: [forbidden, { ...forbidden, file: 'b.js' }] };
+      analyzer.analyze.mockResolvedValue(report);
+
+      const assessment = await service.assess(directory(), { deepScan: true });
+
+      expect(assessment.criticalSlugsToReenter).toEqual(['read:audit_log']);
+      expect(assessment.forbiddenImportsToAccept).toEqual(['@bge/database']);
+      expect(assessment.analysis).toBe(report);
+      expect(assessment.validated.manifest.slug).toBe('demo-sink');
+      expect(assessment.serverChecks).toHaveLength(3);
+      expect(analyzer.analyze).toHaveBeenCalledWith(directory(), { deepScan: true });
+      expect(authority.isServerAdmin).not.toHaveBeenCalled();
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(db.plugin.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('checks authority before it touches the directory or reads the manifest (#1094)', async () => {
+      authority.isServerAdmin.mockResolvedValue(false);
+      const read = jest.spyOn(jest.requireActual<typeof import('node:fs/promises')>('node:fs/promises'), 'readFile');
+
+      await expect(service.install(input())).rejects.toBeInstanceOf(PluginInstallAuthorityError);
+
+      expect(directories.confirm).not.toHaveBeenCalled();
+      expect(analyzer.analyze).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+      expect(db.permission.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('manifest gate', () => {
     it('refuses a directory the loader could not resolve at the next boot, and records nothing (#224)', async () => {
       directories.confirm.mockRejectedValue(new PluginDirectoryLayoutError('demo-sink', 'checksum fails the pattern'));
