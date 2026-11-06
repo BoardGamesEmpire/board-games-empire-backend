@@ -633,6 +633,22 @@ describe('plugin update consent (approve/reject/pending)', () => {
       const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
       expect(row.pendingStagingId).toBe(STAGING_ID);
     });
+
+    it('the database refuses a staged checksum in any other form (#1117)', async () => {
+      // Approval makes the staged checksum the installed one, which the
+      // database holds to 64 lowercase hex characters, so it holds the staged
+      // one to the same form.
+      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK]);
+
+      const failure = await db.client.plugin
+        .update({ where: { id: plugin.id }, data: { pendingSha256: 'B'.repeat(64) } })
+        .catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(errorText(failure)).toContain('plugins_pending_sha256_format');
+      const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      expect(row.pendingSha256).toBe(STAGED_SHA);
+    });
   });
 
   describe('pending read', () => {

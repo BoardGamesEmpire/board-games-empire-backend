@@ -742,9 +742,11 @@ export class PluginUpdateService {
     }
 
     // Activation makes the staged checksum a path segment and
-    // `installedSha256`, so an approval refuses a corrupt value as the
-    // resolver refuses it at the next boot, before any manifest or
-    // escalation work (#1117). The read never uses it, so it never refuses it.
+    // `installedSha256`. The database refuses any other form
+    // (plugins_pending_sha256_format, #1117), so this is the backstop the
+    // brand needs: an approval refuses a corrupt value as the resolver refuses
+    // it at the next boot, before any manifest or escalation work. The read
+    // never uses it, so it never refuses it.
     const pendingSha256 = approval === undefined ? undefined : parsePluginArtifactSha256(plugin.pendingSha256);
 
     if (pendingSha256 === null) {
