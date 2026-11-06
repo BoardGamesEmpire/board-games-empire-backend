@@ -15,6 +15,11 @@ export interface PluginModuleOptions {
   readonly pluginsRoot: string;
   /** Running BGE version for manifest `bgeCompat` evaluation — build-time injected constant per #59. */
   readonly bgeVersion: string;
+  /**
+   * What kind of process this is (`'api'`, and the worker roles later). It
+   * labels the plugin load records the process writes (#1094).
+   */
+  readonly processRole: string;
   /** Server default locale for manifest localization resolution. */
   readonly defaultLocale: string;
 }
