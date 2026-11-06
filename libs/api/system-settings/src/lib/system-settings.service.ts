@@ -1,4 +1,4 @@
-import { DatabaseService, isPrismaDependentRecordNotFoundError } from '@bge/database';
+import { DatabaseService, isPrismaDependentRecordNotFoundError, Prisma } from '@bge/database';
 import { t } from '@bge/i18n';
 import { isMailConfigured, MAIL_READINESS_SELECT, MailFailureCode } from '@bge/mail';
 import { MailDispatcherService, MailQueueUnavailableError } from '@bge/queue-mail';
@@ -42,28 +42,38 @@ export class SystemSettingsService {
   /**
    * An unknown id answers 404. `update` throws P2025 when no row matches, and
    * nothing else maps that to a response, so it answered 500 (#571).
+   *
+   * The check on a kept SMTP password and the write run in one transaction,
+   * with the row locked `FOR UPDATE` before the check (#654). Every other
+   * settings write is an `UPDATE`, which waits on that lock, so a concurrent
+   * write either commits first and is checked, or waits and lands after.
+   * Without the lock, a password saved between the check and the write would
+   * be kept for the server this patch names.
    */
   async updateSystemSettings(
     settingsId: string,
     updateSettingsDTO: UpdateSystemSettingsDto,
   ): Promise<SystemSettingsView> {
     const { smtpPassword, ...rest } = updateSettingsDTO;
-    if (smtpPassword === undefined) {
-      await this.refuseKeptPasswordForNewServer(settingsId, updateSettingsDTO);
-    }
 
     try {
-      const row = await this.db.systemSetting.update({
-        where: { id: settingsId },
-        // The password is stored as ciphertext only (#654). An omitted key
-        // stays out of `data`, so the stored one is kept; null clears it.
-        data: {
-          ...rest,
-          ...(smtpPassword !== undefined && {
-            smtpPassword: smtpPassword === null ? null : this.encryption.encrypt(smtpPassword),
-          }),
-        },
-        select: SYSTEM_SETTINGS_ROW_SELECT,
+      const row = await this.db.$transaction(async (tx) => {
+        if (smtpPassword === undefined) {
+          await this.refuseKeptPasswordForNewServer(tx, settingsId, updateSettingsDTO);
+        }
+
+        return tx.systemSetting.update({
+          where: { id: settingsId },
+          // The password is stored as ciphertext only (#654). An omitted key
+          // stays out of `data`, so the stored one is kept; null clears it.
+          data: {
+            ...rest,
+            ...(smtpPassword !== undefined && {
+              smtpPassword: smtpPassword === null ? null : this.encryption.encrypt(smtpPassword),
+            }),
+          },
+          select: SYSTEM_SETTINGS_ROW_SELECT,
+        });
       });
 
       return toView(row);
@@ -84,13 +94,19 @@ export class SystemSettingsService {
    * the password again, or null to clear it. Clearing the host is allowed:
    * with no host nothing is sent anywhere.
    */
-  private async refuseKeptPasswordForNewServer(settingsId: string, update: UpdateSystemSettingsDto): Promise<void> {
+  private async refuseKeptPasswordForNewServer(
+    tx: Prisma.TransactionClient,
+    settingsId: string,
+    update: UpdateSystemSettingsDto,
+  ): Promise<void> {
     const { smtpHost, smtpPort, smtpSecurity } = update;
     if (smtpHost === undefined && smtpPort === undefined && smtpSecurity === undefined) {
       return;
     }
 
-    const stored = await this.db.systemSetting.findUnique({
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM system_settings WHERE id = ${settingsId} FOR UPDATE`);
+
+    const stored = await tx.systemSetting.findUnique({
       where: { id: settingsId },
       select: { smtpHost: true, smtpPort: true, smtpSecurity: true, smtpPassword: true },
     });
