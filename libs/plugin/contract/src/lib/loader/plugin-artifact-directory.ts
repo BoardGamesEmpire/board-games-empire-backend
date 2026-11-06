@@ -23,7 +23,7 @@ export function parsePluginArtifactSha256(value: string): PluginArtifactSha256 |
  * Layout contract for a plugin artifact on disk (#59 loader ↔ distribution
  * boundary): the directory `<pluginsRoot>/<slug>/<sha256>/` one artifact is
  * placed in. The loader consumes ONLY this interface; the install ingress
- * (planned, #1094) is to place directories satisfying it.
+ * (#1094) places directories satisfying it.
  *
  * One type serves an installed artifact and a staged one, because a
  * directory's identity is its checksum: the row column naming it,

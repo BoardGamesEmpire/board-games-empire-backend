@@ -16,7 +16,7 @@ import { isContained, realpathOrNull } from './path-containment';
 
 /**
  * Maps a plugin artifact to its on-disk `PluginArtifactDirectory`,
- * `<pluginsRoot>/<slug>/<sha256>/`, where the install ingress is to place it (planned, #1094). The
+ * `<pluginsRoot>/<slug>/<sha256>/`, where the install ingress places it (#1094). The
  * loader asks for the artifact a row's `installedSha256` names; a staged
  * update's files are the directory its `pendingSha256` names. There is one
  * root, because no plugin ships inside the server (#696).

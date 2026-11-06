@@ -20,6 +20,9 @@
       "path": "../../libs/common/env"
     },
     {
+      "path": "../../libs/plugin/artifacts"
+    },
+    {
       "path": "../../libs/plugin/manifest"
     },
     {
@@ -47,10 +50,10 @@
       "path": "../../libs/common/bootstrap"
     },
     {
-      "path": "../../libs/api/auth"
+      "path": "../../libs/common/permissions"
     },
     {
-      "path": "../../libs/common/permissions"
+      "path": "../../libs/api/auth"
     },
     {
       "path": "../../libs/common/testing-e2e"

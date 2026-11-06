@@ -1,6 +1,9 @@
 import { PLUGIN_REQUESTED_PERMISSIONS_READER } from '@bge/database';
 import { GLOBAL_MODULE_METADATA, MODULE_METADATA } from '@nestjs/common/constants.js';
+import { PluginGrantAuthorityService } from './grants/plugin-grant-authority.service';
+import { PluginDirectoryResolverService } from './loader/plugin-directory-resolver.service';
 import { StoredManifestRequestedPermissionsReader } from './manifest/stored-manifest-requested-permissions.reader';
+import { MODULE_OPTIONS_TOKEN } from './plugin-module.options';
 import { PluginModule } from './plugin.module';
 
 /**
@@ -16,5 +19,17 @@ describe('PluginModule wiring (#577)', () => {
       useClass: StoredManifestRequestedPermissionsReader,
     });
     expect(Reflect.getMetadata(MODULE_METADATA.EXPORTS, PluginModule)).toContain(PLUGIN_REQUESTED_PERMISSIONS_READER);
+  });
+});
+
+/**
+ * The plugin artifacts lib relies on these global exports: it cannot import
+ * this module without building a second runtime that has no options.
+ */
+describe('PluginModule exports for the plugin artifacts lib (#1094)', () => {
+  it('exports the directory resolver, the authority check and the options that name the plugins root', () => {
+    expect(Reflect.getMetadata(MODULE_METADATA.EXPORTS, PluginModule)).toEqual(
+      expect.arrayContaining([PluginDirectoryResolverService, PluginGrantAuthorityService, MODULE_OPTIONS_TOKEN]),
+    );
   });
 });

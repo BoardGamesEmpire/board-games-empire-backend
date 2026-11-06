@@ -11,6 +11,8 @@ import {
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
 import { spawnSync, type ChildProcess } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import {
   apiEnvOverrides,
@@ -18,6 +20,7 @@ import {
   E2E_BASE_URL_VAR,
   E2E_DATABASE_CONTAINER_ADDRESS_VAR,
   E2E_FAKE_PROVIDER_URL_VAR,
+  E2E_PLUGINS_ROOT_VAR,
   fakeProviderEnv,
   parseRedisUrl,
   POSTGRES_IMAGE,
@@ -86,7 +89,7 @@ const apiBaseUrl = (port: number): string => `http://127.0.0.1:${port}`;
  * debug without its logs. A port lost before the API could bind it is
  * retried on a fresh one (`launchOnFreePort`).
  */
-async function launchApi(env: NodeJS.ProcessEnv): Promise<LaunchedApi> {
+async function launchApi(env: NodeJS.ProcessEnv, pluginsRoot: string): Promise<LaunchedApi> {
   requireBundle('API', API_BUNDLE, '@boardgamesempire/api:build');
 
   const verbose = env[E2E_VERBOSE_VAR] === 'true';
@@ -98,7 +101,7 @@ async function launchApi(env: NodeJS.ProcessEnv): Promise<LaunchedApi> {
     return {
       label: 'API',
       bundle: API_BUNDLE,
-      env: { ...env, ...apiEnvOverrides(baseUrl, port) },
+      env: { ...env, ...apiEnvOverrides(baseUrl, port, pluginsRoot) },
       verbose,
       isReady: async () => {
         try {
@@ -137,7 +140,9 @@ async function launchApi(env: NodeJS.ProcessEnv): Promise<LaunchedApi> {
  *  5. A fake sign-in provider in this process, listed to the API as its only
  *     sign-in provider (#912); its URL is published via
  *     `BGE_E2E_FAKE_PROVIDER_URL`.
- *  6. The built API bundle as a child process, gated on `/health/ready`;
+ *  6. A fresh plugins root for the API, published via `BGE_E2E_PLUGINS_ROOT`
+ *     and removed by teardown (#1094).
+ *  7. The built API bundle as a child process, gated on `/health/ready`;
  *     its base URL is published via `BGE_E2E_BASE_URL`.
  *
  * Handles are stashed on `globalThis` for `global-teardown`. If the process
@@ -154,6 +159,7 @@ export default async function globalSetup(): Promise<void> {
   let redis: StartedRedisContainer | undefined;
   let api: ChildProcess | undefined;
   let signInProvider: FakeSignInProvider | undefined;
+  let pluginsRoot: string | undefined;
 
   try {
     let databaseUrl: string;
@@ -222,7 +228,12 @@ export default async function globalSetup(): Promise<void> {
     Object.assign(process.env, fakeProviderEnv(signInProvider.url));
     process.env[E2E_FAKE_PROVIDER_URL_VAR] = signInProvider.url;
 
-    const launched = await launchApi(process.env);
+    // A fresh plugins root for the API (#1094), which the install ingress
+    // fills; specs read where it is from the variable.
+    pluginsRoot = await mkdtemp(path.join(tmpdir(), 'bge-e2e-plugins-'));
+    process.env[E2E_PLUGINS_ROOT_VAR] = pluginsRoot;
+
+    const launched = await launchApi(process.env, pluginsRoot);
     api = launched.child;
     process.env[E2E_BASE_URL_VAR] = launched.baseUrl;
 
@@ -230,12 +241,17 @@ export default async function globalSetup(): Promise<void> {
     // no-op after a clean teardown, since the child has exited by then.
     killOnExit(api);
 
-    setE2EGlobalState({ postgres, redis, api, signInProvider });
+    setE2EGlobalState({ postgres, redis, api, signInProvider, pluginsRoot });
     console.log(`[e2e] harness ready — API at ${launched.baseUrl}`);
   } catch (error) {
     // Teardown never runs when setup throws — stop whatever already started.
     api?.kill('SIGKILL');
-    await Promise.allSettled([signInProvider?.close(), postgres?.stop(), redis?.stop()]);
+    await Promise.allSettled([
+      signInProvider?.close(),
+      postgres?.stop(),
+      redis?.stop(),
+      pluginsRoot === undefined ? undefined : rm(pluginsRoot, { recursive: true, force: true }),
+    ]);
     throw error;
   }
 }
