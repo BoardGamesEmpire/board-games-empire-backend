@@ -64,8 +64,8 @@ import { gatingFindings, type StaticAnalysisFinding, type StaticAnalysisReport }
 
 export interface PluginInstallInput {
   /**
-   * The plugin artifact's directory, which the install ingress is to place
-   * (planned, #1094); its checksum is the one the row records (#224). The
+   * The plugin artifact's directory, which the install ingress placed
+   * (#1094); its checksum is the one the row records (#224). The
    * installer never opens the plugin artifact itself (#59).
    */
   readonly directory: PluginArtifactDirectory;
@@ -100,7 +100,7 @@ export interface PluginInstallInput {
 
 /**
  * What `assess()` found in a plugin artifact: the validated manifest and
- * everything an install would ask the admin to confirm (#1094).
+ * everything an install would ask the server admin to confirm (#1094).
  */
 export interface PluginInstallAssessment {
   readonly validated: PluginManifestValidationResult;
@@ -131,7 +131,7 @@ export interface PluginInstallResult {
  * The install orchestration seam (#59 Phase C2): installer authority →
  * `assess()` (manifest validation → categorical exclusions →
  * core-permission existence (step 3, DB half) → static analysis) → Critical
- * second factor → forbidden-import acknowledgement → one transaction
+ * confirmation → forbidden-import acknowledgement → one transaction
  * persisting the `Plugin` row, its `PluginPermission` catalog (fresh-install
  * rows only), and the server-scope grant seed → post-commit
  * `plugin.installed` provenance.
@@ -174,8 +174,8 @@ export class PluginInstallerService {
     const initiatedAt = new Date();
 
     // Authority first, before the resolver stats the plugins root or the
-    // directory, and before the manifest is read or analyzed: a non-admin
-    // gets no file-system signal at all (#1094).
+    // directory, and before the manifest is read or analyzed: anyone but a
+    // server admin gets no file-system signal at all (#1094).
     if (!(await this.authority.isServerAdmin(input.installerId))) {
       throw new PluginInstallAuthorityError(input.installerId);
     }
@@ -247,14 +247,15 @@ export class PluginInstallerService {
 
   /**
    * Everything an install would check about a plugin artifact, short of the
-   * admin's confirmations: manifest validation, the categorical exclusions,
-   * core-permission existence and static analysis (#1094). The artifact step
-   * calls it to show an admin what the artifact asks for, and `install()`
-   * calls it before it enforces the two confirmation gates, so both see one
-   * assessment.
+   * server admin's confirmations: manifest validation, the categorical
+   * exclusions, core-permission existence and static analysis (#1094). The
+   * artifact step calls it to show a server admin what the artifact asks for,
+   * and `install()` calls it before it enforces the two confirmation gates, so
+   * both see one assessment.
    *
    * It throws what those steps throw. It does not throw for a missing
-   * confirmation: it reports what `install()` will ask the admin to re-enter.
+   * confirmation: it reports what `install()` will ask the server admin to
+   * re-enter.
    * It writes nothing, emits nothing and takes no actor, so the caller is
    * the one to check authority first.
    */

@@ -1053,7 +1053,7 @@ Code that ships inside the server and provides what a plugin could also provide,
 _Avoid_: bundled plugin, built-in plugin
 
 **Plugin artifact**:
-The packaged, checksummed file one version of a plugin is distributed as; installing from one, by link or by upload, is planned.
+The packaged, checksummed file one version of a plugin is distributed as. A server admin installs from one by link or by upload.
 _Avoid_: package, bundle
 
 **Provenance**:
@@ -1065,7 +1065,7 @@ Adding a plugin to a server, which only server admins do. A household admin can 
 _Avoid_: household install
 
 **Install ingress**:
-Planned: the way a plugin's artifact reaches a server to be installed, from a plugin registry, by link or by upload.
+The way a plugin's artifact reaches a server to be installed, by link or by upload. A plugin registry, still to come, is the third way.
 _Avoid_: ingress on its own (data pushed to a running plugin comes in through topics)
 
 **Plugin scope**:

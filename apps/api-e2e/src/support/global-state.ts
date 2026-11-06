@@ -20,6 +20,8 @@ export interface E2EGlobalState {
   readonly mailpit?: StartedMailpit;
   readonly api?: ChildProcess;
   readonly signInProvider?: FakeSignInProvider;
+  /** The plugins root the API was given (#1094), which teardown removes. */
+  readonly pluginsRoot?: string;
 }
 
 interface E2EGlobalCarrier {
