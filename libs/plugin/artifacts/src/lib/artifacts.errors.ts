@@ -29,9 +29,10 @@ export class PluginArchiveRefusedError extends Error {
 }
 
 /**
- * The plugin artifact's bytes do not have the checksum the admin expected
- * (#1094), and nothing of them is kept. `actualSha256` is null when the
- * expected value is not a checksum at all, so there was nothing to compare.
+ * The plugin artifact's bytes do not have the checksum the server admin
+ * expected (#1094), and nothing of them is kept. `actualSha256` is null when
+ * the expected value is not a checksum at all, so there was nothing to
+ * compare.
  */
 export class PluginArtifactChecksumMismatchError extends Error {
   override readonly name = 'PluginArtifactChecksumMismatchError';
@@ -70,14 +71,14 @@ export type PluginArtifactLinkRefusal =
 const LINK_REFUSALS: Readonly<Record<PluginArtifactLinkRefusal, string>> = {
   'invalid-link':
     'The link is not one the server can use: it must be an http or https address, with no username or password in it.',
-  'blocked-by-policy': "The server's outbound policy does not allow the link's address.",
-  'redirect-blocked': "The link redirects to an address the server's outbound policy does not allow.",
+  'blocked-by-policy': "The server's outbound HTTP policy does not allow the link's address.",
+  'redirect-blocked': "The link redirects to an address the server's outbound HTTP policy does not allow.",
   'too-many-redirects': 'The link redirects too many times.',
 };
 
 /**
  * The server will not fetch the link (#1094): it is not a usable address, or
- * it leads somewhere the outbound policy refuses. Nothing is kept.
+ * it leads somewhere the outbound HTTP policy refuses. Nothing is kept.
  */
 export class PluginArtifactLinkRefusedError extends Error {
   override readonly name = 'PluginArtifactLinkRefusedError';

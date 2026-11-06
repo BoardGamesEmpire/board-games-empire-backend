@@ -56,7 +56,7 @@ describe('plugin artifact errors (#1094)', () => {
 
   it.each([
     ['invalid-link', 'no username or password'],
-    ['blocked-by-policy', 'outbound policy'],
+    ['blocked-by-policy', 'outbound HTTP policy'],
     ['redirect-blocked', 'redirects to an address'],
     ['too-many-redirects', 'too many times'],
   ] as const)('explains a link refused as %s (#1094)', (reason, wording) => {

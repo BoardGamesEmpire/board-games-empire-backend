@@ -2,20 +2,27 @@ import { AuditContextService } from '@bge/actor-context';
 import { DatabaseService } from '@bge/database';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
+  MODULE_OPTIONS_TOKEN,
   PluginConsentPresentationService,
+  PluginDirectoryResolverService,
   PluginFeatureStateService,
+  PluginGrantAuthorityService,
   PluginGrantService,
+  PluginInstallerService,
   PluginInventoryService,
   PluginLifecycleService,
   PluginUnitLifecycleService,
   PluginUpdateService,
 } from '@bge/plugin';
+import { SecureHttpService } from '@bge/secure-http';
 import { Global, Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { ClsModule } from 'nestjs-cls';
 import { I18nService } from 'nestjs-i18n';
 import { PluginExceptionFilter } from './filters/plugin-exception.filter';
+import { PluginArtifactsController } from './plugin-artifacts.controller';
 import { PluginsApiModule } from './plugins-api.module';
+import { PluginsController } from './plugins.controller';
 
 /**
  * Stand-ins for the app's global modules, visible everywhere exactly as the
@@ -39,6 +46,14 @@ import { PluginsApiModule } from './plugins-api.module';
     { provide: PluginUnitLifecycleService, useValue: {} },
     { provide: PluginFeatureStateService, useValue: {} },
     { provide: PluginInventoryService, useValue: {} },
+    // The install ingress (#1094): the receiver and the installer need the
+    // runtime's install seams and its module options, and the receiver the
+    // outbound download.
+    { provide: PluginInstallerService, useValue: {} },
+    { provide: PluginDirectoryResolverService, useValue: {} },
+    { provide: PluginGrantAuthorityService, useValue: {} },
+    { provide: MODULE_OPTIONS_TOKEN, useValue: { pluginsRoot: '/plugins', defaultLocale: 'en' } },
+    { provide: SecureHttpService, useValue: {} },
   ],
   exports: [
     I18nService,
@@ -51,6 +66,11 @@ import { PluginsApiModule } from './plugins-api.module';
     PluginUnitLifecycleService,
     PluginFeatureStateService,
     PluginInventoryService,
+    PluginInstallerService,
+    PluginDirectoryResolverService,
+    PluginGrantAuthorityService,
+    MODULE_OPTIONS_TOKEN,
+    SecureHttpService,
   ],
 })
 class StubGlobalsModule {}
@@ -80,6 +100,13 @@ describe('PluginsApiModule (DI wiring smoke test)', () => {
       .overrideProvider(DatabaseService)
       .useValue({})
       .compile();
+
+  it('lists PluginsController before PluginArtifactsController, so a plugin slugged artifacts keeps its routes (#1094)', () => {
+    const controllers = Reflect.getMetadata('controllers', PluginsApiModule) as unknown[];
+
+    expect(controllers.indexOf(PluginsController)).toBeGreaterThanOrEqual(0);
+    expect(controllers.indexOf(PluginsController)).toBeLessThan(controllers.indexOf(PluginArtifactsController));
+  });
 
   it('resolves the exception filter and its dependencies at compile time', async () => {
     const moduleRef = await compile(PluginsApiModule);

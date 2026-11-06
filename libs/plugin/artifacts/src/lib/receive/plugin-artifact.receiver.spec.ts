@@ -75,7 +75,7 @@ const NOT_A_SLUG: PluginTarballEntry[] = [
   { name: 'package/package.json', content: '{}' },
 ];
 
-/** A public address the outbound policy allows, and a private one it refuses. */
+/** A public address the outbound HTTP policy allows, and a private one it refuses. */
 const ADDRESSES: Readonly<Record<string, string>> = { [HOST]: '8.8.8.8', [BLOCKED_HOST]: '10.0.0.5' };
 
 class FakeDnsResolver implements DnsResolver {
@@ -328,7 +328,7 @@ describe('PluginArtifactReceiver (#1094)', () => {
       expect(store.recordReceived).toHaveBeenCalledWith(expect.objectContaining({ sha256 }), expect.any(Date));
     });
 
-    it('refuses a non-admin before reading a byte (#1094)', async () => {
+    it('refuses anyone but a server admin before reading a byte (#1094)', async () => {
       authority.isServerAdmin.mockResolvedValue(false);
       serve();
 
@@ -355,6 +355,47 @@ describe('PluginArtifactReceiver (#1094)', () => {
       expect(store.recordReceived).not.toHaveBeenCalled();
     });
 
+    it('logs a failed download for the operator with the host and the cause, never the full link (#1094)', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn');
+      origin()
+        .intercept({ path: `${PATH}?token=s3cret` })
+        .replyWithError(new Error('connect ECONNREFUSED'));
+
+      const err = await failure(byLink({ url: `${LINK}?token=s3cret` }));
+
+      expect(err).toBeInstanceOf(PluginArtifactDownloadFailedError);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(HOST));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('PluginArtifactDownloadFailedError'));
+      // The cause's own code, so the line is not only the mapped error's name.
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('OUTBOUND_NETWORK_ERROR'));
+      const logged = warn.mock.calls.map(([line]) => String(line)).join('\n');
+      expect(logged).not.toContain('s3cret');
+      expect(logged).not.toContain(PATH);
+    });
+
+    it('logs the reason behind an unresolvable host, so a DNS failure does not read as a policy block (#1094)', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn');
+
+      await failure(byLink({ url: `https://${UNRESOLVABLE_HOST}${PATH}?token=s3cret` }));
+
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(UNRESOLVABLE_HOST));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('reason dns-failure'));
+      expect(warn.mock.calls.map(([line]) => String(line)).join('\n')).not.toContain('s3cret');
+    });
+
+    it('logs a link that answers with an error status, with the host and the status (#1094)', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn');
+      origin()
+        .intercept({ path: `${PATH}?token=s3cret` })
+        .reply(404, 'gone');
+
+      await failure(byLink({ url: `${LINK}?token=s3cret` }));
+
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(HOST));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('HTTP status 404'));
+      expect(warn.mock.calls.map(([line]) => String(line)).join('\n')).not.toContain('s3cret');
+    });
+
     // The link is recorded on the row, then as the installed plugin's
     // provenance, which GET /plugins serves: a secret in it would leak.
     it.each([`https://user:token@${HOST}${PATH}`, `https://token@${HOST}${PATH}`, `https://:secret@${HOST}${PATH}`])(
@@ -372,7 +413,7 @@ describe('PluginArtifactReceiver (#1094)', () => {
       },
     );
 
-    it('refuses a non-admin for authority before it looks at the link, credentials and all (#1094)', async () => {
+    it('refuses anyone but a server admin for authority before it looks at the link, credentials and all (#1094)', async () => {
       authority.isServerAdmin.mockResolvedValue(false);
       serve();
 
@@ -571,7 +612,7 @@ describe('PluginArtifactReceiver (#1094)', () => {
       expect(store.recordReceived).not.toHaveBeenCalled();
     });
 
-    it('refuses a non-admin upload before reading a byte, and removes the upload (#1094)', async () => {
+    it('refuses an upload by anyone but a server admin before reading a byte, and removes the upload (#1094)', async () => {
       authority.isServerAdmin.mockResolvedValue(false);
 
       // Neither the bad checksum nor the size is reached.
@@ -687,7 +728,7 @@ describe('PluginArtifactReceiver (#1094)', () => {
         expect(store.recordReceived).not.toHaveBeenCalled();
       });
 
-      it('is left alone for a non-admin too, who is refused for authority first (#1094)', async () => {
+      it('is left alone for anyone but a server admin too, who is refused for authority first (#1094)', async () => {
         authority.isServerAdmin.mockResolvedValue(false);
         const archivePath = join(root, 'elsewhere.tgz');
         await writeFile(archivePath, bytes);
