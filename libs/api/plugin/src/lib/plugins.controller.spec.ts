@@ -115,6 +115,97 @@ describe('PluginsController (delegation)', () => {
   let abilityService: MockAbilityService;
   let scopeComposer: ScopeComposer;
 
+  // Every `:slug` route sits in exactly one of these tables. The read and
+  // write describes below pin each one's ceiling check and its unknown-slug
+  // error, and `route registration` fails a `:slug` route in neither (#985).
+  // The closures read the controller and the mocks lazily, at call time.
+  const reads = [
+    {
+      route: 'getBySlug',
+      call: (): Observable<unknown> => controller.getBySlug('demo-sink'),
+      service: () => inventory.getBySlug,
+      notFound: PluginInventoryNotFoundError,
+      slugField: 'pluginSlug',
+    },
+    {
+      route: 'consentPresentation',
+      call: (): Observable<unknown> => controller.consentPresentation('demo-sink'),
+      service: () => presentation.presentForUnitBySlug,
+      notFound: PluginConsentPresentationNotFoundError,
+      slugField: 'pluginSlug',
+    },
+    {
+      route: 'pendingUpdate',
+      call: (): Observable<unknown> => controller.pendingUpdate('demo-sink'),
+      service: () => updates.describePending,
+      notFound: PluginUpdatePluginNotFoundError,
+      slugField: 'slug',
+    },
+    {
+      route: 'featureStates',
+      call: (): Observable<unknown> => controller.featureStates('demo-sink'),
+      service: () => featureState.resolveForUnitBySlug,
+      notFound: PluginFeatureStateNotFoundError,
+      slugField: 'pluginSlug',
+    },
+  ];
+
+  const writes = [
+    {
+      route: 'decideGrant',
+      call: (): Observable<unknown> =>
+        controller.decideGrant('demo-sink', {
+          permissionSlug: 'plugin|demo-sink|manage:digest',
+          status: PluginGrantStatus.Granted,
+        }),
+      service: () => grants.decide,
+      notFound: PluginGrantPluginNotFoundError,
+      slugField: 'pluginSlug',
+    },
+    {
+      route: 'enable',
+      call: (): Observable<unknown> => controller.enable('demo-sink'),
+      service: () => lifecycle.enable,
+      notFound: PluginLifecycleNotFoundError,
+      slugField: 'slug',
+    },
+    {
+      route: 'disable',
+      call: (): Observable<unknown> => controller.disable('demo-sink'),
+      service: () => lifecycle.disable,
+      notFound: PluginLifecycleNotFoundError,
+      slugField: 'slug',
+    },
+    {
+      route: 'updateConfig',
+      call: (): Observable<unknown> => controller.updateConfig('demo-sink', { config: {} }),
+      service: () => lifecycle.updateConfig,
+      notFound: PluginLifecycleNotFoundError,
+      slugField: 'slug',
+    },
+    {
+      route: 'uninstall',
+      call: (): Observable<unknown> => controller.uninstall('demo-sink', {}),
+      service: () => lifecycle.uninstall,
+      notFound: PluginLifecycleNotFoundError,
+      slugField: 'slug',
+    },
+    {
+      route: 'approveUpdate',
+      call: (): Observable<unknown> => controller.approveUpdate('demo-sink', { stagingId: 'staging-a' }),
+      service: () => updates.approve,
+      notFound: PluginUpdatePluginNotFoundError,
+      slugField: 'slug',
+    },
+    {
+      route: 'rejectUpdate',
+      call: (): Observable<unknown> => controller.rejectUpdate('demo-sink', { stagingId: 'staging-a' }),
+      service: () => updates.reject,
+      notFound: PluginUpdatePluginNotFoundError,
+      slugField: 'slug',
+    },
+  ];
+
   beforeEach(() => {
     lifecycle = {
       enable: jest.fn().mockResolvedValue(PLUGIN),
@@ -499,39 +590,9 @@ describe('PluginsController (delegation)', () => {
   // services read by slug alone. So each route resolves its slug under the
   // actor's ceiling first, composed as the server list composes it, and
   // answers a slug outside it with the route's own not-found error: a key
-  // cannot tell a plugin outside its scope from one never installed.
+  // cannot tell a plugin outside its scope from one never installed. The
+  // routes are the `reads` table at the top of this file.
   describe("the single reads resolve their slug under the actor's ceiling (#789)", () => {
-    const reads = [
-      {
-        route: 'getBySlug',
-        call: (): Observable<unknown> => controller.getBySlug('demo-sink'),
-        service: () => inventory.getBySlug,
-        notFound: PluginInventoryNotFoundError,
-        slugField: 'pluginSlug',
-      },
-      {
-        route: 'consentPresentation',
-        call: (): Observable<unknown> => controller.consentPresentation('demo-sink'),
-        service: () => presentation.presentForUnitBySlug,
-        notFound: PluginConsentPresentationNotFoundError,
-        slugField: 'pluginSlug',
-      },
-      {
-        route: 'pendingUpdate',
-        call: (): Observable<unknown> => controller.pendingUpdate('demo-sink'),
-        service: () => updates.describePending,
-        notFound: PluginUpdatePluginNotFoundError,
-        slugField: 'slug',
-      },
-      {
-        route: 'featureStates',
-        call: (): Observable<unknown> => controller.featureStates('demo-sink'),
-        service: () => featureState.resolveForUnitBySlug,
-        notFound: PluginFeatureStateNotFoundError,
-        slugField: 'pluginSlug',
-      },
-    ];
-
     it.each(reads)(
       'answers $route outside the ceiling with its own not-found error, before its service',
       async ({ call, service, notFound, slugField }) => {
@@ -569,64 +630,9 @@ describe('PluginsController (delegation)', () => {
   // The write gate is type-level too, and the service seam checks only that
   // the acting user is a server admin: it never sees the key. So an Admin's
   // key pinned to one plugin wrote every other until each write resolved its
-  // slug under the `manage` ceiling first, as the reads do under `read`.
+  // slug under the `manage` ceiling first, as the reads do under `read`. The
+  // routes are the `writes` table at the top of this file.
   describe("the writes resolve their slug under the actor's manage ceiling (#978)", () => {
-    const writes = [
-      {
-        route: 'decideGrant',
-        call: (): Observable<unknown> =>
-          controller.decideGrant('demo-sink', {
-            permissionSlug: 'plugin|demo-sink|manage:digest',
-            status: PluginGrantStatus.Granted,
-          }),
-        service: () => grants.decide,
-        notFound: PluginGrantPluginNotFoundError,
-        slugField: 'pluginSlug',
-      },
-      {
-        route: 'enable',
-        call: (): Observable<unknown> => controller.enable('demo-sink'),
-        service: () => lifecycle.enable,
-        notFound: PluginLifecycleNotFoundError,
-        slugField: 'slug',
-      },
-      {
-        route: 'disable',
-        call: (): Observable<unknown> => controller.disable('demo-sink'),
-        service: () => lifecycle.disable,
-        notFound: PluginLifecycleNotFoundError,
-        slugField: 'slug',
-      },
-      {
-        route: 'updateConfig',
-        call: (): Observable<unknown> => controller.updateConfig('demo-sink', { config: {} }),
-        service: () => lifecycle.updateConfig,
-        notFound: PluginLifecycleNotFoundError,
-        slugField: 'slug',
-      },
-      {
-        route: 'uninstall',
-        call: (): Observable<unknown> => controller.uninstall('demo-sink', {}),
-        service: () => lifecycle.uninstall,
-        notFound: PluginLifecycleNotFoundError,
-        slugField: 'slug',
-      },
-      {
-        route: 'approveUpdate',
-        call: (): Observable<unknown> => controller.approveUpdate('demo-sink', { stagingId: 'staging-a' }),
-        service: () => updates.approve,
-        notFound: PluginUpdatePluginNotFoundError,
-        slugField: 'slug',
-      },
-      {
-        route: 'rejectUpdate',
-        call: (): Observable<unknown> => controller.rejectUpdate('demo-sink', { stagingId: 'staging-a' }),
-        service: () => updates.reject,
-        notFound: PluginUpdatePluginNotFoundError,
-        slugField: 'slug',
-      },
-    ];
-
     it.each(writes)(
       'answers $route outside the ceiling with its own not-found error, before its service',
       async ({ call, service, notFound, slugField }) => {
@@ -763,6 +769,23 @@ describe('PluginsController (delegation)', () => {
         // of a one-segment literal route would shadow it.
         'getBySlug',
       ]);
+    });
+
+    // Every `:slug` route must sit in `reads` or `writes`, whose tests pin its
+    // assertUnderCeiling call and its unknown-slug error. Listing a new handler
+    // in the registration list above is not enough. A route may take an array
+    // of paths, so each one is read (#985).
+    it('places every :slug route in the reads or writes ceiling table (#985)', () => {
+      const slugRoutes = Object.getOwnPropertyNames(PluginsController.prototype)
+        .filter((name) => name !== 'constructor')
+        .filter((name) => {
+          const path: unknown = Reflect.getMetadata('path', PluginsController.prototype[name as never]);
+          return [path].flat().some((each) => typeof each === 'string' && each.includes(':slug'));
+        })
+        .sort();
+
+      expect(slugRoutes).toEqual([...reads, ...writes].map(({ route }) => route).sort());
+      expect(slugRoutes).toHaveLength(11);
     });
   });
 });
