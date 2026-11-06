@@ -60,6 +60,19 @@ export class PluginArtifactStore {
     await this.db.pluginArtifact.deleteMany({ where: { sha256 } });
   }
 
+  /**
+   * Deletes every row whose expiry has come, and says how many: the artifact
+   * sweep's first step (#1094). From then on nothing names the directory of
+   * an artifact nobody installed, and the sweep removes it once it is older
+   * than its grace period. `lte` here and `gt` in `findLive` and
+   * `refreshForInstall` agree on the instant a row expires, so a refresh the
+   * deletion races either finds the row live and keeps it, or finds it gone.
+   */
+  async removeExpired(now: Date): Promise<number> {
+    const { count } = await this.db.pluginArtifact.deleteMany({ where: { expiresAt: { lte: now } } });
+    return count;
+  }
+
   private expiryFrom(now: Date): Date {
     return new Date(now.getTime() + PLUGIN_ARTIFACT_TTL_MS);
   }

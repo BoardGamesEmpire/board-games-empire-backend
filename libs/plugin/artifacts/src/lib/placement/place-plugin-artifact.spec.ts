@@ -1,8 +1,17 @@
 import { buildPluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
-import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { placePluginArtifact } from './place-plugin-artifact';
+
+// The real rename, behind a mock one test races.
+jest.mock('node:fs/promises', () => {
+  const actual = jest.requireActual('node:fs/promises');
+  return { ...actual, rename: jest.fn(actual.rename) };
+});
+
+const { rename: actualRename, rmdir: actualRmdir } =
+  jest.requireActual<typeof import('node:fs/promises')>('node:fs/promises');
 
 describe('placePluginArtifact (#1094)', () => {
   let root: string;
@@ -13,6 +22,7 @@ describe('placePluginArtifact (#1094)', () => {
   });
 
   afterEach(async () => {
+    jest.mocked(rename).mockReset().mockImplementation(actualRename);
     await rm(root, { recursive: true, force: true });
   });
 
@@ -64,6 +74,30 @@ describe('placePluginArtifact (#1094)', () => {
     );
 
     expect(Date.now() - (await stat(target)).mtimeMs).toBeLessThan(60_000);
+  });
+
+  it('makes the slug directory again and retries once when something removed it before the rename (#1094)', async () => {
+    const dir = await extracted('one', 'first');
+    jest.mocked(rename).mockImplementationOnce(async (from, to) => {
+      // Something else, such as a manual rmdir, removes the slug directory between the mkdir and the rename.
+      await actualRmdir(join(root, 'demo-sink'));
+      return actualRename(from, to);
+    });
+
+    await expect(placePluginArtifact(dir, root, 'demo-sink', sha256)).resolves.toBe('placed');
+
+    expect(await readFile(join(root, 'demo-sink', sha256, 'manifest.json'), 'utf8')).toBe('first');
+    expect(await exists(dir)).toBe(false);
+    expect(rename).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets a second failure of the rename propagate (#1094)', async () => {
+    // Nothing was extracted there, so both attempts fail.
+    await expect(
+      placePluginArtifact(join(root, '.incoming', 'missing'), root, 'demo-sink', sha256),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+
+    expect(rename).toHaveBeenCalledTimes(2);
   });
 
   it('keeps different checksums of one slug side by side (#1094)', async () => {
