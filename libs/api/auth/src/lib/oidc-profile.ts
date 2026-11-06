@@ -34,17 +34,18 @@ function localPart(email: string | undefined): string | undefined {
 }
 
 /**
- * Maps a sign-in provider's claims onto the user row (#912). Raw claims are
- * present whether better-auth got the profile from the userinfo endpoint or
- * from the ID token.
+ * Maps a sign-in provider's claims onto the user row (#912). The claims are
+ * the ID token's merged with the provider's UserInfo answer; where both give
+ * a claim, the ID token's wins (#993).
  *
  * The username falls back to the email's local part last because better-auth
  * redirects with `name_is_missing` when it has no name at all. better-auth
  * applies this at the first sign-in only, since `overrideUserInfo` is unset,
  * so a later rename on the server survives.
  *
- * The picture is not mapped: better-auth already takes `image` from the
- * `picture` claim on both paths, and two sources for it could drift.
+ * The picture is not mapped: the merged claims already carry the `picture`
+ * claim as `image`, which better-auth takes, and two sources for it could
+ * drift.
  */
 export function mapOidcProfile(profile: Record<string, unknown>): OidcProfileFields {
   const fields: OidcProfileFields = {

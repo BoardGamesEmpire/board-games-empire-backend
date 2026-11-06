@@ -467,8 +467,20 @@ describe("authFactory's sign-in providers", () => {
     for (const entry of plugin?.options.config ?? []) {
       expect(entry['scopes']).toEqual(['openid', 'profile', 'email']);
       expect(entry['mapProfileToUser']).toBe(mapOidcProfile);
+      expect(entry['getUserInfo']).toEqual(expect.any(Function));
       expect(entry['overrideUserInfo']).toBeUndefined();
     }
+  });
+
+  // Each provider reads its own discovery document for the UserInfo endpoint
+  // and keeps it, so a shared function would ask one provider's UserInfo with
+  // another's access token.
+  it('gives each provider a getUserInfo of its own, which merges UserInfo into the ID token (#993)', () => {
+    const plugin = genericOAuthOf(authFactory({} as PrismaClient, withProviders(providers)));
+
+    const [google, authentik] = plugin?.options.config ?? [];
+    expect(google['getUserInfo']).toEqual(expect.any(Function));
+    expect(google['getUserInfo']).not.toBe(authentik['getUserInfo']);
   });
 
   it('adds no genericOAuth plugin without providers (#912)', () => {

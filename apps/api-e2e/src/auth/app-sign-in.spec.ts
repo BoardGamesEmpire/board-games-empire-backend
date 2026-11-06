@@ -358,7 +358,8 @@ describe('signing in from a native app (#1019)', () => {
       const recorded = await ticketOf(result.ticket);
       expect(recorded.nonce).toEqual(expect.any(String));
       expect(recorded.nonce).toBe(result.authorization.searchParams.get('nonce'));
-      expect(recorded.userInfoCalls).toBe(0);
+      // UserInfo is asked as well, for what the token leaves out (#993).
+      expect(recorded.userInfoCalls).toBe(1);
     });
 
     it.each(ID_TOKEN_FAULTS)('tells the app when the provider’s ID token is refused: %s (#1019)', async (idToken) => {
@@ -384,7 +385,7 @@ describe('signing in from a native app (#1019)', () => {
     // cookie, and the app learns the sign-in must start again (#1050).
     it('tells the app when its sign-in outlived the state cookie (#1050)', async () => {
       const start = await startAppSignIn(baseUrl, { state: 'kept' });
-      const ticket = await registerTicket(fakeProviderUrl(), claimsOf(freshIdentity()), undefined);
+      const ticket = await registerTicket(fakeProviderUrl(), claimsOf(freshIdentity()));
       const authorize = new URL(start.location);
       authorize.searchParams.set('ticket', ticket);
       const callbackUrl = await nextLocation(baseUrl, authorize);

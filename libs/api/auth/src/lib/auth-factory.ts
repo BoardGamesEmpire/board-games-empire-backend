@@ -5,7 +5,7 @@ import type { AuditContextService, SystemActorScope } from '@bge/actor-context';
 import type { PrismaClient } from '@bge/database';
 import { isTrue, splitTrimFilter } from '@bge/env';
 import type { I18nTranslations } from '@bge/i18n';
-import { Logger } from '@nestjs/common';
+import { Logger, type LoggerService } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { betterAuth } from 'better-auth';
@@ -41,6 +41,7 @@ import { createIdTokenGate } from './id-token-gate';
 import { mapOidcProfile, OIDC_SCOPES } from './oidc-profile';
 import { createProviderEmailGate } from './provider-email-gate';
 import { providerPictureOnly } from './provider-picture';
+import { createProviderUserInfo } from './provider-user-info';
 import { createSettingGates, settingGateDeps } from './setting-gates';
 import { createSignOutHook } from './sign-out-hook';
 import { createUsernameVariants } from './username-variant';
@@ -208,7 +209,9 @@ export function authFactory(
     passkey(),
     twoFactor(),
 
-    ...(providers.length > 0 ? [genericOAuth({ config: providers.map(toGenericOAuthConfig) })] : []),
+    ...(providers.length > 0
+      ? [genericOAuth({ config: providers.map((provider) => toGenericOAuthConfig(provider, logger)) })]
+      : []),
 
     ...(usingSwagger ? [openAPI()] : []),
 
@@ -361,7 +364,7 @@ function oidcProvidersFor(configService?: ConfigService): readonly OidcProviderC
   return readOidcProviders();
 }
 
-function toGenericOAuthConfig(provider: OidcProviderConfig) {
+function toGenericOAuthConfig(provider: OidcProviderConfig, logger: Pick<LoggerService, 'warn'>) {
   return {
     providerId: provider.id,
     discoveryUrl: provider.discoveryUrl,
@@ -369,6 +372,10 @@ function toGenericOAuthConfig(provider: OidcProviderConfig) {
     clientSecret: provider.clientSecret,
     scopes: [...OIDC_SCOPES],
     mapProfileToUser: mapOidcProfile,
+    // The ID token's claims merged with the provider's UserInfo answer; why
+    // is on createProviderUserInfo (#993). One per provider: each keeps the
+    // UserInfo endpoint its own discovery document lists.
+    getUserInfo: createProviderUserInfo(provider, { logger }),
     // Every provider here is an OpenID Connect one, so `sub` is the user's
     // identity there. better-auth's default reads an `id` claim instead when
     // discovery omits `id_token_signing_alg_values_supported`, which refuses

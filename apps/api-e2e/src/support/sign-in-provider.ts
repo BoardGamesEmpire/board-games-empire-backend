@@ -48,6 +48,9 @@ export interface ProviderSignInOptions {
   /** Spoils the ID token the provider sends, when it sends one; a sound one unless set. */
   readonly idToken?: IdTokenFault;
 
+  /** What `/userinfo` answers instead of the claims; the claims unless set (#993). */
+  readonly userInfo?: Record<string, unknown>;
+
   /** Where the callback sends the browser on success; `/` unless set. */
   readonly callbackURL?: string;
 
@@ -75,17 +78,26 @@ export function sessionCookieOf(setCookie: readonly string[] | string | undefine
   return session ?? '';
 }
 
+/** How the fake sign-in provider answers one sign-in, beyond the claims. */
+export interface TicketOptions {
+  /** Spoils the ID token the provider sends, when it sends one; a sound one unless set. */
+  readonly idToken?: IdTokenFault;
+
+  /** What `/userinfo` answers instead of the claims; the claims unless set (#993). */
+  readonly userInfo?: Record<string, unknown>;
+}
+
 /** Registers what the fake sign-in provider says about the user, and returns the sign-in's ticket. */
 export async function registerTicket(
   providerUrl: string,
   claims: Record<string, unknown>,
-  idToken: IdTokenFault | undefined,
+  options: TicketOptions = {},
 ): Promise<string> {
-  const query = idToken === undefined ? '' : `?idToken=${idToken}`;
+  const query = options.idToken === undefined ? '' : `?idToken=${options.idToken}`;
   const response = await fetch(`${providerUrl}/tickets${query}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(claims),
+    body: JSON.stringify({ claims, userInfo: options.userInfo }),
   });
   const body: unknown = await response.json();
 
@@ -124,7 +136,10 @@ export async function signInThroughProvider(
     throw new Error(`starting a provider sign-in failed: ${start.status} ${JSON.stringify(start.body)}`);
   }
 
-  const ticket = await registerTicket(fakeProviderUrl(), claims, options.idToken);
+  const ticket = await registerTicket(fakeProviderUrl(), claims, {
+    idToken: options.idToken,
+    userInfo: options.userInfo,
+  });
 
   const authorize = new URL(start.body.url);
   authorize.searchParams.set('ticket', ticket);
