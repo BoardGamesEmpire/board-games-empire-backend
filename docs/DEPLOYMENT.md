@@ -132,6 +132,8 @@ Only the hostname is compared, ignoring case, so ports don't matter. `TRUSTED_OR
 
 **What the proxy must do:** forward the client's `Host` unchanged. The api ignores `X-Forwarded-Host`, because a web page can set that header on its own requests.
 
+**Request body size:** allow a request body a little over 100 MiB on the api's routes. A plugin artifact posted by upload is up to 100 MiB (#1094), and a media upload is up to 50 MiB. nginx's `client_max_body_size` defaults to 1 MiB, so with it left alone an upload answers 413 from the proxy before the api sees it; set `client_max_body_size 101m;`. The extra is deliberate: an upload travels in a multipart body slightly larger than the file, so a limit of exactly 100 MiB can refuse a plugin artifact at its size limit. The api has limits of its own: a request may take up to an hour (`requestTimeout`), and a body that sends less than 64 KiB in a minute while the api is reading it is cut off, so a proxy that buffers a slow upload before it forwards it should not time out first.
+
 **Internal callers:** Compose healthchecks and Kubernetes probes that use an IP address keep working. A scraper that targets a service name, such as `api:33333`, adds that name to `TRUSTED_ORIGINS` or targets an IP address.
 
 **Under Compose:** `TRUSTED_ORIGINS` defaults to `BGE_PUBLIC_URL`. To add a name, set `TRUSTED_ORIGINS` in your `.env`. The api still answers at `BGE_PUBLIC_URL` and trusts it for sign-in, so that value needn't be repeated.

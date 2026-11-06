@@ -1,5 +1,6 @@
 // The subpath, for the reason given in global-setup.
 import { stopChild } from '@bge/testing-e2e/child-process';
+import { rm } from 'node:fs/promises';
 import { getE2EGlobalState } from './global-state';
 
 /**
@@ -12,16 +13,22 @@ import { getE2EGlobalState } from './global-state';
  * reaper.)
  */
 export default async function globalTeardown(): Promise<void> {
-  const { postgres, redis, api, signInProvider } = getE2EGlobalState();
+  const { postgres, redis, api, signInProvider, pluginsRoot } = getE2EGlobalState();
 
   await stopChild(api);
 
-  const results = await Promise.allSettled([signInProvider?.close(), postgres?.stop(), redis?.stop()]);
+  // After the API has stopped, so nothing is writing into it.
+  const results = await Promise.allSettled([
+    signInProvider?.close(),
+    postgres?.stop(),
+    redis?.stop(),
+    pluginsRoot === undefined ? undefined : rm(pluginsRoot, { recursive: true, force: true }),
+  ]);
 
   const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
   if (failures.length > 0) {
     throw new Error(
-      `e2e teardown failed to stop ${failures.length} of the fake sign-in provider and the containers: ${failures.map((f) => String(f.reason)).join('; ')}`,
+      `e2e teardown failed to stop ${failures.length} of the fake sign-in provider, the containers and the plugins root: ${failures.map((f) => String(f.reason)).join('; ')}`,
     );
   }
 

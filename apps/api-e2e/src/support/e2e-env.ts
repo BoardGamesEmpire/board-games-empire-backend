@@ -57,6 +57,13 @@ export const E2E_BASE_URL_VAR = 'BGE_E2E_BASE_URL';
  */
 export const API_PORT_VAR = 'PORT';
 
+/**
+ * The directory the harness gives the API as its plugins root (#1094), made
+ * fresh by `global-setup` for each run. Specs read it back to see where an
+ * installed or posted plugin artifact landed on disk.
+ */
+export const E2E_PLUGINS_ROOT_VAR = 'BGE_E2E_PLUGINS_ROOT';
+
 export const POSTGRES_IMAGE = 'postgres:17-alpine';
 export const REDIS_IMAGE = 'redis:7-alpine';
 
@@ -149,8 +156,13 @@ export const API_CONFIGURED_SERVER_NAME = 'bge-e2e.test';
  * developer's `.env` may turn it on, and then every cookie is accepted from
  * any origin: the WebSocket specs that prove a cookie from an untrusted or
  * missing origin is refused (#511) would fail on that machine alone.
+ *
+ * `PLUGINS_ROOT` is the harness's own directory, not the `./data/plugins` the
+ * server would default to inside the checkout: the install ingress writes there
+ * (#1094), and a run must neither leave plugin artifacts in the working tree
+ * nor read ones an earlier run left.
  */
-export function apiEnvOverrides(baseUrl: string, port: number): Record<string, string> {
+export function apiEnvOverrides(baseUrl: string, port: number, pluginsRoot: string): Record<string, string> {
   const trustedOrigins = [baseUrl, baseUrl.replace('127.0.0.1', 'localhost'), `https://${API_CONFIGURED_SERVER_NAME}`];
 
   return {
@@ -161,6 +173,7 @@ export function apiEnvOverrides(baseUrl: string, port: number): Record<string, s
     THROTTLE_LIMIT: String(API_THROTTLE_LIMIT),
     THROTTLE_TTL_MS: String(API_THROTTLE_TTL_MS),
     DISABLE_ORIGIN_CHECK: 'false',
+    PLUGINS_ROOT: pluginsRoot,
   };
 }
 

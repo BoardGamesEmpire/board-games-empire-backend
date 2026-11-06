@@ -8,8 +8,8 @@ import { ConfigurableModuleBuilder } from '@nestjs/common';
 export interface PluginModuleOptions {
   /**
    * Root directory for installed plugins, one directory per plugin artifact
-   * (`<pluginsRoot>/<slug>/<sha256>`, #224), which the install ingress is to
-   * populate (planned, #1094). The only one: no plugin ships inside the server
+   * (`<pluginsRoot>/<slug>/<sha256>`, #224), which the install ingress
+   * populates (#1094). The only one: no plugin ships inside the server
    * (#696).
    */
   readonly pluginsRoot: string;
