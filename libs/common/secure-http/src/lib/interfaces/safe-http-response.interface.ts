@@ -43,3 +43,18 @@ export interface SafeHttpResponse<T = unknown> {
   /** Number of redirects followed (0 if the original URL responded directly). */
   redirectCount: number;
 }
+
+/**
+ * Result of `SafeHttpService.download`. Like `SafeHttpResponse`, any HTTP
+ * status is a result, not an error. Only a 2xx answer is written; any other
+ * status has `written: null` and leaves no file.
+ */
+export interface SafeHttpDownloadResult {
+  status: number;
+  headers: Readonly<Record<string, string>>;
+  finalUrl: string;
+  redirectCount: number;
+  durationMs: number;
+  /** What reached the file (2xx only): its length and lowercase hex SHA-256. */
+  written: { bytes: number; sha256: string } | null;
+}

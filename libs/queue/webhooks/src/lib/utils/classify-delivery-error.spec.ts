@@ -4,6 +4,7 @@ import {
   RedirectLimitExceededError,
   RedirectToDisallowedTargetError,
   RequestTimeoutError,
+  ResponseTooLargeError,
   SsrfRejectionError,
 } from '@bge/secure-http';
 import { WebhookDeliveryFailedError } from '../errors/webhook-delivery-failed.error';
@@ -24,6 +25,11 @@ describe('classifyDeliveryError', () => {
 
   it('classifies an outbound network error', () => {
     const result = classifyDeliveryError(new OutboundNetworkError('https://example.com/hook', new Error('ECONNRESET')));
+    expect(result.code).toBe(WebhookDeliveryErrorCode.NetworkError);
+  });
+
+  it('classifies an answer whose body ran past the size limit as a network error, as before it had its own code (#1094)', () => {
+    const result = classifyDeliveryError(new ResponseTooLargeError('https://example.com/hook', 10 * 1024 * 1024));
     expect(result.code).toBe(WebhookDeliveryErrorCode.NetworkError);
   });
 

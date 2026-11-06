@@ -76,3 +76,36 @@ export interface SafeHttpRequestOptions {
    */
   signal?: AbortSignal;
 }
+
+/**
+ * Options for `SafeHttpService.download`. The body is streamed to
+ * `destination` instead of being held in memory, so the byte cap is the
+ * caller's, not the 10 MiB ceiling of `request()`. There is no retry.
+ */
+export interface SafeHttpDownloadOptions {
+  /**
+   * File to write. It is created exclusively (`wx`): an existing path is an
+   * error, and is left untouched. On any failure after creation it is removed.
+   */
+  destination: string;
+
+  /** Most bytes the body may hold. Past it the download fails and no file stays. */
+  maxBytes: number;
+
+  /**
+   * One time limit for the whole transfer, counted from the call. It cuts off
+   * every hop's connection, its answer and the body as they arrive. The
+   * outbound HTTP policy's address lookup before each hop is not cut off by
+   * it, though the time it takes counts: the resolver's own timeouts bound the
+   * lookup.
+   */
+  timeoutMs: number;
+
+  headers?: Record<string, string>;
+
+  /** Per-download redirect cap. Overrides the policy default. */
+  maxRedirects?: number;
+
+  /** Caller-controlled cancellation. Composes with the time limit. */
+  signal?: AbortSignal;
+}
