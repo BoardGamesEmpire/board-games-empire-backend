@@ -5,6 +5,7 @@ import type { PluginArtifactDirectory, PluginContext } from '@boardgamesempire/p
 import { PluginEvent, buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
 import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { validatePluginManifest } from '@boardgamesempire/plugin-manifest';
+import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -15,6 +16,7 @@ import { PluginDisabledEvent, PluginLoadFailedEvent } from '../events/plugin.eve
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './plugin-instance-registry';
+import { PluginLoadRecorder } from './plugin-load-recorder.service';
 import { PluginLoaderService } from './plugin-loader.service';
 import type { PluginModuleImporter } from './plugin-module-importer';
 
@@ -37,6 +39,7 @@ describe('PluginLoaderService', () => {
   let emitter: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
   let systemActorScope: jest.Mocked<Pick<SystemActorScope, 'run'>>;
   let pluginActorScope: jest.Mocked<Pick<PluginActorScope, 'run'>>;
+  let recorder: jest.Mocked<Pick<PluginLoadRecorder, 'record'>>;
   let loader: PluginLoaderService;
 
   const context: PluginContext = {} as PluginContext;
@@ -98,6 +101,7 @@ describe('PluginLoaderService', () => {
     pluginActorScope = {
       run: jest.fn(<T>(_pluginId: string, _unit: unknown, _reason: string, fn: () => T): T => fn()),
     } as unknown as jest.Mocked<Pick<PluginActorScope, 'run'>>;
+    recorder = { record: jest.fn().mockResolvedValue(undefined) };
     validateMock.mockReturnValue({
       manifest,
       permissionChecks: [],
@@ -116,6 +120,7 @@ describe('PluginLoaderService', () => {
       emitter as unknown as EventEmitter2,
       systemActorScope as unknown as SystemActorScope,
       pluginActorScope as unknown as PluginActorScope,
+      recorder as unknown as PluginLoadRecorder,
       options,
     );
   });
@@ -253,6 +258,71 @@ describe('PluginLoaderService', () => {
       await loader.loadAllEnabled();
 
       expect(db.plugin.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('load records (#1094)', () => {
+    const loadDemo = async (): Promise<Plugin> => {
+      const row = makePluginRow();
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
+      importer.importModule.mockResolvedValue({ default: jest.fn().mockReturnValue({}) });
+
+      return row;
+    };
+
+    it('records the loaded artifact after the plugin registers, from the directory it ran (#1094)', async () => {
+      const row = await loadDemo();
+      recorder.record.mockImplementation(() => {
+        // The plugin is already registered when its record is written.
+        expect(registry.has(row.slug)).toBe(true);
+        return Promise.resolve();
+      });
+
+      await loader.loadAllEnabled();
+
+      expect(recorder.record).toHaveBeenCalledTimes(1);
+      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'));
+      expect(registry.resolve(row.slug).sha256).toBe(sha('a'));
+    });
+
+    it('a failed record does not quarantine the plugin, and the loader retries it once (#1094)', async () => {
+      const row = await loadDemo();
+      recorder.record.mockRejectedValueOnce(new Error('db blip')).mockResolvedValueOnce(undefined);
+
+      await loader.loadAllEnabled();
+
+      expect(recorder.record).toHaveBeenCalledTimes(2);
+      expect(registry.isEnabled(row.slug)).toBe(true);
+      expect(db.plugin.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('a failed record does not quarantine the plugin when the retry fails too (#1094)', async () => {
+      const row = await loadDemo();
+      recorder.record.mockRejectedValue(new Error('db down'));
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+
+      await loader.loadAllEnabled();
+
+      expect(recorder.record).toHaveBeenCalledTimes(2);
+      expect(registry.isEnabled(row.slug)).toBe(true);
+      expect(configService.evict).not.toHaveBeenCalled();
+      expect(db.plugin.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(expect.stringContaining(`'${row.slug}'`));
+      error.mockRestore();
+    });
+
+    it('records nothing for a plugin that fails to load (#1094)', async () => {
+      const row = makePluginRow();
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
+      importer.importModule.mockRejectedValue(new Error('import failed'));
+
+      await loader.loadAllEnabled();
+
+      expect(recorder.record).not.toHaveBeenCalled();
     });
   });
 

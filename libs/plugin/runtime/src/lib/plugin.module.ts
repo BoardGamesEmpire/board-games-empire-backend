@@ -17,6 +17,7 @@ import { PluginLifecycleListener } from './lifecycle/plugin-lifecycle.listener';
 import { PluginLifecycleService } from './lifecycle/plugin-lifecycle.service';
 import { PluginDirectoryResolverService } from './loader/plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './loader/plugin-instance-registry';
+import { PluginLoadRecorder } from './loader/plugin-load-recorder.service';
 import { PluginLoaderService } from './loader/plugin-loader.service';
 import { DynamicImportPluginModuleImporter, PLUGIN_MODULE_IMPORTER } from './loader/plugin-module-importer';
 import { StoredManifestRequestedPermissionsReader } from './manifest/stored-manifest-requested-permissions.reader';
@@ -71,6 +72,7 @@ import { PluginUpdateService } from './update/plugin-update.service';
     PluginLifecycleListener,
     PluginLifecycleService,
     PluginLoaderService,
+    PluginLoadRecorder,
     PluginStaticAnalysisService,
     PluginUnitLifecycleService,
     PluginUpdateService,
@@ -101,10 +103,10 @@ import { PluginUpdateService } from './update/plugin-update.service';
     PLUGIN_REQUESTED_PERMISSIONS_READER,
     // The plugin artifacts lib (#1094) places a received artifact under the
     // plugins root, which these options name, and confirms the directory
-    // with the resolver before it assesses it. It refuses a non-admin with
-    // the authority check before it reads a byte. It relies on these global
-    // exports: importing this module would build a second runtime with no
-    // options.
+    // with the resolver before it assesses it. It refuses anyone but a server
+    // admin with the authority check before it reads a byte. It relies on
+    // these global exports: importing this module would build a second
+    // runtime with no options.
     MODULE_OPTIONS_TOKEN,
     PluginDirectoryResolverService,
     PluginGrantAuthorityService,
