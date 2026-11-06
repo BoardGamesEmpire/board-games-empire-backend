@@ -27,7 +27,7 @@ describe('system settings read shape', () => {
     );
   });
 
-  it('publishes the row id and the twelve settings', () => {
+  it('publishes the row id and each setting', () => {
     expect(Object.keys(SYSTEM_SETTINGS_SELECT).sort()).toEqual(
       [
         'id',
@@ -35,6 +35,7 @@ describe('system settings read shape', () => {
         'allowPasswordResets',
         'allowUserRegistration',
         'allowUsernameChange',
+        'providerLinkingPolicy',
         'feedbackReportRetentionDays',
         'feedbackReportServerRedactionEnabled',
         'requireContributionApproval',

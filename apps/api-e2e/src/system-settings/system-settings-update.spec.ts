@@ -1,4 +1,4 @@
-import { Reach } from '@bge/database';
+import { ProviderLinkingPolicy, Reach } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -33,6 +33,7 @@ describe('system settings update', () => {
     allowPasswordResets: true,
     allowUserRegistration: true,
     allowUsernameChange: true,
+    providerLinkingPolicy: true,
     feedbackReportRetentionDays: true,
     feedbackReportServerRedactionEnabled: true,
     requireContributionApproval: true,
@@ -132,6 +133,11 @@ describe('system settings update', () => {
         reviewGatewayMechanics: !original.reviewGatewayMechanics,
         householdInviteePolicy: differentFrom(original.householdInviteePolicy, Reach.Friends, Reach.Public),
         eventInviteePolicy: differentFrom(original.eventInviteePolicy, Reach.Friends, Reach.Public),
+        providerLinkingPolicy: differentFrom(
+          original.providerLinkingPolicy,
+          ProviderLinkingPolicy.AutomaticWhenVerified,
+          ProviderLinkingPolicy.SignedIn,
+        ),
       };
 
       const { body } = await patch(admin, changed).expect(200);
@@ -148,6 +154,28 @@ describe('system settings update', () => {
 
       expect(body.settings).toMatchObject(changed);
       await expect(readSettings()).resolves.toEqual({ ...original, ...changed });
+    });
+
+    it('sets the provider linking policy, and refuses a value it does not know (#913)', async () => {
+      const admin = await actors.admin();
+      const changed = {
+        providerLinkingPolicy: differentFrom(
+          original.providerLinkingPolicy,
+          ProviderLinkingPolicy.AutomaticWhenVerified,
+          ProviderLinkingPolicy.SignedIn,
+        ),
+      };
+
+      const { body } = await patch(admin, changed).expect(200);
+
+      expect(body.settings).toMatchObject(changed);
+      await expect(readSettings()).resolves.toEqual({ ...original, ...changed });
+
+      await patch(admin, { providerLinkingPolicy: 'Automatic' }).expect(400);
+      await expect(readSettings()).resolves.toEqual({ ...original, ...changed });
+
+      await patch(admin, { providerLinkingPolicy: original.providerLinkingPolicy }).expect(200);
+      await expect(readSettings()).resolves.toEqual(original);
     });
 
     it('accepts a century for each day count', async () => {

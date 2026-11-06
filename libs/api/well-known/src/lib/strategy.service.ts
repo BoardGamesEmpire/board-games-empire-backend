@@ -35,7 +35,7 @@ export class StrategyService {
     // switch advertised below is then the one they enforce (#585).
     const settings = await this.db.systemSetting.findUnique({
       where: { singleton: true },
-      select: { identifier: true, name: true, allowUserRegistration: true },
+      select: { identifier: true, name: true, allowUserRegistration: true, providerLinkingPolicy: true },
     });
     assert(settings, 'System settings not found in database');
 
@@ -68,6 +68,9 @@ export class StrategyService {
     dto.bgeAnonymousAuthSupported = settings.allowUserRegistration;
 
     dto.strategies = this.buildStrategies(settings.allowUserRegistration);
+
+    // The same column the auth gate reads, so what is advertised is what is enforced (#913).
+    dto.bgeProviderLinkingPolicy = settings.providerLinkingPolicy;
 
     return dto;
   }

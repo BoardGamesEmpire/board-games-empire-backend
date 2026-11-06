@@ -83,8 +83,9 @@ export async function permissionsCacheReadRaw(
  * Writes `raw` under `logicalKey` in the permission-graph store, exactly as
  * given, to expire in `ttlMs`.
  *
- * The suite's only write to a store the api reads, and an exception to the
- * black-box rule for the reason {@link storeHas} is. Some writes the api
+ * One of the suite's two writes to a store the api reads, with
+ * `ageStoredSession` (`session-age.ts`), and an exception to the black-box
+ * rule for the reason {@link storeHas} is. Some writes the api
  * makes can't be timed over HTTP: a request that loaded a graph before a
  * change and writes it to the cache after the change's eviction. Writing back
  * a value read earlier with {@link permissionsCacheReadRaw} stands in for that
