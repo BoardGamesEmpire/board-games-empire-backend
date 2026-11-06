@@ -10,6 +10,11 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./consumer": {
+      "types": "./src/consumer.ts",
+      "import": "./src/consumer.ts",
+      "default": "./src/consumer.ts"
+    },
     "./package.json": "./package.json"
   },
   "nx": {

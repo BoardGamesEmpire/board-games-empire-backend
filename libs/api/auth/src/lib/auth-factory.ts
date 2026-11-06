@@ -5,6 +5,7 @@ import type { AuditContextService, SystemActorScope } from '@bge/actor-context';
 import type { PrismaClient } from '@bge/database';
 import { isTrue, splitTrimFilter } from '@bge/env';
 import type { I18nTranslations } from '@bge/i18n';
+import type { MailDispatcherService } from '@bge/queue-mail';
 import { Logger, type LoggerService } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
@@ -39,6 +40,7 @@ import { AUTH_BASE_PATH, AUTH_CLIENT_IP_HEADER, AUTH_COOKIE_PREFIX } from './con
 import { UserCreatedEvent } from './events/auth.events';
 import { createIdTokenGate } from './id-token-gate';
 import { mapOidcProfile, OIDC_SCOPES } from './oidc-profile';
+import { createPasswordReset, passwordResetDeps } from './password-reset';
 import { createProviderEmailGate } from './provider-email-gate';
 import { providerPictureOnly } from './provider-picture';
 import { createProviderUserInfo } from './provider-user-info';
@@ -133,6 +135,9 @@ export function authFactory(
   auditContext?: AuditContextService,
   systemActorScope?: SystemActorScope,
   i18n?: I18nService<I18nTranslations>,
+  // Without one, as when the better-auth CLI builds the instance, there is no
+  // outgoing mail: a reset request keeps better-auth's own refusal (#654).
+  mailDispatcher?: Pick<MailDispatcherService, 'enqueue'>,
 ) {
   const logger = new Logger('AuthFactory');
   logger.log(`Initializing BetterAuth with ConfigService: ${configService instanceof ConfigService}`);
@@ -166,6 +171,7 @@ export function authFactory(
   const idTokenGate = createIdTokenGate(gateDeps.render);
   const usernameVariants = createUsernameVariants(prisma);
   const providerEmailGate = createProviderEmailGate(providers, gateDeps.render);
+  const passwordReset = mailDispatcher && createPasswordReset(passwordResetDeps(prisma, mailDispatcher, i18n));
 
   const usingSwagger = configService?.get<boolean>('swagger.enabled');
   if (usingSwagger) {
@@ -273,7 +279,10 @@ export function authFactory(
     },
     hooks: {
       before: createAuthMiddleware(async (context) => {
+        // Resets switched off is the answer whatever the mail settings, so the
+        // gate runs before the mail checks.
         await settingGates.beforeRoute(context);
+        await passwordReset?.beforeRoute(context);
         await signOutHook.beforeRoute(context);
         idTokenGate.beforeRoute(context);
       }),
@@ -321,11 +330,25 @@ export function authFactory(
         // user no longer removes their keys. Add a `delete.before`/`after` hook
         // here that runs `prisma.apikey.deleteMany({ where: { referenceId: user.id } })`.
       },
+      // A reset token lives as long as the mail settings say (#654). The
+      // prefix match needs plain identifiers, so `verification.storeIdentifier`
+      // stays unset.
+      ...(passwordReset && {
+        verification: { create: { before: passwordReset.beforeVerificationCreate } },
+      }),
     },
     // Without a storage, as when the better-auth CLI builds the instance,
     // better-auth keeps sessions in the database.
     secondaryStorage: storage,
-    emailAndPassword: { enabled: options.useEmailPass },
+    emailAndPassword: {
+      enabled: options.useEmailPass,
+      // `resetPasswordTokenExpiresIn` stays unset: if the verification hook
+      // misses, better-auth's 1 hour applies, the shorter time (#654).
+      ...(passwordReset && {
+        sendResetPassword: passwordReset.sendResetPassword,
+        revokeSessionsOnPasswordReset: true,
+      }),
+    },
     trustedOrigins,
     plugins,
   });

@@ -24,6 +24,9 @@
       "path": "../../common/permissions/tsconfig.lib.json"
     },
     {
+      "path": "../../common/mail/tsconfig.lib.json"
+    },
+    {
       "path": "../../common/testing/tsconfig.lib.json"
     },
     {
@@ -36,7 +39,7 @@
       "path": "../../common/redis/tsconfig.lib.json"
     },
     {
-      "path": "../../common/i18n/tsconfig.lib.json"
+      "path": "../../queue/mail/tsconfig.lib.json"
     },
     {
       "path": "../../common/env/tsconfig.lib.json"
@@ -46,6 +49,9 @@
     },
     {
       "path": "../../common/actor-context/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/i18n/tsconfig.lib.json"
     }
   ],
   "exclude": ["jest.config.ts", "jest.config.cts", "src/**/*.spec.ts", "src/**/*.test.ts", "src/**/*.fixture.ts"]

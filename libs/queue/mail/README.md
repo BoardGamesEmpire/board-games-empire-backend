@@ -5,6 +5,11 @@ The queue for outgoing mail, and the worker's sender (#654).
 - **Producer** (`MailQueueProducerModule`, `MailDispatcherService.enqueue(recipientUserId, message)`): the api adds a job and never connects to an SMTP server. While the queue's Redis connection is down it throws `MailQueueUnavailableError` at once, since the queue's client would otherwise hold the add until Redis is back. Otherwise it throws whatever `queue.add` throws, so the caller decides what a lost mail means.
 - **Consumer** (`MailQueueConsumerModule`): the worker reads the mail settings from the `SystemSetting` row for every job, decrypts the SMTP password, renders the message in the recipient's language and sends it over a new, unpooled nodemailer transport.
 
+## Entry points
+
+- `@bge/queue-mail` is the producer side only: the queue name and job constants, the job interface, `MailQueueProducerModule`, `MailDispatcherService` and `MailQueueUnavailableError`. The api imports this one.
+- `@bge/queue-mail/consumer` is the worker's side: `MailQueueConsumerModule`, the processor, the delivery service and `MailTransportError`. It loads nodemailer, so the api must never import it: the api queues mail and never sends it.
+
 ## Retries and failures
 
 A password reset is added with five attempts and exponential backoff from five seconds. A test email gets one attempt, so the admin hears back at once.

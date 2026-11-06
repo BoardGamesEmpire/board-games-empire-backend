@@ -6,7 +6,7 @@ import { InviteExpirySweepModule } from '@bge/invites';
 import { MediaSweepModule } from '@bge/media';
 import { BullMQQueueDepthRecorderModule, createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
 import { FeedbackQueueConsumerModule } from '@bge/queue-feedback';
-import { MailQueueConsumerModule } from '@bge/queue-mail';
+import { MailQueueConsumerModule } from '@bge/queue-mail/consumer';
 import { WebhookQueueConsumerModule, WebhookQueueProducerModule } from '@bge/queue-webhooks';
 import { QUEUE_REDIS_CLIENT, RedisModule } from '@bge/redis';
 import { StorageModule } from '@bge/storage';

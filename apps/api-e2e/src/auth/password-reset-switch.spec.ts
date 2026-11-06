@@ -16,9 +16,9 @@ const REFUSAL = {
 /**
  * The settings row's password-reset switch (#585).
  *
- * No reset can succeed yet, switch on or off: nothing in the server sends
- * mail (#654), so better-auth answers its own `RESET_PASSWORD_DISABLED` once
- * past the switch. That answer is what shows the switch let a request
+ * No reset can succeed yet, switch on or off: the seeded row has no mail
+ * settings (#654), so a request past the switch is refused with
+ * `MAIL_NOT_CONFIGURED`. That answer is what shows the switch let a request
  * through.
  */
 describe('the password-reset switch', () => {
@@ -39,13 +39,27 @@ describe('the password-reset switch', () => {
   const setSwitch = useSettingSwitch(() => db, 'allowPasswordResets');
 
   describe('asking for a reset', () => {
-    it('reaches better-auth while resets are on', async () => {
+    // The seeded row has no mail settings, so a request that names a usable
+    // link is still refused: no reset can be mailed yet (#654).
+    it('reaches the mail check while resets are on, and is refused until mail is set up', async () => {
+      const user = await actors.user();
+
+      const response = await postToAuth(baseUrl, REQUEST_RESET_PATH).send({
+        email: user.user.email,
+        redirectTo: `${baseUrl}/reset`,
+      });
+
+      expect(response.status).toBe(403);
+      expect(response.body).toMatchObject({ code: 'MAIL_NOT_CONFIGURED' });
+    });
+
+    it('is refused with 400 when the app names no redirectTo (#654)', async () => {
       const user = await actors.user();
 
       const response = await postToAuth(baseUrl, REQUEST_RESET_PATH).send({ email: user.user.email });
 
       expect(response.status).toBe(400);
-      expect(response.body).toMatchObject({ code: 'RESET_PASSWORD_DISABLED' });
+      expect(response.body).toMatchObject({ code: 'PASSWORD_RESET_REDIRECT_REQUIRED' });
     });
 
     it('is refused with 403 while resets are off', async () => {
