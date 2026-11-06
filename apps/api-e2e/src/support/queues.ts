@@ -242,6 +242,16 @@ export interface DrainQueueOptions {
   readonly settleMs?: number;
 
   readonly pollIntervalMs?: number;
+
+  /**
+   * The queue's jobs may run in steps: a job moves itself back to `delayed`
+   * between them (BullMQ's step jobs), as a full extended network rebuild
+   * does after each batch (#497). Such a delay leaves no `failedReason` on
+   * the job, which is how it differs from a retry, so it is counted as the
+   * same job carrying on. Off by default, so a drain still fails on a retry
+   * it can't tell from a step.
+   */
+  readonly steps?: boolean;
 }
 
 /** A stream entry's flat `[field, value, ...]` list, as a record. */
@@ -294,7 +304,7 @@ export async function drainQueue(
   expected: number,
   options: DrainQueueOptions = {},
 ): Promise<void> {
-  const { timeoutMs = 30_000, settleMs = 500, pollIntervalMs = 50 } = options;
+  const { timeoutMs = 30_000, settleMs = 500, pollIntervalMs = 50, steps = false } = options;
 
   if (!Number.isInteger(expected) || expected < 0) {
     throw new Error(`drainQueue: expected count must be >= 0 and an integer, got ${expected}`);
@@ -345,6 +355,10 @@ export async function drainQueue(
           );
         case 'delayed':
           if (started.has(jobId)) {
+            if (steps && !(await queue.getJob(jobId))?.failedReason) {
+              break;
+            }
+
             throw await retried(jobId, 'failed an attempt and was scheduled for a retry');
           }
           break;

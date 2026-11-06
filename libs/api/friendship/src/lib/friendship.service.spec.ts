@@ -10,6 +10,7 @@ import {
   type MockDatabaseService,
 } from '@bge/testing';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ExtendedNetworkProducer } from './extended-network/extended-network.producer';
 import { FriendshipService } from './friendship.service';
 
 /**
@@ -44,12 +45,14 @@ describe('FriendshipService', () => {
   let db: MockDatabaseService;
   let abilityService: jest.Mocked<Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId'>>;
   let compose: jest.SpyInstance;
+  let extendedNetwork: jest.Mocked<Pick<ExtendedNetworkProducer, 'changed'>>;
 
   beforeEach(async () => {
     abilityService = {
       getCurrentResourceConditions: jest.fn().mockReturnValue([COND]),
       getActingUserId: jest.fn().mockReturnValue(ME),
     };
+    extendedNetwork = { changed: jest.fn().mockResolvedValue(undefined) };
 
     const ctx = await createTestingModuleWithDb({
       providers: [
@@ -58,6 +61,7 @@ describe('FriendshipService', () => {
         // clauses asserted below are the merge the lists actually run.
         ScopeComposer,
         { provide: AbilityService, useValue: abilityService },
+        { provide: ExtendedNetworkProducer, useValue: extendedNetwork },
       ],
     });
 
@@ -127,6 +131,20 @@ describe('FriendshipService', () => {
           respondedAt: null,
         }),
       );
+    });
+
+    // A request is no friendship step, so the extended network table has nothing to
+    // rebuild (#497). The upsert writes `Pending` over no row or a declined or
+    // withdrawn one, never over an accepted one.
+    it('queues no extended network table rebuild for a request (#497)', async () => {
+      db.user.findUnique.mockResolvedValue(acceptingUser as never);
+      db.friendship.findUnique.mockResolvedValue(null);
+      db.friendship.upsert.mockResolvedValue(friendship() as never);
+
+      await service.create({ addresseeId: OTHER });
+
+      expect(db.friendship.upsert).toHaveBeenCalled();
+      expect(extendedNetwork.changed).not.toHaveBeenCalled();
     });
 
     it('creates a pending request via upsert when none exists', async () => {
@@ -223,6 +241,128 @@ describe('FriendshipService', () => {
       db.friendship.findUnique.mockResolvedValue(null);
       await expect(service.respond('f-1', FriendshipStatus.Accepted)).rejects.toThrow(NotFoundException);
     });
+
+    // A response read the row as Pending, but a concurrent one may have moved
+    // it since. Writing only while it is still Pending means a withdrawal
+    // can't undo an accept it lost the race to, and it lets a decline or a
+    // withdrawal skip the extended network table's rebuild (#497).
+    it.each([
+      ['an accept', FriendshipStatus.Accepted, friendship({ requesterId: OTHER, addresseeId: ME })],
+      ['a decline', FriendshipStatus.Declined, friendship({ requesterId: OTHER, addresseeId: ME })],
+      ['a withdrawal', FriendshipStatus.Withdrawn, friendship({ requesterId: ME, addresseeId: OTHER })],
+    ] as const)('writes %s only while the row is still Pending (#497)', async (_case, status, row) => {
+      db.friendship.findUnique.mockResolvedValue(row);
+      db.friendship.update.mockResolvedValue(friendship({ status }));
+
+      await service.respond('f-1', status);
+
+      expect(db.friendship.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: 'f-1', status: FriendshipStatus.Pending, AND: [COND] }),
+        }),
+      );
+    });
+
+    it('refuses a response a concurrent one overtook as no longer pending (#497)', async () => {
+      db.friendship.findUnique.mockResolvedValue(friendship({ requesterId: ME, addresseeId: OTHER }));
+      db.friendship.update.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('No record was found for an update.', {
+          code: 'P2025',
+          clientVersion: 'test',
+        }),
+      );
+
+      await expect(service.respond('f-1', FriendshipStatus.Withdrawn)).rejects.toThrow(BadRequestException);
+      expect(extendedNetwork.changed).not.toHaveBeenCalled();
+    });
+
+    // A block can end a friendship from any status, so its write is not
+    // pinned to the status it read.
+    it('writes a block whatever status the row moved to (#497)', async () => {
+      db.friendship.findUnique.mockResolvedValue(friendship({ requesterId: OTHER, addresseeId: ME }));
+      db.friendship.update.mockResolvedValue(friendship({ status: FriendshipStatus.Blocked }));
+
+      await service.respond('f-1', FriendshipStatus.Blocked);
+
+      expect(db.friendship.update.mock.calls[0][0].where).not.toHaveProperty('status');
+    });
+
+    // The extended network table counts accepted friendships only (#497). An accept
+    // adds one, and a block can end one, so both queue a rebuild of both
+    // users' neighbourhoods once written.
+    it.each([
+      ['an accept', FriendshipStatus.Accepted, friendship({ requesterId: OTHER, addresseeId: ME })],
+      [
+        'a block',
+        FriendshipStatus.Blocked,
+        friendship({ requesterId: OTHER, addresseeId: ME, status: FriendshipStatus.Accepted }),
+      ],
+      ['a block of a request', FriendshipStatus.Blocked, friendship({ requesterId: OTHER, addresseeId: ME })],
+    ] as const)(
+      "queues both users' extended network table rebuilds once %s is written (#497)",
+      async (_case, status, row) => {
+        // The database mocks and this one count calls on separate counters, so
+        // the order is logged rather than read from `invocationCallOrder`.
+        const order: string[] = [];
+        db.friendship.findUnique.mockResolvedValue(row);
+        db.friendship.update.mockImplementation((async () => {
+          order.push('update');
+          return friendship({ requesterId: OTHER, addresseeId: ME, status });
+        }) as never);
+        extendedNetwork.changed.mockImplementation(async () => {
+          order.push('queue');
+        });
+
+        await service.respond('f-1', status);
+
+        expect(extendedNetwork.changed).toHaveBeenCalledTimes(1);
+        expect([...extendedNetwork.changed.mock.calls[0][0]].sort()).toEqual([ME, OTHER].sort());
+        expect(order).toEqual(['update', 'queue']);
+      },
+    );
+
+    // The guarded write proves the row was Pending, which no step counts, and
+    // a decline or a withdrawal leaves it unaccepted.
+    it.each([
+      ['a decline', FriendshipStatus.Declined, friendship({ requesterId: OTHER, addresseeId: ME })],
+      ['a withdrawal', FriendshipStatus.Withdrawn, friendship({ requesterId: ME, addresseeId: OTHER })],
+    ] as const)('queues no extended network table rebuild for %s (#497)', async (_case, status, row) => {
+      db.friendship.findUnique.mockResolvedValue(row);
+      db.friendship.update.mockResolvedValue(friendship({ status }));
+
+      await service.respond('f-1', status);
+
+      expect(extendedNetwork.changed).not.toHaveBeenCalled();
+    });
+
+    // While the queue's Redis is unreachable, queueing neither settles nor
+    // rejects. The friendship is already written, so the request answers.
+    it('answers without waiting for the rebuild to be queued (#497)', async () => {
+      db.friendship.findUnique.mockResolvedValue(friendship({ requesterId: OTHER, addresseeId: ME }));
+      db.friendship.update.mockResolvedValue(friendship({ status: FriendshipStatus.Accepted }));
+      extendedNetwork.changed.mockReturnValue(new Promise<void>(() => undefined));
+
+      await expect(service.respond('f-1', FriendshipStatus.Accepted)).resolves.toEqual(
+        expect.objectContaining({ status: FriendshipStatus.Accepted }),
+      );
+      expect(extendedNetwork.changed).toHaveBeenCalledTimes(1);
+    });
+
+    it('queues no extended network table rebuild for a response that is refused, or that matches no row it may change (#497)', async () => {
+      db.friendship.findUnique.mockResolvedValue(friendship({ requesterId: ME, addresseeId: OTHER }));
+      await expect(service.respond('f-1', FriendshipStatus.Accepted)).rejects.toThrow(ForbiddenException);
+
+      db.friendship.findUnique.mockResolvedValue(friendship({ requesterId: OTHER, addresseeId: ME }));
+      db.friendship.update.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('No record was found for an update.', {
+          code: 'P2025',
+          clientVersion: 'test',
+        }),
+      );
+      await expect(service.respond('f-1', FriendshipStatus.Blocked)).rejects.toThrow(ForbiddenException);
+
+      expect(extendedNetwork.changed).not.toHaveBeenCalled();
+    });
   });
 
   describe('remove', () => {
@@ -245,6 +385,59 @@ describe('FriendshipService', () => {
       expect(db.friendship.delete).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ id: 'f-1', AND: [COND] }) }),
       );
+    });
+
+    // An unfriend removes a friendship step, and the extended network table loses it
+    // only when this rebuild runs (#497).
+    it("queues both users' extended network table rebuilds once a removal is written (#497)", async () => {
+      const order: string[] = [];
+      db.friendship.findUnique.mockResolvedValue(friendship({ status: FriendshipStatus.Accepted }));
+      db.friendship.delete.mockImplementation((async () => {
+        order.push('delete');
+        return friendship({ status: FriendshipStatus.Accepted });
+      }) as never);
+      extendedNetwork.changed.mockImplementation(async () => {
+        order.push('queue');
+      });
+
+      await service.remove('f-1');
+
+      expect(extendedNetwork.changed).toHaveBeenCalledTimes(1);
+      expect([...extendedNetwork.changed.mock.calls[0][0]].sort()).toEqual([ME, OTHER].sort());
+      expect(order).toEqual(['delete', 'queue']);
+    });
+
+    // The status is the deleted row's own, so no concurrent change can make
+    // it stale. An unblock or a removed request ends no accepted friendship.
+    it.each([
+      ['an unblock', FriendshipStatus.Blocked],
+      ['a removed request', FriendshipStatus.Pending],
+      ['a removed declined request', FriendshipStatus.Declined],
+    ] as const)('queues no extended network table rebuild for %s (#497)', async (_case, status) => {
+      db.friendship.findUnique.mockResolvedValue(friendship({ requesterId: ME, addresseeId: OTHER, status }));
+      db.friendship.delete.mockResolvedValue(friendship({ requesterId: ME, addresseeId: OTHER, status }));
+
+      await service.remove('f-1');
+
+      expect(extendedNetwork.changed).not.toHaveBeenCalled();
+    });
+
+    it('queues no extended network table rebuild for a removal that is refused (#497)', async () => {
+      db.friendship.findUnique.mockResolvedValue(
+        friendship({ requesterId: OTHER, addresseeId: ME, status: FriendshipStatus.Blocked }),
+      );
+      await expect(service.remove('f-1')).rejects.toThrow(ForbiddenException);
+
+      db.friendship.findUnique.mockResolvedValue(friendship({ status: FriendshipStatus.Accepted }));
+      db.friendship.delete.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('No record was found for a delete.', {
+          code: 'P2025',
+          clientVersion: 'test',
+        }),
+      );
+      await expect(service.remove('f-1')).rejects.toThrow(ForbiddenException);
+
+      expect(extendedNetwork.changed).not.toHaveBeenCalled();
     });
   });
 

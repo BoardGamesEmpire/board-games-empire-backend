@@ -351,6 +351,56 @@ describe('drainQueue', () => {
     await expect(drainQueue(queue, mark, 1, drainFast)).rejects.toThrow(/'feedback'.*j1.*retry.*sink timed out/s);
   });
 
+  // A job run in steps moves itself back to `delayed` between them, leaving
+  // no failure on the job (#497). Allowed, it is the same job carrying on.
+  it('counts a job that ran in steps once, when the drain allows steps (#497)', async () => {
+    const queue = scriptedStream('network', {
+      arrivals: [
+        [
+          { event: 'active', jobId: 'j1', prev: 'waiting' },
+          { event: 'delayed', jobId: 'j1', delay: '0' },
+          { event: 'waiting', jobId: 'j1', prev: 'delayed' },
+          { event: 'active', jobId: 'j1', prev: 'waiting' },
+          { event: 'completed', jobId: 'j1', returnvalue: 'null', prev: 'active' },
+        ],
+      ],
+    });
+    const mark = await markQueueEvents(queue);
+
+    await expect(drainQueue(queue, mark, 1, { ...drainFast, steps: true })).resolves.toBeUndefined();
+  });
+
+  it('still throws on a retry when the drain allows steps (#497)', async () => {
+    const queue = scriptedStream('network', {
+      arrivals: [
+        [
+          { event: 'active', jobId: 'j1', prev: 'waiting' },
+          { event: 'delayed', jobId: 'j1', delay: '5000' },
+        ],
+      ],
+      failedReasons: { j1: 'connection lost' },
+    });
+    const mark = await markQueueEvents(queue);
+
+    await expect(drainQueue(queue, mark, 1, { ...drainFast, steps: true })).rejects.toThrow(
+      /'network'.*j1.*retry.*connection lost/s,
+    );
+  });
+
+  it('reads a step as a retry when the drain does not allow steps (#497)', async () => {
+    const queue = scriptedStream('network', {
+      arrivals: [
+        [
+          { event: 'active', jobId: 'j1', prev: 'waiting' },
+          { event: 'delayed', jobId: 'j1', delay: '0' },
+        ],
+      ],
+    });
+    const mark = await markQueueEvents(queue);
+
+    await expect(drainQueue(queue, mark, 1, drainFast)).rejects.toThrow(/'network'.*j1.*retry/s);
+  });
+
   it('throws on a retry without backoff', async () => {
     const queue = scriptedStream('feedback', {
       arrivals: [
