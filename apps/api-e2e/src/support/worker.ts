@@ -1,5 +1,6 @@
 import { QueueNames } from '@bge/game-import';
 import { FEEDBACK_QUEUE_NAME } from '@bge/queue-feedback';
+import { MAIL_QUEUE_NAME } from '@bge/queue-mail';
 import { WEBHOOK_QUEUE_NAME } from '@bge/queue-webhooks';
 import {
   E2E_VERBOSE_VAR,
@@ -41,6 +42,7 @@ const READINESS_POLL_MS = 100;
  */
 export const WORKER_QUEUE_NAMES = [
   FEEDBACK_QUEUE_NAME,
+  MAIL_QUEUE_NAME,
   WEBHOOK_QUEUE_NAME,
   QueueNames.GamesImport,
   '{bge.media.contribution-sweep}',

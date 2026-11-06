@@ -1,6 +1,7 @@
 import type { DataGatewayCapability, EventParticipationStatus, JobType, ResourceType } from '@bge/database';
 import { NotificationType } from '@bge/database';
 import type { I18nMessage } from '@bge/i18n';
+import type { MailFailureCode } from '@bge/mail';
 
 /**
  * Per-`NotificationType` payload shapes.
@@ -262,6 +263,18 @@ export interface UsernameVariantAssignedPayload {
 }
 
 /**
+ * The outcome of the test email an admin asked for (#654), sent to that admin
+ * alone. `code` is the stable failure code, `null` when the mail went; `message`
+ * is the plain-language outcome as a `t()` marker, which `I18nResponseInterceptor`
+ * renders in the reader's language on `GET /notifications/unread`.
+ */
+export interface MailTestResultPayload {
+  outcome: 'sent' | 'failed';
+  code: MailFailureCode | null;
+  message: I18nMessage;
+}
+
+/**
  * The single source of truth mapping every `NotificationType` to its payload
  * shape. Keyed by the enum value, so `NotificationPayloadMap[T]` resolves a
  * type's payload and the discriminated `UnreadNotificationDto` / typed
@@ -286,6 +299,7 @@ export type NotificationPayloadMap = {
   [NotificationType.GameShareReceived]: GameShareReceivedPayload;
   [NotificationType.GameShareAwaitingApproval]: GameShareAwaitingApprovalPayload;
   [NotificationType.UsernameVariantAssigned]: UsernameVariantAssignedPayload;
+  [NotificationType.MailTestResult]: MailTestResultPayload;
   [NotificationType.EventInviteReceived]: EventRefPayload;
   [NotificationType.EventCreated]: EventRefPayload;
   [NotificationType.EventCancelled]: EventCancelledPayload;
