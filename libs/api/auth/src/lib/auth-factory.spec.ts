@@ -450,14 +450,22 @@ describe("authFactory's sign-in providers", () => {
 
   afterEach(() => jest.restoreAllMocks());
 
-  it('turns implicit linking off and lets a link use a different email (#912)', () => {
+  // better-auth's own conditions for a link a sign-in makes itself run first,
+  // and the provider linking policy decides the rest in the gate, so the
+  // option that would refuse every such link before the gate is off (#913).
+  // Among those conditions is that this server has verified the registered
+  // user's email, which the gate can't see, so it is set rather than left to
+  // better-auth's default.
+  it('lets a link a sign-in makes itself reach the policy gate only for a registered user whose email this server verified, and lets a link use a different email (#912, #913)', () => {
     const auth = authFactory({} as PrismaClient, withProviders(providers));
 
     expect(auth.options.account?.accountLinking).toEqual({
-      disableImplicitLinking: true,
+      disableImplicitLinking: false,
+      requireLocalEmailVerified: true,
       allowDifferentEmails: true,
       trustedProviders: [],
     });
+    expect(auth.options.user?.validateUserInfo).toEqual(expect.any(Function));
   });
 
   it('hands each provider to genericOAuth, in order, with fixed scopes and the profile mapping (#912)', () => {
@@ -551,17 +559,19 @@ describe("authFactory's sign-in provider behaviours", () => {
     expect(trustedProviders).toEqual([]);
   });
 
-  // A trusted provider passes better-auth's verified-email check for implicit
-  // linking too, so only this option keeps a provider's email claim from
-  // attaching it to a registered user. The e2e suite pins the refusal; this
-  // pins that the two options travel together (#1016, #913).
-  it('keeps implicit linking off while a provider is trusted for linking (#1016)', () => {
+  // A trusted provider passes better-auth's check on the provider's email for
+  // a link a sign-in makes itself too, so only the policy gate, which checks
+  // that email itself, keeps such a provider's email claim from attaching it
+  // to a registered user. The e2e suite pins the refusals; this pins that the
+  // gate is there whenever better-auth lets those links reach it (#913).
+  it('checks every link a sign-in makes itself against the policy while a provider is trusted for linking (#1016, #913)', () => {
     const auth = authFactory({} as PrismaClient, withProviders([lenient]));
 
     expect(auth.options.account?.accountLinking).toMatchObject({
-      disableImplicitLinking: true,
+      disableImplicitLinking: false,
       trustedProviders: ['lenient'],
     });
+    expect(auth.options.user?.validateUserInfo).toEqual(expect.any(Function));
   });
 });
 

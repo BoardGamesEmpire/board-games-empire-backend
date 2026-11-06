@@ -1,3 +1,4 @@
+import { ProviderLinkingPolicy } from '@bge/database';
 import { createActors, pollUntil, type Actors } from '@bge/testing-e2e';
 import { createHash, randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -10,6 +11,7 @@ import {
   SIGNED_FAKE_PROVIDER_ID,
 } from '../support/e2e-env';
 import { base64UrlJson } from '../support/fake-sign-in-provider';
+import { useProviderLinkingPolicy } from '../support/provider-linking-policy';
 import { useSettingSwitch } from '../support/setting-switch';
 import { fakeProviderUrl, signInThroughProvider } from '../support/sign-in-provider';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
@@ -25,6 +27,17 @@ const ID_TOKEN_REFUSED_BODY = {
   message:
     "This server doesn't accept a sign-in provider's token sent directly. Sign in through the provider's page instead",
 } as const;
+
+/**
+ * What the provider linking gate tells a client whose provider sign-in would
+ * link a registered user's email while only a signed-in user may link (#913).
+ */
+const LINK_NEEDS_SIGN_IN_DESCRIPTION =
+  'That email address already belongs to a user on this server. Sign in another way, then link this sign-in provider from your sign-in methods';
+
+/** What the gate tells a client whose provider didn't confirm the email it would link automatically (#913). */
+const LINK_EMAIL_UNVERIFIED_DESCRIPTION =
+  "Your sign-in provider hasn't confirmed your email address, so the provider can't be linked automatically. Sign in another way, then link the provider from your sign-in methods";
 
 /** A token with claims and no signature, as a client that forged one would send it. */
 const unsignedIdToken = (claims: Record<string, unknown>): string =>
@@ -370,8 +383,10 @@ describe('signing in through a sign-in provider', () => {
   });
 
   /**
-   * Both emails are verified, so better-auth's own conditions for linking on
-   * its own all hold: only the server's refusal to link implicitly stops it.
+   * Both emails are verified, so better-auth's own conditions for a link a
+   * sign-in makes itself all hold: only the provider linking policy, `SignedIn`
+   * unless a server admin changes it, stops it (#913). The message is the policy
+   * gate's: better-auth's own refusal carries none.
    */
   it('refuses a provider sign-in whose email belongs to a registered user, with account_not_linked (#912)', async () => {
     const existing = await actors.user();
@@ -386,10 +401,111 @@ describe('signing in through a sign-in provider', () => {
     });
 
     expect(result.location.searchParams.get('error')).toBe('account_not_linked');
+    expect(result.location.searchParams.get('error_description')).toBe(LINK_NEEDS_SIGN_IN_DESCRIPTION);
     expect(result.cookie).toBe('');
     await expect(
       db.client.account.count({ where: { userId: existing.user.id, providerId: FAKE_PROVIDER_ID } }),
     ).resolves.toBe(0);
+  });
+
+  /**
+   * A provider sign-in with a registered user's email links itself to that
+   * user when the provider linking policy allows it (#913). Each test starts
+   * under `SignedIn`, and sets the policy it needs.
+   */
+  describe('under automatic linking (#913)', () => {
+    const setPolicy = useProviderLinkingPolicy(() => db);
+
+    /** A registered user whose email this server has verified, as the Owner's is. */
+    const verifiedUser = async () => {
+      const existing = await actors.user();
+      await db.client.user.update({ where: { id: existing.user.id }, data: { emailVerified: true } });
+
+      return existing;
+    };
+
+    it('links a sign-in to the registered user with that email when both have verified it (#913)', async () => {
+      await setPolicy(ProviderLinkingPolicy.AutomaticWhenVerified);
+      const existing = await verifiedUser();
+      const usersBefore = await db.client.user.count();
+      const { sub } = freshIdentity();
+
+      const result = await signInThroughProvider(baseUrl, {
+        sub,
+        email: existing.user.email,
+        email_verified: true,
+        preferred_username: 'someone',
+      });
+
+      expect(result.location.href).toBe(new URL('/', baseUrl).href);
+      await expect(sessionUserId(result.cookie)).resolves.toBe(existing.user.id);
+      await expect(
+        db.client.account.findMany({
+          where: { providerId: FAKE_PROVIDER_ID, accountId: sub },
+          select: { userId: true },
+        }),
+      ).resolves.toEqual([{ userId: existing.user.id }]);
+      await expect(db.client.user.count()).resolves.toBe(usersBefore);
+    });
+
+    // better-auth's own condition: the registered user's email must be
+    // verified here too. Its refusal carries the code alone.
+    it('refuses when the registered user’s email is unverified, with account_not_linked (#913)', async () => {
+      await setPolicy(ProviderLinkingPolicy.AutomaticWhenVerified);
+      const existing = await actors.user();
+      await db.client.user.update({ where: { id: existing.user.id }, data: { emailVerified: false } });
+      const { sub } = freshIdentity();
+
+      const result = await signInThroughProvider(baseUrl, {
+        sub,
+        email: existing.user.email,
+        email_verified: true,
+        preferred_username: 'someone',
+      });
+
+      expect(result.location.searchParams.get('error')).toBe('account_not_linked');
+      expect(result.cookie).toBe('');
+      await expect(accountRowCount(FAKE_PROVIDER_ID, sub)).resolves.toBe(0);
+    });
+
+    // A provider allowed unverified emails is trusted for linking, so
+    // better-auth lets it past its own check on the provider's email. Only the
+    // gate's check stops it, so this fails without that check.
+    it('refuses a lenient provider that doesn’t confirm the email, with account_not_linked and a message (#913)', async () => {
+      await setPolicy(ProviderLinkingPolicy.AutomaticWhenVerified);
+      const existing = await verifiedUser();
+      const { sub } = freshIdentity();
+
+      const result = await signInThroughProvider(
+        baseUrl,
+        { sub, email: existing.user.email, preferred_username: 'someone' },
+        { providerId: LENIENT_FAKE_PROVIDER_ID },
+      );
+
+      expect(result.location.searchParams.get('error')).toBe('account_not_linked');
+      expect(result.location.searchParams.get('error_description')).toBe(LINK_EMAIL_UNVERIFIED_DESCRIPTION);
+      expect(result.cookie).toBe('');
+      await expect(accountRowCount(LENIENT_FAKE_PROVIDER_ID, sub)).resolves.toBe(0);
+    });
+
+    // The gate reads the settings row on every link, so a server admin's change
+    // needs no restart.
+    it('applies a policy change on the next sign-in, with no restart (#913)', async () => {
+      const existing = await verifiedUser();
+      const { sub } = freshIdentity();
+      const claims = { sub, email: existing.user.email, email_verified: true, preferred_username: 'someone' };
+
+      const refused = await signInThroughProvider(baseUrl, claims);
+      expect(refused.location.searchParams.get('error')).toBe('account_not_linked');
+      await expect(accountRowCount(FAKE_PROVIDER_ID, sub)).resolves.toBe(0);
+
+      await setPolicy(ProviderLinkingPolicy.AutomaticWhenVerified);
+      const linked = await signInThroughProvider(baseUrl, claims);
+
+      expect(linked.location.href).toBe(new URL('/', baseUrl).href);
+      await expect(sessionUserId(linked.cookie)).resolves.toBe(existing.user.id);
+      await expect(accountRowCount(FAKE_PROVIDER_ID, sub)).resolves.toBe(1);
+    });
   });
 
   it('links a provider with a different email to a signed-in user, then signs that user in through it (#912)', async () => {
@@ -655,9 +771,9 @@ describe('signing in through a sign-in provider', () => {
     /**
      * Trusting a provider for linking also lets its sign-in past better-auth's
      * check on the provider's email, for a user that email already belongs to.
-     * Only `disableImplicitLinking` stops that, so this fails without it. Both
-     * emails are verified but the claim isn't there, as with a provider that
-     * never sends it.
+     * Only the provider linking gate stops it now, under the `SignedIn` policy
+     * (#913). The registered user's email is verified, and the provider's
+     * claim isn't there, as with a provider that never sends it.
      */
     it('refuses a lenient provider’s sign-in with a registered user’s email, with account_not_linked (#1016)', async () => {
       const existing = await actors.user();
@@ -671,6 +787,7 @@ describe('signing in through a sign-in provider', () => {
       );
 
       expect(result.location.searchParams.get('error')).toBe('account_not_linked');
+      expect(result.location.searchParams.get('error_description')).toBe(LINK_NEEDS_SIGN_IN_DESCRIPTION);
       expect(result.cookie).toBe('');
       await expect(accountRowCount(LENIENT_FAKE_PROVIDER_ID, sub)).resolves.toBe(0);
       await expect(db.client.user.count({ where: { email: existing.user.email } })).resolves.toBe(1);

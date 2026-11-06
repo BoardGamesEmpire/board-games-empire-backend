@@ -9,7 +9,7 @@ import { Logger, type LoggerService } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { betterAuth } from 'better-auth';
-import { createAuthMiddleware } from 'better-auth/api';
+import { createAuthMiddleware, getOAuthState } from 'better-auth/api';
 import {
   admin,
   anonymous,
@@ -40,6 +40,7 @@ import { UserCreatedEvent } from './events/auth.events';
 import { createIdTokenGate } from './id-token-gate';
 import { mapOidcProfile, OIDC_SCOPES } from './oidc-profile';
 import { createProviderEmailGate } from './provider-email-gate';
+import { createProviderLinkingGate, providerLinkingPolicyReader } from './provider-linking-gate';
 import { providerPictureOnly } from './provider-picture';
 import { createProviderUserInfo } from './provider-user-info';
 import { createSettingGates, settingGateDeps } from './setting-gates';
@@ -166,6 +167,11 @@ export function authFactory(
   const idTokenGate = createIdTokenGate(gateDeps.render);
   const usernameVariants = createUsernameVariants(prisma);
   const providerEmailGate = createProviderEmailGate(providers, gateDeps.render);
+  const providerLinkingGate = createProviderLinkingGate({
+    readPolicy: providerLinkingPolicyReader(prisma),
+    readOAuthState: getOAuthState,
+    render: gateDeps.render,
+  });
 
   const usingSwagger = configService?.get<boolean>('swagger.enabled');
   if (usingSwagger) {
@@ -249,24 +255,34 @@ export function authFactory(
           required: false,
         },
       },
+      // Every link a sign-in makes itself passes the provider linking gate
+      // (#913). better-auth runs it for each new user, each returning sign-in
+      // through a provider and each link from a signed-in session as well, and
+      // the gate lets those through.
+      validateUserInfo: providerLinkingGate,
     },
     account: {
-      // A provider never attaches itself to an existing user (#912): that
-      // would let a provider's email claim take over a registered user. A link
-      // is made from a signed-in session instead, and may use a different
-      // email because people often hold different addresses at the provider
-      // and on this server.
+      // A provider sign-in may link itself to the registered user with the
+      // same email, but only when the provider linking policy allows it: the
+      // gate on `user.validateUserInfo` decides (#913). better-auth's own
+      // conditions run first, among them that this server has verified the
+      // registered user's email, and the gate sees only the links that pass
+      // them. A link made from a signed-in session needs no policy, and may use
+      // a different email because people often hold different addresses at
+      // the provider and on this server (#912).
       //
       // A provider the operator allows unverified emails for is trusted for
-      // linking (#1016): its link starts from a signed-in session, so the
-      // email claim isn't what grants access, and without this it could sign
-      // in but never link. That is safe only while `disableImplicitLinking` is
-      // on: better-auth lets a trusted provider past its verified-email check
-      // for implicit linking too, so turning that off would let the provider's
-      // email claim attach it to a registered user. #913 turns implicit linking
-      // back on, and has to account for that.
+      // linking (#1016): the session, not the email claim, grants a link made
+      // from a signed-in session, and without this the provider could sign
+      // in but never link. better-auth lets a trusted provider past its check
+      // on the provider's email for a link a sign-in makes itself too, so the
+      // gate checks that email itself.
       accountLinking: {
-        disableImplicitLinking: true,
+        disableImplicitLinking: false,
+        // better-auth's own default, set here because the policy relies on
+        // it: the gate sees only the provider's email claim, never whether
+        // this server has verified the registered user's email (#913).
+        requireLocalEmailVerified: true,
         allowDifferentEmails: true,
         trustedProviders: idsAllowingUnverifiedEmail(providers),
       },

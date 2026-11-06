@@ -174,6 +174,8 @@
     "username_change_disabled": "Username changes are turned off on this server",
     "sign_in_provider_email_unverified": "Your sign-in provider hasn't confirmed your email address, so you can't sign up with it here. Confirm the address with the provider, then try again",
     "sign_in_provider_id_token_refused": "This server doesn't accept a sign-in provider's token sent directly. Sign in through the provider's page instead",
+    "provider_link_needs_sign_in": "That email address already belongs to a user on this server. Sign in another way, then link this sign-in provider from your sign-in methods",
+    "provider_link_email_unverified": "Your sign-in provider hasn't confirmed your email address, so the provider can't be linked automatically. Sign in another way, then link the provider from your sign-in methods",
     "app_sign_in_return_address_refused": "The app asked to receive your sign-in at an address this server doesn't send sign-ins to, so the sign-in was stopped. Update the app, then try again",
     "app_sign_in_request_invalid": "The app's sign-in request was incomplete or couldn't be read, so the sign-in was stopped. Start again from the app",
     "app_sign_in_flow_invalid": "This sign-in has expired or was already finished. Start again from the app",
