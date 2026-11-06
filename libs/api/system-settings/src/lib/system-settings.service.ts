@@ -1,7 +1,15 @@
 import { DatabaseService, isPrismaDependentRecordNotFoundError } from '@bge/database';
 import { t } from '@bge/i18n';
+import { isMailConfigured, MAIL_READINESS_SELECT, MailFailureCode } from '@bge/mail';
+import { MailDispatcherService, MailQueueUnavailableError } from '@bge/queue-mail';
 import { EncryptionService } from '@bge/services';
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { UpdateSystemSettingsDto } from './dto/update-system-settings.dto';
 import { SYSTEM_SETTINGS_ROW_SELECT, toView, type SystemSettingsView } from './read-shapes';
 
@@ -10,6 +18,7 @@ export class SystemSettingsService {
   constructor(
     private readonly db: DatabaseService,
     private readonly encryption: EncryptionService,
+    private readonly mailDispatcher: MailDispatcherService,
   ) {}
 
   /**
@@ -101,6 +110,41 @@ export class SystemSettingsService {
         code: 'SMTP_PASSWORD_REQUIRED',
         message: t('errors.system_settings.smtp_password_required'),
       });
+    }
+  }
+
+  /**
+   * Queues a test email to the admin asking for it, so they learn whether the
+   * mail settings work (#654). It refuses while mail is not set up, answers
+   * 503 at once while the queue's Redis is down, and any other queue failure
+   * propagates as a 500: an admin asking for a test should hear that it
+   * failed. Whether the SMTP server then accepts it shows in the worker's
+   * delivery notification.
+   */
+  async sendTestMail(recipientUserId: string): Promise<void> {
+    const row = await this.db.systemSetting.findUnique({
+      where: { singleton: true },
+      select: MAIL_READINESS_SELECT,
+    });
+
+    if (!isMailConfigured(row)) {
+      throw new ConflictException({
+        code: MailFailureCode.NotConfigured,
+        message: t('errors.system_settings.mail_not_configured'),
+      });
+    }
+
+    try {
+      await this.mailDispatcher.enqueue(recipientUserId, { kind: 'test' });
+    } catch (error) {
+      if (error instanceof MailQueueUnavailableError) {
+        throw new ServiceUnavailableException({
+          code: 'MAIL_QUEUE_UNAVAILABLE',
+          message: t('errors.system_settings.mail_queue_unavailable'),
+        });
+      }
+
+      throw error;
     }
   }
 }

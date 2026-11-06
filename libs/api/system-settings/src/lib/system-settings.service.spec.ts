@@ -1,4 +1,5 @@
 import { Prisma } from '@bge/database';
+import { MailDispatcherService, MailQueueUnavailableError } from '@bge/queue-mail';
 import { EncryptionService } from '@bge/services';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import { ConflictException, HttpStatus, NotFoundException } from '@nestjs/common';
@@ -15,11 +16,18 @@ describe('SystemSettingsService', () => {
   let service: SystemSettingsService;
   let db: MockDatabaseService;
   const encryption = { encrypt: jest.fn((value: string) => `enc(${value})`), decrypt: jest.fn() };
+  const dispatcher = { enqueue: jest.fn() };
 
   beforeEach(async () => {
     const ctx = await createTestingModuleWithDb({
-      providers: [SystemSettingsService, { provide: EncryptionService, useValue: encryption }],
+      providers: [
+        SystemSettingsService,
+        { provide: EncryptionService, useValue: encryption },
+        { provide: MailDispatcherService, useValue: dispatcher },
+      ],
     });
+
+    dispatcher.enqueue.mockReset().mockResolvedValue(undefined);
 
     db = ctx.db;
     service = ctx.module.get(SystemSettingsService);
@@ -167,6 +175,63 @@ describe('SystemSettingsService', () => {
       db.systemSetting.update.mockRejectedValue(failure);
 
       await expect(service.updateSystemSettings('settings-1', {})).rejects.toBe(failure);
+    });
+  });
+
+  describe('sendTestMail (#654)', () => {
+    const configured = { smtpHost: 'smtp.example.com', mailFromAddress: 'bge@example.com' };
+
+    it('reads only the singleton row, and only what the configured check needs (#654)', async () => {
+      db.systemSetting.findUnique.mockResolvedValue(configured as never);
+
+      await service.sendTestMail('user-1');
+
+      expect(db.systemSetting.findUnique).toHaveBeenCalledWith({
+        where: { singleton: true },
+        select: { smtpHost: true, mailFromAddress: true },
+      });
+    });
+
+    it('queues a test email for the recipient when mail is set up (#654)', async () => {
+      db.systemSetting.findUnique.mockResolvedValue(configured as never);
+
+      await service.sendTestMail('user-1');
+
+      expect(dispatcher.enqueue).toHaveBeenCalledWith('user-1', { kind: 'test' });
+    });
+
+    it('answers 409 MAIL_NOT_CONFIGURED and queues nothing when mail is not set up (#654)', async () => {
+      db.systemSetting.findUnique.mockResolvedValue({ smtpHost: null, mailFromAddress: null } as never);
+
+      await expect(service.sendTestMail('user-1')).rejects.toMatchObject({
+        status: HttpStatus.CONFLICT,
+        response: {
+          code: 'MAIL_NOT_CONFIGURED',
+          message: expect.objectContaining({ key: 'errors.system_settings.mail_not_configured' }),
+        },
+      });
+      expect(dispatcher.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('answers 503 MAIL_QUEUE_UNAVAILABLE at once while the queue is down (#654)', async () => {
+      db.systemSetting.findUnique.mockResolvedValue(configured as never);
+      dispatcher.enqueue.mockRejectedValue(new MailQueueUnavailableError());
+
+      await expect(service.sendTestMail('user-1')).rejects.toMatchObject({
+        status: HttpStatus.SERVICE_UNAVAILABLE,
+        response: {
+          code: 'MAIL_QUEUE_UNAVAILABLE',
+          message: expect.objectContaining({ key: 'errors.system_settings.mail_queue_unavailable' }),
+        },
+      });
+    });
+
+    it('lets any other queue failure propagate, so the admin hears the test failed (#654)', async () => {
+      db.systemSetting.findUnique.mockResolvedValue(configured as never);
+      const failure = new Error('redis down');
+      dispatcher.enqueue.mockRejectedValue(failure);
+
+      await expect(service.sendTestMail('user-1')).rejects.toBe(failure);
     });
   });
 });

@@ -1,4 +1,5 @@
 import { DatabaseService } from '@bge/database';
+import { isMailConfigured, MAIL_READINESS_SELECT } from '@bge/mail';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import assert from 'node:assert';
@@ -35,7 +36,13 @@ export class StrategyService {
     // switch advertised below is then the one they enforce (#585).
     const settings = await this.db.systemSetting.findUnique({
       where: { singleton: true },
-      select: { identifier: true, name: true, allowUserRegistration: true },
+      select: {
+        identifier: true,
+        name: true,
+        allowUserRegistration: true,
+        allowPasswordResets: true,
+        ...MAIL_READINESS_SELECT,
+      },
     });
     assert(settings, 'System settings not found in database');
 
@@ -67,16 +74,27 @@ export class StrategyService {
     // registration is closed (#585).
     dto.bgeAnonymousAuthSupported = settings.allowUserRegistration;
 
-    dto.strategies = this.buildStrategies(settings.allowUserRegistration);
+    // A reset needs both the switch and a way to send the email (#654).
+    const passwordResetAvailable = settings.allowPasswordResets && isMailConfigured(settings);
+
+    dto.strategies = this.buildStrategies(
+      settings.allowUserRegistration,
+      passwordResetAvailable,
+      settings.allowPasswordResets,
+    );
 
     return dto;
   }
 
-  private buildStrategies(registrationOpen: boolean): AuthStrategyDto[] {
+  private buildStrategies(
+    registrationOpen: boolean,
+    passwordResetAvailable: boolean,
+    resetsAllowed: boolean,
+  ): AuthStrategyDto[] {
     const strategies: AuthStrategyDto[] = [];
 
     if (this.configService.get<boolean>('auth.useEmailPasswordAuth')) {
-      strategies.push(this.buildEmailAndPasswordStrategy(registrationOpen));
+      strategies.push(this.buildEmailAndPasswordStrategy(registrationOpen, passwordResetAvailable, resetsAllowed));
     }
 
     // One per sign-in provider, in the operator's list order (#912). The config
@@ -90,7 +108,11 @@ export class StrategyService {
     return strategies;
   }
 
-  private buildEmailAndPasswordStrategy(registrationOpen: boolean): EmailAndPasswordStrategyDto {
+  private buildEmailAndPasswordStrategy(
+    registrationOpen: boolean,
+    passwordResetAvailable: boolean,
+    resetsAllowed: boolean,
+  ): EmailAndPasswordStrategyDto {
     const signUpDisabled = !registrationOpen;
 
     const dto = new EmailAndPasswordStrategyDto();
@@ -99,6 +121,18 @@ export class StrategyService {
 
     if (!signUpDisabled) {
       dto.signUpEndpoint = authPath('/sign-up/email');
+    }
+
+    dto.passwordResetAvailable = passwordResetAvailable;
+
+    if (passwordResetAvailable) {
+      dto.requestPasswordResetEndpoint = authPath('/request-password-reset');
+    }
+
+    // Finishing a reset needs only the switch: a link mailed before mail was
+    // switched off still works, so a client must be able to find where (#654).
+    if (resetsAllowed) {
+      dto.resetPasswordEndpoint = authPath('/reset-password');
     }
 
     return dto;

@@ -282,6 +282,8 @@
   "system_settings": {
     "not_found": "No system settings found! Run the seed script to create default settings.",
     "id_not_found": "System settings with ID {id} not found",
+    "mail_not_configured": "Email isn't set up on this server yet. Add an SMTP host and a From address to the mail settings, then try again",
+    "mail_queue_unavailable": "The server couldn't queue the test email because its job queue isn't reachable. Try again in a few minutes",
     "smtp_password_required": "Enter the SMTP password again when you change the SMTP host, port or connection security. The saved password is only sent to the server it was saved for",
     "multiple": "Multiple system settings found! There can be only one. Please fix the database."
   },
