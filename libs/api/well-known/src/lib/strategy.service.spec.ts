@@ -1,4 +1,4 @@
-import type { SystemSetting } from '@bge/database';
+import { ProviderLinkingPolicy, type SystemSetting } from '@bge/database';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { ConfigService } from '@nestjs/config';
 import { AUTH_BASE_PATH, authPath, AuthStrategyType } from './constants';
@@ -29,6 +29,7 @@ const DOCUMENTED_WIRE_KEYS = [
   'bge_two_factor_supported',
   'bge_anonymous_auth_supported',
   'strategies',
+  'bge_provider_linking_policy',
 ].sort();
 
 const BASE_ISSUER = 'https://api.example.com';
@@ -82,6 +83,7 @@ const MOCK_SYSTEM_SETTING = {
   identifier: 'test-server-id-00000000',
   name: 'Test Server',
   allowUserRegistration: true,
+  providerLinkingPolicy: ProviderLinkingPolicy.SignedIn,
 };
 
 const REGISTRATION_CLOSED = { ...MOCK_SYSTEM_SETTING, allowUserRegistration: false };
@@ -189,6 +191,16 @@ describe('StrategyService', () => {
 
         expect(discovery.bgeServerId).toBe(MOCK_SYSTEM_SETTING.identifier);
       });
+
+      it.each([ProviderLinkingPolicy.SignedIn, ProviderLinkingPolicy.AutomaticWhenVerified])(
+        'reports the provider linking policy the settings row holds (%s) (#913)',
+        async (policy) => {
+          const service = await createService({}, { ...MOCK_SYSTEM_SETTING, providerLinkingPolicy: policy });
+          const discovery = await service.getDiscovery();
+
+          expect(discovery.bgeProviderLinkingPolicy).toBe(policy);
+        },
+      );
 
       it('sets name from the system setting', async () => {
         const service = await createService({});

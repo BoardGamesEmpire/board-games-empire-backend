@@ -195,6 +195,20 @@ describe('signing in through a sign-in provider', () => {
     }
   });
 
+  describe('discovery and the provider linking policy (#913)', () => {
+    const setPolicy = useProviderLinkingPolicy(() => db);
+
+    it('reports the provider linking policy in discovery, as the settings row holds it (#913)', async () => {
+      const read = async () =>
+        (await request(baseUrl).get(DISCOVERY_PATH).expect(200)).body.bge_provider_linking_policy;
+
+      expect(await read()).toBe(ProviderLinkingPolicy.SignedIn);
+
+      await setPolicy(ProviderLinkingPolicy.AutomaticWhenVerified);
+      expect(await read()).toBe(ProviderLinkingPolicy.AutomaticWhenVerified);
+    });
+  });
+
   it('asks the provider for openid, profile and email (#912)', async () => {
     const { sub, email } = freshIdentity();
 
