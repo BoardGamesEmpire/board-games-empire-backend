@@ -52,6 +52,7 @@ import {
   PluginInstallPermissionCollisionError,
   PluginInstallStaticAnalysisError,
   PluginInstallUnknownCorePermissionError,
+  PluginReinstallConflictError,
 } from './install.errors';
 import {
   DEFAULT_PLUGIN_EXECUTION_MODE,
@@ -582,7 +583,7 @@ export class PluginInstallerService {
         });
 
         if (claimed.count !== 1) {
-          throw new PluginInstallConflictError(manifest.slug);
+          throw new PluginReinstallConflictError(manifest.slug);
         }
 
         plugin = await tx.plugin.findUniqueOrThrow({ where: { id: existing.id } });
