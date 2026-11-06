@@ -1,5 +1,6 @@
 import { Action, ResourceType } from '@bge/database';
 import { CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
+import { EncryptionService } from '@bge/services';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { SystemSettingsController } from './system-settings.controller';
 import { SystemSettingsService } from './system-settings.service';
@@ -9,7 +10,7 @@ describe('SystemSettingsController', () => {
 
   beforeEach(async () => {
     const { module } = await createTestingModuleWithDb({
-      providers: [SystemSettingsService],
+      providers: [SystemSettingsService, { provide: EncryptionService, useValue: { encrypt: jest.fn() } }],
       controllers: [SystemSettingsController],
       overrideGuards: [PoliciesGuard],
     });

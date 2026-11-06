@@ -47,6 +47,12 @@ enum NotificationType {
   AuditUnattributedEvent
 
   /**
+   * For the admin who sent a test email: whether it was sent.
+   * Payload: { outcome, code, message }
+   */
+  MailTestResult
+
+  /**
    * DataGateway notifications, each sent to the server admins (#763):
    * DataGatewayAutoDisabled: repeated failures switched the DataGateway off.
    * Payload: { gatewayId, gatewayName, reason, consecutiveFailures,
