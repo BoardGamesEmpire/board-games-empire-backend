@@ -271,6 +271,35 @@ describe('game collection authorization', () => {
       await readEntry(viewer, friendsEntry.id).expect(200);
     });
 
+    // The request body accepts the rung, and a reader the extended network table puts
+    // three steps from the owner sees the entry it made (#497).
+    it('creates an ExtendedNetwork entry, which a reader three steps away sees (#497)', async () => {
+      const [owner, viewer, stranger] = await Promise.all([actors.user(), actors.user(), actors.user()]);
+      await arrangeExtendedNetwork(db.client, owner, viewer, 3);
+      const platform = await tabletopPlatform(db.client);
+      const game = await db.client.game.create({
+        data: { title: `e2e game ${randomUUID().slice(0, 8)}` },
+        select: { id: true },
+      });
+      const platformGame = await db.client.platformGame.create({
+        data: { gameId: game.id, platformId: platform.id },
+        select: { id: true },
+      });
+
+      const { collection } = readCollectionEnvelope(
+        await request(baseUrl)
+          .post(COLLECTIONS_PATH)
+          .set(owner.headers)
+          .send({ platformGameId: platformGame.id, medium: GameMedium.Physical, reach: Reach.ExtendedNetwork })
+          .expect(201),
+        'POST /api/game-collections with reach ExtendedNetwork',
+      );
+
+      expect(collection.reach).toBe(Reach.ExtendedNetwork);
+      await readEntry(viewer, collection.id).expect(200);
+      await readEntry(stranger, collection.id).expect(404);
+    });
+
     it('refuses a request with no session, where it used to serve the Public entries', async () => {
       const owner = await actors.user();
       await arrangeCollection(owner.user.id);

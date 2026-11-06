@@ -460,6 +460,23 @@ describe('game authorization', () => {
       expect(await reachOf(game.id)).toBe(Reach.FriendsOfFriends);
     });
 
+    // The request body accepts the rung, and a reader the extended network table puts
+    // three steps from the creator reads the game it made (#497).
+    it('creates an ExtendedNetwork game, which a reader three steps away reads (#497)', async () => {
+      const [creator, viewer, stranger] = await Promise.all([actors.user(), actors.user(), actors.user()]);
+      await arrangeExtendedNetwork(db.client, creator, viewer, 3);
+
+      const created = await createGame(creator, { title: 'Extended prototype', reach: Reach.ExtendedNetwork }).expect(
+        201,
+      );
+      const { game } = gameEnvelope(created, 'POST /api/games with reach ExtendedNetwork');
+
+      expect(game.reach).toBe(Reach.ExtendedNetwork);
+      expect(await reachOf(game.id)).toBe(Reach.ExtendedNetwork);
+      await readGame(viewer, game.id).expect(200);
+      await readGame(stranger, game.id).expect(403);
+    });
+
     it('refuses Household with 400, which is no longer a reach (#808)', async () => {
       const creator = await actors.user();
 

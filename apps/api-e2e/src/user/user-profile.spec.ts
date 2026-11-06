@@ -350,6 +350,23 @@ describe('user profile', () => {
       await readProfile(stranger, profileOwner.user.id).expect(404);
     });
 
+    it('lets a reader three steps away read the profile once its owner sets it to ExtendedNetwork (#497)', async () => {
+      const { profileOwner, friend, stranger } = await arrange(Reach.Private);
+      const viewer = await actors.user();
+      await arrangeExtendedNetwork(db.client, profileOwner, viewer, 3);
+      await readProfile(viewer, profileOwner.user.id).expect(404);
+
+      const edited = userProfile(
+        await editOwnProfile(profileOwner, { reach: Reach.ExtendedNetwork }).expect(200),
+        'PATCH /api/users/me/profile',
+      );
+      expect(edited).toMatchObject({ reach: Reach.ExtendedNetwork });
+
+      await readProfile(viewer, profileOwner.user.id).expect(200);
+      await readProfile(friend, profileOwner.user.id).expect(200);
+      await readProfile(stranger, profileOwner.user.id).expect(404);
+    });
+
     it('refuses an avatar change for now', async () => {
       const profileOwner = await actors.user();
 

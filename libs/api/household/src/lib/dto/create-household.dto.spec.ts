@@ -42,11 +42,14 @@ describe('CreateHouseholdDto', () => {
   });
 
   // The rungs a household read rule serves, and no others. `Public` waits on
-  // #231 (#495), and so does `FriendsOfFriends` (#496). Null would reach a
-  // non-nullable column as a 500.
-  it.each([['Public'], ['FriendsOfFriends'], ['Household'], [null]])('rejects reach %p', async (reach) => {
-    await expect(propertiesWithErrors({ ...VALID_PAYLOAD, reach })).resolves.toEqual(['reach']);
-  });
+  // #231 (#495), and so do `FriendsOfFriends` (#496) and `ExtendedNetwork`
+  // (#497). Null would reach a non-nullable column as a 500.
+  it.each([['Public'], ['FriendsOfFriends'], ['ExtendedNetwork'], ['Household'], [null]])(
+    'rejects reach %p',
+    async (reach) => {
+      await expect(propertiesWithErrors({ ...VALID_PAYLOAD, reach })).resolves.toEqual(['reach']);
+    },
+  );
 
   describe('clientRequestId (#210)', () => {
     it('is optional', async () => {

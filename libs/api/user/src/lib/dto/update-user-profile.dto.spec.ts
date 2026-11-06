@@ -34,7 +34,7 @@ const CLEARABLE_TEXT = [
 
 describe('UpdateUserProfileDto', () => {
   it('accepts every reach a profile read rule serves, and no other', async () => {
-    for (const reach of [Reach.Public, Reach.FriendsOfFriends, Reach.Friends, Reach.Private]) {
+    for (const reach of [Reach.Public, Reach.ExtendedNetwork, Reach.FriendsOfFriends, Reach.Friends, Reach.Private]) {
       expect(await keysFor({ reach })).toEqual({});
     }
 

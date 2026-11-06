@@ -16,10 +16,14 @@ describe.each([
       forbidNonWhitelisted: true,
     });
 
-  // Every rung a game read rule serves, friends of friends included (#496).
-  it.each([Reach.Public, Reach.FriendsOfFriends, Reach.Friends, Reach.Private])('accepts %s', async (reach) => {
-    await expect(errorsFor({ reach })).resolves.toHaveLength(0);
-  });
+  // Every rung a game read permission serves, friends of friends (#496) and
+  // the extended network (#497) included.
+  it.each([Reach.Public, Reach.ExtendedNetwork, Reach.FriendsOfFriends, Reach.Friends, Reach.Private])(
+    'accepts %s',
+    async (reach) => {
+      await expect(errorsFor({ reach })).resolves.toHaveLength(0);
+    },
+  );
 
   // `Household` is no longer a reach (#808), and null would reach a
   // non-nullable column as a 500.

@@ -204,6 +204,16 @@ describe('system settings update', () => {
       await expect(readSettings()).resolves.toEqual(original);
     };
 
+    // No route offers the extended network as an invitee policy (#497).
+    it.each(['householdInviteePolicy', 'eventInviteePolicy'])(
+      'answers 400 to ExtendedNetwork for %s (#497)',
+      async (key) => {
+        const admin = await actors.admin();
+
+        await expectRefused(admin, { [key]: Reach.ExtendedNetwork });
+      },
+    );
+
     it.each(DAY_COUNTS)('answers 400 to %s below one day, past a century, or fractional', async (key) => {
       const admin = await actors.admin();
 

@@ -106,22 +106,17 @@ describe('browsing upcoming events (#962)', () => {
   });
 
   // The extended network rows stand in for the friendships the worker job reads, and
-  // the block is read from the friendships, before any job runs (#497). The
-  // events are created at `Friends` and moved to the rung in the database: the
-  // request bodies accept it only once its measurement is reviewed. A host's
-  // `FriendsOfFriends` event stays off a list the extended network rows alone reach.
+  // the block is read from the friendships, before any job runs (#497). A
+  // host's `FriendsOfFriends` event stays off a list the extended network rows alone
+  // reach.
   it('lists an ExtendedNetwork event to a reader three steps from its host, and leaves it out for one the host blocked (#497)', async () => {
     const [host, blockingHost, viewer] = await Promise.all([actors.user(), actors.user(), actors.user()]);
     await arrangeExtendedNetwork(db.client, host, viewer, 3);
     await arrangeExtendedNetwork(db.client, blockingHost, viewer, 3);
     await arrangeFriendship(db.client, blockingHost, viewer, FriendshipStatus.Blocked);
 
-    const extendedNetworkId = await createdEventId(host, { reach: Reach.Friends, ...dated(2) });
-    const blockedId = await createdEventId(blockingHost, { reach: Reach.Friends, ...dated(2) });
-    await db.client.event.updateMany({
-      where: { id: { in: [extendedNetworkId, blockedId] } },
-      data: { reach: Reach.ExtendedNetwork },
-    });
+    const extendedNetworkId = await createdEventId(host, { reach: Reach.ExtendedNetwork, ...dated(2) });
+    const blockedId = await createdEventId(blockingHost, { reach: Reach.ExtendedNetwork, ...dated(2) });
     const friendsOfFriendsId = await createdEventId(host, { reach: Reach.FriendsOfFriends, ...dated(2) });
 
     const ids = await browse(viewer);

@@ -20,9 +20,12 @@ describe.each([
     return errors.map((error) => error.property);
   };
 
-  it.each([Reach.Private, Reach.Friends, Reach.FriendsOfFriends, Reach.Public])('accepts %s', async (reach) => {
-    await expect(propertiesWithErrors({ reach })).resolves.toEqual([]);
-  });
+  it.each([Reach.Private, Reach.Friends, Reach.FriendsOfFriends, Reach.ExtendedNetwork, Reach.Public])(
+    'accepts %s',
+    async (reach) => {
+      await expect(propertiesWithErrors({ reach })).resolves.toEqual([]);
+    },
+  );
 
   it('accepts the field left out', async () => {
     await expect(propertiesWithErrors({})).resolves.toEqual([]);

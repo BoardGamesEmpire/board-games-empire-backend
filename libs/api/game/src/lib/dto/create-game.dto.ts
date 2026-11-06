@@ -4,7 +4,13 @@ import { NotLessThanProperty, ReachProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsInt, IsOptional, IsPositive, IsString, Max } from 'class-validator';
 
-const GAME_REACHES = [Reach.Public, Reach.FriendsOfFriends, Reach.Friends, Reach.Private] as const;
+const GAME_REACHES = [
+  Reach.Public,
+  Reach.ExtendedNetwork,
+  Reach.FriendsOfFriends,
+  Reach.Friends,
+  Reach.Private,
+] as const;
 
 /**
  * The longest new or changed description a game may be sent with. The
@@ -24,16 +30,20 @@ const INT32_MAX = 2 ** 31 - 1;
 
 /**
  * A game's reach: every rung a game read rule serves, friends of friends
- * included (#496). Shared with `UpdateGameDto`, which names no default.
+ * (#496) and the extended network (#497) included. Shared with
+ * `UpdateGameDto`, which names no default.
  */
 export function GameReachProperty(defaultReach?: GameReach): PropertyDecorator {
   return ReachProperty({
     reaches: GAME_REACHES,
     default: defaultReach,
     description:
-      'Who may read the game besides its creator. `Public`: every signed-in user. `FriendsOfFriends`: the ' +
-      "creator's friends and friends of friends, unless a block stands between the creator and the reader. " +
-      "`Friends`: the creator's friends. `Private`: no one.",
+      'Who may read the game besides its creator. `Public`: every signed-in user. `ExtendedNetwork`: the ' +
+      "creator's friends and everyone up to three friendship steps from the creator, unless a block stands " +
+      'between the creator and the reader. A reader who is no longer within three steps may keep access for ' +
+      'a short while: usually seconds after an unfriend, up to a day after a user who linked them is deleted. ' +
+      "`FriendsOfFriends`: the creator's friends and friends of friends, unless a block stands between the " +
+      "creator and the reader. `Friends`: the creator's friends. `Private`: no one.",
   });
 }
 

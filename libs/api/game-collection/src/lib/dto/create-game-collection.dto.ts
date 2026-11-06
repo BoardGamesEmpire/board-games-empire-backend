@@ -4,12 +4,18 @@ import { ReachProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, Max, Min } from 'class-validator';
 
-const COLLECTION_REACHES = [Reach.Private, Reach.Friends, Reach.FriendsOfFriends, Reach.Public] as const;
+const COLLECTION_REACHES = [
+  Reach.Private,
+  Reach.Friends,
+  Reach.FriendsOfFriends,
+  Reach.ExtendedNetwork,
+  Reach.Public,
+] as const;
 export type CollectionReach = (typeof COLLECTION_REACHES)[number];
 
 /**
  * A collection entry's reach: every rung a collection read rule serves,
- * friends of friends included (#496). The owner's households see the entry
+ * friends of friends (#496) and the extended network (#497) included. The owner's households see the entry
  * whatever its reach (#495). Shared with `UpdateGameCollectionDto`, which
  * names no default.
  */
@@ -21,8 +27,11 @@ export function CollectionReachProperty(defaultReach?: CollectionReach): Propert
       'Who may see this entry besides its owner and the households they share their games with. `Private`: ' +
       "no one. `Friends`: the owner's friends, unless the owner hides their collection from friends. " +
       "`FriendsOfFriends`: the owner's friends and friends of friends, unless a block stands between the " +
-      'owner and the reader, and unless the owner hides their collection from friends. `Public`: everyone on ' +
-      'the server, guests included.',
+      'owner and the reader, and unless the owner hides their collection from friends. `ExtendedNetwork`: ' +
+      'everyone up to three friendship steps from the owner, on the same two conditions. A reader who is no ' +
+      'longer within three steps may keep access for a short while: usually seconds after an unfriend, up ' +
+      'to a day after a user who linked them is deleted. `Public`: everyone on the server, anonymous users ' +
+      'included.',
   });
 }
 

@@ -109,6 +109,15 @@ describe('UpdateSystemSettingsDto', () => {
         [`${property}.isIn`]: 'validation.isIn',
       });
     });
+
+    // The extended network is no invitee policy (#497): at three friendship
+    // steps it is close to Public, and an invite that went through would tell
+    // the inviter whether the invitee is in their extended network.
+    it('refuses ExtendedNetwork for either invitee policy (#497)', async () => {
+      expect(await keysFor({ [property]: 'ExtendedNetwork' })).toEqual({
+        [`${property}.isIn`]: 'validation.isIn',
+      });
+    });
   });
 
   describe('name', () => {

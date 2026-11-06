@@ -367,8 +367,9 @@ describe('event read scope', () => {
     // host's friends. Created at its reach through the route, so the DTO's
     // acceptance is part of the test (#496). A friend reading a `Public` event
     // can't tell the friends rule from the public one, so `Public` is pinned on
-    // a stranger below.
-    it.each([Reach.FriendsOfFriends])(
+    // a stranger below. The extended network admits a friend through the same
+    // friends permissions (#497).
+    it.each([Reach.FriendsOfFriends, Reach.ExtendedNetwork])(
       "serves a friend of the host a %s event's occurrences and policy, and still refuses a stranger",
       async (reach) => {
         const host = await actors.user();
@@ -421,9 +422,7 @@ describe('event read scope', () => {
     // (#497). Two viewers sit three steps from the host, so the blocked one's
     // refusal is the block, which the permissions read from the friendships
     // before any job runs. A direct friend with no extended network row reads it
-    // through the friends permissions. Created at `Friends` and moved to the
-    // rung in the database: the request bodies accept it only once its
-    // measurement is reviewed.
+    // through the friends permissions. Created at its reach through the route.
     it("serves a reader three steps from the host an ExtendedNetwork event's occurrences and policy, and refuses one the host has blocked (#497)", async () => {
       const [host, friend, viewer, blockedViewer, stranger] = await Promise.all(
         Array.from({ length: 5 }, () => actors.user()),
@@ -432,8 +431,7 @@ describe('event read scope', () => {
       await arrangeExtendedNetwork(db.client, host, viewer, 3);
       await arrangeExtendedNetwork(db.client, host, blockedViewer, 3);
       await arrangeFriendship(db.client, host, blockedViewer, FriendshipStatus.Blocked);
-      const { eventId, occurrenceId, guestEmail } = await arrangeEvent(host, { reach: Reach.Friends });
-      await db.client.event.update({ where: { id: eventId }, data: { reach: Reach.ExtendedNetwork } });
+      const { eventId, occurrenceId, guestEmail } = await arrangeEvent(host, { reach: Reach.ExtendedNetwork });
 
       for (const [who, actor] of [
         ['a friend of the host', friend],
