@@ -27,7 +27,12 @@ describe('MailDispatcherService', () => {
   afterEach(() => jest.clearAllMocks());
 
   it('adds a password reset with five attempts, exponential backoff and no retained job (#654)', async () => {
-    await service.enqueue('user-1', { kind: 'password-reset', link: 'https://bge.test/r?t=x', lifetimeMinutes: 60 });
+    await service.enqueue('user-1', {
+      kind: 'password-reset',
+      link: 'https://bge.test/r?t=x',
+      lifetimeMinutes: 60,
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    });
 
     expect(queue.add).toHaveBeenCalledWith(MAIL_DELIVERY_JOB, expect.anything(), {
       attempts: MAIL_DELIVERY_ATTEMPTS,

@@ -2,7 +2,14 @@ import type { I18nTranslations } from '@bge/i18n-core';
 import type { I18nService } from 'nestjs-i18n';
 import { formatLinkLifetime } from './link-lifetime';
 
-export type MailMessage = { kind: 'password-reset'; link: string; lifetimeMinutes: number } | { kind: 'test' };
+/**
+ * One outgoing mail's content. A password reset carries `expiresAt`, the ISO
+ * time its token stops working, so the worker can drop a reset that waited in
+ * the queue past it rather than mail a dead link (#654).
+ */
+export type MailMessage =
+  | { kind: 'password-reset'; link: string; lifetimeMinutes: number; expiresAt: string }
+  | { kind: 'test' };
 
 export interface MailRenderContext {
   readonly lang: string;

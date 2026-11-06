@@ -27,7 +27,12 @@ describe('renderMail', () => {
 
   const reset = () =>
     renderMail(
-      { kind: 'password-reset', link: 'https://bge.test/reset?token=abc', lifetimeMinutes: 1440 },
+      {
+        kind: 'password-reset',
+        link: 'https://bge.test/reset?token=abc',
+        lifetimeMinutes: 1440,
+        expiresAt: '2999-01-01T00:00:00.000Z',
+      },
       context,
       i18n,
     );

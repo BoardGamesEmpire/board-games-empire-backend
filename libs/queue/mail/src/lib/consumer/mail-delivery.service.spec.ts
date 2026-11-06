@@ -8,6 +8,7 @@ import { Logger } from '@nestjs/common';
 import { UnrecoverableError } from 'bullmq';
 import { I18nService } from 'nestjs-i18n';
 import { createTransport } from 'nodemailer';
+import { RESET_LINK_EXPIRED } from '../constants/mail-queue.constants';
 import type { MailDeliveryJob } from '../interfaces/mail-delivery-job.interface';
 import { MailDeliveryService } from './mail-delivery.service';
 import { MailTransportError } from './mail-transport.error';
@@ -26,7 +27,12 @@ const SETTINGS: MailSettings = {
 
 const RESET: MailDeliveryJob = {
   recipientUserId: 'user-1',
-  message: { kind: 'password-reset', link: 'https://bge.test/reset?token=abc', lifetimeMinutes: 60 },
+  message: {
+    kind: 'password-reset',
+    link: 'https://bge.test/reset?token=abc',
+    lifetimeMinutes: 60,
+    expiresAt: '2999-01-01T00:00:00.000Z',
+  },
 };
 const TEST: MailDeliveryJob = { recipientUserId: 'admin-1', message: { kind: 'test' } };
 
@@ -185,6 +191,37 @@ describe('MailDeliveryService', () => {
         payload: expect.objectContaining({ outcome: 'failed', code }),
       });
       expect(sendMail).not.toHaveBeenCalled();
+    });
+  });
+
+  // A reset that waited in the queue past its token's expiry, as while the
+  // worker was down, would mail a dead link that says it still works (#654).
+  describe('when a reset link expired in the queue', () => {
+    const EXPIRES = '2026-11-06T12:00:00.000Z';
+    const expiring: MailDeliveryJob = { ...RESET, message: { ...RESET.message, expiresAt: EXPIRES } as never };
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it.each([
+      ['at its expiry', 0],
+      ['after it', 60_000],
+    ])('drops it unsent %s, for good, on any attempt (#654)', async (_name, late) => {
+      jest.spyOn(Date, 'now').mockReturnValue(Date.parse(EXPIRES) + late);
+
+      const failure = service.deliver(expiring);
+
+      await expect(failure).rejects.toBeInstanceOf(UnrecoverableError);
+      await expect(failure).rejects.toThrow(RESET_LINK_EXPIRED);
+      expect(db.user.findUnique).not.toHaveBeenCalled();
+      expect(sendMail).not.toHaveBeenCalled();
+    });
+
+    it('sends it while the link still works (#654)', async () => {
+      jest.spyOn(Date, 'now').mockReturnValue(Date.parse(EXPIRES) - 1);
+
+      await expect(service.deliver(expiring)).resolves.toBeUndefined();
+
+      expect(sendMail).toHaveBeenCalledTimes(1);
     });
   });
 

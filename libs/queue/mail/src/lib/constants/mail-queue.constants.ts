@@ -18,3 +18,10 @@ export const MAIL_DELIVERY_BACKOFF_MS = 5_000;
 
 /** One try for a test email, so the admin hears the outcome at once. */
 export const MAIL_TEST_ATTEMPTS = 1;
+
+/**
+ * The `UnrecoverableError` message for a password reset whose link expired
+ * while it waited in the queue, as when the worker was down (#654). It is not
+ * a `MailFailureCode`: nothing failed to send, and a test email cannot expire.
+ */
+export const RESET_LINK_EXPIRED = 'PASSWORD_RESET_LINK_EXPIRED';

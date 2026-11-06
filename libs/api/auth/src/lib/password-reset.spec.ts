@@ -174,14 +174,36 @@ describe('createPasswordReset', () => {
   });
 
   describe('sendResetPassword', () => {
-    it('queues the client link with the lifetime from the settings (#654)', async () => {
+    it('queues the client link with the lifetime from the settings, and when it expires (#654)', async () => {
       const { sendResetPassword } = createPasswordReset(deps);
 
       await sendResetPassword({ user: { id: 'u1' }, url: CALLBACK_URL, token: 'tok' });
 
       expect(sent).toEqual([
-        ['u1', { kind: 'password-reset', link: 'https://c.example/reset#token=tok', lifetimeMinutes: 1440 }],
+        [
+          'u1',
+          {
+            kind: 'password-reset',
+            link: 'https://c.example/reset#token=tok',
+            lifetimeMinutes: 1440,
+            expiresAt: '2026-11-06T00:00:00.000Z',
+          },
+        ],
       ]);
+    });
+
+    // The worker drops a reset past this time, so it must be the token's own
+    // expiry, not one worked out again when the mail is queued (#654).
+    it('carries the expiry the verification hook gave the token, within one request (#654)', async () => {
+      const { beforeVerificationCreate, sendResetPassword } = createPasswordReset(deps);
+
+      await runWithRequestState(new WeakMap(), async () => {
+        await beforeVerificationCreate({ identifier: 'reset-password:tok' });
+        deps.now.mockReturnValue(new Date('2026-11-05T00:00:05Z'));
+        await sendResetPassword({ user: { id: 'u1' }, url: CALLBACK_URL, token: 'tok' });
+      });
+
+      expect(sent).toEqual([['u1', expect.objectContaining({ expiresAt: '2026-11-06T00:00:00.000Z' })]]);
     });
 
     // While Redis refuses connections `queue.add` waits instead of rejecting;

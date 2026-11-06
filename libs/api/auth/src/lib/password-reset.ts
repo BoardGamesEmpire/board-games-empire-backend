@@ -81,6 +81,14 @@ export function createPasswordReset(deps: PasswordResetDeps) {
   const readMailState = async (): Promise<MailState> =>
     (await hasRequestState()) ? requestMailState.get() : deps.readMailState();
 
+  // The expiry the verification hook gave the token, so the mail carries the
+  // moment the link stops working (#654). The hook runs before
+  // `sendResetPassword` in the same request. Outside one, as in a unit test,
+  // nothing is shared and the send works it out from the lifetime.
+  const requestLinkExpiry = defineRequestState<Date | null>(() => null);
+  const linkExpiry = (state: NonNullable<MailState>): Date =>
+    new Date(deps.now().getTime() + state.lifetimeMinutes * 60_000);
+
   return {
     /**
      * Refuses a reset request that could not produce a usable link, or that
@@ -153,11 +161,18 @@ export function createPasswordReset(deps: PasswordResetDeps) {
         return;
       }
 
+      const expiresAt = ((await hasRequestState()) && (await requestLinkExpiry.get())) || linkExpiry(state);
+
       // Not awaited, so how long queueing takes never shows in the response:
       // better-auth holds the response for this function, and only a
       // registered address reaches it (#654).
       void deps
-        .enqueue(data.user.id, { kind: 'password-reset', link, lifetimeMinutes: state.lifetimeMinutes })
+        .enqueue(data.user.id, {
+          kind: 'password-reset',
+          link,
+          lifetimeMinutes: state.lifetimeMinutes,
+          expiresAt: expiresAt.toISOString(),
+        })
         .catch((error: unknown) => {
           logger.error(`Password reset not mailed: could not queue the mail (${errorName(error)})`);
         });
@@ -179,7 +194,12 @@ export function createPasswordReset(deps: PasswordResetDeps) {
         return undefined;
       }
 
-      return { data: { expiresAt: new Date(deps.now().getTime() + state.lifetimeMinutes * 60_000) } };
+      const expiresAt = linkExpiry(state);
+      if (await hasRequestState()) {
+        await requestLinkExpiry.set(expiresAt);
+      }
+
+      return { data: { expiresAt } };
     },
   };
 }

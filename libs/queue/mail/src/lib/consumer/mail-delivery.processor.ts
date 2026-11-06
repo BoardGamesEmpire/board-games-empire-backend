@@ -48,9 +48,10 @@ export class MailDeliveryProcessor extends ActorAwareWorkerHost<MailDeliveryJob>
   /**
    * A mail code is claimed only for a failure the delivery service
    * classified: a transport error, or an `UnrecoverableError` whose message is
-   * a mail code. The base worker host's own `UnrecoverableError` keeps its
-   * message (queue name and job id only). Any other error is named by class, without its message
-   * or stack.
+   * a mail code. Any other `UnrecoverableError` keeps its message: the base
+   * worker host's names only the queue and job id, and the delivery service's
+   * `RESET_LINK_EXPIRED` carries no job data. Any other error is named by
+   * class, without its message or stack.
    */
   private describe(error: Error): string {
     if (error instanceof MailTransportError) {

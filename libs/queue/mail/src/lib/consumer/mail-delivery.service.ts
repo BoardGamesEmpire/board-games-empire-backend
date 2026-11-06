@@ -17,6 +17,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { UnrecoverableError } from 'bullmq';
 import { I18nService } from 'nestjs-i18n';
 import { createTransport } from 'nodemailer';
+import { RESET_LINK_EXPIRED } from '../constants/mail-queue.constants';
 import type { MailDeliveryJob } from '../interfaces/mail-delivery-job.interface';
 import { MailTransportError } from './mail-transport.error';
 
@@ -43,6 +44,9 @@ function isPermanentRefusal(error: unknown): boolean {
  * as bad credentials, which a retry would only repeat. A temporary (4xx)
  * refusal, such as greylisting, is retried.
  *
+ * A reset whose link expired in the queue is dropped unsent, as an
+ * `UnrecoverableError` whose message is `RESET_LINK_EXPIRED`.
+ *
  * A failed send logs one warn line: the job's kind, the mail code and the
  * error's `code`, `responseCode` and `command`, which name the step that
  * failed and carry no message data. It is the admin's only trace for a test
@@ -63,6 +67,13 @@ export class MailDeliveryService {
   ) {}
 
   async deliver(job: MailDeliveryJob): Promise<void> {
+    // A reset that waited past its token's expiry, as while the worker was
+    // down, would mail a dead link that says it still works. Checked on every
+    // attempt, so a retry that runs late is dropped too (#654).
+    if (job.message.kind === 'password-reset' && Date.now() >= Date.parse(job.message.expiresAt)) {
+      throw new UnrecoverableError(RESET_LINK_EXPIRED);
+    }
+
     const recipient = await this.db.user.findUnique({
       where: { id: job.recipientUserId },
       select: { email: true, username: true },

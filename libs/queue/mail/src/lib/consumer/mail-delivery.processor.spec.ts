@@ -5,7 +5,7 @@ import { Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { UnrecoverableError, type Job } from 'bullmq';
 import { ClsModule } from 'nestjs-cls';
-import { MAIL_DELIVERY_ATTEMPTS } from '../constants/mail-queue.constants';
+import { MAIL_DELIVERY_ATTEMPTS, RESET_LINK_EXPIRED } from '../constants/mail-queue.constants';
 import type { MailDeliveryJob } from '../interfaces/mail-delivery-job.interface';
 import { MailDeliveryProcessor } from './mail-delivery.processor';
 import { MailDeliveryService } from './mail-delivery.service';
@@ -15,7 +15,7 @@ const LINK = 'https://bge.test/reset?token=secret-token';
 
 const data: MailDeliveryJob = {
   recipientUserId: 'user-1',
-  message: { kind: 'password-reset', link: LINK, lifetimeMinutes: 60 },
+  message: { kind: 'password-reset', link: LINK, lifetimeMinutes: 60, expiresAt: '2999-01-01T00:00:00.000Z' },
 };
 
 const makeJob = (over: { attempts?: number; attemptsMade?: number } = {}): Job<MailDeliveryJob & JobMetaEnvelope> =>
@@ -118,5 +118,12 @@ describe('MailDeliveryProcessor', () => {
 
     expect(everythingLogged()).toContain('Job mail-delivery#job-7 missing __meta envelope');
     expect(everythingLogged()).not.toContain('MAIL_');
+  });
+
+  it('logs a reset dropped for an expired link as failed for good, naming the reason (#654)', async () => {
+    await processor.onFailed(makeJob({ attemptsMade: 1 }), new UnrecoverableError(RESET_LINK_EXPIRED));
+
+    expect(everythingLogged()).toContain('failed for good: reason=PASSWORD_RESET_LINK_EXPIRED');
+    expect(everythingLogged()).not.toContain(LINK);
   });
 });
