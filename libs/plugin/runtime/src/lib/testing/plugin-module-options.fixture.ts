@@ -10,6 +10,7 @@ export function buildPluginModuleOptions(overrides: Partial<PluginModuleOptions>
     pluginsRoot: '/plugins',
     bgeVersion: '1.0.0',
     defaultLocale: 'en',
+    processRole: 'api',
     ...overrides,
   };
 }

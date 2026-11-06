@@ -176,6 +176,7 @@ export function createMockDatabaseService(): MockDatabaseService {
     pluginGrant: mockDelegate(),
     pluginLifecycleEvent: mockDelegate(),
     pluginPermission: mockDelegate(),
+    pluginProcessLoad: mockDelegate(),
     publisher: mockDelegate(),
     publisherGatewayLink: mockDelegate(),
     quota: mockDelegate(),

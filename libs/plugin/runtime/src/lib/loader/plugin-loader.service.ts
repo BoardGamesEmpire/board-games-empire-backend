@@ -1,6 +1,6 @@
 import { PluginActorScope, SERVER_PLUGIN_UNIT, SystemActorScope } from '@bge/actor-context';
 import { DatabaseService, type Plugin } from '@bge/database';
-import type { PluginFactory } from '@boardgamesempire/plugin-contract';
+import type { PluginArtifactSha256, PluginFactory } from '@boardgamesempire/plugin-contract';
 import { validatePluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -15,6 +15,7 @@ import { assertResolvedEntrypointContained, resolvePluginEntrypoint } from './en
 import { PluginDiskVersionMismatchError, PluginEntrypointError, PluginModuleShapeError } from './loader.errors';
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './plugin-instance-registry';
+import { PluginLoadRecorder } from './plugin-load-recorder.service';
 import { PLUGIN_MODULE_IMPORTER, type PluginModuleImporter } from './plugin-module-importer';
 
 /**
@@ -57,6 +58,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
     private readonly emitter: EventEmitter2,
     private readonly systemActorScope: SystemActorScope,
     private readonly pluginActorScope: PluginActorScope,
+    private readonly recorder: PluginLoadRecorder,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
   ) {}
 
@@ -136,11 +138,14 @@ export class PluginLoaderService implements OnApplicationBootstrap {
         slug: plugin.slug,
         category: plugin.category,
         scope: plugin.scope,
+        sha256: directory.sha256,
         manifest,
         instance,
       },
       { enabled: true },
     );
+
+    await this.recordLoad(plugin.slug, directory.sha256);
 
     // The code now running is the activated version — the disk check above
     // proved it — so a clean load is what clears both self-healing flags,
@@ -160,6 +165,28 @@ export class PluginLoaderService implements OnApplicationBootstrap {
 
       if (plugin.restartRequired) {
         this.logger.log(`Plugin '${plugin.slug}' v${plugin.version} loaded post-update — restartRequired cleared`);
+      }
+    }
+  }
+
+  /**
+   * Records the artifact this process now runs (#1094). Its failure never
+   * quarantines the plugin: the code is already running, and the heartbeat
+   * is an `updateMany`, so it cannot recreate a missing row. One retry
+   * covers a transient database error; after that the plugin stays loaded
+   * and the failure is logged. The sweep then sees no record for it, so a
+   * restart is what restores the protection.
+   */
+  private async recordLoad(slug: string, sha256: PluginArtifactSha256): Promise<void> {
+    for (const attempt of [1, 2]) {
+      try {
+        await this.recorder.record(slug, sha256);
+        return;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error(
+          `Failed to record the artifact plugin '${slug}' loaded (attempt ${attempt} of 2): ${message}`,
+        );
       }
     }
   }

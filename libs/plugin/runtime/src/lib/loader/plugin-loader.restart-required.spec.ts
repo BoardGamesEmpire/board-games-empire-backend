@@ -15,6 +15,7 @@ import { PluginLoadFailedEvent } from '../events/plugin.events';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './plugin-instance-registry';
+import { PluginLoadRecorder } from './plugin-load-recorder.service';
 import { PluginLoaderService } from './plugin-loader.service';
 import type { PluginModuleImporter } from './plugin-module-importer';
 
@@ -96,6 +97,7 @@ describe('PluginLoaderService — restart-required and tombstones', () => {
       warnings: [],
     });
 
+    const recorder = { record: jest.fn().mockResolvedValue(undefined) };
     const contextFactory = { create: jest.fn().mockReturnValue(context) };
     const configService = { prime: jest.fn(), evict: jest.fn() };
     const systemActorScope = { run: jest.fn(<T>(_reason: string, fn: () => T): T => fn()) };
@@ -113,6 +115,7 @@ describe('PluginLoaderService — restart-required and tombstones', () => {
       emitter as unknown as EventEmitter2,
       systemActorScope as unknown as SystemActorScope,
       pluginActorScope as unknown as PluginActorScope,
+      recorder as unknown as PluginLoadRecorder,
       options,
     );
   });

@@ -35,6 +35,7 @@ export * from './lib/loader/path-containment';
 export * from './lib/loader/plugin-definition';
 export * from './lib/loader/plugin-directory-resolver.service';
 export * from './lib/loader/plugin-instance-registry';
+export * from './lib/loader/plugin-load-recorder.service';
 export * from './lib/loader/plugin-loader.service';
 export * from './lib/loader/plugin-module-importer';
 export * from './lib/manifest/manifest-move';

@@ -7,5 +7,6 @@ export * from './lib/placement/place-plugin-artifact';
 export * from './lib/plugin-artifacts.module';
 export * from './lib/receive/plugin-artifact.receiver';
 export * from './lib/store/plugin-artifact.store';
+export * from './lib/sweep/plugin-artifact-sweep.service';
 export * from './lib/testing/plugin-tarball';
 export * from './lib/workspace/incoming';
