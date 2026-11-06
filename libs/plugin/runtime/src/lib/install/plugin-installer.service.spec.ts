@@ -16,6 +16,7 @@ import {
 } from '@bge/database';
 import { createMockDatabaseService, UNIT_BOUND_RULES, type MockDatabaseService } from '@bge/testing';
 import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
+import { buildPluginArtifactSha256 as sha, type PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -146,7 +147,7 @@ describe('PluginInstallerService', () => {
 
   const directory = (): PluginArtifactDirectory => ({
     slug: 'demo-sink',
-    sha256: 'a'.repeat(64),
+    sha256: sha('a'),
     rootDir,
     manifestPath: join(rootDir, 'manifest.json'),
     packageJsonPath: join(rootDir, 'package.json'),
@@ -259,7 +260,7 @@ describe('PluginInstallerService', () => {
       // The directory's name is the artifact's checksum, so the install takes
       // it from there rather than from a second input that could disagree. A
       // link or registry the provenance leaves out is stored as null (#696).
-      await service.install(input({ directory: { ...directory(), sha256: 'c'.repeat(64) }, provenance: undefined }));
+      await service.install(input({ directory: { ...directory(), sha256: sha('c') }, provenance: undefined }));
 
       const [{ data }] = db.plugin.create.mock.calls[0] as [{ data: Record<string, unknown> }];
       expect(data).toEqual(
@@ -385,7 +386,14 @@ describe('PluginInstallerService', () => {
       directories.confirm.mockRejectedValue(new PluginDirectoryLayoutError('demo-sink', 'checksum fails the pattern'));
 
       await expect(
-        service.install(input({ directory: { ...directory(), sha256: `sha256:${'A'.repeat(64)}` } })),
+        service.install(
+          input({
+            directory: {
+              ...directory(),
+              sha256: `sha256:${'A'.repeat(64)}` as unknown as PluginArtifactSha256,
+            },
+          }),
+        ),
       ).rejects.toBeInstanceOf(PluginDirectoryLayoutError);
       expect(db.plugin.create).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();

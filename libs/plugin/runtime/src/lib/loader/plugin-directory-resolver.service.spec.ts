@@ -1,3 +1,4 @@
+import { buildPluginArtifactSha256 as sha, type PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,8 +8,8 @@ import { PluginDirectoryLayoutError, PluginDirectoryNotFoundError } from './load
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 
 describe('PluginDirectoryResolverService', () => {
-  const SHA_A = 'a'.repeat(64);
-  const SHA_B = 'b'.repeat(64);
+  const SHA_A = sha('a');
+  const SHA_B = sha('b');
 
   let pluginsRoot: string;
   let resolver: PluginDirectoryResolverService;
@@ -314,7 +315,7 @@ describe('PluginDirectoryResolverService', () => {
       await expect(
         resolver.confirm({
           slug: 'demo-sink',
-          sha256: `sha256:${'A'.repeat(64)}`,
+          sha256: `sha256:${'A'.repeat(64)}` as unknown as PluginArtifactSha256,
           rootDir,
           manifestPath: join(rootDir, 'manifest.json'),
           packageJsonPath: join(rootDir, 'package.json'),

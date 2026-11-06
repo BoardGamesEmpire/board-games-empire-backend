@@ -1,7 +1,7 @@
 import { MutationEvent, type PluginUnit } from '@bge/actor-context';
 import type { HouseholdPlugin, Plugin, PluginGrant, PluginUnitDormantReason, UserPlugin } from '@bge/database';
 import { ResourceType } from '@bge/database';
-import { PluginEvent } from '@boardgamesempire/plugin-contract';
+import { PluginEvent, type PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import type { PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest';
 import type { StaticAnalysisFinding } from '../install/static-analysis.types';
 import type { UpdateEscalation } from '../update/update-escalation.types';
@@ -365,7 +365,7 @@ export class PluginUpdatePendingEvent extends MutationEvent<Plugin> {
     before: PluginUpdateStagingSnapshot,
     after: PluginUpdateStagingSnapshot,
     /** Checksum of the staged plugin artifact; every staged update has one (#696). */
-    public readonly pendingSha256: string,
+    public readonly pendingSha256: PluginArtifactSha256,
     /** What escalated — WHY this update needed staged consent. Context for the lifecycle row and the C4 surface. */
     public readonly escalations: readonly UpdateEscalation[],
     /** Forbidden import specifiers the staging admin explicitly accepted on the NEW version. */

@@ -2,6 +2,7 @@ import { PluginActorScope, SystemActorScope } from '@bge/actor-context';
 import { DatabaseService, PluginCategory, PluginScope, type Plugin } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import type { PluginArtifactDirectory, PluginContext } from '@boardgamesempire/plugin-contract';
+import { buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
 import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -76,7 +77,7 @@ describe('PluginLoaderService — restart-required and tombstones', () => {
 
     return {
       slug,
-      sha256: 'a'.repeat(64),
+      sha256: sha('a'),
       rootDir,
       manifestPath: join(rootDir, 'manifest.json'),
       packageJsonPath: join(rootDir, 'package.json'),

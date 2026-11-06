@@ -11,7 +11,7 @@ import {
   RiskLevel,
 } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
-import { PluginEvent } from '@boardgamesempire/plugin-contract';
+import { PluginEvent, buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
 import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigEventsService } from '../config/plugin-config-events.service';
@@ -247,7 +247,7 @@ describe('PluginLifecycleListener', () => {
             pendingVersion: '1.3.0',
             pendingStagingId: 'staging-1',
           },
-          'b'.repeat(64),
+          sha('b'),
           [],
           [],
           initiatedAt,
