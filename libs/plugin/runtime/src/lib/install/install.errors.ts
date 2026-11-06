@@ -161,11 +161,22 @@ export class PluginInstallStaticAnalysisError extends Error {
 
 /** A plugin with this slug is already installed. Updates are the C3 flow, not a reinstall. */
 export class PluginInstallConflictError extends Error {
-  override readonly name = 'PluginInstallConflictError';
+  override readonly name: string = 'PluginInstallConflictError';
 
   constructor(public readonly slug: string) {
     super(`Plugin '${slug}' is already installed — updates go through the pending/approve flow, not a reinstall`);
   }
+}
+
+/**
+ * Two reinstalls of the same uninstalled plugin raced and this one lost: the
+ * guarded claim of the row found it already cleared (#1094). Still a
+ * `PluginInstallConflictError`, so existing handling keeps working; its own
+ * `name` is the stable code a client can match on to tell a lost race (retry
+ * and see the plugin installed) from an install over a live plugin.
+ */
+export class PluginReinstallConflictError extends PluginInstallConflictError {
+  override readonly name: string = 'PluginReinstallConflictError';
 }
 
 /**

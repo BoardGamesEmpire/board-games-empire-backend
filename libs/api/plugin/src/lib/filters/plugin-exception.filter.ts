@@ -39,6 +39,7 @@ import {
   PluginLifecycleNotFoundError,
   PluginLifecyclePluginChangedError,
   PluginLifecycleTombstonedError,
+  PluginReinstallConflictError,
   PluginStaticAnalysisUnavailableError,
   PluginUnitAuthorityError,
   PluginUnitConfigRequiredError,
@@ -364,6 +365,14 @@ function buildRenderers(): RendererMap {
   renders(PluginInstallConflictError, (exception) => ({
     status: Http.Conflict,
     message: t('errors.plugin.install_conflict', { slug: exception.slug }),
+    fields: { slug: exception.slug },
+  }));
+
+  // The subclass has its own entry: dispatch walks the prototype chain, so
+  // without one it would render the parent's "already installed" copy (#1094).
+  renders(PluginReinstallConflictError, (exception) => ({
+    status: Http.Conflict,
+    message: t('errors.plugin.reinstall_conflict', { slug: exception.slug }),
     fields: { slug: exception.slug },
   }));
 

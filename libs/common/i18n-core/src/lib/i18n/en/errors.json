@@ -319,6 +319,7 @@
     "grant_plugin_changed": "Plugin '{slug}' changed while you were deciding — review its current permissions and decide again",
     "grant_tombstoned": "Plugin '{slug}' was uninstalled and cannot accept consent decisions",
     "install_conflict": "Plugin '{slug}' is already installed — updates go through the pending/approve flow",
+    "reinstall_conflict": "Plugin '{slug}' was reinstalled by someone else at the same moment — check the plugin list before trying again",
     "install_permission_collision": "Plugin '{slug}' declares permission slugs that already exist",
     "update_version_conflict": "Version '{version}' of plugin '{slug}' is already active",
     "update_pending_conflict": "Plugin '{slug}' already has version '{pendingVersion}' staged — resolve it before staging '{incomingVersion}'",

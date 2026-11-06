@@ -29,6 +29,7 @@ import {
   PluginInstallStaticAnalysisError,
   PluginInstallUnknownCorePermissionError,
   PluginLifecyclePluginChangedError,
+  PluginReinstallConflictError,
   PluginStaticAnalysisUnavailableError,
   PluginUnitAuthorityError,
   PluginUnitConfigRequiredError,
@@ -213,6 +214,15 @@ describe('PluginExceptionFilter', () => {
       expect(rendered().getStatus()).toBe(Http.Conflict);
       expect(body()['message']).toBe(`t:errors.plugin.${key}`);
       expect(body()['code']).toBe(exception.name);
+    });
+
+    it('renders a lost reinstall race as 409 with its own copy and the slug, not the install-conflict copy (#1094)', () => {
+      filter.catch(new PluginReinstallConflictError('sample'), host);
+
+      expect(rendered().getStatus()).toBe(Http.Conflict);
+      expect(body()['code']).toBe('PluginReinstallConflictError');
+      expect(body()['message']).toBe('t:errors.plugin.reinstall_conflict');
+      expect(body()['slug']).toBe('sample');
     });
 
     it('names the plugin and the staging the caller answered when that staging was replaced (#357)', () => {

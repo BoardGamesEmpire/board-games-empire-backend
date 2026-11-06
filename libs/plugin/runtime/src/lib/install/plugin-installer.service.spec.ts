@@ -42,6 +42,7 @@ import {
   PluginInstallPermissionCollisionError,
   PluginInstallStaticAnalysisError,
   PluginInstallUnknownCorePermissionError,
+  PluginReinstallConflictError,
 } from './install.errors';
 import { DEFAULT_PLUGIN_EXECUTION_MODE } from './manifest-enum.maps';
 import { PluginInstallerService, type PluginInstallInput } from './plugin-installer.service';
@@ -887,6 +888,16 @@ describe('PluginInstallerService', () => {
 
         await expect(service.install(input())).rejects.toBeInstanceOf(PluginInstallConflictError);
         expect(emitter.emit).not.toHaveBeenCalled();
+      });
+
+      it('a reinstall race has its own code (#1094)', async () => {
+        db.plugin.updateMany.mockResolvedValue({ count: 0 });
+
+        const failure = await service.install(input()).catch((error: unknown) => error);
+
+        expect(failure).toBeInstanceOf(PluginReinstallConflictError);
+        expect(failure).toBeInstanceOf(PluginInstallConflictError);
+        expect((failure as Error).name).toBe('PluginReinstallConflictError');
       });
 
       it('a fresh install reports no reset — the flag is reinstall provenance only', async () => {
