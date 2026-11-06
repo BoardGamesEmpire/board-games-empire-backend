@@ -166,10 +166,8 @@ describe('PluginInstallerService', () => {
 
   const input = (overrides: Partial<PluginInstallInput> = {}): PluginInstallInput => ({
     directory: directory(),
-    provenance: {
-      installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
-      registrySlug: 'bge-official',
-    },
+    url: 'https://registry.example/demo-sink-1.2.0.tgz',
+    registrySlug: 'bge-official',
     installerId: 'admin-1',
     ...overrides,
   });
@@ -259,18 +257,40 @@ describe('PluginInstallerService', () => {
     it("records the artifact directory's checksum as installedSha256 (#224)", async () => {
       // The directory's name is the artifact's checksum, so the install takes
       // it from there rather than from a second input that could disagree. A
-      // link or registry the provenance leaves out is stored as null (#696).
-      await service.install(input({ directory: { ...directory(), sha256: sha('c') }, provenance: undefined }));
+      // link or registry the install leaves out is stored as null (#696).
+      await service.install(
+        input({ directory: { ...directory(), sha256: sha('c') }, url: undefined, registrySlug: undefined }),
+      );
 
       const [{ data }] = db.plugin.create.mock.calls[0] as [{ data: Record<string, unknown> }];
       expect(data).toEqual(
         expect.objectContaining({ installedSha256: 'c'.repeat(64), installedFromUrl: null, registrySlug: null }),
       );
       expect(installedEvent().provenance).toEqual({
-        installedFromUrl: null,
-        installedSha256: 'c'.repeat(64),
+        sha256: sha('c'),
+        url: null,
         registrySlug: null,
       });
+    });
+
+    it('records where the artifact came from under the provenance names the client reads (#1117)', async () => {
+      const artifact = directory();
+
+      await service.install({ directory: artifact, url: 'https://example.test/a.tgz', installerId: 'admin-1' });
+
+      expect(installedEvent().provenance).toEqual({
+        sha256: artifact.sha256,
+        url: 'https://example.test/a.tgz',
+        registrySlug: null,
+      });
+      const [{ data }] = db.plugin.create.mock.calls[0] as [{ data: Record<string, unknown> }];
+      expect(data).toEqual(
+        expect.objectContaining({
+          installedSha256: artifact.sha256,
+          installedFromUrl: 'https://example.test/a.tgz',
+          registrySlug: null,
+        }),
+      );
     });
 
     it('creates one PluginPermission row per declare, classified explicit Low', async () => {
@@ -340,8 +360,8 @@ describe('PluginInstallerService', () => {
         enabled: false,
       });
       expect(event.provenance).toEqual({
-        installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
-        installedSha256: 'a'.repeat(64),
+        sha256: sha('a'),
+        url: 'https://registry.example/demo-sink-1.2.0.tgz',
         registrySlug: 'bge-official',
       });
       expect(event.grantedPermissions).toEqual([

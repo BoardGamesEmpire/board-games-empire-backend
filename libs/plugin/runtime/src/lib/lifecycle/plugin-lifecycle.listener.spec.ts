@@ -133,8 +133,8 @@ describe('PluginLifecycleListener', () => {
   describe('row shapes', () => {
     it('persists an Installed row with provenance, grants, and audit findings in the payload', async () => {
       const provenance: PluginProvenance = {
-        installedFromUrl: 'https://registry.example/p.tgz',
-        installedSha256: 'abc',
+        sha256: sha('b'),
+        url: 'https://registry.example/p.tgz',
         registrySlug: 'bge-official',
       };
       const event = new PluginInstalledEvent(
@@ -181,6 +181,11 @@ describe('PluginLifecycleListener', () => {
           }),
         }),
       );
+
+      // The stored payload carries the same three names the inventory serves
+      // to the client, with no column-style alias beside them (#1117).
+      const payload = createdRow()['payload'] as { provenance: Record<string, unknown> };
+      expect(Object.keys(payload.provenance).sort()).toEqual(['registrySlug', 'sha256', 'url']);
     });
 
     /** D-CN on #59/#370: the reset flag rides the same payload the seeded grants already do. */

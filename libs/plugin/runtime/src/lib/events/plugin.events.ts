@@ -25,11 +25,12 @@ import type { UpdateEscalation } from '../update/update-escalation.types';
 /**
  * Where the installed plugin artifact came from: its link, checksum and
  * registry (#84). Every plugin is installed from one, so its checksum is
- * always set (#696).
+ * always set (#696). The names are the ones the client reads (#1117), so the
+ * event, the lifecycle payload and the inventory read share one shape.
  */
 export interface PluginProvenance {
-  readonly installedFromUrl: string | null;
-  readonly installedSha256: string;
+  readonly sha256: PluginArtifactSha256;
+  readonly url: string | null;
   readonly registrySlug: string | null;
 }
 

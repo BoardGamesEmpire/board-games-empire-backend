@@ -6,8 +6,11 @@ import {
   Prisma,
   type PluginUnitDormantReason,
 } from '@bge/database';
+import { parsePluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { resolveLocalizedString, type PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
+import type { PluginProvenance } from '../events/plugin.events';
+import { PluginDirectoryLayoutError } from '../loader/loader.errors';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import {
@@ -82,17 +85,6 @@ export interface PluginServerInventoryOptions extends PluginInventoryOptions {
   readonly includeUninstalled?: boolean;
 }
 
-/**
- * Where the installed plugin artifact came from, as read back off the row.
- * There is one shape, with no kind to tell apart, because every plugin is
- * installed from an artifact (#696), and the database requires its checksum.
- */
-export interface PluginInventoryProvenance {
-  readonly sha256: string;
-  readonly url: string | null;
-  readonly registrySlug: string | null;
-}
-
 /** A staged update awaiting consent, as the list surfaces it. */
 export interface PluginInventoryPendingUpdate {
   readonly version: string;
@@ -163,7 +155,7 @@ export interface PluginInventoryEntry extends PluginInventoryIdentity {
   readonly uninstalledAt: Date | null;
   readonly restartRequired: boolean;
   readonly installedAt: Date;
-  readonly provenance: PluginInventoryProvenance;
+  readonly provenance: PluginProvenance;
   readonly pendingUpdate: PluginInventoryPendingUpdate | null;
 }
 
@@ -592,6 +584,25 @@ export class PluginInventoryService {
     return { id: row.id, slug: row.slug, category: row.category, scope: row.scope };
   }
 
+  /**
+   * Where the plugin artifact came from, as read back off the row. One shape,
+   * with no kind to tell apart, because every plugin is installed from an
+   * artifact (#696) and the database requires its checksum.
+   */
+  private provenanceOf(row: ServerRow): PluginProvenance {
+    const sha256 = parsePluginArtifactSha256(row.installedSha256);
+
+    if (sha256 === null) {
+      // Unreachable: the database refuses any other form
+      // (plugins_installed_sha256_format, #1117), so a list read never fails
+      // for one row. Kept as the backstop the brand needs: refused as the
+      // resolver refuses it, never served unvouched for.
+      throw new PluginDirectoryLayoutError(row.slug, 'the installed checksum is not 64 lowercase hex characters');
+    }
+
+    return { sha256, url: row.installedFromUrl, registrySlug: row.registrySlug };
+  }
+
   /** The operational half, reachable only from the `read:plugin` surface. */
   private serverColumns(row: ServerRow): Omit<PluginInventoryEntry, keyof PluginInventoryIdentity> {
     return {
@@ -600,7 +611,7 @@ export class PluginInventoryService {
       uninstalledAt: row.uninstalledAt,
       restartRequired: row.restartRequired,
       installedAt: row.installedAt,
-      provenance: { sha256: row.installedSha256, url: row.installedFromUrl, registrySlug: row.registrySlug },
+      provenance: this.provenanceOf(row),
       // A staged row without a checksum is no staged update, as approval and the
       // pending read treat it (#696). The database sets the five staged columns
       // together or not at all (plugins_staged_update_all_or_nothing, #357), so

@@ -96,6 +96,32 @@ describe('installed-plugin inventory (#354)', () => {
       });
     });
 
+    it('the database refuses an installed checksum in any other form, so no row can fail the list (#1117)', async () => {
+      // The read refuses a checksum that is not 64 lowercase hex characters,
+      // and it maps every row, so one such row would fail the read for all.
+      const plugin = await arrangePlugin();
+
+      const failure = await db.client.plugin
+        .update({ where: { id: plugin.id }, data: { installedSha256: 'A'.repeat(64) } })
+        .catch((err: unknown) => err);
+
+      // Prisma's driver adapter may put Postgres's words in the message, the
+      // cause or the meta, so every own property is searched.
+      const text = (value: unknown, depth = 0): string =>
+        depth > 4 || value === null || value === undefined
+          ? ''
+          : typeof value !== 'object'
+            ? String(value)
+            : Object.getOwnPropertyNames(value)
+                .map((key) => text((value as Record<string, unknown>)[key], depth + 1))
+                .join(' ');
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(text(failure)).toContain('plugins_installed_sha256_format');
+      const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      expect(row.installedSha256).toBe('a'.repeat(64));
+    });
+
     // Only `en` ships as a supported catalog (#135), so the resolver never
     // hands this read a `de` locale even though the fixture manifest carries a
     // German displayName — the manifest chain's own resolution is proven in

@@ -8,6 +8,7 @@ import {
 } from '@bge/database';
 import { batchTransactionCall, createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
+import { PluginDirectoryLayoutError } from '../loader/loader.errors';
 import type { PluginModuleOptions } from '../plugin-module.options';
 import {
   PluginInventoryManifestError,
@@ -168,6 +169,17 @@ describe('PluginInventoryService', () => {
         url: 'https://registry.example/x.tgz',
         registrySlug: 'bge-official',
       });
+    });
+
+    it('refuses a stored checksum that is not 64 lowercase hex characters (#1117)', async () => {
+      // Only a hand edit of the database can leave one, since the install
+      // writes the resolver's branded value. The resolver refuses it at boot.
+      db.plugin.findMany.mockResolvedValue([row({ installedSha256: 'ABC' })] as never);
+      db.plugin.count.mockResolvedValue(1 as never);
+
+      await expect(service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling)).rejects.toBeInstanceOf(
+        PluginDirectoryLayoutError,
+      );
     });
 
     it('surfaces a staged update with pendingSince, never updatedAt, and its staging id (#357)', async () => {
