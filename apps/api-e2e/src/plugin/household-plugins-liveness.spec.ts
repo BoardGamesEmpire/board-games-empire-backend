@@ -1,4 +1,4 @@
-import { PluginCategory, PluginGrantStatus, PluginScope, RiskLevel, type Plugin } from '@bge/database';
+import { PluginGrantStatus, PluginScope, RiskLevel, type Plugin } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
@@ -8,6 +8,7 @@ import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
 import { householdPluginKey } from './plugin-api-key';
+import { pluginRowData } from './plugin-row-fixtures';
 
 /**
  * The household plugin routes answer 404 for a household that is missing or
@@ -56,15 +57,13 @@ describe('household plugin routes for a missing or deleted household (#553)', ()
     });
 
     plugin = await db.client.plugin.create({
-      data: {
+      data: pluginRowData({
         slug: manifest.slug,
         version: manifest.version,
-        category: PluginCategory.FeedbackSink,
         scope: PluginScope.Household,
         manifestJson: manifest as never,
         enabled: true,
-        installedSha256: 'a'.repeat(64),
-      },
+      }),
     });
     await db.client.pluginPermission.create({
       data: { pluginId: plugin.id, slug: `plugin|${plugin.slug}|manage:digest`, riskLevel: RiskLevel.Low },

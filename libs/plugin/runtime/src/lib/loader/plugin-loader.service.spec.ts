@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { PluginConfigService } from '../config/plugin-config.service';
 import { PluginContextFactory } from '../context/plugin-context.factory';
 import { PluginDisabledEvent, PluginLoadFailedEvent } from '../events/plugin.events';
-import type { PluginModuleOptions } from '../plugin-module.options';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './plugin-instance-registry';
 import { PluginLoaderService } from './plugin-loader.service';
@@ -25,11 +25,7 @@ jest.mock('@boardgamesempire/plugin-manifest', () => ({
 
 describe('PluginLoaderService', () => {
   const manifest = { events: { subscribes: [], emits: [] } } as unknown as PluginManifest;
-  const options: PluginModuleOptions = {
-    pluginsRoot: '/unused-in-spec/installed',
-    bgeVersion: '0.1.0',
-    defaultLocale: 'en',
-  };
+  const options = buildPluginModuleOptions({ bgeVersion: '0.1.0' });
 
   let workDir: string;
   let db: MockDatabaseService;

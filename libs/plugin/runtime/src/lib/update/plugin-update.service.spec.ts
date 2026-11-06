@@ -45,7 +45,7 @@ import type { PluginStaticAnalysisService } from '../install/plugin-static-analy
 import type { StaticAnalysisFinding, StaticAnalysisReport } from '../install/static-analysis.types';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
-import type { PluginModuleOptions } from '../plugin-module.options';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginUpdateService, type PluginUpdateStageInput } from './plugin-update.service';
 import {
   PluginUpdateAuthorityError,
@@ -63,11 +63,7 @@ import {
 } from './update.errors';
 
 describe('PluginUpdateService', () => {
-  const options: PluginModuleOptions = {
-    pluginsRoot: '/var/lib/bge/plugins',
-    bgeVersion: '0.3.0',
-    defaultLocale: 'en',
-  };
+  const options = buildPluginModuleOptions();
 
   const emptyReport: StaticAnalysisReport = {
     findings: [],

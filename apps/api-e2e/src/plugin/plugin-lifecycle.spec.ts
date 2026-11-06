@@ -1,11 +1,11 @@
 import {
-  PluginCategory,
   PluginGrantScope,
   PluginGrantStatus,
   PluginLifecycleEventType,
   PluginScope,
   RiskLevel,
   type Plugin,
+  type Prisma,
 } from '@bge/database';
 import { createActors, pollUntil, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
 /**
  * The wire half of #320: enable/disable, server config PATCH, and uninstall
@@ -45,21 +46,19 @@ describe('plugin lifecycle (server-level)', () => {
    * stored-manifest re-validation — correctly — as corrupted state. The
    * between-test truncate keeps the unique slug collision-free per test.
    */
-  const arrangePlugin = async (overrides: Partial<Plugin> = {}): Promise<Plugin> => {
+  const arrangePlugin = async (overrides: Partial<Prisma.PluginUncheckedCreateInput> = {}): Promise<Plugin> => {
     const manifest = buildPluginManifest();
     const slug = manifest.slug;
 
     return db.client.plugin.create({
-      data: {
+      data: pluginRowData({
         slug,
         version: manifest.version,
-        category: PluginCategory.FeedbackSink,
         scope: PluginScope.Server,
         manifestJson: manifest as never,
         enabled: false,
-        installedSha256: 'a'.repeat(64),
-        ...(overrides as Record<string, never>),
-      },
+        ...overrides,
+      }),
     });
   };
 
@@ -188,11 +187,7 @@ describe('plugin lifecycle (server-level)', () => {
       const admin = await actors.admin();
       const plugin = await arrangePlugin({
         enabled: true,
-        pendingVersion: '1.3.0',
-        pendingManifestJson: { ...buildPluginManifest(), version: '1.3.0' } as never,
-        pendingSha256: 'b'.repeat(64),
-        pendingSince: new Date(),
-        pendingStagingId: 'e2e-staging-1',
+        ...stagedUpdateColumns({ version: '1.3.0' }),
       });
       await arrangeConsentSurface(plugin);
       await db.client.userPlugin.create({ data: { userId: admin.user.id, pluginId: plugin.id, enabled: true } });

@@ -32,7 +32,7 @@ import {
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
-import type { PluginModuleOptions } from '../plugin-module.options';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import {
   PluginInstallAuthorityError,
   PluginInstallConflictError,
@@ -49,11 +49,7 @@ import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
 import type { StaticAnalysisFinding, StaticAnalysisReport } from './static-analysis.types';
 
 describe('PluginInstallerService', () => {
-  const options: PluginModuleOptions = {
-    pluginsRoot: '/var/lib/bge/plugins',
-    bgeVersion: '0.3.0',
-    defaultLocale: 'en',
-  };
+  const options = buildPluginModuleOptions();
 
   const emptyReport: StaticAnalysisReport = {
     findings: [],

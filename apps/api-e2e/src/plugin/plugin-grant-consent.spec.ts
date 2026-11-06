@@ -1,16 +1,10 @@
-import {
-  PluginCategory,
-  PluginGrantScope,
-  PluginGrantStatus,
-  PluginScope,
-  RiskLevel,
-  type Plugin,
-} from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel, type Plugin } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
 /**
  * The wire half of #322: grant decisions and the consent-presentation read
@@ -105,16 +99,14 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
     const active = manifestWithChecks('1.2.0', checks);
 
     const plugin = await db.client.plugin.create({
-      data: {
+      data: pluginRowData({
         slug: active.slug,
         version: active.version,
-        category: PluginCategory.FeedbackSink,
         scope: PluginScope.Household,
         manifestJson: active as never,
         enabled: true,
-        installedSha256: 'a'.repeat(64),
         ...overrides,
-      },
+      }),
     });
     await db.client.pluginPermission.create({
       data: { pluginId: plugin.id, slug: `plugin|${plugin.slug}|manage:digest`, riskLevel: RiskLevel.Low },
@@ -201,20 +193,14 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
         HOUSEHOLD_CHECK,
         USER_CHECK,
       ]);
-      const plugin = await arrangePlugin(DEFAULT_CHECKS, {
-        pendingVersion: pending.version,
-        pendingManifestJson: pending as never,
-        pendingSha256: 'b'.repeat(64),
-        pendingSince: STAGED_AT,
-        pendingStagingId: 'e2e-staging-1',
-      });
+      const plugin = await arrangePlugin(DEFAULT_CHECKS, stagedUpdateColumns({ manifest: pending, since: STAGED_AT }));
 
       await decideServer(admin, plugin.slug, denied('read:safe_http_policy')).expect(200);
 
       const refusal = await request(baseUrl)
         .post(`${PLUGINS_PATH}/${plugin.slug}/update/approve`)
         .set(admin.headers)
-        .send({ stagingId: 'e2e-staging-1' })
+        .send({ stagingId: INVENTORY_STAGING_ID })
         .expect(409);
 
       expect(refusal.body.code).toBe('PluginUpdateBlockedByDenialError');

@@ -9,7 +9,7 @@ import {
 import { batchTransactionCall, createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
-import type { PluginModuleOptions } from '../plugin-module.options';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import {
   PluginInventoryManifestError,
   PluginInventoryNotFoundError,
@@ -22,11 +22,7 @@ import {
 } from './plugin-inventory.service';
 
 describe('PluginInventoryService', () => {
-  const options: PluginModuleOptions = {
-    pluginsRoot: '/var/lib/bge/plugins',
-    bgeVersion: '0.3.0',
-    defaultLocale: 'en',
-  };
+  const options = buildPluginModuleOptions();
 
   const manifest = buildPluginManifest();
   const INSTALLED_AT = new Date('2026-08-01T00:00:00Z');
@@ -172,8 +168,9 @@ describe('PluginInventoryService', () => {
     });
 
     it('refuses a stored checksum that is not 64 lowercase hex characters (#1117)', async () => {
-      // Only a hand edit of the database can leave one, since the install
-      // writes the resolver's branded value. The resolver refuses it at boot.
+      // Only a hand edit of the database can leave one, since the install and
+      // an update's activation write the resolver's branded value. The
+      // resolver refuses it at boot.
       db.plugin.findMany.mockResolvedValue([row({ installedSha256: 'ABC' })] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 

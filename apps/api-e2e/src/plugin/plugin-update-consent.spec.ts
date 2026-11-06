@@ -1,5 +1,4 @@
 import {
-  PluginCategory,
   PluginGrantScope,
   PluginGrantStatus,
   PluginLifecycleEventType,
@@ -14,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
 /**
  * The wire half of #321: approve/reject/pending over a REAL staged row —
@@ -35,7 +35,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
   const STAGED_AT = new Date('2026-08-01T12:00:00Z');
   /** The staged plugin artifact's checksum, and the staging's id (#357), on every row this spec stages. */
   const STAGED_SHA = 'b'.repeat(64);
-  const STAGING_ID = 'e2e-staging-1';
+  const STAGING_ID = INVENTORY_STAGING_ID;
 
   let db: TestDatabase;
   let actors: Actors;
@@ -129,21 +129,20 @@ describe('plugin update consent (approve/reject/pending)', () => {
     };
 
     const plugin = await db.client.plugin.create({
-      data: {
+      data: pluginRowData({
         slug: active.slug,
         version: active.version,
-        category: PluginCategory.FeedbackSink,
         scope: scope === 'server' ? PluginScope.Server : PluginScope.Household,
         manifestJson: active as never,
         enabled: true,
-        installedSha256: 'a'.repeat(64),
         config: (overrides.activeConfig ?? {}) as never,
-        pendingVersion: pending.version,
-        pendingManifestJson: pending as never,
-        pendingSha256: STAGED_SHA,
-        pendingSince: STAGED_AT,
-        pendingStagingId: STAGING_ID,
-      },
+        ...stagedUpdateColumns({
+          manifest: pending,
+          sha256: STAGED_SHA,
+          since: STAGED_AT,
+          stagingId: STAGING_ID,
+        }),
+      }),
     });
 
     return { plugin, pending };
@@ -603,15 +602,13 @@ describe('plugin update consent (approve/reject/pending)', () => {
       // wrong staging, or a degenerate one, so Postgres refuses the shape.
       const active = activeManifest();
       const plugin = await db.client.plugin.create({
-        data: {
+        data: pluginRowData({
           slug: active.slug,
           version: active.version,
-          category: PluginCategory.FeedbackSink,
           scope: PluginScope.Server,
           manifestJson: active as never,
           enabled: true,
-          installedSha256: 'a'.repeat(64),
-        },
+        }),
       });
 
       const failure = await db.client.plugin

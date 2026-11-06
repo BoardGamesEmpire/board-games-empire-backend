@@ -1,16 +1,10 @@
-import {
-  PluginCategory,
-  PluginGrantStatus,
-  PluginScope,
-  PluginUnitDormantReason,
-  RiskLevel,
-  type Plugin,
-} from '@bge/database';
+import { PluginGrantStatus, PluginScope, PluginUnitDormantReason, RiskLevel, type Plugin } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { pluginRowData } from './plugin-row-fixtures';
 
 /**
  * The wire half of #323: household and user unit enablement plus the
@@ -91,16 +85,14 @@ describe('plugin unit enablement + feature state (#323)', () => {
     });
 
     const plugin = await db.client.plugin.create({
-      data: {
+      data: pluginRowData({
         slug: manifest.slug,
         version: manifest.version,
-        category: PluginCategory.FeedbackSink,
         scope: manifest.scope === 'server' ? PluginScope.Server : PluginScope.Household,
         manifestJson: manifest as never,
         enabled: true,
-        installedSha256: 'a'.repeat(64),
         ...rowOverrides,
-      },
+      }),
     });
     await db.client.pluginPermission.create({
       data: { pluginId: plugin.id, slug: `plugin|${plugin.slug}|manage:digest`, riskLevel: RiskLevel.Low },

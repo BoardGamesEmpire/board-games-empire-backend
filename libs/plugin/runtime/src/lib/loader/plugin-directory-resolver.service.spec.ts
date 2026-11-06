@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PluginModuleOptions } from '../plugin-module.options';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginDirectoryLayoutError, PluginDirectoryNotFoundError } from './loader.errors';
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 
@@ -14,11 +15,7 @@ describe('PluginDirectoryResolverService', () => {
   let pluginsRoot: string;
   let resolver: PluginDirectoryResolverService;
 
-  const options = (): PluginModuleOptions => ({
-    pluginsRoot,
-    bgeVersion: '0.1.0',
-    defaultLocale: 'en',
-  });
+  const options = (): PluginModuleOptions => buildPluginModuleOptions({ pluginsRoot });
 
   /** Writes a plugin artifact directory, `<root>/<slug>/<sha256>/`, holding the given files. */
   const scaffold = async (
@@ -232,11 +229,9 @@ describe('PluginDirectoryResolverService', () => {
     });
 
     it('rejects when the configured root itself cannot be resolved', async () => {
-      const missingRootResolver = new PluginDirectoryResolverService({
-        pluginsRoot: join(pluginsRoot, 'does-not-exist'),
-        bgeVersion: '0.1.0',
-        defaultLocale: 'en',
-      });
+      const missingRootResolver = new PluginDirectoryResolverService(
+        buildPluginModuleOptions({ pluginsRoot: join(pluginsRoot, 'does-not-exist') }),
+      );
 
       await expect(missingRootResolver.resolve('demo-sink', SHA_A)).rejects.toThrow(
         /configured plugin root .* cannot be resolved/,

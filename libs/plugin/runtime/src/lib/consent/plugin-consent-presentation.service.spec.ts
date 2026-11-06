@@ -2,7 +2,7 @@ import type { PluginUnit } from '@bge/actor-context';
 import { DatabaseService, PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
 import { createMockDatabaseService, UNIT_BOUND_RULES, type MockDatabaseService } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
-import type { PluginModuleOptions } from '../plugin-module.options';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import {
   PluginConsentPresentationManifestError,
   PluginConsentPresentationNotFoundError,
@@ -12,11 +12,7 @@ import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.
 import { PluginConsentPresentationService } from './plugin-consent-presentation.service';
 
 describe('PluginConsentPresentationService', () => {
-  const options: PluginModuleOptions = {
-    pluginsRoot: '/var/lib/bge/plugins',
-    bgeVersion: '0.3.0',
-    defaultLocale: 'en',
-  };
+  const options = buildPluginModuleOptions();
 
   const OWN_CANONICAL = 'plugin|demo-sink|manage:digest';
 
