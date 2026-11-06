@@ -573,6 +573,15 @@ describe("authFactory's sign-in provider behaviours", () => {
     });
     expect(auth.options.user?.validateUserInfo).toEqual(expect.any(Function));
   });
+
+  // Set explicitly, though it is better-auth's own default, so the check on a
+  // link and better-auth's checks on its other sensitive routes share one
+  // window that an upgrade can't move. The e2e suite pins the refusal (#913).
+  it('asks for a session signed in within a day to link a sign-in provider (#913)', () => {
+    const auth = authFactory({} as PrismaClient, withProviders([strict]));
+
+    expect(auth.options.session?.freshAge).toBe(86_400);
+  });
 });
 
 describe("authFactory's app sign-in", () => {

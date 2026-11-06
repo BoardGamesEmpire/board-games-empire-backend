@@ -12,8 +12,9 @@ import {
 } from '../support/e2e-env';
 import { base64UrlJson } from '../support/fake-sign-in-provider';
 import { useProviderLinkingPolicy } from '../support/provider-linking-policy';
+import { ageStoredSession } from '../support/session-age';
 import { useSettingSwitch } from '../support/setting-switch';
-import { fakeProviderUrl, signInThroughProvider } from '../support/sign-in-provider';
+import { fakeProviderUrl, sessionCookieOf, signInThroughProvider } from '../support/sign-in-provider';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 
 const GET_SESSION_PATH = '/api/auth/get-session';
@@ -531,6 +532,66 @@ describe('signing in through a sign-in provider', () => {
     expect(again.location.href).toBe(new URL('/', baseUrl).href);
     await expect(sessionUserId(again.cookie)).resolves.toBe(existing.user.id);
     await expect(db.client.user.count({ where: { email: providerEmail } })).resolves.toBe(0);
+  });
+
+  /**
+   * Starting a link needs a session signed in within a day (#913). The (#912)
+   * link test above starts one from a fresh session. Each session here is aged
+   * in the store, which stands in for waiting out the day, and each still
+   * signs its user in, so the refusal is about its age alone.
+   */
+  describe('starting a link from an old session', () => {
+    const LINK_PATH = '/api/auth/link-social';
+    const SIGN_IN_PATH = '/api/auth/sign-in/email';
+    const A_DAY_AND_AN_HOUR_MS = 25 * 60 * 60 * 1000;
+
+    const NEEDS_RECENT_SIGN_IN_BODY = {
+      code: 'PROVIDER_LINK_NEEDS_RECENT_SIGN_IN',
+      message: 'Linking a sign-in provider needs a recent sign-in. Sign in again, then link it',
+    } as const;
+
+    /** The session token a credential names: the part before its signature, which the store is keyed on. */
+    const sessionToken = (credential: string) => decodeURIComponent(credential).split('.')[0];
+
+    /**
+     * Starts a link to the fake provider with `headers` and expects the refusal.
+     * The status and body tell it apart from a link that started: that would
+     * answer 200 with the provider's URL. The Account row would be written only
+     * on the provider's callback, so the count just confirms nothing was
+     * written before it.
+     */
+    const expectLinkRefused = async (userId: string, headers: Record<string, string>) => {
+      const response = await postToAuth(baseUrl, LINK_PATH)
+        .set(headers)
+        .send({ provider: FAKE_PROVIDER_ID, callbackURL: '/' });
+
+      expect(response.status).toBe(403);
+      expect(response.body).toEqual(NEEDS_RECENT_SIGN_IN_BODY);
+      await expect(db.client.account.count({ where: { userId, providerId: FAKE_PROVIDER_ID } })).resolves.toBe(0);
+    };
+
+    // Native apps and API callers send a bearer credential. Every before hook
+    // sees it as sent, and the bearer plugin hands the route its session only
+    // after them, so a check that read only the cookie would let these through.
+    it('refuses to start a link from a session signed in more than a day ago, with PROVIDER_LINK_NEEDS_RECENT_SIGN_IN (#913)', async () => {
+      const existing = await actors.user();
+      await ageStoredSession(sessionToken(existing.credentials.token), A_DAY_AND_AN_HOUR_MS);
+
+      await expect(sessionUserOf(existing.headers)).resolves.toBe(existing.user.id);
+      await expectLinkRefused(existing.user.id, existing.headers);
+    });
+
+    it('refuses to start a link from a password sign-in’s cookie more than a day old, as a browser sends it (#913)', async () => {
+      const existing = await actors.user();
+      const signIn = await postToAuth(baseUrl, SIGN_IN_PATH)
+        .send({ email: existing.user.email, password: existing.password })
+        .expect(200);
+      const cookie = sessionCookieOf(signIn.headers['set-cookie']);
+      await ageStoredSession(sessionToken(cookie.slice(cookie.indexOf('=') + 1)), A_DAY_AND_AN_HOUR_MS);
+
+      await expect(sessionUserId(cookie)).resolves.toBe(existing.user.id);
+      await expectLinkRefused(existing.user.id, { Cookie: cookie });
+    });
   });
 
   /**

@@ -35,11 +35,12 @@ import {
   readOidcProviders,
   unlistedOidcVariables,
 } from './configuration/oidc-providers';
-import { AUTH_BASE_PATH, AUTH_CLIENT_IP_HEADER, AUTH_COOKIE_PREFIX } from './constants';
+import { AUTH_BASE_PATH, AUTH_CLIENT_IP_HEADER, AUTH_COOKIE_PREFIX, SESSION_FRESH_AGE_SECONDS } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
 import { createIdTokenGate } from './id-token-gate';
 import { mapOidcProfile, OIDC_SCOPES } from './oidc-profile';
 import { createProviderEmailGate } from './provider-email-gate';
+import { createProviderLinkFreshness } from './provider-link-freshness';
 import { createProviderLinkingGate, providerLinkingPolicyReader } from './provider-linking-gate';
 import { providerPictureOnly } from './provider-picture';
 import { createProviderUserInfo } from './provider-user-info';
@@ -165,6 +166,7 @@ export function authFactory(
   const settingGates = createSettingGates(gateDeps);
   const signOutHook = createSignOutHook({ render: gateDeps.render });
   const idTokenGate = createIdTokenGate(gateDeps.render);
+  const providerLinkFreshness = createProviderLinkFreshness({ render: gateDeps.render });
   const usernameVariants = createUsernameVariants(prisma);
   const providerEmailGate = createProviderEmailGate(providers, gateDeps.render);
   const providerLinkingGate = createProviderLinkingGate({
@@ -287,11 +289,18 @@ export function authFactory(
         trustedProviders: idsAllowingUnverifiedEmail(providers),
       },
     },
+    session: {
+      // One day, better-auth's own default, set here so every fresh-session
+      // check agrees: better-auth's on its sensitive routes, and the one on
+      // starting a link to a sign-in provider (#913).
+      freshAge: SESSION_FRESH_AGE_SECONDS,
+    },
     hooks: {
       before: createAuthMiddleware(async (context) => {
         await settingGates.beforeRoute(context);
         await signOutHook.beforeRoute(context);
         idTokenGate.beforeRoute(context);
+        await providerLinkFreshness.beforeRoute(context);
       }),
     },
     secret: options.secret,
