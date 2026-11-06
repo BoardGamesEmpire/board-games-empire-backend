@@ -27,6 +27,7 @@ const NOT_NULLABLE = [
   'reviewGatewayLanguages',
   'householdInviteePolicy',
   'eventInviteePolicy',
+  'providerLinkingPolicy',
 ];
 
 const DAY_COUNTS = ['feedbackReportRetentionDays', 'contributionReclaimDays', 'auditLogRetentionDays'];
@@ -107,6 +108,20 @@ describe('UpdateSystemSettingsDto', () => {
     it.each(['Household', 'Private', 'Anyone'])('refuses %s', async (level) => {
       expect(await keysFor({ [property]: level })).toEqual({
         [`${property}.isIn`]: 'validation.isIn',
+      });
+    });
+  });
+
+  describe('providerLinkingPolicy', () => {
+    it('accepts each provider linking policy (#913)', async () => {
+      for (const policy of ['SignedIn', 'AutomaticWhenVerified']) {
+        expect(await keysFor({ providerLinkingPolicy: policy })).toEqual({});
+      }
+    });
+
+    it('refuses a provider linking policy it does not know (#913)', async () => {
+      expect(await keysFor({ providerLinkingPolicy: 'Automatic' })).toEqual({
+        'providerLinkingPolicy.isEnum': 'validation.isEnum',
       });
     });
   });
