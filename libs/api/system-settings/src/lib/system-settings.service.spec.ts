@@ -1,7 +1,13 @@
 import { Prisma } from '@bge/database';
 import { MailDispatcherService, MailQueueUnavailableError } from '@bge/queue-mail';
 import { EncryptionService } from '@bge/services';
-import { createTestingModuleWithDb, rawQueryText, unwrapTransaction, type MockDatabaseService } from '@bge/testing';
+import {
+  createMockDatabaseService,
+  createTestingModuleWithDb,
+  rawQueryText,
+  unwrapTransaction,
+  type MockDatabaseService,
+} from '@bge/testing';
 import { ConflictException, HttpStatus, NotFoundException } from '@nestjs/common';
 import type { SystemSettingsView } from './read-shapes';
 import { SystemSettingsService } from './system-settings.service';
@@ -166,16 +172,22 @@ describe('SystemSettingsService', () => {
       // A password saved between the check and the write would otherwise be
       // kept for the server this patch names (#654).
       it('locks the row before the check, and checks and writes in one transaction (#654)', async () => {
+        // A client of its own for the transaction, so a lock taken on the root
+        // client cannot pass for one: that would be an autocommit statement,
+        // released before the check it is meant to guard.
+        const tx = createMockDatabaseService();
+        db.$transaction.mockImplementation((cb) => cb(tx));
+
         const order: string[] = [];
-        db.$queryRaw.mockImplementation(((query: unknown) => {
+        tx.$queryRaw.mockImplementation(((query: unknown) => {
           order.push(rawQueryText(query));
           return Promise.resolve([]);
         }) as never);
-        db.systemSetting.findUnique.mockImplementation((() => {
+        tx.systemSetting.findUnique.mockImplementation((() => {
           order.push('check');
           return Promise.resolve({ ...server, smtpPassword: null });
         }) as never);
-        db.systemSetting.update.mockImplementation((() => {
+        tx.systemSetting.update.mockImplementation((() => {
           order.push('write');
           return Promise.resolve(stored);
         }) as never);
@@ -184,6 +196,9 @@ describe('SystemSettingsService', () => {
 
         expect(db.$transaction).toHaveBeenCalledTimes(1);
         expect(order).toEqual(['SELECT id FROM system_settings WHERE id = ? FOR UPDATE', 'check', 'write']);
+        expect(db.$queryRaw).not.toHaveBeenCalled();
+        expect(db.systemSetting.findUnique).not.toHaveBeenCalled();
+        expect(db.systemSetting.update).not.toHaveBeenCalled();
       });
     });
 
