@@ -1,9 +1,11 @@
 import {
+  PLUGIN_ARTIFACT_SHA256_PATTERN,
   PLUGIN_MANIFEST_FILENAME,
   PLUGIN_PACKAGE_JSON_FILENAME,
+  parsePluginArtifactSha256,
   type PluginArtifactDirectory,
 } from '@boardgamesempire/plugin-contract';
-import { PLUGIN_ARTIFACT_SHA256_PATTERN, PLUGIN_SLUG_PATTERN } from '@boardgamesempire/plugin-manifest';
+import { PLUGIN_SLUG_PATTERN } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -36,7 +38,9 @@ export class PluginDirectoryResolverService {
       );
     }
 
-    if (!PLUGIN_ARTIFACT_SHA256_PATTERN.test(sha256)) {
+    const parsed = parsePluginArtifactSha256(sha256);
+
+    if (parsed === null) {
       throw new PluginDirectoryLayoutError(
         slug,
         `checksum fails ${String(PLUGIN_ARTIFACT_SHA256_PATTERN)} and cannot be a path segment`,
@@ -50,10 +54,10 @@ export class PluginDirectoryResolverService {
       throw new PluginDirectoryLayoutError(slug, `configured plugin root '${configuredRoot}' cannot be resolved`);
     }
 
-    const artifactPath = join(realRoot, slug, sha256);
-    const rootStat = await stat(artifactPath).catch(() => null);
+    const artifactPath = join(realRoot, slug, parsed);
+    const artifactStat = await stat(artifactPath).catch(() => null);
 
-    if (rootStat === null || !rootStat.isDirectory()) {
+    if (artifactStat === null || !artifactStat.isDirectory()) {
       throw new PluginDirectoryNotFoundError(slug, artifactPath);
     }
 
@@ -86,7 +90,7 @@ export class PluginDirectoryResolverService {
     await this.assertContainedFile(slug, manifestPath, PLUGIN_MANIFEST_FILENAME, rootDir);
     await this.assertContainedFile(slug, packageJsonPath, PLUGIN_PACKAGE_JSON_FILENAME, rootDir);
 
-    return { slug, sha256, rootDir, manifestPath, packageJsonPath };
+    return { slug, sha256: parsed, rootDir, manifestPath, packageJsonPath };
   }
 
   /**

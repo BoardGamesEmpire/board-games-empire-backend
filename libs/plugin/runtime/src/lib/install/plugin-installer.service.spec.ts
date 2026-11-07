@@ -16,6 +16,7 @@ import {
 } from '@bge/database';
 import { createMockDatabaseService, UNIT_BOUND_RULES, type MockDatabaseService } from '@bge/testing';
 import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
+import { buildPluginArtifactSha256 as sha, type PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -31,7 +32,7 @@ import {
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
-import type { PluginModuleOptions } from '../plugin-module.options';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import {
   PluginInstallAuthorityError,
   PluginInstallConflictError,
@@ -48,11 +49,7 @@ import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
 import type { StaticAnalysisFinding, StaticAnalysisReport } from './static-analysis.types';
 
 describe('PluginInstallerService', () => {
-  const options: PluginModuleOptions = {
-    pluginsRoot: '/var/lib/bge/plugins',
-    bgeVersion: '0.3.0',
-    defaultLocale: 'en',
-  };
+  const options = buildPluginModuleOptions();
 
   const emptyReport: StaticAnalysisReport = {
     findings: [],
@@ -146,7 +143,7 @@ describe('PluginInstallerService', () => {
 
   const directory = (): PluginArtifactDirectory => ({
     slug: 'demo-sink',
-    sha256: 'a'.repeat(64),
+    sha256: sha('a'),
     rootDir,
     manifestPath: join(rootDir, 'manifest.json'),
     packageJsonPath: join(rootDir, 'package.json'),
@@ -165,10 +162,8 @@ describe('PluginInstallerService', () => {
 
   const input = (overrides: Partial<PluginInstallInput> = {}): PluginInstallInput => ({
     directory: directory(),
-    provenance: {
-      installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
-      registrySlug: 'bge-official',
-    },
+    url: 'https://registry.example/demo-sink-1.2.0.tgz',
+    registrySlug: 'bge-official',
     installerId: 'admin-1',
     ...overrides,
   });
@@ -258,18 +253,40 @@ describe('PluginInstallerService', () => {
     it("records the artifact directory's checksum as installedSha256 (#224)", async () => {
       // The directory's name is the artifact's checksum, so the install takes
       // it from there rather than from a second input that could disagree. A
-      // link or registry the provenance leaves out is stored as null (#696).
-      await service.install(input({ directory: { ...directory(), sha256: 'c'.repeat(64) }, provenance: undefined }));
+      // link or registry the install leaves out is stored as null (#696).
+      await service.install(
+        input({ directory: { ...directory(), sha256: sha('c') }, url: undefined, registrySlug: undefined }),
+      );
 
       const [{ data }] = db.plugin.create.mock.calls[0] as [{ data: Record<string, unknown> }];
       expect(data).toEqual(
         expect.objectContaining({ installedSha256: 'c'.repeat(64), installedFromUrl: null, registrySlug: null }),
       );
       expect(installedEvent().provenance).toEqual({
-        installedFromUrl: null,
-        installedSha256: 'c'.repeat(64),
+        sha256: sha('c'),
+        url: null,
         registrySlug: null,
       });
+    });
+
+    it('records where the artifact came from under the provenance names the client reads (#1117)', async () => {
+      const artifact = directory();
+
+      await service.install({ directory: artifact, url: 'https://example.test/a.tgz', installerId: 'admin-1' });
+
+      expect(installedEvent().provenance).toEqual({
+        sha256: artifact.sha256,
+        url: 'https://example.test/a.tgz',
+        registrySlug: null,
+      });
+      const [{ data }] = db.plugin.create.mock.calls[0] as [{ data: Record<string, unknown> }];
+      expect(data).toEqual(
+        expect.objectContaining({
+          installedSha256: artifact.sha256,
+          installedFromUrl: 'https://example.test/a.tgz',
+          registrySlug: null,
+        }),
+      );
     });
 
     it('creates one PluginPermission row per declare, classified explicit Low', async () => {
@@ -339,8 +356,8 @@ describe('PluginInstallerService', () => {
         enabled: false,
       });
       expect(event.provenance).toEqual({
-        installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
-        installedSha256: 'a'.repeat(64),
+        sha256: sha('a'),
+        url: 'https://registry.example/demo-sink-1.2.0.tgz',
         registrySlug: 'bge-official',
       });
       expect(event.grantedPermissions).toEqual([
@@ -385,7 +402,14 @@ describe('PluginInstallerService', () => {
       directories.confirm.mockRejectedValue(new PluginDirectoryLayoutError('demo-sink', 'checksum fails the pattern'));
 
       await expect(
-        service.install(input({ directory: { ...directory(), sha256: `sha256:${'A'.repeat(64)}` } })),
+        service.install(
+          input({
+            directory: {
+              ...directory(),
+              sha256: `sha256:${'A'.repeat(64)}` as unknown as PluginArtifactSha256,
+            },
+          }),
+        ),
       ).rejects.toBeInstanceOf(PluginDirectoryLayoutError);
       expect(db.plugin.create).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();

@@ -23,6 +23,7 @@ import {
   type MockDatabaseService,
 } from '@bge/testing';
 import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
+import { buildPluginArtifactSha256 as sha, type PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -44,7 +45,7 @@ import type { PluginStaticAnalysisService } from '../install/plugin-static-analy
 import type { StaticAnalysisFinding, StaticAnalysisReport } from '../install/static-analysis.types';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
-import type { PluginModuleOptions } from '../plugin-module.options';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginUpdateService, type PluginUpdateStageInput } from './plugin-update.service';
 import {
   PluginUpdateAuthorityError,
@@ -62,11 +63,7 @@ import {
 } from './update.errors';
 
 describe('PluginUpdateService', () => {
-  const options: PluginModuleOptions = {
-    pluginsRoot: '/var/lib/bge/plugins',
-    bgeVersion: '0.3.0',
-    defaultLocale: 'en',
-  };
+  const options = buildPluginModuleOptions();
 
   const emptyReport: StaticAnalysisReport = {
     findings: [],
@@ -186,7 +183,7 @@ describe('PluginUpdateService', () => {
 
   const directory = (): PluginArtifactDirectory => ({
     slug: 'demo-sink',
-    sha256: 'b'.repeat(64),
+    sha256: sha('b'),
     rootDir,
     manifestPath: join(rootDir, 'manifest.json'),
     packageJsonPath: join(rootDir, 'package.json'),
@@ -289,7 +286,14 @@ describe('PluginUpdateService', () => {
       await writeManifest(nextManifest());
 
       await expect(
-        service.stage(input({ directory: { ...directory(), sha256: `sha256:${'A'.repeat(64)}` } })),
+        service.stage(
+          input({
+            directory: {
+              ...directory(),
+              sha256: `sha256:${'A'.repeat(64)}` as unknown as PluginArtifactSha256,
+            },
+          }),
+        ),
       ).rejects.toBeInstanceOf(PluginDirectoryLayoutError);
       expect(db.plugin.updateMany).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();
@@ -414,7 +418,7 @@ describe('PluginUpdateService', () => {
     it("an update that activates at once records the artifact directory's checksum (#224)", async () => {
       await writeManifest(nextManifest());
 
-      const result = await service.stage(input({ directory: { ...directory(), sha256: 'd'.repeat(64) } }));
+      const result = await service.stage(input({ directory: { ...directory(), sha256: sha('d') } }));
 
       expect(result.activated).toBe(true);
       expect(db.plugin.updateMany).toHaveBeenCalledWith(
@@ -590,7 +594,7 @@ describe('PluginUpdateService', () => {
       // so the checksum comes from that directory and from nowhere else.
       await writeManifest(nextManifest({ storage: { ...activeManifest.storage, writesCore: ['GameNight'] } }));
 
-      await service.stage(input({ directory: { ...directory(), sha256: 'd'.repeat(64) } }));
+      await service.stage(input({ directory: { ...directory(), sha256: sha('d') } }));
 
       expect(db.plugin.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ pendingSha256: 'd'.repeat(64) }) }),
@@ -656,7 +660,7 @@ describe('PluginUpdateService', () => {
       makePlugin({
         pendingVersion: nextJson.version,
         pendingManifestJson: nextJson as unknown as Prisma.JsonValue,
-        pendingSha256: 'new-sha',
+        pendingSha256: 'f'.repeat(64),
         pendingSince: new Date('2026-07-29T00:00:00Z'),
         pendingStagingId: 'staging-a',
         ...overrides,
@@ -725,6 +729,36 @@ describe('PluginUpdateService', () => {
         service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
       ).rejects.toThrow(PluginUpdateStagingReplacedError);
       expect(db.pluginGrant.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('refuses to approve a staged row whose checksum is not a checksum (#1117)', async () => {
+      // The staged checksum becomes a path segment at activation; a corrupt
+      // value is refused as the resolver refuses it at the next boot.
+      db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest(), { pendingSha256: 'not-a-checksum' }));
+
+      await expect(
+        service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
+      ).rejects.toThrow(PluginDirectoryLayoutError);
+      expect(db.plugin.update).not.toHaveBeenCalled();
+      expect(db.plugin.updateMany).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('refuses a corrupt staged checksum before it validates the staged manifest or reads a permission (#1117)', async () => {
+      // A staged manifest that fails validation too: the checksum is judged
+      // first, so the refusal names it, and no escalation work runs.
+      db.plugin.findUnique.mockResolvedValue(
+        pendingPlugin(nextManifest(), {
+          pendingSha256: 'not-a-checksum',
+          pendingManifestJson: { slug: 'demo-sink' } as unknown as Prisma.JsonValue,
+        }),
+      );
+
+      await expect(
+        service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
+      ).rejects.toThrow(PluginDirectoryLayoutError);
+      expect(db.permission.findMany).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
@@ -2155,7 +2189,7 @@ describe('PluginUpdateService', () => {
       db.plugin.findUnique.mockResolvedValue(
         makePlugin({
           pendingVersion: '1.3.0',
-          pendingSha256: 'new-sha',
+          pendingSha256: 'f'.repeat(64),
           pendingSince: new Date('2026-08-10T09:00:00Z'),
           pendingStagingId: 'staging-a',
         }),
@@ -2187,7 +2221,7 @@ describe('PluginUpdateService', () => {
 
     it('reject refuses a staging id that is not the current staging, and writes nothing (#357)', async () => {
       db.plugin.findUnique.mockResolvedValue(
-        makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha', pendingStagingId: 'staging-b' }),
+        makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'f'.repeat(64), pendingStagingId: 'staging-b' }),
       );
 
       const failure = await service
@@ -2203,10 +2237,10 @@ describe('PluginUpdateService', () => {
     it('reject answers a replaced staging when another one takes the slot between its check and its clear (#357)', async () => {
       db.plugin.findUnique
         .mockResolvedValueOnce(
-          makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha', pendingStagingId: 'staging-a' }),
+          makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'f'.repeat(64), pendingStagingId: 'staging-a' }),
         ) // the load
         .mockResolvedValue(
-          makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha', pendingStagingId: 'staging-b' }),
+          makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'f'.repeat(64), pendingStagingId: 'staging-b' }),
         ); // the guard's re-read
       db.plugin.updateMany.mockResolvedValue({ count: 0 });
 
@@ -2223,7 +2257,7 @@ describe('PluginUpdateService', () => {
       // races into the typed no-pending refusal.
       db.plugin.findUnique
         .mockResolvedValueOnce(
-          makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha', pendingStagingId: 'staging-a' }),
+          makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'f'.repeat(64), pendingStagingId: 'staging-a' }),
         ) // the load
         .mockResolvedValue(makePlugin()); // the guard's re-read: still installed, pending gone
       db.plugin.updateMany.mockResolvedValue({ count: 0 });
@@ -2238,7 +2272,7 @@ describe('PluginUpdateService', () => {
       const uninstalledAt = new Date('2026-08-16T12:00:00Z');
       db.plugin.findUnique
         .mockResolvedValueOnce(
-          makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha', pendingStagingId: 'staging-a' }),
+          makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'f'.repeat(64), pendingStagingId: 'staging-a' }),
         )
         .mockResolvedValue(makePlugin({ uninstalledAt }));
       db.plugin.updateMany.mockResolvedValue({ count: 0 });
@@ -2267,7 +2301,7 @@ describe('PluginUpdateService', () => {
       makePlugin({
         pendingVersion: nextJson.version,
         pendingManifestJson: nextJson as unknown as Prisma.JsonValue,
-        pendingSha256: 'new-sha',
+        pendingSha256: 'f'.repeat(64),
         pendingSince,
         pendingStagingId: 'staging-a',
         ...overrides,
@@ -2289,6 +2323,17 @@ describe('PluginUpdateService', () => {
 
     it('throws the no-pending error when nothing is staged', async () => {
       await expect(service.describePending('demo-sink')).rejects.toThrow(PluginUpdateNoPendingError);
+    });
+
+    it('reads a staged update whose checksum is not a checksum, since only approval uses it (#1117)', async () => {
+      // Refusing it here would hide a staging the server admin may want to reject.
+      db.plugin.findUnique.mockResolvedValue(stagedPlugin(nextManifest(), { pendingSha256: 'not-a-checksum' }));
+
+      const description = await service.describePending('demo-sink');
+
+      expect(description.plugin.pendingStagingId).toBe('staging-a');
+      expect(description.plugin.pendingVersion).toBe('1.3.0');
+      expect(description.comparison.escalations).toEqual([]);
     });
 
     it('returns the row, pendingSince, and a comparison recomputed against today, without requiring authority', async () => {

@@ -1,6 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
 import { PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
-import { PluginEvent } from '@boardgamesempire/plugin-contract';
+import { PluginEvent, buildPluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import type { StaticAnalysisFinding } from '../install/static-analysis.types';
 import {
   GrantedPermissionRecord,
@@ -25,8 +25,8 @@ import {
 const initiatedAt = new Date('2026-07-22T10:00:00.000Z');
 
 const provenance: PluginProvenance = {
-  installedFromUrl: 'https://plugins.example.com/demo-sink-1.2.0.tgz',
-  installedSha256: 'a'.repeat(64),
+  sha256: buildPluginArtifactSha256('a'),
+  url: 'https://plugins.example.com/demo-sink-1.2.0.tgz',
   registrySlug: 'bge-official',
 };
 

@@ -21,7 +21,7 @@ import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginGrantCreatedEvent, PluginGrantRejectedEvent } from '../events/plugin.events';
 import { type ClaimedPluginRow } from '../manifest/manifest-move';
-import type { PluginModuleOptions } from '../plugin-module.options';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import {
   PluginGrantAuthorityError,
   PluginGrantConsentScopeMismatchError,
@@ -40,11 +40,7 @@ import { PluginGrantAuthorityService } from './plugin-grant-authority.service';
 import { PluginGrantService } from './plugin-grant.service';
 
 describe('PluginGrantService', () => {
-  const options: PluginModuleOptions = {
-    pluginsRoot: '/var/lib/bge/plugins',
-    bgeVersion: '0.3.0',
-    defaultLocale: 'en',
-  };
+  const options = buildPluginModuleOptions();
 
   /**
    * Household-scope manifest so every consent scope is exercisable:

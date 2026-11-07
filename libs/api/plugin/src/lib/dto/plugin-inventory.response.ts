@@ -6,8 +6,8 @@ import type {
   PluginInventoryFeature,
   PluginInventoryIdentity,
   PluginInventoryPendingUpdate,
-  PluginInventoryProvenance,
   PluginInventoryUnitState,
+  PluginProvenance,
   PluginUnitInventoryEntry,
 } from '@bge/plugin';
 import { ApiProperty } from '@nestjs/swagger';
@@ -34,9 +34,11 @@ import { ApiProperty } from '@nestjs/swagger';
  */
 
 /** Where the plugin artifact came from. One shape: every plugin is installed from an artifact (#696). */
-class PluginProvenanceDto implements PluginInventoryProvenance {
-  @ApiProperty({ description: 'SHA-256 of the installed plugin artifact' })
-  sha256!: string;
+class PluginProvenanceDto implements PluginProvenance {
+  // Typed off the interface so the brand carries without this lib importing
+  // it; on the wire it is a plain string (#1117).
+  @ApiProperty({ type: String, description: 'SHA-256 of the installed plugin artifact' })
+  sha256!: PluginProvenance['sha256'];
 
   @ApiProperty({ type: String, nullable: true, description: 'Ingress URL; null for a manual upload' })
   url!: string | null;

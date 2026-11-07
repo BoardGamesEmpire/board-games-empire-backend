@@ -41,6 +41,7 @@ export * from './lib/manifest/stored-manifest';
 export * from './lib/plugin-module.options';
 export * from './lib/plugin.module';
 export * from './lib/registry/plugin-category.map';
+export * from './lib/testing/plugin-module-options.fixture';
 export * from './lib/units/plugin-unit-lifecycle.service';
 export * from './lib/units/unit.errors';
 export * from './lib/update/escalation-comparator';

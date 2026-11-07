@@ -1,15 +1,4 @@
-import { i18nValidationMessage } from '@bge/i18n';
-import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString } from 'class-validator';
+import { StagedUpdateAnswerDto } from './staged-update-answer.dto';
 
-/** Shape-only validation: whether `stagingId` names the current staging is the service's call (#357). */
-export class RejectPluginUpdateDto {
-  @ApiProperty({
-    description:
-      'The staged update this rejection answers: `stagingId` from GET /plugins/:slug/update/pending. If another ' +
-      'staging has replaced it since, the rejection answers 409 PluginUpdateStagingReplacedError and clears nothing.',
-  })
-  @IsString({ message: i18nValidationMessage('validation.isString') })
-  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
-  stagingId!: string;
-}
+/** Rejecting a staged update carries only the staging it answers (#357, #1118). */
+export class RejectPluginUpdateDto extends StagedUpdateAnswerDto {}

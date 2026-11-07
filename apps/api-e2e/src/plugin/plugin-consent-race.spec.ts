@@ -1,17 +1,11 @@
-import {
-  PluginCategory,
-  PluginGrantScope,
-  PluginGrantStatus,
-  PluginScope,
-  RiskLevel,
-  type Plugin,
-} from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel, type Plugin } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
+import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
 /**
  * The invariants, raced over HTTP (#360 tier 1).
@@ -90,16 +84,14 @@ describe('consent decisions under concurrency (#360)', () => {
     const active = manifestWith('1.2.0', checks);
 
     const plugin = await db.client.plugin.create({
-      data: {
+      data: pluginRowData({
         slug: active.slug,
         version: active.version,
-        category: PluginCategory.FeedbackSink,
         scope: PluginScope.Household,
         manifestJson: active as never,
         enabled: true,
-        installedSha256: 'a'.repeat(64),
         ...overrides,
-      },
+      }),
     });
     await db.client.pluginPermission.create({
       data: { pluginId: plugin.id, slug: `plugin|${plugin.slug}|manage:digest`, riskLevel: RiskLevel.Low },
@@ -118,7 +110,7 @@ describe('consent decisions under concurrency (#360)', () => {
     request(baseUrl)
       .post(`${PLUGINS_PATH}/${slug}/update/approve`)
       .set(actor.headers)
-      .send({ stagingId: 'e2e-staging-1' });
+      .send({ stagingId: INVENTORY_STAGING_ID });
 
   describe('Granted against Denied on the same required household check', () => {
     it('never leaves the unit serving over a durable denial, or suspended with nothing outstanding', async () => {
@@ -229,13 +221,7 @@ describe('consent decisions under concurrency (#360)', () => {
         { ...POLICY_READ_CHECK, required: true },
         HOUSEHOLD_CHECK,
       ]);
-      const plugin = await arrangePlugin(undefined, {
-        pendingVersion: pending.version,
-        pendingManifestJson: pending as never,
-        pendingSha256: 'b'.repeat(64),
-        pendingSince: STAGED_AT,
-        pendingStagingId: 'e2e-staging-1',
-      });
+      const plugin = await arrangePlugin(undefined, stagedUpdateColumns({ manifest: pending, since: STAGED_AT }));
 
       const [denial, activation] = await Promise.all([
         decideServer(admin, plugin.slug, {

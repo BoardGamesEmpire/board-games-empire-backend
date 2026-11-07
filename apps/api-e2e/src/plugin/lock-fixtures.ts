@@ -1,12 +1,6 @@
-import {
-  PluginCategory,
-  PluginGrantScope,
-  PluginGrantStatus,
-  PluginScope,
-  RiskLevel,
-  type PrismaClient,
-} from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel, type PrismaClient } from '@bge/database';
 import { randomUUID } from 'node:crypto';
+import { pluginRowData } from './plugin-row-fixtures';
 
 /**
  * Rows and probe statements for the plugin lock specs — the mechanics tier
@@ -146,15 +140,13 @@ export async function arrangePlugin(prisma: PrismaClient): Promise<PluginLockFix
   const version = '1.0.0';
 
   const plugin = await prisma.plugin.create({
-    data: {
+    data: pluginRowData({
       slug,
       version,
-      category: PluginCategory.FeedbackSink,
       scope: PluginScope.Household,
       manifestJson: { slug, version },
       enabled: true,
-      installedSha256: 'a'.repeat(64),
-    },
+    }),
     select: { id: true },
   });
 

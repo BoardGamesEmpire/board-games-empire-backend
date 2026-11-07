@@ -1,9 +1,10 @@
 import { PluginGrantScope } from '@bge/database';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { StoredManifestRequestedPermissionsReader } from './stored-manifest-requested-permissions.reader';
 
 describe('StoredManifestRequestedPermissionsReader (#577)', () => {
-  const reader = new StoredManifestRequestedPermissionsReader({ bgeVersion: '0.0.0', defaultLocale: 'en' } as never);
+  const reader = new StoredManifestRequestedPermissionsReader(buildPluginModuleOptions({ bgeVersion: '0.0.0' }));
 
   const manifest = buildPluginManifest({
     scope: 'household',

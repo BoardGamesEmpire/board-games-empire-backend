@@ -10,7 +10,7 @@ import {
 import { createMockDatabaseService, UNIT_BOUND_RULES, type MockDatabaseService } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { PluginConsentCheckClassifier } from '../consent/plugin-consent-check-classifier.service';
-import type { PluginModuleOptions } from '../plugin-module.options';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginUnitScopeError } from '../units/unit.errors';
 import {
   PluginFeatureStateManifestError,
@@ -20,11 +20,7 @@ import {
 import { PluginFeatureStateService } from './plugin-feature-state.service';
 
 describe('PluginFeatureStateService', () => {
-  const options: PluginModuleOptions = {
-    pluginsRoot: '/var/lib/bge/plugins',
-    bgeVersion: '0.3.0',
-    defaultLocale: 'en',
-  };
+  const options = buildPluginModuleOptions();
 
   /**
    * Household-scope manifest exercising the full binding matrix:

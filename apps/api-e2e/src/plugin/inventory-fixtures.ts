@@ -1,9 +1,10 @@
 import { PluginCategory, PluginScope, RiskLevel, type Plugin, type PrismaClient } from '@bge/database';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
+import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
-/** The staging id (#357) on every update `arrangeInventoryPlugin` stages; approve and reject must send it. */
-export const INVENTORY_STAGING_ID = 'e2e-staging-1';
+/** Re-exported: the staging id (#357) on every update `arrangeInventoryPlugin` stages; approve and reject must send it. */
+export { INVENTORY_STAGING_ID };
 
 export interface InventoryPluginOptions {
   /** Columns written over the installed defaults: `uninstalledAt`, `scope`, and so on. */
@@ -50,27 +51,20 @@ export const arrangeInventoryPlugin = async (
   const staged =
     options.stagedVersion === undefined
       ? {}
-      : {
-          pendingVersion: options.stagedVersion,
-          pendingManifestJson: { ...manifest, version: options.stagedVersion } as never,
-          pendingSha256: 'b'.repeat(64),
-          pendingSince: new Date(),
-          pendingStagingId: INVENTORY_STAGING_ID,
-        };
+      : stagedUpdateColumns({ manifest: { ...manifest, version: options.stagedVersion } });
 
   const plugin = await prisma.plugin.create({
-    data: {
+    data: pluginRowData({
       slug,
       version: manifest.version,
       category: PluginCategory.FeedbackSink,
       scope: manifest.scope === 'server' ? PluginScope.Server : PluginScope.Household,
       manifestJson: manifest as never,
       enabled: true,
-      installedSha256: 'a'.repeat(64),
       installedFromUrl: 'https://registry.test/fixture.tgz',
       ...staged,
       ...options.row,
-    },
+    }),
   });
   await prisma.pluginPermission.create({
     data: { pluginId: plugin.id, slug: `plugin|${slug}|manage:digest`, riskLevel: RiskLevel.Low },

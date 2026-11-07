@@ -28,6 +28,7 @@ import {
   UserPluginUnitDisabledEvent,
   UserPluginUnitEnabledEvent,
 } from '../events/plugin.events';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import type { PluginGrantAuthorityService } from './plugin-grant-authority.service';
 import { PluginGrantService, type PluginGrantDecisionInput } from './plugin-grant.service';
 
@@ -233,11 +234,7 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       db as never,
       authority as unknown as PluginGrantAuthorityService,
       emitter as never,
-      {
-        pluginsRoot: '/var/lib/bge/plugins',
-        bgeVersion: '0.3.0',
-        defaultLocale: 'en',
-      },
+      buildPluginModuleOptions(),
     );
 
     db.plugin.findUnique.mockResolvedValue(makePlugin());

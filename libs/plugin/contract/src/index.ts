@@ -5,3 +5,4 @@ export * from './lib/loader/plugin-artifact-directory.js';
 export * from './lib/plugin-factory.js';
 export * from './lib/registry/base-plugin-registry.js';
 export * from './lib/registry/registry.errors.js';
+export * from './lib/testing/plugin-artifact-sha256.fixture.js';

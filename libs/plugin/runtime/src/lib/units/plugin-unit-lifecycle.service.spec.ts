@@ -24,7 +24,7 @@ import {
   UserPluginEnabledEvent,
 } from '../events/plugin.events';
 import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
-import type { PluginModuleOptions } from '../plugin-module.options';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginUnitLifecycleService } from './plugin-unit-lifecycle.service';
 import {
   PluginUnitAuthorityError,
@@ -38,11 +38,7 @@ import {
 } from './unit.errors';
 
 describe('PluginUnitLifecycleService', () => {
-  const options: PluginModuleOptions = {
-    pluginsRoot: '/var/lib/bge/plugins',
-    bgeVersion: '0.3.0',
-    defaultLocale: 'en',
-  };
+  const options = buildPluginModuleOptions();
 
   const CANONICAL_DIGEST = 'plugin|demo-sink|manage:digest';
 
