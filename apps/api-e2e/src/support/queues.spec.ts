@@ -351,6 +351,96 @@ describe('drainQueue', () => {
     await expect(drainQueue(queue, mark, 1, drainFast)).rejects.toThrow(/'feedback'.*j1.*retry.*sink timed out/s);
   });
 
+  // A job run in steps moves itself back to `delayed` between them, leaving
+  // no failure on the job (#497). Allowed, it is the same job carrying on.
+  // The fake has no hash for j1, as when the job finished and was removed
+  // before the drain read the step, so the due time decides: the event's
+  // `delay` is the absolute time it is due, here the event's own (id 1002-0).
+  it('counts a job that ran in steps once, when the drain allows steps (#497)', async () => {
+    const queue = scriptedStream('network', {
+      arrivals: [
+        [
+          { event: 'active', jobId: 'j1', prev: 'waiting' },
+          { event: 'delayed', jobId: 'j1', delay: '1002' },
+          { event: 'waiting', jobId: 'j1', prev: 'delayed' },
+          { event: 'active', jobId: 'j1', prev: 'waiting' },
+          { event: 'completed', jobId: 'j1', returnvalue: 'null', prev: 'active' },
+        ],
+      ],
+    });
+    const mark = await markQueueEvents(queue);
+
+    await expect(drainQueue(queue, mark, 1, { ...drainFast, steps: true })).resolves.toBeUndefined();
+  });
+
+  it('still throws on a retry when the drain allows steps (#497)', async () => {
+    const queue = scriptedStream('network', {
+      arrivals: [
+        [
+          { event: 'active', jobId: 'j1', prev: 'waiting' },
+          { event: 'delayed', jobId: 'j1', delay: '6002' },
+        ],
+      ],
+      failedReasons: { j1: 'connection lost' },
+    });
+    const mark = await markQueueEvents(queue);
+
+    await expect(drainQueue(queue, mark, 1, { ...drainFast, steps: true })).rejects.toThrow(
+      /'network'.*j1.*retry.*connection lost/s,
+    );
+  });
+
+  // The retry ran again and finished before the drain read its `delayed`
+  // event, and `removeOnComplete` took its hash, failure and all (#497). Its
+  // due time, the backoff past the event (id 1002-0), still marks it a retry.
+  it('throws on a retry whose job was removed before the drain read it, when the drain allows steps (#497)', async () => {
+    const queue = scriptedStream('network', {
+      arrivals: [
+        [
+          { event: 'active', jobId: 'j1', prev: 'waiting' },
+          { event: 'delayed', jobId: 'j1', delay: String(1002 + 5_000) },
+          { event: 'waiting', jobId: 'j1', prev: 'delayed' },
+          { event: 'active', jobId: 'j1', prev: 'waiting' },
+          { event: 'completed', jobId: 'j1', returnvalue: 'null', prev: 'active' },
+        ],
+      ],
+    });
+    const mark = await markQueueEvents(queue);
+
+    await expect(drainQueue(queue, mark, 1, { ...drainFast, steps: true })).rejects.toThrow(/'network'.*j1.*retry/s);
+  });
+
+  it('reads a removed job delayed with no due time as a retry, when the drain allows steps (#497)', async () => {
+    const queue = scriptedStream('network', {
+      arrivals: [
+        [
+          { event: 'active', jobId: 'j1', prev: 'waiting' },
+          { event: 'delayed', jobId: 'j1' },
+          { event: 'waiting', jobId: 'j1', prev: 'delayed' },
+          { event: 'active', jobId: 'j1', prev: 'waiting' },
+          { event: 'completed', jobId: 'j1', returnvalue: 'null', prev: 'active' },
+        ],
+      ],
+    });
+    const mark = await markQueueEvents(queue);
+
+    await expect(drainQueue(queue, mark, 1, { ...drainFast, steps: true })).rejects.toThrow(/'network'.*j1.*retry/s);
+  });
+
+  it('reads a step as a retry when the drain does not allow steps (#497)', async () => {
+    const queue = scriptedStream('network', {
+      arrivals: [
+        [
+          { event: 'active', jobId: 'j1', prev: 'waiting' },
+          { event: 'delayed', jobId: 'j1', delay: '1002' },
+        ],
+      ],
+    });
+    const mark = await markQueueEvents(queue);
+
+    await expect(drainQueue(queue, mark, 1, drainFast)).rejects.toThrow(/'network'.*j1.*retry/s);
+  });
+
   it('throws on a retry without backoff', async () => {
     const queue = scriptedStream('feedback', {
       arrivals: [

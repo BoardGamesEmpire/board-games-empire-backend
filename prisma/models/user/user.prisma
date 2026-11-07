@@ -55,6 +55,11 @@ model User {
   friendshipsRequested Friendship[] @relation("FriendshipsRequested")
   friendshipsReceived  Friendship[] @relation("FriendshipsReceived")
 
+  // The users up to three friendship steps from this one, and the users this
+  // one is that close to: the same pairs, read from either end (#497).
+  extendedNetwork   ExtendedNetwork[] @relation("ExtendedNetwork")
+  extendedNetworkOf ExtendedNetwork[] @relation("ExtendedNetworkOf")
+
   eventsCreated   Event[]         @relation("EventsCreated")
   eventsCancelled Event[]         @relation("CancelledBy")
   eventsDeleted   Event[]         @relation("DeletedBy")

@@ -1,4 +1,11 @@
-import { acceptedFriendOf, friendOfFriendOf, gameSharedWith, PERMISSION_CATALOG, Reach } from '@bge/database';
+import {
+  acceptedFriendOf,
+  friendOfFriendOf,
+  gameSharedWith,
+  PERMISSION_CATALOG,
+  Reach,
+  withinExtendedNetworkOf,
+} from '@bge/database';
 import { gameListScope } from './game-list-scope';
 
 /**
@@ -7,14 +14,18 @@ import { gameListScope } from './game-list-scope';
  * failing spec.
  */
 describe('gameListScope', () => {
-  it("declares the live Public games, the acting user's own, a friend's that reach friends, a friend of a friend's that reach friends of friends, and the games shared with the acting user", () => {
+  it("declares the live Public games, the acting user's own, a friend's that reach friends, a friend of a friend's that reach friends of friends, their extended network's that reach it, and the games shared with the acting user", () => {
     expect(gameListScope('u-1')).toEqual({
       deletedAt: null,
       OR: [
         { reach: Reach.Public },
         { createdById: 'u-1' },
-        { reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] }, createdBy: { is: acceptedFriendOf('u-1') } },
+        {
+          reach: { in: ['Friends', 'FriendsOfFriends', 'ExtendedNetwork', 'Public'] },
+          createdBy: { is: acceptedFriendOf('u-1') },
+        },
         { AND: [{ reach: Reach.FriendsOfFriends }, { createdBy: { is: friendOfFriendOf('u-1') } }] },
+        { AND: [{ reach: Reach.ExtendedNetwork }, { createdBy: { is: withinExtendedNetworkOf('u-1') } }] },
         gameSharedWith('u-1'),
       ],
     });
@@ -29,7 +40,8 @@ describe('gameListScope', () => {
     ["the acting user's own", 'read:game', 1],
     ["a friend's that reach friends", 'read:game:friends', 2],
     ["a friend of a friend's that reach friends of friends", 'read:game:friends-of-friends', 3],
-    ['the games shared with the acting user', 'read:game:shared', 4],
+    ["their extended network's that reach it", 'read:game:extended-network', 4],
+    ['the games shared with the acting user', 'read:game:shared', 5],
   ])('declares %s exactly as %s reads them', (_set, slug, branch) => {
     const { deletedAt, OR } = gameListScope('{{ user.id }}');
 

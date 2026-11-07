@@ -28,6 +28,20 @@ function asFriendship(value: unknown): FriendshipWire | undefined {
   return typeof id === 'string' && id.length > 0 ? (value as unknown as FriendshipWire) : undefined;
 }
 
+/** `POST /api/friendships` and `PATCH /api/friendships/:id`: `{ message, friendship }`. */
+export function friendshipEnvelope(response: HttpResponseLike, request: RequestDescription): FriendshipWire {
+  if (!isRecord(response.body)) {
+    return fail('the body is not an object', request, response);
+  }
+
+  const friendship = asFriendship(response.body['friendship']);
+  if (friendship === undefined) {
+    return fail("it carried no 'friendship' object with a string id", request, response);
+  }
+
+  return friendship;
+}
+
 /**
  * `GET /api/friendships`: `{ friendships: [...], pagination }`. The total is
  * checked against the page because both count the same actor-scoped set

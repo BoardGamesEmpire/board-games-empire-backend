@@ -1,6 +1,11 @@
 import type { EnumReachFilter, Prisma } from '../client';
 import { Action, ResourceType, RiskLevel } from '../client';
-import { acceptedFriendOf, friendOfFriendOf, REACHES_ADMITTING_FRIENDS } from '../utils/friendship-conditions';
+import {
+  acceptedFriendOf,
+  friendOfFriendOf,
+  REACHES_ADMITTING_FRIENDS,
+  withinExtendedNetworkOf,
+} from '../utils/friendship-conditions';
 import { liveHouseholdOf } from '../utils/household-conditions';
 import { gameSharedWith } from '../utils/share-conditions';
 import { assertJsonConditions, assertUniqueSlugs, assertValidSubjects } from './catalog-integrity';
@@ -46,6 +51,26 @@ const reachAdmittingFriends = {
 //   ahead of the scalar beside it.
 const friendOfFriendOfActingUser = friendOfFriendOf('{{ user.id }}');
 
+// Relational clause meaning "the extended network table puts this User node within
+// three friendship steps of the acting user, with no block between them"
+// (#497). Its shape is `withinExtendedNetworkOf`'s, which `gameListScope` and
+// `browseEventScope` share. Module-private for the reasons
+// `acceptedFriendOfActingUser` gives.
+//
+// Every extended network permission sits beside a friends-of-friends
+// permission, admits `ExtendedNetwork` alone and is shaped as
+// `friendOfFriendOfActingUser` explains. It reads the table alone, for these
+// reasons:
+// - Direct friends come in through the friends permissions, which admit the
+//   rung, so a friend never waits for the job that writes the table.
+// - The friends-of-friends permissions stay exact on their own rung, reading
+//   the friendships. At `ExtendedNetwork` a friend of a friend reads through
+//   the table, as anyone three steps away does, rather than through a second
+//   permission that would cost each row another lookup.
+// - Blocks, and on profiles bans, are checked in the query, so they take
+//   effect before any job runs. Only an unfriend waits for the job.
+const withinExtendedNetworkOfActingUser = withinExtendedNetworkOf('{{ user.id }}');
+
 // The games shared with the acting user, by name or through a household they
 // belong to, once each share is in effect (#810). Its shape is
 // `gameSharedWith`'s, which the game list scope shares, so a read by id and
@@ -55,9 +80,9 @@ const gameSharedWithActingUser = gameSharedWith('{{ user.id }}');
 
 // The owner's preference for showing their collection to friends. An absent
 // preferences row reads as the schema default, `true`, as FriendshipService
-// reads it. The friends-of-friends rule carries it too, so a wider circle never
-// sees what the narrower one can't (#496). Module-private for the reasons
-// `acceptedFriendOfActingUser` gives.
+// reads it. The friends-of-friends and extended network permissions carry it
+// too, so a wider circle never sees what the narrower one can't (#496, #497).
+// Module-private for the reasons `acceptedFriendOfActingUser` gives.
 const showsCollectionToFriends = {
   OR: [{ preferences: null }, { preferences: { is: { showCollectionToFriends: true } } }],
 } satisfies Prisma.UserWhereInput;
@@ -359,16 +384,16 @@ export const PERMISSION_CATALOG = [
   //
   // A profile has a reach, split like the Game family: your own, whatever its
   // reach, a friend's that reaches their friends, a friend of a friend's that
-  // reaches friends of friends (#496), and everyone's `Public` ones. The
-  // unconditioned read these replace served every profile to every user,
-  // whatever its owner chose (#495). User search composes this read, so a
-  // profile is found only where it can be read. The friends, friends-of-friends
-  // and public reads rate `Medium`, as `read:user:searchable` does: they are
-  // other users' personal details, such as accessibility needs, that their
-  // owners chose to show. The friends, friends-of-friends and public reads
-  // leave out a banned user's profile, as user search leaves them out; the
-  // user's own read, staff and the Owner still reach it. What else a ban hides
-  // is #887 (#840).
+  // reaches friends of friends (#496), one in your extended network that
+  // reaches it (#497), and everyone's `Public` ones. The unconditioned read
+  // these replace served every profile to every user, whatever its owner chose
+  // (#495). User search composes this read, so a profile is found only where
+  // it can be read. The reads of other users' profiles rate `Medium`, as
+  // `read:user:searchable` does: they are other users' personal details, such
+  // as accessibility needs, that their owners chose to show. They also leave
+  // out a banned user's profile, as user search leaves them out; the user's
+  // own read, staff and the Owner still reach it. What else a ban hides is #887
+  // (#840).
   // TODO: consider the ability to block other users from viewing your profile, etc.
   permission({
     action: Action.read,
@@ -395,6 +420,16 @@ export const PERMISSION_CATALOG = [
     slug: 'read:user:profile:friends-of-friends',
     riskLevel: RiskLevel.Medium,
     reason: "View a friend of a friend's profile that reaches friends of friends",
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.UserProfile,
+    conditions: {
+      AND: [{ reach: 'ExtendedNetwork' }, { user: { is: { AND: [unbannedUser, withinExtendedNetworkOfActingUser] } } }],
+    },
+    slug: 'read:user:profile:extended-network',
+    riskLevel: RiskLevel.Medium,
+    reason: 'View a profile in your extended network that reaches it',
   }),
   permission({
     action: Action.read,
@@ -485,6 +520,18 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: "View a friend of a friend's events that reach friends of friends",
   }),
+  // Extended network reach: read what reaches someone up to three friendship
+  // steps from the owner, unless a block stands between them (#497). Each of
+  // these adds to its friends-of-friends permission and leaves `Public` to the
+  // public permission. Shaped as `withinExtendedNetworkOfActingUser` explains.
+  permission({
+    action: Action.read,
+    subject: ResourceType.Event,
+    conditions: { AND: [{ reach: 'ExtendedNetwork' }, { createdBy: { is: withinExtendedNetworkOfActingUser } }] },
+    slug: 'read:event:extended-network',
+    riskLevel: RiskLevel.Medium,
+    reason: 'View an event in your extended network that reaches it',
+  }),
   // Public reach: every signed-in user on the server reads a `Public` event,
   // its dates and its policy, capacity included. No attendee read comes with
   // it, as none comes with the friends rules, so who attends stays with the
@@ -511,8 +558,9 @@ export const PERMISSION_CATALOG = [
   // --- Games ---
   //
   // Split like the GameCollection family: the bare slug is the creator's own
-  // rows, `:friends` is a friend's games that reach their friends, and
-  // `:public` is everyone else's view. A game carries a reach its creator
+  // rows, `:friends` is a friend's games that reach their friends,
+  // `:friends-of-friends` and `:extended-network` are the wider rungs' (#496,
+  // #497), and `:public` is everyone else's view. A game carries a reach its creator
   // chooses, and `User` is held by every signed-in actor, so an unconditioned
   // read here would hand every private game to everyone (#472). `:shared` is
   // the games their owners shared with the acting user, on top of each game's
@@ -554,6 +602,17 @@ export const PERMISSION_CATALOG = [
     slug: 'read:game:friends-of-friends',
     riskLevel: RiskLevel.Low,
     reason: "View a friend of a friend's games that reach friends of friends",
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.Game,
+    conditions: {
+      deletedAt: null,
+      AND: [{ reach: 'ExtendedNetwork' }, { createdBy: { is: withinExtendedNetworkOfActingUser } }],
+    },
+    slug: 'read:game:extended-network',
+    riskLevel: RiskLevel.Low,
+    reason: 'View a game in your extended network that reaches it',
   }),
   // A share waiting for approval grants nothing, and a block between the
   // game's owner and a named recipient vetoes the user share (#810). Shaped
@@ -876,6 +935,17 @@ export const PERMISSION_CATALOG = [
     slug: 'read:event_occurrence:friends-of-friends',
     riskLevel: RiskLevel.Medium,
     reason: "View the occurrences of a friend of a friend's events that reach friends of friends",
+  }),
+  // Bound and rated as `read:event:extended-network` is.
+  permission({
+    action: Action.read,
+    subject: ResourceType.EventOccurrence,
+    conditions: {
+      event: { is: { AND: [{ reach: 'ExtendedNetwork' }, { createdBy: { is: withinExtendedNetworkOfActingUser } }] } },
+    },
+    slug: 'read:event_occurrence:extended-network',
+    riskLevel: RiskLevel.Medium,
+    reason: 'View the occurrences of an event in your extended network that reaches it',
   }),
   // Bound and rated as `read:event:public` is.
   permission({
@@ -1287,6 +1357,17 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: "View the policy configuration of a friend of a friend's events that reach friends of friends",
   }),
+  // Bound and rated as `read:event:extended-network` is.
+  permission({
+    action: Action.read,
+    subject: ResourceType.EventPolicy,
+    conditions: {
+      event: { is: { AND: [{ reach: 'ExtendedNetwork' }, { createdBy: { is: withinExtendedNetworkOfActingUser } }] } },
+    },
+    slug: 'read:event_policy:extended-network',
+    riskLevel: RiskLevel.Medium,
+    reason: 'View the policy configuration of an event in your extended network that reaches it',
+  }),
   // Bound and rated as `read:event:public` is.
   permission({
     action: Action.read,
@@ -1377,9 +1458,10 @@ export const PERMISSION_CATALOG = [
     reason: 'View collections shared with your household',
   }),
   // An entry reaches the owner's accepted friends at every rung from
-  // `Friends` up, and friends of friends at `FriendsOfFriends`, each only while
-  // the owner's preferences show the collection to friends (#496). A `Public`
-  // entry reaches everyone through the public rule.
+  // `Friends` up, friends of friends at `FriendsOfFriends` (#496), and the
+  // owner's extended network at `ExtendedNetwork` (#497), each only while the
+  // owner's preferences show the collection to friends. A `Public` entry
+  // reaches everyone through the public permission.
   permission({
     action: Action.read,
     subject: ResourceType.GameCollection,
@@ -1405,6 +1487,20 @@ export const PERMISSION_CATALOG = [
     slug: 'read:game_collection:friends-of-friends',
     riskLevel: RiskLevel.Medium,
     reason: "View a friend of a friend's collections that reach friends of friends",
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.GameCollection,
+    conditions: {
+      deletedAt: null,
+      AND: [
+        { reach: 'ExtendedNetwork' },
+        { user: { is: { AND: [showsCollectionToFriends, withinExtendedNetworkOfActingUser] } } },
+      ],
+    },
+    slug: 'read:game_collection:extended-network',
+    riskLevel: RiskLevel.Medium,
+    reason: 'View a collection in your extended network that reaches it',
   }),
   permission({
     action: Action.read,

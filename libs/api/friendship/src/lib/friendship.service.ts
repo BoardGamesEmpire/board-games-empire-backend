@@ -1,6 +1,7 @@
 import {
   Action,
   DatabaseService,
+  type Friendship,
   FriendshipStatus,
   isPrismaDependentRecordNotFoundError,
   isPrismaUniqueConstraintError,
@@ -19,6 +20,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { CreateFriendRequestDto, ListFriendshipsQueryDto, RespondableFriendshipStatus } from './dto';
+import { ExtendedNetworkProducer } from './extended-network/extended-network.producer';
 
 /**
  * Both participants, as every friendship read returns them. Extracted to module
@@ -39,6 +41,7 @@ export class FriendshipService {
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
     private readonly scopeComposer: ScopeComposer,
+    private readonly extendedNetwork: ExtendedNetworkProducer,
   ) {}
 
   /**
@@ -219,6 +222,18 @@ export class FriendshipService {
    * - Blocked             — either participant, from any non-Blocked state; the
    *   row is reoriented so the blocker becomes the `requester` (so only the
    *   blocker can later unblock via {@link remove}).
+   *
+   * A transition from Pending writes only while the row is still Pending, so
+   * a response that a concurrent one overtook is refused as no longer
+   * pending rather than written over it: a withdrawal never undoes an accept.
+   *
+   * Once written, an accept or a block queues a rebuild of the extended network table
+   * around both users (#497). Those are the responses that can add or end an
+   * accepted friendship, the only kind of step the table counts. A decline or
+   * a withdrawal moves a row that the guarded write proves was Pending, so it
+   * queues nothing. A block can end a friendship from any status, so it
+   * always queues; it takes effect at once, since the permissions check
+   * blocks themselves.
    */
   async respond(id: string, status: RespondableFriendshipStatus) {
     const userId = this.abilityService.getActingUserId();
@@ -228,6 +243,7 @@ export class FriendshipService {
     const isRequester = friendship.requesterId === userId;
 
     const data: Prisma.FriendshipUpdateInput = { status, respondedAt: new Date() };
+    let fromPending = false;
 
     switch (status) {
       case FriendshipStatus.Accepted:
@@ -238,6 +254,7 @@ export class FriendshipService {
         if (friendship.status !== FriendshipStatus.Pending) {
           throw new BadRequestException(t('errors.friendship.not_pending'));
         }
+        fromPending = true;
         break;
 
       case FriendshipStatus.Withdrawn:
@@ -247,6 +264,7 @@ export class FriendshipService {
         if (friendship.status !== FriendshipStatus.Pending) {
           throw new BadRequestException(t('errors.friendship.not_pending'));
         }
+        fromPending = true;
         break;
 
       case FriendshipStatus.Blocked:
@@ -259,13 +277,26 @@ export class FriendshipService {
         break;
     }
 
-    return this.updateScoped(id, data);
+    const updated = await this.updateScoped(id, data, fromPending ? FriendshipStatus.Pending : undefined);
+    if (status === FriendshipStatus.Accepted || status === FriendshipStatus.Blocked) {
+      // Not awaited: queueing never rejects, but it hangs while the queue's
+      // Redis is unreachable, and the friendship is already written.
+      void this.extendedNetwork.changed([updated.requesterId, updated.addresseeId]);
+    }
+
+    return updated;
   }
 
   /**
    * Remove a friendship (unfriend, or unblock by the blocker). A blocked user
    * cannot delete the row to escape the block — only the blocker (recorded as
    * the `requester` of a Blocked row) may.
+   *
+   * Once written, an unfriend queues a rebuild of the extended network table around
+   * both users (#497): it takes a reader out of the extended network only
+   * when that rebuild runs. The status comes from the deleted row itself, so
+   * an unblock or a removed request, which ends no accepted friendship,
+   * queues nothing.
    */
   async remove(id: string) {
     const userId = this.abilityService.getActingUserId();
@@ -275,8 +306,9 @@ export class FriendshipService {
       throw new ForbiddenException(t('errors.friendship.cannot_remove_blocker'));
     }
 
+    let removed: Friendship;
     try {
-      return await this.db.friendship.delete({
+      removed = await this.db.friendship.delete({
         where: {
           id,
           // eslint-disable-next-line no-restricted-syntax -- single-row delete by id, not a collection read
@@ -286,13 +318,28 @@ export class FriendshipService {
     } catch (error) {
       throw this.mapMissingToForbidden(error, id);
     }
+
+    if (removed.status === FriendshipStatus.Accepted) {
+      // Not awaited, as in `respond`.
+      void this.extendedNetwork.changed([removed.requesterId, removed.addresseeId]);
+    }
+
+    return removed;
   }
 
-  private async updateScoped(id: string, data: Prisma.FriendshipUpdateInput) {
+  /**
+   * Writes `data` to a row the actor may change. With `expectedStatus`, only
+   * while the row still has it: the caller read it there, and a row that left
+   * it since was moved by a concurrent response. The caller already read the
+   * row as a participant, which no response changes, so a miss under the
+   * guard means the status moved, or the row is gone.
+   */
+  private async updateScoped(id: string, data: Prisma.FriendshipUpdateInput, expectedStatus?: FriendshipStatus) {
     try {
       return await this.db.friendship.update({
         where: {
           id,
+          ...(expectedStatus && { status: expectedStatus }),
           // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.Friendship, Action.update),
         },
@@ -300,6 +347,10 @@ export class FriendshipService {
         include: PARTICIPANT_INCLUDE,
       });
     } catch (error) {
+      if (expectedStatus === FriendshipStatus.Pending && isPrismaDependentRecordNotFoundError(error)) {
+        throw new BadRequestException(t('errors.friendship.not_pending'));
+      }
+
       throw this.mapMissingToForbidden(error, id);
     }
   }

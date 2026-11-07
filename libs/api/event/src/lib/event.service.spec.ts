@@ -1051,6 +1051,25 @@ describe('EventService', () => {
       expect(db.event.create).not.toHaveBeenCalled();
     });
 
+    // The settings PATCH doesn't offer the extended network as a policy
+    // (#497). Stored by a write that skips it, the policy lets nobody in, a
+    // friend included.
+    it('refuses every invite under an ExtendedNetwork event policy, which no route accepts but a direct write could store (#497)', async () => {
+      db.systemSetting.findUnique.mockResolvedValue({
+        householdInviteePolicy: Reach.Public,
+        eventInviteePolicy: Reach.ExtendedNetwork,
+      } as never);
+      db.friendship.findFirst.mockResolvedValue({ status: FriendshipStatus.Accepted } as never);
+
+      const error = await service
+        .createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto)
+        .catch((reason: unknown) => reason);
+
+      expect(error).toBeInstanceOf(ForbiddenException);
+      expect((error as ForbiddenException).message).toContain('errors.event.invitee_friends_only');
+      expect(db.event.create).not.toHaveBeenCalled();
+    });
+
     it('asks nothing about the creator listed among the invitees', async () => {
       await service.createEvent({ title: 'X', inviteUserIds: ['user-1'] } as CreateEventDto);
 

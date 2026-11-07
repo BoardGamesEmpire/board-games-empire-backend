@@ -282,6 +282,11 @@ async function isFriendOfFriend(tx: Prisma.TransactionClient, inviterId: string,
  *
  * `Private` can be set only as the preference. As a policy it fails closed if
  * a write that skips the PATCH stores it.
+ *
+ * No route accepts `ExtendedNetwork` as either, so it fails closed as both,
+ * and the gate never reads the extended network table (#497). At three friendship steps
+ * it is close to `Public`, and an invite that went through would tell the
+ * inviter whether the invitee is in their extended network.
  */
 function reaches(level: Reach, status: FriendshipStatus | null, friendOfFriend: boolean): boolean {
   switch (level) {
@@ -291,6 +296,7 @@ function reaches(level: Reach, status: FriendshipStatus | null, friendOfFriend: 
       return status === FriendshipStatus.Accepted;
     case Reach.FriendsOfFriends:
       return status === FriendshipStatus.Accepted || friendOfFriend;
+    case Reach.ExtendedNetwork:
     case Reach.Private:
       return false;
   }

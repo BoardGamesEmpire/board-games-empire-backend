@@ -1,3 +1,4 @@
+import { Reach } from '@bge/database';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { CreateEventDto } from './create-event.dto';
@@ -17,6 +18,14 @@ describe('CreateEventDto', () => {
     'accepts an event outside any household or in a named one: %p',
     async (household) => {
       await expect(propertiesWithErrors({ title: 'Game night', ...household })).resolves.toEqual([]);
+    },
+  );
+
+  // Every rung an event read permission serves (#496, #497).
+  it.each([Reach.Private, Reach.Friends, Reach.FriendsOfFriends, Reach.ExtendedNetwork, Reach.Public])(
+    'accepts reach %s',
+    async (reach) => {
+      await expect(propertiesWithErrors({ title: 'Game night', reach })).resolves.toEqual([]);
     },
   );
 

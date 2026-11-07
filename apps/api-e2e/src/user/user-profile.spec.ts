@@ -1,5 +1,12 @@
 import { FriendshipStatus, Reach } from '@bge/database';
-import { arrangeFriendship, befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import {
+  arrangeExtendedNetwork,
+  arrangeFriendship,
+  befriend,
+  createActors,
+  type Actors,
+  type AuthenticatedActor,
+} from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -110,13 +117,59 @@ describe('user profile', () => {
     await readProfile(viewer, profileOwner.user.id).expect(404);
   });
 
+  // The extended network rows stand in for the friendships the worker job reads, and
+  // the block is read from the friendships, before any job runs (#497). Two
+  // readers sit three steps from the owner, so the blocked one's 404 is the
+  // block and nothing else. A direct friend with no extended network row reads it
+  // through the friends permission.
+  it('lets a reader three steps away read an ExtendedNetwork profile, and answers one its owner blocked 404 (#497)', async () => {
+    const { profileOwner, friend, stranger } = await arrange(Reach.ExtendedNetwork);
+    const [viewer, blockedViewer] = await Promise.all([actors.user(), actors.user()]);
+    await arrangeExtendedNetwork(db.client, profileOwner, viewer, 3);
+    await arrangeExtendedNetwork(db.client, profileOwner, blockedViewer, 3);
+    await arrangeFriendship(db.client, profileOwner, blockedViewer, FriendshipStatus.Blocked);
+
+    await readProfile(friend, profileOwner.user.id).expect(200);
+
+    const asViewer = userProfile(
+      await readProfile(viewer, profileOwner.user.id).expect(200),
+      'GET /api/users/:id/profile as a reader three steps away',
+    );
+    expect(asViewer.userId).toBe(profileOwner.user.id);
+    for (const field of OWNER_ONLY) {
+      expect(asViewer).not.toHaveProperty(field);
+    }
+
+    await readProfile(blockedViewer, profileOwner.user.id).expect(404);
+    await readProfile(stranger, profileOwner.user.id).expect(404);
+  });
+
+  // Each wider rung keeps to its own permissions: friends of friends are
+  // read from the friendships, and the extended network rows open only the extended
+  // network's rung (#497).
+  it('answers 404 for a FriendsOfFriends profile to a reader only the extended network table puts three steps away (#497)', async () => {
+    const { profileOwner, stranger: viewer } = await arrange(Reach.FriendsOfFriends);
+    await arrangeExtendedNetwork(db.client, profileOwner, viewer, 3);
+
+    await readProfile(viewer, profileOwner.user.id).expect(404);
+
+    // The control: the same reader reads it once it reaches the extended network.
+    await db.client.userProfile.update({
+      where: { userId: profileOwner.user.id },
+      data: { reach: Reach.ExtendedNetwork },
+    });
+    await readProfile(viewer, profileOwner.user.id).expect(200);
+  });
+
   // A banned user's profile is hidden from other users as user search hides
-  // them (#840). The reader gets the profile before the ban, so the 404 is
-  // the ban's, not the reach's.
+  // them (#840), at every rung, the extended network's included (#497). The
+  // reader gets the profile before the ban, so the 404 is the ban's, not the
+  // reach's.
   it.each([
     [Reach.Public, 'a stranger', 'stranger'],
     [Reach.Friends, 'a friend', 'friend'],
     [Reach.FriendsOfFriends, 'a friend of a friend', 'friendOfFriend'],
+    [Reach.ExtendedNetwork, 'a reader three steps away', 'extendedNetwork'],
   ] as const)(
     'answers 404 for a banned user’s %s profile to %s who read it before the ban (#840)',
     async (reach, _reader, readerKey) => {
@@ -125,6 +178,9 @@ describe('user profile', () => {
       if (readerKey === 'friendOfFriend') {
         reader = await actors.user();
         await befriend(db.client, reader, friend);
+      }
+      if (readerKey === 'extendedNetwork') {
+        await arrangeExtendedNetwork(db.client, profileOwner, reader, 3);
       }
 
       await readProfile(reader, profileOwner.user.id).expect(200);
@@ -290,6 +346,23 @@ describe('user profile', () => {
       expect(edited).toMatchObject({ reach: Reach.FriendsOfFriends });
 
       await readProfile(friendOfFriend, profileOwner.user.id).expect(200);
+      await readProfile(friend, profileOwner.user.id).expect(200);
+      await readProfile(stranger, profileOwner.user.id).expect(404);
+    });
+
+    it('lets a reader three steps away read the profile once its owner sets it to ExtendedNetwork (#497)', async () => {
+      const { profileOwner, friend, stranger } = await arrange(Reach.Private);
+      const viewer = await actors.user();
+      await arrangeExtendedNetwork(db.client, profileOwner, viewer, 3);
+      await readProfile(viewer, profileOwner.user.id).expect(404);
+
+      const edited = userProfile(
+        await editOwnProfile(profileOwner, { reach: Reach.ExtendedNetwork }).expect(200),
+        'PATCH /api/users/me/profile',
+      );
+      expect(edited).toMatchObject({ reach: Reach.ExtendedNetwork });
+
+      await readProfile(viewer, profileOwner.user.id).expect(200);
       await readProfile(friend, profileOwner.user.id).expect(200);
       await readProfile(stranger, profileOwner.user.id).expect(404);
     });

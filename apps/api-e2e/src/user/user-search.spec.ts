@@ -1,5 +1,12 @@
 import { FriendshipStatus, Reach, ResourceType } from '@bge/database';
-import { arrangeFriendship, befriend, createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import {
+  arrangeExtendedNetwork,
+  arrangeFriendship,
+  befriend,
+  createActors,
+  type Actors,
+  type SessionActor,
+} from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { mintApiKey, type Caller } from '../support/api-key';
@@ -168,6 +175,43 @@ describe('user search', () => {
       expect(idsOf(asBlocked.users)).not.toContain(owner.user.id);
       // Control: the blocked viewer's search works, and finds the friend.
       expect(idsOf(asBlocked.users)).toContain(friend.user.id);
+    });
+
+    // The extended network rows stand in for the friendships the worker job reads, and
+    // the block is read from the friendships, before any job runs (#497). Two
+    // viewers sit three steps from the owner, so the blocked one's miss is the
+    // block and nothing else.
+    it('finds an ExtendedNetwork profile for a reader three steps away, and not for one its owner has blocked (#497)', async () => {
+      const { term, friend, owner, stranger } = await arrangeFriends();
+      const [viewer, blockedViewer] = await Promise.all([
+        actors.user({ username: `${term}-viewer` }),
+        actors.user({ username: `${term}-blocked` }),
+      ]);
+      await db.client.userProfile.update({ where: { userId: owner.user.id }, data: { reach: Reach.ExtendedNetwork } });
+      await arrangeExtendedNetwork(db.client, owner, viewer, 3);
+      await arrangeExtendedNetwork(db.client, owner, blockedViewer, 3);
+      await arrangeFriendship(db.client, owner, blockedViewer, FriendshipStatus.Blocked);
+
+      // A direct friend finds it through the friends permission, with no
+      // extended network row.
+      const asFriend = userSearchPage(await search(friend, term).expect(200), 'GET /api/users/search as a friend');
+      expect(idsOf(asFriend.users)).toContain(owner.user.id);
+
+      const asViewer = userSearchPage(
+        await search(viewer, term).expect(200),
+        'GET /api/users/search as a reader three steps away',
+      );
+      expect(idsOf(asViewer.users)).toContain(owner.user.id);
+
+      for (const [who, actor] of [
+        ['a reader three steps away the owner blocked', blockedViewer],
+        ['a stranger', stranger],
+      ] as const) {
+        const page = userSearchPage(await search(actor, term).expect(200), `GET /api/users/search as ${who}`);
+        expect(idsOf(page.users)).not.toContain(owner.user.id);
+        // Control: the search works, and finds the friend.
+        expect(idsOf(page.users)).toContain(friend.user.id);
+      }
     });
 
     // `isSearchable` decides whether a readable profile is offered to search,

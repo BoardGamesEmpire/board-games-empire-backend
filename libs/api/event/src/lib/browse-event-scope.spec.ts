@@ -5,6 +5,7 @@ import {
   liveHouseholdOf,
   PERMISSION_CATALOG,
   Reach,
+  withinExtendedNetworkOf,
 } from '@bge/database';
 import { browseEventScope } from './browse-event-scope';
 
@@ -14,13 +15,17 @@ import { browseEventScope } from './browse-event-scope';
  * failing spec (#962).
  */
 describe('browseEventScope (#962)', () => {
-  it("declares the events the acting user has no attendee row on, among the Public ones, a friend's that reach friends, a friend of a friend's that reach friends of friends, and their households'", () => {
+  it("declares the events the acting user has no attendee row on, among the Public ones, a friend's that reach friends, a friend of a friend's that reach friends of friends, their extended network's that reach it, and their households'", () => {
     expect(browseEventScope('u-1')).toEqual({
       attendees: { none: { userId: 'u-1' } },
       OR: [
         { reach: Reach.Public, createdBy: { is: { NOT: blockWith('u-1') } } },
-        { reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] }, createdBy: { is: acceptedFriendOf('u-1') } },
+        {
+          reach: { in: ['Friends', 'FriendsOfFriends', 'ExtendedNetwork', 'Public'] },
+          createdBy: { is: acceptedFriendOf('u-1') },
+        },
         { AND: [{ reach: Reach.FriendsOfFriends }, { createdBy: { is: friendOfFriendOf('u-1') } }] },
+        { AND: [{ reach: Reach.ExtendedNetwork }, { createdBy: { is: withinExtendedNetworkOf('u-1') } }] },
         { household: { is: liveHouseholdOf('u-1') } },
       ],
     });
@@ -33,6 +38,7 @@ describe('browseEventScope (#962)', () => {
   it.each([
     ["a friend's that reach friends", 'read:event:friends', 1],
     ["a friend of a friend's that reach friends of friends", 'read:event:friends-of-friends', 2],
+    ["their extended network's that reach it", 'read:event:extended-network', 3],
   ])('declares %s exactly as %s reads them', (_set, slug, arm) => {
     expect(browseEventScope('{{ user.id }}').OR?.[arm]).toStrictEqual(
       PERMISSION_CATALOG.find((entry) => entry.slug === slug)?.conditions,

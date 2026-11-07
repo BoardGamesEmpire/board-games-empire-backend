@@ -17,6 +17,9 @@
       "path": "../../libs/api/game-import"
     },
     {
+      "path": "../../libs/api/friendship"
+    },
+    {
       "path": "../../libs/common/env"
     },
     {
@@ -47,10 +50,10 @@
       "path": "../../libs/common/bootstrap"
     },
     {
-      "path": "../../libs/api/auth"
+      "path": "../../libs/common/permissions"
     },
     {
-      "path": "../../libs/common/permissions"
+      "path": "../../libs/api/auth"
     },
     {
       "path": "../../libs/common/testing-e2e"

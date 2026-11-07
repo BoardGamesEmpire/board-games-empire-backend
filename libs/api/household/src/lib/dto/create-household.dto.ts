@@ -12,8 +12,9 @@ export type HouseholdReach = (typeof HOUSEHOLD_REACHES)[number];
  * rule serves. `Public` waits on #231, which decides what someone outside a
  * household sees of it (#495). So does `FriendsOfFriends`, which widens a
  * roster beyond friends and needs an answer to whose block vetoes in a
- * household of many members (#496). Shared with `UpdateHouseholdDto`, which
- * names no default.
+ * household of many members (#496), and so does `ExtendedNetwork`, for the
+ * same reasons (#497). Shared with `UpdateHouseholdDto`, which names no
+ * default.
  */
 export function HouseholdReachProperty(defaultReach?: HouseholdReach): PropertyDecorator {
   return ReachProperty({

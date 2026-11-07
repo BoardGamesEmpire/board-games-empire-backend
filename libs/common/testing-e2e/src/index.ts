@@ -1,4 +1,5 @@
 export * from './lib/actors.js';
+export * from './lib/extended-network.js';
 export * from './lib/friendship.js';
 export * from './lib/household.js';
 export * from './lib/invite.js';

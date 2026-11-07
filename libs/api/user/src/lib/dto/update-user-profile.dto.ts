@@ -15,8 +15,17 @@ export const PROFILE_HOUSE_RULES_MAX_LENGTH = 200;
 export const PROFILE_PRACTICAL_INFO_MAX_LENGTH = 500;
 export const PROFILE_PLAYER_COUNT_MAX = 100;
 
-/** The reaches a profile read rule serves, friends of friends included (#496). */
-export const PROFILE_REACHES = [Reach.Public, Reach.FriendsOfFriends, Reach.Friends, Reach.Private] as const;
+/**
+ * The reaches a profile read permission serves, friends of friends (#496)
+ * and the extended network (#497) included.
+ */
+export const PROFILE_REACHES = [
+  Reach.Public,
+  Reach.ExtendedNetwork,
+  Reach.FriendsOfFriends,
+  Reach.Friends,
+  Reach.Private,
+] as const;
 export type ProfileReach = (typeof PROFILE_REACHES)[number];
 
 /** Trimmed, so padding is never stored. */
@@ -164,6 +173,10 @@ export class UpdateUserProfileDto {
     reaches: PROFILE_REACHES,
     description:
       'Who may read the profile besides its owner, and so find it in search. `Public`: every signed-in user. ' +
+      "`ExtendedNetwork`: the owner's accepted friends and everyone up to three friendship steps from the " +
+      'owner, unless a block stands between the owner and the reader. A reader who is no longer within three ' +
+      'steps may keep access for a short while: usually seconds after an unfriend, up to a day after a user ' +
+      'who linked them is deleted. ' +
       "`FriendsOfFriends`: the owner's accepted friends and friends of friends, unless a block stands " +
       "between the owner and the reader. `Friends`: the owner's accepted friends. `Private`: no one else. " +
       'Staff read every profile whatever its reach.',

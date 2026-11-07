@@ -6,7 +6,14 @@ import {
   Reach,
   SystemRole,
 } from '@bge/database';
-import { arrangeFriendship, befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import {
+  arrangeExtendedNetwork,
+  arrangeFriendship,
+  befriend,
+  createActors,
+  type Actors,
+  type AuthenticatedActor,
+} from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -360,8 +367,9 @@ describe('event read scope', () => {
     // host's friends. Created at its reach through the route, so the DTO's
     // acceptance is part of the test (#496). A friend reading a `Public` event
     // can't tell the friends rule from the public one, so `Public` is pinned on
-    // a stranger below.
-    it.each([Reach.FriendsOfFriends])(
+    // a stranger below. The extended network admits a friend through the same
+    // friends permissions (#497).
+    it.each([Reach.FriendsOfFriends, Reach.ExtendedNetwork])(
       "serves a friend of the host a %s event's occurrences and policy, and still refuses a stranger",
       async (reach) => {
         const host = await actors.user();
@@ -409,6 +417,54 @@ describe('event read scope', () => {
         await readEvent(blockedViewer, eventId).expect(404);
       },
     );
+
+    // The extended network rows stand in for the friendships the worker job reads
+    // (#497). Two viewers sit three steps from the host, so the blocked one's
+    // refusal is the block, which the permissions read from the friendships
+    // before any job runs. A direct friend with no extended network row reads it
+    // through the friends permissions. Created at its reach through the route.
+    it("serves a reader three steps from the host an ExtendedNetwork event's occurrences and policy, and refuses one the host has blocked (#497)", async () => {
+      const [host, friend, viewer, blockedViewer, stranger] = await Promise.all(
+        Array.from({ length: 5 }, () => actors.user()),
+      );
+      await befriend(db.client, friend, host);
+      await arrangeExtendedNetwork(db.client, host, viewer, 3);
+      await arrangeExtendedNetwork(db.client, host, blockedViewer, 3);
+      await arrangeFriendship(db.client, host, blockedViewer, FriendshipStatus.Blocked);
+      const { eventId, occurrenceId, guestEmail } = await arrangeEvent(host, { reach: Reach.ExtendedNetwork });
+
+      for (const [who, actor] of [
+        ['a friend of the host', friend],
+        ['a reader three steps from the host', viewer],
+      ] as const) {
+        const response = await readEvent(actor, eventId).expect(200);
+        const read = eventDetailEnvelope(response, `GET /api/events/:id as ${who}, at ExtendedNetwork`);
+        expect(read.occurrences.map((occurrence) => occurrence.id)).toEqual([occurrenceId]);
+        expect(read.policy?.eventId).toBe(eventId);
+        expect(read.attendees).toEqual([]);
+        expect(JSON.stringify(response.body)).not.toContain(guestEmail);
+
+        await readOccurrence(actor, eventId, occurrenceId).expect(200);
+      }
+
+      await readEvent(blockedViewer, eventId).expect(404);
+      await readEvent(stranger, eventId).expect(404);
+    });
+
+    // Each wider rung keeps to its own permissions: friends of friends are
+    // read from the friendships, and the extended network rows open only the extended
+    // network's rung (#497).
+    it('refuses a FriendsOfFriends event to a reader only the extended network table puts three steps from the host (#497)', async () => {
+      const [host, viewer] = await Promise.all([actors.user(), actors.user()]);
+      await arrangeExtendedNetwork(db.client, host, viewer, 3);
+      const { eventId } = await arrangeEvent(host, { reach: Reach.FriendsOfFriends });
+
+      await readEvent(viewer, eventId).expect(404);
+
+      // The control: the same reader reads it once it reaches the extended network.
+      await db.client.event.update({ where: { id: eventId }, data: { reach: Reach.ExtendedNetwork } });
+      await readEvent(viewer, eventId).expect(200);
+    });
 
     it("serves any signed-in user a Public event's occurrences and policy, and none of its attendees", async () => {
       const host = await actors.user();
