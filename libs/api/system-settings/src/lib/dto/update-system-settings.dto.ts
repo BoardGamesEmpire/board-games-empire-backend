@@ -81,7 +81,7 @@ export class UpdateSystemSettingsDto {
   // Trim before validation, so a whitespace-only name collapses to '' and
   // answers 400 rather than labelling the server with nothing, and the length
   // is measured without the padding.
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @Transform(trimStrings)
   name?: string;
 
   @ApiPropertyOptional({
