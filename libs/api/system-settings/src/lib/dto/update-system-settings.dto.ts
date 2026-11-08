@@ -1,4 +1,4 @@
-import { Reach, SmtpSecurity } from '@bge/database';
+import { ProviderLinkingPolicy, Reach, SmtpSecurity } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
@@ -283,4 +283,14 @@ export class UpdateSystemSettingsDto {
   @Min(PASSWORD_RESET_LINK_LIFETIME_MINUTES.min, { message: i18nValidationMessage('validation.min') })
   @Max(PASSWORD_RESET_LINK_LIFETIME_MINUTES.max, { message: i18nValidationMessage('validation.max') })
   passwordResetLinkLifetimeMinutes?: number;
+
+  @ApiPropertyOptional({
+    description:
+      "Whether a sign-in provider's sign-in can link itself to the registered user with the same email. SignedIn: only a signed-in user links a provider, from their sign-in methods. AutomaticWhenVerified: a provider sign-in links itself when the provider and this server have both verified the email. Anyone who controls a registered user's verified email at a provider can then sign in as that user, the Owner included.",
+    enum: ProviderLinkingPolicy,
+    enumName: 'ProviderLinkingPolicy',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsEnum(ProviderLinkingPolicy, { message: i18nValidationMessage('validation.isEnum') })
+  providerLinkingPolicy?: ProviderLinkingPolicy;
 }

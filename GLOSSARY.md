@@ -130,6 +130,10 @@ _Avoid_: account
 An identity server the operator configures, such as Authentik, Keycloak or Google, that registered users can sign in through. A first sign-in through one creates a registered user, if the provider confirms the email address or the operator allows this one not to; a registered user can also link one and then sign in through it. The operator gives each one a label (`OIDC_<ID>_DISPLAY_NAME`) that clients show; it is not a user's display name.
 _Avoid_: identity provider, IdP, SSO
 
+**Provider linking policy**:
+The system setting that decides whether a sign-in through a sign-in provider can link that provider to the registered user who has the same email, or whether only a signed-in user can link one.
+_Avoid_: account-linking policy, implicit linking (better-auth's term)
+
 **App sign-in**:
 How a native app signs in through a sign-in provider: it opens the provider in a browser through the server, and exchanges the single-use code the server hands back for a session of its own.
 _Avoid_: native login, mobile OAuth, deep-link sign-in

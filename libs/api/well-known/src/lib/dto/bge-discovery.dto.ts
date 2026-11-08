@@ -1,3 +1,4 @@
+import { ProviderLinkingPolicy } from '@bge/database';
 import { ApiProperty } from '@nestjs/swagger';
 import { EmailAndPasswordStrategyDto } from './email-and-password-strategy.dto';
 import { OidcStrategyDto } from './oidc-strategy.dto';
@@ -152,4 +153,17 @@ export class BgeDiscoveryDto {
     },
   })
   strategies!: AuthStrategyDto[];
+
+  /**
+   * Whether a sign-in provider's sign-in may link itself to the registered
+   * user with the same email (#913). Server-wide.
+   */
+  @ApiProperty({
+    enum: ProviderLinkingPolicy,
+    enumName: 'ProviderLinkingPolicy',
+    description:
+      "Whether a sign-in provider's sign-in can link itself to the registered user with the same email " +
+      '(AutomaticWhenVerified), or only a signed-in user links one (SignedIn). Server-wide.',
+  })
+  bgeProviderLinkingPolicy!: ProviderLinkingPolicy;
 }

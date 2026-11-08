@@ -13,6 +13,12 @@ model SystemSetting {
   allowUserRegistration Boolean @default(true) @map("allow_user_registration")
   allowUsernameChange   Boolean @default(true) @map("allow_username_change")
 
+  /// Whether a sign-in through a sign-in provider can link that provider to the
+  /// registered user with the same email, or only a signed-in user can link one.
+  /// Read by the provider linking gate (`provider-linking-gate.ts`) on every
+  /// provider sign-in (#913).
+  providerLinkingPolicy ProviderLinkingPolicy @default(SignedIn) @map("provider_linking_policy")
+
   feedbackReportRetentionDays          Int     @default(90) @map("feedback_report_retention_days")
   feedbackReportServerRedactionEnabled Boolean @default(true) @map("feedback_report_server_redaction_enabled")
 

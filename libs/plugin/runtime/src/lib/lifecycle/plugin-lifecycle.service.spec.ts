@@ -14,7 +14,7 @@ import {
 import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import type { PluginInstanceRegistry } from '../loader/plugin-instance-registry';
 import type { ClaimedPluginRow } from '../manifest/manifest-move';
-import type { PluginModuleOptions } from '../plugin-module.options';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import {
   PluginLifecycleAuthorityError,
   PluginLifecycleManifestError,
@@ -25,11 +25,7 @@ import {
 import { PluginLifecycleService } from './plugin-lifecycle.service';
 
 describe('PluginLifecycleService', () => {
-  const options: PluginModuleOptions = {
-    pluginsRoot: '/var/lib/bge/plugins',
-    bgeVersion: '0.3.0',
-    defaultLocale: 'en',
-  };
+  const options = buildPluginModuleOptions();
 
   const activeManifest = buildPluginManifest();
 

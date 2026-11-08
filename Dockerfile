@@ -23,7 +23,7 @@
 # /web, published from the client repository. Renovate moves the digest when
 # the client's `edge` moves (#599). The BGE image records this reference as a
 # label, so it names the client it carries.
-ARG CLIENT_WEB_IMAGE=ghcr.io/boardgamesempire/bge-client-web:edge@sha256:e7c878afa9a2ada912def0028359748d506980373ed240a6ae6237ca3e7234e1
+ARG CLIENT_WEB_IMAGE=ghcr.io/boardgamesempire/bge-client-web:edge@sha256:ad4154190adf5371616f69b907ac07daf4c787357d50adff55466a998f8e91ff
 # The client's image is a single linux/amd64 manifest, and its files are the
 # same on every platform, so every build takes that one. Naming the platform
 # keeps BuildKit from warning that an arm64 build pulled an amd64 image; it is
@@ -32,7 +32,7 @@ ARG CLIENT_WEB_PLATFORM=linux/amd64
 
 # Node 24, the major CI runs (.github/actions/setup-workspace). Renovate moves
 # the digest (#599); a new major changes CI and this line together.
-FROM node:26-alpine@sha256:7ed4edf2b680417bf06d3f465de09bb113f877ff265b15f72a27a4c6fb76fb04 AS node
+FROM node:26-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS node
 
 # Every workspace's package.json at its own path, with the lockfile. Both
 # installs need all of them, and copying nothing else into their stages keeps

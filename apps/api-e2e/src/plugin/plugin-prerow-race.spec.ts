@@ -1,4 +1,4 @@
-import { PluginCategory, PluginGrantStatus, PluginScope, RiskLevel, type Plugin } from '@bge/database';
+import { PluginGrantStatus, PluginScope, RiskLevel, type Plugin } from '@bge/database';
 import { createActors, type Actors } from '@bge/testing-e2e';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import request from 'supertest';
@@ -8,6 +8,7 @@ import { bindTemplate, readShippedSql, readShippedValue } from '../support/shipp
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { LOCK_SOURCES } from './lock-order';
 import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
+import { pluginRowData } from './plugin-row-fixtures';
 
 /**
  * The race a row lock cannot reach: two transactions writing a unit's state
@@ -102,15 +103,13 @@ describe('the pre-row races (#360)', () => {
     });
 
     const plugin = await db.client.plugin.create({
-      data: {
+      data: pluginRowData({
         slug: manifest.slug,
         version: manifest.version,
-        category: PluginCategory.FeedbackSink,
         scope: PluginScope.Household,
         manifestJson: manifest as never,
         enabled: true,
-        installedSha256: 'a'.repeat(64),
-      },
+      }),
     });
     await db.client.pluginPermission.create({
       data: { pluginId: plugin.id, slug: `plugin|${plugin.slug}|manage:digest`, riskLevel: RiskLevel.Low },

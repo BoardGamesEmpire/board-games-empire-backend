@@ -1,4 +1,5 @@
 import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
+import { buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,7 +23,7 @@ describe('PluginStaticAnalysisService', () => {
 
   const directory = (): PluginArtifactDirectory => ({
     slug: 'demo-sink',
-    sha256: 'a'.repeat(64),
+    sha256: sha('a'),
     rootDir,
     manifestPath: join(rootDir, 'manifest.json'),
     packageJsonPath: join(rootDir, 'package.json'),

@@ -1,5 +1,6 @@
 import type { PluginUnit } from '@bge/actor-context';
 import {
+  CONSENT_UNIT_BINDING_REFUSAL,
   DatabaseService,
   grantScopeCoordinatesForUnit,
   PERMISSION_CATALOG,
@@ -7,8 +8,14 @@ import {
   PluginGrantStatus,
   RiskLevel,
 } from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import {
+  createMockDatabaseService,
+  UNIT_BOUND_RULES,
+  UNIT_ID_OFF_ID_COLUMN_RULES,
+  type MockDatabaseService,
+} from '@bge/testing';
 import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
+import { Logger } from '@nestjs/common';
 import { unitConsumesConsentScope, unitOwnsConsentScope } from './consent-classification.types';
 import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
 
@@ -157,8 +164,7 @@ describe('PluginConsentCheckClassifier', () => {
       {
         slug: 'create:notification',
         riskLevel: RiskLevel.Low,
-        subject: 'Notification',
-        conditions: { householdId: '{{ unit.householdId }}' },
+        ...UNIT_BOUND_RULES.Household,
       },
     ] as never);
     db.pluginGrant.findMany.mockResolvedValue([
@@ -184,8 +190,7 @@ describe('PluginConsentCheckClassifier', () => {
       {
         slug: 'create:notification',
         riskLevel: RiskLevel.High,
-        subject: 'Notification',
-        conditions: { householdId: '{{ unit.householdId }}' },
+        ...UNIT_BOUND_RULES.Household,
       },
     ] as never);
     db.pluginGrant.findMany.mockResolvedValue([
@@ -260,6 +265,49 @@ describe('PluginConsentCheckClassifier', () => {
         });
       },
     );
+
+    // The unit's id on a field that holds no unit id binds nothing, directly
+    // or through a relation filter, so its Granted row confers nothing (#994).
+    describe('a Granted row with the unit id off its id columns', () => {
+      let warn: jest.SpyInstance | undefined;
+
+      afterEach(() => warn?.mockRestore());
+
+      it.each(
+        (['household', 'user'] as const).flatMap((consentScope) =>
+          UNIT_ID_OFF_ID_COLUMN_RULES[consentScope === 'household' ? 'Household' : 'User'].map((rule) => ({
+            consentScope,
+            ...rule,
+          })),
+        ),
+      )(
+        "refuses the consent unit's id on $label at $consentScope scope (#994)",
+        async ({ consentScope, subject, conditions }) => {
+          warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+          const slug = 'read:household_member';
+          db.permission.findMany.mockResolvedValue([{ slug, riskLevel: RiskLevel.Low, subject, conditions }] as never);
+          db.pluginGrant.findMany.mockResolvedValue([
+            {
+              permissionSlug: slug,
+              scopeType: consentScope === 'household' ? PluginGrantScope.Household : PluginGrantScope.User,
+              status: PluginGrantStatus.Granted,
+              decidedRiskLevel: RiskLevel.Low,
+            },
+          ] as never);
+
+          const result = await classifier.classify('plg_1', consentScope === 'household' ? HOUSEHOLD_UNIT : USER_UNIT, [
+            check(slug, { consentScope }),
+          ]);
+
+          expect(result.decisions.get(slug)).toEqual({
+            decision: 'pending',
+            decidedRiskLevel: RiskLevel.Low,
+            staleRisk: false,
+          });
+          expect(warn).toHaveBeenCalledWith(expect.stringContaining(CONSENT_UNIT_BINDING_REFUSAL));
+        },
+      );
+    });
 
     /** One Granted Low row at the unit's own scope over `slug`, carrying its real catalog rule. */
     async function classifyGranted(slug: string, consentScope: 'household' | 'user') {

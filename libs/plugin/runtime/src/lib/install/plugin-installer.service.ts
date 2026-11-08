@@ -61,19 +61,6 @@ import {
 import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
 import { gatingFindings, type StaticAnalysisFinding, type StaticAnalysisReport } from './static-analysis.types';
 
-/**
- * Where the plugin artifact came from, beyond its checksum (#84): the link it
- * was fetched from and the registry it was found through. The checksum is the
- * artifact directory's own (#224), so it is not a second input here that
- * could disagree with the directory.
- */
-export interface PluginInstallProvenance {
-  /** Absent for a manual upload, which has a checksum but no link. */
-  readonly installedFromUrl?: string;
-  /** `PluginRegistrySource.slug` the artifact was discovered through (#84). */
-  readonly registrySlug?: string;
-}
-
 export interface PluginInstallInput {
   /**
    * The plugin artifact's directory, which the install ingress is to place
@@ -81,8 +68,14 @@ export interface PluginInstallInput {
    * installer never opens the plugin artifact itself (#59).
    */
   readonly directory: PluginArtifactDirectory;
-  /** Omitted for a manual upload, which has neither link nor registry. */
-  readonly provenance?: PluginInstallProvenance;
+  /**
+   * The link the plugin artifact was fetched from (#84). Omitted for a manual
+   * upload, which has a checksum but no link. The checksum is the artifact
+   * directory's own (#224), so it is not a second input that could disagree.
+   */
+  readonly url?: string;
+  /** `PluginRegistrySource.slug` the artifact was discovered through (#84). */
+  readonly registrySlug?: string;
   /** The installing admin — server-admin authority is verified, never assumed. */
   readonly installerId: string;
   /** Exact re-entry of every Critical + required permission slug. */
@@ -166,12 +159,12 @@ export class PluginInstallerService {
     // resolver would refuse then is refused now, with the same error (#224).
     const directory = await this.directories.confirm(input.directory);
     // What the row and the installed event record: the checksum is the
-    // artifact directory's own (#224), and a link or registry the provenance
+    // artifact directory's own (#224), and a link or registry the install
     // leaves out is stored as null.
     const provenance: PluginProvenance = {
-      installedFromUrl: input.provenance?.installedFromUrl ?? null,
-      installedSha256: directory.sha256,
-      registrySlug: input.provenance?.registrySlug ?? null,
+      sha256: directory.sha256,
+      url: input.url ?? null,
+      registrySlug: input.registrySlug ?? null,
     };
 
     const validated = await this.validateManifest(directory);
@@ -473,8 +466,8 @@ export class PluginInstallerService {
         // The VALIDATED manifest object — the canonical form every later
         // re-validation (loader, grants, C3 comparison) starts from.
         manifestJson: manifest as Prisma.InputJsonValue,
-        installedFromUrl: provenance.installedFromUrl,
-        installedSha256: provenance.installedSha256,
+        installedFromUrl: provenance.url,
+        installedSha256: provenance.sha256,
         registrySlug: provenance.registrySlug,
         installedById: installerId,
         installedAt: initiatedAt,

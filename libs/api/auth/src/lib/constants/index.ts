@@ -47,3 +47,10 @@ export const AUTH_CLIENT_IP_HEADER = 'x-bge-client-ip';
  * can always send back the name it was served (#819).
  */
 export const DISPLAY_NAME_MAX_LENGTH = 64;
+
+/**
+ * How recently a session must have signed in, in seconds, for better-auth's
+ * fresh-session checks and for starting a link to a sign-in provider: one day
+ * (`session.freshAge`, #913).
+ */
+export const SESSION_FRESH_AGE_SECONDS = 86_400;

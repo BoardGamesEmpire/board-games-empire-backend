@@ -1,24 +1,10 @@
-import { plainToInstance } from 'class-transformer';
-import { validate } from 'class-validator';
 import { RejectPluginUpdateDto } from './reject-plugin-update.dto';
+import { StagedUpdateAnswerDto } from './staged-update-answer.dto';
 
+// The `stagingId` rules are specified once in staged-update-answer.dto.spec.ts (#1118).
 describe('RejectPluginUpdateDto', () => {
-  // Mirrors the global pipe (apps/api/src/main.ts), which converts implicitly.
-  const toDto = (plain: Record<string, unknown>): RejectPluginUpdateDto =>
-    plainToInstance(RejectPluginUpdateDto, plain, { enableImplicitConversion: true });
-
-  const invalidProperties = async (plain: Record<string, unknown>): Promise<string[]> =>
-    (await validate(toDto(plain))).map((error) => error.property);
-
-  it('requires the staging id the staged-update read reported (#357)', async () => {
-    await expect(invalidProperties({})).resolves.toEqual(['stagingId']);
-  });
-
-  it('refuses an empty staging id (#357)', async () => {
-    await expect(invalidProperties({ stagingId: '' })).resolves.toEqual(['stagingId']);
-  });
-
-  it('accepts a staging id (#357)', async () => {
-    await expect(invalidProperties({ stagingId: 'staging-a' })).resolves.toEqual([]);
+  it('adds nothing to the staged-update answer (#1118)', () => {
+    expect(Object.getOwnPropertyNames(new RejectPluginUpdateDto())).toEqual([]);
+    expect(new RejectPluginUpdateDto()).toBeInstanceOf(StagedUpdateAnswerDto);
   });
 });

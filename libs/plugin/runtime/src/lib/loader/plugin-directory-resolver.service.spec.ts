@@ -1,23 +1,21 @@
+import { buildPluginArtifactSha256 as sha, type PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PluginModuleOptions } from '../plugin-module.options';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginDirectoryLayoutError, PluginDirectoryNotFoundError } from './loader.errors';
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 
 describe('PluginDirectoryResolverService', () => {
-  const SHA_A = 'a'.repeat(64);
-  const SHA_B = 'b'.repeat(64);
+  const SHA_A = sha('a');
+  const SHA_B = sha('b');
 
   let pluginsRoot: string;
   let resolver: PluginDirectoryResolverService;
 
-  const options = (): PluginModuleOptions => ({
-    pluginsRoot,
-    bgeVersion: '0.1.0',
-    defaultLocale: 'en',
-  });
+  const options = (): PluginModuleOptions => buildPluginModuleOptions({ pluginsRoot });
 
   /** Writes a plugin artifact directory, `<root>/<slug>/<sha256>/`, holding the given files. */
   const scaffold = async (
@@ -231,11 +229,9 @@ describe('PluginDirectoryResolverService', () => {
     });
 
     it('rejects when the configured root itself cannot be resolved', async () => {
-      const missingRootResolver = new PluginDirectoryResolverService({
-        pluginsRoot: join(pluginsRoot, 'does-not-exist'),
-        bgeVersion: '0.1.0',
-        defaultLocale: 'en',
-      });
+      const missingRootResolver = new PluginDirectoryResolverService(
+        buildPluginModuleOptions({ pluginsRoot: join(pluginsRoot, 'does-not-exist') }),
+      );
 
       await expect(missingRootResolver.resolve('demo-sink', SHA_A)).rejects.toThrow(
         /configured plugin root .* cannot be resolved/,
@@ -314,7 +310,7 @@ describe('PluginDirectoryResolverService', () => {
       await expect(
         resolver.confirm({
           slug: 'demo-sink',
-          sha256: `sha256:${'A'.repeat(64)}`,
+          sha256: `sha256:${'A'.repeat(64)}` as unknown as PluginArtifactSha256,
           rootDir,
           manifestPath: join(rootDir, 'manifest.json'),
           packageJsonPath: join(rootDir, 'package.json'),

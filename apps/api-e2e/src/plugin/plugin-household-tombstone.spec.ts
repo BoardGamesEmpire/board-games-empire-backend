@@ -1,11 +1,4 @@
-import {
-  PluginCategory,
-  PluginGrantScope,
-  PluginGrantStatus,
-  PluginScope,
-  RiskLevel,
-  type Plugin,
-} from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel, type Plugin } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import request from 'supertest';
@@ -16,6 +9,7 @@ import { expectLockWaiter, withBarrier, type Barrier } from '../support/lock-bar
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
 import { householdPluginKey } from './plugin-api-key';
+import { pluginRowData } from './plugin-row-fixtures';
 
 /**
  * #548's acceptance over HTTP: a household plugin write that passed every check
@@ -72,15 +66,13 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
     });
 
     const plugin = await db.client.plugin.create({
-      data: {
+      data: pluginRowData({
         slug: manifest.slug,
         version: manifest.version,
-        category: PluginCategory.FeedbackSink,
         scope: PluginScope.Household,
         manifestJson: manifest as never,
         enabled: true,
-        installedSha256: 'a'.repeat(64),
-      },
+      }),
     });
     await db.client.pluginPermission.create({
       data: { pluginId: plugin.id, slug: `plugin|${plugin.slug}|manage:digest`, riskLevel: RiskLevel.Low },

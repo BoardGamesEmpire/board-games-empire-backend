@@ -2,7 +2,7 @@ import { PluginActorScope, SystemActorScope } from '@bge/actor-context';
 import { DatabaseService, PluginCategory, PluginScope, type Plugin } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import type { PluginArtifactDirectory, PluginContext } from '@boardgamesempire/plugin-contract';
-import { PluginEvent } from '@boardgamesempire/plugin-contract';
+import { PluginEvent, buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
 import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { PluginConfigService } from '../config/plugin-config.service';
 import { PluginContextFactory } from '../context/plugin-context.factory';
 import { PluginDisabledEvent, PluginLoadFailedEvent } from '../events/plugin.events';
-import type { PluginModuleOptions } from '../plugin-module.options';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './plugin-instance-registry';
 import { PluginLoaderService } from './plugin-loader.service';
@@ -25,11 +25,7 @@ jest.mock('@boardgamesempire/plugin-manifest', () => ({
 
 describe('PluginLoaderService', () => {
   const manifest = { events: { subscribes: [], emits: [] } } as unknown as PluginManifest;
-  const options: PluginModuleOptions = {
-    pluginsRoot: '/unused-in-spec/installed',
-    bgeVersion: '0.1.0',
-    defaultLocale: 'en',
-  };
+  const options = buildPluginModuleOptions({ bgeVersion: '0.1.0' });
 
   let workDir: string;
   let db: MockDatabaseService;
@@ -74,7 +70,7 @@ describe('PluginLoaderService', () => {
 
     return {
       slug,
-      sha256: 'a'.repeat(64),
+      sha256: sha('a'),
       rootDir,
       manifestPath: join(rootDir, 'manifest.json'),
       packageJsonPath: join(rootDir, 'package.json'),

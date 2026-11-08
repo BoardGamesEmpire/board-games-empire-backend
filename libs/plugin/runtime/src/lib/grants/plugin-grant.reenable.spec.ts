@@ -16,6 +16,7 @@ import {
   prismaTable,
   rawQueryText,
   readPrismaModels,
+  UNIT_BOUND_RULES,
   type MockDatabaseService,
 } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
@@ -27,6 +28,7 @@ import {
   UserPluginUnitDisabledEvent,
   UserPluginUnitEnabledEvent,
 } from '../events/plugin.events';
+import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import type { PluginGrantAuthorityService } from './plugin-grant-authority.service';
 import { PluginGrantService, type PluginGrantDecisionInput } from './plugin-grant.service';
 
@@ -177,17 +179,16 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
     { id, enabled: true, suspended_for_consent: suspendedForConsent },
   ];
 
-  // Clauses naming the consenting unit's own id, so unit-scope decisions pass
-  // the unit-binding gate (#60, #591); the refusals are specced in the main
-  // service suite.
-  const BINDS_HOUSEHOLD = { householdId: '{{ unit.householdId }}' };
-  const BINDS_USER = { ownerId: '{{ unit.userId }}' };
+  // Subjects and clauses naming the consenting unit's own id on a column that
+  // holds it, so unit-scope decisions pass the unit-binding gate (#60, #591,
+  // #994); the refusals are specced in the main service suite.
+  const BINDS_HOUSEHOLD = UNIT_BOUND_RULES.Household;
+  const BINDS_USER = UNIT_BOUND_RULES.User;
 
   const calendarRead = {
     slug: 'calendar:read',
-    subject: 'calendar',
+    ...BINDS_HOUSEHOLD,
     riskLevel: RiskLevel.Low,
-    conditions: BINDS_HOUSEHOLD,
   } as unknown as Permission;
 
   /**
@@ -196,8 +197,11 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
    * asserted, matching how `calendarRead` above is built. User-consented
    * slugs pass `BINDS_USER`.
    */
-  const corePermission = (slug: string, riskLevel: RiskLevel, conditions: object = BINDS_HOUSEHOLD): Permission =>
-    ({ slug, riskLevel, conditions }) as unknown as Permission;
+  const corePermission = (
+    slug: string,
+    riskLevel: RiskLevel,
+    binds: (typeof UNIT_BOUND_RULES)['Household' | 'User'] = BINDS_HOUSEHOLD,
+  ): Permission => ({ slug, riskLevel, ...binds }) as unknown as Permission;
 
   let db: MockDatabaseService;
   let emitter: { emit: jest.Mock };
@@ -230,11 +234,7 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       db as never,
       authority as unknown as PluginGrantAuthorityService,
       emitter as never,
-      {
-        pluginsRoot: '/var/lib/bge/plugins',
-        bgeVersion: '0.3.0',
-        defaultLocale: 'en',
-      },
+      buildPluginModuleOptions(),
     );
 
     db.plugin.findUnique.mockResolvedValue(makePlugin());

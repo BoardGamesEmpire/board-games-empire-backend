@@ -21,6 +21,7 @@ export const SYSTEM_SETTINGS_SELECT = {
   allowPasswordResets: true,
   allowUserRegistration: true,
   allowUsernameChange: true,
+  providerLinkingPolicy: true,
 
   feedbackReportRetentionDays: true,
   feedbackReportServerRedactionEnabled: true,

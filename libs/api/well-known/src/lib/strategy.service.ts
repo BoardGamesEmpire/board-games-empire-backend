@@ -48,6 +48,7 @@ export class StrategyService {
         identifier: true,
         name: true,
         allowUserRegistration: true,
+        providerLinkingPolicy: true,
         allowPasswordResets: true,
         ...MAIL_READINESS_SELECT,
       },
@@ -86,6 +87,9 @@ export class StrategyService {
       allowed: settings.allowPasswordResets,
       mailConfigured: isMailConfigured(settings),
     });
+
+    // The same column the auth gate reads, so what is advertised is what is enforced (#913).
+    dto.bgeProviderLinkingPolicy = settings.providerLinkingPolicy;
 
     return dto;
   }

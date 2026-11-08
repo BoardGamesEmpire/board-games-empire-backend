@@ -1,0 +1,11 @@
+/// Whether a sign-in through a sign-in provider can link that provider to the
+/// registered user who has the same email address (#913).
+enum ProviderLinkingPolicy {
+  /// Only a signed-in user links a sign-in provider, from their sign-in methods.
+  SignedIn
+  /// A provider sign-in links itself to the registered user with that email when
+  /// the provider and this server have both verified it (#913).
+  AutomaticWhenVerified
+
+  @@map("provider_linking_policy_types")
+}

@@ -15,7 +15,11 @@ import {
   type PluginGrant,
   type UserPlugin,
 } from '@bge/database';
-import type { PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
+import {
+  parsePluginArtifactSha256,
+  type PluginArtifactDirectory,
+  type PluginArtifactSha256,
+} from '@boardgamesempire/plugin-contract';
 import {
   PluginManifestValidationError,
   resolveLocalizedString,
@@ -53,6 +57,7 @@ import {
 import { MANIFEST_SCOPE_TO_PRISMA } from '../install/manifest-enum.maps';
 import { PluginStaticAnalysisService } from '../install/plugin-static-analysis.service';
 import { gatingFindings, type StaticAnalysisReport } from '../install/static-analysis.types';
+import { PluginDirectoryLayoutError } from '../loader/loader.errors';
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
@@ -145,6 +150,25 @@ function requestedSlugsDropped(
         .filter((slug) => !stillRequested.has(slug) && !removed.has(slug)),
     ),
   ];
+}
+
+/** A staged update resolved and compared, as the approval and the staged-update read both see it. */
+interface ResolvedPendingUpdate {
+  readonly plugin: Plugin;
+  readonly active: PluginManifestValidationResult;
+  readonly next: PluginManifestValidationResult;
+  readonly corePermissions: ReadonlyMap<string, Permission>;
+  readonly comparison: UpdateEscalationComparison;
+}
+
+/** What an approval brings to the resolution: the staging it answers (#357). */
+interface PendingUpdateApproval {
+  readonly stagingId: string;
+}
+
+interface ResolvedPendingApproval extends ResolvedPendingUpdate {
+  /** The staged plugin artifact's checksum, which activation records as `installedSha256`. */
+  readonly pendingSha256: PluginArtifactSha256;
 }
 
 export interface PluginUpdateStageInput {
@@ -494,7 +518,7 @@ export class PluginUpdateService {
 
     const { plugin, active, next, corePermissions, comparison, pendingSha256 } = await this.resolvePendingUpdate(
       input.slug,
-      input.stagingId,
+      { stagingId: input.stagingId },
     );
 
     if (comparison.blockedByDenial.length > 0) {
@@ -575,11 +599,14 @@ export class PluginUpdateService {
    * pipeline, via {@link resolvePendingUpdate} — so the screen and the
    * approval cannot disagree about what the update escalates.
    *
-   * A pure read with two deliberate asymmetries from `approve()`: no
+   * A pure read with three deliberate asymmetries from `approve()`: no
    * server-admin re-verification (reading is not a consent act — the edge
-   * guards it with `read:plugin`), and a durable denial is RENDERED as
+   * guards it with `read:plugin`); a durable denial is RENDERED as
    * `comparison.blockedByDenial` rather than thrown — the screen's job is
-   * to show the block, the approval's job is to refuse over it.
+   * to show the block, the approval's job is to refuse over it; and the
+   * staged checksum is not checked, because only activation uses it, and
+   * refusing a corrupt one here would hide a staging the server admin may
+   * want to reject (#1117).
    */
   async describePending(slug: string): Promise<PluginUpdatePendingDescription> {
     const { plugin, active, next, comparison } = await this.resolvePendingUpdate(slug);
@@ -689,20 +716,17 @@ export class PluginUpdateService {
    * staging): BGE itself may have moved since, and describing or approving
    * a version that can no longer load would trade a typed refusal here for
    * a quarantine at the next boot.
+   *
+   * An approval passes the staging it answers, and gets the staged checksum
+   * back as well, checked (#357, #1117). The staged-update read passes
+   * neither.
    */
+  private resolvePendingUpdate(slug: string): Promise<ResolvedPendingUpdate>;
+  private resolvePendingUpdate(slug: string, approval: PendingUpdateApproval): Promise<ResolvedPendingApproval>;
   private async resolvePendingUpdate(
     slug: string,
-    /** The staging an approval answers (#357); the read that reports the id passes none. */
-    stagingId?: string,
-  ): Promise<{
-    readonly plugin: Plugin;
-    readonly active: PluginManifestValidationResult;
-    readonly next: PluginManifestValidationResult;
-    readonly corePermissions: ReadonlyMap<string, Permission>;
-    readonly comparison: UpdateEscalationComparison;
-    /** The staged plugin artifact's checksum, which activation records as `installedSha256`. */
-    readonly pendingSha256: string;
-  }> {
+    approval?: PendingUpdateApproval,
+  ): Promise<ResolvedPendingUpdate & { readonly pendingSha256?: PluginArtifactSha256 }> {
     const plugin = await this.loadUpdatablePlugin(slug);
 
     // A staged row without its checksum names no plugin artifact, so there
@@ -713,8 +737,20 @@ export class PluginUpdateService {
 
     // Before the staged manifest is validated or compared: a staging the
     // approver never saw is refused for that, whatever else is wrong with it.
-    if (stagingId !== undefined && plugin.pendingStagingId !== stagingId) {
-      throw new PluginUpdateStagingReplacedError(plugin.slug, stagingId);
+    if (approval !== undefined && plugin.pendingStagingId !== approval.stagingId) {
+      throw new PluginUpdateStagingReplacedError(plugin.slug, approval.stagingId);
+    }
+
+    // Activation makes the staged checksum a path segment and
+    // `installedSha256`. The database refuses any other form
+    // (plugins_pending_sha256_format, #1117), so this is the backstop the
+    // brand needs: an approval refuses a corrupt value as the resolver refuses
+    // it at the next boot, before any manifest or escalation work. The read
+    // never uses it, so it never refuses it.
+    const pendingSha256 = approval === undefined ? undefined : parsePluginArtifactSha256(plugin.pendingSha256);
+
+    if (pendingSha256 === null) {
+      throw new PluginDirectoryLayoutError(plugin.slug, 'the staged checksum is not 64 lowercase hex characters');
     }
 
     const next = this.validateStoredManifest(plugin, plugin.pendingManifestJson, plugin.pendingVersion, {
@@ -725,7 +761,7 @@ export class PluginUpdateService {
     const corePermissions = await this.loadCorePermissions(next);
     const comparison = await this.compare(plugin, active, next, corePermissions);
 
-    return { plugin, active, next, corePermissions, comparison, pendingSha256: plugin.pendingSha256 };
+    return { plugin, active, next, corePermissions, comparison, pendingSha256 };
   }
 
   /** A tombstoned row is not an update target, and the distinction deserves its own error (#59). */
@@ -985,7 +1021,7 @@ export class PluginUpdateService {
     active: PluginManifestValidationResult,
     next: PluginManifestValidationResult,
     /** The checksum of the plugin artifact being activated, which becomes `installedSha256` (#224). */
-    artifactSha256: string,
+    artifactSha256: PluginArtifactSha256,
     comparison: UpdateEscalationComparison,
     checksToSeed: readonly NormalizedPermissionRequest[],
     corePermissions: ReadonlyMap<string, Permission>,
@@ -1068,7 +1104,7 @@ export class PluginUpdateService {
     plugin: Plugin,
     active: PluginManifestValidationResult,
     next: PluginManifestValidationResult,
-    artifactSha256: string,
+    artifactSha256: PluginArtifactSha256,
     comparison: UpdateEscalationComparison,
     checksToSeed: readonly NormalizedPermissionRequest[],
     corePermissions: ReadonlyMap<string, Permission>,

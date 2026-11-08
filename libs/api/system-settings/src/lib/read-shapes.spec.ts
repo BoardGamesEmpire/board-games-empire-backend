@@ -27,7 +27,7 @@ describe('system settings read shape', () => {
     );
   });
 
-  it('publishes the row id and the settings, the SMTP password excepted (#654)', () => {
+  it('publishes the row id and each setting, the SMTP password excepted (#654)', () => {
     expect(Object.keys(SYSTEM_SETTINGS_SELECT).sort()).toEqual(
       [
         'id',
@@ -35,6 +35,7 @@ describe('system settings read shape', () => {
         'allowPasswordResets',
         'allowUserRegistration',
         'allowUsernameChange',
+        'providerLinkingPolicy',
         'feedbackReportRetentionDays',
         'feedbackReportServerRedactionEnabled',
         'requireContributionApproval',

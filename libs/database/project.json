@@ -19,7 +19,7 @@
         "{workspaceRoot}/libs/scripts/src/prisma-generate/**/*.js",
         "!{workspaceRoot}/libs/scripts/src/prisma-generate/**/*.spec.js",
         {
-          "externalDependencies": ["prisma", "@prisma/client"]
+          "externalDependencies": ["prisma", "@prisma/client", "@prisma/get-dmmf"]
         }
       ],
       "outputs": ["{projectRoot}/src/lib/generated"]
@@ -58,7 +58,19 @@
       ]
     },
     "test": {
-      "dependsOn": ["generate"]
+      "dependsOn": ["generate"],
+      "// inputs": "The inferred list plus the generated TypeScript itself (the last entry, which hashes generate's output). The specs read what generate writes into the gitignored generated directory, the client and unit-id-columns.ts (#994), so without it a schema-only change keeps this task's hash and replays a cached pass. See docs/NX_CACHING.md.",
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/jest.preset.js",
+        {
+          "externalDependencies": ["jest", "@nx/jest", "reflect-metadata", "@swc/jest"]
+        },
+        {
+          "dependentTasksOutputFiles": "**/*.ts"
+        }
+      ]
     }
   }
 }
