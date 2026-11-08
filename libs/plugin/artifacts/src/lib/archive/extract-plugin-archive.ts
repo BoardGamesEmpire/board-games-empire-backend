@@ -74,7 +74,8 @@ const readHead = async (path: string): Promise<Buffer> => {
  *
  * The extractor owns its output. On any failure it removes everything it wrote,
  * `intoDir` included, before it rethrows, so a caller never sees half an
- * extraction.
+ * extraction. So `intoDir` must not exist yet, and its parent must: an
+ * existing `intoDir` fails with `EEXIST` and is left as it is.
  */
 export const extractPluginArchive = async (
   archivePath: string,
@@ -85,9 +86,11 @@ export const extractPluginArchive = async (
     throw new PluginArchiveRefusedError('not-gzip');
   }
 
-  try {
-    await mkdir(intoDir, { recursive: true, mode: 0o755 });
+  // Made before the cleanup below can run, so the cleanup only ever removes a
+  // directory this call created (#1094).
+  await mkdir(intoDir, { mode: 0o755 });
 
+  try {
     return await extractInto(archivePath, intoDir, boundedDecompressedLimit(options.maxDecompressedBytes));
   } catch (err) {
     // A failed cleanup must not replace the error that caused it.

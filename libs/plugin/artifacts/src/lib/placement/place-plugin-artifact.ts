@@ -1,6 +1,6 @@
 import type { PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { PLUGIN_SLUG_PATTERN } from '@boardgamesempire/plugin-manifest';
-import { mkdir, rename, rm, utimes } from 'node:fs/promises';
+import { lstat, mkdir, rename, rm, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /**
@@ -11,6 +11,11 @@ import { join } from 'node:path';
  * An existing directory is touched: the sweep removes an unreferenced
  * directory once its mtime is over an hour old, and a re-post whose database
  * row just expired would otherwise be swept between this call and the new row.
+ *
+ * A slug directory that is a symbolic link is refused, and the extracted
+ * directory is left for the caller to clean up. The loader refuses an
+ * artifact behind a linked slug directory, and the sweep never follows a
+ * link, so one placed through it could never load and never be swept.
  */
 export const placePluginArtifact = async (
   extractDir: string,
@@ -28,6 +33,9 @@ export const placePluginArtifact = async (
   const target = join(slugDir, sha256);
 
   await mkdir(slugDir, { recursive: true });
+  if ((await lstat(slugDir)).isSymbolicLink()) {
+    throw new Error(`${slugDir} is a symbolic link; a plugin directory must be a directory inside the plugins root`);
+  }
 
   try {
     await rename(extractDir, target);

@@ -1,5 +1,5 @@
 import { buildPluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
-import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { placePluginArtifact } from './place-plugin-artifact';
@@ -28,6 +28,24 @@ describe('placePluginArtifact (#1094)', () => {
       () => true,
       () => false,
     );
+
+  it('refuses a slug directory that is a symbolic link, and moves nothing through it (#1094)', async () => {
+    // The loader refuses an artifact behind a linked slug directory, and the
+    // sweep never follows a link, so one placed through it would sit outside
+    // the root, unloadable and never swept.
+    const elsewhere = await mkdtemp(join(tmpdir(), 'bge-place-elsewhere-'));
+    try {
+      await symlink(elsewhere, join(root, 'demo-sink'));
+      const dir = await extracted('one', 'first');
+
+      await expect(placePluginArtifact(dir, root, 'demo-sink', sha256)).rejects.toThrow('symbolic link');
+
+      expect(await readdir(elsewhere)).toEqual([]);
+      expect(await exists(dir)).toBe(true);
+    } finally {
+      await rm(elsewhere, { recursive: true, force: true });
+    }
+  });
 
   it('places an extracted artifact at <root>/<slug>/<sha256> (#1094)', async () => {
     const dir = await extracted('one', 'first');

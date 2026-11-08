@@ -4,6 +4,9 @@ import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { PluginArchiveRefusedError } from '../artifacts.errors';
 
+/** Failures that mean the archive put no readable file at `manifest.json`. */
+const NO_MANIFEST_CODES: ReadonlySet<string> = new Set(['ENOENT', 'ENOTDIR', 'EISDIR']);
+
 /**
  * The slug an extracted plugin artifact declares, which names the directory it
  * is placed in. Refuses a manifest that is missing, not JSON, or whose slug is
@@ -13,6 +16,9 @@ import { PluginArchiveRefusedError } from '../artifacts.errors';
  * manifest over the archive rules' manifest cap is never read into memory
  * (`manifest-size`). The archive checker refuses such a manifest while it is
  * extracted, so this is the second line behind it (#1094).
+ *
+ * Any other read failure (EACCES, EIO, EMFILE) is the server's, not the
+ * archive's, and propagates as it is, as the extractor's do.
  */
 export const readArtifactSlug = async (extractDir: string): Promise<string> => {
   const path = join(extractDir, PLUGIN_MANIFEST_FILENAME);
@@ -25,7 +31,16 @@ export const readArtifactSlug = async (extractDir: string): Promise<string> => {
     }
     parsed = JSON.parse(await readFile(path, 'utf8'));
   } catch (err) {
-    throw err instanceof PluginArchiveRefusedError ? err : refuse();
+    if (err instanceof PluginArchiveRefusedError) {
+      throw err;
+    }
+
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    if (err instanceof SyntaxError || (code !== undefined && NO_MANIFEST_CODES.has(code))) {
+      throw refuse();
+    }
+
+    throw err;
   }
 
   const slug = (parsed as { slug?: unknown } | null)?.slug;

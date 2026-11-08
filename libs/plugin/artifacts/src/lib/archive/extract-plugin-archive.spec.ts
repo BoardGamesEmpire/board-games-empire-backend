@@ -1,7 +1,7 @@
 import { PLUGIN_ARCHIVE_MAX_ENTRIES, PLUGIN_ARCHIVE_MAX_MANIFEST_BYTES } from '@boardgamesempire/plugin-manifest';
 import * as fs from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
@@ -18,7 +18,7 @@ import { readArtifactSlug } from './read-artifact-slug';
 
 jest.mock('node:fs/promises', () => {
   const actual = jest.requireActual('node:fs/promises');
-  return { ...actual, mkdir: jest.fn(actual.mkdir) };
+  return { ...actual, mkdir: jest.fn(actual.mkdir), readFile: jest.fn(actual.readFile) };
 });
 
 jest.mock('node:fs', () => {
@@ -234,7 +234,7 @@ describe('extractPluginArchive (#1094)', () => {
     expect(await exists(intoDir)).toBe(false);
   });
 
-  it('lets a failure of mkdir on intoDir propagate as it is, unreplaced by the cleanup (#1094)', async () => {
+  it('lets a failure of mkdir on intoDir propagate as it is (#1094)', async () => {
     await write(VALID);
     // intoDir's parent is a file, so mkdir fails with ENOTDIR before any entry is read.
     await writeFile(join(dir, 'blocker'), '');
@@ -246,6 +246,22 @@ describe('extractPluginArchive (#1094)', () => {
 
     expect(err).not.toBeInstanceOf(PluginArchiveRefusedError);
     expect(err).toMatchObject({ code: 'ENOTDIR', syscall: 'mkdir' });
+  });
+
+  it('refuses an intoDir that already exists with EEXIST, and leaves what is in it (#1094)', async () => {
+    // The cleanup after a refusal removes intoDir whole, so the extractor only
+    // writes into a directory it made itself.
+    await write([...VALID, { name: 'other/x.js', content: 'x' }]);
+    await mkdir(intoDir);
+    await writeFile(join(intoDir, 'keep'), 'keep');
+
+    const err = await extractPluginArchive(archivePath, intoDir).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(err).toMatchObject({ code: 'EEXIST', syscall: 'mkdir' });
+    expect(await readFile(join(intoDir, 'keep'), 'utf8')).toBe('keep');
   });
 
   it('lets a disk-full error while writing an entry propagate unchanged and cleans up (#1094)', async () => {
@@ -449,6 +465,35 @@ describe('extractPluginArchive (#1094)', () => {
     await mkdir(intoDir, { recursive: true });
 
     await expect(readArtifactSlug(intoDir)).rejects.toMatchObject({ rule: 'manifest-slug' });
+  });
+
+  it('refuses a manifest.json that is a directory as manifest-slug (#1094)', async () => {
+    await mkdir(join(intoDir, 'manifest.json'), { recursive: true });
+
+    await expect(readArtifactSlug(intoDir)).rejects.toMatchObject({ rule: 'manifest-slug' });
+  });
+
+  // A disk fault is the server's, not the archive's: it must not reach the
+  // uploader as a refusal of their manifest.
+  it.each(['EACCES', 'EIO'])('lets %s reading the manifest propagate as it is (#1094)', async (code) => {
+    await mkdir(intoDir, { recursive: true });
+    await writeFile(join(intoDir, 'manifest.json'), JSON.stringify({ slug: 'demo-sink' }));
+    const failure = Object.assign(new Error(code), { code, syscall: 'open' });
+    (fsPromises.readFile as unknown as jest.Mock).mockRejectedValueOnce(failure);
+
+    await expect(readArtifactSlug(intoDir)).rejects.toBe(failure);
+  });
+
+  it('refuses a .incoming that is a symbolic link (#1094)', async () => {
+    // The sweep never follows a link, so scratch written through one would
+    // never be cleared, and it may lie outside the plugins root.
+    const root = join(dir, 'plugins');
+    const elsewhere = join(dir, 'elsewhere');
+    await mkdir(root);
+    await mkdir(elsewhere);
+    await symlink(elsewhere, join(root, '.incoming'));
+
+    await expect(allocateIncoming(root)).rejects.toThrow('symbolic link');
   });
 
   it('allocates paths under .incoming without creating them, and cleans up (#1094)', async () => {

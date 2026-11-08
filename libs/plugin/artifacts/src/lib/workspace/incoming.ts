@@ -1,5 +1,5 @@
 import { createId } from '@paralleldrive/cuid2';
-import { mkdir, rm } from 'node:fs/promises';
+import { lstat, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export const INCOMING_DIRNAME = '.incoming';
@@ -17,10 +17,18 @@ export interface IncomingWorkspace {
  * `<root>/.incoming/<id>.tgz` and `<root>/.incoming/<id>/`. Both are inside the
  * plugins root so the final rename never crosses a filesystem. Only
  * `.incoming/` is created here; the caller makes the paths.
+ *
+ * A `.incoming` that is a symbolic link is refused: writes through it may land
+ * outside the plugins root, and the sweep, which never follows a link, would
+ * never clear them.
  */
 export const allocateIncoming = async (pluginsRoot: string): Promise<IncomingWorkspace> => {
   const incomingDir = join(pluginsRoot, INCOMING_DIRNAME);
   await mkdir(incomingDir, { recursive: true });
+
+  if ((await lstat(incomingDir)).isSymbolicLink()) {
+    throw new Error(`${incomingDir} is a symbolic link; it must be a directory inside the plugins root`);
+  }
 
   const id = createId();
   const archivePath = join(incomingDir, `${id}.tgz`);
