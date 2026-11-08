@@ -68,7 +68,7 @@ model SystemSetting {
   // hand-written migration SQL (20261005000000_system_setting_day_bounds),
   // because Prisma cannot express them here. Null still passes for
   // auditLogRetentionDays. passwordResetLinkLifetimeMinutes (15..10080) and
-  // smtpPort (1..65535) are held the same way, in 20261106140000_outgoing_mail.
+  // smtpPort (1..65535) are held the same way, in 20261107120000_outgoing_mail.
   @@map("system_settings")
 }
 

@@ -49,7 +49,7 @@ const INVITEE_POLICIES = [Reach.Public, Reach.FriendsOfFriends, Reach.Friends] a
  * How long a password reset link may work, in minutes: at least a quarter of
  * an hour, since mail can be slow, and at most a week (#654). The default
  * lives in the schema. A CHECK constraint holds the column to the same range
- * (migration 20261106140000_outgoing_mail), so a change here needs a migration
+ * (migration 20261107120000_outgoing_mail), so a change here needs a migration
  * too.
  */
 export const PASSWORD_RESET_LINK_LIFETIME_MINUTES = { min: 15, max: 10_080 } as const;
