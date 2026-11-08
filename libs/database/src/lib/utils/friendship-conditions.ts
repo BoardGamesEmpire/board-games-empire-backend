@@ -84,9 +84,11 @@ export function friendOfFriendOf(userId: string): Prisma.UserWhereInput {
  * user's side.
  *
  * - A worker job rewrites the table's rows a few seconds after each friendship
- *   change, so an unfriend reaches this clause then. A block reaches it at
- *   once: the table stores no blocks, and the veto reads the friendships, as
- *   `friendOfFriendOf`'s does.
+ *   change, so an unfriend reaches this clause then. A block between the two
+ *   users reaches it at once: the table stores no blocks, and the veto reads
+ *   the friendships, as `friendOfFriendOf`'s does. A block elsewhere on the
+ *   path ends that friendship step, as an unfriend does, and reaches this
+ *   clause with the job.
  * - The table holds friends and friends of friends too, at one and two steps.
  *   A direct friend is admitted at once through the friends permissions,
  *   which admit the extended network's rung. A friend of a friend reaches an

@@ -56,8 +56,14 @@ describe('ExtendedNetworkScheduleService (#497)', () => {
     );
   };
 
+  /** The start hook queues in the background; this lets it finish. */
+  const started = async () => {
+    expect(schedule.onApplicationBootstrap()).toBeUndefined();
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+
   it('queues a full rebuild when the worker starts, as the system (#497)', async () => {
-    await schedule.onApplicationBootstrap();
+    await started();
 
     expectFullRebuildQueued();
   });
@@ -66,7 +72,7 @@ describe('ExtendedNetworkScheduleService (#497)', () => {
   // one job across the workers, the second waits in the queue rather than in
   // an open transaction.
   it('holds the extended network jobs to one at a time across workers when the worker starts (#497)', async () => {
-    await schedule.onApplicationBootstrap();
+    await started();
 
     expect(queue.setGlobalConcurrency).toHaveBeenCalledWith(1);
   });
@@ -75,7 +81,7 @@ describe('ExtendedNetworkScheduleService (#497)', () => {
     const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     queue.setGlobalConcurrency.mockRejectedValueOnce(new Error('connection lost'));
 
-    await expect(schedule.onApplicationBootstrap()).resolves.toBeUndefined();
+    await started();
 
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('connection lost'));
     expectFullRebuildQueued();
@@ -99,8 +105,35 @@ describe('ExtendedNetworkScheduleService (#497)', () => {
     const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     queue.add.mockRejectedValueOnce(new Error('connection lost'));
 
-    await expect(schedule.onApplicationBootstrap()).resolves.toBeUndefined();
+    await started();
 
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('connection lost'));
+  });
+
+  // The queue's connection holds a command until Redis answers. Awaited, a
+  // Redis that is down at start would hold up the worker's later bootstrap
+  // hooks and its shutdown handlers until it came back.
+  it('returns from the start hook before Redis answers, and still sets the limit before queueing (#497)', async () => {
+    let answer: (value: number) => void = () => undefined;
+    queue.setGlobalConcurrency.mockReturnValueOnce(new Promise<number>((resolve) => (answer = resolve)));
+
+    await started();
+
+    expect(queue.setGlobalConcurrency).toHaveBeenCalledWith(1);
+    expect(queue.add).not.toHaveBeenCalled();
+
+    answer(1);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expectFullRebuildQueued();
+  });
+
+  it('logs a start that fails outside the queue calls, rather than rejecting unhandled (#497)', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    systemActorScope.run.mockImplementationOnce(() => Promise.reject(new Error('no actor')));
+
+    await started();
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('no actor'));
   });
 });

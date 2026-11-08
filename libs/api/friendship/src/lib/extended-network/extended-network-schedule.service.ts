@@ -55,9 +55,22 @@ export class ExtendedNetworkScheduleService implements OnApplicationBootstrap {
     @InjectQueue(EXTENDED_NETWORK_QUEUE) private readonly queue: Queue<ExtendedNetworkJob & JobMetaEnvelope>,
   ) {}
 
-  async onApplicationBootstrap(): Promise<void> {
-    await this.runOneAtATime();
-    await this.queueRebuildAll();
+  /**
+   * Not awaited. The queue's connection holds a command until Redis answers,
+   * so with Redis down at start an awaited call would hold up the worker's
+   * later bootstrap hooks, and the shutdown handlers registered after them,
+   * until Redis came back (#497). The limit is still set before the rebuild
+   * is queued.
+   */
+  onApplicationBootstrap(): void {
+    void this.runOneAtATime()
+      .then(() => this.queueRebuildAll())
+      .catch((error: unknown) =>
+        this.logger.warn(
+          `Could not prepare the extended network rebuilds at start; the next one runs in a day: ` +
+            (error instanceof Error ? error.message : String(error)),
+        ),
+      );
   }
 
   @Interval(REBUILD_SCHEDULE_NAME, REBUILD_INTERVAL_MS)
