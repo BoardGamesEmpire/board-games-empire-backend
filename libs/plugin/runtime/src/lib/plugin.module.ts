@@ -6,6 +6,7 @@ import { PluginConfigSchemaService } from './config/plugin-config-schema.service
 import { PluginConfigService } from './config/plugin-config.service';
 import { PluginConsentCheckClassifier } from './consent/plugin-consent-check-classifier.service';
 import { PluginConsentPresentationService } from './consent/plugin-consent-presentation.service';
+import { PluginConsentStandingService } from './consent/plugin-consent-standing.service';
 import { PluginContextFactory } from './context/plugin-context.factory';
 import { PluginFeatureStateService } from './features/plugin-feature-state.service';
 import { PluginGrantAuthorityService } from './grants/plugin-grant-authority.service';
@@ -58,6 +59,7 @@ import { PluginUpdateService } from './update/plugin-update.service';
     { provide: PLUGIN_REQUESTED_PERMISSIONS_READER, useClass: StoredManifestRequestedPermissionsReader },
     PluginConsentCheckClassifier,
     PluginConsentPresentationService,
+    PluginConsentStandingService,
     PluginDirectoryResolverService,
     PluginFeatureStateService,
     PluginInstanceRegistry,
@@ -79,6 +81,9 @@ import { PluginUpdateService } from './update/plugin-update.service';
   ],
   exports: [
     PluginConsentPresentationService,
+    // #1149's read-time consent standing: what a unit still owes, for the
+    // API edges that report a unit's state code.
+    PluginConsentStandingService,
     PluginFeatureStateService,
     PluginInstanceRegistry,
     PluginConfigService,
