@@ -18,9 +18,9 @@ import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plug
 /**
  * The wire half of #321: approve/reject/pending over a REAL staged row —
  * grants seeded and re-stamped as persisted rows, the 409 challenge
- * round-trip driven from the error body, suspension visible in both the
- * response and the unit table, and the 404/410/409 distinctions the
- * pending read draws.
+ * round-trip driven from the error body, the units owing re-consent reported
+ * on the response and announced without a write to their rows (#1149), and
+ * the 404/410/409 distinctions the pending read draws.
  *
  * Staged state is arranged directly on the row — the ingress that calls
  * `stage()` with a resolved directory is #84's, and no endpoint exists.
@@ -218,8 +218,8 @@ describe('plugin update consent (approve/reject/pending)', () => {
       expect(response.body.restartRequired).toBe(true);
       expect(response.body.plugin.version).toBe('1.3.0');
       expect(response.body.plugin.pendingVersion).toBeNull();
-      expect(response.body.suspendedHouseholdUnits).toEqual([]);
-      expect(response.body.suspendedUserUnits).toEqual([]);
+      expect(response.body.reconsentHouseholdUnits).toEqual([]);
+      expect(response.body.reconsentUserUnits).toEqual([]);
       // Both undecided server checks seeded Granted — the plugin-declared
       // one at its locked Low, the core one at today's catalog risk.
       expect(response.body.seededGrants).toHaveLength(2);
@@ -414,7 +414,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
       expect(row.pendingVersion).toBe('1.3.0');
     });
 
-    it('suspends user units owing the new decision and reports them on the response', async () => {
+    it('reports user units owing the new decision on the response, announces them, and writes nothing to their rows', async () => {
       const admin = await actors.admin();
       const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, USER_SCOPE_CHECK]);
       const unit = await db.client.userPlugin.create({
@@ -423,17 +423,29 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
       const response = await approve(admin, plugin.slug).expect(200);
 
-      expect(response.body.suspendedUserUnits).toEqual([
+      expect(response.body.reconsentUserUnits).toEqual([
         { userId: admin.user.id, outstanding: ['read:game_collection:public'] },
       ]);
-      expect(response.body.suspendedHouseholdUnits).toEqual([]);
+      expect(response.body.reconsentHouseholdUnits).toEqual([]);
 
+      // The announcement is the durable record that the member has a review
+      // pending (#1149): one lifecycle row per unit, carrying what it owes.
+      const events = await awaitLifecycleRow(plugin, PluginLifecycleEventType.ReconsentRequested);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        event: PluginLifecycleEventType.ReconsentRequested,
+        scopeType: PluginGrantScope.User,
+        scopeId: admin.user.id,
+        manifestVersion: '1.3.0',
+        payload: { outstandingPermissionSlugs: ['read:game_collection:public'] },
+      });
+
+      // Consent standing is worked out when read, so the unit enablement is never
+      // written: the member's unit enablement stays on and the row's
+      // timestamp proves nothing touched it (#1149).
       const row = await db.client.userPlugin.findUniqueOrThrow({ where: { id: unit.id } });
-      expect(row.suspendedForConsent).toBe(true);
-      expect(row.suspendedAt).not.toBeNull();
-      // Suspension parks the unit pending re-consent; the member's enable
-      // INTENT is not overwritten.
       expect(row.enabled).toBe(true);
+      expect(row.updatedAt).toEqual(unit.updatedAt);
     });
 
     it('answers 410 when the plugin tombstoned while the update sat pending — uninstalled mid-decision, not a 404', async () => {

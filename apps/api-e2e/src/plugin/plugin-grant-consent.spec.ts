@@ -12,10 +12,11 @@ import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plug
  * pinned as its 409 (and its pending-manifest exception as the C4.3
  * integration: the denial lands, and it is APPROVE that refuses), the
  * authority matrix per scope including the household instance gate, the
- * #225 enablement anchor, D60-7's exclusion, the D-AR late-acceptance
- * re-enable and its D-BQ suspension mirror as observable unit-row flips,
- * and the presentation's decision states (`per-unit`, `staleRisk`) from
- * each viewpoint.
+ * user's unit enablement a first grant creates (#225), the household
+ * exclusion of condition-free core checks, the consent standing the feature
+ * read derives from the grants without a unit-enablement write (#1149), and the
+ * presentation's decision states (`per-unit`, `staleRisk`) from each
+ * viewpoint.
  *
  * Plugin state is arranged directly on the rows (the install ingress is
  * #84's; no endpoint exists), including the `PluginPermission` catalog rows
@@ -132,6 +133,9 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
 
   const readUserConsent = (actor: SessionActor, slug: string) =>
     request(baseUrl).get(`/api/users/me/plugins/${slug}/consent`).set(actor.headers);
+
+  const readHouseholdFeatures = (actor: SessionActor, householdId: string, slug: string) =>
+    request(baseUrl).get(`/api/households/${householdId}/plugins/${slug}/features`).set(actor.headers);
 
   const granted = (permissionSlug: string) => ({ permissionSlug, status: PluginGrantStatus.Granted });
   const denied = (permissionSlug: string) => ({ permissionSlug, status: PluginGrantStatus.Denied });
@@ -257,7 +261,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       await decideHousehold(ownerB, fixtureA.household.id, plugin.slug, granted('read:game:public')).expect(403);
     });
 
-    it('user decide: any authenticated user, for their own unit only — Granted creates the #225 anchor, Denied creates nothing', async () => {
+    it('user decide: any authenticated user, for their own unit only — Granted creates the #225 unit enablement, Denied creates nothing', async () => {
       const user = await actors.user();
       const plugin = await arrangePlugin();
 
@@ -267,7 +271,8 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       await decideUser(user, plugin.slug, granted('read:game_collection:public')).expect(200);
       const units = await db.client.userPlugin.findMany({ where: { pluginId: plugin.id } });
       expect(units).toHaveLength(1);
-      expect(units[0].suspendedForConsent).toBe(false);
+      // The first user grant writes the user's unit enablement, switched on.
+      expect(units[0].enabled).toBe(true);
     });
 
     it('D60-7: a household decision on a condition-free core check is the typed 403 exclusion', async () => {
@@ -334,81 +339,90 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
     });
   });
 
-  describe('unit suspension transitions (D-AR / D-BQ)', () => {
-    it('late acceptance re-enables: the Granted decision that clears the last requirement lifts suspendedForConsent', async () => {
+  describe('consent standing is derived (#1061, #1063, #1147)', () => {
+    /** A household unit whose unit enablement is switched on, as a household admin's enable leaves it. */
+    const arrangeEnabledHouseholdUnit = (householdId: string, pluginId: string) =>
+      db.client.householdPlugin.create({ data: { householdId, pluginId, enabled: true } });
+
+    const unitRow = (id: string) => db.client.householdPlugin.findUniqueOrThrow({ where: { id } });
+
+    it('a unit still owing a required household check is served: GET features reports state review_pending with the slug as never_asked', async () => {
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner });
       const plugin = await arrangePlugin();
-      await db.client.householdPlugin.create({
-        data: {
-          householdId: fixture.household.id,
-          pluginId: plugin.id,
-          enabled: true,
-          suspendedForConsent: true,
-          suspendedAt: new Date('2026-08-15T00:00:00Z'),
-        },
-      });
+      await arrangeEnabledHouseholdUnit(fixture.household.id, plugin.id);
 
-      await decideHousehold(owner, fixture.household.id, plugin.slug, granted('read:game:public')).expect(200);
+      const response = await readHouseholdFeatures(owner, fixture.household.id, plugin.slug).expect(200);
+      const featureState = response.body.featureState;
 
-      // The re-enable pass is awaited inside decide(), so the flip is
-      // visible as soon as the response is — no polling needed.
-      const unit = await db.client.householdPlugin.findFirstOrThrow({ where: { pluginId: plugin.id } });
-      expect(unit.suspendedForConsent).toBe(false);
-      expect(unit.suspendedAt).toBeNull();
-      expect(unit.enabled).toBe(true);
+      // Consent never decides whether the unit runs: it keeps running on the
+      // grants it holds, and the state code says a review is pending.
+      expect(featureState.served).toBe(true);
+      expect(featureState.state).toBe('review_pending');
+      expect(featureState.consent.outstanding).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            slug: 'read:game:public',
+            kind: 'never_asked',
+            required: true,
+            riskLevel: RiskLevel.Low,
+          }),
+        ]),
+      );
     });
 
-    it('the D-BQ mirror: a denial that leaves a REQUIRED household check unsatisfied suspends the unit', async () => {
+    it('a Denied on a required household check leaves the unit served and reports the slug as refused', async () => {
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner });
       const plugin = await arrangePlugin();
-      await db.client.householdPlugin.create({
-        data: { householdId: fixture.household.id, pluginId: plugin.id, enabled: true },
-      });
+      const unit = await arrangeEnabledHouseholdUnit(fixture.household.id, plugin.id);
 
       await decideHousehold(owner, fixture.household.id, plugin.slug, denied('read:game:public')).expect(200);
 
-      const unit = await db.client.householdPlugin.findFirstOrThrow({ where: { pluginId: plugin.id } });
-      expect(unit.suspendedForConsent).toBe(true);
-      expect(unit.suspendedAt).not.toBeNull();
-      // Suspension, not an enabled flip: the admin's prior intent survives
-      // for late acceptance to restore exactly.
-      expect(unit.enabled).toBe(true);
+      const response = await readHouseholdFeatures(owner, fixture.household.id, plugin.slug).expect(200);
+      const featureState = response.body.featureState;
+      expect(featureState.served).toBe(true);
+      expect(featureState.state).toBe('review_pending');
+      expect(featureState.consent.outstanding).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ slug: 'read:game:public', kind: 'refused', required: true }),
+        ]),
+      );
+
+      // The decision wrote one grant row and nothing on the unit: the
+      // household admin's unit enablement is exactly as they left it.
+      const row = await unitRow(unit.id);
+      expect(row.enabled).toBe(true);
+      expect(row.updatedAt).toEqual(unit.updatedAt);
     });
 
-    it('an anchor created after a required denial is born suspended — decision order cannot put the unit in service (#359)', async () => {
-      // Two required permissions at user scope, both allowlisted public reads
-      // a user may consent to (#591), so the deny-then-grant order is
-      // exercisable.
-      const MEDIA_CHECK = {
-        slug: 'read:media_object:public',
-        required: true,
-        reason: { en: 'Shows public game images in each member’s digest.' },
-        consentScope: 'user',
-      } as const;
-      const user = await actors.user();
-      const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK, { ...USER_CHECK, required: true }, MEDIA_CHECK]);
+    it('the Granted decision that clears the last outstanding check flips state to on with no unit-enablement write', async () => {
+      const admin = await actors.admin();
+      const owner = await actors.user();
+      const fixture = await actors.householdWithMembers({ owner });
+      const plugin = await arrangePlugin();
+      // The server-consented requirement is a server admin's to answer; with
+      // it granted, the household check is the only one left outstanding.
+      await decideServer(admin, plugin.slug, granted(`plugin|${plugin.slug}|manage:digest`)).expect(200);
+      const unit = await arrangeEnabledHouseholdUnit(fixture.household.id, plugin.id);
 
-      // Deny required P first: no row exists yet, so there is nothing to
-      // suspend — the absence of the row is what keeps the unit unserved.
-      await decideUser(user, plugin.slug, denied(USER_CHECK.slug)).expect(200);
-      expect(await db.client.userPlugin.count({ where: { pluginId: plugin.id } })).toBe(0);
+      const before = await readHouseholdFeatures(owner, fixture.household.id, plugin.slug).expect(200);
+      expect(before.body.featureState.state).toBe('review_pending');
+      expect(before.body.featureState.consent.outstanding).toEqual([
+        expect.objectContaining({ slug: 'read:game:public', kind: 'never_asked' }),
+      ]);
 
-      // Granting required Q creates the anchor (#225) — born suspended,
-      // because P's refusal stands. Unsuspended, this unit would serve the
-      // moment the row appeared, without the denial ever being consulted.
-      await decideUser(user, plugin.slug, granted(MEDIA_CHECK.slug)).expect(200);
-      const unit = await db.client.userPlugin.findFirstOrThrow({ where: { pluginId: plugin.id } });
-      expect(unit.suspendedForConsent).toBe(true);
-      expect(unit.suspendedAt).not.toBeNull();
-      expect(unit.enabled).toBe(true);
+      await decideHousehold(owner, fixture.household.id, plugin.slug, granted('read:game:public')).expect(200);
 
-      // Late acceptance heals the birth state like any other suspension.
-      await decideUser(user, plugin.slug, granted(USER_CHECK.slug)).expect(200);
-      const healed = await db.client.userPlugin.findFirstOrThrow({ where: { pluginId: plugin.id } });
-      expect(healed.suspendedForConsent).toBe(false);
-      expect(healed.suspendedAt).toBeNull();
+      const after = await readHouseholdFeatures(owner, fixture.household.id, plugin.slug).expect(200);
+      expect(after.body.featureState).toMatchObject({ served: true, state: 'on' });
+      expect(after.body.featureState.consent.outstanding).toEqual([]);
+
+      // Nothing was re-enabled because nothing was ever switched off: the
+      // state is worked out when read, so the decision left the row alone.
+      const row = await unitRow(unit.id);
+      expect(row.enabled).toBe(true);
+      expect(row.updatedAt).toEqual(unit.updatedAt);
     });
   });
 

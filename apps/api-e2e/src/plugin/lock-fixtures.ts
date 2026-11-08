@@ -95,29 +95,19 @@ export const SERVER_GRANT_INSERT =
    RETURNING id`;
 
 /**
- * A household unit row created the way the enable path creates it, as a
- * statement a barrier can hold open mid-transaction.
+ * The `unit row` stage of the claimed lock order, as a statement a barrier can
+ * hold open.
  *
- * Named rather than typed at its call site, so the next spec that needs an
- * uncommitted creation reuses it: a second hand-typed copy is the drift
- * `shipped-sql.ts` exists to prevent, arriving through the back door.
+ * No shipped statement locks a unit enablement by raw SQL since consent standing
+ * became a read-time derivation (#1149): the unit writers that remain take the
+ * row through a Prisma write (`tx.householdPlugin.update`, the user's first
+ * grant's `upsert`, the dormancy pass's `updateMany`), which Prisma cannot
+ * express as a held lock. So this states the stage in the form the `unit row`
+ * pattern recognises. `FOR UPDATE` is the strongest row mode, at least as
+ * strong as the `FOR NO KEY UPDATE` an UPDATE of non-key columns takes, so a
+ * barrier holding it waits out every unit writer the real write would.
  */
-export const UNIT_ANCHOR_INSERT =
-  'INSERT INTO household_plugins (id, household_id, plugin_id, updated_at) VALUES ($1, $2, $3, now()) RETURNING id';
-
-/**
- * What a mirror suspend pass writes once it holds the unit row, as a statement
- * a barrier can hold open (`plugin-grant.service.ts` — the pass's Prisma
- * update).
- *
- * Stands in for the write only. What the specs care about is that a contender
- * blocked on the row lock re-reads THIS value rather than its own snapshot,
- * which is what makes the pass's `unit.suspendedForConsent` short-circuit
- * idempotent under contention rather than merely usually right.
- */
-export const UNIT_SUSPEND_CLAIM =
-  'UPDATE household_plugins SET suspended_for_consent = true, suspended_at = now(), updated_at = now() ' +
-  'WHERE id = $1 RETURNING id';
+export const UNIT_ROW_LOCK = 'SELECT id FROM household_plugins WHERE household_id = $1 AND plugin_id = $2 FOR UPDATE';
 
 export interface PluginLockFixture {
   readonly pluginId: string;
@@ -242,26 +232,6 @@ export async function arrangeHouseholdUnit(
 ): Promise<{ unitId: string }> {
   const unit = await prisma.householdPlugin.create({
     data: { householdId, pluginId },
-    select: { id: true },
-  });
-
-  return { unitId: unit.id };
-}
-
-/**
- * An existing user unit row, the twin of {@link arrangeHouseholdUnit}.
- *
- * Created directly rather than through `decide()`: these specs never
- * authenticate, and #225 makes the decision path the only creator over the
- * wire — which is a fact the interaction tier tests rather than relies on.
- */
-export async function arrangeUserUnit(
-  prisma: PrismaClient,
-  userId: string,
-  pluginId: string,
-): Promise<{ unitId: string }> {
-  const unit = await prisma.userPlugin.create({
-    data: { userId, pluginId },
     select: { id: true },
   });
 

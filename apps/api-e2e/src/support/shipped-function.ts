@@ -164,11 +164,10 @@ export function readShippedFunction(relativePath: string, functionName: string):
  *
  * A function with two independent branches cannot be pinned as one body. Order
  * is judged by first occurrence, so the earlier branch's stages date the later
- * branch's claim: `decide()` reaches its required-denial mirror long before its
- * granted-user anchor, and an anchor created BEFORE the key it is supposed to
- * sit behind still leaves the whole-body pin green — which is an
- * advisory-after-unit inversion, and the shape that deadlocks against the
- * mirror pass taking those two the other way round.
+ * branch's claim: when an earlier branch writes a unit enablement, a later branch that
+ * creates its row BEFORE the key it is supposed to sit behind still leaves the
+ * whole-body pin green — which is an advisory-after-unit inversion, and the
+ * shape that deadlocks against a writer taking those two the other way round.
  *
  * The branch is named by its CONDITION rather than by its contents, which is
  * what keeps this from being circular: matching on the lock it takes would make
@@ -383,7 +382,7 @@ function bodyOfDeclaration(node: ts.Node, functionName: string): ts.Block | unde
  * not nodes: a note sitting alone before a block's closing brace belongs to the
  * `}`, and an empty function's entire body is trivia between two braces. A
  * node-only walk left both of them in the text, which is worse than useless
- * here — a comment mentioning `suspendHouseholdUnit` would SUPPLY the match for
+ * here — a comment mentioning `writeHouseholdUnit` would SUPPLY the match for
  * a stage the path had stopped taking, and the pin would answer "in order"
  * about a body it had only read prose in.
  */

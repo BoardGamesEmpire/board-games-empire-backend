@@ -384,12 +384,12 @@ const IDENTIFIER_CHARACTER = /[A-Za-z0-9_$]/;
 /**
  * Every offset at which `needle` appears AS A WHOLE NAME.
  *
- * The boundary check is load-bearing rather than tidy. `lockHouseholdUnit` is a
- * prefix of `lockHouseholdUnitScope`, and the plugin runtime ships both — with
- * the longer one imported at the top of the file, far above either statement.
- * A substring anchor resolves to that import and lifts whichever template
- * follows it, which is silently wrong precisely when the two statements bind
- * the same parameters and nothing downstream notices.
+ * The boundary check is load-bearing rather than tidy. When one function's
+ * name is a prefix of another's (a `lockUnit` beside a `lockUnitScope`), and
+ * the longer one is imported at the top of the file, far above either
+ * statement, a substring anchor resolves to that import and lifts whichever
+ * template follows it. That is silently wrong precisely when the two
+ * statements bind the same parameters and nothing downstream notices.
  */
 function occurrences(source: string, needle: string): number[] {
   const found: number[] = [];

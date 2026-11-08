@@ -435,9 +435,15 @@ describe('installed-plugin inventory (#354)', () => {
 
       expect(entryFor(response.body, plugin.slug)).toMatchObject({
         serverEnabled: true,
-        dormantReason: null,
-        unit: { anchored: false, enabled: false, suspendedForConsent: false },
+        unit: {
+          anchored: false,
+          enabled: false,
+          state: 'off',
+          consent: { outstanding: expect.any(Array), optionalOff: expect.any(Array) },
+        },
       });
+      // Dormancy is reported through `unit.state` now (#1149).
+      expect(entryFor(response.body, plugin.slug)).not.toHaveProperty('dormantReason');
     });
 
     it('reports the dormancy a row carries, and the reason distinguishes the two causes (D-CF, D-CM)', async () => {
@@ -470,15 +476,15 @@ describe('installed-plugin inventory (#354)', () => {
 
       const response = await listHousehold(owner, fixture.household.id, '?limit=100').expect(200);
 
+      // The unit state carries the cause (#1149): `unavailable` for the scope
+      // orphan, `needs_configuration` for the retained document.
       expect(entryFor(response.body, orphaned.slug)).toMatchObject({
-        dormantReason: PluginUnitDormantReason.ScopeOrphaned,
         // Retained with the admin's own switch intact, so a re-scope back
         // restores their choice rather than a default (#369, D-CK).
-        unit: { anchored: true, enabled: true },
+        unit: { anchored: true, enabled: true, state: 'unavailable' },
       });
       expect(entryFor(response.body, stale.slug)).toMatchObject({
-        dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-        unit: { anchored: true, enabled: true },
+        unit: { anchored: true, enabled: true, state: 'needs_configuration' },
       });
     });
 
