@@ -2,12 +2,22 @@ import {
   DatabaseService,
   PluginCategory,
   PluginExecutionMode,
+  PluginGrantScope,
+  PluginGrantStatus,
   PluginScope,
   PluginUnitDormantReason,
   Prisma,
+  RiskLevel,
 } from '@bge/database';
-import { batchTransactionCall, createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import {
+  batchTransactionCall,
+  createMockDatabaseService,
+  UNIT_BOUND_RULES,
+  type MockDatabaseService,
+} from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
+import { PluginConsentCheckClassifier } from '../consent/plugin-consent-check-classifier.service';
+import { PluginConsentStandingService } from '../consent/plugin-consent-standing.service';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import {
@@ -26,6 +36,41 @@ describe('PluginInventoryService', () => {
 
   const manifest = buildPluginManifest();
   const INSTALLED_AT = new Date('2026-08-01T00:00:00Z');
+  const MANAGE_CANONICAL = 'plugin|demo-sink|manage:digest';
+
+  const grant = (
+    slug: string,
+    scopeType: PluginGrantScope,
+    decidedRiskLevel: RiskLevel = RiskLevel.Low,
+    status: PluginGrantStatus = PluginGrantStatus.Granted,
+  ) => ({ permissionSlug: slug, scopeType, status, decidedRiskLevel });
+
+  const serverGrants = [
+    grant('feedback:read', PluginGrantScope.Server),
+    grant(MANAGE_CANONICAL, PluginGrantScope.Server),
+  ];
+
+  /** The baseline manifest plus the unit-scope checks a household or user can owe. */
+  const manifestWithUnitChecks = () => {
+    const withChecks = buildPluginManifest({ scope: 'household' });
+    withChecks.permissions.checks = [
+      ...withChecks.permissions.checks,
+      {
+        slug: 'update:calendar',
+        required: true,
+        reason: { en: 'Writes digest reminders to the household calendar.' },
+        consentScope: 'household',
+      },
+      {
+        slug: 'read:public_content',
+        required: true,
+        reason: { en: 'Shows public content excerpts inside per-user views.' },
+        consentScope: 'user',
+      },
+    ];
+
+    return withChecks;
+  };
 
   /** A row as `INVENTORY_SELECT` returns it — installed, living, no pending update. */
   const row = (overrides: Record<string, unknown> = {}) => ({
@@ -63,7 +108,19 @@ describe('PluginInventoryService', () => {
 
   beforeEach(() => {
     db = createMockDatabaseService();
-    service = new PluginInventoryService(db as unknown as DatabaseService, options);
+    // The server-consented checks of the baseline manifest are granted, so a
+    // unit enablement reads `on` unless a test makes it owe something (#1149).
+    db.pluginGrant.findMany.mockResolvedValue(serverGrants as never);
+    db.permission.findMany.mockResolvedValue([{ slug: 'feedback:read', riskLevel: RiskLevel.Low }] as never);
+    db.pluginPermission.findMany.mockResolvedValue([{ slug: MANAGE_CANONICAL, riskLevel: RiskLevel.Low }] as never);
+
+    // The real classifier over the mock database, so the standing assertions
+    // exercise the consent rule itself rather than a stubbed answer.
+    const standing = new PluginConsentStandingService(
+      new PluginConsentCheckClassifier(db as unknown as DatabaseService),
+      options,
+    );
+    service = new PluginInventoryService(db as unknown as DatabaseService, standing, options);
     unitCeiling = jest.fn((scope: Prisma.PluginWhereInput) => ({ AND: [scope, CEILING] }));
     serverCeiling = jest.fn(() => CEILING);
   });
@@ -417,7 +474,7 @@ describe('PluginInventoryService', () => {
       expect(db.plugin.count).toHaveBeenCalledWith({ where });
     });
 
-    it('joins only THIS household enablement row', async () => {
+    it('joins only the unit enablement of THIS household', async () => {
       db.plugin.findMany.mockResolvedValue([] as never);
       db.plugin.count.mockResolvedValue(0 as never);
 
@@ -441,54 +498,151 @@ describe('PluginInventoryService', () => {
       expect(rows[0].unit).toEqual({
         anchored: false,
         enabled: false,
-        suspendedForConsent: false,
-        suspendedAt: null,
+        state: 'off',
+        consent: { outstanding: [], optionalOff: [] },
       });
-      expect(rows[0].dormantReason).toBeNull();
     });
 
-    it('an anchored row carries its enablement and suspension state', async () => {
-      const suspendedAt = new Date('2026-08-21T00:00:00Z');
+    it('an anchored row carries its enablement, state code and consent standing (#1149)', async () => {
       db.plugin.findMany.mockResolvedValue([
-        householdRow({ scope: PluginScope.Household }, [{ enabled: true, suspendedForConsent: true, suspendedAt }]),
+        householdRow({ scope: PluginScope.Household }, [{ enabled: true, dormantReason: null }]),
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
       const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
-      expect(rows[0].unit).toEqual({ anchored: true, enabled: true, suspendedForConsent: true, suspendedAt });
+      expect(rows[0].unit).toEqual({
+        anchored: true,
+        enabled: true,
+        state: 'on',
+        consent: { outstanding: [], optionalOff: [] },
+      });
     });
 
-    it('reports the dormancy the row carries — the #369 orphan, as activation wrote it (D-CM)', async () => {
+    it('selects only enabled and dormantReason from the household row, no stored suspension (#1149)', async () => {
+      db.plugin.findMany.mockResolvedValue([] as never);
+      db.plugin.count.mockResolvedValue(0 as never);
+
+      await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
+
+      expect(db.plugin.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            householdPlugins: { where: { householdId: 'hh-1' }, select: { enabled: true, dormantReason: true } },
+          }),
+        }),
+      );
+    });
+
+    it('a household row owing re-consent reads state review_pending (#1149)', async () => {
+      // The household granted update:calendar when it was Low; the catalog has
+      // since raised it, so the grant no longer covers (#1149).
+      db.pluginGrant.findMany.mockResolvedValue([
+        ...serverGrants,
+        grant('update:calendar', PluginGrantScope.Household, RiskLevel.Low),
+      ] as never);
+      db.permission.findMany.mockResolvedValue([
+        { slug: 'feedback:read', riskLevel: RiskLevel.Low },
+        { slug: 'update:calendar', riskLevel: RiskLevel.High, ...UNIT_BOUND_RULES.Household },
+      ] as never);
       db.plugin.findMany.mockResolvedValue([
-        householdRow({ scope: PluginScope.Server }, [
-          {
-            enabled: true,
-            suspendedForConsent: false,
-            suspendedAt: null,
-            dormantReason: PluginUnitDormantReason.ScopeOrphaned,
-          },
+        householdRow({ scope: PluginScope.Household, manifestJson: manifestWithUnitChecks() }, [
+          { enabled: true, dormantReason: null },
         ]),
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
       const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
-      expect(rows[0].dormantReason).toBe(PluginUnitDormantReason.ScopeOrphaned);
+      expect(rows[0].unit.state).toBe('review_pending');
+      expect(rows[0].unit.consent.outstanding).toEqual([
+        expect.objectContaining({
+          slug: 'update:calendar',
+          kind: 'risk_raised',
+          required: true,
+          riskLevel: RiskLevel.High,
+        }),
+      ]);
+    });
+
+    it('a row whose manifest cannot be read keeps its marker and reports an empty standing (#1149)', async () => {
+      db.plugin.findMany.mockResolvedValue([
+        householdRow({ scope: PluginScope.Household, manifestJson: { nonsense: true } }, [
+          { enabled: true, dormantReason: null },
+        ]),
+      ] as never);
+      db.plugin.count.mockResolvedValue(1 as never);
+
+      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
+
+      expect(rows[0].manifestUnreadable).toBe(true);
+      expect(rows[0].unit).toEqual({
+        anchored: true,
+        enabled: true,
+        state: 'on',
+        consent: { outstanding: [], optionalOff: [] },
+      });
+      expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
+    });
+
+    it('localizes the outstanding reasons with the locale the list localizes with (#1149)', async () => {
+      const withChecks = manifestWithUnitChecks();
+      withChecks.permissions.checks[2] = {
+        ...withChecks.permissions.checks[2],
+        reason: {
+          en: 'Writes digest reminders to the household calendar.',
+          de: 'Schreibt Erinnerungen in den Haushaltskalender.',
+        },
+      };
+      db.plugin.findMany.mockResolvedValue([
+        householdRow({ scope: PluginScope.Household, manifestJson: withChecks }, [
+          { enabled: true, dormantReason: null },
+        ]),
+      ] as never);
+      db.plugin.count.mockResolvedValue(1 as never);
+
+      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling, {
+        locale: 'de',
+      });
+
+      expect(rows[0].unit.consent.outstanding[0]?.reason).toBe('Schreibt Erinnerungen in den Haushaltskalender.');
+    });
+
+    it('a ScopeOrphaned household row reads state unavailable and no dormantReason field (#1149)', async () => {
+      db.plugin.findMany.mockResolvedValue([
+        householdRow({ scope: PluginScope.Server }, [
+          { enabled: true, dormantReason: PluginUnitDormantReason.ScopeOrphaned },
+        ]),
+      ] as never);
+      db.plugin.count.mockResolvedValue(1 as never);
+
+      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
+
+      expect(rows[0].unit.state).toBe('unavailable');
+      expect(rows[0]).not.toHaveProperty('dormantReason');
+      expect(rows[0].unit).not.toHaveProperty('dormantReason');
       // Dormancy is not a disable: the admin's own switch is untouched, which
       // is what makes a re-scope back restore their choice.
       expect(rows[0].unit.enabled).toBe(true);
     });
 
+    it('a switched-on household row under a plugin a server admin switched off reads unavailable, with serverEnabled false (#1149)', async () => {
+      db.plugin.findMany.mockResolvedValue([
+        householdRow({ scope: PluginScope.Household, enabled: false }, [{ enabled: true, dormantReason: null }]),
+      ] as never);
+      db.plugin.count.mockResolvedValue(1 as never);
+
+      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
+
+      // Nothing runs while the server switch is off, so the code never says
+      // on; the household's own switch is untouched and still reads true.
+      expect(rows[0]).toMatchObject({ serverEnabled: false, unit: { enabled: true, state: 'unavailable' } });
+    });
+
     it('reports a config dormancy under a household-scope plugin — the reason is read, not inferred from scope', async () => {
       db.plugin.findMany.mockResolvedValue([
         householdRow({ scope: PluginScope.Household }, [
-          {
-            enabled: true,
-            suspendedForConsent: false,
-            suspendedAt: null,
-            dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-          },
+          { enabled: true, dormantReason: PluginUnitDormantReason.NeedsConfiguration },
         ]),
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
@@ -497,7 +651,7 @@ describe('PluginInventoryService', () => {
 
       // The replaced boolean could not have said this: the scope admits
       // households, so `scope === Server && anchored` was false here.
-      expect(rows[0].dormantReason).toBe(PluginUnitDormantReason.NeedsConfiguration);
+      expect(rows[0].unit.state).toBe('needs_configuration');
     });
 
     it('a server-scope plugin with NO household row is not dormant — there is no row to be dormant', async () => {
@@ -506,7 +660,7 @@ describe('PluginInventoryService', () => {
 
       const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
-      expect(rows[0].dormantReason).toBeNull();
+      expect(rows[0].unit.state).toBe('off');
     });
   });
 
@@ -559,10 +713,40 @@ describe('PluginInventoryService', () => {
       expect(rows[0].displayName).toBe('Demo Sink');
     });
 
-    it('an anchored user row carries its own enablement state', async () => {
-      db.plugin.findMany.mockResolvedValue([
-        userRow({}, [{ enabled: false, suspendedForConsent: false, suspendedAt: null }]),
+    it('a plugin the user never consented to reads anchored false, state off, and lists its user-scope checks under consent (#1149)', async () => {
+      db.permission.findMany.mockResolvedValue([
+        { slug: 'feedback:read', riskLevel: RiskLevel.Low },
+        { slug: 'read:public_content', riskLevel: RiskLevel.Low, ...UNIT_BOUND_RULES.User },
       ] as never);
+      db.plugin.findMany.mockResolvedValue([userRow({ manifestJson: manifestWithUnitChecks() })] as never);
+      db.plugin.count.mockResolvedValue(1 as never);
+
+      const { rows } = await service.listForUser('user-1', { skip: 0, pageSize: 25 }, unitCeiling);
+
+      expect(rows[0].unit.anchored).toBe(false);
+      expect(rows[0].unit.state).toBe('off');
+      expect(rows[0].unit.consent.outstanding).toEqual([
+        expect.objectContaining({ slug: 'read:public_content', kind: 'never_asked', required: true }),
+      ]);
+    });
+
+    it('selects only enabled from the user row and carries no dormancy (#1149)', async () => {
+      db.plugin.findMany.mockResolvedValue([] as never);
+      db.plugin.count.mockResolvedValue(0 as never);
+
+      await service.listForUser('user-1', { skip: 0, pageSize: 25 }, unitCeiling);
+
+      expect(db.plugin.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            userPlugins: { where: { userId: 'user-1' }, select: { enabled: true } },
+          }),
+        }),
+      );
+    });
+
+    it('an anchored user row carries its own enablement state (#1149)', async () => {
+      db.plugin.findMany.mockResolvedValue([userRow({}, [{ enabled: false }])] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
       const { rows } = await service.listForUser('user-1', { skip: 0, pageSize: 25 }, unitCeiling);
@@ -570,8 +754,8 @@ describe('PluginInventoryService', () => {
       expect(rows[0].unit).toEqual({
         anchored: true,
         enabled: false,
-        suspendedForConsent: false,
-        suspendedAt: null,
+        state: 'off',
+        consent: { outstanding: [], optionalOff: [] },
       });
     });
   });
