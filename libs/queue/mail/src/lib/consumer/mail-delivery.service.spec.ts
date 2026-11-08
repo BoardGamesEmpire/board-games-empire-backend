@@ -285,6 +285,65 @@ describe('MailDeliveryService', () => {
     });
   });
 
+  // A test has one try and the admin waits on its notification, so a failure
+  // the send does not classify must still end in one (#654).
+  describe('when something other than the send fails', () => {
+    const outage = new Error('Timed out fetching a new connection from the connection pool');
+
+    it.each([
+      ['the recipient read', () => db.user.findUnique.mockRejectedValue(outage)],
+      ['the settings read', () => db.systemSetting.findUnique.mockRejectedValue(outage)],
+    ])('tells the admin a test was not sent when %s fails, and resolves (#654)', async (_step, arrange) => {
+      arrange();
+
+      await expect(service.deliver(TEST)).resolves.toBeUndefined();
+
+      expect(notifications.create).toHaveBeenCalledTimes(1);
+      expect(notifications.create).toHaveBeenCalledWith({
+        userId: 'admin-1',
+        type: NotificationType.MailTestResult,
+        payload: expect.objectContaining({ outcome: 'failed', code: MailFailureCode.SendFailed }),
+      });
+      expect(sendMail).not.toHaveBeenCalled();
+    });
+
+    it('logs the class of what failed for a test, never its message (#654)', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      db.systemSetting.findUnique.mockRejectedValue(new TypeError('detail from https://c.example/reset#token=tok'));
+
+      await service.deliver(TEST);
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      const line = String(warn.mock.calls[0][0]);
+      expect(line).toContain(MailFailureCode.SendFailed);
+      expect(line).toContain('TypeError');
+      expect(line).not.toContain('c.example');
+      warn.mockRestore();
+    });
+
+    it('rethrows it unchanged for a reset, so BullMQ retries (#654)', async () => {
+      db.systemSetting.findUnique.mockRejectedValue(outage);
+
+      await expect(service.deliver(RESET)).rejects.toBe(outage);
+
+      expect(notifications.create).not.toHaveBeenCalled();
+    });
+
+    // The outcome is known before the one notification is written, so a test
+    // that went is never reported as failed (#654).
+    it('fails the job, reporting nothing else, when a sent test cannot be notified (#654)', async () => {
+      notifications.create.mockRejectedValue(outage);
+
+      await expect(service.deliver(TEST)).rejects.toBe(outage);
+
+      expect(sendMail).toHaveBeenCalledTimes(1);
+      expect(notifications.create).toHaveBeenCalledTimes(1);
+      expect(notifications.create).toHaveBeenCalledWith(
+        expect.objectContaining({ payload: expect.objectContaining({ outcome: 'sent' }) }),
+      );
+    });
+  });
+
   it.each([
     ['test', TEST],
     ['password reset', RESET],

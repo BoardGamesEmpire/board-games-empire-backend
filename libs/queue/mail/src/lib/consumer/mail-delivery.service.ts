@@ -28,6 +28,17 @@ function isPermanentRefusal(error: unknown): boolean {
   return typeof responseCode === 'number' && responseCode >= 500 && responseCode < 600;
 }
 
+/** A failure's class name, never its message, which can carry what was sent. */
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
+}
+
+/** Why a send did not go: the stable code, and whether a reset's retry could go differently. */
+interface SendFailure {
+  readonly code: MailFailureCode;
+  readonly retryable: boolean;
+}
+
 /**
  * The worker's sender (#654). For every job it reads the mail settings from
  * the row, decrypts the SMTP password, renders the message in the recipient's
@@ -35,14 +46,15 @@ function isPermanentRefusal(error: unknown): boolean {
  * an admin's change applies to the next mail. The transport is not pooled, so
  * keeping it would save no connection: nodemailer connects for each send.
  *
- * Failures split on who is waiting. A test email is one try, and its failure
- * is the answer: the admin gets a notification with the stable code and the
- * job completes. A password reset has no one waiting, so a failure that a
- * retry can mend is rethrown for BullMQ. One it cannot is an
- * `UnrecoverableError` whose message is the code: nothing set up, a password
- * that no longer decrypts, or the SMTP server's permanent (5xx) refusal, such
- * as bad credentials, which a retry would only repeat. A temporary (4xx)
- * refusal, such as greylisting, is retried.
+ * Failures split on who is waiting. A test email is one try, and the admin's
+ * notification is its answer, whatever failed: the stable code of a failure
+ * the send classifies, and `MAIL_SEND_FAILED` for any other, such as a
+ * database read that fails. The job then completes. A password reset has no
+ * one waiting, so a failure that a retry can mend is rethrown for BullMQ. One
+ * it cannot is an `UnrecoverableError` whose message is the code: nothing set
+ * up, a password that no longer decrypts, or the SMTP server's permanent (5xx)
+ * refusal, such as bad credentials, which a retry would only repeat. A
+ * temporary (4xx) refusal, such as greylisting, is retried.
  *
  * A reset whose link expired in the queue is dropped unsent, as an
  * `UnrecoverableError` whose message is `RESET_LINK_EXPIRED`.
@@ -67,37 +79,93 @@ export class MailDeliveryService {
   ) {}
 
   async deliver(job: MailDeliveryJob): Promise<void> {
+    if (job.message.kind === 'test') {
+      return this.deliverTest(job);
+    }
+
     // A reset that waited past its token's expiry, as while the worker was
     // down, would mail a dead link that says it still works. Checked on every
     // attempt, so a retry that runs late is dropped too (#654).
-    if (job.message.kind === 'password-reset' && Date.now() >= Date.parse(job.message.expiresAt)) {
+    if (Date.now() >= Date.parse(job.message.expiresAt)) {
       throw new UnrecoverableError(RESET_LINK_EXPIRED);
     }
 
-    const recipient = await this.db.user.findUnique({
-      where: { id: job.recipientUserId },
-      select: { email: true, username: true },
-    });
+    const recipient = await this.readRecipient(job);
 
     // The account was deleted after the mail was queued: nobody to tell.
     if (!recipient) {
       return;
     }
 
+    const failure = await this.send(job, recipient);
+    if (failure?.retryable) {
+      throw new MailTransportError(failure.code);
+    }
+
+    if (failure) {
+      throw new UnrecoverableError(failure.code);
+    }
+  }
+
+  /**
+   * The test has one try, and the admin waits on its notification, so any
+   * failure becomes one, not only those the send classifies. Otherwise a read
+   * that fails, say, would fail the job, and the admin would hear nothing
+   * (#654). The notification is written once, after the outcome is known, so
+   * a send that went is never reported as failed. Only a notification that
+   * cannot be written fails the job, and the processor logs it.
+   */
+  private async deliverTest(job: MailDeliveryJob): Promise<void> {
+    let code: MailFailureCode | null;
+    try {
+      const recipient = await this.readRecipient(job);
+
+      // The admin's account was deleted after they asked: nobody to tell.
+      if (!recipient) {
+        return;
+      }
+
+      code = (await this.send(job, recipient))?.code ?? null;
+    } catch (error) {
+      this.logger.warn(
+        `Mail test failed outside the send: mailCode=${MailFailureCode.SendFailed} error=${errorName(error)}`,
+      );
+      code = MailFailureCode.SendFailed;
+    }
+
+    await this.notifyTestResult(job.recipientUserId, code);
+  }
+
+  private readRecipient(job: MailDeliveryJob): Promise<{ email: string; username: string } | null> {
+    return this.db.user.findUnique({
+      where: { id: job.recipientUserId },
+      select: { email: true, username: true },
+    });
+  }
+
+  /**
+   * One try at sending. It resolves to `null` when the mail went, or to the
+   * failure when it did not; anything it cannot classify, such as a database
+   * read that fails, it throws.
+   */
+  private async send(
+    job: MailDeliveryJob,
+    recipient: { email: string; username: string },
+  ): Promise<SendFailure | null> {
     const settings = await this.db.systemSetting.findUnique({
       where: { singleton: true },
       select: MAIL_SETTINGS_SELECT,
     });
 
     if (!settings || !isMailConfigured(settings)) {
-      return this.fail(job, MailFailureCode.NotConfigured);
+      return { code: MailFailureCode.NotConfigured, retryable: false };
     }
 
     let password: string | null;
     try {
       password = settings.smtpPassword ? this.encryption.decrypt(settings.smtpPassword) : null;
     } catch {
-      return this.fail(job, MailFailureCode.SettingsUnreadable);
+      return { code: MailFailureCode.SettingsUnreadable, retryable: false };
     }
 
     const lang = await this.locale.resolve({ userId: job.recipientUserId });
@@ -119,14 +187,12 @@ export class MailDeliveryService {
       const code = classifyMailError(error);
       this.logSendFailure(job, code, error);
 
-      return this.fail(job, code, !isPermanentRefusal(error));
+      return { code, retryable: !isPermanentRefusal(error) };
     } finally {
       transport.close();
     }
 
-    if (job.message.kind === 'test') {
-      await this.notifyTestResult(job.recipientUserId, null);
-    }
+    return null;
   }
 
   /** Only the fields that name the failed step; never the error's message, response or stack. */
@@ -137,23 +203,6 @@ export class MailDeliveryService {
       .map(([key, value]) => `${key}=${value}`);
 
     this.logger.warn(`Mail send failed: kind=${job.message.kind} mailCode=${code} ${facts.join(' ')}`.trimEnd());
-  }
-
-  /**
-   * A test reports the failure to the admin and completes. A reset throws: a
-   * `MailTransportError` (retried) for a send a retry may mend, an
-   * `UnrecoverableError` for a failure it cannot.
-   */
-  private async fail(job: MailDeliveryJob, code: MailFailureCode, retryable = false): Promise<void> {
-    if (job.message.kind === 'test') {
-      return this.notifyTestResult(job.recipientUserId, code);
-    }
-
-    if (retryable) {
-      throw new MailTransportError(code);
-    }
-
-    throw new UnrecoverableError(code);
   }
 
   private async notifyTestResult(userId: string, code: MailFailureCode | null): Promise<void> {
