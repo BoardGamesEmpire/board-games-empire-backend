@@ -1,8 +1,8 @@
 /// Per-user enablement + configuration for user-scope plugin consent
 /// (#225 uniform-enablement decision). The row is created BY the user's
 /// first Granted user-scope decision — consent is the enabling act, so
-/// there is nothing to opt into first — and exists to carry the state
-/// consent maintains. Absence means the user never granted anything at
+/// there is nothing to opt into first — and carries the user's
+/// `enabled` switch and `config`. Absence means the user never granted anything at
 /// user scope; a Denied-only decision creates no row (a denial confers no
 /// authority and no enablement — durable refusals live on PluginGrant).
 ///
@@ -32,8 +32,9 @@ model UserPlugin {
   /// The user's own switch, layered UNDER Plugin.enabled and any household
   /// enablement — their intent, and only theirs. Consent never touches it:
   /// consent standing is derived at read time from the manifest's
-  /// requirements and the recorded grants (#1149), so a late acceptance
-  /// changes what serves without rewriting the user's choice.
+  /// requirements and the recorded grants (#1149), so a later consent
+  /// changes what the ability confers and the unit's state code, never whether
+  /// the unit is served, and never rewrites the user's choice.
   enabled Boolean @default(true)
 
   /// Per-user plugin configuration (manifest config.schema governs the

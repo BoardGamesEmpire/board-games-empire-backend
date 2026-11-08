@@ -1123,8 +1123,12 @@ A permission a plugin defines in its own namespace for its own features. It is a
 _Avoid_: own-namespace permission, plugin-declared, plugin permission
 
 **Required permission**:
-A permission a plugin asks for and cannot work without: a server that refuses one blocks any update needing it, and a household or user that has not granted one is suspended. Refusing an optional permission only switches off its feature.
+A permission a plugin asks for and cannot work without: a server that refuses one blocks any update needing it, and a household or user that has not granted one keeps running on what it did grant, with the plugin's state reported as review pending. Refusing an optional permission only switches off its feature.
 _Avoid_: mandatory
+
+**Consent standing**:
+What a consent unit still owes a plugin under the current manifest and today's risk levels: the required permissions that do not confer and the optional ones that are off. Worked out when read, never stored.
+_Avoid_: late acceptance
 
 **Consent decision**:
 An answer to a plugin's request for a permission, given for the server, a household or a user: granted or denied.
@@ -1159,16 +1163,16 @@ Retyping each Critical-risk permission that an install or update gives server co
 _Avoid_: second factor, typed confirmation
 
 **Unit enablement**:
-A household's or user's own participation in a plugin: their on/off choice and their settings. A household creates it by switching the plugin on; a user's is created by their first grant.
+A household's or user's own participation in a plugin: their on/off choice and their settings. A household creates it by switching the plugin on; a user's is created by their first grant. A client receives one of five state codes for a unit: `off` (not switched on, or no unit enablement), `on` (running with everything the plugin asks for), `review_pending` (running on what was agreed while a required permission is outstanding), `needs_configuration` (switched on but its settings no longer fit the plugin) and `unavailable` (switched on, but the server cannot run it for this unit: the server switch is off, or this version has no surface at the unit's scope).
 _Avoid_: enablement row, anchor, enrolled, unit row
-
-**Late acceptance**:
-A consent that answers a unit's last outstanding required permission and so lifts its suspension.
-_Avoid_: re-enable (that is the unit's own switch), late consent
 
 **Re-consent**:
 A fresh answer a unit owes because an update made a permission newly required for it, raised its risk, or moved it to the unit's consent scope.
 _Avoid_: reconsent, re-prompt
+
+**Review pending**:
+The state of a unit that is switched on and running while its consent standing lists a required permission; the plugin runs on the grants it has.
+_Avoid_: suspension, suspended, suspended for consent, disabled, auto-disabled
 
 **Pre-consent**:
 Consent given ahead of an update, which takes effect when the update lands.
@@ -1179,10 +1183,6 @@ _Avoid_: dormant grant
 **Server switch**:
 The on/off control for a plugin across the whole server. Nothing runs for anyone while it is off, and each unit's own switch sits beneath it.
 _Avoid_: kill switch, server-level switch; enabled on its own
-
-**Suspension**:
-A plugin unit stopped because consent it needs is missing. It resumes once the consent is given.
-_Avoid_: disabled, auto-disabled
 
 **Dormancy**:
 A plugin unit, for the server or a household, kept in place but unable to run until something is fixed, such as settings a new version no longer accepts. Nobody chooses it; switching a plugin off on purpose is disabling it.
@@ -1197,7 +1197,7 @@ What remains when a plugin is uninstalled: every consent is discarded so a reins
 _Avoid_: tombstone, deleted, removed
 
 **Lifecycle event**:
-A permanent record of one change in a plugin's life, such as its install, a consent decided, a unit suspended, or its uninstall. It is kept after uninstall and never cleaned away.
+A permanent record of one change in a plugin's life, such as its install, a consent decided, a re-consent requested, or its uninstall. It is kept after uninstall and never cleaned away.
 _Avoid_: plugin event, audit entry, provenance timeline
 
 **Channel floor**:
@@ -1221,7 +1221,7 @@ A change in a new plugin version that widens what the plugin can reach or change
 _Avoid_: breaking change, permission escalation
 
 **Server-gating escalation**:
-An escalation the server must approve before an update can go live. Escalations that households or users own never wait for the server; those units are suspended instead.
+An escalation the server must approve before an update can go live. Escalations that households or users own never wait for the server; those units go to review pending instead.
 _Avoid_: blocking escalation
 
 **Update approval**:

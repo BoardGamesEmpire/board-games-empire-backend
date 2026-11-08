@@ -17,8 +17,9 @@ model HouseholdPlugin {
   /// Household-level switch, layered UNDER Plugin.enabled — the household
   /// ADMIN's intent, and only theirs. Consent never touches it: consent
   /// standing is derived at read time from the manifest's requirements and
-  /// the recorded grants (#1149), so a late acceptance changes what serves
-  /// without rewriting the admin's choice. The serving predicate is
+  /// the recorded grants (#1149), so a later consent changes what the
+  /// ability confers and the unit's state code, never whether the unit is
+  /// served, and never rewrites the admin's choice. The serving predicate is
   /// `enabled && dormantReason == null`.
   enabled Boolean @default(true)
 

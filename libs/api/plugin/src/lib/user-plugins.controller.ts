@@ -166,7 +166,7 @@ export class UserPluginsController {
       'Flips your own switch (enabled) back on. Your unit enablement is created by your first Granted user-scope ' +
       'consent decision (#225) — without one there is nothing to enable (404). Consent standing is worked out ' +
       'on every read and this endpoint never writes it: a required check still outstanding leaves the unit ' +
-      'running with state review_pending until late acceptance.',
+      'running with state review_pending until it is granted.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not a session user (API keys cannot exercise this axis)' })
