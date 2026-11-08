@@ -89,7 +89,10 @@ export interface SafeHttpDownloadOptions {
    */
   destination: string;
 
-  /** Most bytes the body may hold. Past it the download fails and no file stays. */
+  /**
+   * Most bytes the body may hold. Past it the download fails and no file
+   * stays. A value that is not a non-negative integer is refused.
+   */
   maxBytes: number;
 
   /**

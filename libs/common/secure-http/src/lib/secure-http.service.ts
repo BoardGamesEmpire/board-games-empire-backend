@@ -48,6 +48,17 @@ import { OUTBOUND_HTTP_OBSERVER } from './safe-http.tokens';
  */
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
+/**
+ * Drops a response body that will not be read. undici's body emits
+ * `RequestAbortedError` when it is destroyed before its end, and an `error`
+ * event with no listener crashes the process, so a listener is attached first
+ * (#1094).
+ */
+const discardBody = (body: Dispatcher.ResponseData['body']): void => {
+  body.on('error', () => undefined);
+  body.destroy();
+};
+
 /** Status codes that trigger retry when a retry policy is configured. */
 const DEFAULT_RETRY_STATUSES: readonly number[] = [408, 429, 502, 503, 504];
 
@@ -228,8 +239,15 @@ export class SecureHttpService {
    *
    * Throws only `SafeHttpError` subclasses, plus file-system errors on the
    * destination itself (such as `EEXIST`), which propagate as they are (#1094).
+   * A `maxBytes` that is not a byte count is a caller's bug: a `RangeError`,
+   * before any request, since NaN or Infinity would pass every check against
+   * the cap.
    */
   async download(url: string, options: SafeHttpDownloadOptions): Promise<SafeHttpDownloadResult> {
+    if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 0) {
+      throw new RangeError(`maxBytes must be a non-negative integer, not ${options.maxBytes}`);
+    }
+
     const snapshot = this.policy.current();
     const deadline = AbortSignal.timeout(options.timeoutMs);
     const resolved: ResolvedOptions = {
@@ -424,7 +442,7 @@ export class SecureHttpService {
       const redirecting = this.isFollowableRedirect(status) && !!responseHeaders['location'];
       if (sink) {
         if (redirecting || status < 200 || status > 299) {
-          result.body.destroy();
+          discardBody(result.body);
           return { status, headers: responseHeaders, bodyBytes: Buffer.alloc(0) };
         }
 
@@ -603,7 +621,7 @@ export class SecureHttpService {
   ): Promise<{ bytes: number; sha256: string }> {
     const declared = Number(headers['content-length']);
     if (Number.isFinite(declared) && declared > sink.maxBytes) {
-      body.destroy();
+      discardBody(body);
       throw new ResponseTooLargeError(url.toString(), sink.maxBytes);
     }
 
@@ -611,7 +629,7 @@ export class SecureHttpService {
     try {
       handle = await open(sink.destination, 'wx');
     } catch (err) {
-      body.destroy();
+      discardBody(body);
       throw new DestinationError(err);
     }
 

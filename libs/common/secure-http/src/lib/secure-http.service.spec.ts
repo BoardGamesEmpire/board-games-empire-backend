@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import { Http } from '@status/codes';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer, type Server, type ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -504,6 +504,23 @@ describe('SecureHttpService', () => {
       return dns;
     }
 
+    // The cap guards the disk. NaN or Infinity would pass every comparison
+    // against it, so a value that is not a byte count is refused (#1094).
+    it.each([Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5])(
+      'refuses a maxBytes of %p before any request (#1094)',
+      async (maxBytes) => {
+        const dns = dnsFor(['example.com', '8.8.8.8']);
+        const onRequest = jest.fn();
+        const { service } = buildService({ dns, mockAgent, observer: { onRequest } });
+
+        await expect(
+          service.download('http://example.com/a.tgz', { destination, maxBytes, timeoutMs: 5_000 }),
+        ).rejects.toBeInstanceOf(RangeError);
+        expect(onRequest).not.toHaveBeenCalled();
+        expect(existsSync(destination)).toBe(false);
+      },
+    );
+
     it('writes a 2xx body to the destination and reports its checksum (#1094)', async () => {
       const dns = dnsFor(['example.com', '8.8.8.8']);
       const { service, pool } = buildService({ dns, mockAgent });
@@ -669,11 +686,12 @@ describe('SecureHttpService', () => {
       expect(onError).toHaveBeenCalledTimes(1);
     });
 
-    // MockAgent hands over a whole body in one piece, so the mid-body cases
-    // use a real local server. The dispatcher pins every connection to
-    // 127.0.0.1 while the policy still sees a public address, as production
-    // pinning does.
-    describe('a body that arrives in pieces', () => {
+    // MockAgent hands over a whole body in one piece, and a body it hands over
+    // never raises undici's abort error, so the mid-body cases and the bodies
+    // a download leaves unread use a real local server. The dispatcher pins
+    // every connection to 127.0.0.1 while the policy still sees a public
+    // address, as production pinning does.
+    describe('against a real server', () => {
       let server: Server;
       let agent: Agent;
       let port: number;
@@ -690,10 +708,10 @@ describe('SecureHttpService', () => {
         await new Promise((resolve) => server.close(resolve));
       });
 
-      async function serve(handler: (res: ServerResponse) => void): Promise<SecureHttpService> {
-        server = createServer((_req, res) => {
+      async function serve(handler: (res: ServerResponse, req: IncomingMessage) => void): Promise<SecureHttpService> {
+        server = createServer((req, res) => {
           held.push(res);
-          handler(res);
+          handler(res, req);
         });
         await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
         port = (server.address() as AddressInfo).port;
@@ -766,6 +784,76 @@ describe('SecureHttpService', () => {
             signal: controller.signal,
           }),
         ).rejects.toBeInstanceOf(OutboundNetworkError);
+        expect(existsSync(destination)).toBe(false);
+      });
+
+      // A body that is dropped unread, destroyed before its end, emits undici's
+      // RequestAbortedError. With no listener that `error` event crashes the
+      // process, and Jest fails the test on it. It is emitted a turn after the
+      // download settles, so each test waits for it (#1094).
+      const unreadBodiesSettle = async (): Promise<void> => {
+        await new Promise((resolve) => setImmediate(resolve));
+        await new Promise((resolve) => setImmediate(resolve));
+      };
+
+      it("drops a redirect's body without an unhandled error (#1094)", async () => {
+        const service = await serve((res, req) => {
+          if (req.url === '/moved') {
+            res.writeHead(Http.Found, { location: '/a.tgz' });
+            res.end('moved');
+            return;
+          }
+          res.end('plugin');
+        });
+
+        const result = await service.download(`http://example.com:${port}/moved`, {
+          destination,
+          maxBytes: 1024,
+          timeoutMs: 5_000,
+        });
+        await unreadBodiesSettle();
+
+        expect(result.redirectCount).toBe(1);
+        expect(readFileSync(destination).toString()).toBe('plugin');
+      });
+
+      it("drops a non-2xx answer's body without an unhandled error (#1094)", async () => {
+        const service = await serve((res) => {
+          res.writeHead(Http.NotFound);
+          res.end('not here');
+        });
+
+        const result = await service.download(`http://example.com:${port}/a.tgz`, {
+          destination,
+          maxBytes: 1024,
+          timeoutMs: 5_000,
+        });
+        await unreadBodiesSettle();
+
+        expect(result.written).toBeNull();
+        expect(existsSync(destination)).toBe(false);
+      });
+
+      it('drops the body for an existing destination without an unhandled error (#1094)', async () => {
+        const service = await serve((res) => res.end('plugin'));
+        writeFileSync(destination, 'keep');
+
+        await expect(
+          service.download(`http://example.com:${port}/a.tgz`, { destination, maxBytes: 1024, timeoutMs: 5_000 }),
+        ).rejects.toMatchObject({ code: 'EEXIST' });
+        await unreadBodiesSettle();
+
+        expect(readFileSync(destination).toString()).toBe('keep');
+      });
+
+      it('drops a body declared over the cap without an unhandled error (#1094)', async () => {
+        const service = await serve((res) => res.end(Buffer.alloc(2048, 1)));
+
+        await expect(
+          service.download(`http://example.com:${port}/a.tgz`, { destination, maxBytes: 1024, timeoutMs: 5_000 }),
+        ).rejects.toBeInstanceOf(ResponseTooLargeError);
+        await unreadBodiesSettle();
+
         expect(existsSync(destination)).toBe(false);
       });
     });
