@@ -53,7 +53,11 @@ export interface SafeHttpRequestOptions {
   /** Request body. Object/array bodies are JSON-stringified. */
   body?: SafeHttpRequestBody;
 
-  /** Per-request timeout in milliseconds. Overrides the policy default. */
+  /**
+   * Per-request timeout in milliseconds. Overrides the policy default. An
+   * integer from 1 to 2^31 - 1 (the longest a timer holds); anything else is
+   * a `RangeError` before any request.
+   */
   timeoutMs?: number;
 
   /**
@@ -103,7 +107,8 @@ export interface SafeHttpDownloadOptions {
    * every hop's connection, its answer and the body as they arrive. The
    * outbound HTTP policy's address lookup before each hop is not cut off by
    * it, though the time it takes counts: the resolver's own timeouts bound the
-   * lookup.
+   * lookup. An integer from 1 to 2^31 - 1; anything else is a `RangeError`
+   * before any request.
    */
   timeoutMs: number;
 

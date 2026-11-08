@@ -114,6 +114,9 @@ interface HopResult {
   written?: { bytes: number; sha256: string };
 }
 
+/** The longest delay a Node timer holds; a longer one fires after 1 ms. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
 /**
  * Outbound HTTP service with SSRF defense. Every request goes through the
  * full evaluation pipeline:
@@ -137,8 +140,9 @@ interface HopResult {
  * never propagate to the caller.
  *
  * Thrown errors from this service are always subclasses of `SafeHttpError`,
- * except a caller's bug: an option that is not a count (`maxRedirects`, or
- * `download()`'s `maxBytes`) is a `RangeError` before any request (#1094).
+ * except a caller's bug: an option out of its range (`timeoutMs`,
+ * `maxRedirects`, or `download()`'s `maxBytes`) is a `RangeError` before any
+ * request (#1094).
  * HTTP non-success statuses are NOT thrown — they're returned on
  * `SafeHttpResponse.status` so the caller can branch on application
  * semantics.
@@ -243,7 +247,7 @@ export class SecureHttpService {
    * destination itself (such as `EEXIST`), which propagate as they are (#1094).
    * A `maxBytes` that is not a byte count is a caller's bug: a `RangeError`,
    * before any request, since NaN or Infinity would pass every check against
-   * the cap. The same goes for `maxRedirects`.
+   * the cap. The same goes for `timeoutMs` and `maxRedirects`.
    */
   async download(url: string, options: SafeHttpDownloadOptions): Promise<SafeHttpDownloadResult> {
     if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 0) {
@@ -251,11 +255,12 @@ export class SecureHttpService {
     }
 
     const snapshot = this.policy.current();
-    const deadline = AbortSignal.timeout(options.timeoutMs);
+    const timeoutMs = this.resolveTimeoutMs(options.timeoutMs, snapshot);
+    const deadline = AbortSignal.timeout(timeoutMs);
     const resolved: ResolvedOptions = {
       method: 'GET',
       headers: options.headers ?? {},
-      timeoutMs: options.timeoutMs,
+      timeoutMs,
       maxRedirects: this.resolveMaxRedirects(options.maxRedirects, snapshot),
       responseType: 'arraybuffer',
       signal: options.signal,
@@ -570,6 +575,27 @@ export class SecureHttpService {
   // ───────────────────────────────────────────────────────────────
 
   /**
+   * The caller's time limit, or the policy default. A timer holds at most
+   * 2^31 - 1 ms; Node turns anything longer into 1 ms, a false timeout, and
+   * refuses NaN, Infinity or a fraction only once the hop is under way, where
+   * it would reach the caller as a network error. So a limit outside 1 ms to
+   * 2^31 - 1 ms is a caller's bug: a `RangeError` before any request
+   * (#1094). The policy default is already 1,000 to 300,000 ms (its DTO says
+   * so).
+   */
+  private resolveTimeoutMs(requested: number | undefined, snapshot: SafeHttpPolicySnapshot): number {
+    if (requested === undefined) {
+      return snapshot.defaultTimeoutMs;
+    }
+
+    if (!Number.isSafeInteger(requested) || requested < 1 || requested > MAX_TIMER_MS) {
+      throw new RangeError(`timeoutMs must be an integer from 1 to ${MAX_TIMER_MS}, not ${requested}`);
+    }
+
+    return requested;
+  }
+
+  /**
    * The caller's redirect cap, or the policy default. NaN or Infinity never
    * meets `redirectCount >= maxRedirects`, so a redirect loop would run on
    * until the time limit: a cap that is not a non-negative integer is a
@@ -593,7 +619,7 @@ export class SecureHttpService {
       method: options.method ?? 'GET',
       headers: options.headers ?? {},
       body: options.body,
-      timeoutMs: options.timeoutMs ?? snapshot.defaultTimeoutMs,
+      timeoutMs: this.resolveTimeoutMs(options.timeoutMs, snapshot),
       maxRedirects: this.resolveMaxRedirects(options.maxRedirects, snapshot),
       responseType: options.responseType ?? 'json',
       retry: options.retry,

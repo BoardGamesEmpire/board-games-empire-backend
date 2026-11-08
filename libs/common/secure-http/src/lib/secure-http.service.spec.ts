@@ -499,6 +499,35 @@ describe('SecureHttpService', () => {
         RequestTimeoutError,
       );
     });
+
+    // A time limit that is not a timer's duration is a caller's bug. NaN or
+    // Infinity used to fail inside the hop and reach the caller as a network
+    // error, after the observer heard of a request; anything above 2^31 - 1
+    // ms became a 1 ms timer and a false timeout. Refused before any request
+    // (#1094).
+    it.each([Number.NaN, Number.POSITIVE_INFINITY, -1, 0, 1.5, 2 ** 31])(
+      'refuses a timeoutMs of %p before any request (#1094)',
+      async (timeoutMs) => {
+        const dns = new FakeDnsResolver();
+        dns.set('example.com', [v4('8.8.8.8')]);
+        const onRequest = jest.fn();
+        const { service } = buildService({ dns, mockAgent, observer: { onRequest } });
+
+        await expect(service.request('http://example.com/a', { timeoutMs })).rejects.toBeInstanceOf(RangeError);
+        expect(onRequest).not.toHaveBeenCalled();
+      },
+    );
+
+    it('accepts the longest time limit a timer holds (#1094)', async () => {
+      const dns = new FakeDnsResolver();
+      dns.set('example.com', [v4('8.8.8.8')]);
+      mockAgent.get('http://example.com').intercept({ path: '/a' }).reply(Http.Ok, { ok: true });
+
+      const { service } = buildService({ dns, mockAgent });
+      const response = await service.request('http://example.com/a', { timeoutMs: 2 ** 31 - 1 });
+
+      expect(response.status).toBe(Http.Ok);
+    });
   });
 
   describe('download', () => {
@@ -549,6 +578,23 @@ describe('SecureHttpService', () => {
         await expect(
           service.download('http://example.com/a.tgz', { destination, maxBytes: 1024, maxRedirects, timeoutMs: 5_000 }),
         ).rejects.toBeInstanceOf(RangeError);
+        expect(onRequest).not.toHaveBeenCalled();
+        expect(existsSync(destination)).toBe(false);
+      },
+    );
+
+    // And the time limit: a value that is not a timer's duration is refused
+    // with the same RangeError, not Node's own (#1094).
+    it.each([Number.NaN, Number.POSITIVE_INFINITY, -1, 0, 1.5, 2 ** 31])(
+      'refuses a timeoutMs of %p before any request (#1094)',
+      async (timeoutMs) => {
+        const dns = dnsFor(['example.com', '8.8.8.8']);
+        const onRequest = jest.fn();
+        const { service } = buildService({ dns, mockAgent, observer: { onRequest } });
+
+        await expect(
+          service.download('http://example.com/a.tgz', { destination, maxBytes: 1024, timeoutMs }),
+        ).rejects.toThrow(/^timeoutMs must be/);
         expect(onRequest).not.toHaveBeenCalled();
         expect(existsSync(destination)).toBe(false);
       },
