@@ -5,8 +5,7 @@ import type { StaticAnalysisFinding } from '../install/static-analysis.types';
 import {
   GrantedPermissionRecord,
   HouseholdPluginConfigUpdatedEvent,
-  HouseholdPluginUnitDisabledEvent,
-  HouseholdPluginUnitEnabledEvent,
+  HouseholdPluginReconsentRequestedEvent,
   NpmAuditFinding,
   PluginConfigUpdatedEvent,
   PluginDisabledEvent,
@@ -18,8 +17,7 @@ import {
   PluginProvenance,
   PluginUninstalledEvent,
   PluginUpdateCheckCompletedEvent,
-  UserPluginUnitDisabledEvent,
-  UserPluginUnitEnabledEvent,
+  UserPluginReconsentRequestedEvent,
 } from './plugin.events';
 
 const initiatedAt = new Date('2026-07-22T10:00:00.000Z');
@@ -261,74 +259,37 @@ describe('plugin lifecycle events', () => {
     });
   });
 
-  describe('HouseholdPluginUnitDisabledEvent', () => {
-    it('carries the escalated permission slugs and manifest version as context; enabled is untouched', () => {
-      const event = new HouseholdPluginUnitDisabledEvent(
-        { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: false },
-        { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: true },
+  describe('HouseholdPluginReconsentRequestedEvent', () => {
+    it('announces the outstanding slugs and manifest version with an unchanged row (#1149)', () => {
+      const unit = { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: true };
+      const event = new HouseholdPluginReconsentRequestedEvent(
+        unit,
         ['plugin|demo-sink|update:calendar', 'calendar:read'],
         '1.3.0',
         initiatedAt,
       );
 
-      expect(event.requiredPermissionSlugs).toEqual(['plugin|demo-sink|update:calendar', 'calendar:read']);
+      expect(event.outstandingPermissionSlugs).toEqual(['plugin|demo-sink|update:calendar', 'calendar:read']);
       expect(event.manifestVersion).toBe('1.3.0');
-      expect(event.after.enabled).toBe(true);
+      expect(event.subject).toBe('HouseholdPlugin');
+      expect(event.subjectId).toBe('hp_1');
       expect(event.action).toBe('update');
-      expect(HouseholdPluginUnitDisabledEvent.eventName).toBe(PluginEvent.UnitDisabled);
+      expect(event.before).toBe(event.after);
+      expect(HouseholdPluginReconsentRequestedEvent.eventName).toBe(PluginEvent.ReconsentRequested);
     });
   });
 
-  describe('HouseholdPluginUnitEnabledEvent', () => {
-    it('carries the clearing decision as context', () => {
-      const event = new HouseholdPluginUnitEnabledEvent(
-        { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: true },
-        { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: false },
-        'calendar:read',
-        '1.3.0',
-        initiatedAt,
-      );
+  describe('UserPluginReconsentRequestedEvent', () => {
+    it('shares the ReconsentRequested routing key and disambiguates on subject (#1149)', () => {
+      const unit = { id: 'up_1', userId: 'user_1', pluginId: 'plg_1', enabled: true };
+      const event = new UserPluginReconsentRequestedEvent(unit, ['read:user_digest'], '1.3.0', initiatedAt);
 
-      expect(event.grantedPermissionSlug).toBe('calendar:read');
-      expect(event.manifestVersion).toBe('1.3.0');
-      expect(HouseholdPluginUnitEnabledEvent.eventName).toBe(PluginEvent.UnitEnabled);
-    });
-  });
-
-  describe('UserPluginUnitDisabledEvent', () => {
-    it('shares the UnitDisabled routing key with the household class and disambiguates on subject (#225)', () => {
-      const event = new UserPluginUnitDisabledEvent(
-        { id: 'up_1', userId: 'user_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: false },
-        { id: 'up_1', userId: 'user_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: true },
-        ['read:user_digest'],
-        '1.3.0',
-        initiatedAt,
-      );
-
-      expect(event.requiredPermissionSlugs).toEqual(['read:user_digest']);
-      expect(event.manifestVersion).toBe('1.3.0');
-      // The user's enabled intent survives the suspension, as it does at household scope.
-      expect(event.after.enabled).toBe(true);
-      expect(event.action).toBe('update');
-      expect(event.subject).toBe('UserPlugin');
-      expect(UserPluginUnitDisabledEvent.eventName).toBe(PluginEvent.UnitDisabled);
-    });
-  });
-
-  describe('UserPluginUnitEnabledEvent', () => {
-    it('carries the clearing decision as context (#225)', () => {
-      const event = new UserPluginUnitEnabledEvent(
-        { id: 'up_1', userId: 'user_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: true },
-        { id: 'up_1', userId: 'user_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: false },
-        'read:user_digest',
-        '1.3.0',
-        initiatedAt,
-      );
-
-      expect(event.grantedPermissionSlug).toBe('read:user_digest');
+      expect(event.outstandingPermissionSlugs).toEqual(['read:user_digest']);
       expect(event.manifestVersion).toBe('1.3.0');
       expect(event.subject).toBe('UserPlugin');
-      expect(UserPluginUnitEnabledEvent.eventName).toBe(PluginEvent.UnitEnabled);
+      expect(event.subjectId).toBe('up_1');
+      expect(event.before).toBe(event.after);
+      expect(UserPluginReconsentRequestedEvent.eventName).toBe(PluginEvent.ReconsentRequested);
     });
   });
 

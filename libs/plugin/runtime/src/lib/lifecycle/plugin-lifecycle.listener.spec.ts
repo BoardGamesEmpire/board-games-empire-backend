@@ -18,7 +18,7 @@ import { PluginConfigEventsService } from '../config/plugin-config-events.servic
 import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginEnabledEvent,
-  HouseholdPluginUnitDisabledEvent,
+  HouseholdPluginReconsentRequestedEvent,
   HouseholdPluginUnitDormantEvent,
   HouseholdPluginUnitRevivedEvent,
   PluginConfigUpdatedEvent,
@@ -33,8 +33,7 @@ import {
   PluginUpdatePendingEvent,
   PluginUpdateRejectedEvent,
   UserPluginDisabledEvent,
-  UserPluginUnitDisabledEvent,
-  UserPluginUnitEnabledEvent,
+  UserPluginReconsentRequestedEvent,
   type PluginProvenance,
 } from '../events/plugin.events';
 import { PluginLifecycleListener, UNATTRIBUTED_LIFECYCLE_ACTOR } from './plugin-lifecycle.listener';
@@ -421,7 +420,7 @@ describe('PluginLifecycleListener', () => {
       // subject-guarded fallback would refuse them.
       const event = new HouseholdPluginEnabledEvent(
         null,
-        { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true, suspendedForConsent: false },
+        { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true },
         initiatedAt,
       );
       db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
@@ -437,25 +436,6 @@ describe('PluginLifecycleListener', () => {
           scopeType: PluginGrantScope.Household,
           scopeId: 'household-1',
           payload: {},
-        }),
-      );
-    });
-
-    it('records the born-suspended slugs on a creation-shaped enable — the suspension’s only durable "why" (#323)', async () => {
-      const event = new HouseholdPluginEnabledEvent(
-        null,
-        { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true, suspendedForConsent: true },
-        initiatedAt,
-        ['plugin|demo-sink|manage:digest'],
-      );
-      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
-
-      emitter.emit(PluginEvent.Enabled, event);
-      await flush();
-
-      expect(createdRow()).toEqual(
-        expect.objectContaining({
-          payload: { bornSuspendedSlugs: ['plugin|demo-sink|manage:digest'] },
         }),
       );
     });
@@ -486,8 +466,8 @@ describe('PluginLifecycleListener', () => {
 
     it('persists a USER unit-switch flip with User scope coordinates (#323)', async () => {
       const event = new UserPluginDisabledEvent(
-        { id: 'up-1', userId: 'user-9', pluginId: 'plugin-1', enabled: true, suspendedForConsent: false },
-        { id: 'up-1', userId: 'user-9', pluginId: 'plugin-1', enabled: false, suspendedForConsent: false },
+        { id: 'up-1', userId: 'user-9', pluginId: 'plugin-1', enabled: true },
+        { id: 'up-1', userId: 'user-9', pluginId: 'plugin-1', enabled: false },
         initiatedAt,
       );
       db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
@@ -505,26 +485,49 @@ describe('PluginLifecycleListener', () => {
       );
     });
 
-    it('persists a UnitDisabled row with the escalated permission slugs and manifest version', async () => {
-      const event = new HouseholdPluginUnitDisabledEvent(
-        { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true, suspendedForConsent: false },
-        { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true, suspendedForConsent: true },
+    it('persists a ReconsentRequested row with the outstanding slugs and manifest version (#1149)', async () => {
+      const event = new HouseholdPluginReconsentRequestedEvent(
+        { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true },
         ['plugin|demo-sink|update:calendar'],
         '1.3.0',
         initiatedAt,
       );
       db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
 
-      emitter.emit(PluginEvent.UnitDisabled, event);
+      emitter.emit(PluginEvent.ReconsentRequested, event);
       await flush();
 
       expect(createdRow()).toEqual(
         expect.objectContaining({
-          event: PluginLifecycleEventType.UnitDisabled,
+          event: PluginLifecycleEventType.ReconsentRequested,
+          pluginId: 'plugin-1',
           scopeType: PluginGrantScope.Household,
           scopeId: 'household-1',
           manifestVersion: '1.3.0',
-          payload: { requiredPermissionSlugs: ['plugin|demo-sink|update:calendar'] },
+          payload: { outstandingPermissionSlugs: ['plugin|demo-sink|update:calendar'] },
+        }),
+      );
+    });
+
+    it('persists a USER ReconsentRequested row with User scope coordinates — the class, not the routing key, is the scope (#1149)', async () => {
+      const event = new UserPluginReconsentRequestedEvent(
+        { id: 'up-1', userId: 'user-1', pluginId: 'plugin-1', enabled: true },
+        ['read:user_digest'],
+        '1.3.0',
+        initiatedAt,
+      );
+      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
+
+      emitter.emit(PluginEvent.ReconsentRequested, event);
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          event: PluginLifecycleEventType.ReconsentRequested,
+          scopeType: PluginGrantScope.User,
+          scopeId: 'user-1',
+          manifestVersion: '1.3.0',
+          payload: { outstandingPermissionSlugs: ['read:user_digest'] },
         }),
       );
     });
@@ -536,7 +539,6 @@ describe('PluginLifecycleListener', () => {
           householdId: 'household-1',
           pluginId: 'plugin-1',
           enabled: true,
-          suspendedForConsent: false,
           dormantReason: null,
         },
         {
@@ -544,7 +546,6 @@ describe('PluginLifecycleListener', () => {
           householdId: 'household-1',
           pluginId: 'plugin-1',
           enabled: true,
-          suspendedForConsent: false,
           dormantReason: PluginUnitDormantReason.ScopeOrphaned,
         },
         PluginUnitDormantReason.ScopeOrphaned,
@@ -556,9 +557,9 @@ describe('PluginLifecycleListener', () => {
       emitter.emit(PluginEvent.UnitDormant, event);
       await flush();
 
-      // Its OWN kind, not UnitDisabled: that one means consent suspension and
-      // its payload is permission slugs, so recording dormancy under it would
-      // make the provenance table lie about both.
+      // Its OWN kind: dormancy has no outstanding slugs and a different cure
+      // than re-consent, so recording it under ReconsentRequested would make
+      // the provenance table lie about both.
       expect(createdRow()).toEqual(
         expect.objectContaining({
           event: PluginLifecycleEventType.UnitDormant,
@@ -577,7 +578,6 @@ describe('PluginLifecycleListener', () => {
           householdId: 'household-1',
           pluginId: 'plugin-1',
           enabled: true,
-          suspendedForConsent: false,
           dormantReason: PluginUnitDormantReason.ScopeOrphaned,
         },
         {
@@ -585,7 +585,6 @@ describe('PluginLifecycleListener', () => {
           householdId: 'household-1',
           pluginId: 'plugin-1',
           enabled: true,
-          suspendedForConsent: false,
           dormantReason: null,
         },
         PluginUnitDormantReason.ScopeOrphaned,
@@ -603,54 +602,6 @@ describe('PluginLifecycleListener', () => {
           scopeId: 'household-1',
           manifestVersion: '1.4.0',
           payload: { clearedReason: PluginUnitDormantReason.ScopeOrphaned },
-        }),
-      );
-    });
-
-    it('persists a USER UnitDisabled row with User scope coordinates — the class, not the routing key, is the scope (#225)', async () => {
-      const event = new UserPluginUnitDisabledEvent(
-        { id: 'up-1', userId: 'user-1', pluginId: 'plugin-1', enabled: true, suspendedForConsent: false },
-        { id: 'up-1', userId: 'user-1', pluginId: 'plugin-1', enabled: true, suspendedForConsent: true },
-        ['read:user_digest'],
-        '1.3.0',
-        initiatedAt,
-      );
-      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
-
-      emitter.emit(PluginEvent.UnitDisabled, event);
-      await flush();
-
-      expect(createdRow()).toEqual(
-        expect.objectContaining({
-          event: PluginLifecycleEventType.UnitDisabled,
-          scopeType: PluginGrantScope.User,
-          scopeId: 'user-1',
-          manifestVersion: '1.3.0',
-          payload: { requiredPermissionSlugs: ['read:user_digest'] },
-        }),
-      );
-    });
-
-    it('persists a USER UnitEnabled row carrying the clearing decision (#225)', async () => {
-      const event = new UserPluginUnitEnabledEvent(
-        { id: 'up-1', userId: 'user-1', pluginId: 'plugin-1', enabled: true, suspendedForConsent: true },
-        { id: 'up-1', userId: 'user-1', pluginId: 'plugin-1', enabled: true, suspendedForConsent: false },
-        'read:user_digest',
-        '1.3.0',
-        initiatedAt,
-      );
-      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
-
-      emitter.emit(PluginEvent.UnitEnabled, event);
-      await flush();
-
-      expect(createdRow()).toEqual(
-        expect.objectContaining({
-          event: PluginLifecycleEventType.UnitEnabled,
-          scopeType: PluginGrantScope.User,
-          scopeId: 'user-1',
-          manifestVersion: '1.3.0',
-          payload: { grantedPermissionSlug: 'read:user_digest' },
         }),
       );
     });

@@ -39,8 +39,7 @@ export const RESERVED_PLUGIN_SLUGS: ReadonlySet<string> = new Set([
   'grant-created',
   'grant-rejected',
   'grant-revoked',
-  'unit-disabled',
-  'unit-enabled',
+  're-consent-requested',
   'unit-dormant',
   'unit-revived',
 ]);
