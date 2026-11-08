@@ -19,11 +19,7 @@ import type { Prisma } from '@bge/database';
  * optimization: uniformity is what keeps the total lock order
  * (plugin row → grant row → advisory → unit row) a rule instead of a
  * per-site argument, and a writer that skips the advisory reopens the
- * pre-row race class for every creator it can overlap with. The one
- * deliberate exception is activation's batched suspension pass, which
- * predates the scheme; it is ordered anyway, because every unit-row writer
- * claims the plugin row before this lock, so a unit write either committed
- * before activation's claim or waits behind it (#361).
+ * pre-row race class for every creator it can overlap with.
  *
  * The plugin row sorts BEFORE this lock, and that is a correctness
  * constraint rather than a convention: uninstall and activation both claim

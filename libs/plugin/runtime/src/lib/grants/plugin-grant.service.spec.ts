@@ -82,14 +82,6 @@ describe('PluginGrantService', () => {
     ...overrides,
   });
 
-  /** The row a post-commit pass's claim reads (#361): the plugin the decision read, still current. */
-  const currentPluginRow = {
-    slug: 'demo-sink',
-    version: '1.2.0',
-    manifest_json: manifest,
-    uninstalled_at: null,
-  };
-
   const grantRow = (overrides: Partial<PluginGrant> = {}): PluginGrant =>
     ({
       id: 'grant_1',
@@ -143,14 +135,11 @@ describe('PluginGrantService', () => {
     db.$transaction.mockImplementation((cb) => cb(db));
     db.plugin.findUnique.mockResolvedValue(plugin);
 
-    // Routes `$queryRaw` by table, and the `plugins` reads by the column they
-    // select: the decision's claim (#398, #361) answers with the signals it
-    // compares (`manifest_matches`), a post-commit pass's claim (#361) with the
-    // plugin manifest itself (`manifest_json`), and the two unit-row locks keep
-    // the mock's default "no row" answer. Handing either claim the other's row
-    // shape would make the test driving it pass or fail for the wrong reason,
-    // and so would a further raw statement matching whichever route came
-    // first, so that one fails loudly instead.
+    // Routes `$queryRaw` by what it reads: the decision's plugin-row claim
+    // (#398, #361) answers with the signals it compares (`manifest_matches`),
+    // and the household share lock (#548) with a live row unless a case says
+    // otherwise. A decision reads no unit enablement (#1149), so any other raw
+    // statement fails loudly rather than matching a route by accident.
     householdLive = true;
     db.$queryRaw.mockImplementation(((query: unknown) => {
       const sql = rawQueryText(query);
@@ -159,16 +148,8 @@ describe('PluginGrantService', () => {
         return Promise.resolve([claimedRow()]);
       }
 
-      if (sql.includes('FROM plugins')) {
-        return Promise.resolve([currentPluginRow]);
-      }
-
       if (sql.includes('FROM households')) {
         return Promise.resolve(householdLive ? [{ id: 'hh_1' }] : []);
-      }
-
-      if (sql.includes('FROM household_plugins') || sql.includes('FROM user_plugins')) {
-        return Promise.resolve([]);
       }
 
       throw new Error(`Unrouted $queryRaw in test: ${sql}`);
@@ -665,6 +646,57 @@ describe('PluginGrantService', () => {
       expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
     });
 
+    it('a Denied decision on a required household check writes the grant row and nothing else', async () => {
+      // A required denial below server scope is recorded, and the unit's
+      // consent standing reads it from the grant row (#1149). The decision
+      // writes no unit enablement and announces no unit transition: a stored
+      // mirror of that state is what drifted in #1061, #1063 and #1147.
+      const requiredCalendar = {
+        ...manifest,
+        permissions: {
+          ...manifest.permissions,
+          checks: manifest.permissions.checks.map((check) =>
+            check.slug === 'update:calendar' ? { ...check, required: true } : check,
+          ),
+        },
+      };
+      db.plugin.findUnique.mockResolvedValue({ ...plugin, manifestJson: requiredCalendar } as unknown as Plugin);
+      db.pluginGrant.upsert.mockResolvedValue(
+        grantRow({
+          scopeType: PluginGrantScope.Household,
+          scopeId: 'hh_1',
+          permissionSlug: 'update:calendar',
+          status: PluginGrantStatus.Denied,
+        }),
+      );
+
+      const result = await service.decide({
+        ...serverDecision,
+        permissionSlug: 'update:calendar',
+        scopeType: PluginGrantScope.Household,
+        scopeId: 'hh_1',
+        deciderId: 'user-hh-admin',
+        status: PluginGrantStatus.Denied,
+      });
+
+      expect(result.changed).toBe(true);
+      expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(1);
+      expect(db.pluginGrant.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ create: expect.objectContaining({ status: PluginGrantStatus.Denied }) }),
+      );
+
+      const householdPluginCalls = Object.values(db.householdPlugin).flatMap((method) =>
+        jest.isMockFunction(method) ? method.mock.calls : [],
+      );
+      const rawSql = db.$queryRaw.mock.calls.map(([query]) => rawQueryText(query));
+
+      expect(householdPluginCalls).toEqual([]);
+      expect(rawSql.some((sql) => sql.includes('household_plugins'))).toBe(false);
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+      expect(emitter.emit).toHaveBeenCalledTimes(1);
+      expect(emitter.emit).toHaveBeenCalledWith(PluginEvent.GrantRejected, expect.any(PluginGrantRejectedEvent));
+    });
+
     it('a denial against a permission only the PENDING manifest requires stays legal — upgrades never coerce the installed plugin', async () => {
       // The staged update promotes feedback:read to required; the ACTIVE
       // manifest — the one decide() judges against — keeps it optional.
@@ -750,7 +782,7 @@ describe('PluginGrantService', () => {
     });
   });
 
-  describe('decide — user enablement anchor (#225)', () => {
+  describe("decide — the user's unit enablement (#225)", () => {
     const userDecision = {
       ...serverDecision,
       permissionSlug: 'read:public_content',
@@ -762,16 +794,13 @@ describe('PluginGrantService', () => {
     it('a Granted user-scope decision ensures the UserPlugin row, atomically with the grant', async () => {
       await service.decide(userDecision);
 
-      // Empty update arm on purpose: the row may exist suspended or
-      // user-disabled, and consent never writes `enabled` or clears a
-      // suspension here — the late-acceptance path owns that transition.
-      // The create arm states its birth state explicitly: no OTHER required
-      // user check exists in this manifest (read:public_content is the only
-      // user check, and it is optional), so the denied-required probe is
-      // skipped entirely and the anchor is born serving.
+      // The row carries unit enablement and nothing else (#1149): an empty
+      // update arm, because the row may exist user-disabled and consent never
+      // writes `enabled`; a create arm with no consent state, because what
+      // the unit still owes is read from its grants, never written here.
       expect(db.userPlugin.upsert).toHaveBeenCalledWith({
         where: { userId_pluginId: { userId: 'user-a', pluginId: 'plg_1' } },
-        create: { userId: 'user-a', pluginId: 'plg_1', suspendedForConsent: false, suspendedAt: null },
+        create: { userId: 'user-a', pluginId: 'plg_1' },
         update: {},
       });
       expect(db.pluginGrant.count).not.toHaveBeenCalled();
