@@ -106,6 +106,8 @@ const AUTHENTIK: ProviderConfig = {
 
 const OIDC_CONFIG: Pick<MockAuthConfig, 'oidcProviders'> = { oidcProviders: [AUTHENTIK] };
 
+let lastDb: Awaited<ReturnType<typeof createTestingModuleWithDb>>['db'];
+
 async function createService(
   config: MockAuthConfig,
   systemSetting: Partial<SystemSetting> = MOCK_SYSTEM_SETTING,
@@ -113,6 +115,8 @@ async function createService(
   const { module, db } = await createTestingModuleWithDb({
     providers: [StrategyService, { provide: ConfigService, useValue: buildMockConfigService(config) }],
   });
+
+  lastDb = db;
 
   // Only the singleton row resolves: it is the row the auth gates enforce, so
   // discovery must advertise that one and no other.
@@ -391,6 +395,53 @@ describe('StrategyService', () => {
           const [strategy] = discovery.strategies as EmailAndPasswordStrategyDto[];
 
           expect(strategy.signUpEndpoint).toBeUndefined();
+        });
+
+        describe('password reset (#654)', () => {
+          const MAIL_SET_UP = { smtpHost: 'smtp.example.com', mailFromAddress: 'bge@example.com' };
+          const strategyOf = async (row: Partial<SystemSetting>) => {
+            const service = await createService({ useEmailPasswordAuth: true }, { ...MOCK_SYSTEM_SETTING, ...row });
+            const discovery = await service.getDiscovery();
+            return discovery.strategies[0] as EmailAndPasswordStrategyDto;
+          };
+
+          it('reads the reset switch and the mail settings from the singleton row (#654)', async () => {
+            await strategyOf({ allowPasswordResets: true, ...MAIL_SET_UP });
+
+            expect(lastDb.systemSetting.findUnique).toHaveBeenCalledWith(
+              expect.objectContaining({
+                select: expect.objectContaining({
+                  allowPasswordResets: true,
+                  smtpHost: true,
+                  mailFromAddress: true,
+                }),
+              }),
+            );
+          });
+
+          it('is available, with both endpoints, when resets are on and mail is set up (#654)', async () => {
+            const strategy = await strategyOf({ allowPasswordResets: true, ...MAIL_SET_UP });
+
+            expect(strategy.passwordResetAvailable).toBe(true);
+            expect(strategy.requestPasswordResetEndpoint).toBe(`${AUTH_BASE}/request-password-reset`);
+            expect(strategy.resetPasswordEndpoint).toBe(`${AUTH_BASE}/reset-password`);
+          });
+
+          it('is unavailable, with no endpoints, when resets are off (#654)', async () => {
+            const strategy = await strategyOf({ allowPasswordResets: false, ...MAIL_SET_UP });
+
+            expect(strategy.passwordResetAvailable).toBe(false);
+            expect(strategy.requestPasswordResetEndpoint).toBeUndefined();
+            expect(strategy.resetPasswordEndpoint).toBeUndefined();
+          });
+
+          it('cannot request a reset but still lists the finishing endpoint when mail is not set up (#654)', async () => {
+            const strategy = await strategyOf({ allowPasswordResets: true, smtpHost: null, mailFromAddress: null });
+
+            expect(strategy.passwordResetAvailable).toBe(false);
+            expect(strategy.requestPasswordResetEndpoint).toBeUndefined();
+            expect(strategy.resetPasswordEndpoint).toBe(`${AUTH_BASE}/reset-password`);
+          });
         });
 
         it('sets signUpDisabled: false when registration is open', async () => {

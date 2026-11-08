@@ -9,7 +9,9 @@ const UNREAD_PATH = '/api/notifications/unread';
  * and answers the list it held of. A notification listener runs after the
  * response to the request that caused it (#167), so one read straight after
  * that request can come too early. It waits as long as every other poll in
- * the suite does, `pollUntil`'s default.
+ * the suite does, `pollUntil`'s default, unless `options.timeoutMs` says
+ * otherwise: a notification that follows a slow step, such as a test email's
+ * SMTP connection (#654), needs longer.
  *
  * Nothing here waits out an absence. A spec showing that a notification was
  * NOT sent waits instead for a later one the same user is sent, then checks
@@ -22,6 +24,7 @@ export async function unreadWhen(
   baseUrl: string,
   actor: SessionActor,
   predicate: (unread: readonly UnreadNotificationWire[]) => boolean,
+  options: { readonly timeoutMs?: number } = {},
 ): Promise<readonly UnreadNotificationWire[]> {
   let last: readonly UnreadNotificationWire[] = [];
 
@@ -33,6 +36,7 @@ export async function unreadWhen(
       return predicate(last) ? last : undefined;
     },
     {
+      timeoutMs: options.timeoutMs,
       description: () =>
         `user '${actor.user.username}' (${actor.user.id}) to hold the notifications the spec expects. ` +
         `Their last unread list was:\n${JSON.stringify(last, null, 2)}`,

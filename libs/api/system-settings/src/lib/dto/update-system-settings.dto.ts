@@ -1,8 +1,20 @@
-import { ProviderLinkingPolicy, Reach } from '@bge/database';
+import { ProviderLinkingPolicy, Reach, SmtpSecurity } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEnum, IsIn, IsInt, IsNotEmpty, IsString, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import {
+  IsBoolean,
+  IsEmail,
+  IsEnum,
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 
 /**
  * A century. Each reader turns a day count into a date, `now` minus a
@@ -38,6 +50,20 @@ const MAX_NAME_LENGTH = 100;
 const INVITEE_POLICIES = [Reach.Public, Reach.FriendsOfFriends, Reach.Friends] as const;
 
 /**
+ * How long a password reset link may work, in minutes: at least a quarter of
+ * an hour, since mail can be slow, and at most a week (#654). The default
+ * lives in the schema. A CHECK constraint holds the column to the same range
+ * (migration 20261107120000_outgoing_mail), so a change here needs a migration
+ * too.
+ */
+export const PASSWORD_RESET_LINK_LIFETIME_MINUTES = { min: 15, max: 10_080 } as const;
+
+/** Long enough for any host name (253), a user name or an address (254). */
+const MAX_MAIL_SETTING_LENGTH = 255;
+
+const trimStrings = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
+
+/**
  * Partial update for the `SystemSetting` singleton row. A property the body
  * omits is left unchanged.
  *
@@ -59,7 +85,7 @@ export class UpdateSystemSettingsDto {
   // Trim before validation, so a whitespace-only name collapses to '' and
   // answers 400 rather than labelling the server with nothing, and the length
   // is measured without the padding.
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @Transform(trimStrings)
   name?: string;
 
   @ApiPropertyOptional({
@@ -182,6 +208,85 @@ export class UpdateSystemSettingsDto {
   @ValidateIf((_, value) => value !== undefined)
   @IsIn(INVITEE_POLICIES, { message: i18nValidationMessage('validation.isIn') })
   eventInviteePolicy?: (typeof INVITEE_POLICIES)[number];
+
+  @ApiPropertyOptional({
+    description: 'The SMTP server outgoing mail goes through. Null clears it, which stops outgoing mail.',
+    maxLength: MAX_MAIL_SETTING_LENGTH,
+    nullable: true,
+    type: String,
+  })
+  @ValidateIf((_, value) => value !== undefined && value !== null)
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
+  @MaxLength(MAX_MAIL_SETTING_LENGTH, { message: i18nValidationMessage('validation.maxLength') })
+  @Transform(trimStrings)
+  smtpHost?: string | null;
+
+  @ApiPropertyOptional({ description: "The SMTP server's port.", minimum: 1, maximum: 65_535 })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
+  @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(65_535, { message: i18nValidationMessage('validation.max') })
+  smtpPort?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'How the connection to the SMTP server is secured. StartTls: a plain connection upgraded to TLS. ImplicitTls: TLS from the first byte. None: no TLS, for a trusted local relay.',
+    enum: SmtpSecurity,
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsEnum(SmtpSecurity, { message: i18nValidationMessage('validation.isEnum') })
+  smtpSecurity?: SmtpSecurity;
+
+  @ApiPropertyOptional({
+    description: 'The user name the SMTP server asks for. Null means none.',
+    maxLength: MAX_MAIL_SETTING_LENGTH,
+    nullable: true,
+    type: String,
+  })
+  @ValidateIf((_, value) => value !== undefined && value !== null)
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
+  @MaxLength(MAX_MAIL_SETTING_LENGTH, { message: i18nValidationMessage('validation.maxLength') })
+  @Transform(trimStrings)
+  smtpUser?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'The password the SMTP server asks for. It is stored encrypted and never returned: a read says only whether one is set. Null clears it. It is not trimmed, since a password may begin or end with a space.',
+    maxLength: MAX_MAIL_SETTING_LENGTH,
+    nullable: true,
+    type: String,
+  })
+  @ValidateIf((_, value) => value !== undefined && value !== null)
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
+  @MaxLength(MAX_MAIL_SETTING_LENGTH, { message: i18nValidationMessage('validation.maxLength') })
+  smtpPassword?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'The address outgoing mail comes from. Null clears it, which stops outgoing mail.',
+    maxLength: MAX_MAIL_SETTING_LENGTH,
+    nullable: true,
+    type: String,
+  })
+  @ValidateIf((_, value) => value !== undefined && value !== null)
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsEmail({}, { message: i18nValidationMessage('validation.isEmail') })
+  @MaxLength(MAX_MAIL_SETTING_LENGTH, { message: i18nValidationMessage('validation.maxLength') })
+  @Transform(trimStrings)
+  mailFromAddress?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'How long a password reset link works, in minutes.',
+    minimum: PASSWORD_RESET_LINK_LIFETIME_MINUTES.min,
+    maximum: PASSWORD_RESET_LINK_LIFETIME_MINUTES.max,
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
+  @Min(PASSWORD_RESET_LINK_LIFETIME_MINUTES.min, { message: i18nValidationMessage('validation.min') })
+  @Max(PASSWORD_RESET_LINK_LIFETIME_MINUTES.max, { message: i18nValidationMessage('validation.max') })
+  passwordResetLinkLifetimeMinutes?: number;
 
   @ApiPropertyOptional({
     description:

@@ -18,7 +18,9 @@ import {
   E2E_BASE_URL_VAR,
   E2E_DATABASE_CONTAINER_ADDRESS_VAR,
   E2E_FAKE_PROVIDER_URL_VAR,
+  E2E_MAILPIT_VAR,
   fakeProviderEnv,
+  MAILPIT_IMAGE,
   parseRedisUrl,
   POSTGRES_IMAGE,
   REDIS_IMAGE,
@@ -28,6 +30,7 @@ import {
 } from './e2e-env';
 import { startFakeSignInProvider, type FakeSignInProvider } from './fake-sign-in-provider';
 import { setE2EGlobalState } from './global-state';
+import { startMailpit, type StartedMailpit } from './mailpit';
 import { sweepThrottleBuckets } from './redis-reset';
 
 /** The deployable artifact under test — built by the e2e target's `api:build` dependency. */
@@ -123,21 +126,25 @@ async function launchApi(env: NodeJS.ProcessEnv): Promise<LaunchedApi> {
  *  1. Postgres and Redis testcontainers (or the `BGE_E2E_*` escape-hatch
  *     endpoints — treated as DISPOSABLE: they are migrated, seeded, and
  *     swept exactly like a container).
- *  2. `process.env` overrides for `DATABASE_URL`, `DATABASE_MIGRATION_URL`,
+ *  2. A Mailpit container, the SMTP server outgoing mail reaches (#654); its
+ *     ports are published via `BGE_E2E_MAILPIT`. Always a container, with no
+ *     escape hatch: nothing reaches it until a spec points the mail settings
+ *     at it, and a spec reads back every message it holds.
+ *  3. `process.env` overrides for `DATABASE_URL`, `DATABASE_MIGRATION_URL`,
  *     the address other containers reach the Postgres container at, and all
  *     three Redis connection prefixes. Jest spawns its workers AFTER globalSetup
  *     resolves, so the workers inherit these values; the API child process
  *     receives them explicitly. `.env` (gitignored, developer-owned) is
  *     never written, and dotenv semantics mean it never overrides an
  *     already-set process variable.
- *  3. `prisma migrate deploy` — the real migration chain, from empty,
+ *  4. `prisma migrate deploy` — the real migration chain, from empty,
  *     is itself under test.
- *  4. `prisma db seed` — the real reference seeds via the `prisma.config.ts`
+ *  5. `prisma db seed` — the real reference seeds via the `prisma.config.ts`
  *     seed hook (`libs/database/src/seed-cli.ts` → `runSeeds`).
- *  5. A fake sign-in provider in this process, listed to the API as its only
+ *  6. A fake sign-in provider in this process, listed to the API as its only
  *     sign-in provider (#912); its URL is published via
  *     `BGE_E2E_FAKE_PROVIDER_URL`.
- *  6. The built API bundle as a child process, gated on `/health/ready`;
+ *  7. The built API bundle as a child process, gated on `/health/ready`;
  *     its base URL is published via `BGE_E2E_BASE_URL`.
  *
  * Handles are stashed on `globalThis` for `global-teardown`. If the process
@@ -152,6 +159,7 @@ export default async function globalSetup(): Promise<void> {
 
   let postgres: StartedPostgreSqlContainer | undefined;
   let redis: StartedRedisContainer | undefined;
+  let mailpit: StartedMailpit | undefined;
   let api: ChildProcess | undefined;
   let signInProvider: FakeSignInProvider | undefined;
 
@@ -189,6 +197,17 @@ export default async function globalSetup(): Promise<void> {
           'the rate-limit sweep is skipped and specs that isolate a queue or start a worker refuse to run',
       );
     }
+
+    // After Redis and before the API, though neither child reads it: the API
+    // and the worker learn the SMTP server only from the mail settings on the
+    // settings row, which a spec points here (#654).
+    console.log(`[e2e] starting ${MAILPIT_IMAGE} (testcontainers)...`);
+    mailpit = await startMailpit();
+    process.env[E2E_MAILPIT_VAR] = JSON.stringify({
+      smtpHost: mailpit.smtpHost,
+      smtpPort: mailpit.smtpPort,
+      apiUrl: mailpit.apiUrl,
+    });
 
     process.env['DATABASE_URL'] = databaseUrl;
     // The migration credential too, to the same database: a developer's `.env`
@@ -230,12 +249,12 @@ export default async function globalSetup(): Promise<void> {
     // no-op after a clean teardown, since the child has exited by then.
     killOnExit(api);
 
-    setE2EGlobalState({ postgres, redis, api, signInProvider });
+    setE2EGlobalState({ postgres, redis, mailpit, api, signInProvider });
     console.log(`[e2e] harness ready — API at ${launched.baseUrl}`);
   } catch (error) {
     // Teardown never runs when setup throws — stop whatever already started.
     api?.kill('SIGKILL');
-    await Promise.allSettled([signInProvider?.close(), postgres?.stop(), redis?.stop()]);
+    await Promise.allSettled([signInProvider?.close(), postgres?.stop(), redis?.stop(), mailpit?.stop()]);
     throw error;
   }
 }

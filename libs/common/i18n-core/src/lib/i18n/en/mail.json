@@ -1,0 +1,20 @@
+{
+  "password_reset": {
+    "subject": "Reset your password on {server}",
+    "body": "Hello {username},\n\nSomeone asked to reset the password for your account on {server}. To choose a new password, open this link:\n\n{link}\n\nThe link works once, for {lifetime}.\n\nIf you didn't ask for this, you can ignore this email. Your password stays the same."
+  },
+  "test": {
+    "subject": "Test email from {server}",
+    "body": "Hello {username},\n\nThis is the test email you sent from {server}'s mail settings. Email from this server is working."
+  },
+  "test_result": {
+    "sent": "The test email was sent to your address. If it isn't in your inbox, check your spam folder.",
+    "not_configured": "The test email wasn't sent, because email isn't set up on this server. Add an SMTP host and a From address to the mail settings.",
+    "settings_unreadable": "The test email wasn't sent, because the saved SMTP password can't be read. This happens when the server's encryption key changes. Enter the SMTP password again in the mail settings.",
+    "auth_failed": "The test email wasn't sent, because the SMTP server didn't accept the user name or password. Check them in the mail settings.",
+    "host_unreachable": "The test email wasn't sent, because this server couldn't connect to the SMTP host. Check the host and port in the mail settings.",
+    "tls_failed": "The test email wasn't sent, because a secure connection to the SMTP host failed. Check the connection security and the port in the mail settings.",
+    "rejected": "The test email wasn't sent, because the SMTP server refused the sender or the recipient. Check the From address in the mail settings.",
+    "send_failed": "The test email wasn't sent, because something went wrong while sending it. Try again, and check the worker's log if it keeps failing."
+  }
+}

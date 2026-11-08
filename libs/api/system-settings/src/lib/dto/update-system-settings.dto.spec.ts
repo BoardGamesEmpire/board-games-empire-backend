@@ -1,7 +1,7 @@
 import { validationCatalogKeys } from '@bge/testing';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { UpdateSystemSettingsDto } from './update-system-settings.dto';
+import { PASSWORD_RESET_LINK_LIFETIME_MINUTES, UpdateSystemSettingsDto } from './update-system-settings.dto';
 
 type PlainPayload = Record<string, unknown>;
 
@@ -149,6 +149,61 @@ describe('UpdateSystemSettingsDto', () => {
 
     it('refuses a name longer than 100 characters', async () => {
       expect(await keysFor({ name: 'a'.repeat(101) })).toEqual({ 'name.maxLength': 'validation.maxLength' });
+    });
+  });
+
+  describe('mail settings (#654)', () => {
+    it('accepts a full set (#654)', async () => {
+      expect(
+        await keysFor({
+          smtpHost: 'smtp.example.com',
+          smtpPort: 465,
+          smtpSecurity: 'ImplicitTls',
+          smtpUser: 'mailer',
+          smtpPassword: ' pass word ',
+          mailFromAddress: 'games@example.com',
+          passwordResetLinkLifetimeMinutes: 60,
+        }),
+      ).toEqual({});
+    });
+
+    it.each(['smtpHost', 'smtpUser', 'smtpPassword', 'mailFromAddress'])(
+      'accepts null for %s (#654)',
+      async (property) => {
+        expect(await keysFor({ [property]: null })).toEqual({});
+      },
+    );
+
+    it('refuses what a mail setting cannot hold (#654)', async () => {
+      const refused = [
+        { smtpPassword: '' },
+        { smtpPort: 0 },
+        { smtpPort: 65_536 },
+        { smtpSecurity: 'Tls' },
+        { mailFromAddress: 'not-an-address' },
+        { passwordResetLinkLifetimeMinutes: 14 },
+        { passwordResetLinkLifetimeMinutes: 10_081 },
+        { smtpHost: '' },
+      ];
+
+      for (const payload of refused) {
+        const { errors } = await validateAsThePipeDoes(payload);
+        expect(errors.map((error) => error.property)).toEqual(Object.keys(payload));
+      }
+    });
+
+    it('does not trim the password, which may begin or end with a space (#654)', async () => {
+      const { dto } = await validateAsThePipeDoes({ smtpPassword: ' x ' });
+      expect(dto.smtpPassword).toBe(' x ');
+    });
+
+    it('trims the host (#654)', async () => {
+      const { dto } = await validateAsThePipeDoes({ smtpHost: ' smtp.example.com ' });
+      expect(dto.smtpHost).toBe('smtp.example.com');
+    });
+
+    it('bounds the link lifetime at 15 minutes to 7 days (#654)', () => {
+      expect(PASSWORD_RESET_LINK_LIFETIME_MINUTES).toEqual({ min: 15, max: 10_080 });
     });
   });
 });

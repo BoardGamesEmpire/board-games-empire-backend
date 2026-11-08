@@ -24,6 +24,9 @@
       "path": "../i18n/tsconfig.lib.json"
     },
     {
+      "path": "../mail/tsconfig.lib.json"
+    },
+    {
       "path": "../../database/tsconfig.lib.json"
     }
   ],

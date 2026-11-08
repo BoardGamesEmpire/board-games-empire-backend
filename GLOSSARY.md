@@ -967,6 +967,13 @@ _Avoid_: backend, store; driver on its own
 A message inside the app to one user about something that concerns them, such as an invite, an RSVP, a nomination's outcome or a finished import, which they mark as read. Email and push delivery are planned.
 _Avoid_: alert; notification for a webhook delivery
 
+**Outgoing mail**:
+Email the server sends, such as password reset links and an admin's test email, through the SMTP server set in the mail settings. The worker sends it; nothing is sent until the mail settings name a host and a From address.
+_Avoid_: mailer, email transport
+
+**Mail settings**:
+The part of the server settings that says how outgoing mail is sent: the SMTP host, port, connection security, user, password and From address. An admin changes them, and a change applies to the next email without a restart.
+
 **Announcement**:
 Planned: a notice from staff to a chosen audience, with acknowledgement and reminders, which the server also uses to warn of scheduled plugin updates and uninstalls.
 _Avoid_: notification (a way of delivering it, not the notice)

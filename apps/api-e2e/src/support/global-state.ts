@@ -2,11 +2,13 @@ import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import type { StartedRedisContainer } from '@testcontainers/redis';
 import type { ChildProcess } from 'node:child_process';
 import type { FakeSignInProvider } from './fake-sign-in-provider';
+import type { StartedMailpit } from './mailpit';
 
 /**
  * Handles started by `global-setup` and stopped by `global-teardown`:
- * the two dependency containers, the API server child process and the fake
- * sign-in provider it signs users in through (#912). Jest runs both files
+ * the two dependency containers, the Mailpit container outgoing mail reaches
+ * (#654), the API server child process and the fake sign-in provider it signs
+ * users in through (#912). Jest runs both files
  * in the SAME main process (test files run in workers), so `globalThis` is
  * the documented channel between them. A container handle is absent when
  * the corresponding escape hatch (`BGE_E2E_DATABASE_URL` /
@@ -15,6 +17,7 @@ import type { FakeSignInProvider } from './fake-sign-in-provider';
 export interface E2EGlobalState {
   readonly postgres?: StartedPostgreSqlContainer;
   readonly redis?: StartedRedisContainer;
+  readonly mailpit?: StartedMailpit;
   readonly api?: ChildProcess;
   readonly signInProvider?: FakeSignInProvider;
 }

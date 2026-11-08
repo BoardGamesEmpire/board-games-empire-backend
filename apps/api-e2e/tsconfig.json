@@ -44,6 +44,9 @@
       "path": "../../libs/queue/feedback"
     },
     {
+      "path": "../../libs/queue/mail"
+    },
+    {
       "path": "../../libs/common/redis"
     },
     {

@@ -61,6 +61,31 @@ export const POSTGRES_IMAGE = 'postgres:17-alpine';
 export const REDIS_IMAGE = 'redis:7-alpine';
 
 /**
+ * The SMTP server outgoing mail reaches in the suite (#654). Mailpit keeps
+ * every message it accepts and serves them over an HTTP API, so a spec reads
+ * the mail the worker sent.
+ */
+export const MAILPIT_IMAGE = 'axllent/mailpit:v1.33.0';
+
+/**
+ * Where the Mailpit container `global-setup` starts is listening, as the JSON
+ * of a {@link MailpitEndpoint}. Specs read it back through
+ * {@link requireMailpit}. Neither child gets it: the API and the worker learn
+ * the SMTP server only from the mail settings on the settings row, which a
+ * spec writes.
+ */
+export const E2E_MAILPIT_VAR = 'BGE_E2E_MAILPIT';
+
+/** Mailpit's two ports, as this machine reaches them. */
+export interface MailpitEndpoint {
+  /** The host and port of its SMTP server: what the mail settings name. */
+  readonly smtpHost: string;
+  readonly smtpPort: number;
+  /** The base URL of its HTTP API, such as `http://localhost:55001`. */
+  readonly apiUrl: string;
+}
+
+/**
  * The `NODE_ENV` the API child runs under: the value CI and Jest's CLI set.
  * Pinned by the harness rather than inherited, because a developer's shell
  * may hold anything at all, and a value outside the environments `@bge/env`
@@ -413,6 +438,24 @@ export function requireBaseUrl(env: Readonly<Record<string, string | undefined>>
   }
 
   return baseUrl;
+}
+
+/** The Mailpit endpoint `global-setup` published, or a loud failure if it never did. */
+export function requireMailpit(env: Readonly<Record<string, string | undefined>>): MailpitEndpoint {
+  const raw = env[E2E_MAILPIT_VAR]?.trim();
+
+  if (!raw) {
+    throw new Error(`${E2E_MAILPIT_VAR} is not set — did the e2e globalSetup run and start Mailpit?`);
+  }
+
+  const parsed: unknown = JSON.parse(raw);
+  const { smtpHost, smtpPort, apiUrl } = (parsed ?? {}) as Partial<Record<keyof MailpitEndpoint, unknown>>;
+
+  if (typeof smtpHost !== 'string' || typeof smtpPort !== 'number' || typeof apiUrl !== 'string') {
+    throw new Error(`${E2E_MAILPIT_VAR} must be the JSON of { smtpHost, smtpPort, apiUrl }; received ${raw}`);
+  }
+
+  return { smtpHost, smtpPort, apiUrl };
 }
 
 /**

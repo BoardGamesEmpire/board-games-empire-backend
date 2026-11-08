@@ -21,13 +21,13 @@ describe('system settings read shape', () => {
     expect(classified).toEqual(declared);
   });
 
-  it('withholds the signing secret and the row bookkeeping', () => {
+  it('withholds the signing secret, the SMTP password and the row bookkeeping (#654)', () => {
     expect(Object.keys(SYSTEM_SETTINGS_SCALARS_OMITTED).sort()).toEqual(
-      ['identifier', 'mediaSigningSecret', 'singleton'].sort(),
+      ['identifier', 'mediaSigningSecret', 'singleton', 'smtpPassword'].sort(),
     );
   });
 
-  it('publishes the row id and each setting', () => {
+  it('publishes the row id and each setting, the SMTP password excepted (#654)', () => {
     expect(Object.keys(SYSTEM_SETTINGS_SELECT).sort()).toEqual(
       [
         'id',
@@ -47,6 +47,12 @@ describe('system settings read shape', () => {
         'reviewGatewayMechanics',
         'householdInviteePolicy',
         'eventInviteePolicy',
+        'smtpHost',
+        'smtpPort',
+        'smtpSecurity',
+        'smtpUser',
+        'mailFromAddress',
+        'passwordResetLinkLifetimeMinutes',
       ].sort(),
     );
   });
