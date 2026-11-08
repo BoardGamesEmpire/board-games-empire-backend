@@ -1,5 +1,8 @@
-import { PluginCategory, PluginExecutionMode, PluginScope, PluginUnitDormantReason } from '@bge/database';
+import { PluginCategory, PluginExecutionMode, PluginScope, RiskLevel } from '@bge/database';
 import type {
+  ConsentOutstandingCheck,
+  ConsentOutstandingKind,
+  PluginConsentStanding,
   PluginHouseholdInventoryEntry,
   PluginInventoryDetail,
   PluginInventoryEntry,
@@ -9,7 +12,9 @@ import type {
   PluginInventoryUnitState,
   PluginProvenance,
   PluginUnitInventoryEntry,
+  PluginUnitStateCode,
 } from '@bge/plugin';
+import { PLUGIN_UNIT_STATE_CODES } from '@bge/plugin';
 import { ApiProperty } from '@nestjs/swagger';
 
 /**
@@ -32,6 +37,18 @@ import { ApiProperty } from '@nestjs/swagger';
  * there is no pre-existing entity whose partial projection we would be
  * guessing at.
  */
+
+/**
+ * The four kinds, listed for OpenAPI (#1149). Keyed by the runtime union so a
+ * kind added there fails to compile here until the OpenAPI list gains it.
+ */
+const CONSENT_OUTSTANDING_KIND_LIST: Record<ConsentOutstandingKind, true> = {
+  never_asked: true,
+  refused: true,
+  risk_raised: true,
+  outstanding_elsewhere: true,
+};
+const CONSENT_OUTSTANDING_KINDS = Object.keys(CONSENT_OUTSTANDING_KIND_LIST);
 
 /** Where the plugin artifact came from. One shape: every plugin is installed from an artifact (#696). */
 class PluginProvenanceDto implements PluginProvenance {
@@ -133,10 +150,70 @@ export class PluginInventoryEntryDto extends PluginInventoryIdentityDto implemen
   pendingUpdate!: PendingUpdateDto | null;
 }
 
+export class ConsentOutstandingCheckDto implements ConsentOutstandingCheck {
+  @ApiProperty({ description: 'The permission slug of the check' })
+  slug!: string;
+
+  @ApiProperty({
+    enum: CONSENT_OUTSTANDING_KINDS,
+    enumName: 'ConsentOutstandingKind',
+    description:
+      'Why the check confers nothing yet. These are stable codes a client can announce or rephrase. ' +
+      'never_asked: no decision has been made. refused: a durable denial was recorded. risk_raised: the earlier ' +
+      'consent no longer covers the permission, whose risk has risen since. outstanding_elsewhere: only another ' +
+      'scope can answer it, such as a server admin for a server-consented check seen from a household or user.',
+  })
+  kind!: ConsentOutstandingKind;
+
+  @ApiProperty({
+    description:
+      'True for a permission the plugin says it cannot work without: while such a check is outstanding the unit ' +
+      'reads review_pending and keeps running on the grants it gave, with the ability denying what was not ' +
+      'granted. False for an optional check, which only switches its feature off.',
+  })
+  required!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'The manifest feature name the check belongs to; null for a check that covers the whole plugin',
+  })
+  feature!: string | null;
+
+  @ApiProperty({
+    enum: RiskLevel,
+    enumName: 'RiskLevel',
+    nullable: true,
+    description:
+      "The permission's risk today; null when a core permission is no longer in the catalog. A permission the " +
+      'plugin declares is always Low.',
+  })
+  riskLevel!: RiskLevel | null;
+
+  @ApiProperty({ description: 'Plain-language reason, localized, as the plugin states it' })
+  reason!: string;
+}
+
+export class PluginConsentStandingDto implements PluginConsentStanding {
+  @ApiProperty({
+    type: [ConsentOutstandingCheckDto],
+    description:
+      'Required checks that confer nothing yet. While any remain, the unit state is review_pending: the unit ' +
+      'keeps its unit enablement and consent standing is worked out on every read, never stored (#1149).',
+  })
+  outstanding!: ConsentOutstandingCheckDto[];
+
+  @ApiProperty({
+    type: [ConsentOutstandingCheckDto],
+    description: 'Optional checks that confer nothing yet. Each switches its feature off without holding the unit.',
+  })
+  optionalOff!: ConsentOutstandingCheckDto[];
+}
+
 class UnitStateDto implements PluginInventoryUnitState {
   @ApiProperty({
     description:
-      'Whether an enablement row exists at all. False is common and distinct from enabled=false: a user who has ' +
+      'Whether a unit enablement exists at all. False is common and distinct from enabled=false: a user who has ' +
       'consented to nothing is unanchored on every plugin.',
   })
   anchored!: boolean;
@@ -144,11 +221,27 @@ class UnitStateDto implements PluginInventoryUnitState {
   @ApiProperty()
   enabled!: boolean;
 
-  @ApiProperty()
-  suspendedForConsent!: boolean;
+  @ApiProperty({
+    enum: PLUGIN_UNIT_STATE_CODES,
+    enumName: 'PluginUnitStateCode',
+    description:
+      'The unit state, a stable code a client can announce or rephrase. off: no unit enablement, or it is switched ' +
+      'off. on: running with everything the plugin asks for. review_pending: running on what was agreed while ' +
+      'required checks are outstanding, see consent; it can list only outstanding_elsewhere entries, a ' +
+      'server-scope permission a server admin must answer, and a client renders that as waiting on the server ' +
+      'admin, not as a prompt the household or user can accept. ' +
+      'needs_configuration: the retained configuration no longer fits the active schema; supplying a conforming ' +
+      'document heals it. unavailable: switched on, but the server cannot run it for this unit, because the ' +
+      'server switch is off (serverEnabled false) or the plugin no longer has this axis; only a server admin ' +
+      'restores it. Worked out on every read, never stored.',
+  })
+  state!: PluginUnitStateCode;
 
-  @ApiProperty({ type: Date, nullable: true })
-  suspendedAt!: Date | null;
+  @ApiProperty({
+    type: PluginConsentStandingDto,
+    description: 'What the unit still owes the plugin, worked out from its grants and the active manifest',
+  })
+  consent!: PluginConsentStandingDto;
 }
 
 export class PluginUnitInventoryEntryDto extends PluginInventoryIdentityDto implements PluginUnitInventoryEntry {
@@ -164,22 +257,10 @@ export class PluginUnitInventoryEntryDto extends PluginInventoryIdentityDto impl
   unit!: UnitStateDto;
 }
 
+/** The household list shares the unit shape; a switched-on unit enablement that serves nothing reads `unavailable` or `needs_configuration` (#1149). */
 export class PluginHouseholdInventoryEntryDto
   extends PluginUnitInventoryEntryDto
-  implements PluginHouseholdInventoryEntry
-{
-  @ApiProperty({
-    enum: PluginUnitDormantReason,
-    nullable: true,
-    description:
-      "Why this household's retained enablement row cannot serve, or null when it can. ScopeOrphaned: an " +
-      'activation re-scoped the plugin so it no longer has a household axis, and only a re-scope back restores ' +
-      'the row. NeedsConfiguration: the retained configuration no longer satisfies the active schema, and ' +
-      'supplying a conforming document heals it. Such a row is listed rather than hidden — it exists and serves ' +
-      'nothing, which is precisely what an admin needs to see.',
-  })
-  dormantReason!: PluginUnitDormantReason | null;
-}
+  implements PluginHouseholdInventoryEntry {}
 
 class InventoryFeatureDto implements PluginInventoryFeature {
   @ApiProperty({ description: 'Manifest features[].name — the stable identifier' })

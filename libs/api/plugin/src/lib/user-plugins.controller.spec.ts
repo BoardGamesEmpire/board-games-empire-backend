@@ -29,14 +29,23 @@ const PRESENTATION = {
 const GRANT = { id: 'grant-1', permissionSlug: 'read:public_content', status: PluginGrantStatus.Granted } as never;
 const UNIT_ROW = { id: 'up-1', userId: USER_ID, pluginId: 'plugin-1', enabled: true } as never;
 const INVENTORY_PAGE = {
-  rows: [{ id: 'plugin-1', slug: 'demo-sink', serverEnabled: true, unit: { anchored: false } }],
+  rows: [
+    {
+      id: 'plugin-1',
+      slug: 'demo-sink',
+      serverEnabled: true,
+      unit: { anchored: false, enabled: false, state: 'off', consent: { outstanding: [], optionalOff: [] } },
+    },
+  ],
   total: 1,
 };
 const FEATURE_STATE = {
   plugin: { id: 'plugin-1', slug: 'demo-sink' },
   unit: { scopeType: 'User', userId: USER_ID },
   served: true,
-  suspendedForConsent: false,
+  serverEnabled: true,
+  state: 'on',
+  consent: { outstanding: [], optionalOff: [] },
   features: [],
 } as unknown as PluginFeatureUnitState;
 

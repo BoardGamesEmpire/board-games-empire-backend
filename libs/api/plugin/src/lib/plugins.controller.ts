@@ -296,8 +296,10 @@ export class PluginsController {
     summary: 'Approve the staged pending update',
     description:
       'The server-scope consent act: seeds the new server-consentable grants, re-stamps risk-escalated ones, ' +
-      'applies the declares[] catalog diff, and suspends household/user units owing a fresh decision (reported ' +
-      'per axis on the response). Activation is DB-side — the running instance keeps the prior code until the ' +
+      'applies the declares[] catalog diff, and reports the household and user units owing a fresh decision per axis on the ' +
+      'response (reconsentHouseholdUnits, reconsentUserUnits). Those units keep whatever they were running: one ' +
+      'owing a required permission reads review_pending until its owner decides, and one owing only a risk-raised ' +
+      'optional permission has that feature off (#1149). Activation is DB-side — the running instance keeps the prior code until the ' +
       'next restart (restartRequired). Enforcement of the confirmation sets stays in the service; the 409 ' +
       'challenge bodies carry the prompt inputs to re-submit verbatim. The body names the staging it answers with ' +
       'the stagingId the staged-update read reported (#357).',
@@ -345,8 +347,8 @@ export class PluginsController {
         // one operational instruction: nothing serves the new code until a
         // restart.
         restartRequired: result.plugin.restartRequired,
-        suspendedHouseholdUnits: result.suspendedHouseholdUnits,
-        suspendedUserUnits: result.suspendedUserUnits,
+        reconsentHouseholdUnits: result.reconsentHouseholdUnits,
+        reconsentUserUnits: result.reconsentUserUnits,
       })),
     );
   }
