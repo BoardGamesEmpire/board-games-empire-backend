@@ -136,7 +136,9 @@ interface HopResult {
  * and redirect denial. Observer exceptions are caught and logged; they
  * never propagate to the caller.
  *
- * Thrown errors from this service are always subclasses of `SafeHttpError`.
+ * Thrown errors from this service are always subclasses of `SafeHttpError`,
+ * except a caller's bug: an option that is not a count (`maxRedirects`, or
+ * `download()`'s `maxBytes`) is a `RangeError` before any request (#1094).
  * HTTP non-success statuses are NOT thrown — they're returned on
  * `SafeHttpResponse.status` so the caller can branch on application
  * semantics.
@@ -241,7 +243,7 @@ export class SecureHttpService {
    * destination itself (such as `EEXIST`), which propagate as they are (#1094).
    * A `maxBytes` that is not a byte count is a caller's bug: a `RangeError`,
    * before any request, since NaN or Infinity would pass every check against
-   * the cap.
+   * the cap. The same goes for `maxRedirects`.
    */
   async download(url: string, options: SafeHttpDownloadOptions): Promise<SafeHttpDownloadResult> {
     if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 0) {
@@ -254,7 +256,7 @@ export class SecureHttpService {
       method: 'GET',
       headers: options.headers ?? {},
       timeoutMs: options.timeoutMs,
-      maxRedirects: options.maxRedirects ?? snapshot.defaultMaxRedirects,
+      maxRedirects: this.resolveMaxRedirects(options.maxRedirects, snapshot),
       responseType: 'arraybuffer',
       signal: options.signal,
       deadline,
@@ -567,13 +569,32 @@ export class SecureHttpService {
   // Helpers
   // ───────────────────────────────────────────────────────────────
 
+  /**
+   * The caller's redirect cap, or the policy default. NaN or Infinity never
+   * meets `redirectCount >= maxRedirects`, so a redirect loop would run on
+   * until the time limit: a cap that is not a non-negative integer is a
+   * caller's bug, a `RangeError` before any request (#1094). The policy
+   * default is already an integer from 0 to 20 (its DTO and column say so).
+   */
+  private resolveMaxRedirects(requested: number | undefined, snapshot: SafeHttpPolicySnapshot): number {
+    if (requested === undefined) {
+      return snapshot.defaultMaxRedirects;
+    }
+
+    if (!Number.isSafeInteger(requested) || requested < 0) {
+      throw new RangeError(`maxRedirects must be a non-negative integer, not ${requested}`);
+    }
+
+    return requested;
+  }
+
   private resolveOptions(options: SafeHttpRequestOptions, snapshot: SafeHttpPolicySnapshot): ResolvedOptions {
     return {
       method: options.method ?? 'GET',
       headers: options.headers ?? {},
       body: options.body,
       timeoutMs: options.timeoutMs ?? snapshot.defaultTimeoutMs,
-      maxRedirects: options.maxRedirects ?? snapshot.defaultMaxRedirects,
+      maxRedirects: this.resolveMaxRedirects(options.maxRedirects, snapshot),
       responseType: options.responseType ?? 'json',
       retry: options.retry,
       signal: options.signal,

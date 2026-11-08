@@ -287,6 +287,22 @@ describe('SecureHttpService', () => {
       );
     });
 
+    // NaN or Infinity never meets `redirectCount >= maxRedirects`, so a
+    // redirect loop would run on until the time limit. A cap that is not a
+    // count is a caller's bug, refused before any request (#1094).
+    it.each([Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5])(
+      'refuses a maxRedirects of %p before any request (#1094)',
+      async (maxRedirects) => {
+        const dns = new FakeDnsResolver();
+        dns.set('example.com', [v4('8.8.8.8')]);
+        const onRequest = jest.fn();
+        const { service } = buildService({ dns, mockAgent, observer: { onRequest } });
+
+        await expect(service.request('http://example.com/a', { maxRedirects })).rejects.toBeInstanceOf(RangeError);
+        expect(onRequest).not.toHaveBeenCalled();
+      },
+    );
+
     it('Http.SeeOther redirects convert POST to GET and drop body', async () => {
       const dns = new FakeDnsResolver();
       dns.set('example.com', [v4('8.8.8.8')]);
@@ -515,6 +531,23 @@ describe('SecureHttpService', () => {
 
         await expect(
           service.download('http://example.com/a.tgz', { destination, maxBytes, timeoutMs: 5_000 }),
+        ).rejects.toBeInstanceOf(RangeError);
+        expect(onRequest).not.toHaveBeenCalled();
+        expect(existsSync(destination)).toBe(false);
+      },
+    );
+
+    // The same holds for the redirect cap: NaN or Infinity would never stop
+    // a redirect loop short of the time limit (#1094).
+    it.each([Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5])(
+      'refuses a maxRedirects of %p before any request (#1094)',
+      async (maxRedirects) => {
+        const dns = dnsFor(['example.com', '8.8.8.8']);
+        const onRequest = jest.fn();
+        const { service } = buildService({ dns, mockAgent, observer: { onRequest } });
+
+        await expect(
+          service.download('http://example.com/a.tgz', { destination, maxBytes: 1024, maxRedirects, timeoutMs: 5_000 }),
         ).rejects.toBeInstanceOf(RangeError);
         expect(onRequest).not.toHaveBeenCalled();
         expect(existsSync(destination)).toBe(false);

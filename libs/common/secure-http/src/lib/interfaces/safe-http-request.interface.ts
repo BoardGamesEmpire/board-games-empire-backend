@@ -56,7 +56,10 @@ export interface SafeHttpRequestOptions {
   /** Per-request timeout in milliseconds. Overrides the policy default. */
   timeoutMs?: number;
 
-  /** Per-request redirect cap. Overrides the policy default. */
+  /**
+   * Per-request redirect cap. Overrides the policy default. A non-negative
+   * integer; anything else is a `RangeError` before any request.
+   */
   maxRedirects?: number;
 
   /** Default `json`. */
@@ -106,7 +109,10 @@ export interface SafeHttpDownloadOptions {
 
   headers?: Record<string, string>;
 
-  /** Per-download redirect cap. Overrides the policy default. */
+  /**
+   * Per-download redirect cap. Overrides the policy default. A non-negative
+   * integer; anything else is a `RangeError` before any request.
+   */
   maxRedirects?: number;
 
   /** Caller-controlled cancellation. Composes with the time limit. */
