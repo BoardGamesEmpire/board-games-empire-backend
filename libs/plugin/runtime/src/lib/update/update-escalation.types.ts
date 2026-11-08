@@ -90,8 +90,8 @@ export interface UpdateEscalationComparison {
    * Escalations belonging to a unit deliberately do NOT server-gate — their
    * consent is not the server admin's to give, and gating on them
    * would both ask the wrong principal and stall the update on a decision
-   * that principal cannot make. Activation expresses those as per-unit
-   * suspension instead.
+   * that principal cannot make. Activation announces those to each unit as
+   * re-consent it owes instead (#1149).
    */
   readonly serverGating: boolean;
   /**
@@ -101,12 +101,12 @@ export interface UpdateEscalationComparison {
    */
   readonly blockedByDenial: readonly string[];
   /**
-   * Household-scope slugs a unit must decide again before it may keep
-   * serving: newly required, promoted to required, risk-escalated above the
-   * risk the unit consented under, or newly moved to household
-   * consent. On activation every household unit lacking a `Granted` row for
-   * all of these is suspended until late acceptance re-enables it, which
-   * re-stamps the decision at today's risk (#59).
+   * Household-scope slugs a unit must decide again: newly required, promoted
+   * to required, risk-escalated above the risk the unit consented under, or
+   * newly moved to household consent. On activation every enabled household
+   * unit lacking a covering `Granted` row for all of these is told it owes
+   * re-consent and keeps running on its existing grants; its answer stamps
+   * the decision at today's risk (#59, #1149).
    *
    * Named for re-consent rather than for `required` because risk escalation
    * qualifies regardless of the flag: consent given for a Low permission is
@@ -122,14 +122,14 @@ export interface UpdateEscalationComparison {
    */
   readonly serverRiskEscalatedSlugs: readonly string[];
   /**
-   * User-scope slugs a user must decide again before their unit may keep
-   * serving — the exact user-scope mirror of `householdReconsentSlugs`
-   * (#225): newly required, promoted to required, risk-escalated above the
-   * risk the user consented under, or newly moved to user consent. On
-   * activation every `UserPlugin` unit lacking a covering `Granted` row for
-   * all of these is suspended until late acceptance re-enables it. Users
-   * with no enablement row are unaffected — no row means not
-   * enabled, so there is nothing to suspend.
+   * User-scope slugs a user must decide again — the exact user-scope mirror
+   * of `householdReconsentSlugs` (#225): newly required, promoted to
+   * required, risk-escalated above the risk the user consented under, or
+   * newly moved to user consent. On activation every enabled `UserPlugin`
+   * unit lacking a covering `Granted` row for all of these is told it owes
+   * re-consent and keeps running on its existing grants (#1149). Users with
+   * no unit enablement are unaffected — no row means not enabled, so there is
+   * nobody to tell.
    */
   readonly userReconsentSlugs: readonly string[];
 }

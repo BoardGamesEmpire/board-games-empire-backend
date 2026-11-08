@@ -7,7 +7,7 @@ import type { RiskLevel } from '../client';
  *
  * Lives here (rather than in the plugin runtime, its original home) because
  * consumers now span two dependency islands: the runtime's escalation
- * comparison / suspension pass / late-acceptance re-enable check, and the
+ * comparator, consent check classifier and activation's covering read, and the
  * permissions lib's plugin grant read path (#60) — which the runtime imports and
  * therefore must not be imported by. `@bge/database` is beneath both.
  *

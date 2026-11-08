@@ -22,7 +22,8 @@ export interface EscalationComparatorInput {
  * The update-escalation comparison (#59 Phase C3). Pure and synchronous:
  * the service prepares the views, this decides what escalated, whether the
  * server admin must approve, what a surviving denial blocks, and which
- * household units activation will suspend.
+ * slugs activation tells household and user units they owe re-consent on
+ * (#1149).
  *
  * Set semantics throughout — removal of a permission, a domain, or a
  * writesCore entry never escalates (narrowings are free), and the
@@ -91,10 +92,10 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
     // A scope change subsumes a simultaneous risk escalation, exactly as it
     // subsumes a required promotion above. The grant whose risk went stale
     // belongs to the OLD scope's principal, and activation deletes it
-    // (delete-to-pending) — routing it would suspend units that are no
-    // longer the deciding principal and CANNOT become one: decide() rejects
+    // (delete-to-pending) — routing it would ask re-consent of units that are
+    // no longer the deciding principal and CANNOT become one: decide() rejects
     // an off-scope decision (PluginGrantConsentScopeMismatchError), so a
-    // unit suspended this way has no action available to clear itself. The
+    // unit asked this way has no action available to answer it. The
     // scope change already forces consent from scratch at the new scope,
     // where it is stamped at today's risk.
     if (scopeChangedSlugs.has(grant.permissionSlug)) {

@@ -189,8 +189,11 @@ export class PluginGrantService {
         // ROW triggers, so that lock arrives only once the grant tuple is
         // already written: the upsert below would otherwise take the plugin row
         // LAST and invert the total order plugin row → grant row → advisory →
-        // unit enablement that activation's `FOR UPDATE` follows. Against activation
-        // that inversion is a cycle rather than a queue, and the loser rendered
+        // unit enablement. Activation follows it and skips the advisory: its plugin
+        // row `FOR UPDATE`, then its server grant
+        // rows `FOR UPDATE`, then — only for dormancy, since it writes no unit's
+        // enablement (#1149) — household unit enablements. Against activation that
+        // inversion is a cycle rather than a queue, and the loser rendered
         // an untyped 500 (#398). Claiming here makes this transaction block
         // BEFORE it writes the grant tuple, so nothing can be waiting on that
         // tuple while this transaction waits on the plugin row.

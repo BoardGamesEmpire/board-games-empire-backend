@@ -70,13 +70,13 @@ describe('compareForEscalations', () => {
       expect(result.householdReconsentSlugs).toEqual(['calendar:read']);
     });
 
-    it('excludes a new OPTIONAL household check from the suspension set', () => {
+    it('excludes a new OPTIONAL household check from the re-consent set', () => {
       const result = compare({ next: view({ checks: [check('calendar:read', 'household', false)] }) });
 
       expect(result.householdReconsentSlugs).toEqual([]);
     });
 
-    it('flags a required promotion at household scope into the suspension set', () => {
+    it('flags a required promotion at household scope into the re-consent set', () => {
       const result = compare({
         active: view({ checks: [check('calendar:read', 'household', false)] }),
         next: view({ checks: [check('calendar:read', 'household', true)] }),
@@ -274,9 +274,9 @@ describe('compareForEscalations', () => {
         currentRiskBySlug: new Map([['calendar:read', RiskLevel.High]]),
       });
 
-      // Suspending the household would strand it: the permission is no
-      // longer a household check, so decide() refuses a household decision
-      // on it and the unit could never clear its own suspension.
+      // Asking the household for re-consent would strand it: the permission
+      // is no longer a household check, so decide() refuses a household
+      // decision on it and the unit could never answer.
       expect(result.householdReconsentSlugs).toEqual([]);
       expect(result.userReconsentSlugs).toEqual(['calendar:read']);
       expect(result.escalations).not.toContainEqual(expect.objectContaining({ kind: 'risk-escalated' }));
