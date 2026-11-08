@@ -26,7 +26,7 @@ describe('PluginFeatureStateService', () => {
   /**
    * Household-scope manifest exercising the full binding matrix:
    * - `manage:digest` — required, server-consented, NO feature (plugin-wide;
-   *   must never appear in feature derivation or the grant query).
+   *   must never appear in a feature's `blockingSlugs` / `perUnitSlugs`).
    * - weekly-digest ← `feedback:read` (core, server) + `create:notification`
    *   (core, household) — the issue's worked example.
    * - calendar-sync ← `update:calendar` (core, household) +

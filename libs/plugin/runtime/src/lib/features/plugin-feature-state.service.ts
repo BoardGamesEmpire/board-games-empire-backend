@@ -108,7 +108,7 @@ export interface PluginFeatureUnitState {
  * they are reported in `perUnitSlugs` so a viewpoint that does not fully
  * determine a feature says so instead of reading as a fleet-wide green.
  *
- * Per-check states come from `PluginConsentStandingService`, (one
+ * Per-check states come from `PluginConsentStandingService` (one
  * classification per read), so the feature answer and the consent surface
  * cannot disagree about what `pending` or `denied` means. Risk coverage
  * applies exactly as in the read path: a `Granted` row whose
@@ -271,10 +271,6 @@ export class PluginFeatureStateService {
     // deliberately absent (#1149).
     const served = plugin.enabled && unitState.enabled && unitState.dormantReason === null;
 
-    // The loader does not yet report whether the unit enablement exists. An
-    // enabled one necessarily does, and a missing one reads `off` either way,
-    // so this holds until the loader reports existence (#1149).
-    const anchored = unit.scopeType === 'Server' || unitState.enabled;
     const { standing: consent, refusedSlugs } = await this.standing.resolveDetailed(
       plugin.id,
       unit,
@@ -282,7 +278,7 @@ export class PluginFeatureStateService {
       locale,
     );
     const state = derivePluginUnitState({
-      anchored,
+      anchored: unitState.anchored,
       // The server switch IS the Server unit's own switch, so that unit reads
       // `off` when it is off; a household or user unit reads `unavailable`,
       // since the switch is not theirs to flip (#1149).

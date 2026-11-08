@@ -528,10 +528,13 @@ export class PermissionsService {
    *
    * - **Serving predicate.** `servable` is false when the plugin is disabled
    *   or tombstoned, or (Household/User units) when the unit's enablement
-   *   row is missing, disabled, or `suspendedForConsent`. Suspension and
-   *   gated approval make a plain intersection transitively safe only while
-   *   every invoker remembers to check; applying it where grants are
-   *   consumed documents the invariant at the point of consumption.
+   *   is missing, disabled, or dormant. Consent is not part of "served"
+   *   (#1149; removes #1061, #1063): a unit that still owes a required
+   *   permission stays servable, and the intersection of `Granted` rows
+   *   below is what denies the ungranted slug. Whether a unit has consented
+   *   is answered by `PluginConsentStandingService` in `@bge/plugin`.
+   *   Applying the predicate where grants are consumed documents the
+   *   invariant at the point of consumption.
    * - **Risk coverage.** A grant whose `decidedRiskLevel` no longer covers
    *   the permission's current catalog risk confers nothing (C3's "a
    *   Granted row is not consent" — the stale risk is exactly what
@@ -561,17 +564,17 @@ export class PermissionsService {
    * invalidation path exists yet (mirrors the feature-state service's "no
    * caching until measured" posture).
    *
-   * Related but deliberately NOT the same predicate as the runtime's
-   * `unitConsentSatisfied` (suspension/re-enable): that asks whether a
-   * unit's consent still satisfies the MANIFEST (and treats a check whose
-   * catalog row vanished as `Low` so a deleted row cannot suspend a unit);
-   * this asks which grants confer AUTHORITY, and a grant with no catalog
-   * row confers nothing because there is no `Permission` row to build a
-   * rule from. They share `riskCovers`; the missing-row asymmetry is the
-   * questions differing, not drift.
+   * Related but deliberately NOT the same question as the consent standing
+   * `PluginConsentStandingService` (in `@bge/plugin`) works out: that asks
+   * what a unit still owes against the MANIFEST; this asks which grants
+   * confer AUTHORITY. Both read a missing catalog row as non-conferring (the
+   * standing's classifier decides that in `decide()`). The only difference
+   * is the outcome: here no rule is built from a grant with no `Permission`
+   * row, while the standing reports that slug as owed (`never_asked`). They
+   * share `riskCovers` (#1149).
    */
   async getPluginGrantSnapshot(pluginId: string, unit: PluginUnit): Promise<PluginGrantSnapshot | null> {
-    // Independent reads — the unit-enablement row is keyed by (unit, pluginId)
+    // Independent reads — the unit enablement is keyed by (unit, pluginId)
     // and does not need the plugin row first.
     const [plugin, unitServed] = await Promise.all([
       this.db.plugin.findUnique({
@@ -795,20 +798,24 @@ export class PermissionsService {
 
   /**
    * The unit half of the serving predicate:
-   * `enabled && !suspendedForConsent && dormantReason === null` on the unit's
-   * enablement row (#225, #369), read through the shared
-   * `loadPluginUnitEnablement` so this predicate and the feature-state
-   * derivation cannot drift on what "served" means.
+   * `enabled && dormantReason === null` on the unit's enablement (#225, #369),
+   * read through the shared `loadPluginUnitEnablement` so this predicate and
+   * the feature-state derivation cannot drift on what "served" means.
    *
-   * Dormancy is the third component and not a variant of the other two: a
-   * dormant row is one the manifest moved out from under (a scope narrowing, a
-   * schema tightening), so the household's own `enabled` intent survives it and
-   * abilities must stop resolving regardless of that intent (D-CK).
+   * Dormancy is independent of `enabled`: a dormant unit enablement is one the
+   * manifest moved out from under (a scope narrowing, a schema tightening), so
+   * the household's own `enabled` intent survives it and abilities must stop
+   * resolving regardless of that intent.
+   *
+   * Consent is deliberately absent (#1149; removes #1061, #1063): an unmet
+   * required permission is the ability's to deny, grant by grant, not a reason
+   * to stop serving. `PluginConsentStandingService` in `@bge/plugin` answers
+   * whether a unit has consented.
    */
   private async isUnitServed(pluginId: string, unit: PluginUnit): Promise<boolean> {
     const state = await loadPluginUnitEnablement(this.db, pluginId, unit);
 
-    return state.enabled && !state.suspendedForConsent && state.dormantReason === null;
+    return state.enabled && state.dormantReason === null;
   }
 
   private loadApiKeyGraph(apiKeyId: string) {
