@@ -15,7 +15,7 @@ The queue for outgoing mail, and the worker's sender (#654).
 A password reset is added with five attempts and exponential backoff from five seconds. A test email gets one attempt, so the admin hears back at once.
 
 - A reset that fails for a reason a retry can mend is rethrown, and BullMQ retries it. That includes the SMTP server's temporary (4xx) refusals, such as greylisting.
-- A reset with nothing set up, with a stored password that no longer decrypts, or refused for good by the SMTP server (a 5xx answer, such as bad credentials) throws `UnrecoverableError` with the code (`MAIL_NOT_CONFIGURED`, `MAIL_SETTINGS_UNREADABLE`, `MAIL_AUTH_FAILED` and so on) as its message. Retrying bad credentials would only log in wrong again, which can lock the account at the provider.
+- A reset with nothing set up, with a stored password that no longer decrypts, refused for good by the SMTP server (a 5xx answer, such as bad credentials), or refused by nodemailer before the server answers (a user name with no password, or an envelope it won't send) throws `UnrecoverableError` with the code (`MAIL_NOT_CONFIGURED`, `MAIL_SETTINGS_UNREADABLE`, `MAIL_AUTH_FAILED` and so on) as its message. Retrying bad credentials would only log in wrong again, which can lock the account at the provider.
 - A test email writes a `MailTestResult` notification for the admin, with the outcome, the stable code and a plain-language message, and completes. Any failure gets one, including one outside the send, such as a database read that fails, which is reported as `MAIL_SEND_FAILED`. Only a notification that can't be written fails the job.
 
 ## No secrets in logs

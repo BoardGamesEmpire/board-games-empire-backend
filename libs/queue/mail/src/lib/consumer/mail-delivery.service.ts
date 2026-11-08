@@ -21,11 +21,23 @@ import { RESET_LINK_EXPIRED } from '../constants/mail-queue.constants';
 import type { MailDeliveryJob } from '../interfaces/mail-delivery-job.interface';
 import { MailTransportError } from './mail-transport.error';
 
-/** SMTP's permanent refusals (RFC 5321 4.2.1): sending again gets the same answer. */
-function isPermanentRefusal(error: unknown): boolean {
+/**
+ * Whether sending again would get the same answer (#654). When the SMTP
+ * server answered, its reply code decides: a 5xx is a permanent refusal (RFC
+ * 5321 4.2.1), and a 4xx, such as greylisting, is temporary. Nodemailer also
+ * refuses on its own, before the server answers and so with no reply code: a
+ * user name with no password, or an envelope it won't send. The same settings
+ * fail that way on every try. A connection that fails has no reply code
+ * either, and a later try can reach the host.
+ */
+function isPermanentFailure(error: unknown, code: MailFailureCode): boolean {
   const { responseCode } = (error ?? {}) as { responseCode?: unknown };
 
-  return typeof responseCode === 'number' && responseCode >= 500 && responseCode < 600;
+  if (typeof responseCode === 'number') {
+    return responseCode >= 500 && responseCode < 600;
+  }
+
+  return code === MailFailureCode.AuthFailed || code === MailFailureCode.Rejected;
 }
 
 /** A failure's class name, never its message, which can carry what was sent. */
@@ -52,9 +64,10 @@ interface SendFailure {
  * database read that fails. The job then completes. A password reset has no
  * one waiting, so a failure that a retry can mend is rethrown for BullMQ. One
  * it cannot is an `UnrecoverableError` whose message is the code: nothing set
- * up, a password that no longer decrypts, or the SMTP server's permanent (5xx)
- * refusal, such as bad credentials, which a retry would only repeat. A
- * temporary (4xx) refusal, such as greylisting, is retried.
+ * up, a password that no longer decrypts, the SMTP server's permanent (5xx)
+ * refusal, such as bad credentials, or nodemailer's own refusal before the
+ * server answers, such as a user name with no password. A retry would only
+ * repeat those. A temporary (4xx) refusal, such as greylisting, is retried.
  *
  * A reset whose link expired in the queue is dropped unsent, as an
  * `UnrecoverableError` whose message is `RESET_LINK_EXPIRED`.
@@ -187,7 +200,7 @@ export class MailDeliveryService {
       const code = classifyMailError(error);
       this.logSendFailure(job, code, error);
 
-      return { code, retryable: !isPermanentRefusal(error) };
+      return { code, retryable: !isPermanentFailure(error, code) };
     } finally {
       transport.close();
     }

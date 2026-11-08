@@ -227,7 +227,8 @@ describe('MailDeliveryService', () => {
 
   describe('when the SMTP server refuses', () => {
     beforeEach(() => {
-      sendMail.mockRejectedValue(Object.assign(new Error('Invalid login'), { code: 'EAUTH' }));
+      // A refusal from the server carries its reply code; 454 is a temporary one.
+      sendMail.mockRejectedValue(Object.assign(new Error('Invalid login'), { code: 'EAUTH', responseCode: 454 }));
     });
 
     it('throws a retryable transport error with the code for a reset, so BullMQ retries (#654)', async () => {
@@ -270,6 +271,31 @@ describe('MailDeliveryService', () => {
       ['a temporary auth failure', 'EAUTH', 454],
     ])('retries a reset after %s (a %s %s) (#654)', async (_name, code, responseCode) => {
       sendMail.mockRejectedValue(Object.assign(new Error('try later'), { code, responseCode }));
+
+      await expect(service.deliver(RESET)).rejects.toBeInstanceOf(MailTransportError);
+    });
+
+    // Nodemailer refuses these itself, before the server answers, so there is
+    // no reply code, and the same settings fail the same way on every try.
+    it.each([
+      ['a user name with no password', 'EAUTH', MailFailureCode.AuthFailed],
+      ['an envelope with no recipient', 'EENVELOPE', MailFailureCode.Rejected],
+    ])(
+      'fails a reset for good when nodemailer refuses %s (a %s with no reply code) (#654)',
+      async (_name, code, mailCode) => {
+        sendMail.mockRejectedValue(Object.assign(new Error('refused'), { code, command: 'API' }));
+
+        const failure = service.deliver(RESET);
+
+        await expect(failure).rejects.toBeInstanceOf(UnrecoverableError);
+        await expect(failure).rejects.toThrow(mailCode);
+      },
+    );
+
+    it('retries a reset when the host cannot be reached, which has no reply code either (#654)', async () => {
+      sendMail.mockRejectedValue(
+        Object.assign(new Error('connect ECONNREFUSED'), { code: 'ESOCKET', command: 'CONN' }),
+      );
 
       await expect(service.deliver(RESET)).rejects.toBeInstanceOf(MailTransportError);
     });
