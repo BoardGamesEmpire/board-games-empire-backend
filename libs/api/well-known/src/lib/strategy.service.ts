@@ -20,6 +20,14 @@ interface ListedSignInProvider {
   readonly discoveryUrl: string;
 }
 
+/** The two settings that decide what discovery says about password resets (#654). */
+interface PasswordResetSettings {
+  /** The settings switch, `allowPasswordResets`. */
+  readonly allowed: boolean;
+  /** Whether the server can send the reset email. */
+  readonly mailConfigured: boolean;
+}
+
 @Injectable()
 export class StrategyService {
   constructor(
@@ -74,27 +82,19 @@ export class StrategyService {
     // registration is closed (#585).
     dto.bgeAnonymousAuthSupported = settings.allowUserRegistration;
 
-    // A reset needs both the switch and a way to send the email (#654).
-    const passwordResetAvailable = settings.allowPasswordResets && isMailConfigured(settings);
-
-    dto.strategies = this.buildStrategies(
-      settings.allowUserRegistration,
-      passwordResetAvailable,
-      settings.allowPasswordResets,
-    );
+    dto.strategies = this.buildStrategies(settings.allowUserRegistration, {
+      allowed: settings.allowPasswordResets,
+      mailConfigured: isMailConfigured(settings),
+    });
 
     return dto;
   }
 
-  private buildStrategies(
-    registrationOpen: boolean,
-    passwordResetAvailable: boolean,
-    resetsAllowed: boolean,
-  ): AuthStrategyDto[] {
+  private buildStrategies(registrationOpen: boolean, resets: PasswordResetSettings): AuthStrategyDto[] {
     const strategies: AuthStrategyDto[] = [];
 
     if (this.configService.get<boolean>('auth.useEmailPasswordAuth')) {
-      strategies.push(this.buildEmailAndPasswordStrategy(registrationOpen, passwordResetAvailable, resetsAllowed));
+      strategies.push(this.buildEmailAndPasswordStrategy(registrationOpen, resets));
     }
 
     // One per sign-in provider, in the operator's list order (#912). The config
@@ -110,8 +110,7 @@ export class StrategyService {
 
   private buildEmailAndPasswordStrategy(
     registrationOpen: boolean,
-    passwordResetAvailable: boolean,
-    resetsAllowed: boolean,
+    resets: PasswordResetSettings,
   ): EmailAndPasswordStrategyDto {
     const signUpDisabled = !registrationOpen;
 
@@ -123,15 +122,16 @@ export class StrategyService {
       dto.signUpEndpoint = authPath('/sign-up/email');
     }
 
-    dto.passwordResetAvailable = passwordResetAvailable;
+    // Asking for a reset needs both the switch and a way to send the email (#654).
+    dto.passwordResetAvailable = resets.allowed && resets.mailConfigured;
 
-    if (passwordResetAvailable) {
+    if (dto.passwordResetAvailable) {
       dto.requestPasswordResetEndpoint = authPath('/request-password-reset');
     }
 
     // Finishing a reset needs only the switch: a link mailed before mail was
     // switched off still works, so a client must be able to find where (#654).
-    if (resetsAllowed) {
+    if (resets.allowed) {
       dto.resetPasswordEndpoint = authPath('/reset-password');
     }
 
