@@ -1,8 +1,6 @@
 import {
   PluginCategory,
   PluginExecutionMode,
-  PluginGrantScope,
-  PluginGrantStatus,
   PluginScope,
   PluginUnitDormantReason,
   Prisma,
@@ -211,8 +209,6 @@ describe('PluginUnitLifecycleService', () => {
           householdId: 'hh-1',
           pluginId: 'plugin-1',
           enabled: true,
-          suspendedForConsent: false,
-          suspendedAt: null,
           config: {},
         },
       });
@@ -222,10 +218,12 @@ describe('PluginUnitLifecycleService', () => {
       expect(event).toBeInstanceOf(HouseholdPluginEnabledEvent);
       expect(event.before).toBeNull();
       expect(event.after.enabled).toBe(true);
-      expect(event.bornSuspendedSlugs).toEqual([]);
+      expect(event).not.toHaveProperty('bornSuspendedSlugs');
     });
 
-    it('is born suspended when a required household-scope check carries a durable denial, and the event names it', async () => {
+    it('first enable beside a durable required denial creates the row enabled; standing, not the row, reports the refusal', async () => {
+      // A durable denial of a required household-scope check no longer vetoes
+      // the row (#1149): consent standing derives review pending at read time.
       db.householdPlugin.findUnique.mockResolvedValue(null);
       db.pluginGrant.findMany.mockResolvedValue([{ permissionSlug: CANONICAL_DIGEST }] as never);
       db.householdPlugin.create.mockImplementation((({ data }: { data: Partial<HouseholdPlugin> }) =>
@@ -233,55 +231,15 @@ describe('PluginUnitLifecycleService', () => {
 
       const row = await service.enableHousehold(enableInput);
 
-      expect(row.suspendedForConsent).toBe(true);
-      // Denied specifically, never merely pending, and only the REQUIRED
-      // household-scope slugs enter the probe — the delta-scoping the
-      // suspension machinery uses.
-      expect(db.pluginGrant.findMany).toHaveBeenCalledWith({
-        where: {
-          pluginId: 'plugin-1',
-          scopeType: PluginGrantScope.Household,
-          scopeId: 'hh-1',
-          status: PluginGrantStatus.Denied,
-          permissionSlug: { in: [CANONICAL_DIGEST] },
-        },
-        select: { permissionSlug: true },
-      });
+      expect(row.enabled).toBe(true);
       expect(db.householdPlugin.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ suspendedForConsent: true, suspendedAt: expect.any(Date) }),
+        data: { householdId: 'hh-1', pluginId: 'plugin-1', enabled: true, config: {} },
       });
-
-      // The blocking slugs ride the creation event: no suspension event
-      // fires for a birth state, so this is the durable "why".
-      const [{ event }] = emittedEvents();
-      expect(event.bornSuspendedSlugs).toEqual([CANONICAL_DIGEST]);
-    });
-
-    it('skips the denial probe entirely when the manifest has no required household-scope checks', async () => {
-      const optionalOnly = buildPluginManifest({
-        scope: 'household',
-        permissions: {
-          declares: ['manage:digest'],
-          checks: [
-            {
-              slug: 'manage:digest',
-              required: false,
-              reason: { en: 'Optional digest management.' },
-              consentScope: 'household',
-            },
-          ],
-        },
-      });
-      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: optionalOnly as unknown as Prisma.JsonValue }));
-      db.householdPlugin.findUnique.mockResolvedValue(null);
-      db.householdPlugin.create.mockResolvedValue(makeHouseholdRow());
-
-      await service.enableHousehold(enableInput);
-
       expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
-      expect(db.householdPlugin.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ suspendedForConsent: false }),
-      });
+
+      const [{ event }] = emittedEvents();
+      expect(event).toBeInstanceOf(HouseholdPluginEnabledEvent);
+      expect(event).not.toHaveProperty('bornSuspendedSlugs');
     });
 
     it('opens the transaction household row first: share lock, plugin-row re-read, scope lock, unit row', async () => {
@@ -319,13 +277,9 @@ describe('PluginUnitLifecycleService', () => {
     });
 
     it('refuses when a concurrent activation promoted a new version after the manifest was read', async () => {
-      // The probe and the config gate were both derived from 1.2.0's
-      // manifest. Applying them against 1.3.0 can create a serving row
-      // beside a durable denial of a newly required check, or suspend one
-      // over a check 1.3.0 dropped and no decision can heal. Activation's
-      // own suspension pass cannot cover for it: that pass runs inside the
-      // activation transaction, so a row created after it committed is
-      // invisible to it.
+      // The config gate was derived from 1.2.0's manifest. Applying it
+      // against 1.3.0 would validate a document against a schema that is
+      // gone, so the enable refuses rather than act on the stale judgment.
       db.householdPlugin.findUnique.mockResolvedValue(null);
       db.$queryRaw.mockResolvedValue([livingRow({ version: '1.3.0' })] as never);
 
@@ -375,8 +329,8 @@ describe('PluginUnitLifecycleService', () => {
       // permitted, and that pair restores `version` while never touching
       // `installedAt` — the installer is its only writer. Both discriminators
       // therefore agree with the pre-read while `manifest_json` has been
-      // replaced twice, and the config schema and the born-suspended probe's
-      // required set are judgments made against a manifest that is gone.
+      // replaced twice, and the config schema is a judgment made against a
+      // manifest that is gone.
       db.householdPlugin.findUnique.mockResolvedValue(null);
       db.$queryRaw.mockResolvedValue([livingRow({ manifest_matches: false })] as never);
 
@@ -591,25 +545,12 @@ describe('PluginUnitLifecycleService', () => {
 
       await service.enableHousehold(enableInput);
 
-      // `suspendedForConsent` is system state — the admin's switch write
-      // must not reference it at all.
+      // The admin's switch write touches `enabled` alone (#1149).
       expect(db.householdPlugin.update).toHaveBeenCalledWith({ where: { id: 'hp-1' }, data: { enabled: true } });
 
       const [{ event }] = emittedEvents();
       expect(event).toBeInstanceOf(HouseholdPluginEnabledEvent);
       expect(event.before.enabled).toBe(false);
-    });
-
-    it('a suspended unit stays suspended across an enable flip — late acceptance, not the admin, clears it', async () => {
-      const before = makeHouseholdRow({ enabled: false, suspendedForConsent: true, suspendedAt: new Date(1) });
-      db.householdPlugin.findUnique.mockResolvedValue(before);
-      db.householdPlugin.update.mockResolvedValue({ ...before, enabled: true });
-
-      const row = await service.enableHousehold(enableInput);
-
-      expect(row.suspendedForConsent).toBe(true);
-      const [{ event }] = emittedEvents();
-      expect(event.after.suspendedForConsent).toBe(true);
     });
 
     it('re-enabling an already-enabled row without config is a no-op: no write, no event', async () => {

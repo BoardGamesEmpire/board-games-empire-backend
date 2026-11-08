@@ -46,9 +46,9 @@ export interface HouseholdDormancyTransition {
  * caller's transaction commits. `decide()` joined that discipline in #398 — it
  * claims the plugin row `FOR SHARE` as the first statement of its transaction —
  * and could not invalidate this read even before it did: it cannot create or
- * re-scope a household row, only suspend and re-enable existing ones. Its
- * claim also compares the plugin manifest it judged against, so it refuses
- * rather than writes after an activation moved it (#361).
+ * re-scope a household row. Its claim also compares the plugin manifest it
+ * judged against, so it refuses rather than writes after an activation moved
+ * it (#361).
  */
 export async function reconcileHouseholdDormancy(args: {
   readonly tx: Prisma.TransactionClient;
@@ -60,7 +60,7 @@ export async function reconcileHouseholdDormancy(args: {
   const { tx, pluginId, manifest, configSchema, initiatedAt } = args;
 
   // One read per replacement regardless of how many households run the plugin,
-  // matching activation's suspension passes: a per-unit query loop would put
+  // matching activation's passes: a per-unit query loop would put
   // the transaction's duration on the install count.
   const rows = await tx.householdPlugin.findMany({ where: { pluginId } });
 
@@ -163,9 +163,9 @@ export function emitHouseholdDormancy(
 
 /** The dormancy events' snapshot: the switch fields plus the reason, so a diff shows what moved and what deliberately did not. */
 function snapshot(unit: HouseholdPlugin) {
-  const { id, householdId, pluginId, enabled, suspendedForConsent, dormantReason } = unit;
+  const { id, householdId, pluginId, enabled, dormantReason } = unit;
 
-  return { id, householdId, pluginId, enabled, suspendedForConsent, dormantReason };
+  return { id, householdId, pluginId, enabled, dormantReason };
 }
 
 /**
@@ -224,8 +224,7 @@ async function applyDormancy(
   });
 
   // `enabled` is untouched on purpose: dormancy is not the admin's intent, so
-  // their switch survives it and a revival restores exactly what they chose —
-  // the same discipline consent suspension follows.
+  // their switch survives it and a revival restores exactly what they chose.
   return rows.map((row) => ({
     before: row,
     after: { ...row, dormantReason: reason, dormantAt: initiatedAt },
