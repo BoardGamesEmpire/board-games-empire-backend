@@ -98,8 +98,6 @@ describe('PluginInstallerService', () => {
     householdId: 'hh-1',
     pluginId: 'plugin-1',
     enabled: true,
-    suspendedForConsent: false,
-    suspendedAt: null,
     config: { webhookUrl: 'https://example.test/hook' },
     dormantReason: null,
     dormantAt: null,

@@ -137,8 +137,6 @@ describe('PluginUnitLifecycleService', () => {
     householdId: 'hh-1',
     pluginId: 'plugin-1',
     enabled: true,
-    suspendedForConsent: false,
-    suspendedAt: null,
     config: {},
     dormantReason: null,
     dormantAt: null,
@@ -152,8 +150,6 @@ describe('PluginUnitLifecycleService', () => {
     userId: 'user-1',
     pluginId: 'plugin-1',
     enabled: true,
-    suspendedForConsent: false,
-    suspendedAt: null,
     config: {},
     createdAt: new Date(0),
     updatedAt: new Date(0),
@@ -964,15 +960,15 @@ describe('PluginUnitLifecycleService', () => {
       expect(event).toBeInstanceOf(UserPluginEnabledEvent);
     });
 
-    it('disables without touching consent state and emits the user disabled event', async () => {
-      const before = makeUserRow({ suspendedForConsent: true, suspendedAt: new Date(1) });
+    it('disables by writing only the enabled flag and emits the user disabled event (#1149)', async () => {
+      const before = makeUserRow();
       db.userPlugin.findUnique.mockResolvedValue(before);
       db.userPlugin.update.mockResolvedValue({ ...before, enabled: false });
 
       const row = await service.disableUser(userInput);
 
       expect(db.userPlugin.update).toHaveBeenCalledWith({ where: { id: 'up-1' }, data: { enabled: false } });
-      expect(row.suspendedForConsent).toBe(true);
+      expect(row.enabled).toBe(false);
       const [{ event }] = emittedEvents();
       expect(event).toBeInstanceOf(UserPluginDisabledEvent);
     });

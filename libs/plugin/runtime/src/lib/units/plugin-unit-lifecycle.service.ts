@@ -1,7 +1,7 @@
 import type { HouseholdPlugin, Plugin, UserPlugin } from '@bge/database';
 import { DatabaseService, lockLiveHousehold, PluginScope, PluginUnitDormantReason, Prisma } from '@bge/database';
 import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
@@ -134,8 +134,6 @@ type HouseholdEnableOutcome =
  */
 @Injectable()
 export class PluginUnitLifecycleService {
-  private readonly logger = new Logger(PluginUnitLifecycleService.name);
-
   constructor(
     private readonly db: DatabaseService,
     private readonly authority: PluginGrantAuthorityService,
