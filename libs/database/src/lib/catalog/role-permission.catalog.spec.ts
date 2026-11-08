@@ -41,6 +41,16 @@ const FRIEND_OF_FRIEND_OF_ACTING_USER = {
   NOT: BLOCK_WITH_ACTING_USER,
 };
 
+/**
+ * "A user the extended network table puts within three friendship steps of the acting
+ * user, with no block between them", as an extended network permission binds
+ * it (#497). Written out for the reason `ACCEPTED_FRIEND_OF_ACTING_USER` is.
+ */
+const WITHIN_EXTENDED_NETWORK_OF_ACTING_USER = {
+  extendedNetwork: { some: { otherUserId: '{{ user.id }}', steps: { lte: 3 } } },
+  NOT: BLOCK_WITH_ACTING_USER,
+};
+
 // Importing the catalog modules IS the positive integrity case: each runs its
 // assertions at module scope, so a shipped catalog that violated one would fail
 // this file at import. The negative cases live in catalog-integrity.spec.ts.
@@ -311,7 +321,7 @@ describe('the shipped catalogs', () => {
       expect(conditionsOf('read:game')).toStrictEqual({ deletedAt: null, createdById: '{{ user.id }}' });
       expect(conditionsOf('read:game:friends')).toStrictEqual({
         deletedAt: null,
-        reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
+        reach: { in: ['Friends', 'FriendsOfFriends', 'ExtendedNetwork', 'Public'] },
         createdBy: { is: ACCEPTED_FRIEND_OF_ACTING_USER },
       });
       expect(conditionsOf('read:game:public')).toStrictEqual({ deletedAt: null, reach: 'Public' });
@@ -404,7 +414,7 @@ describe('the shipped catalogs', () => {
       // clause (#840).
       expect(conditionsOf('read:user:profile:own')).toStrictEqual({ userId: '{{ user.id }}' });
       expect(conditionsOf('read:user:profile:friends')).toStrictEqual({
-        reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
+        reach: { in: ['Friends', 'FriendsOfFriends', 'ExtendedNetwork', 'Public'] },
         user: { is: { AND: [{ banned: false }, ACCEPTED_FRIEND_OF_ACTING_USER] } },
       });
       expect(conditionsOf('read:user:profile:public')).toStrictEqual({
@@ -421,10 +431,10 @@ describe('the shipped catalogs', () => {
     // The ladder reads upwards: a reach wider than `Friends` still admits a
     // friend. Each of these but the collection rule once tested `Friends`
     // alone, so widening a household or an event to `Public` hid it from the
-    // friends who could read it before (#495). The friends rules admit direct
-    // friends at every rung from `Friends` up, and friends of friends read
-    // through their own rules (#496).
-    const rungsAdmittingFriends = ['Friends', 'FriendsOfFriends', 'Public'];
+    // friends who could read it before (#495). The friends permissions admit
+    // direct friends at every rung from `Friends` up, and friends of friends
+    // and the extended network read through their own (#496, #497).
+    const rungsAdmittingFriends = ['Friends', 'FriendsOfFriends', 'ExtendedNetwork', 'Public'];
 
     it.each([
       ['read:event:friends', (reach: unknown) => ({ reach })],
@@ -549,11 +559,97 @@ describe('the shipped catalogs', () => {
       expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain(slug);
     });
 
-    // The friends-of-friends rules leave `Public` to these, so the ladder reads
-    // upwards across the two: a friend of a friend reads a `Public` item through
-    // its public rule, whoever owns it (#496). A model given a friends-of-friends
-    // rule without a public rule here would hide its `Public` items from friends
-    // of friends.
+    // Each sits beside its friends-of-friends permission, admits
+    // `ExtendedNetwork` alone and tests it ahead of the relation in an `AND`,
+    // as those permissions do and for their reason (#496). The relation is one
+    // lookup on the extended network table's key, which a worker job keeps current. The
+    // block clause beside it reads the friendships, because the table stores
+    // no blocks: lost, it would let someone the owner blocked in through the
+    // friends they share, for good. Pinned exactly for that reason (#497). The
+    // profile permission keeps the ban test, and the collection permission the
+    // owner's `showCollectionToFriends`, as their friends-of-friends
+    // permissions do.
+    it.each([
+      [
+        'read:event:extended-network',
+        { AND: [{ reach: 'ExtendedNetwork' }, { createdBy: { is: WITHIN_EXTENDED_NETWORK_OF_ACTING_USER } }] },
+        RiskLevel.Medium,
+      ],
+      [
+        'read:event_occurrence:extended-network',
+        {
+          event: {
+            is: { AND: [{ reach: 'ExtendedNetwork' }, { createdBy: { is: WITHIN_EXTENDED_NETWORK_OF_ACTING_USER } }] },
+          },
+        },
+        RiskLevel.Medium,
+      ],
+      [
+        'read:event_policy:extended-network',
+        {
+          event: {
+            is: { AND: [{ reach: 'ExtendedNetwork' }, { createdBy: { is: WITHIN_EXTENDED_NETWORK_OF_ACTING_USER } }] },
+          },
+        },
+        RiskLevel.Medium,
+      ],
+      [
+        'read:user:profile:extended-network',
+        {
+          AND: [
+            { reach: 'ExtendedNetwork' },
+            { user: { is: { AND: [{ banned: false }, WITHIN_EXTENDED_NETWORK_OF_ACTING_USER] } } },
+          ],
+        },
+        RiskLevel.Medium,
+      ],
+      [
+        'read:game:extended-network',
+        {
+          deletedAt: null,
+          AND: [{ reach: 'ExtendedNetwork' }, { createdBy: { is: WITHIN_EXTENDED_NETWORK_OF_ACTING_USER } }],
+        },
+        RiskLevel.Low,
+      ],
+      [
+        'read:game_collection:extended-network',
+        {
+          deletedAt: null,
+          AND: [
+            { reach: 'ExtendedNetwork' },
+            {
+              user: {
+                is: {
+                  AND: [
+                    { OR: [{ preferences: null }, { preferences: { is: { showCollectionToFriends: true } } }] },
+                    WITHIN_EXTENDED_NETWORK_OF_ACTING_USER,
+                  ],
+                },
+              },
+            },
+          ],
+        },
+        RiskLevel.Medium,
+      ],
+    ])(
+      'let a reader within three friendship steps read through %s, with no block between them (#497)',
+      (slug, conditions, risk) => {
+        const entry = PERMISSION_CATALOG.find((candidate) => candidate.slug === slug);
+
+        expect(entry?.conditions).toStrictEqual(conditions);
+        // Rated as its friends-of-friends permission is.
+        expect(entry?.riskLevel).toBe(risk);
+        expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain(slug);
+        expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain(slug);
+      },
+    );
+
+    // The friends-of-friends and extended network permissions leave `Public`
+    // to these, so the ladder reads upwards across them: a friend of a friend,
+    // or someone in the owner's extended network, reads a `Public` item
+    // through its public permission, whoever owns it (#496, #497). A model
+    // given either permission without a public permission here would hide its
+    // `Public` items from them.
     it.each([
       ['read:event:friends-of-friends', 'read:event:public', { reach: 'Public' }],
       [
@@ -569,23 +665,39 @@ describe('the shipped catalogs', () => {
       ],
       ['read:game:friends-of-friends', 'read:game:public', { deletedAt: null, reach: 'Public' }],
       ['read:game_collection:friends-of-friends', 'read:game_collection:public', { deletedAt: null, reach: 'Public' }],
-    ])('let every reader of %s read Public items through %s', (friendsOfFriendsSlug, publicSlug, conditions) => {
+      ['read:event:extended-network', 'read:event:public', { reach: 'Public' }],
+      [
+        'read:event_occurrence:extended-network',
+        'read:event_occurrence:public',
+        { event: { is: { reach: 'Public' } } },
+      ],
+      ['read:event_policy:extended-network', 'read:event_policy:public', { event: { is: { reach: 'Public' } } }],
+      [
+        'read:user:profile:extended-network',
+        'read:user:profile:public',
+        { reach: 'Public', user: { is: { banned: false } } },
+      ],
+      ['read:game:extended-network', 'read:game:public', { deletedAt: null, reach: 'Public' }],
+      ['read:game_collection:extended-network', 'read:game_collection:public', { deletedAt: null, reach: 'Public' }],
+    ])('let every reader of %s read Public items through %s', (rungSlug, publicSlug, conditions) => {
       const holders = (slug: string) =>
         Object.entries(ROLE_PERMISSION_CATALOG)
           .filter(([, slugs]) => slugs.some((held) => held === slug))
           .map(([role]) => role);
 
       expect(PERMISSION_CATALOG.find(({ slug }) => slug === publicSlug)?.conditions).toStrictEqual(conditions);
-      expect(holders(publicSlug)).toEqual(expect.arrayContaining(holders(friendsOfFriendsSlug)));
+      expect(holders(publicSlug)).toEqual(expect.arrayContaining(holders(rungSlug)));
     });
 
     // A roster shown beyond its members is #231's question, and so is whose
-    // block vetoes in a household of many members (#496).
-    it('gives households and their rosters no friends-of-friends rule until #231 decides what they open', () => {
+    // block vetoes in a household of many members (#496, #497).
+    it('gives households and their rosters no friends-of-friends or extended network permission until #231 decides what they open', () => {
       const slugs = PERMISSION_CATALOG.map(({ slug }) => slug);
 
       expect(slugs).not.toContain('read:households:friends-of-friends');
       expect(slugs).not.toContain('read:household_member:friends-of-friends');
+      expect(slugs).not.toContain('read:households:extended-network');
+      expect(slugs).not.toContain('read:household_member:extended-network');
     });
 
     // A household sees a member's collection through the member's

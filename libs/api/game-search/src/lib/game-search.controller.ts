@@ -24,7 +24,8 @@ export class GameSearchController {
       'Collects all results from local DB and coordinator unary gRPC into a single response. ' +
       'The local half matches titles within the set `GET /games` lists: the live Public games, the acting ' +
       'user’s own, their friends’ that reach friends, their friends of friends’ that reach friends of ' +
-      'friends, and the games shared with them or with a household they belong to once the share is in ' +
+      'friends, those of users up to three friendship steps away that reach the extended network, and ' +
+      'the games shared with them or with a household they belong to once the share is in ' +
       'effect, by one rule for every role. ' +
       '**Breaking change (#513).** Owner/Admin/Moderator ' +
       'previously also found every private game on the server; one they can read is still readable at ' +

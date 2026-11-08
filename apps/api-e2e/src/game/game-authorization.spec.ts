@@ -1,6 +1,13 @@
 import { FriendshipStatus, Reach, type DatabaseService } from '@bge/database';
 import { ServiceAccountService } from '@bge/services';
-import { arrangeFriendship, befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import {
+  arrangeExtendedNetwork,
+  arrangeFriendship,
+  befriend,
+  createActors,
+  type Actors,
+  type AuthenticatedActor,
+} from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -314,6 +321,55 @@ describe('game authorization', () => {
       expect(await listedIds(viewer, 'the viewer')).not.toContain(game.id);
     });
 
+    // The extended network rows stand in for the friendships the worker job reads
+    // (#497). Two readers sit three steps from the creator, so the blocked
+    // one's refusal is the block, which the permissions read from the
+    // friendships before any job runs. A direct friend with no extended network row
+    // reads it through the friends permission.
+    it('admits a reader three steps away to an ExtendedNetwork game, by id, in the list and in search, and refuses one the creator has blocked (#497)', async () => {
+      const [creator, friend, viewer, blockedViewer, stranger] = await Promise.all(
+        Array.from({ length: 5 }, () => actors.user()),
+      );
+      await befriend(db.client, friend, creator);
+      await arrangeExtendedNetwork(db.client, creator, viewer, 3);
+      await arrangeExtendedNetwork(db.client, creator, blockedViewer, 3);
+      await arrangeFriendship(db.client, creator, blockedViewer, FriendshipStatus.Blocked);
+      const token = randomUUID().slice(0, 8);
+      const game = await arrangeGame(creator.user.id, Reach.ExtendedNetwork, `e2e extended network ${token}`);
+
+      await readGame(friend, game.id).expect(200);
+      expect(await listedIds(friend, 'a friend')).toContain(game.id);
+
+      await readGame(viewer, game.id).expect(200);
+      expect(await listedIds(viewer, 'a reader three steps away')).toContain(game.id);
+      expect(await searchedIds(viewer, token, 'a reader three steps away')).toContain(game.id);
+
+      for (const [who, actor] of [
+        ['a reader three steps away whom the creator blocked', blockedViewer],
+        ['a stranger', stranger],
+      ] as const) {
+        await readGame(actor, game.id).expect(403);
+        expect(await listedIds(actor, who)).not.toContain(game.id);
+        expect(await searchedIds(actor, token, who)).not.toContain(game.id);
+      }
+    });
+
+    // Each wider rung keeps to its own permissions: friends of friends are
+    // read from the friendships, and the extended network rows open only the extended
+    // network's rung (#497).
+    it('refuses a FriendsOfFriends game to a reader only the extended network table puts three steps away (#497)', async () => {
+      const [creator, viewer] = await Promise.all([actors.user(), actors.user()]);
+      await arrangeExtendedNetwork(db.client, creator, viewer, 3);
+      const friendsOfFriendsGame = await arrangeGame(creator.user.id, Reach.FriendsOfFriends);
+      const extendedNetworkGame = await arrangeGame(creator.user.id, Reach.ExtendedNetwork);
+
+      // The control: the same reader reads the wider rung's game.
+      await readGame(viewer, extendedNetworkGame.id).expect(200);
+
+      await readGame(viewer, friendsOfFriendsGame.id).expect(403);
+      expect(await listedIds(viewer, 'a reader three steps away')).not.toContain(friendsOfFriendsGame.id);
+    });
+
     // The list names the friendship itself, so staff, who read every game,
     // are still listed only their own friends' games.
     it('lists staff no stranger’s Friends game, while each still reads it by id', async () => {
@@ -402,6 +458,23 @@ describe('game authorization', () => {
 
       expect(game.reach).toBe(Reach.FriendsOfFriends);
       expect(await reachOf(game.id)).toBe(Reach.FriendsOfFriends);
+    });
+
+    // The request body accepts the rung, and a reader the extended network table puts
+    // three steps from the creator reads the game it made (#497).
+    it('creates an ExtendedNetwork game, which a reader three steps away reads (#497)', async () => {
+      const [creator, viewer, stranger] = await Promise.all([actors.user(), actors.user(), actors.user()]);
+      await arrangeExtendedNetwork(db.client, creator, viewer, 3);
+
+      const created = await createGame(creator, { title: 'Extended prototype', reach: Reach.ExtendedNetwork }).expect(
+        201,
+      );
+      const { game } = gameEnvelope(created, 'POST /api/games with reach ExtendedNetwork');
+
+      expect(game.reach).toBe(Reach.ExtendedNetwork);
+      expect(await reachOf(game.id)).toBe(Reach.ExtendedNetwork);
+      await readGame(viewer, game.id).expect(200);
+      await readGame(stranger, game.id).expect(403);
     });
 
     it('refuses Household with 400, which is no longer a reach (#808)', async () => {

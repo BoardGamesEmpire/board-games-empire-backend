@@ -187,10 +187,18 @@ one or more api processes.
 ### Worker
 
 The worker runs the server's background jobs: it consumes game imports
-(`{bge.games.import}`), webhook and feedback deliveries, and the media sweep.
-It configures the cache as well: it backs the worker's cache store and
-carries the outbound HTTP policy's update channel, which webhook delivery
-follows.
+(`{bge.games.import}`), webhook and feedback deliveries, the media sweep, and
+the extended network's rebuilds (`{bge.friendship.extended-network}`). It configures
+the cache as well: it backs the worker's cache store and carries the outbound
+HTTP policy's update channel, which webhook delivery follows.
+
+The api queues to the worker too: each friendship change that can add or end
+an accepted friendship queues a rebuild, which runs a couple of seconds
+later. The worker queues a full rebuild when it starts and daily, which
+runs a batch of users at a time and goes back to the queue between batches.
+The rebuilds run one at a time across every worker, and a change's rebuild
+runs before the full rebuild's next batch. While that queue is backed up, an
+unfriend takes longer to take a user out of someone's extended network.
 
 ### Gateway worker
 

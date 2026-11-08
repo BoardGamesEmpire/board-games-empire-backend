@@ -1,3 +1,4 @@
+import { EXTENDED_NETWORK_QUEUE } from '@bge/friendship';
 import { QueueNames } from '@bge/game-import';
 import { FEEDBACK_QUEUE_NAME } from '@bge/queue-feedback';
 import { WEBHOOK_QUEUE_NAME } from '@bge/queue-webhooks';
@@ -44,6 +45,7 @@ export const WORKER_QUEUE_NAMES = [
   WEBHOOK_QUEUE_NAME,
   QueueNames.GamesImport,
   '{bge.media.contribution-sweep}',
+  EXTENDED_NETWORK_QUEUE,
 ] as const;
 
 export type WorkerQueueName = (typeof WORKER_QUEUE_NAMES)[number];

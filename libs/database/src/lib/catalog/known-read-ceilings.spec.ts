@@ -114,6 +114,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
       'read:user:profile:own': 'binds user.id',
       'read:user:profile:friends': 'binds user.id',
       'read:user:profile:friends-of-friends': 'binds user.id',
+      'read:user:profile:extended-network': 'binds user.id',
       'read:user:profile:public': 'fixed filter',
     },
   },
@@ -136,6 +137,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
       'read:game': 'binds user.id',
       'read:game:friends': 'binds user.id',
       'read:game:friends-of-friends': 'binds user.id',
+      'read:game:extended-network': 'binds user.id',
       'read:game:public': 'fixed filter',
       'read:game:shared': 'binds user.id',
     },
@@ -147,6 +149,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
       'read:game_collection:household': 'binds user.id',
       'read:game_collection:friends': 'binds user.id',
       'read:game_collection:friends-of-friends': 'binds user.id',
+      'read:game_collection:extended-network': 'binds user.id',
       'read:game_collection:public': 'fixed filter',
     },
     AnonymousUser: { 'read:game_collection:public': 'fixed filter' },
@@ -213,6 +216,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
     User: {
       'read:event:friends': 'binds user.id',
       'read:event:friends-of-friends': 'binds user.id',
+      'read:event:extended-network': 'binds user.id',
       'read:event:public': 'fixed filter',
     },
     HouseholdOwner: { 'read:event:participant:household': 'binds householdId' },
@@ -309,6 +313,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
     User: {
       'read:event_occurrence:friends': 'binds user.id',
       'read:event_occurrence:friends-of-friends': 'binds user.id',
+      'read:event_occurrence:extended-network': 'binds user.id',
       'read:event_occurrence:public': 'fixed filter',
     },
     HouseholdOwner: { 'read:event_occurrence:household': 'binds householdId' },
@@ -327,6 +332,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
     User: {
       'read:event_policy:friends': 'binds user.id',
       'read:event_policy:friends-of-friends': 'binds user.id',
+      'read:event_policy:extended-network': 'binds user.id',
       'read:event_policy:public': 'fixed filter',
     },
     HouseholdOwner: { 'read:event_policy:household': 'binds householdId' },

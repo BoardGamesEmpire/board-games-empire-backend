@@ -193,15 +193,19 @@ One user asking to become another's friend, which the other accepts or declines 
 _Avoid_: invite (for friends); sender and recipient (say requester and addressee)
 
 **Friends of friends**:
-Users two friendship steps away from you, with no block between you, as a reach between friends and everyone.
+Users two friendship steps away from you, with no block between you, as a reach between friends and the extended network.
 _Avoid_: second degree
+
+**Extended network**:
+Users up to three friendship steps away from you, with no block between you, as a reach between friends of friends and everyone.
+_Avoid_: third degree, network on its own
 
 **Block**:
 One user shutting out another, whether or not they are friends.
 _Avoid_: blocked friendship
 
 **Reach**:
-How far from its owner an item can be seen: only the owner, friends, friends of friends, or everyone. The four form a ladder, each rung reaching everyone the rung below it does.
+How far from its owner an item can be seen: only the owner, friends, friends of friends, the extended network, or everyone. The five form a ladder, each rung reaching everyone the rung below it does.
 _Avoid_: visibility
 
 **Share**:

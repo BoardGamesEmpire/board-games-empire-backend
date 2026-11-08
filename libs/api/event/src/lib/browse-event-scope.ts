@@ -6,21 +6,24 @@ import {
   type Prisma,
   Reach,
   REACHES_ADMITTING_FRIENDS,
+  withinExtendedNetworkOf,
 } from '@bge/database';
 
 /**
  * The set `GET /events/browse` is about: the events the acting user has no
  * attendee row on, among the Public ones, a friend's that reach friends, a
- * friend of a friend's that reach friends of friends, and their households'
- * (#962). `EventService.browseEvents` declares it through
- * `ScopeComposer.compose`, so the acting user's ceiling limits it.
+ * friend of a friend's that reach friends of friends, those of their extended
+ * network that reach it (#497), and their households' (#962).
+ * `EventService.browseEvents` declares it through `ScopeComposer.compose`, so
+ * the acting user's ceiling limits it.
  *
  * It is the same set for every role. Taking the ceiling as the answer would list
  * Admin and Moderator every event on the server through `read:event`, the
- * widening #512 removed from `GET /events`. The friends and friends-of-friends
- * arms name the friendships themselves, so staff are listed their own
- * friends' events and no one else's. An event staff can read stays readable
- * by id. It is narrowed out of the list, not withdrawn.
+ * widening #512 removed from `GET /events`. The friends, friends-of-friends
+ * and extended network arms name the friendships and the extended network rows
+ * themselves, so staff are listed their own friends' events and no one
+ * else's. An event staff can read stays readable by id. It is narrowed out of
+ * the list, not withdrawn.
  *
  * Any attendee row keeps an event out, a removed one included. The list is
  * the events the acting user could join, and a host's removal shouldn't put
@@ -36,6 +39,9 @@ import {
  *   the reach test first in an `AND`: the second friendship step runs once
  *   per row it reaches, so it should reach only the events at
  *   `FriendsOfFriends`.
+ * - The extended network arm is shaped as its permission's condition is too,
+ *   so its extended network lookup reaches only the events at `ExtendedNetwork`. Its
+ *   block veto is part of that condition, as the friends-of-friends arm's is.
  * - The household arm needs a membership in a live household,
  *   `liveHouseholdOf`'s. It checks no block: the event belongs to the
  *   household, which already shows it to the member. A soft-deleted
@@ -52,6 +58,7 @@ export function browseEventScope(subjectId: string): Prisma.EventWhereInput {
       { reach: Reach.Public, createdBy: { is: { NOT: blockWith(subjectId) } } },
       { reach: { in: [...REACHES_ADMITTING_FRIENDS] }, createdBy: { is: acceptedFriendOf(subjectId) } },
       { AND: [{ reach: Reach.FriendsOfFriends }, { createdBy: { is: friendOfFriendOf(subjectId) } }] },
+      { AND: [{ reach: Reach.ExtendedNetwork }, { createdBy: { is: withinExtendedNetworkOf(subjectId) } }] },
       { household: { is: liveHouseholdOf(subjectId) } },
     ],
   };

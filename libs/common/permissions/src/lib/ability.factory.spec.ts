@@ -815,7 +815,7 @@ describe('AbilityFactory', () => {
         expect(ability.rules.at(-1)?.conditions).toEqual({
           household: {
             is: {
-              reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
+              reach: { in: ['Friends', 'FriendsOfFriends', 'ExtendedNetwork', 'Public'] },
               members: {
                 some: {
                   user: {
@@ -905,7 +905,7 @@ describe('AbilityFactory', () => {
       const ability = factory.createForUser(user);
 
       expect(ability.rules.at(-1)?.conditions).toEqual({
-        reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
+        reach: { in: ['Friends', 'FriendsOfFriends', 'ExtendedNetwork', 'Public'] },
         user: {
           is: {
             AND: [
@@ -1007,6 +1007,84 @@ describe('AbilityFactory', () => {
       expect(
         ability.can(Action.read, asEntity('Game', { deletedAt: null, reach: 'FriendsOfFriends', createdBy })),
       ).toBe(expected);
+    });
+  });
+
+  // One lookup on the creator's extended network rows, with the block veto beside it,
+  // so the acting user's id is rendered into three clauses (#497).
+  describe('read:game:extended-network — relation-scoped rendering', () => {
+    const extendedNetworkReader = () =>
+      makeUser({ id: 'user-42', roles: [makeRole('User', [catalogPermission('read:game:extended-network')])] });
+
+    it("renders the acting user id into the creator's extended network lookup and both block clauses", () => {
+      expect(factory.createForUser(extendedNetworkReader()).rules.at(-1)?.conditions).toEqual({
+        deletedAt: null,
+        AND: [
+          { reach: 'ExtendedNetwork' },
+          {
+            createdBy: {
+              is: {
+                extendedNetwork: { some: { otherUserId: 'user-42', steps: { lte: 3 } } },
+                NOT: {
+                  OR: [
+                    { friendshipsRequested: { some: { addresseeId: 'user-42', status: 'Blocked' } } },
+                    { friendshipsReceived: { some: { requesterId: 'user-42', status: 'Blocked' } } },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      });
+    });
+
+    it('renders every template variable to a non-empty value', () => {
+      const conditions = factory.createForUser(extendedNetworkReader()).rules.at(-1)?.conditions;
+
+      // An out-of-context variable renders as an empty string, as the test
+      // under 'household member rules (#155)' explains.
+      expect(stringLeaves(conditions)).not.toContain('');
+    });
+
+    // The in-memory matcher throws on the relation shorthand, so these prove it
+    // reads the operator form, compares the steps, and applies the veto, which
+    // the extended network rows know nothing of. A blocked row's requester is the user
+    // who placed the block.
+    const noFriendships = { friendshipsRequested: [], friendshipsReceived: [] };
+    const readerThreeStepsAway = [{ otherUserId: 'user-42', steps: 3 }];
+
+    it.each([
+      ['no extended network rows', { extendedNetwork: [], ...noFriendships }, false],
+      ['the reader three steps away', { extendedNetwork: readerThreeStepsAway, ...noFriendships }, true],
+      [
+        'someone else three steps away',
+        { extendedNetwork: [{ otherUserId: 'user-7', steps: 3 }], ...noFriendships },
+        false,
+      ],
+      [
+        'the reader three steps away, whom they have blocked',
+        {
+          extendedNetwork: readerThreeStepsAway,
+          friendshipsRequested: [{ addresseeId: 'user-42', status: 'Blocked' }],
+          friendshipsReceived: [],
+        },
+        false,
+      ],
+      [
+        'the reader three steps away, who has blocked them',
+        {
+          extendedNetwork: readerThreeStepsAway,
+          friendshipsRequested: [],
+          friendshipsReceived: [{ requesterId: 'user-42', status: 'Blocked' }],
+        },
+        false,
+      ],
+    ])('checks a game whose creator has %s in memory without throwing', (_case, createdBy, expected) => {
+      const ability = factory.createForUser(extendedNetworkReader());
+
+      expect(ability.can(Action.read, asEntity('Game', { deletedAt: null, reach: 'ExtendedNetwork', createdBy }))).toBe(
+        expected,
+      );
     });
   });
 
@@ -2019,11 +2097,12 @@ describe('AbilityFactory', () => {
       expect(user.can(Action.delete, asEntity('Game', { createdById: 'someone-else' }))).toBe(false);
     });
 
-    it('lets an ordinary User read the games it created, a friend’s that reach friends, a friend of a friend’s that reach friends of friends, every Public one and the ones shared with it, and no others', () => {
+    it('lets an ordinary User read the games it created, a friend’s that reach friends, a friend of a friend’s that reach friends of friends, those of its extended network that reach it, every Public one and the ones shared with it, and no others', () => {
       // The clause the game list, the by-id read and search all put in their
       // `where` (#472). Before, `read:game` carried no condition, so this was
       // `{}`: every signed-in user read every private game. A friend of a
-      // friend whom a block separates from the creator is not let in (#496).
+      // friend, or anyone else in the creator's extended network, whom a block
+      // separates from the creator is not let in (#496, #497).
       // A share reaches its recipient once it is in effect, and a block
       // between the game's creator and a named recipient vetoes it (#810).
       const user = factory.createForUser(
@@ -2068,6 +2147,20 @@ describe('AbilityFactory', () => {
           {
             deletedAt: null,
             AND: [
+              { reach: 'ExtendedNetwork' },
+              {
+                createdBy: {
+                  is: {
+                    extendedNetwork: { some: { otherUserId: 'user-1', steps: { lte: 3 } } },
+                    NOT: blockWithUser1,
+                  },
+                },
+              },
+            ],
+          },
+          {
+            deletedAt: null,
+            AND: [
               { reach: 'FriendsOfFriends' },
               {
                 createdBy: {
@@ -2090,7 +2183,7 @@ describe('AbilityFactory', () => {
           },
           {
             deletedAt: null,
-            reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
+            reach: { in: ['Friends', 'FriendsOfFriends', 'ExtendedNetwork', 'Public'] },
             createdBy: {
               is: {
                 OR: [

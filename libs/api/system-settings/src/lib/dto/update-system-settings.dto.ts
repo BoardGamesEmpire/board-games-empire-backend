@@ -29,7 +29,11 @@ const MAX_NAME_LENGTH = 100;
 /**
  * The levels the server's invitee policies take, for households (#278) and
  * events (#546): everyone, friends of friends (#496), or friends. `Private`
- * would turn every invite of that kind off.
+ * would turn every invite of that kind off. The extended network isn't one
+ * (#497): at three friendship steps it is close to `Public`, and an invite
+ * that went through would tell the inviter whether the invitee is in their
+ * extended network. The invitee gate refuses it, should a write skip this
+ * PATCH.
  */
 const INVITEE_POLICIES = [Reach.Public, Reach.FriendsOfFriends, Reach.Friends] as const;
 

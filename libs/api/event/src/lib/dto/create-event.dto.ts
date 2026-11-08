@@ -23,12 +23,19 @@ import { CreateEventPolicyDto } from './create-event-policy.dto';
  */
 export const MAX_INVITE_USER_IDS = 50;
 
-const EVENT_REACHES = [Reach.Private, Reach.Friends, Reach.FriendsOfFriends, Reach.Public] as const;
+const EVENT_REACHES = [
+  Reach.Private,
+  Reach.Friends,
+  Reach.FriendsOfFriends,
+  Reach.ExtendedNetwork,
+  Reach.Public,
+] as const;
 export type EventReach = (typeof EVENT_REACHES)[number];
 
 /**
  * An event's reach: every rung an event read rule serves, friends of friends
- * included (#496). Shared with `UpdateEventDto`, which names no default.
+ * (#496) and the extended network (#497) included. Shared with
+ * `UpdateEventDto`, which names no default.
  */
 export function EventReachProperty(defaultReach?: EventReach): PropertyDecorator {
   return ReachProperty({
@@ -37,7 +44,11 @@ export function EventReachProperty(defaultReach?: EventReach): PropertyDecorator
     description:
       "Who may read the event besides its attendees and its household's members. `Friends`: also its " +
       "creator's friends. `FriendsOfFriends`: also its creator's friends and friends of friends, unless " +
-      'a block stands between the creator and the reader. `Public`: every signed-in user. `Private`: no one else.',
+      'a block stands between the creator and the reader. `ExtendedNetwork`: also everyone up to three ' +
+      'friendship steps from its creator, unless a block stands between the creator and the reader. A reader ' +
+      'who is no longer within three steps may keep access for a short while: usually seconds after an ' +
+      'unfriend, up to a day after a user who linked them is deleted. `Public`: every signed-in user. ' +
+      '`Private`: no one else.',
   });
 }
 

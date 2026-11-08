@@ -5,11 +5,20 @@ import { FriendshipStatus, Reach } from '../client';
  * The rungs of the reach ladder that admit a friend: `Friends` and every rung
  * above it. The ladder reads upwards, so a wider reach keeps the readers of a
  * narrower one (#495). Direct friends read up the ladder through the friends
- * rules, and friends of friends through their own rules (#496). Frozen: the
+ * permissions, friends of friends through their own (#496), and the extended
+ * network through permissions that read the extended network table (#497). Frozen: the
  * catalog copies it once at load and list scopes read it on every call, so a
  * change made at run time would set the two apart.
  */
-export const REACHES_ADMITTING_FRIENDS = Object.freeze([Reach.Friends, Reach.FriendsOfFriends, Reach.Public] as const);
+export const REACHES_ADMITTING_FRIENDS = Object.freeze([
+  Reach.Friends,
+  Reach.FriendsOfFriends,
+  Reach.ExtendedNetwork,
+  Reach.Public,
+] as const);
+
+/** How many accepted friendship steps the extended network reaches (#497). */
+export const EXTENDED_NETWORK_STEPS = 3;
 
 /**
  * The users who are accepted friends of `userId`, in either direction: a
@@ -62,6 +71,38 @@ export function friendOfFriendOf(userId: string): Prisma.UserWhereInput {
         },
       },
     ],
+    NOT: blockWith(userId),
+  };
+}
+
+/**
+ * The users the extended network table puts within three friendship steps of `userId`,
+ * with no block between them (#497). The catalog renders it against
+ * `{{ user.id }}`, and `gameListScope` and `browseEventScope` against the
+ * acting user's id, so a permission and a list agree on who is in someone's
+ * extended network. The table is found by its primary key from the matched
+ * user's side.
+ *
+ * - A worker job rewrites the table's rows a few seconds after each friendship
+ *   change, so an unfriend reaches this clause then. A block between the two
+ *   users reaches it at once: the table stores no blocks, and the veto reads
+ *   the friendships, as `friendOfFriendOf`'s does. A block elsewhere on the
+ *   path ends that friendship step, as an unfriend does, and reaches this
+ *   clause with the job.
+ * - The table holds friends and friends of friends too, at one and two steps.
+ *   A direct friend is admitted at once through the friends permissions,
+ *   which admit the extended network's rung. A friend of a friend reaches an
+ *   extended network item through this clause alone, so after the job, like
+ *   the third step.
+ * - The clause bounds `steps` itself rather than relying on the table's limit,
+ *   so the rung stays at three steps if a later, wider rung makes the table
+ *   hold more (#497).
+ *
+ * A new clause on every call, as `acceptedFriendOf` builds one.
+ */
+export function withinExtendedNetworkOf(userId: string): Prisma.UserWhereInput {
+  return {
+    extendedNetwork: { some: { otherUserId: userId, steps: { lte: EXTENDED_NETWORK_STEPS } } },
     NOT: blockWith(userId),
   };
 }

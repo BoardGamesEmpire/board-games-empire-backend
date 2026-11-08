@@ -368,7 +368,8 @@ export class GameService {
 
       // Only an import gives the service account a game, and imported games are
       // public. Re-import never rewrites reach, so one narrowed here, to
-      // FriendsOfFriends, Friends or Private, would stay narrowed for good.
+      // ExtendedNetwork, FriendsOfFriends, Friends or Private, would stay
+      // narrowed for good.
       const privatizes = updateGameDto.reach !== undefined && updateGameDto.reach !== Reach.Public;
       if (privatizes && existing.createdBy?.isServiceAccount === true) {
         throw new BadRequestException(t('errors.game.server_owned_stays_public', { id }));

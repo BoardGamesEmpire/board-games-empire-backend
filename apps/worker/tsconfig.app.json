@@ -52,6 +52,9 @@
       "path": "../../libs/api/game-import/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/friendship/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/database/tsconfig.lib.json"
     },
     {

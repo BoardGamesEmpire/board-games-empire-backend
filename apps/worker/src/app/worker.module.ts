@@ -1,6 +1,7 @@
 import { AuditContextModule } from '@bge/actor-context';
 import { AuditLogModule, AuditRetentionModule } from '@bge/audit-log';
 import { DatabaseModule } from '@bge/database';
+import { ExtendedNetworkConsumerModule } from '@bge/friendship';
 import { GameImportConsumerModule } from '@bge/game-import';
 import { InviteExpirySweepModule } from '@bge/invites';
 import { MediaSweepModule } from '@bge/media';
@@ -105,6 +106,11 @@ import { baseLogger } from './lib/logger';
     // Periodic stamp of `Expired` on outstanding invites past their window
     // that nothing else stamped (#165). Worker-only for the same reason.
     InviteExpirySweepModule,
+
+    // Keeps the extended network's table current: the rebuild each friendship
+    // change queues from the API, and the full one at start and daily (#497).
+    // Worker-only, so the @Interval runs here and not in the API.
+    ExtendedNetworkConsumerModule,
 
     // Add more consumer modules here as the worker gains capabilities
     GameImportConsumerModule,

@@ -242,7 +242,30 @@ export interface DrainQueueOptions {
   readonly settleMs?: number;
 
   readonly pollIntervalMs?: number;
+
+  /**
+   * The queue's jobs may run in steps: a job moves itself back to `delayed`
+   * between them (BullMQ's step jobs), as a full extended network rebuild
+   * does after each batch (#497). Such a delay leaves no `failedReason` on
+   * the job, which is how it differs from a retry, so it is counted as the
+   * same job carrying on. A job that has finished and been removed
+   * (`removeOnComplete`) before the drain reads its `delayed` event can no
+   * longer be asked, so then the event's due time decides: a step is due at
+   * once, a retry only after its backoff, which must be longer than
+   * {@link STEP_CLOCK_SLACK_MS}. Off by default, so a drain still fails on a
+   * retry it can't tell from a step.
+   */
+  readonly steps?: boolean;
 }
+
+/**
+ * How far past its own event a step's due time may fall and still read as a
+ * step (#497). A step is due the moment it is delayed; a retry is due after
+ * its backoff, 5 s at the least on the extended network queue. The slack
+ * covers the worker's clock, which stamps the due time, running ahead of
+ * Redis's, which stamps the event's id.
+ */
+const STEP_CLOCK_SLACK_MS = 1_000;
 
 /** A stream entry's flat `[field, value, ...]` list, as a record. */
 function eventFields(fields: readonly string[]): Record<string, string | undefined> {
@@ -294,7 +317,7 @@ export async function drainQueue(
   expected: number,
   options: DrainQueueOptions = {},
 ): Promise<void> {
-  const { timeoutMs = 30_000, settleMs = 500, pollIntervalMs = 50 } = options;
+  const { timeoutMs = 30_000, settleMs = 500, pollIntervalMs = 50, steps = false } = options;
 
   if (!Number.isInteger(expected) || expected < 0) {
     throw new Error(`drainQueue: expected count must be >= 0 and an integer, got ${expected}`);
@@ -315,6 +338,24 @@ export async function drainQueue(
     const reason = job?.failedReason ? `: ${job.failedReason}` : '';
 
     return new Error(`Queue '${queue.name}': job ${jobId} ${what} during the drain${reason}`);
+  };
+
+  // A `delayed` event for a job that was active: a step, or a retry (#497)?
+  // While the job exists its `failedReason` says, since only a retry records
+  // one. A job that has since run again, finished and been removed can't be
+  // asked, and reading "gone" as a step would let a retry through, so then
+  // the event's due time decides. A due time that is missing or unreadable
+  // reads as a retry.
+  const isStep = async (jobId: string, eventId: string, entry: Record<string, string | undefined>) => {
+    const job = await queue.getJob(jobId);
+    if (job) {
+      return !job.failedReason;
+    }
+
+    const due = Number(entry['delay']);
+    const at = Number(eventId.split('-')[0]);
+
+    return Number.isFinite(due) && Number.isFinite(at) && due - at <= STEP_CLOCK_SLACK_MS;
   };
 
   const readNewEvents = async (): Promise<void> => {
@@ -345,6 +386,10 @@ export async function drainQueue(
           );
         case 'delayed':
           if (started.has(jobId)) {
+            if (steps && (await isStep(jobId, id, entry))) {
+              break;
+            }
+
             throw await retried(jobId, 'failed an attempt and was scheduled for a retry');
           }
           break;
