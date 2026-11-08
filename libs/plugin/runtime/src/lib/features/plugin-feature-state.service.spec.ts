@@ -10,6 +10,7 @@ import {
 import { createMockDatabaseService, UNIT_BOUND_RULES, type MockDatabaseService } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { PluginConsentCheckClassifier } from '../consent/plugin-consent-check-classifier.service';
+import { PluginConsentStandingService } from '../consent/plugin-consent-standing.service';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginUnitScopeError } from '../units/unit.errors';
 import {
@@ -36,6 +37,7 @@ describe('PluginFeatureStateService', () => {
    * - status-badge ← no bound checks (nothing to consent).
    */
   const OWN_CANONICAL = 'plugin|demo-sink|read:digest';
+  const MANAGE_CANONICAL = 'plugin|demo-sink|manage:digest';
 
   const manifest = buildPluginManifest({ scope: 'household' });
   manifest.features = [
@@ -84,7 +86,9 @@ describe('PluginFeatureStateService', () => {
     },
     {
       slug: 'update:calendar',
-      required: false,
+      // The household-scope required check: the one a household can itself
+      // owe, so its risk_raised and never_asked kinds are reachable (#1149).
+      required: true,
       reason: { en: 'Writes digest reminders to the household calendar.' },
       feature: 'calendar-sync',
       consentScope: 'household',
@@ -159,6 +163,7 @@ describe('PluginFeatureStateService', () => {
   const householdHappyGrants = [
     grantRow({ slug: 'feedback:read', scopeType: PluginGrantScope.Server }),
     grantRow({ slug: OWN_CANONICAL, scopeType: PluginGrantScope.Server }),
+    grantRow({ slug: MANAGE_CANONICAL, scopeType: PluginGrantScope.Server }),
     grantRow({ slug: 'create:notification' }),
     grantRow({ slug: 'update:calendar' }),
   ];
@@ -180,15 +185,20 @@ describe('PluginFeatureStateService', () => {
   beforeEach(() => {
     db = createMockDatabaseService();
     db.plugin.findUnique.mockResolvedValue(pluginRow() as never);
-    db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, suspendedForConsent: false } as never);
-    db.userPlugin.findUnique.mockResolvedValue({ enabled: true, suspendedForConsent: false } as never);
+    db.householdPlugin.findUnique.mockResolvedValue({ enabled: true } as never);
+    db.userPlugin.findUnique.mockResolvedValue({ enabled: true } as never);
     db.pluginGrant.findMany.mockResolvedValue(householdHappyGrants as never);
     db.permission.findMany.mockResolvedValue(allCoreRisks as never);
-    db.pluginPermission.findMany.mockResolvedValue([{ slug: OWN_CANONICAL, riskLevel: RiskLevel.Low }] as never);
+    db.pluginPermission.findMany.mockResolvedValue([
+      { slug: OWN_CANONICAL, riskLevel: RiskLevel.Low },
+      { slug: MANAGE_CANONICAL, riskLevel: RiskLevel.Low },
+    ] as never);
+
+    const classifier = new PluginConsentCheckClassifier(db as unknown as DatabaseService);
 
     service = new PluginFeatureStateService(
       db as unknown as DatabaseService,
-      new PluginConsentCheckClassifier(db as unknown as DatabaseService),
+      new PluginConsentStandingService(classifier, options),
       options,
     );
   });
@@ -322,7 +332,7 @@ describe('PluginFeatureStateService', () => {
     it('reports every feature active for a fully consented, served household unit', async () => {
       const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
 
-      expect(result).toMatchObject({ served: true, suspendedForConsent: false });
+      expect(result).toMatchObject({ served: true, state: 'on' });
       expect(result?.features).toEqual([
         expect.objectContaining({ name: 'weekly-digest', state: 'active', reason: null, blockingSlugs: [] }),
         expect.objectContaining({ name: 'calendar-sync', state: 'active', reason: null, blockingSlugs: [] }),
@@ -367,16 +377,23 @@ describe('PluginFeatureStateService', () => {
       expect(feature).toMatchObject({ state: 'disabled', reason: 'pending', blockingSlugs: ['create:notification'] });
     });
 
-    it('a server-scope denial dead-ends the feature for every unit', async () => {
+    it('a server-scope denial dead-ends the feature for every unit, reading denied from a household (#1149)', async () => {
       db.pluginGrant.findMany.mockResolvedValue([
         grantRow({ slug: 'feedback:read', scopeType: PluginGrantScope.Server, status: PluginGrantStatus.Denied }),
         grantRow({ slug: 'create:notification' }),
         grantRow({ slug: 'update:calendar' }),
       ] as never);
 
-      const feature = await featureByName(HOUSEHOLD_UNIT, 'weekly-digest');
+      const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
+      const feature = result?.features.find((entry) => entry.name === 'weekly-digest');
 
+      // The refusal is durable, so the feature is not waiting on anyone: it
+      // reads denied. That the household cannot reverse it is the check's
+      // kind under consent, outstanding_elsewhere (#1149).
       expect(feature).toMatchObject({ state: 'disabled', reason: 'denied', blockingSlugs: ['feedback:read'] });
+      expect(result?.consent.optionalOff).toContainEqual(
+        expect.objectContaining({ slug: 'feedback:read', kind: 'outstanding_elsewhere' }),
+      );
     });
 
     it('a grant whose decided risk no longer covers current risk reports pending — consent must be re-given', async () => {
@@ -437,96 +454,176 @@ describe('PluginFeatureStateService', () => {
     });
   });
 
-  describe('suspension', () => {
-    it('reports consent-complete features disabled with reason suspended while the unit is consent-suspended', async () => {
-      db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, suspendedForConsent: true } as never);
+  describe('consent standing (#1149)', () => {
+    it('a unit still owing a required check is served, with state review_pending and the slug under consent.outstanding (#1149)', async () => {
+      // The required, server-consented manage:digest has no grant. Before
+      // #1149 this suspended the unit (#1061, #1063); now it keeps running on
+      // what it was given and the state code says what is waiting.
+      db.pluginGrant.findMany.mockResolvedValue(
+        householdHappyGrants.filter((grant) => grant.permissionSlug !== MANAGE_CANONICAL) as never,
+      );
 
       const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
 
-      expect(result).toMatchObject({ served: false, suspendedForConsent: true });
-      expect(result?.features).toEqual([
-        expect.objectContaining({ name: 'weekly-digest', state: 'disabled', reason: 'suspended', blockingSlugs: [] }),
-        expect.objectContaining({ name: 'calendar-sync', state: 'disabled', reason: 'suspended' }),
-        expect.objectContaining({ name: 'digest-insights', state: 'disabled', reason: 'suspended' }),
-        expect.objectContaining({ name: 'status-badge', state: 'disabled', reason: 'suspended' }),
+      expect(result).toMatchObject({ served: true, state: 'review_pending' });
+      expect(result?.consent.outstanding.map((check) => check.slug)).toEqual([MANAGE_CANONICAL]);
+      expect(result?.consent.optionalOff).toEqual([]);
+    });
+
+    it('a fully consented enabled unit reads on (#1149)', async () => {
+      const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
+
+      expect(result).toMatchObject({
+        served: true,
+        serverEnabled: true,
+        state: 'on',
+        consent: { outstanding: [], optionalOff: [] },
+      });
+    });
+
+    it('a household unit whose plugin a server admin switched off reads unavailable, not on (#1149)', async () => {
+      // Nothing runs for anyone while the server switch is off, so a code
+      // that said `on` would mislead a client announcing the code alone. The
+      // household's own switch is not the one that is off, so it is not
+      // `off` either; serverEnabled says which cause unavailable has.
+      db.plugin.findUnique.mockResolvedValue(pluginRow({ enabled: false }) as never);
+
+      const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
+
+      expect(result).toMatchObject({ served: false, serverEnabled: false, state: 'unavailable' });
+    });
+
+    it('the Server unit reads off when the server switch is off: that switch is its own (#1149)', async () => {
+      db.plugin.findUnique.mockResolvedValue(pluginRow({ enabled: false }) as never);
+
+      const result = await service.resolveForUnit('plg_1', SERVER_UNIT);
+
+      expect(result).toMatchObject({ served: false, serverEnabled: false, state: 'off' });
+    });
+
+    it('a Granted row at a risk the catalog has since raised reads review_pending and stays served (#1149)', async () => {
+      db.permission.findMany.mockResolvedValue([
+        riskRow('feedback:read'),
+        riskRow('create:notification'),
+        riskRow('update:calendar', RiskLevel.High),
+        riskRow('read:public_content'),
+      ] as never);
+
+      const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
+
+      expect(result).toMatchObject({ served: true, state: 'review_pending' });
+      expect(result?.consent.outstanding).toEqual([
+        expect.objectContaining({ slug: 'update:calendar', kind: 'risk_raised', required: true }),
       ]);
     });
 
-    it('an actionable consent state outranks suspension in the reason slot', async () => {
-      db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, suspendedForConsent: true } as never);
-      db.pluginGrant.findMany.mockResolvedValue([
-        grantRow({ slug: 'feedback:read', scopeType: PluginGrantScope.Server }),
-        grantRow({ slug: 'create:notification', status: PluginGrantStatus.Denied }),
-        grantRow({ slug: 'update:calendar' }),
+    it('a server-consented required check with a raised risk reads outstanding_elsewhere from a household (#1149)', async () => {
+      // Seen from a household, a server-consented check is the server admin's
+      // to answer, so the unit is told the cure lies elsewhere.
+      db.pluginPermission.findMany.mockResolvedValue([
+        { slug: OWN_CANONICAL, riskLevel: RiskLevel.Low },
+        { slug: MANAGE_CANONICAL, riskLevel: RiskLevel.High },
       ] as never);
 
-      const feature = await featureByName(HOUSEHOLD_UNIT, 'weekly-digest');
+      const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
 
-      expect(feature).toMatchObject({ state: 'disabled', reason: 'denied', blockingSlugs: ['create:notification'] });
+      expect(result).toMatchObject({ served: true, state: 'review_pending' });
+      expect(result?.consent.outstanding).toEqual([
+        expect.objectContaining({ slug: MANAGE_CANONICAL, kind: 'outstanding_elsewhere' }),
+      ]);
+    });
+
+    it('a refused optional check switches its feature off without holding the unit in review (#1149)', async () => {
+      db.pluginGrant.findMany.mockResolvedValue([
+        ...householdHappyGrants.filter((grant) => grant.permissionSlug !== 'create:notification'),
+        grantRow({ slug: 'create:notification', status: PluginGrantStatus.Denied }),
+      ] as never);
+
+      const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
+
+      expect(result).toMatchObject({ served: true, state: 'on' });
+      expect(result?.consent.optionalOff.map((check) => check.slug)).toEqual(['create:notification']);
     });
   });
 
-  describe('serving vs consent separation', () => {
+  describe('serving vs consent separation (#1149)', () => {
     it('a missing household enablement row is not served, but consent-derived states stand', async () => {
       db.householdPlugin.findUnique.mockResolvedValue(null as never);
 
       const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
 
-      expect(result).toMatchObject({ served: false, suspendedForConsent: false });
+      expect(result).toMatchObject({ served: false, state: 'off' });
       expect(result?.features.every((feature) => feature.state === 'active')).toBe(true);
     });
 
     /**
-     * The third component of the predicate (#369, D-CK). A dormant row is
-     * enabled and unsuspended — the household asked for nothing — so without
-     * this the read answers `served: true` for a unit the manifest moved out
-     * from under.
+     * The third component of the predicate (#369). A dormant row is enabled
+     * and the household asked for nothing, so without this the read answers
+     * `served: true` for a unit the manifest moved out from under.
      */
-    it('a dormant row is not served, and the read says why', async () => {
-      db.householdPlugin.findUnique.mockResolvedValue({
-        enabled: true,
-        suspendedForConsent: false,
-        dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-      } as never);
+    it.each<[string, PluginUnitDormantReason, string]>([
+      ['needs_configuration', PluginUnitDormantReason.NeedsConfiguration, 'needs_configuration'],
+      ['unavailable', PluginUnitDormantReason.ScopeOrphaned, 'unavailable'],
+    ])('a dormant row reads %s from dormantReason, with served false', async (_label, dormantReason, state) => {
+      db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, dormantReason } as never);
 
       const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
 
-      expect(result).toMatchObject({
-        served: false,
-        suspendedForConsent: false,
-        dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-      });
+      expect(result).toMatchObject({ served: false, state });
       // Dormancy is not a consent state: the features keep the states their
       // grants earned, exactly as for a switched-off unit.
       expect(result?.features.every((feature) => feature.state === 'active')).toBe(true);
     });
 
-    it('reports no dormancy for an ordinary served unit', async () => {
-      const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
+    it.each<[string, PluginUnitDormantReason]>([
+      ['needs_configuration', PluginUnitDormantReason.NeedsConfiguration],
+      ['unavailable', PluginUnitDormantReason.ScopeOrphaned],
+    ])(
+      'a dormant row that also owes a required check still reads %s, not review_pending',
+      async (state, dormantReason) => {
+        db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, dormantReason } as never);
+        db.pluginGrant.findMany.mockResolvedValue(
+          householdHappyGrants.filter((grant) => grant.permissionSlug !== 'update:calendar') as never,
+        );
 
-      expect(result).toMatchObject({ served: true, dormantReason: null });
-    });
+        const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
 
-    it('never reports dormancy on the user axis — user consent is legal at any plugin scope (#225)', async () => {
+        expect(result?.consent.outstanding.length).toBeGreaterThan(0);
+        expect(result).toMatchObject({ served: false, state });
+      },
+    );
+
+    it('never reads dormant on the user axis — user consent is legal at any plugin scope (#225)', async () => {
       const result = await service.resolveForUnit('plg_1', USER_UNIT);
 
-      expect(result?.dormantReason).toBeNull();
+      // The default grants cover every check a user unit consumes.
+      expect(result?.state).toBe('on');
     });
 
-    it.each<[string, Partial<{ enabled: boolean; uninstalledAt: Date | null }>]>([
-      ['the plugin is disabled', { enabled: false }],
-      ['the plugin is tombstoned', { uninstalledAt: new Date('2026-08-01T00:00:00Z') }],
-    ])('is not served when %s', async (_label, overrides) => {
-      db.plugin.findUnique.mockResolvedValue(pluginRow(overrides) as never);
+    it('is not served when the plugin is disabled', async () => {
+      db.plugin.findUnique.mockResolvedValue(pluginRow({ enabled: false }) as never);
 
       const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
 
       expect(result).toMatchObject({ served: false });
     });
+
+    it('the tombstone short-circuit returns served false, state off and empty consent lists (#1149)', async () => {
+      db.plugin.findUnique.mockResolvedValue(pluginRow({ uninstalledAt: new Date('2026-08-01T00:00:00Z') }) as never);
+
+      const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
+
+      expect(result).toMatchObject({
+        served: false,
+        state: 'off',
+        consent: { outstanding: [], optionalOff: [] },
+        features: [],
+      });
+    });
   });
 
   describe('scope ownership mirrors the ability read path (#60)', () => {
-    it('queries grants at the Server sentinel plus the unit coordinates, for bound checks only', async () => {
+    it('queries grants at the Server sentinel plus the unit coordinates, for every consumed check', async () => {
       await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
 
       expect(db.pluginGrant.findMany).toHaveBeenCalledWith(
@@ -537,9 +634,11 @@ describe('PluginFeatureStateService', () => {
               { scopeType: PluginGrantScope.Server, scopeId: '' },
               { scopeType: PluginGrantScope.Household, scopeId: 'hh-1' },
             ],
-            // The feature-less required check never enters feature derivation,
-            // and user-consented checks are not consumed by a household unit.
-            permissionSlug: { in: ['feedback:read', 'create:notification', 'update:calendar', OWN_CANONICAL] },
+            // The feature-less required check enters through the consent standing
+            // (#1149), and user-consented checks are not consumed by a household unit.
+            permissionSlug: {
+              in: [MANAGE_CANONICAL, 'feedback:read', 'create:notification', 'update:calendar', OWN_CANONICAL],
+            },
           }),
         }),
       );
@@ -561,7 +660,7 @@ describe('PluginFeatureStateService', () => {
               { scopeType: PluginGrantScope.Server, scopeId: '' },
               { scopeType: PluginGrantScope.User, scopeId: 'u-1' },
             ],
-            permissionSlug: { in: ['feedback:read', 'read:public_content', OWN_CANONICAL] },
+            permissionSlug: { in: [MANAGE_CANONICAL, 'feedback:read', 'read:public_content', OWN_CANONICAL] },
           }),
         }),
       );
@@ -590,7 +689,7 @@ describe('PluginFeatureStateService', () => {
             OR: [{ scopeType: PluginGrantScope.Server, scopeId: '' }],
             // Household- and user-consented checks are other axes' decisions;
             // a Server unit must not consume (or widen into) them.
-            permissionSlug: { in: ['feedback:read', OWN_CANONICAL] },
+            permissionSlug: { in: [MANAGE_CANONICAL, 'feedback:read', OWN_CANONICAL] },
           }),
         }),
       );
@@ -605,7 +704,7 @@ describe('PluginFeatureStateService', () => {
       // entirely per-unit business (the consent surface models the same
       // checks as `per-unit`), and #67's degraded-mode answer must ask the
       // owning units.
-      expect(result).toMatchObject({ served: true, suspendedForConsent: false });
+      expect(result).toMatchObject({ served: true });
       expect(result?.features).toEqual([
         expect.objectContaining({ name: 'weekly-digest', state: 'active', perUnitSlugs: ['create:notification'] }),
         expect.objectContaining({

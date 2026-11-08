@@ -1,11 +1,13 @@
 import { assertPluginUnit, type PluginUnit } from '@bge/actor-context';
-import { DatabaseService, loadPluginUnitEnablement, PluginScope, type PluginUnitDormantReason } from '@bge/database';
-import { resolveLocalizedString, type NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
+import { DatabaseService, loadPluginUnitEnablement, PluginScope } from '@bge/database';
+import { resolveLocalizedString } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
-import { unitConsumesConsentScope, type ConsentCheckClassification } from '../consent/consent-classification.types';
-import { PluginConsentCheckClassifier } from '../consent/plugin-consent-check-classifier.service';
+import { unitConsumesConsentScope } from '../consent/consent-classification.types';
+import { PluginConsentStandingService } from '../consent/plugin-consent-standing.service';
+import type { ConsentOutstandingCheck, PluginConsentStanding } from '../consent/plugin-consent-standing.types';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import { derivePluginUnitState, type PluginUnitStateCode } from '../units/plugin-unit-state';
 import { PluginUnitScopeError } from '../units/unit.errors';
 import {
   PluginFeatureStateManifestError,
@@ -14,16 +16,18 @@ import {
 } from './feature-state.errors';
 
 /**
- * Why a feature is not active, strongest-first. `denied` and `pending` are
- * per-check consent states (a durable refusal vs. a decision nobody has
- * made — which includes a grant whose `decidedRiskLevel` no longer covers
- * the permission's current risk, since that consent must be given
- * again). `suspended` is the unit-level suspension state and is reported
- * only when the feature's consent is otherwise complete — an actionable
- * denial/pending always wins the `reason` slot, because it names what the
- * unit can actually do about it.
+ * Why a feature is not active, strongest-first. Both are per-check consent
+ * states: `denied` is a durable refusal at whichever scope decides the
+ * check, `pending` a decision nobody has made — which includes a grant whose
+ * `decidedRiskLevel` no longer covers the permission's current risk, since
+ * that consent must be given again. A denial outranks a pending decision
+ * because it says the feature is not merely waiting. Whether this unit can
+ * act on it is the check's kind under `consent` (#1149): a server admin's
+ * refusal reads `denied` here and `outstanding_elsewhere` there. A unit that
+ * owes a required permission is not a feature reason: `state` on the unit
+ * says so.
  */
-export type PluginFeatureBlockReason = 'denied' | 'pending' | 'suspended';
+export type PluginFeatureBlockReason = 'denied' | 'pending';
 
 export interface PluginFeatureState {
   /** Manifest `features[].name` — the stable identifier. */
@@ -34,7 +38,7 @@ export interface PluginFeatureState {
   readonly state: 'active' | 'disabled';
   /** `null` exactly when `state` is `active`. */
   readonly reason: PluginFeatureBlockReason | null;
-  /** Canonical slugs of the bound checks blocking activation (empty when active or purely suspended). */
+  /** Canonical slugs of the bound checks blocking activation (empty when active). */
   readonly blockingSlugs: readonly string[];
   /**
    * Bound checks decided on a DIFFERENT unit axis, which this unit's
@@ -57,26 +61,26 @@ export interface PluginFeatureUnitState {
   readonly unit: PluginUnit;
   /**
    * The full operational predicate: plugin enabled and not tombstoned, AND
-   * (for Household/User units) the unit's enablement row exists with
-   * `enabled && !suspendedForConsent && dormantReason === null`. Deliberately
-   * separate from feature `state`: a feature is active iff its owned checks are
-   * granted and the unit is not consent-suspended — a unit that merely switched
-   * the plugin off keeps its consent-derived states, and `served: false` is
-   * what tells the caller nothing runs right now.
+   * the unit's enablement is on with no dormant reason. Consent never enters
+   * it: a unit owing a required permission keeps running on the grants it gave
+   * (the ability denies what it has not granted), so served is not what says a
+   * review is waiting (#1149).
    */
   readonly served: boolean;
-  readonly suspendedForConsent: boolean;
   /**
-   * Why this unit's retained row cannot serve, independent of the household's
-   * own switch and of consent (#369, #370, D-CK). `null` for every unit that is
-   * not dormant, and always `null` on the Server and User axes.
-   *
-   * Reported alongside `served` rather than folded into the feature `reason`
-   * slot: dormancy is not a per-feature consent state, and it is not something
-   * the reading household can act on by deciding anything — the cure is an
-   * admin re-scoping the plugin back or supplying a conforming document.
+   * The plugin's server switch. Reported beside `state` so a client can say
+   * why a switched-on unit reads `unavailable`: this, or a scope that no
+   * longer admits the unit (#1149).
    */
-  readonly dormantReason: PluginUnitDormantReason | null;
+  readonly serverEnabled: boolean;
+  /**
+   * The stable code for the unit's state: off, on, review_pending,
+   * needs_configuration or unavailable. Carries what the server switch,
+   * dormancy and consent each add, so none is reported separately.
+   */
+  readonly state: PluginUnitStateCode;
+  /** Required permissions the unit still owes and optional ones switched off. */
+  readonly consent: PluginConsentStanding;
   readonly features: readonly PluginFeatureState[];
 }
 
@@ -84,12 +88,16 @@ export interface PluginFeatureUnitState {
  * The queryable "is feature X active for unit Y" derivation (#60),
  * landed where it is consumed. Inputs are exactly the C3
  * contract: `PluginGrant` rows (Granted confers, Denied is durable, no row
- * is pending), per-unit suspension state, and the manifest's
- * `checks[].feature` → `features[].name` binding (validated at install).
+ * is pending), the manifest's `checks[].feature` → `features[].name` binding
+ * (validated at install) and the permission catalog. Nothing is stored: the
+ * unit state code is worked out from those on every read (#1149), which
+ * removes the stored flag this read used to trust and the bugs that came with
+ * it (#1061, #1063, #1147).
  *
  * A feature is ACTIVE for a unit iff every bound check the unit's
- * resolution consumes has a conferring `Granted` row and the unit is not
- * consent-suspended. "The checks the unit's resolution consumes"
+ * resolution consumes has a conferring `Granted` row. A unit that still owes
+ * a required permission keeps running on the grants it gave; `state` says
+ * what is waiting. "The checks the unit's resolution consumes"
  * (`unitConsumesConsentScope`) mirrors the ability read path's grant
  * scoping (#60): server-consented checks apply to EVERY unit (they are
  * the plugin's global authority — a server-denied check dead-ends the
@@ -100,8 +108,8 @@ export interface PluginFeatureUnitState {
  * they are reported in `perUnitSlugs` so a viewpoint that does not fully
  * determine a feature says so instead of reading as a fleet-wide green.
  *
- * Per-check states come from `PluginConsentCheckClassifier` — shared with
- * the consent presentation so the feature answer and the consent screen
+ * Per-check states come from `PluginConsentStandingService`, (one
+ * classification per read), so the feature answer and the consent surface
  * cannot disagree about what `pending` or `denied` means. Risk coverage
  * applies exactly as in the read path: a `Granted` row whose
  * `decidedRiskLevel` no longer covers the permission's current risk
@@ -115,7 +123,7 @@ export interface PluginFeatureUnitState {
 export class PluginFeatureStateService {
   constructor(
     private readonly db: DatabaseService,
-    private readonly classifier: PluginConsentCheckClassifier,
+    private readonly standing: PluginConsentStandingService,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
   ) {}
 
@@ -245,8 +253,9 @@ export class PluginFeatureStateService {
         plugin: { id: plugin.id, slug: plugin.slug },
         unit,
         served: false,
-        suspendedForConsent: unitState.suspendedForConsent,
-        dormantReason: unitState.dormantReason,
+        serverEnabled: false,
+        state: 'off',
+        consent: { outstanding: [], optionalOff: [] },
         features: [],
       };
     }
@@ -256,16 +265,37 @@ export class PluginFeatureStateService {
       this.options,
       (pluginSlug, detail, issues) => new PluginFeatureStateManifestError(pluginSlug, detail, issues),
     );
-    // Dormancy joins the predicate as an independent component (D-CK): the
-    // household's `enabled` intent survives a scope narrowing or a schema
-    // tightening, so a row can be enabled, unsuspended, and still serve
-    // nothing.
-    const served =
-      plugin.enabled && unitState.enabled && !unitState.suspendedForConsent && unitState.dormantReason === null;
+    // Dormancy is an independent component of the predicate: the household's
+    // `enabled` intent survives a scope narrowing or a schema tightening, so
+    // a unit can be switched on and still serve nothing (#369). Consent is
+    // deliberately absent (#1149).
+    const served = plugin.enabled && unitState.enabled && unitState.dormantReason === null;
+
+    // The loader does not yet report whether the unit enablement exists. An
+    // enabled one necessarily does, and a missing one reads `off` either way,
+    // so this holds until the loader reports existence (#1149).
+    const anchored = unit.scopeType === 'Server' || unitState.enabled;
+    const { standing: consent, refusedSlugs } = await this.standing.resolveDetailed(
+      plugin.id,
+      unit,
+      validated.permissionChecks,
+      locale,
+    );
+    const state = derivePluginUnitState({
+      anchored,
+      // The server switch IS the Server unit's own switch, so that unit reads
+      // `off` when it is off; a household or user unit reads `unavailable`,
+      // since the switch is not theirs to flip (#1149).
+      enabled: unit.scopeType === 'Server' ? plugin.enabled : unitState.enabled,
+      serverEnabled: plugin.enabled,
+      dormantReason: unitState.dormantReason,
+      outstandingCount: consent.outstanding.length,
+    });
 
     const featureBound = validated.permissionChecks.filter((check) => check.feature !== undefined);
-    const consumedChecks = featureBound.filter((check) => unitConsumesConsentScope(check.consentScope, unit));
-    const { decisions } = await this.classifier.classify(plugin.id, unit, consumedChecks);
+    // One classification per read: every check that does not confer is already
+    // in the standing, so features are derived from it, not from a second pass.
+    const notConferring = [...consent.outstanding, ...consent.optionalOff];
 
     const resolveText = (value: Parameters<typeof resolveLocalizedString>[0]): string =>
       resolveLocalizedString(value, {
@@ -274,9 +304,8 @@ export class PluginFeatureStateService {
       });
 
     const features = validated.manifest.features.map((feature): PluginFeatureState => {
-      const bound = consumedChecks.filter((check) => check.feature === feature.name);
-      const blocking = bound.filter((check) => decisions.get(check.canonicalSlug)?.decision !== 'granted');
-      const reason = this.blockReason(unitState.suspendedForConsent, blocking, decisions);
+      const blocking = notConferring.filter((check) => check.feature === feature.name);
+      const reason = this.blockReason(blocking, refusedSlugs);
 
       return {
         name: feature.name,
@@ -284,7 +313,7 @@ export class PluginFeatureStateService {
         description: resolveText(feature.description),
         state: reason === null ? 'active' : 'disabled',
         reason,
-        blockingSlugs: blocking.map((check) => check.canonicalSlug).sort(),
+        blockingSlugs: blocking.map((check) => check.slug).sort(),
         perUnitSlugs: featureBound
           .filter((check) => check.feature === feature.name && !unitConsumesConsentScope(check.consentScope, unit))
           .map((check) => check.canonicalSlug)
@@ -296,29 +325,30 @@ export class PluginFeatureStateService {
       plugin: { id: plugin.id, slug: plugin.slug },
       unit,
       served,
-      suspendedForConsent: unitState.suspendedForConsent,
-      dormantReason: unitState.dormantReason,
+      serverEnabled: plugin.enabled,
+      state,
+      consent,
       features,
     };
   }
 
   /**
-   * Reason precedence: an actionable per-check state (denied > pending)
-   * outranks the unit-level suspension, because it names what the unit can
-   * actually do about it; suspension is reported only when the feature's
-   * consumed consent is otherwise complete. `null` means active.
+   * `denied` when a durable refusal blocks the feature, at whichever scope
+   * decides the check: a server admin's refusal dead-ends the feature for a
+   * household as surely as the household's own would, and a client told
+   * `pending` would say the decision is still waiting when it has been made.
+   * Who can act on it is the check's kind under `consent` (`refused` for the
+   * unit's own, `outstanding_elsewhere` for another scope's). Every other
+   * non-conferring check reads `pending`; `null` means active (#1149).
    */
   private blockReason(
-    suspended: boolean,
-    blocking: readonly NormalizedPermissionRequest[],
-    decisions: ConsentCheckClassification['decisions'],
+    blocking: readonly ConsentOutstandingCheck[],
+    refusedSlugs: ReadonlySet<string>,
   ): PluginFeatureBlockReason | null {
-    if (blocking.length > 0) {
-      const denied = blocking.some((check) => decisions.get(check.canonicalSlug)?.decision === 'denied');
-
-      return denied ? 'denied' : 'pending';
+    if (blocking.length === 0) {
+      return null;
     }
 
-    return suspended ? 'suspended' : null;
+    return blocking.some((check) => refusedSlugs.has(check.slug)) ? 'denied' : 'pending';
   }
 }
