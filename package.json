@@ -201,7 +201,6 @@
     "@types/multer": "2.2.0",
     "@types/mustache": "4.2.6",
     "@types/node": "26.6.5",
-    "@types/nodemailer": "8.0.2",
     "@types/pg": "8.20.0",
     "@types/semver": "7.7.1",
     "@types/serve-static": "1.15.10",
