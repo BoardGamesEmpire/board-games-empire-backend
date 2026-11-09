@@ -13,8 +13,8 @@ import Joi from 'joi';
 export interface PluginsConfig {
   /**
    * Root directory for installed plugins, one directory per plugin artifact
-   * (`<pluginsRoot>/<slug>/<sha256>`, #224), which the install ingress is to
-   * populate (planned, #1094). Must survive OS temp-cleaning: installed `Plugin` rows reference
+   * (`<pluginsRoot>/<slug>/<sha256>`, #224), which the install ingress
+   * populates (#1094). Must survive OS temp-cleaning: installed `Plugin` rows reference
    * directories under this root, and a vanished root quarantines
    * (force-disables) every installed plugin on the next boot.
    */

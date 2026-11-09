@@ -23,6 +23,9 @@
       "path": "../../libs/common/env"
     },
     {
+      "path": "../../libs/plugin/artifacts"
+    },
+    {
       "path": "../../libs/plugin/manifest"
     },
     {

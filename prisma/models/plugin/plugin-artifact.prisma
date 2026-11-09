@@ -1,0 +1,45 @@
+/// A plugin artifact the server has received and not yet installed or
+/// discarded (#1094): one row per distinct archive, keyed by the SHA-256 of
+/// its bytes. Rows expire seven days after receipt so an artifact nobody
+/// approves does not sit on disk for ever. The `plugin` install and update
+/// pipeline reads a row to find the artifact's directory and provenance.
+///
+/// `receivedById` is a plain String id, not an FK relation, per the Plugin
+/// precedent (`installedById`): the record of who sent an artifact must
+/// survive that user's deletion, and this file must not fan edits into the
+/// auth domain models.
+///
+/// #1095 adds its own columns (the advisory result and the reason a check
+/// failed) later, in a migration of its own; this row holds only what receipt
+/// knows.
+model PluginArtifact {
+  /// SHA-256 of the artifact's archive, lowercase hex.
+  sha256 String @id
+
+  /// Manifest slug of the plugin the artifact carries.
+  slug String
+
+  /// Manifest version (semver) of the plugin the artifact carries.
+  version String
+
+  /// Size of the archive as received, before extraction.
+  compressedBytes Int @map("compressed_bytes")
+
+  /// The link the artifact was downloaded from; null for a manual upload.
+  url String?
+
+  /// PluginRegistrySource.slug the artifact was discovered through; null for
+  /// a direct link or a manual upload. Plain String, as on Plugin.
+  registrySlug String? @map("registry_slug")
+
+  /// Id of the user who sent the artifact; null when no user did.
+  receivedById String? @map("received_by_id")
+
+  receivedAt DateTime @default(now()) @map("received_at") @db.Timestamptz(3)
+
+  /// After this instant the artifact is eligible for removal.
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  @@index([expiresAt])
+  @@map("plugin_artifacts")
+}

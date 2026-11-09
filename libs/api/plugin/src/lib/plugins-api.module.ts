@@ -1,9 +1,12 @@
 import { AuditContextModule } from '@bge/actor-context';
 import { DatabaseModule } from '@bge/database';
+import { PluginArtifactsModule } from '@bge/plugin-artifacts';
 import { Module } from '@nestjs/common';
 import { PluginExceptionFilter } from './filters/plugin-exception.filter';
 import { HouseholdPluginsController } from './household-plugins.controller';
+import { PluginArtifactsController } from './plugin-artifacts.controller';
 import { PluginsController } from './plugins.controller';
+import { PluginArtifactUploadInterceptor } from './upload/plugin-artifact-upload.interceptor';
 import { UserPluginsController } from './user-plugins.controller';
 
 /**
@@ -35,13 +38,21 @@ import { UserPluginsController } from './user-plugins.controller';
     // class-referenced guard in the controller's host module, and the database
     // module is not global, so without this the app fails at boot.
     DatabaseModule,
+    // The receiver and the installer behind the install ingress's routes (#1094).
+    PluginArtifactsModule,
     // No import for the controller's other dependencies: PermissionsModule
     // (PoliciesGuard, AbilityService) and the runtime `@bge/plugin`
     // (PluginLifecycleService) are both global modules, the latter
     // configured once by the host's forRootAsync.
   ],
-  controllers: [PluginsController, HouseholdPluginsController, UserPluginsController],
-  providers: [PluginExceptionFilter],
+  // `PluginsController` must stay first. `artifacts/:sha256` would otherwise
+  // capture `GET /plugins/artifacts/consent` and `/features`, which belong to
+  // a plugin slugged `artifacts` (a valid slug, deliberately not reserved). The
+  // reverse costs nothing, since no checksum is either word, and no
+  // `PluginsController` route can capture `POST /plugins/artifacts`,
+  // `POST /plugins/install` or a checksum read. A module spec pins the order.
+  controllers: [PluginsController, PluginArtifactsController, HouseholdPluginsController, UserPluginsController],
+  providers: [PluginExceptionFilter, PluginArtifactUploadInterceptor],
   exports: [AuditContextModule, PluginExceptionFilter],
 })
 export class PluginsApiModule {}

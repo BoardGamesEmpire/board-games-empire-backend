@@ -455,6 +455,42 @@ describe('plugin update consent (approve/reject/pending)', () => {
       const response = await approve(admin, plugin.slug).expect(409);
       expect(response.body.code).toBe('PluginUpdateNoPendingError');
     });
+
+    it('answers a malformed staged checksum with its own code and copy, and activates nothing (#1094)', async () => {
+      // Only a hand edit writes such a checksum: stage() writes one the
+      // directory resolver confirmed, and the database refuses any other form
+      // (#1117). The check is lifted for this one write and restored as it
+      // was, so approval's backstop refusal is pinned over the wire.
+      const admin = await actors.admin();
+      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK]);
+      const [check] = await db.client.$queryRaw<{ definition: string }[]>`
+        SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+        WHERE conname = 'plugins_pending_sha256_format'`;
+      expect(check?.definition).toEqual(expect.any(String));
+
+      await db.client.$executeRawUnsafe('ALTER TABLE "plugins" DROP CONSTRAINT "plugins_pending_sha256_format"');
+
+      try {
+        await db.client.plugin.update({ where: { id: plugin.id }, data: { pendingSha256: 'B'.repeat(64) } });
+
+        const response = await approve(admin, plugin.slug).expect(500);
+
+        expect(response.body.code).toBe('PluginDirectoryLayoutError');
+        expect(response.body.slug).toBe(plugin.slug);
+        expect(response.body.message).toContain(`The files of plugin '${plugin.slug}' on the server`);
+        // The reason goes to the operator's log, never into the body.
+        expect(JSON.stringify(response.body)).not.toContain('lowercase hex');
+
+        const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+        expect(row.version).toBe('1.2.0');
+        expect(row.pendingStagingId).toBe(STAGING_ID);
+      } finally {
+        await db.client.plugin.updateMany({ where: { id: plugin.id }, data: { pendingSha256: STAGED_SHA } });
+        await db.client.$executeRawUnsafe(
+          `ALTER TABLE "plugins" ADD CONSTRAINT "plugins_pending_sha256_format" ${check?.definition}`,
+        );
+      }
+    });
   });
 
   describe('reject', () => {

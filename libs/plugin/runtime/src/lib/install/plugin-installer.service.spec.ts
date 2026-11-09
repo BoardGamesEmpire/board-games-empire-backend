@@ -42,6 +42,7 @@ import {
   PluginInstallPermissionCollisionError,
   PluginInstallStaticAnalysisError,
   PluginInstallUnknownCorePermissionError,
+  PluginReinstallConflictError,
 } from './install.errors';
 import { DEFAULT_PLUGIN_EXECUTION_MODE } from './manifest-enum.maps';
 import { PluginInstallerService, type PluginInstallInput } from './plugin-installer.service';
@@ -394,6 +395,64 @@ describe('PluginInstallerService', () => {
 
       const [{ data }] = db.plugin.create.mock.calls[0] as [{ data: Record<string, unknown> }];
       expect('executionMode' in data).toBe(false);
+    });
+  });
+
+  describe('assess (#1094)', () => {
+    const forbidden: StaticAnalysisFinding = {
+      file: 'index.js',
+      kind: 'esm-import',
+      specifier: '@bge/database',
+      severity: 'forbidden',
+      scanScope: 'default',
+    };
+
+    it('assesses without confirmations and lists what install will ask for', async () => {
+      const manifest = buildPluginManifest();
+      manifest.permissions.checks = [
+        ...manifest.permissions.checks,
+        { slug: 'read:audit_log', required: true, reason: { en: 'Mirrors audit rows into the external sink.' } },
+      ];
+      await writeManifest(manifest);
+      db.permission.findMany.mockResolvedValue([
+        feedbackRead,
+        { slug: 'read:audit_log', subject: 'audit_log', riskLevel: RiskLevel.Critical } as Permission,
+      ]);
+      const report: StaticAnalysisReport = { ...emptyReport, findings: [forbidden, { ...forbidden, file: 'b.js' }] };
+      analyzer.analyze.mockResolvedValue(report);
+
+      const assessment = await service.assess(directory(), { deepScan: true });
+
+      expect(assessment.criticalSlugsToReenter).toEqual(['read:audit_log']);
+      expect(assessment.forbiddenImportsToAccept).toEqual(['@bge/database']);
+      expect(assessment.analysis).toBe(report);
+      expect(assessment.validated.manifest.slug).toBe('demo-sink');
+      expect(assessment.serverChecks).toHaveLength(3);
+      expect(analyzer.analyze).toHaveBeenCalledWith(directory(), { deepScan: true });
+      expect(authority.isServerAdmin).not.toHaveBeenCalled();
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(db.plugin.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it("scans only the plugin's own files unless asked to go deeper (#1094)", async () => {
+      await writeManifest(buildPluginManifest());
+
+      await service.assess(directory());
+
+      expect(analyzer.analyze).toHaveBeenCalledWith(directory(), { deepScan: false });
+    });
+
+    it('checks authority before it touches the directory or reads the manifest (#1094)', async () => {
+      authority.isServerAdmin.mockResolvedValue(false);
+      const read = jest.spyOn(jest.requireActual<typeof import('node:fs/promises')>('node:fs/promises'), 'readFile');
+
+      await expect(service.install(input())).rejects.toBeInstanceOf(PluginInstallAuthorityError);
+
+      expect(directories.confirm).not.toHaveBeenCalled();
+      expect(analyzer.analyze).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+      expect(db.permission.findMany).not.toHaveBeenCalled();
     });
   });
 
@@ -837,6 +896,16 @@ describe('PluginInstallerService', () => {
 
         await expect(service.install(input())).rejects.toBeInstanceOf(PluginInstallConflictError);
         expect(emitter.emit).not.toHaveBeenCalled();
+      });
+
+      it('a reinstall race has its own code (#1094)', async () => {
+        db.plugin.updateMany.mockResolvedValue({ count: 0 });
+
+        const failure = await service.install(input()).catch((error: unknown) => error);
+
+        expect(failure).toBeInstanceOf(PluginReinstallConflictError);
+        expect(failure).toBeInstanceOf(PluginInstallConflictError);
+        expect((failure as Error).name).toBe('PluginReinstallConflictError');
       });
 
       it('a fresh install reports no reset — the flag is reinstall provenance only', async () => {

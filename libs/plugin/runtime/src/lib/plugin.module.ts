@@ -20,7 +20,7 @@ import { PluginInstanceRegistry } from './loader/plugin-instance-registry';
 import { PluginLoaderService } from './loader/plugin-loader.service';
 import { DynamicImportPluginModuleImporter, PLUGIN_MODULE_IMPORTER } from './loader/plugin-module-importer';
 import { StoredManifestRequestedPermissionsReader } from './manifest/stored-manifest-requested-permissions.reader';
-import { ConfigurableModuleClass } from './plugin-module.options';
+import { ConfigurableModuleClass, MODULE_OPTIONS_TOKEN } from './plugin-module.options';
 import { PluginUnitLifecycleService } from './units/plugin-unit-lifecycle.service';
 import { PluginUpdateService } from './update/plugin-update.service';
 
@@ -87,8 +87,8 @@ import { PluginUpdateService } from './update/plugin-update.service';
     // answers before a slug is known.
     PluginInventoryService,
     // The one export #320 widened the boundary by: the endpoint-facing
-    // lifecycle writer. Its collaborators (schema validation, authority,
-    // registry) stay internal.
+    // lifecycle writer. Its collaborators (schema validation, registry)
+    // stay internal; the authority check is exported below (#1094).
     PluginLifecycleService,
     // #323's endpoint-facing unit writer — same boundary shape as the
     // server lifecycle export above; its collaborators stay internal.
@@ -99,6 +99,15 @@ import { PluginUpdateService } from './update/plugin-update.service';
     // the runtime registers no reader, and confers nothing on plugin
     // actors (#577).
     PLUGIN_REQUESTED_PERMISSIONS_READER,
+    // The plugin artifacts lib (#1094) places a received artifact under the
+    // plugins root, which these options name, and confirms the directory
+    // with the resolver before it assesses it. It refuses a non-admin with
+    // the authority check before it reads a byte. It relies on these global
+    // exports: importing this module would build a second runtime with no
+    // options.
+    MODULE_OPTIONS_TOKEN,
+    PluginDirectoryResolverService,
+    PluginGrantAuthorityService,
   ],
 })
 export class PluginModule extends ConfigurableModuleClass {}
