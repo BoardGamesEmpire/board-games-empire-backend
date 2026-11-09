@@ -11,9 +11,11 @@ export enum ImportErrorCode {
   GatewayError = 'GATEWAY_ERROR',
   InternalError = 'INTERNAL_ERROR',
   /**
-   * The expansion was never attempted because its base game import failed.
-   * Not derived from a raw exception — stamped when the base processor cancels
-   * expansion rows it can no longer spawn (the expansion is Cancelled, not Failed).
+   * The job was never attempted because the import that added it to the batch
+   * failed: the requested game, for a chosen expansion, or the game that needed
+   * an added base game (#971). Not derived from a raw exception — stamped when
+   * the failed job's processor cancels the rows it added (the job is
+   * Cancelled, not Failed). The code keeps its name, since clients key on it.
    */
   BaseImportFailed = 'BASE_IMPORT_FAILED',
 }
@@ -28,7 +30,7 @@ const SAFE_MESSAGE: Record<ImportErrorCode, string> = {
   [ImportErrorCode.NotFound]: 'The requested game could not be found on the gateway.',
   [ImportErrorCode.GatewayError]: 'Fetching game data from the gateway failed.',
   [ImportErrorCode.InternalError]: 'The import failed due to an internal error.',
-  [ImportErrorCode.BaseImportFailed]: 'Skipped because the base game import failed.',
+  [ImportErrorCode.BaseImportFailed]: 'Skipped because the import that added it to the batch failed.',
 };
 
 /**

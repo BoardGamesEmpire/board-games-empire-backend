@@ -279,7 +279,7 @@
       "not_found": "The requested game could not be found on the gateway.",
       "gateway_error": "Fetching game data from the gateway failed.",
       "internal_error": "The import failed due to an internal error.",
-      "base_import_failed": "Skipped because the base game import failed."
+      "base_import_failed": "Skipped because the import that added it to the batch failed."
     }
   },
   "system_settings": {

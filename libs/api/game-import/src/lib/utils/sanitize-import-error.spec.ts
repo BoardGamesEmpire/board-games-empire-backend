@@ -29,7 +29,9 @@ describe('sanitizeImportError', () => {
   });
 
   it('exposes a static, client-safe message for the cascade-cancellation code', () => {
-    expect(importErrorMessage(ImportErrorCode.BaseImportFailed)).toBe('Skipped because the base game import failed.');
+    expect(importErrorMessage(ImportErrorCode.BaseImportFailed)).toBe(
+      'Skipped because the import that added it to the batch failed.',
+    );
   });
 
   it('never includes the raw error message in the sanitized output', () => {
