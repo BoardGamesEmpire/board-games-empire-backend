@@ -129,11 +129,16 @@ const summarize = (result: PluginArtifactSweepResult): string =>
  * deleted.
  *
  * It keeps the code a running process still uses: every process records the
- * checksum it loaded and refreshes the record every minute until it shuts
- * down. A record five minutes without a refresh is taken for a process that
- * died, and deleted. It never follows a symbolic link inside the root, so
- * nothing outside it is touched; removing a real directory recursively does
- * not follow the links inside it either.
+ * checksum it loads before it reads that directory, and refreshes the record
+ * every minute until it shuts down. A record five minutes without a refresh
+ * is taken for a process that died, and deleted; a process that is still
+ * running writes it again at its next refresh.
+ *
+ * It never follows a symbolic link it finds inside the root, and removing a
+ * real directory recursively does not follow the links inside it either. The
+ * check catches a link that is already there. It assumes that only the server
+ * writes to the plugins root: the check and the listing or removal that
+ * follows are separate steps, so a link swapped in between them is not caught.
  *
  * It runs at boot and every hour, in a system actor scope of its own. A run
  * that fails is logged and the next tries again. The boot run never holds up

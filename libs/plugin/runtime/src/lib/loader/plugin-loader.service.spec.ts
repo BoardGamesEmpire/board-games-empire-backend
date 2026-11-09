@@ -271,11 +271,12 @@ describe('PluginLoaderService', () => {
       return row;
     };
 
-    it('records the loaded artifact after the plugin registers, from the directory it ran (#1094)', async () => {
+    it('records the artifact before anything is read from its directory, from the directory it runs (#1094)', async () => {
       const row = await loadDemo();
       recorder.record.mockImplementation(() => {
-        // The plugin is already registered when its record is written.
-        expect(registry.has(row.slug)).toBe(true);
+        // Nothing is imported or registered yet when the record is written.
+        expect(importer.importModule).not.toHaveBeenCalled();
+        expect(registry.has(row.slug)).toBe(false);
         return Promise.resolve();
       });
 
@@ -286,26 +287,14 @@ describe('PluginLoaderService', () => {
       expect(registry.resolve(row.slug).sha256).toBe(sha('a'));
     });
 
-    it('a failed record does not quarantine the plugin, and the loader retries it once (#1094)', async () => {
-      const row = await loadDemo();
-      recorder.record.mockRejectedValueOnce(new Error('db blip')).mockResolvedValueOnce(undefined);
-
-      await loader.loadAllEnabled();
-
-      expect(recorder.record).toHaveBeenCalledTimes(2);
-      expect(registry.isEnabled(row.slug)).toBe(true);
-      expect(db.plugin.update).not.toHaveBeenCalled();
-      expect(emitter.emit).not.toHaveBeenCalled();
-    });
-
-    it('a failed record does not quarantine the plugin when the retry fails too (#1094)', async () => {
+    it('a failed record is logged and neither retried nor quarantined: the heartbeat writes it again (#1094)', async () => {
       const row = await loadDemo();
       recorder.record.mockRejectedValue(new Error('db down'));
       const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
 
       await loader.loadAllEnabled();
 
-      expect(recorder.record).toHaveBeenCalledTimes(2);
+      expect(recorder.record).toHaveBeenCalledTimes(1);
       expect(registry.isEnabled(row.slug)).toBe(true);
       expect(configService.evict).not.toHaveBeenCalled();
       expect(db.plugin.update).not.toHaveBeenCalled();
@@ -314,11 +303,22 @@ describe('PluginLoaderService', () => {
       error.mockRestore();
     });
 
-    it('records nothing for a plugin that fails to load (#1094)', async () => {
+    it('keeps the record of a plugin whose import fails, whose code may be partly loaded (#1094)', async () => {
       const row = makePluginRow();
       db.plugin.findMany.mockResolvedValue([row]);
       directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
       importer.importModule.mockRejectedValue(new Error('import failed'));
+
+      await loader.loadAllEnabled();
+
+      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'));
+      expect(db.plugin.update).toHaveBeenCalled();
+    });
+
+    it('records nothing when the directory cannot be resolved (#1094)', async () => {
+      const row = makePluginRow();
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockRejectedValue(new Error('no such directory'));
 
       await loader.loadAllEnabled();
 

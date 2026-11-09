@@ -18,11 +18,25 @@ export const PLUGIN_LOAD_HEARTBEAT_MS = 60_000;
  */
 export const PLUGIN_LOAD_STALE_MS = 5 * 60_000;
 
+/** A plugin artifact this process recorded loading, and when. */
+interface LoadRecord {
+  readonly sha256: PluginArtifactSha256;
+  readonly loadedAt: Date;
+}
+
 /**
  * Records, per process, which plugin artifact each loaded plugin runs
  * (#1094), so the artifact sweep never removes code a running process still
- * uses. One `PluginProcessLoad` row per (process, plugin): written when the
- * plugin registers, refreshed every minute, deleted at a clean shutdown.
+ * uses. One `PluginProcessLoad` row per (process, plugin): written before the
+ * loader reads the plugin's directory, refreshed every minute, deleted at a
+ * clean shutdown.
+ *
+ * The recorder also holds every record in memory, and the heartbeat writes a
+ * missing one again. A row can go missing while the process still runs its
+ * code: its first write failed, or the database was out of reach for five
+ * minutes and a sweep deleted the row as stale. Without the rewrite, an
+ * update or an uninstall would leave that code's directory unprotected until
+ * the process restarts.
  *
  * Its work happens at boot, on a timer and at shutdown, outside any request,
  * so it reaches `DatabaseService` directly and runs the timer and shutdown
@@ -37,6 +51,9 @@ export class PluginLoadRecorder implements BeforeApplicationShutdown {
   /** Names this process in every row it writes; new on each start. */
   readonly processId: string = createId();
 
+  /** What this process recorded, by slug: the rows the heartbeat keeps in place. */
+  private readonly loads = new Map<string, LoadRecord>();
+
   constructor(
     private readonly db: DatabaseService,
     private readonly systemActorScope: SystemActorScope,
@@ -45,34 +62,42 @@ export class PluginLoadRecorder implements BeforeApplicationShutdown {
 
   /**
    * An upsert, so a restarted plugin's record and a reload both land on the
-   * one (process, slug) row. A failure rejects: the loader decides what a
-   * failed record costs (nothing, it retries once).
+   * one (process, slug) row. The record is held in memory before it is
+   * written, so a failed write is repaired by the next heartbeat. A failure
+   * still rejects, so the loader can log it.
    */
   async record(slug: string, sha256: PluginArtifactSha256): Promise<void> {
-    const now = new Date();
+    const load: LoadRecord = { sha256, loadedAt: new Date() };
+    this.loads.set(slug, load);
 
-    await this.db.pluginProcessLoad.upsert({
-      where: { processId_slug: { processId: this.processId, slug } },
-      create: { processId: this.processId, processRole: this.options.processRole, slug, sha256 },
-      update: { processRole: this.options.processRole, sha256, loadedAt: now, heartbeatAt: now },
-    });
+    await this.write(slug, load, load.loadedAt);
   }
 
   /**
-   * An `updateMany`, which cannot recreate a row that is gone: the loader's
-   * retry covers a record that failed. Swallows its own errors so a tick
-   * cannot crash the scheduler; the next tick tries again. Requires
-   * `ScheduleModule.forRoot()` in the host.
+   * Refreshes this process's rows with one `updateMany`. When it touches
+   * fewer rows than the process recorded, some are missing, and every
+   * record is written again with its original load time. Swallows its own
+   * errors so a tick cannot crash the scheduler; the next tick tries again.
+   * Requires `ScheduleModule.forRoot()` in the host.
    */
   @Interval('plugin-load-heartbeat', PLUGIN_LOAD_HEARTBEAT_MS)
   async heartbeat(): Promise<void> {
     try {
-      await this.systemActorScope.run('plugin-load-heartbeat', () =>
-        this.db.pluginProcessLoad.updateMany({
+      await this.systemActorScope.run('plugin-load-heartbeat', async () => {
+        const now = new Date();
+        const { count } = await this.db.pluginProcessLoad.updateMany({
           where: { processId: this.processId },
-          data: { heartbeatAt: new Date() },
-        }),
-      );
+          data: { heartbeatAt: now },
+        });
+
+        if (count >= this.loads.size) {
+          return;
+        }
+
+        for (const [slug, load] of this.loads) {
+          await this.write(slug, load, now);
+        }
+      });
     } catch (err) {
       this.logger.error(`Plugin load heartbeat failed: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -83,9 +108,14 @@ export class PluginLoadRecorder implements BeforeApplicationShutdown {
    * and `app.close()` is what runs this hook; no `enableShutdownHooks()` is
    * needed. A failed delete is logged, not thrown, so the other shutdown
    * hooks still run: the rows then go stale and the sweep stops honouring
-   * them after `PLUGIN_LOAD_STALE_MS`.
+   * them after `PLUGIN_LOAD_STALE_MS`. The records in memory are dropped
+   * first, so a heartbeat that ticks before the scheduler stops writes none
+   * of them again; one already writing may still land, and that row goes
+   * stale the same way.
    */
   async beforeApplicationShutdown(): Promise<void> {
+    this.loads.clear();
+
     try {
       await this.systemActorScope.run('plugin-load-shutdown', () =>
         this.db.pluginProcessLoad.deleteMany({ where: { processId: this.processId } }),
@@ -93,5 +123,15 @@ export class PluginLoadRecorder implements BeforeApplicationShutdown {
     } catch (err) {
       this.logger.error(`Failed to delete plugin load records: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  private async write(slug: string, { sha256, loadedAt }: LoadRecord, heartbeatAt: Date): Promise<void> {
+    const processRole = this.options.processRole;
+
+    await this.db.pluginProcessLoad.upsert({
+      where: { processId_slug: { processId: this.processId, slug } },
+      create: { processId: this.processId, processRole, slug, sha256, loadedAt, heartbeatAt },
+      update: { processRole, sha256, loadedAt, heartbeatAt },
+    });
   }
 }

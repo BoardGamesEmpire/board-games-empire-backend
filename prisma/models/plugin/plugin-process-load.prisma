@@ -1,6 +1,7 @@
 /// The plugin artifact a running process loaded (#1094): one row per
-/// (process, plugin). A process writes its rows after each plugin registers,
-/// refreshes `heartbeatAt` every minute and deletes them at a clean shutdown.
+/// (process, plugin). A process writes its row before it reads the plugin's
+/// directory, refreshes `heartbeatAt` every minute, writes a row again if it
+/// has gone missing, and deletes its rows at a clean shutdown.
 /// The artifact sweep keeps the directory of any checksum a row with a fresh
 /// heartbeat names, so it never removes code a running process still uses. A
 /// process that dies without cleaning up leaves rows whose heartbeat goes

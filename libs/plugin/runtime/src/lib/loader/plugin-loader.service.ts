@@ -100,6 +100,15 @@ export class PluginLoaderService implements OnApplicationBootstrap {
     const manifest = this.validateManifest(plugin);
     const directory = await this.directories.resolve(plugin.slug, plugin.installedSha256);
 
+    // Recorded before anything is read from the directory (#1094), so the
+    // artifact sweep keeps it from here on. Recorded after the import, a
+    // sweep could remove it mid-load, as when an update is approved during a
+    // rolling restart and the process that ran the old code shuts down. The
+    // load would then fail, and a failed load force-disables the plugin. A
+    // load that fails after this keeps the record until shutdown, and with it
+    // the directory, whose code may be partly imported.
+    await this.recordLoad(plugin.slug, directory.sha256);
+
     // Before anything else is read from the directory, and before any of its
     // code is imported. Every plugin artifact has a directory of its own
     // (#224), so the one installedSha256 names holds the version the row
@@ -145,8 +154,6 @@ export class PluginLoaderService implements OnApplicationBootstrap {
       { enabled: true },
     );
 
-    await this.recordLoad(plugin.slug, directory.sha256);
-
     // The code now running is the activated version — the disk check above
     // proved it — so a clean load is what clears both self-healing flags,
     // in one recovery write.
@@ -170,24 +177,18 @@ export class PluginLoaderService implements OnApplicationBootstrap {
   }
 
   /**
-   * Records the artifact this process now runs (#1094). Its failure never
-   * quarantines the plugin: the code is already running, and the heartbeat
-   * is an `updateMany`, so it cannot recreate a missing row. One retry
-   * covers a transient database error; after that the plugin stays loaded
-   * and the failure is logged. The sweep then sees no record for it, so a
-   * restart is what restores the protection.
+   * Records the artifact this process is about to run (#1094). Its failure
+   * never stops the load: it is logged, and the recorder's next heartbeat
+   * writes the record again.
    */
   private async recordLoad(slug: string, sha256: PluginArtifactSha256): Promise<void> {
-    for (const attempt of [1, 2]) {
-      try {
-        await this.recorder.record(slug, sha256);
-        return;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.error(
-          `Failed to record the artifact plugin '${slug}' loaded (attempt ${attempt} of 2): ${message}`,
-        );
-      }
+    try {
+      await this.recorder.record(slug, sha256);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `Failed to record the artifact plugin '${slug}' runs; the next heartbeat writes it again: ${message}`,
+      );
     }
   }
 
