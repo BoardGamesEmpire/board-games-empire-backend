@@ -106,3 +106,19 @@ export class OutboundNetworkError extends SafeHttpError {
     super(`Network error reaching ${url}: ${cause.message}`);
   }
 }
+
+/**
+ * The response body ran past the byte limit. Thrown by `request()` at its
+ * 10 MiB ceiling and by `download()` at the caller's `maxBytes`. The limit is
+ * a property of the target's answer, so this is never retried (#1094).
+ */
+export class ResponseTooLargeError extends SafeHttpError {
+  readonly code = 'RESPONSE_TOO_LARGE' as const;
+
+  constructor(
+    readonly url: string,
+    readonly limitBytes: number,
+  ) {
+    super(`Response from ${url} exceeded the ${limitBytes} byte limit`);
+  }
+}

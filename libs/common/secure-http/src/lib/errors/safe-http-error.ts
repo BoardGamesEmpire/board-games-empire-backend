@@ -9,6 +9,7 @@ export type SafeHttpErrorCode =
   | 'REDIRECT_DENIED'
   | 'REDIRECT_LIMIT_EXCEEDED'
   | 'REQUEST_TIMEOUT'
+  | 'RESPONSE_TOO_LARGE'
   | 'OUTBOUND_NETWORK_ERROR';
 
 /**

@@ -56,7 +56,11 @@ function toErrorCode(error: unknown): WebhookDeliveryErrorCode {
     switch (error.code) {
       case 'REQUEST_TIMEOUT':
         return WebhookDeliveryErrorCode.Timeout;
+      // An answer too large to read (RESPONSE_TOO_LARGE) was a network error
+      // until it had a code of its own (#1094), and the subscriber's fix is
+      // the same either way.
       case 'OUTBOUND_NETWORK_ERROR':
+      case 'RESPONSE_TOO_LARGE':
         return WebhookDeliveryErrorCode.NetworkError;
       case 'SSRF_REJECTION':
       case 'INVALID_REQUEST_URL':

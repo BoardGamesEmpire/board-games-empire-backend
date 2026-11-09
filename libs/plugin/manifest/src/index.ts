@@ -1,3 +1,4 @@
+export * from './lib/archive-rules.js';
 export * from './lib/constants.js';
 export * from './lib/errors.js';
 export * from './lib/forbidden-specifiers.js';

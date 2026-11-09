@@ -1,4 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { open, rm } from 'node:fs/promises';
+import { Transform, type TransformCallback } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { request as undiciRequest } from 'undici';
 import type Dispatcher from 'undici/types/dispatcher';
 import {
@@ -7,6 +11,7 @@ import {
   RedirectLimitExceededError,
   RedirectToDisallowedTargetError,
   RequestTimeoutError,
+  ResponseTooLargeError,
   SafeHttpError,
   SsrfRejectionError,
 } from './errors';
@@ -17,6 +22,8 @@ import type {
   OutboundRequestEvent,
   OutboundResponseEvent,
   RedirectDeniedEvent,
+  SafeHttpDownloadOptions,
+  SafeHttpDownloadResult,
   SafeHttpMethod,
   SafeHttpPolicySnapshot,
   SafeHttpRequestBody,
@@ -41,6 +48,17 @@ import { OUTBOUND_HTTP_OBSERVER } from './safe-http.tokens';
  */
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
+/**
+ * Drops a response body that will not be read. undici's body emits
+ * `RequestAbortedError` when it is destroyed before its end, and an `error`
+ * event with no listener crashes the process, so a listener is attached first
+ * (#1094).
+ */
+const discardBody = (body: Dispatcher.ResponseData['body']): void => {
+  body.on('error', () => undefined);
+  body.destroy();
+};
+
 /** Status codes that trigger retry when a retry policy is configured. */
 const DEFAULT_RETRY_STATUSES: readonly number[] = [408, 429, 502, 503, 504];
 
@@ -60,13 +78,44 @@ interface ResolvedOptions {
   responseType: SafeHttpResponseType;
   retry?: SafeHttpRetryPolicy;
   signal?: AbortSignal;
+  /**
+   * One time limit shared by every hop. `download()` sets it; `request()`
+   * leaves it out, so each hop gets its own `timeoutMs`.
+   */
+  deadline?: AbortSignal;
+}
+
+/** Where a terminal 2xx body goes instead of memory. */
+interface DownloadSink {
+  destination: string;
+  maxBytes: number;
+}
+
+/** A file-system failure on the destination, tagged so `download()` can pass it through unwrapped. */
+class DestinationError extends Error {
+  constructor(readonly original: unknown) {
+    super('Download destination failed');
+  }
+}
+
+/** The terminal answer of a redirect chain, before it is shaped for a caller. */
+interface TerminalHop {
+  hop: HopResult;
+  finalUrl: string;
+  redirectCount: number;
+  durationMs: number;
 }
 
 interface HopResult {
   status: number;
   headers: Record<string, string>;
   bodyBytes: Buffer;
+  /** Set when the body was streamed to a `DownloadSink`. */
+  written?: { bytes: number; sha256: string };
 }
+
+/** The longest delay a Node timer holds; a longer one fires after 1 ms. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 
 /**
  * Outbound HTTP service with SSRF defense. Every request goes through the
@@ -90,7 +139,10 @@ interface HopResult {
  * and redirect denial. Observer exceptions are caught and logged; they
  * never propagate to the caller.
  *
- * Thrown errors from this service are always subclasses of `SafeHttpError`.
+ * Thrown errors from this service are always subclasses of `SafeHttpError`,
+ * except a caller's bug: an option out of its range (`timeoutMs`,
+ * `maxRedirects`, or `download()`'s `maxBytes`) is a `RangeError` before any
+ * request (#1094).
  * HTTP non-success statuses are NOT thrown — they're returned on
  * `SafeHttpResponse.status` so the caller can branch on application
  * semantics.
@@ -155,11 +207,13 @@ export class SecureHttpService {
 
         // SSRF and URL errors are policy failures, not transient — never retry.
         // Redirect-limit also doesn't retry (the loop is the bug, not the network).
+        // An oversized body won't shrink on a second try (#1094).
         if (
           safeErr instanceof SsrfRejectionError ||
           safeErr instanceof InvalidRequestUrlError ||
           safeErr instanceof RedirectToDisallowedTargetError ||
-          safeErr instanceof RedirectLimitExceededError
+          safeErr instanceof RedirectLimitExceededError ||
+          safeErr instanceof ResponseTooLargeError
         ) {
           throw safeErr;
         }
@@ -178,6 +232,77 @@ export class SecureHttpService {
     throw lastError ?? new OutboundNetworkError(url, new Error('Retry loop exhausted with no error'));
   }
 
+  /**
+   * Stream a response body to a file under a byte cap and one time limit.
+   *
+   * Runs the same per-hop gauntlet as `request()`. Only a 2xx terminal answer
+   * is written; any other status returns `written: null` and creates no file.
+   * `timeoutMs` is one limit counted from the call: it cuts off every hop's
+   * connection, its answer and the body, but not the outbound HTTP policy's
+   * address lookup before a hop, which the resolver's own timeouts bound. The
+   * file is created with `wx` and removed on any failure after it exists. No
+   * retry.
+   *
+   * Throws only `SafeHttpError` subclasses, plus file-system errors on the
+   * destination itself (such as `EEXIST`), which propagate as they are (#1094).
+   * A `maxBytes` that is not a byte count is a caller's bug: a `RangeError`,
+   * before any request, since NaN or Infinity would pass every check against
+   * the cap. The same goes for `timeoutMs` and `maxRedirects`.
+   */
+  async download(url: string, options: SafeHttpDownloadOptions): Promise<SafeHttpDownloadResult> {
+    if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 0) {
+      throw new RangeError(`maxBytes must be a non-negative integer, not ${options.maxBytes}`);
+    }
+
+    const snapshot = this.policy.current();
+    const timeoutMs = this.resolveTimeoutMs(options.timeoutMs, snapshot);
+    const deadline = AbortSignal.timeout(timeoutMs);
+    const resolved: ResolvedOptions = {
+      method: 'GET',
+      headers: options.headers ?? {},
+      timeoutMs,
+      maxRedirects: this.resolveMaxRedirects(options.maxRedirects, snapshot),
+      responseType: 'arraybuffer',
+      signal: options.signal,
+      deadline,
+    };
+    const sink: DownloadSink = { destination: options.destination, maxBytes: options.maxBytes };
+    const startedAt = Date.now();
+
+    await this.notify('onRequest', { url, method: 'GET', attempt: 1 });
+
+    try {
+      const terminal = await this.followRedirects(url, resolved, snapshot, sink);
+      const result: SafeHttpDownloadResult = {
+        status: terminal.hop.status,
+        headers: Object.freeze({ ...terminal.hop.headers }),
+        finalUrl: terminal.finalUrl,
+        redirectCount: terminal.redirectCount,
+        durationMs: terminal.durationMs,
+        written: terminal.hop.written ?? null,
+      };
+
+      await this.notify('onResponse', {
+        url,
+        method: 'GET',
+        status: result.status,
+        durationMs: result.durationMs,
+        redirectCount: result.redirectCount,
+      });
+
+      return result;
+    } catch (err) {
+      // A destination failure (EEXIST, ENOSPC...) reaches the caller as the
+      // raw file-system error, but the observer still gets a terminal event.
+      // The event carries a SafeHttpError, so it sees the same wrapped form
+      // as any other unclassified failure (#1094).
+      const original = err instanceof DestinationError ? err.original : err;
+      const safeErr = this.toSafeHttpError(url, original);
+      await this.notify('onError', { url, method: 'GET', error: safeErr, durationMs: Date.now() - startedAt });
+      throw err instanceof DestinationError ? original : safeErr;
+    }
+  }
+
   // ───────────────────────────────────────────────────────────────
   // Redirect loop with per-hop SSRF
   // ───────────────────────────────────────────────────────────────
@@ -187,6 +312,16 @@ export class SecureHttpService {
     options: ResolvedOptions,
     snapshot: SafeHttpPolicySnapshot,
   ): Promise<SafeHttpResponse<T>> {
+    const { hop, finalUrl, redirectCount, durationMs } = await this.followRedirects(initialUrl, options, snapshot);
+    return this.buildResponse<T>(hop, finalUrl, redirectCount, durationMs, options.responseType);
+  }
+
+  private async followRedirects(
+    initialUrl: string,
+    options: ResolvedOptions,
+    snapshot: SafeHttpPolicySnapshot,
+    sink?: DownloadSink,
+  ): Promise<TerminalHop> {
     const startedAt = Date.now();
     let currentUrl = initialUrl;
     let currentMethod = options.method;
@@ -231,6 +366,8 @@ export class SecureHttpService {
         currentBody,
         options.timeoutMs,
         options.signal,
+        options.deadline,
+        sink,
       );
 
       // ── Redirect handling ──────────────────────────────────────
@@ -261,7 +398,7 @@ export class SecureHttpService {
       }
 
       // ── Terminal response ──────────────────────────────────────
-      return this.buildResponse<T>(hop, currentUrl, redirectCount, Date.now() - startedAt, options.responseType);
+      return { hop, finalUrl: currentUrl, redirectCount, durationMs: Date.now() - startedAt };
     }
   }
 
@@ -279,10 +416,12 @@ export class SecureHttpService {
     body: SafeHttpRequestBody | undefined,
     timeoutMs: number,
     callerSignal: AbortSignal | undefined,
+    deadline: AbortSignal | undefined,
+    sink: DownloadSink | undefined,
   ): Promise<HopResult> {
     const { headers, payload } = this.marshalRequest(callerHeaders, body, hostname);
 
-    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const timeoutSignal = deadline ?? AbortSignal.timeout(timeoutMs);
     const signal = callerSignal ? AbortSignal.any([timeoutSignal, callerSignal]) : timeoutSignal;
 
     const agent = this.dispatcherFactory.build(pinnedIp, pinnedFamily, timeoutMs);
@@ -300,15 +439,31 @@ export class SecureHttpService {
         signal,
       });
 
+      const status = result.statusCode;
+      const responseHeaders = this.normalizeHeaders(result.headers);
+
+      // Only the terminal answer goes to the sink. A redirect's body is
+      // never read for a download: nothing uses it, and reading it under
+      // request()'s 10 MiB ceiling would refuse a small artifact behind a
+      // large redirect page as too large, at a limit the caller never set.
+      const redirecting = this.isFollowableRedirect(status) && !!responseHeaders['location'];
+      if (sink) {
+        if (redirecting || status < 200 || status > 299) {
+          discardBody(result.body);
+          return { status, headers: responseHeaders, bodyBytes: Buffer.alloc(0) };
+        }
+
+        const written = await this.streamToFile(result.body, responseHeaders, url, sink);
+        return { status, headers: responseHeaders, bodyBytes: Buffer.alloc(0), written };
+      }
+
       const bodyBytes = await this.readBodyCapped(result.body, url);
-      return {
-        status: result.statusCode,
-        headers: this.normalizeHeaders(result.headers),
-        bodyBytes,
-      };
+      return { status, headers: responseHeaders, bodyBytes };
     } catch (err) {
       // Distinguish timeout from generic network failure for clean error mapping.
-      if (timeoutSignal.aborted) {
+      // A destination or cap failure is already specific, so it wins over a
+      // timeout that fires while the stream is being torn down.
+      if (timeoutSignal.aborted && !(err instanceof DestinationError) && !(err instanceof ResponseTooLargeError)) {
         throw new RequestTimeoutError(url.toString(), timeoutMs);
       }
 
@@ -419,13 +574,53 @@ export class SecureHttpService {
   // Helpers
   // ───────────────────────────────────────────────────────────────
 
+  /**
+   * The caller's time limit, or the policy default. A timer holds at most
+   * 2^31 - 1 ms; Node turns anything longer into 1 ms, a false timeout, and
+   * refuses NaN, Infinity or a fraction only once the hop is under way, where
+   * it would reach the caller as a network error. So a limit outside 1 ms to
+   * 2^31 - 1 ms is a caller's bug: a `RangeError` before any request
+   * (#1094). The policy default is already 1,000 to 300,000 ms (its DTO says
+   * so).
+   */
+  private resolveTimeoutMs(requested: number | undefined, snapshot: SafeHttpPolicySnapshot): number {
+    if (requested === undefined) {
+      return snapshot.defaultTimeoutMs;
+    }
+
+    if (!Number.isSafeInteger(requested) || requested < 1 || requested > MAX_TIMER_MS) {
+      throw new RangeError(`timeoutMs must be an integer from 1 to ${MAX_TIMER_MS}, not ${requested}`);
+    }
+
+    return requested;
+  }
+
+  /**
+   * The caller's redirect cap, or the policy default. NaN or Infinity never
+   * meets `redirectCount >= maxRedirects`, so a redirect loop would run on
+   * until the time limit: a cap that is not a non-negative integer is a
+   * caller's bug, a `RangeError` before any request (#1094). The policy
+   * default is already an integer from 0 to 20 (its DTO and column say so).
+   */
+  private resolveMaxRedirects(requested: number | undefined, snapshot: SafeHttpPolicySnapshot): number {
+    if (requested === undefined) {
+      return snapshot.defaultMaxRedirects;
+    }
+
+    if (!Number.isSafeInteger(requested) || requested < 0) {
+      throw new RangeError(`maxRedirects must be a non-negative integer, not ${requested}`);
+    }
+
+    return requested;
+  }
+
   private resolveOptions(options: SafeHttpRequestOptions, snapshot: SafeHttpPolicySnapshot): ResolvedOptions {
     return {
       method: options.method ?? 'GET',
       headers: options.headers ?? {},
       body: options.body,
-      timeoutMs: options.timeoutMs ?? snapshot.defaultTimeoutMs,
-      maxRedirects: options.maxRedirects ?? snapshot.defaultMaxRedirects,
+      timeoutMs: this.resolveTimeoutMs(options.timeoutMs, snapshot),
+      maxRedirects: this.resolveMaxRedirects(options.maxRedirects, snapshot),
       responseType: options.responseType ?? 'json',
       retry: options.retry,
       signal: options.signal,
@@ -459,6 +654,69 @@ export class SecureHttpService {
     return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
   }
 
+  /**
+   * Pipe a body to `sink.destination` through a counting, hashing transform.
+   * The file is opened exclusively before any byte is read, so an existing
+   * path fails with `EEXIST` and is never removed. Once opened, any failure
+   * removes the file before the error propagates.
+   */
+  private async streamToFile(
+    body: Dispatcher.ResponseData['body'],
+    headers: Record<string, string>,
+    url: URL,
+    sink: DownloadSink,
+  ): Promise<{ bytes: number; sha256: string }> {
+    const declared = Number(headers['content-length']);
+    if (Number.isFinite(declared) && declared > sink.maxBytes) {
+      discardBody(body);
+      throw new ResponseTooLargeError(url.toString(), sink.maxBytes);
+    }
+
+    let handle;
+    try {
+      handle = await open(sink.destination, 'wx');
+    } catch (err) {
+      discardBody(body);
+      throw new DestinationError(err);
+    }
+
+    const hash = createHash('sha256');
+    let bytes = 0;
+    const counter = new Transform({
+      transform: (chunk: Buffer, _encoding, callback: TransformCallback) => {
+        bytes += chunk.length;
+        if (bytes > sink.maxBytes) {
+          callback(new ResponseTooLargeError(url.toString(), sink.maxBytes));
+          return;
+        }
+
+        hash.update(chunk);
+        callback(null, chunk);
+      },
+    });
+
+    const file = handle.createWriteStream();
+    // The first stream to fail is the cause: pipeline then destroys the rest
+    // with that same error, so a file stream that merely received a source or
+    // cap error must not be mistaken for a destination failure (#1094).
+    let firstFailure: { stream: unknown; error: unknown } | undefined;
+    for (const stream of [body, counter, file]) {
+      stream.once('error', (error) => {
+        firstFailure ??= { stream, error };
+      });
+    }
+
+    try {
+      await pipeline(body, counter, file);
+    } catch (err) {
+      await handle.close().catch(() => undefined);
+      await rm(sink.destination, { force: true }).catch(() => undefined);
+      throw firstFailure?.stream === file ? new DestinationError(firstFailure.error) : err;
+    }
+
+    return { bytes, sha256: hash.digest('hex') };
+  }
+
   private async readBodyCapped(body: Dispatcher.ResponseData['body'], url: URL): Promise<Buffer> {
     const chunks: Buffer[] = [];
     let total = 0;
@@ -470,7 +728,7 @@ export class SecureHttpService {
       if (total > MAX_RESPONSE_BYTES) {
         // Destroy the stream to release the connection promptly.
         body.destroy?.();
-        throw new OutboundNetworkError(url.toString(), new Error(`Response exceeded ${MAX_RESPONSE_BYTES} byte limit`));
+        throw new ResponseTooLargeError(url.toString(), MAX_RESPONSE_BYTES);
       }
 
       chunks.push(buf);

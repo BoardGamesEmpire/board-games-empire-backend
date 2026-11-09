@@ -53,10 +53,17 @@ export interface SafeHttpRequestOptions {
   /** Request body. Object/array bodies are JSON-stringified. */
   body?: SafeHttpRequestBody;
 
-  /** Per-request timeout in milliseconds. Overrides the policy default. */
+  /**
+   * Per-request timeout in milliseconds. Overrides the policy default. An
+   * integer from 1 to 2^31 - 1 (the longest a timer holds); anything else is
+   * a `RangeError` before any request.
+   */
   timeoutMs?: number;
 
-  /** Per-request redirect cap. Overrides the policy default. */
+  /**
+   * Per-request redirect cap. Overrides the policy default. A non-negative
+   * integer; anything else is a `RangeError` before any request.
+   */
   maxRedirects?: number;
 
   /** Default `json`. */
@@ -74,5 +81,45 @@ export interface SafeHttpRequestOptions {
    * Caller-controlled cancellation. Composes with the request timeout —
    * whichever fires first wins.
    */
+  signal?: AbortSignal;
+}
+
+/**
+ * Options for `SafeHttpService.download`. The body is streamed to
+ * `destination` instead of being held in memory, so the byte cap is the
+ * caller's, not the 10 MiB ceiling of `request()`. There is no retry.
+ */
+export interface SafeHttpDownloadOptions {
+  /**
+   * File to write. It is created exclusively (`wx`): an existing path is an
+   * error, and is left untouched. On any failure after creation it is removed.
+   */
+  destination: string;
+
+  /**
+   * Most bytes the body may hold. Past it the download fails and no file
+   * stays. A value that is not a non-negative integer is refused.
+   */
+  maxBytes: number;
+
+  /**
+   * One time limit for the whole transfer, counted from the call. It cuts off
+   * every hop's connection, its answer and the body as they arrive. The
+   * outbound HTTP policy's address lookup before each hop is not cut off by
+   * it, though the time it takes counts: the resolver's own timeouts bound the
+   * lookup. An integer from 1 to 2^31 - 1; anything else is a `RangeError`
+   * before any request.
+   */
+  timeoutMs: number;
+
+  headers?: Record<string, string>;
+
+  /**
+   * Per-download redirect cap. Overrides the policy default. A non-negative
+   * integer; anything else is a `RangeError` before any request.
+   */
+  maxRedirects?: number;
+
+  /** Caller-controlled cancellation. Composes with the time limit. */
   signal?: AbortSignal;
 }

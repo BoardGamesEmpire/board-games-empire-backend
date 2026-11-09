@@ -251,6 +251,9 @@
     },
     {
       "path": "./libs/gateway/driver/igdb"
+    },
+    {
+      "path": "./libs/plugin/artifacts"
     }
   ]
 }

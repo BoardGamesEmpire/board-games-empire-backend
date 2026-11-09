@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { LookupAddress, LookupOptions } from 'node:dns';
 import { Agent, type Dispatcher } from 'undici';
 import { IpFamily } from './ip';
 
@@ -24,7 +25,14 @@ export class HttpDispatcherFactory {
       headersTimeout: timeoutMs,
       bodyTimeout: timeoutMs,
       connect: {
-        lookup: (_hostname: string, _options: unknown, callback: LookupCallback) => {
+        lookup: (_hostname: string, options: LookupOptions, callback: LookupCallback) => {
+          // Node 20+ `autoSelectFamily` asks for every address (`all: true`) and
+          // expects an array; older callers expect a single address (#1094).
+          if (options.all) {
+            callback(null, [{ address: pinnedIp, family }]);
+            return;
+          }
+
           callback(null, pinnedIp, family);
         },
       },
@@ -32,4 +40,4 @@ export class HttpDispatcherFactory {
   }
 }
 
-type LookupCallback = (err: NodeJS.ErrnoException | null, address: string, family: IpFamily) => void;
+type LookupCallback = (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: IpFamily) => void;
