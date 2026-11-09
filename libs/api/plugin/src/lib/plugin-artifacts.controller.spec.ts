@@ -182,6 +182,16 @@ describe('PluginArtifactsController (#1094)', () => {
       expect(german.manifest.executionMode).toBe('in-process');
     });
 
+    it('answers the execution mode the manifest names (#1094)', async () => {
+      const worker = receipt();
+      worker.assessment.validated.manifest = { ...manifest, executionMode: 'worker' } as typeof manifest;
+      receiver.receiveByLink.mockResolvedValue(worker);
+
+      const result = await firstValueFrom(controller.post({ url: 'https://example.test/x.tgz', sha256: SHA }));
+
+      expect(result.manifest.executionMode).toBe('worker');
+    });
+
     it.each([undefined, null, ''])('treats a url of %p beside a file as an upload (#1094)', async (url) => {
       await firstValueFrom(controller.post({ sha256: SHA, url: url as never }, UPLOADED));
 

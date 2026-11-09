@@ -396,6 +396,21 @@ describe('PluginArtifactReceiver (#1094)', () => {
       expect(warn.mock.calls.map(([line]) => String(line)).join('\n')).not.toContain('s3cret');
     });
 
+    it('logs a cause that is not an error by its kind only, since it may quote the link (#1094)', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn');
+      const link = `${LINK}?token=s3cret`;
+      jest
+        .spyOn(http, 'download')
+        .mockRejectedValue(Object.assign(new RequestTimeoutError(link, 1000), { cause: `aborted ${link}` }));
+
+      const err = await failure(byLink({ url: link }));
+
+      expect(err).toMatchObject({ reason: 'timeout' });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('code REQUEST_TIMEOUT'));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('caused by a non-error value'));
+      expect(warn.mock.calls.map(([line]) => String(line)).join('\n')).not.toContain('s3cret');
+    });
+
     // The link is recorded on the row, then as the installed plugin's
     // provenance, which GET /plugins serves: a secret in it would leak.
     it.each([`https://user:token@${HOST}${PATH}`, `https://token@${HOST}${PATH}`, `https://:secret@${HOST}${PATH}`])(
@@ -630,6 +645,25 @@ describe('PluginArtifactReceiver (#1094)', () => {
       expect(store.recordReceived).not.toHaveBeenCalled();
     });
 
+    it('logs an upload it cannot remove afterwards, and still answers with the receipt (#1094)', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn');
+      const upload = await uploaded();
+      const fsPromises = jest.requireActual<typeof import('node:fs/promises')>('node:fs/promises');
+      const realRm = fsPromises.rm;
+      jest.spyOn(fsPromises, 'rm').mockImplementation(async (path, options) => {
+        if (path === upload.archivePath) {
+          throw new Error('EBUSY: resource busy or locked');
+        }
+        return realRm(path, options);
+      });
+
+      const receipt = await receiver.receiveUpload({ ...upload, expectedSha256: sha256, actorId: ADMIN });
+
+      expect(receipt.artifact.sha256).toBe(sha256);
+      expect(store.recordReceived).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('the sweep will remove them: EBUSY'));
+    });
+
     it('refuses an upload over 100 MiB with PluginArtifactTooLargeError (#1094)', async () => {
       const err = await failure(byUpload({ bytes: PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES + 1 }));
 
@@ -825,6 +859,17 @@ describe('PluginArtifactReceiver (#1094)', () => {
 
       expect(err).toBeInstanceOf(PluginArtifactNotFoundError);
       expect(err).toMatchObject({ sha256 });
+      expect(installer.assess).not.toHaveBeenCalled();
+    });
+
+    it('a directory the resolver cannot read for another reason propagates as it is (#1094)', async () => {
+      const received = await byUpload();
+      store.findLive.mockResolvedValue(received.artifact);
+      installer.assess.mockClear();
+      const denied = new Error('EACCES: permission denied');
+      jest.spyOn(resolver, 'resolve').mockRejectedValue(denied);
+
+      await expect(receiver.read(sha256, ADMIN)).rejects.toBe(denied);
       expect(installer.assess).not.toHaveBeenCalled();
     });
 

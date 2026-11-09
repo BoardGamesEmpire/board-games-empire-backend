@@ -325,4 +325,37 @@ describe('request body rate guard baseline (#1094)', () => {
 
     expect(socket.destroy).toHaveBeenCalledTimes(1);
   });
+
+  it('without options, checks 64 KiB a minute, the values the api runs with (#1094)', () => {
+    const server = new EventEmitter();
+    installRequestBodyRateGuard(server as unknown as Server);
+    const socket = Object.assign(new EventEmitter(), { bytesRead: 0, destroy: jest.fn() });
+
+    stubRequest(socket, server);
+    socket.bytesRead += REQUEST_BODY_MIN_BYTES;
+    jest.advanceTimersByTime(REQUEST_BODY_WINDOW_MS - 1);
+
+    expect(socket.destroy).not.toHaveBeenCalled();
+
+    // The first window had exactly the floor; the second has one byte less.
+    jest.advanceTimersByTime(1);
+    socket.bytesRead += REQUEST_BODY_MIN_BYTES - 1;
+    jest.advanceTimersByTime(REQUEST_BODY_WINDOW_MS);
+
+    expect(socket.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops watching a body that has all arrived, though nothing has read it to its end yet (#1094)', () => {
+    const server = new EventEmitter();
+    installRequestBodyRateGuard(server as unknown as Server, { windowMs: 100, minBytes: 1024 });
+    const socket = Object.assign(new EventEmitter(), { bytesRead: 0, destroy: jest.fn() });
+
+    // The whole body is in, so no 'end' has fired and no more bytes come.
+    const req = stubRequest(socket, server);
+    req.complete = true;
+    jest.advanceTimersByTime(100);
+
+    expect(socket.destroy).not.toHaveBeenCalled();
+    expect(jest.getTimerCount()).toBe(0);
+  });
 });

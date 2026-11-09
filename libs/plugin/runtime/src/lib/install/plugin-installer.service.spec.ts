@@ -435,6 +435,14 @@ describe('PluginInstallerService', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
+    it("scans only the plugin's own files unless asked to go deeper (#1094)", async () => {
+      await writeManifest(buildPluginManifest());
+
+      await service.assess(directory());
+
+      expect(analyzer.analyze).toHaveBeenCalledWith(directory(), { deepScan: false });
+    });
+
     it('checks authority before it touches the directory or reads the manifest (#1094)', async () => {
       authority.isServerAdmin.mockResolvedValue(false);
       const read = jest.spyOn(jest.requireActual<typeof import('node:fs/promises')>('node:fs/promises'), 'readFile');

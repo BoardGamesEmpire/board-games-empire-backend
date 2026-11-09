@@ -1,6 +1,6 @@
 import { PluginArchiveRefusedError, PluginArtifactTooLargeError } from '@bge/plugin-artifacts';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
@@ -150,5 +150,19 @@ describe('PluginArtifactUploadStorage (#1094)', () => {
     await remove();
     expect(existsSync(info.path)).toBe(false);
     await expect(remove()).resolves.toBeUndefined();
+  });
+
+  it('hands multer the error when _removeFile cannot remove the path (#1094)', async () => {
+    const storage = new PluginArtifactUploadStorage(root);
+    // rm refuses a directory without `recursive`, even as root.
+    const directory = join(root, 'not-a-file');
+    mkdirSync(join(directory, 'child'), { recursive: true });
+
+    const error = await new Promise<unknown>((done) =>
+      storage._removeFile({} as never, { path: directory } as Express.Multer.File, done),
+    );
+
+    expect(error).toMatchObject({ code: 'ERR_FS_EISDIR' });
+    expect(existsSync(directory)).toBe(true);
   });
 });
