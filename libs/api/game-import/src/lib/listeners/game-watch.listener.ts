@@ -7,13 +7,14 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { ImportJobCompletedEvent } from '../events/import.events';
 
 /**
- * Notifies users who are watching the base game when one of its expansions
- * is imported for the first time.
+ * Notifies users who are watching a base game when one of its expansions
+ * is imported for the first time. An expansion is an add-on with a base game,
+ * whatever brought it into its import batch (#971).
  *
  * Skipped when:
  *   - created = false (re-import)
- *   - isExpansion = false (base game imports don't trigger watch notifications)
- *   - baseGameId is absent (should not happen for a valid expansion import)
+ *   - the game is not an expansion
+ *   - none of its base games is in the game catalog yet (its batch is adding it)
  */
 @Injectable()
 export class GameWatchListener {
@@ -41,13 +42,19 @@ export class GameWatchListener {
       );
     }
 
-    if (!event.baseGameId) {
-      return this.logger.warn(`GameWatchListener skipping: expansion jobId=${event.subjectId} has no baseGameId`);
+    const { baseGameIds } = event;
+
+    // An expansion whose base game its batch is adding is linked by the base
+    // game's import, and a game new to the catalog has no watchers yet (#971).
+    if (baseGameIds.length === 0) {
+      return this.logger.debug(
+        `GameWatchListener skipping: no base game in the catalog yet for jobId=${event.subjectId} gameId=${gameId}`,
+      );
     }
 
     this.logger.debug(
       `GameWatchListener processing expansion import jobId=${event.subjectId} gameId=${gameId} ` +
-        `baseGameId=${event.baseGameId} for notification`,
+        `baseGameIds=${baseGameIds.join(',')} for notification`,
     );
 
     // Importing user comes from CLS (ActorAwareWorkerHost restores the
@@ -57,28 +64,27 @@ export class GameWatchListener {
     const importingUserId = actor ? actorUserId(actor) : null;
 
     try {
-      const watchers = await this.db.gameWatch.findMany({
-        where: { gameId: event.baseGameId },
+      const watches = await this.db.gameWatch.findMany({
+        where: { gameId: { in: baseGameIds } },
         select: {
           userId: true,
+          gameId: true,
           game: { select: { title: true } },
         },
       });
 
       this.logger.debug(
-        `Found ${watchers.length} watchers for base game ${event.baseGameId} when processing expansion import ${gameId}`,
+        `Found ${watches.length} watches on base games ${baseGameIds.join(',')} when processing expansion import ${gameId}`,
       );
 
       // no watchers, nothing to do
-      if (watchers.length === 0) {
+      if (watches.length === 0) {
         return this.logger.debug(
-          `GameWatchListener no watchers to notify for expansionId=${gameId} baseGameId=${event.baseGameId}`,
+          `GameWatchListener no watchers to notify for expansionId=${gameId} baseGameIds=${baseGameIds.join(',')}`,
         );
       }
 
-      // Fetch base game title once — shared by all watcher notifications
-      const baseGameTitle = watchers[0]!.game.title;
-      const inputs: CreateNotificationInput[] = watchers
+      const inputs: CreateNotificationInput[] = firstWatchPerUser(watches, baseGameIds)
         // Importing user already gets an ExpansionImported notification via
         // NotificationListener — skip them here to avoid a duplicate
         .filter((w) => w.userId !== importingUserId)
@@ -89,15 +95,15 @@ export class GameWatchListener {
             gameId,
             gameTitle: event.gameTitle,
             thumbnail: event.thumbnail,
-            baseGameId: event.baseGameId!,
-            baseGameTitle,
+            baseGameId: w.gameId,
+            baseGameTitle: w.game.title,
           },
         }));
 
       await this.notifications.createMany(inputs);
 
       this.logger.log(
-        `Notified ${inputs.length} watchers of expansion import: expansionId=${gameId} baseGameId=${event.baseGameId}`,
+        `Notified ${inputs.length} watchers of expansion import: expansionId=${gameId} baseGameIds=${baseGameIds.join(',')}`,
       );
     } catch (err) {
       this.logger.error(
@@ -106,4 +112,21 @@ export class GameWatchListener {
       );
     }
   }
+}
+
+/**
+ * One watch per user: a user watching several of the expansion's base games
+ * hears of it once, under the first of them its DataGateway named (#971).
+ */
+function firstWatchPerUser<T extends { userId: string; gameId: string }>(watches: T[], baseGameIds: string[]): T[] {
+  const rank = (watch: T) => baseGameIds.indexOf(watch.gameId);
+  const byUser = new Map<string, T>();
+
+  for (const watch of [...watches].sort((a, b) => rank(a) - rank(b))) {
+    if (!byUser.has(watch.userId)) {
+      byUser.set(watch.userId, watch);
+    }
+  }
+
+  return [...byUser.values()];
 }

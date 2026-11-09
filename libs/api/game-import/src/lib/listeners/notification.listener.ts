@@ -96,7 +96,7 @@ export class NotificationListener {
           batchId: event.batchId,
           gatewayId: event.gatewayId,
           externalId: event.externalId,
-          isExpansion: event.isExpansion,
+          origin: event.origin,
           // Sanitized code from the persisted Job.result snapshot — the raw
           // error can carry internal hostnames/IPs, gRPC transport detail or
           // Prisma text, so it stays in Job.error / operator logs and never

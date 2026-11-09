@@ -47,7 +47,7 @@ describe('notification read-back', () => {
         batchId: 'batch-1',
         gatewayId: 'bgg',
         externalId: 'ext-1',
-        isExpansion: false,
+        origin: 'Requested',
         errorCode: 'GATEWAY_ERROR',
         error: t('errors.game_import.failure.gateway_error'),
       },

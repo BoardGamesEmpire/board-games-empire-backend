@@ -2,9 +2,23 @@ import type { InitiatorType } from '@bge/database';
 import type { ImportErrorCode } from '../utils/sanitize-import-error';
 
 /**
+ * Why an import job is in its import batch (#971). Whether its game is an
+ * expansion is a separate matter, read from its content type and its base
+ * games.
+ */
+export enum ImportJobOrigin {
+  /** The game the import request asked for. */
+  Requested = 'Requested',
+  /** An expansion chosen with the requested game. */
+  ChosenExpansion = 'ChosenExpansion',
+  /** A base game the server added because a game in the batch needed it. */
+  AddedBaseGame = 'AddedBaseGame',
+}
+
+/**
  * Common fields shared by every job in the import flow. The DB Job row
  * is the user-facing tracking entity; one row per game-being-imported
- * (base + each expansion).
+ * (the requested game, each chosen expansion, and any added base game).
  */
 interface JobContext {
   /**
@@ -25,6 +39,9 @@ interface JobContext {
   initiatorType: InitiatorType;
   gatewayId: string;
   userId: string | null;
+
+  /** Why the job is in its batch. Also stored on its Job row's payload. */
+  origin: ImportJobOrigin;
 }
 
 /**
@@ -113,6 +130,13 @@ export interface ImportJobResult {
    * game catalog (#971).
    */
   baseGameToAdd?: string;
+
+  /**
+   * True when the game is an add-on (an expansion, DLC, mod, standalone
+   * expansion or accessory) with a base game: linked to one, or missing the
+   * one it needs and adding it to the batch (#971).
+   */
+  isExpansion: boolean;
 }
 
 /**

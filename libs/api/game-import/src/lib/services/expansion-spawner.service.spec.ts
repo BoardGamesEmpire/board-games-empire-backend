@@ -74,6 +74,24 @@ describe('ExpansionSpawnerService', () => {
     expect((flows[1].data as { externalId: string }).externalId).toBe('exp-2');
   });
 
+  it("marks each chosen expansion's job row and flow as ChosenExpansion (#971)", async () => {
+    transaction.mockResolvedValue([
+      { id: 'exp-job-1', status: JobStatus.Pending },
+      { id: 'exp-job-2', status: JobStatus.Pending },
+    ]);
+
+    await service.spawn(input, meta);
+
+    for (const [args] of upsert.mock.calls) {
+      expect(args.create.payload).toEqual(expect.objectContaining({ origin: 'ChosenExpansion' }));
+    }
+    const flows = addBulk.mock.calls[0][0] as FlowJob[];
+    for (const flow of flows) {
+      expect((flow.data as { origin?: string }).origin).toBe('ChosenExpansion');
+      expect((flow.children?.[0]?.data as { origin?: string }).origin).toBe('ChosenExpansion');
+    }
+  });
+
   it('skips flows for rows already terminal from a prior attempt (idempotent retry)', async () => {
     transaction.mockResolvedValue([
       { id: 'exp-job-1', status: JobStatus.Completed },

@@ -54,7 +54,7 @@ export class GameUpsertService {
 
     // After the DataGateway link holds the base game ids, which is what lets
     // an add-on and its base game find each other in either order (#971).
-    const { baseGameIds, baseGameToAdd } = await this.baseGameLinks.link({
+    const { baseGameIds, baseGameToAdd, isExpansion } = await this.baseGameLinks.link({
       gameId,
       gatewayId,
       externalId: gameData.externalId,
@@ -63,7 +63,7 @@ export class GameUpsertService {
       fallbackBaseExternalId,
     });
 
-    return { gameId, gameCreated, sourceCreated, platformGames, baseGameIds, baseGameToAdd };
+    return { gameId, gameCreated, sourceCreated, platformGames, baseGameIds, baseGameToAdd, isExpansion };
   }
 
   private async upsertGameRecord(

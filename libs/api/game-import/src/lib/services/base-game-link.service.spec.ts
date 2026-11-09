@@ -78,7 +78,7 @@ describe('BaseGameLinkService', () => {
 
     const result = await service.link(input({ contentType: ContentType.DLC, baseExternalIds: ['13', '143065'] }));
 
-    expect(result).toEqual({ baseGameIds: ['game-catan', 'game-tribes'] });
+    expect(result).toEqual({ baseGameIds: ['game-catan', 'game-tribes'], isExpansion: true });
     expect(linkedPairs()).toEqual([
       ['game-catan', 'game-expansion'],
       ['game-tribes', 'game-expansion'],
@@ -104,7 +104,7 @@ describe('BaseGameLinkService', () => {
     async (contentType) => {
       const result = await service.link(input({ contentType, baseExternalIds: ['13', '143065'] }));
 
-      expect(result).toEqual({ baseGameIds: [], baseGameToAdd: '13' });
+      expect(result).toEqual({ baseGameIds: [], baseGameToAdd: '13', isExpansion: true });
       expect(db.gameExpansion.upsert).not.toHaveBeenCalled();
     },
   );
@@ -125,12 +125,47 @@ describe('BaseGameLinkService', () => {
     expect(result.baseGameToAdd).toBeUndefined();
   });
 
+  // An expansion to the import's events, notifications and game watches is
+  // an add-on with a base game; a version of its original is not (#971).
+  it.each([
+    ContentType.Remake,
+    ContentType.Remaster,
+    ContentType.Port,
+    ContentType.ExpandedEdition,
+    ContentType.Bundle,
+    ContentType.BaseGame,
+    ContentType.Unknown,
+  ])('links a %s to its original without counting it as an expansion', async (contentType) => {
+    catalog = { '13': { gameId: 'game-catan' } };
+
+    const result = await service.link(input({ contentType, baseExternalIds: ['13'] }));
+
+    expect(result).toEqual({ baseGameIds: ['game-catan'], isExpansion: false });
+  });
+
+  it.each([ContentType.StandaloneExpansion, ContentType.Accessory])(
+    'counts a %s linked to its base game as an expansion',
+    async (contentType) => {
+      catalog = { '13': { gameId: 'game-catan' } };
+
+      const result = await service.link(input({ contentType, baseExternalIds: ['13'] }));
+
+      expect(result).toEqual({ baseGameIds: ['game-catan'], isExpansion: true });
+    },
+  );
+
+  it('does not count an add-on as an expansion while it has no base game and adds none', async () => {
+    const result = await service.link(input({ contentType: ContentType.StandaloneExpansion, baseExternalIds: ['13'] }));
+
+    expect(result).toEqual({ baseGameIds: [], isExpansion: false });
+  });
+
   it('adds nothing when at least one named base game is present', async () => {
     catalog = { '143065': { gameId: 'game-tribes' } };
 
     const result = await service.link(input({ baseExternalIds: ['13', '143065'] }));
 
-    expect(result).toEqual({ baseGameIds: ['game-tribes'] });
+    expect(result).toEqual({ baseGameIds: ['game-tribes'], isExpansion: true });
   });
 
   it('links games already in the game catalog that name this game as their base game', async () => {
@@ -165,7 +200,7 @@ describe('BaseGameLinkService', () => {
 
     const result = await service.link(input({ baseExternalIds: [], fallbackBaseExternalId: '13' }));
 
-    expect(result).toEqual({ baseGameIds: ['game-catan'] });
+    expect(result).toEqual({ baseGameIds: ['game-catan'], isExpansion: true });
     expect(linkedPairs()).toEqual([['game-catan', 'game-expansion']]);
   });
 
@@ -174,7 +209,7 @@ describe('BaseGameLinkService', () => {
 
     const result = await service.link(input({ baseExternalIds: ['143065'], fallbackBaseExternalId: '13' }));
 
-    expect(result).toEqual({ baseGameIds: ['game-tribes'] });
+    expect(result).toEqual({ baseGameIds: ['game-tribes'], isExpansion: true });
     expect(db.gameSource.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { gatewayId: GATEWAY_ID, externalId: { in: ['143065'] } } }),
     );
@@ -183,7 +218,7 @@ describe('BaseGameLinkService', () => {
   it('never adds the fallback game, which is already in its import batch', async () => {
     const result = await service.link(input({ baseExternalIds: [], fallbackBaseExternalId: '13' }));
 
-    expect(result).toEqual({ baseGameIds: [] });
+    expect(result).toEqual({ baseGameIds: [], isExpansion: false });
   });
 
   it('never links a game to itself, though its DataGateway lists it as its own base game', async () => {
@@ -192,7 +227,7 @@ describe('BaseGameLinkService', () => {
 
     const result = await service.link(input({ externalId: '926', baseExternalIds: ['926'] }));
 
-    expect(result).toEqual({ baseGameIds: [] });
+    expect(result).toEqual({ baseGameIds: [], isExpansion: false });
     expect(db.gameExpansion.upsert).not.toHaveBeenCalled();
   });
 
@@ -200,7 +235,10 @@ describe('BaseGameLinkService', () => {
     catalog = { '13': { gameId: 'game-catan' } };
     db.gameExpansion.upsert.mockRejectedValue(uniqueViolation());
 
-    await expect(service.link(input({ baseExternalIds: ['13'] }))).resolves.toEqual({ baseGameIds: ['game-catan'] });
+    await expect(service.link(input({ baseExternalIds: ['13'] }))).resolves.toEqual({
+      baseGameIds: ['game-catan'],
+      isExpansion: true,
+    });
   });
 
   it('looks for its base games and its add-ons at the same time', async () => {

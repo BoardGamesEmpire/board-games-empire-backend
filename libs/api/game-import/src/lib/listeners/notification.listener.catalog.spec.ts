@@ -7,6 +7,7 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { I18nModule, I18nService } from 'nestjs-i18n';
 import { ImportJobFailedEvent } from '../events/import.events';
+import { ImportJobOrigin } from '../interfaces/import-job.interface';
 import { ImportErrorCode, importErrorMessage } from '../utils/sanitize-import-error';
 import { NotificationListener } from './notification.listener';
 
@@ -70,7 +71,7 @@ describe('ImportFailed notification read-back (real catalog)', () => {
           status: JobStatus.Failed,
           result: { errorCode: ImportErrorCode.NotFound, error: importErrorMessage(ImportErrorCode.NotFound) },
         },
-        { batchId: 'batch-1', gatewayId: 'bgg', externalId: 'ext-1', isExpansion: false },
+        { batchId: 'batch-1', gatewayId: 'bgg', externalId: 'ext-1', origin: ImportJobOrigin.Requested },
         new Date(),
       ),
     );

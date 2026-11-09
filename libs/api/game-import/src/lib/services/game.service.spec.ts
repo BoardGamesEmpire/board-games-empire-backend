@@ -43,7 +43,7 @@ describe('GameUpsertService', () => {
     } as unknown as jest.Mocked<PersonUpsertService>;
 
     serviceAccount = { resolveOrEnsure: jest.fn().mockResolvedValue({ id: SERVICE_ACCOUNT_ID }) };
-    baseGameLinks = { link: jest.fn().mockResolvedValue({ baseGameIds: [] }) };
+    baseGameLinks = { link: jest.fn().mockResolvedValue({ baseGameIds: [], isExpansion: false }) };
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
       providers: [
@@ -637,7 +637,7 @@ describe('GameUpsertService', () => {
       db.gameSource.update.mockImplementation((async () => order.push('store')) as never);
       baseGameLinks.link.mockImplementation(async () => {
         order.push('link');
-        return { baseGameIds: [] };
+        return { baseGameIds: [], isExpansion: false };
       });
 
       await service.upsert(expansionData(), GATEWAY_ID, ContentFormat.PlainText);
@@ -674,11 +674,16 @@ describe('GameUpsertService', () => {
 
     it('reports the base games linked and the base game to add', async () => {
       stubNewGameCreation('game-expansion');
-      baseGameLinks.link.mockResolvedValue({ baseGameIds: [], baseGameToAdd: '13' });
+      baseGameLinks.link.mockResolvedValue({ baseGameIds: [], baseGameToAdd: '13', isExpansion: true });
 
       const result = await service.upsert(expansionData(), GATEWAY_ID, ContentFormat.PlainText);
 
-      expect(result).toMatchObject({ gameId: 'game-expansion', baseGameIds: [], baseGameToAdd: '13' });
+      expect(result).toMatchObject({
+        gameId: 'game-expansion',
+        baseGameIds: [],
+        baseGameToAdd: '13',
+        isExpansion: true,
+      });
     });
   });
 });

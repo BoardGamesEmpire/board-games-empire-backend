@@ -1,4 +1,4 @@
-import { type ContentFormat, DatabaseService, JobStatus, Prisma } from '@bge/database';
+import { DatabaseService, JobStatus, Prisma, type ContentFormat } from '@bge/database';
 import { ActorAwareWorkerHost, extractJobMeta } from '@bge/queue-actor-context';
 import { guardWorkerEvent } from '@bge/utils';
 import { WebhookEventType, webhookEnvelope } from '@bge/webhooks';
@@ -8,12 +8,13 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Job } from 'bullmq';
 import { JobNames, QueueNames } from '../constants/queue.constants';
 import { ImportJobCompletedEvent } from '../events/import.events';
-import type {
-  ExpansionImportJobPayload,
-  GameImportJobPayload,
-  ImportJobResult,
-  PersistedJobFailure,
-  PersistedJobResult,
+import {
+  ImportJobOrigin,
+  type ExpansionImportJobPayload,
+  type GameImportJobPayload,
+  type ImportJobResult,
+  type PersistedJobFailure,
+  type PersistedJobResult,
 } from '../interfaces/import-job.interface';
 import { ImportBatchCompletionService } from '../services/batch-completion.service';
 import { ExpansionSpawnerService } from '../services/expansion-spawner.service';
@@ -41,12 +42,9 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
 
   protected processJob(job: Job<GameImportJobPayload | ExpansionImportJobPayload>): Promise<ImportJobResult> {
     switch (job.name) {
-      case JobNames.GameImport: {
-        return this.processImport(job, false);
-      }
-
+      case JobNames.GameImport:
       case JobNames.ExpansionImport: {
-        return this.processImport(job as Job<ExpansionImportJobPayload>, true);
+        return this.processImport(job);
       }
 
       default: {
@@ -55,20 +53,15 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
     }
   }
 
-  private async processImport(
-    job: Job<GameImportJobPayload | ExpansionImportJobPayload>,
-    isExpansion: boolean,
-  ): Promise<ImportJobResult> {
+  private async processImport(job: Job<GameImportJobPayload | ExpansionImportJobPayload>): Promise<ImportJobResult> {
     const initiatedAt = new Date();
-    const { jobId, batchId, gatewayId } = job.data;
+    const { jobId, batchId, gatewayId, origin } = job.data;
 
     // GameData is the return value of this job's fetch child, run by the
     // gateway-worker. BullMQ stores it under the child's queue:jobId key.
     const gameData = extractGameDataFromChildren(await job.getChildrenValues());
 
-    this.logger.log(
-      `${isExpansion ? 'Expansion' : 'Base game'} import: jobId=${jobId} externalId=${gameData.externalId}`,
-    );
+    this.logger.log(`${origin} game import: jobId=${jobId} externalId=${gameData.externalId}`);
 
     // Fetch processor already moved status to Running and stamped startedAt on
     // the Pending → Running transition. This call only records the import job's
@@ -78,19 +71,24 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
     await this.markRunning(jobId, job.id!.toString());
 
     const contentFormat = await this.contentFormatOf(gatewayId);
+    // A chosen expansion falls back on the requested game as its base game
+    // when its DataGateway names none (#971).
     const result = await this.gameUpsert.upsert(
       gameData,
       gatewayId,
       contentFormat,
-      isExpansion ? (job.data as ExpansionImportJobPayload).requestedExternalId : undefined,
+      origin === ImportJobOrigin.ChosenExpansion
+        ? (job.data as ExpansionImportJobPayload).requestedExternalId
+        : undefined,
     );
 
-    // The base GameSource now exists, so its expansions can resolve it. Spawn
-    // their flows BEFORE marking this base Completed: the freshly-created
-    // Pending expansion rows must be visible to batch-completion so it can't
-    // fire on the base alone. Idempotent, so a retry after a mid-spawn crash
-    // converges rather than duplicating work.
-    if (!isExpansion) {
+    // The requested game's GameSource now exists, so the expansions chosen
+    // with it can fall back on it. Spawn their flows BEFORE marking it
+    // Completed: the freshly-created Pending expansion rows must be visible to
+    // batch-completion so it can't fire on the requested game alone.
+    // Idempotent, so a retry after a mid-spawn crash converges rather than
+    // duplicating work.
+    if (origin === ImportJobOrigin.Requested) {
       await this.spawnExpansions(job as Job<GameImportJobPayload>);
     }
 
@@ -121,13 +119,14 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
           batchId,
           gatewayId,
           externalId: gameData.externalId,
-          isExpansion,
+          origin,
           gameTitle: gameData.title,
           thumbnail: gameData.thumbnailUrl ?? null,
           gameCreated: result.gameCreated,
           sourceCreated: result.sourceCreated,
           platformGames: result.platformGames,
-          baseGameId: result.baseGameIds[0],
+          baseGameIds: result.baseGameIds,
+          isExpansion: result.isExpansion,
         },
         initiatedAt,
       ),
@@ -192,7 +191,7 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
 
   @OnWorkerEvent('failed')
   async onFailed(job: Job<GameImportJobPayload | ExpansionImportJobPayload>, error: Error): Promise<void> {
-    const { jobId, batchId, gatewayId, externalId } = job.data;
+    const { jobId, batchId, gatewayId, externalId, origin } = job.data;
 
     const attempts = job.opts.attempts ?? 1;
     if (attempts > 1 && job.attemptsMade < attempts) {
@@ -264,12 +263,7 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
           });
         }
 
-        emitJobFailedEvents(
-          this.events,
-          { jobId, batchId, externalId, gatewayId, isExpansion: job.name === JobNames.ExpansionImport },
-          sanitized,
-          initiatedAt,
-        );
+        emitJobFailedEvents(this.events, { jobId, batchId, externalId, gatewayId, origin }, sanitized, initiatedAt);
 
         await this.batchCompletion.checkAndEmit(batchId);
       }),
@@ -306,8 +300,9 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
           gameCreated: event.gameCreated,
           sourceCreated: event.sourceCreated,
           platformGames: event.platformGames,
+          origin: event.origin,
           isExpansion: event.isExpansion,
-          baseGameId: event.baseGameId,
+          baseGameIds: event.baseGameIds,
           gatewayId: event.gatewayId,
           externalId: event.externalId,
         },

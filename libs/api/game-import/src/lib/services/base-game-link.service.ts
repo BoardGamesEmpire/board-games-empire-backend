@@ -27,6 +27,12 @@ export interface LinkBaseGamesResult {
    * the game catalog.
    */
   baseGameToAdd?: string;
+  /**
+   * True when the game is an add-on that has a base game: linked to one, or
+   * missing the one it needs. A remake, remaster, port or edition linked to
+   * its original is not an expansion (#971).
+   */
+  isExpansion: boolean;
 }
 
 /**
@@ -36,6 +42,18 @@ export interface LinkBaseGamesResult {
  * (#971, #658).
  */
 const NEEDS_BASE_GAME: ReadonlySet<ContentType> = new Set([ContentType.Expansion, ContentType.DLC, ContentType.Mod]);
+
+/**
+ * The content types that add to a base game rather than being a version of
+ * it, so a game of one with a base game is an expansion to the import's
+ * events, notifications and game watches. A remake, remaster, port, edition
+ * or bundle linked to its original is not (#971, #658).
+ */
+const ADD_ON: ReadonlySet<ContentType> = new Set([
+  ...NEEDS_BASE_GAME,
+  ContentType.StandaloneExpansion,
+  ContentType.Accessory,
+]);
 
 /**
  * Links an imported game to its base games, and the add-ons already in the
@@ -64,7 +82,12 @@ export class BaseGameLinkService {
     const [baseGameIds] = await Promise.all([this.linkToBaseGames(input, named.externalIds), this.linkAddOns(input)]);
 
     const needsOne = named.fromDataGateway && baseGameIds.length === 0 && NEEDS_BASE_GAME.has(input.contentType);
-    return needsOne ? { baseGameIds, baseGameToAdd: named.externalIds[0] } : { baseGameIds };
+    const baseGameToAdd = needsOne ? named.externalIds[0] : undefined;
+    // An add-on whose base game is being added counts already: the base
+    // game's own import makes the link, after this game's events fired.
+    const isExpansion = ADD_ON.has(input.contentType) && (baseGameIds.length > 0 || baseGameToAdd !== undefined);
+
+    return baseGameToAdd ? { baseGameIds, baseGameToAdd, isExpansion } : { baseGameIds, isExpansion };
   }
 
   /**

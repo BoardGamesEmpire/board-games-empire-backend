@@ -1,6 +1,6 @@
 import { DatabaseService, InitiatorType, JobStatus, JobType } from '@bge/database';
 import type { GameImportJobPayload } from '@bge/game-import';
-import { buildBaseFlow, FlowProducerNames, idempotencyKeyFor } from '@bge/game-import';
+import { buildBaseFlow, FlowProducerNames, idempotencyKeyFor, ImportJobOrigin } from '@bge/game-import';
 import type { JobActorMeta } from '@bge/queue-actor-context';
 import { InjectFlowProducer } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
@@ -54,6 +54,7 @@ export class GameImportEnqueuerService {
       userId: input.userId,
       expansionExternalIds: [...input.expansionExternalIds],
       locale: input.locale,
+      origin: ImportJobOrigin.Requested,
     };
 
     await this.flowProducer.add(buildBaseFlow(basePayload, meta));
@@ -93,6 +94,7 @@ export class GameImportEnqueuerService {
           gatewayId: input.gatewayId,
           externalId: input.externalId,
           expansionExternalIds: [...input.expansionExternalIds],
+          origin: ImportJobOrigin.Requested,
         },
       },
       select: { id: true },

@@ -1,7 +1,7 @@
 import { MutationEvent } from '@bge/actor-context';
 import { ResourceType, type Job } from '@bge/database';
 import { ImportEvents } from '../constants/queue.constants';
-import type { PlatformGameRef } from '../interfaces/import-job.interface';
+import type { ImportJobOrigin, PlatformGameRef } from '../interfaces/import-job.interface';
 import type { ImportErrorCode } from '../utils/sanitize-import-error';
 
 /**
@@ -28,12 +28,16 @@ type ImportJobStatusSnapshot = Readonly<Pick<Job, 'id' | 'status'>>;
 /**
  * Listener-facing context shared by every import job event — display /
  * routing data, not row state, so it is never persisted to audit rows.
+ *
+ * `origin` says why the job is in its batch. Whether its game is an
+ * expansion is known only once it persists and is linked, so only the
+ * completed event says so (#971).
  */
 export interface ImportJobEventContext {
   batchId: string;
   gatewayId: string;
   externalId: string;
-  isExpansion: boolean;
+  origin: ImportJobOrigin;
 }
 
 /** First Pending → Running transition of a fetch job's backing Job row. */
@@ -49,7 +53,7 @@ export class ImportJobStartedEvent extends MutationEvent<Job> {
   readonly batchId: string;
   readonly gatewayId: string;
   readonly externalId: string;
-  readonly isExpansion: boolean;
+  readonly origin: ImportJobOrigin;
 
   constructor(
     before: ImportJobStatusSnapshot,
@@ -62,7 +66,7 @@ export class ImportJobStartedEvent extends MutationEvent<Job> {
     this.batchId = context.batchId;
     this.gatewayId = context.gatewayId;
     this.externalId = context.externalId;
-    this.isExpansion = context.isExpansion;
+    this.origin = context.origin;
   }
 }
 
@@ -80,8 +84,14 @@ export interface ImportJobCompletedContext extends ImportJobEventContext {
   /** True when this specific gatewayId+externalId GameSource was new. */
   sourceCreated: boolean;
   platformGames: PlatformGameRef[];
-  /** Resolved DB id of the base game — only set for expansion imports. */
-  baseGameId?: string;
+  /** The base games the import linked the game to, in the order its DataGateway named them (#971). */
+  baseGameIds: string[];
+  /**
+   * True when the game is an add-on with a base game: linked to one, or
+   * adding the one it needs to the batch (#971). A remake or edition linked
+   * to its original is not.
+   */
+  isExpansion: boolean;
 }
 
 /** Running → Completed transition of an import job's Job row. */
@@ -97,13 +107,15 @@ export class ImportJobCompletedEvent extends MutationEvent<Job> {
   readonly batchId: string;
   readonly gatewayId: string;
   readonly externalId: string;
+  readonly origin: ImportJobOrigin;
+  /** True when the game is an add-on with a base game, whatever its origin (#971). */
   readonly isExpansion: boolean;
   readonly gameTitle: string;
   readonly thumbnail: string | null;
   readonly gameCreated: boolean;
   readonly sourceCreated: boolean;
   readonly platformGames: PlatformGameRef[];
-  readonly baseGameId?: string;
+  readonly baseGameIds: string[];
 
   constructor(
     before: ImportJobStatusSnapshot,
@@ -116,13 +128,14 @@ export class ImportJobCompletedEvent extends MutationEvent<Job> {
     this.batchId = context.batchId;
     this.gatewayId = context.gatewayId;
     this.externalId = context.externalId;
+    this.origin = context.origin;
     this.isExpansion = context.isExpansion;
     this.gameTitle = context.gameTitle;
     this.thumbnail = context.thumbnail;
     this.gameCreated = context.gameCreated;
     this.sourceCreated = context.sourceCreated;
     this.platformGames = context.platformGames;
-    this.baseGameId = context.baseGameId;
+    this.baseGameIds = context.baseGameIds;
   }
 }
 
@@ -158,7 +171,7 @@ export class ImportJobFailedEvent extends MutationEvent<Job> {
   readonly batchId: string;
   readonly gatewayId: string;
   readonly externalId: string;
-  readonly isExpansion: boolean;
+  readonly origin: ImportJobOrigin;
 
   constructor(
     before: ImportJobFailedBeforeSnapshot,
@@ -171,6 +184,6 @@ export class ImportJobFailedEvent extends MutationEvent<Job> {
     this.batchId = context.batchId;
     this.gatewayId = context.gatewayId;
     this.externalId = context.externalId;
-    this.isExpansion = context.isExpansion;
+    this.origin = context.origin;
   }
 }

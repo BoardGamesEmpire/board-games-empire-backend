@@ -55,7 +55,11 @@ export interface ImportFailedPayload {
   batchId: string;
   gatewayId: string;
   externalId: string;
-  isExpansion: boolean;
+  /**
+   * Why the job was in its import batch: `Requested`, `ChosenExpansion` or
+   * `AddedBaseGame` (#971).
+   */
+  origin: string;
   errorCode: string;
   error: I18nMessage;
 }

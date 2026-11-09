@@ -3,6 +3,7 @@ import { JobStatus, JobType, NotificationType } from '@bge/database';
 import { isI18nMessage } from '@bge/i18n';
 import type { NotificationsService } from '@bge/notifications-service';
 import { ImportJobCompletedEvent, ImportJobFailedEvent, type ImportJobCompletedContext } from '../events/import.events';
+import { ImportJobOrigin } from '../interfaces/import-job.interface';
 import { ImportErrorCode, importErrorMessage } from '../utils/sanitize-import-error';
 import { NotificationListener } from './notification.listener';
 
@@ -17,12 +18,14 @@ const makeCompleted = (ctx: Partial<ImportJobCompletedContext> = {}) =>
       batchId: 'batch-1',
       gatewayId: 'bgg',
       externalId: 'ext-1',
-      isExpansion: false,
+      origin: ImportJobOrigin.Requested,
       gameTitle: 'Catan',
       thumbnail: null,
       gameCreated: true,
       sourceCreated: true,
       platformGames: [],
+      baseGameIds: [],
+      isExpansion: false,
       ...ctx,
     },
     new Date(),
@@ -36,7 +39,7 @@ const makeFailed = (errorCode: ImportErrorCode = ImportErrorCode.GatewayError) =
       status: JobStatus.Failed,
       result: { errorCode, error: importErrorMessage(errorCode) },
     },
-    { batchId: 'batch-1', gatewayId: 'bgg', externalId: 'ext-1', isExpansion: false },
+    { batchId: 'batch-1', gatewayId: 'bgg', externalId: 'ext-1', origin: ImportJobOrigin.Requested },
     new Date(),
   );
 
@@ -73,8 +76,8 @@ describe('NotificationListener', () => {
       });
     });
 
-    it('uses ExpansionImported for expansion imports', async () => {
-      await listener.handle(makeCompleted({ isExpansion: true, baseGameId: 'base-1' }));
+    it('uses ExpansionImported for an add-on with a base game (#971)', async () => {
+      await listener.handle(makeCompleted({ baseGameIds: ['base-1'], isExpansion: true }));
 
       expect(notifications.create).toHaveBeenCalledWith(
         expect.objectContaining({ type: NotificationType.ExpansionImported }),
@@ -117,7 +120,7 @@ describe('NotificationListener', () => {
           batchId: 'batch-1',
           gatewayId: 'bgg',
           externalId: 'ext-1',
-          isExpansion: false,
+          origin: 'Requested',
           errorCode: ImportErrorCode.GatewayError,
           error: expect.objectContaining({ key: 'errors.game_import.failure.gateway_error' }),
         },

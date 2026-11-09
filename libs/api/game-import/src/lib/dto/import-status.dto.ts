@@ -1,6 +1,6 @@
 import { JobStatus } from '@bge/database';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ImportBatchStatus } from '../interfaces/import-job.interface';
+import { ImportBatchStatus, ImportJobOrigin } from '../interfaces/import-job.interface';
 import { ImportErrorCode } from '../utils/sanitize-import-error';
 
 export class ImportPlatformGameDto {
@@ -23,24 +23,32 @@ export class ImportJobStatusDto {
   })
   status!: JobStatus;
 
-  @ApiProperty({ description: 'False for the base game, true for a co-imported expansion' })
-  isExpansion!: boolean;
+  @ApiProperty({
+    enum: ImportJobOrigin,
+    enumName: 'ImportJobOrigin',
+    description:
+      'Why the job is in the batch: Requested is the game the import asked for, ChosenExpansion is an ' +
+      'expansion chosen with it, and AddedBaseGame is a base game the server added because a game in the ' +
+      'batch needed it. It says nothing about whether the game is an expansion; see the game itself.',
+  })
+  origin!: ImportJobOrigin;
 
   @ApiPropertyOptional({
     type: String,
     nullable: true,
     description:
-      'Job id of the base game this expansion belongs to; null for base games. Lets a client draw the ' +
-      'request → base → expansion graph (base ids are the graph edges when a batch has more than one base).',
+      'Job id of the job that brought this one into the batch: the requested game for a chosen expansion, ' +
+      'or the game that needed an added base game. Null for the requested game. Lets a client draw the ' +
+      "batch's graph.",
   })
   parentJobId?: string | null;
 
   @ApiPropertyOptional({
     type: [String],
     description:
-      'External ids of the expansions this base was asked to co-import. Present on base jobs only. Expansions ' +
-      'are spawned once the base persists, so before then (or if the base fails) they have no job entry yet — ' +
-      'render these as pending/skipped nodes off the base.',
+      'External ids of the expansions chosen with the requested game. Present on its job only. Their jobs ' +
+      'are added once the requested game persists, so before then (or if it fails) they have no job entry ' +
+      'yet — render these as pending or skipped nodes off the requested game.',
   })
   requestedExpansions?: string[];
 

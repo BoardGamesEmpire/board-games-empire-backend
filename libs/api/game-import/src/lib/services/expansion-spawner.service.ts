@@ -5,7 +5,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { FlowProducer } from 'bullmq';
 import { FlowProducerNames } from '../constants/queue.constants';
 import { buildExpansionFlow } from '../flows/import-flow.builder';
-import type { ExpansionImportJobPayload } from '../interfaces/import-job.interface';
+import { ImportJobOrigin, type ExpansionImportJobPayload } from '../interfaces/import-job.interface';
 import { idempotencyKeyFor } from '../utils/idempotency-key';
 
 export interface SpawnExpansionsInput {
@@ -82,6 +82,7 @@ export class ExpansionSpawnerService {
               gatewayId: input.gatewayId,
               externalId,
               requestedExternalId: input.requestedExternalId,
+              origin: ImportJobOrigin.ChosenExpansion,
             } satisfies Prisma.InputJsonObject,
           },
           update: {},
@@ -108,6 +109,7 @@ export class ExpansionSpawnerService {
             initiatorType: input.initiatorType,
             userId: input.userId,
             locale: input.locale,
+            origin: ImportJobOrigin.ChosenExpansion,
           } satisfies ExpansionImportJobPayload,
           meta,
         ),

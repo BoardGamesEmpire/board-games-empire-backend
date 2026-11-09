@@ -9,7 +9,7 @@ import { Job } from 'bullmq';
 import { of, throwError } from 'rxjs';
 import { JobNames } from '../constants/queue.constants';
 import { ImportJobFailedEvent, ImportJobStartedEvent } from '../events/import.events';
-import type { GameFetchJobPayload } from '../interfaces/import-job.interface';
+import { ImportJobOrigin, type GameFetchJobPayload } from '../interfaces/import-job.interface';
 import { ImportBatchCompletionService } from '../services/batch-completion.service';
 import { GameFetchProcessor } from './game-fetch.processor';
 
@@ -31,6 +31,7 @@ describe('GameFetchProcessor', () => {
     initiatorType: InitiatorType.User,
     userId: 'user-7',
     locale: 'en',
+    origin: ImportJobOrigin.Requested,
   };
   const meta: JobActorMeta = { actor: { kind: 'user', userId: 'user-7' }, correlationId: 'corr-1' };
 
@@ -111,9 +112,18 @@ describe('GameFetchProcessor', () => {
       expect(started.subjectId).toBe('job-1');
       expect(started.before).toEqual({ id: 'job-1', status: JobStatus.Pending });
       expect(started.after).toEqual({ id: 'job-1', status: JobStatus.Running });
-      expect(started).toMatchObject({ batchId: 'batch-1', gatewayId: 'bgg', externalId: 'ext-1', isExpansion: false });
+      expect(started).toMatchObject({ batchId: 'batch-1', gatewayId: 'bgg', externalId: 'ext-1', origin: 'Requested' });
+      // No link exists before the game persists, so the start says why the job
+      // is in its batch, not whether the game is an expansion (#971).
+      expect(started).not.toHaveProperty('isExpansion');
       // The acting user rides CLS, never the payload.
       expect(started).not.toHaveProperty('userId');
+      expect(events.emit).toHaveBeenCalledWith(
+        WebhookEventType.ImportJobStarted,
+        expect.objectContaining({
+          data: { jobId: 'job-1', batchId: 'batch-1', gatewayId: 'bgg', externalId: 'ext-1', origin: 'Requested' },
+        }),
+      );
 
       // Retry attempt: the row is already Running, so no started events fire.
       events.emit.mockClear();
@@ -214,7 +224,8 @@ describe('GameFetchProcessor', () => {
         status: JobStatus.Failed,
         result: { errorCode: 'GATEWAY_ERROR', error: 'Fetching game data from the gateway failed.' },
       });
-      expect(failed).toMatchObject({ batchId: 'batch-1', gatewayId: 'bgg', externalId: 'ext-1', isExpansion: false });
+      expect(failed).toMatchObject({ batchId: 'batch-1', gatewayId: 'bgg', externalId: 'ext-1', origin: 'Requested' });
+      expect(failed).not.toHaveProperty('isExpansion');
       expect(failed).not.toHaveProperty('userId');
       expect(batchCompletion.checkAndEmit).toHaveBeenCalledWith('batch-1');
     });
@@ -237,12 +248,15 @@ describe('GameFetchProcessor', () => {
       expect(batchCompletion.checkAndEmit).not.toHaveBeenCalled();
     });
 
-    it('flags expansion fetches as expansions in the failure event', async () => {
+    it("carries the job's origin, not its job name, in the failure event and webhook (#971)", async () => {
       const expansionJob = {
         name: JobNames.ExpansionFetch,
         id: '9',
         queueName: 'gateway-fetch',
-        data: wrapJobData({ ...payload, jobId: 'exp-job', requestedExternalId: 'base-ext' }, meta),
+        data: wrapJobData(
+          { ...payload, jobId: 'exp-job', requestedExternalId: 'base-ext', origin: ImportJobOrigin.ChosenExpansion },
+          meta,
+        ),
         attemptsMade: 5,
         opts: { attempts: 5 },
       } as unknown as Job<GameFetchJobPayload>;
@@ -254,7 +268,11 @@ describe('GameFetchProcessor', () => {
       const failed = failedCall![1] as ImportJobFailedEvent;
       expect(failed).toBeInstanceOf(ImportJobFailedEvent);
       expect(failed.subjectId).toBe('exp-job');
-      expect(failed.isExpansion).toBe(true);
+      expect(failed.origin).toBe(ImportJobOrigin.ChosenExpansion);
+      expect(events.emit).toHaveBeenCalledWith(
+        WebhookEventType.ImportJobFailed,
+        expect.objectContaining({ data: expect.objectContaining({ origin: 'ChosenExpansion' }) }),
+      );
       expect(batchCompletion.checkAndEmit).toHaveBeenCalledWith('batch-1');
     });
 
