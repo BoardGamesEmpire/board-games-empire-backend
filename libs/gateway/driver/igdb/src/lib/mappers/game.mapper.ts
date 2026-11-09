@@ -465,9 +465,10 @@ export function toCategoryData(entity: IgdbNamedEntity): proto.CategoryData {
   } satisfies proto.CategoryData;
 }
 
-function toBaseGameExternalId(game: IgdbGame): string | undefined {
+/** The base game IGDB names for a game: its `parent_game`, or else its `version_parent` (#971). */
+function toBaseGameExternalIds(game: IgdbGame): string[] {
   const ref = game.parent_game ?? game.version_parent;
-  return typeof ref === 'number' ? String(ref) : undefined;
+  return typeof ref === 'number' ? [String(ref)] : [];
 }
 
 /** The year of a Unix-seconds date, in UTC, as IGDB's search narrowing reads it (#719). */
@@ -506,7 +507,7 @@ export function toGameSearchData(game: IgdbGame): proto.GameSearchData {
     summary: game.summary,
     availablePlatforms: (game.platforms ?? []).map(toPlatformData),
     availableReleases,
-    baseGameExternalId: toBaseGameExternalId(game),
+    baseGameExternalIds: toBaseGameExternalIds(game),
   };
 }
 
@@ -561,7 +562,7 @@ export function toGameData(game: IgdbGame, locale?: string): proto.GameData {
     ageRatings,
     artists: [],
     averageRating: game.total_rating,
-    baseGameExternalId: toBaseGameExternalId(game),
+    baseGameExternalIds: toBaseGameExternalIds(game),
 
     categories,
     contentType: toContentType(game.game_type),

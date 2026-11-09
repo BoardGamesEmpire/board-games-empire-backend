@@ -34,6 +34,7 @@ const searchHit = (externalId: string, title: string): proto.GameSearchData => (
   contentType: proto.ContentType.CONTENT_TYPE_BASE_GAME,
   availablePlatforms: [],
   availableReleases: [],
+  baseGameExternalIds: [],
 });
 
 const catan = searchHit('13', 'Catan');

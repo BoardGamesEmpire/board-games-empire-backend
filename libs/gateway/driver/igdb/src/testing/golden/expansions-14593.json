@@ -34,7 +34,9 @@
           "languages": []
         }
       ],
-      "baseGameExternalId": "14593"
+      "baseGameExternalIds": [
+        "14593"
+      ]
     }
   },
   {
@@ -72,7 +74,9 @@
           "languages": []
         }
       ],
-      "baseGameExternalId": "14593"
+      "baseGameExternalIds": [
+        "14593"
+      ]
     }
   },
   {
@@ -333,7 +337,9 @@
           ]
         }
       ],
-      "baseGameExternalId": "14593"
+      "baseGameExternalIds": [
+        "14593"
+      ]
     }
   },
   {
@@ -432,7 +438,9 @@
           "languages": []
         }
       ],
-      "baseGameExternalId": "14593"
+      "baseGameExternalIds": [
+        "14593"
+      ]
     }
   },
   {
@@ -470,7 +478,9 @@
           "languages": []
         }
       ],
-      "baseGameExternalId": "14593"
+      "baseGameExternalIds": [
+        "14593"
+      ]
     }
   },
   {
@@ -569,7 +579,9 @@
           "languages": []
         }
       ],
-      "baseGameExternalId": "14593"
+      "baseGameExternalIds": [
+        "14593"
+      ]
     }
   },
   {
@@ -668,7 +680,9 @@
           "languages": []
         }
       ],
-      "baseGameExternalId": "14593"
+      "baseGameExternalIds": [
+        "14593"
+      ]
     }
   },
   {
@@ -706,7 +720,9 @@
           "languages": []
         }
       ],
-      "baseGameExternalId": "14593"
+      "baseGameExternalIds": [
+        "14593"
+      ]
     }
   },
   {
@@ -720,7 +736,9 @@
       "summary": "A mod for the game Hollow Knight that adds a game mode with a whole new world to explore - the Glimmering Realm!\n\nChanges the layout, items and lore of Hallownest into a whole new realm\nNo map included, draw your own or venture forth without guidance\nAdds a new game mode, all old save files will remain unchanged",
       "availablePlatforms": [],
       "availableReleases": [],
-      "baseGameExternalId": "14593"
+      "baseGameExternalIds": [
+        "14593"
+      ]
     }
   },
   {
@@ -859,7 +877,9 @@
           "languages": []
         }
       ],
-      "baseGameExternalId": "14593"
+      "baseGameExternalIds": [
+        "14593"
+      ]
     }
   },
   {
@@ -904,7 +924,9 @@
           ]
         }
       ],
-      "baseGameExternalId": "14593"
+      "baseGameExternalIds": [
+        "14593"
+      ]
     }
   },
   {

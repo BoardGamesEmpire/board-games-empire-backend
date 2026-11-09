@@ -944,7 +944,8 @@
             }
           ]
         }
-      ]
+      ],
+      "baseGameExternalIds": []
     }
   },
   {
@@ -989,7 +990,9 @@
           ]
         }
       ],
-      "baseGameExternalId": "14593"
+      "baseGameExternalIds": [
+        "14593"
+      ]
     }
   },
   {
@@ -1032,7 +1035,8 @@
             }
           ]
         }
-      ]
+      ],
+      "baseGameExternalIds": []
     }
   },
   {
@@ -1833,7 +1837,8 @@
             }
           ]
         }
-      ]
+      ],
+      "baseGameExternalIds": []
     }
   },
   {
@@ -1871,7 +1876,9 @@
           "languages": []
         }
       ],
-      "baseGameExternalId": "14593"
+      "baseGameExternalIds": [
+        "14593"
+      ]
     }
   },
   {

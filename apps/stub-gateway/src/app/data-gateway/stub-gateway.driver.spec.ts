@@ -275,7 +275,7 @@ describe('StubGatewayDriver', () => {
       );
 
       expect(titlesOf(frames)).toEqual([STUB_EXPANSION.title]);
-      expect(frames[0].game?.baseGameExternalId).toBe(STUB_BASE_GAME.externalId);
+      expect(frames[0].game?.baseGameExternalIds).toEqual([STUB_BASE_GAME.externalId]);
       expect(frames.at(-1)?.status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
     });
 

@@ -374,16 +374,16 @@ describe('IgdbDriver', () => {
       expect(result?.game?.thumbnailUrl).not.toMatch(/^\/\//);
     });
 
-    it('sets baseGameExternalId from parent_game for DLC games', async () => {
+    it('sends parent_game as the base game of a DLC (#971)', async () => {
       igdbService.call.mockReturnValue(of([DLC_GAME]));
 
       const frames = await firstValueFrom(driver.searchGames({ correlationId: 'c', query: 'dlc' }).pipe(toArray()));
       const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
-      expect(result?.game?.baseGameExternalId).toBe(String(DLC_GAME.parent_game));
+      expect(result?.game?.baseGameExternalIds).toEqual([String(DLC_GAME.parent_game)]);
     });
 
-    it('sets baseGameExternalId from version_parent for standalone expansions', async () => {
+    it('sends version_parent as the base game of a standalone expansion (#971)', async () => {
       igdbService.call.mockReturnValue(of([STANDALONE_EXPANSION]));
 
       const frames = await firstValueFrom(
@@ -391,16 +391,16 @@ describe('IgdbDriver', () => {
       );
       const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
-      expect(result?.game?.baseGameExternalId).toBe(String(STANDALONE_EXPANSION.version_parent));
+      expect(result?.game?.baseGameExternalIds).toEqual([String(STANDALONE_EXPANSION.version_parent)]);
     });
 
-    it('does not set baseGameExternalId for base games', async () => {
+    it('sends no base game for a base game (#971)', async () => {
       igdbService.call.mockReturnValue(of([BASE_GAME]));
 
       const frames = await firstValueFrom(driver.searchGames({ correlationId: 'c', query: 'Hades' }).pipe(toArray()));
       const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
-      expect(result?.game?.baseGameExternalId).toBeUndefined();
+      expect(result?.game?.baseGameExternalIds).toEqual([]);
     });
   });
 

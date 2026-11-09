@@ -9,6 +9,7 @@ const game = (yearPublished?: number): proto.GameSearchData => ({
   yearPublished,
   availablePlatforms: [],
   availableReleases: [],
+  baseGameExternalIds: [],
 });
 
 const range = (publishYear: proto.IntRange) => toResultFilter({ platformTypes: [], contentTypes: [], publishYear });

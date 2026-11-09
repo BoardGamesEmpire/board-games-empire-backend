@@ -75,6 +75,7 @@ describe('GameSearchController', () => {
             inSystem: false,
             platforms: [],
             availableReleases: [],
+            baseGameExternalIds: [],
           },
         ],
       },

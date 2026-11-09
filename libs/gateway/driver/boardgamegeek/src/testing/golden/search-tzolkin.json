@@ -14,6 +14,7 @@
       "maxPlayers": 4,
       "minPlaytime": 90,
       "maxPlaytime": 90,
+      "baseGameExternalIds": [],
       "summary": "Tzolkin: The Mayan Calendar presents a new game mechanism: dynamic worker placement. Players representing different Mayan tribes place their workers on giant connected gears, and as the gears rotate they take the workers to different action spots.\n\nDuring a turn, players can either (a) place one or more workers on the lowest visible spot of the gears or (b) pick up one or more workers. When placing workers, they must pay corn, which is used as a currency in the game. When they pick up a worker, they perform certain actions depending on the position of the worker. Actions located \"later\" on the gears are more valuable, so it's wise to let the time work for you – but players cannot skip their turn; if they have all their workers on the gears, they have to pick some up. \n\nThe game ends after one full revolution of the central Tzolkin gear. There are many paths to victory. Pleasing the gods by placing crystal skulls in deep caves or building many temples are just two of those many paths...",
       "availablePlatforms": [
         {
@@ -55,7 +56,9 @@
       "maxPlayers": 4,
       "minPlaytime": 90,
       "maxPlaytime": 90,
-      "baseGameExternalId": "126163",
+      "baseGameExternalIds": [
+        "126163"
+      ],
       "summary": "Released in Spielbox issue 2012/6, this mini expansion includes one new monument tile and one new starting wealth tile.\n\nFrom the Spielbox:\n\nEvery culture evolves. Some grow and flourish; others decline, but they must change.\n\nThis mini-expansion consists of one monument tile and one Starting Wealth Tile. Mix them in with the other tiles of the same kind.\n\nBonus Monument - Granary\n\nThis granary is built to stand the test of time. Its magnificence long after the Mayans stop storing grain in it.\n\nThis monument is unique in that an immediate effect during play. When you build it, immediately take 13 corn from the corn bank.\nAt the end of the game, this monument is worth 13 points.\n\nBonus Starting Wealth - Cistern\n\nYour tribe has figured out how to draw water out of the surrounding soil and and store it in an underground cistern. The ecological impact of this feat of engineering harms the other tribes\n\nIf you choose this Starting Wealth Tile, you get 10 corn. Each of your opponents starts with 1 less corn. (An opponent whose Starting Wealth Tiles provide no corn is not affected.)\nIf you draw this tile when placing dummy workers, it indicates that you will play this game with one less dummy worker than usual (11 instead of 12 in a two-player game or 5 instead of 6 in a three-player game).\n\nHelp your culture grow and flourish, and the gods will smile upon you.",
       "availablePlatforms": [
         {
@@ -97,7 +100,9 @@
       "maxPlayers": 4,
       "minPlaytime": 90,
       "maxPlaytime": 90,
-      "baseGameExternalId": "126163",
+      "baseGameExternalIds": [
+        "126163"
+      ],
       "summary": "Given away in the Gathering of Friends 2013 convention giftbags, this mini expansion includes one new monument and one new starting wealth tile.\n\nFrom the Rules:\n\nBonus Monument\n\nUnlike other monuments, the points for constructing this are scored immediately (not at the end of the game).  The number of points scored depends on when you build it:\n\nFirst quarter of the game- 40 points.\nSecond quarter- 31 points.\nThird quarter- 22 points.\nFourth quarter- 13 points.\n\nAs depicted on the tile, each Food Day is counted as the last day of its quarter.  For example, if you build this monument on the first Food Day, you get 40 points.\n\nIf a Food Day occurs one day late (because a player used the time-speeding privilege of the Starting Player Space) it still counts as the last day of its quarter for the purposes of this monument.\n\nBonus Starting Wealth Tile\n\nIf you take this as your Starting Wealth Tile, you get 6 corn and 4 wood, but you also move down one step on the brown temple.\n\nIn a 2- or 3-player game, this tile might be drawn when you are placing dummy workers.  If so, this tile indicates that you must place one extra dummy worker (7 in a 3-player game, or 13 in a 2-player game).\n\nInstead of using worker figures, you can represent dummy workers with the round, flat markers in the non-player colors.  Otherwise you won't have enough.  Also, this makes it easier to distinguish players' workers from dummy workers, so we recommend using the markers even when you aren't playing with this tile.",
       "availablePlatforms": [
         {
@@ -139,7 +144,9 @@
       "maxPlayers": 5,
       "minPlaytime": 90,
       "maxPlaytime": 90,
-      "baseGameExternalId": "126163",
+      "baseGameExternalIds": [
+        "126163"
+      ],
       "summary": "Game description from the publisher:\n\nIn Tzolk'in: The Mayan Calendar - Tribes & Prophecies, each player now becomes the leader of a particular tribe, each of which has a special ability that only that player can use. The game includes 13 tribes to provide plenty of variety. (You know that 13 is a spooky and magical number, right?)\n\nWith this expansion, the game of Tzolk'in: The Mayan Calendar is also influenced by three prophecies that are revealed ahead of time and fulfilled when the time is right. These prophecies give players other opportunities to score points, but they can also lose points if they don't prepare themselves for the prophecy effects. As with the tribes, the expansion includes 13 prophecies. (Woohoo, 13 again!)\n\nThis expansion also has new buildings and components that allow up to five players to compete.",
       "availablePlatforms": [
         {
@@ -181,7 +188,10 @@
       "maxPlayers": 5,
       "minPlaytime": 90,
       "maxPlaytime": 90,
-      "baseGameExternalId": "126163",
+      "baseGameExternalIds": [
+        "126163",
+        "143065"
+      ],
       "summary": "A new tribe and a new prophecy for Tzolk'in: The Mayan Calendar - Tribes & Prophecies.\n\nIt was given out by Czech Games Edition at Essen Spiel 2013.\n\nLater it was a promotional tribe tile given away as part of the 2020 Secret Cabal Kickstarter Promo Pack.\n\nEk Chuah allows the player to borrow resources from the bank.",
       "availablePlatforms": [
         {

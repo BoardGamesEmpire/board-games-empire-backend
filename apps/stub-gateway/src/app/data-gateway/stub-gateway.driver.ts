@@ -66,7 +66,7 @@ function toSearchData(game: proto.GameData): proto.GameSearchData {
     maxPlayers: game.maxPlayers,
     minPlaytime: game.minPlaytime,
     maxPlaytime: game.maxPlaytime,
-    baseGameExternalId: game.baseGameExternalId,
+    baseGameExternalIds: game.baseGameExternalIds,
     summary: game.description,
     availablePlatforms: game.platforms,
     availableReleases: game.releases,
@@ -191,7 +191,7 @@ export class StubGatewayDriver implements DataGatewayDriver {
   }
 
   fetchExpansions(request: proto.FetchExpansionsRequest): Observable<proto.GatewaySearchResult> {
-    const expansions = STUB_GAMES.filter((game) => game.baseGameExternalId === request.baseExternalId);
+    const expansions = STUB_GAMES.filter((game) => game.baseGameExternalIds.includes(request.baseExternalId));
 
     return this.stream(request.correlationId, expansions);
   }

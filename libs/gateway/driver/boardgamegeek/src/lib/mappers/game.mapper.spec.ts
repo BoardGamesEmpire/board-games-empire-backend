@@ -218,7 +218,7 @@ describe('searchItemToGameSearchData', () => {
       maxPlayers: 4,
       minPlaytime: 60,
       maxPlaytime: 120,
-      baseGameExternalId: '13',
+      baseGameExternalIds: ['13'],
       summary: 'Vanquish monsters.',
     });
     expect(result.averageRating).toBeCloseTo(8.6);
@@ -598,6 +598,25 @@ describe('thingToGameData — links and image URLs (#716)', () => {
     const game = thingToGameData(makeBggThing({ thumbnail: ' ', image: '' }));
 
     expect([game.thumbnailUrl, game.imageUrl]).toEqual([undefined, undefined]);
+  });
+});
+
+describe('base games (#971)', () => {
+  const links: BggLink[] = [
+    { type: BggLinkType.BoardGameExpansion, id: 13, value: 'Catan', inbound: 'true' },
+    { type: BggLinkType.BoardGameExpansion, id: 200, value: 'An expansion of this one' },
+    { type: BggLinkType.BoardGameExpansion, id: 926, value: 'Catan: Cities & Knights', inbound: 'true' },
+  ];
+
+  it('sends every inbound expansion link as a base game, in BGG order', () => {
+    const thing = makeBggThing({ type: BggThingType.BoardGameExpansion, links });
+
+    expect(thingToGameData(thing).baseGameExternalIds).toEqual(['13', '926']);
+    expect(thingToGameSearchData(thing).baseGameExternalIds).toEqual(['13', '926']);
+  });
+
+  it('sends no base game for a thing with no inbound expansion link', () => {
+    expect(thingToGameData(makeBggThing({ links: [links[1]] })).baseGameExternalIds).toEqual([]);
   });
 });
 

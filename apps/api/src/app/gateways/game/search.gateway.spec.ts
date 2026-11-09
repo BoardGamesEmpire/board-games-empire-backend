@@ -1143,6 +1143,7 @@ function makeResultFrame(overrides: Partial<SearchGameResult> = {}): SearchGameR
       contentType: ContentType.CONTENT_TYPE_BASE_GAME,
       availablePlatforms: [],
       availableReleases: [],
+      baseGameExternalIds: [],
     } as GameSearchData,
     inSystem: false,
     ...overrides,
