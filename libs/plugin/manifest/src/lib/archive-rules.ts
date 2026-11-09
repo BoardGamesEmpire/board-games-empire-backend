@@ -18,9 +18,12 @@ export const PLUGIN_ARCHIVE_MAX_MANIFEST_BYTES = 1024 * 1024;
  * `extracted-size`, `manifest-size`, `required-file` and, for an entry whose
  * size is not a non-negative safe integer or whose path collides with an
  * earlier entry's, `corrupt`. The reader also reports `corrupt` for a damaged
- * stream; `not-gzip`, `compressed-size` and `manifest-slug` are for the reader
- * and the receiver to report. They all live here so the rules stay in one
- * list.
+ * stream; `not-gzip` and `manifest-slug` are for the reader and the receiver
+ * to report. They all live here so the rules stay in one list.
+ *
+ * The compressed-size cap is not a rule here. It is enforced where the bytes
+ * arrive (the download's byte cap, the upload's), before anything reads the
+ * archive, and refused there as too large.
  */
 export type PluginArchiveRule =
   | 'not-gzip'
@@ -30,7 +33,6 @@ export type PluginArchiveRule =
   | 'top-level'
   | 'entry-count'
   | 'extracted-size'
-  | 'compressed-size'
   | 'required-file'
   | 'manifest-slug'
   | 'manifest-size';
