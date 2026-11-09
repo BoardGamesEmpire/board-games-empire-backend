@@ -16,6 +16,10 @@ import { join } from 'node:path';
  * directory is left for the caller to clean up. The loader refuses an
  * artifact behind a linked slug directory, and the sweep never follows a
  * link, so one placed through it could never load and never be swept.
+ *
+ * The check catches a link that is already there. It assumes that only the
+ * server writes to the plugins root: the check and the rename are separate
+ * steps, so a link swapped in between them is not caught.
  */
 export const placePluginArtifact = async (
   extractDir: string,

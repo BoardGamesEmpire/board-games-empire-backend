@@ -21,6 +21,10 @@ export interface IncomingWorkspace {
  * A `.incoming` that is a symbolic link is refused: writes through it may land
  * outside the plugins root, and the sweep, which never follows a link, would
  * never clear them.
+ *
+ * The check catches a link that is already there. It assumes that only the
+ * server writes to the plugins root: the check and the writes that follow are
+ * separate steps, so a link swapped in between them is not caught.
  */
 export const allocateIncoming = async (pluginsRoot: string): Promise<IncomingWorkspace> => {
   const incomingDir = join(pluginsRoot, INCOMING_DIRNAME);
