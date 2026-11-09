@@ -6,6 +6,7 @@ import {
   Body,
   Catch,
   Controller,
+  Logger,
   Module,
   Post,
   Req,
@@ -17,7 +18,7 @@ import {
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { MulterError } from 'multer';
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,6 +30,7 @@ const GZIP = Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0x01, 0x02]);
 
 let seen: { file?: PluginArtifactUploadedFile; body?: unknown; existedInHandler?: boolean } = {};
 let handlerFails = false;
+let handlerReplacesFileWithDirectory = false;
 
 class EchoFilter implements ExceptionFilter {
   catch(error: Error, host: ArgumentsHost): void {
@@ -43,6 +45,12 @@ class UploadController {
   take(req: { file?: PluginArtifactUploadedFile }, body: unknown) {
     seen = { file: req.file, body, existedInHandler: req.file ? existsSync(req.file.path) : undefined };
     if (handlerFails) throw new Error('handler failed');
+    if (handlerReplacesFileWithDirectory && req.file) {
+      // A path the backstop cannot remove: rmSync refuses a directory, even as root.
+      rmSync(req.file.path);
+      mkdirSync(req.file.path);
+      writeFileSync(join(req.file.path, 'child'), '');
+    }
     return { ok: true };
   }
 }
@@ -75,6 +83,7 @@ describe('PluginArtifactUploadInterceptor (#1094)', () => {
   beforeEach(async () => {
     seen = {};
     handlerFails = false;
+    handlerReplacesFileWithDirectory = false;
     root = mkdtempSync(join(tmpdir(), 'bge-interceptor-'));
     isServerAdmin = jest.fn().mockResolvedValue(true);
     class TestModule {}
@@ -117,6 +126,18 @@ describe('PluginArtifactUploadInterceptor (#1094)', () => {
     expect(response.status).toBe(500);
     expect(seen.existedInHandler).toBe(true);
     expect(incoming()).toEqual([]);
+  });
+
+  it('logs a file it cannot remove instead of throwing, which would end the process (#1094)', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    handlerReplacesFileWithDirectory = true;
+
+    const response = await post(fileForm(GZIP));
+
+    expect(response.status).toBe(201);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(seen.file?.path ?? '<no file>'));
+    warn.mockRestore();
   });
 
   it('passes bytes that are not gzip through as PluginArchiveRefusedError and leaves nothing (#1094)', async () => {

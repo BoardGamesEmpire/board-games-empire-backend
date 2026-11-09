@@ -7,7 +7,14 @@ import {
 } from '@bge/plugin';
 import { PluginArtifactTooLargeError } from '@bge/plugin-artifacts';
 import { PLUGIN_ARCHIVE_MAX_COMPRESSED_BYTES } from '@boardgamesempire/plugin-manifest';
-import { Inject, Injectable, type CallHandler, type ExecutionContext, type NestInterceptor } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  type CallHandler,
+  type ExecutionContext,
+  type NestInterceptor,
+} from '@nestjs/common';
 import multer, { MulterError } from 'multer';
 import { rmSync } from 'node:fs';
 import { finalize, type Observable } from 'rxjs';
@@ -48,10 +55,14 @@ export const transformUploadError = (error: unknown): unknown => {
  * same check, and the receiver checks again.
  *
  * Whatever the handler's outcome, the interceptor removes the file afterwards.
- * The receiver usually has already; this is the backstop.
+ * The receiver usually has already; this is the backstop. It runs before the
+ * response goes out, and a file it cannot remove is logged and left in
+ * `.incoming`: an error thrown from `finalize` reaches no filter, and RxJS
+ * rethrows it outside the request, which ends the process.
  */
 @Injectable()
 export class PluginArtifactUploadInterceptor implements NestInterceptor {
+  private readonly logger = new Logger(PluginArtifactUploadInterceptor.name);
   private readonly upload: ReturnType<ReturnType<typeof multer>['single']>;
 
   constructor(
@@ -80,6 +91,22 @@ export class PluginArtifactUploadInterceptor implements NestInterceptor {
       ),
     );
 
-    return next.handle().pipe(finalize(() => request.file && rmSync(request.file.path, { force: true })));
+    return next.handle().pipe(finalize(() => this.removeUpload(request.file)));
+  }
+
+  private removeUpload(file: PluginArtifactUploadedFile | undefined): void {
+    if (file === undefined) {
+      return;
+    }
+
+    try {
+      rmSync(file.path, { force: true });
+    } catch (err) {
+      this.logger.warn(
+        `The uploaded plugin artifact at ${file.path} could not be removed and stays in .incoming: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 }
