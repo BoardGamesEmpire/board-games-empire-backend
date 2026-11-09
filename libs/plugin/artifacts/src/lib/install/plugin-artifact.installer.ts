@@ -43,7 +43,8 @@ export type PluginArtifactInstallResult = Pick<PluginInstallResult, 'plugin'>;
  * emits nothing: a state change already at its target answers 2xx with the
  * current record (ADR-0002). Two such installs at once both find nothing
  * installed and both run; the one that loses the race answers the same way,
- * from the plugin the winner installed.
+ * from the plugin the winner installed, whether it loses at the install or
+ * finds the row already deleted.
  */
 @Injectable()
 export class PluginArtifactInstaller {
@@ -83,6 +84,14 @@ export class PluginArtifactInstaller {
     // row reads as absent.
     const artifact = await this.store.refreshForInstall(sha256, new Date());
     if (artifact === null) {
+      // A concurrent install of the same checksum may have committed and
+      // deleted the row since the look above: the install is done all the
+      // same.
+      const winner = await this.installedFrom(sha256);
+      if (winner !== null) {
+        return { plugin: winner };
+      }
+
       throw new PluginArtifactNotFoundError(sha256);
     }
 

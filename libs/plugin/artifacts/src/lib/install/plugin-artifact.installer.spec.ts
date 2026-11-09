@@ -137,6 +137,20 @@ describe('PluginArtifactInstaller (#1094)', () => {
       expect(db.plugin.findFirst).toHaveBeenLastCalledWith({ where: { installedSha256: sha256, uninstalledAt: null } });
     });
 
+    it('the loser answers with the winner even when the winner deleted the row before this one refreshed it (#1094)', async () => {
+      // Both find nothing installed; the other then installs and deletes the
+      // row before this one refreshes it, so the refresh finds no row.
+      db.plugin.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(winner);
+      store.refreshForInstall.mockResolvedValue(null);
+
+      await expect(installer.install({ sha256, actorId: 'admin-1' })).resolves.toEqual({ plugin: winner });
+
+      expect(db.plugin.findFirst).toHaveBeenCalledTimes(2);
+      expect(directories.resolve).not.toHaveBeenCalled();
+      expect(runtime.install).not.toHaveBeenCalled();
+      expect(store.remove).not.toHaveBeenCalled();
+    });
+
     it('a failure with no plugin running the checksum is still the answer (#1094)', async () => {
       const conflict = new PluginInstallConflictError('demo-sink');
       runtime.install.mockRejectedValue(conflict);
