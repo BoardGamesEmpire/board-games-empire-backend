@@ -10,6 +10,12 @@ model GameSource {
   externalId String  @map("external_id")
   sourceUrl  String? @map("source_url")
 
+  // The external ids, on this DataGateway, of every base game the game is an
+  // add-on to, as the DataGateway last sent them. An import of a base game
+  // finds the add-ons already in the game catalog through these, so the link
+  // is made whichever of the two arrives first (#971).
+  baseExternalIds String[] @default([]) @map("base_external_ids")
+
   metadata Json? @map("metadata")
 
   // Sync management
@@ -48,5 +54,6 @@ model GameSource {
   @@index([gameId])
   @@index([gatewayId])
   @@index([lastSynced])
+  @@index([baseExternalIds], type: Gin)
   @@map("game_sources")
 }

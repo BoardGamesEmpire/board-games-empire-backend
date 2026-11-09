@@ -39,7 +39,7 @@ export interface GameFetchJobPayload extends JobContext {
 }
 
 export interface ExpansionFetchJobPayload extends GameFetchJobPayload {
-  baseGameExternalId: string;
+  requestedExternalId: string;
 }
 
 /**
@@ -67,10 +67,11 @@ export interface GameImportJobPayload extends JobContext {
 
 export interface ExpansionImportJobPayload extends GameImportJobPayload {
   /**
-   * externalId of the base game on the same platform.
-   * Used to resolve the base Game.id via GameSource after the parent job completes.
+   * External id of the requested game this expansion was chosen with, on the
+   * same DataGateway. Linked as its base game only when the DataGateway names
+   * none (#971).
    */
-  baseGameExternalId: string;
+  requestedExternalId: string;
 }
 
 /**
@@ -101,9 +102,17 @@ export interface ImportJobResult {
   sourceCreated: boolean;
 
   /**
-   * Resolved DB id of the base game — only set for expansion imports
+   * The base games the game is linked to, in the order its DataGateway named
+   * them. Empty for a game linked to none (#971).
    */
-  baseGameId?: string;
+  baseGameIds: string[];
+
+  /**
+   * External id of the base game to add to the import batch: set when the
+   * game needs a base game and none of those its DataGateway names is in the
+   * game catalog (#971).
+   */
+  baseGameToAdd?: string;
 }
 
 /**

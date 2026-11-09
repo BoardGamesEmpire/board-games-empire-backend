@@ -11,6 +11,7 @@ import { GameWatchListener } from './listeners/game-watch.listener';
 import { ImportActivityListener } from './listeners/import-activity.listener';
 import { NotificationListener } from './listeners/notification.listener';
 import { GameImportProcessor } from './processors/game-import.processor';
+import { BaseGameLinkService } from './services/base-game-link.service';
 import { ImportBatchCompletionService } from './services/batch-completion.service';
 import { ExpansionSpawnerService } from './services/expansion-spawner.service';
 import { GameUpsertService } from './services/game.service';
@@ -36,6 +37,7 @@ import { ReleaseGraphResolver } from './services/release-graph.resolver';
     BullModule.registerFlowProducer({ name: FlowProducerNames.GamesImport }),
   ],
   providers: [
+    BaseGameLinkService,
     ExpansionSpawnerService,
     GameImportProcessor,
     GameUpsertService,

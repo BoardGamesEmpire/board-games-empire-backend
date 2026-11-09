@@ -242,7 +242,7 @@ describe('GameFetchProcessor', () => {
         name: JobNames.ExpansionFetch,
         id: '9',
         queueName: 'gateway-fetch',
-        data: wrapJobData({ ...payload, jobId: 'exp-job', baseGameExternalId: 'base-ext' }, meta),
+        data: wrapJobData({ ...payload, jobId: 'exp-job', requestedExternalId: 'base-ext' }, meta),
         attemptsMade: 5,
         opts: { attempts: 5 },
       } as unknown as Job<GameFetchJobPayload>;

@@ -14,8 +14,11 @@ export interface SpawnExpansionsInput {
   batchId: string;
   correlationId: string;
   gatewayId: string;
-  /** External id of the base game — recorded on each expansion for the upsert lookup. */
-  baseExternalId: string;
+  /**
+   * External id of the requested game — recorded on each expansion, which
+   * links to it when its DataGateway names no base game (#971).
+   */
+  requestedExternalId: string;
   expansionExternalIds: string[];
   locale?: string;
   initiatorType: InitiatorType;
@@ -78,7 +81,7 @@ export class ExpansionSpawnerService {
               correlationId: input.correlationId,
               gatewayId: input.gatewayId,
               externalId,
-              baseGameExternalId: input.baseExternalId,
+              requestedExternalId: input.requestedExternalId,
             } satisfies Prisma.InputJsonObject,
           },
           update: {},
@@ -101,7 +104,7 @@ export class ExpansionSpawnerService {
             correlationId: input.correlationId,
             gatewayId: input.gatewayId,
             externalId,
-            baseGameExternalId: input.baseExternalId,
+            requestedExternalId: input.requestedExternalId,
             initiatorType: input.initiatorType,
             userId: input.userId,
             locale: input.locale,

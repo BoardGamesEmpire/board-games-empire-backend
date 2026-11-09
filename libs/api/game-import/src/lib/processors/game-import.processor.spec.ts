@@ -18,7 +18,7 @@ const extractMock = extractGameDataFromChildren as jest.MockedFunction<typeof ex
 describe('GameImportProcessor', () => {
   let processor: GameImportProcessor;
   let db: { job: { update: jest.Mock; updateMany: jest.Mock }; dataGateway: { findUnique: jest.Mock } };
-  let gameUpsert: jest.Mocked<Pick<GameUpsertService, 'upsert' | 'upsertExpansion'>>;
+  let gameUpsert: jest.Mocked<Pick<GameUpsertService, 'upsert'>>;
   let events: { emit: jest.Mock };
   let batchCompletion: { checkAndEmit: jest.Mock };
   let expansionSpawner: { spawn: jest.Mock };
@@ -54,7 +54,7 @@ describe('GameImportProcessor', () => {
       },
       dataGateway: { findUnique: jest.fn().mockResolvedValue({ contentFormat: ContentFormat.PlainText }) },
     };
-    gameUpsert = { upsert: jest.fn(), upsertExpansion: jest.fn() };
+    gameUpsert = { upsert: jest.fn() };
     events = { emit: jest.fn() };
     batchCompletion = { checkAndEmit: jest.fn().mockResolvedValue(undefined) };
     expansionSpawner = { spawn: jest.fn().mockResolvedValue(undefined) };
@@ -78,7 +78,13 @@ describe('GameImportProcessor', () => {
 
   it('processes a base game inside the actor scope and emits an ImportJobCompletedEvent', async () => {
     const platformGames = [{ platformId: 'plat-1', platformGameId: 'pg-1' }];
-    const result: ImportJobResult = { gameId: 'game-1', gameCreated: true, sourceCreated: true, platformGames };
+    const result: ImportJobResult = {
+      gameId: 'game-1',
+      gameCreated: true,
+      sourceCreated: true,
+      platformGames,
+      baseGameIds: [],
+    };
     gameUpsert.upsert.mockResolvedValue(result);
 
     const returned = await processor.process(makeJob(JobNames.GameImport, basePayload));
@@ -91,6 +97,7 @@ describe('GameImportProcessor', () => {
       expect.objectContaining({ externalId: 'ext-1' }),
       'bgg',
       ContentFormat.PlainText,
+      undefined,
     );
 
     const completedCall = events.emit.mock.calls.find(([name]) => name === ImportJobCompletedEvent.eventName);
@@ -116,7 +123,13 @@ describe('GameImportProcessor', () => {
   });
 
   describe('content format', () => {
-    const imported: ImportJobResult = { gameId: 'game-1', gameCreated: true, sourceCreated: true, platformGames: [] };
+    const imported: ImportJobResult = {
+      gameId: 'game-1',
+      gameCreated: true,
+      sourceCreated: true,
+      platformGames: [],
+      baseGameIds: [],
+    };
 
     it("imports a game with its DataGateway's content format, read once for the job", async () => {
       db.dataGateway.findUnique.mockResolvedValue({ contentFormat: ContentFormat.Html });
@@ -126,16 +139,16 @@ describe('GameImportProcessor', () => {
 
       expect(db.dataGateway.findUnique).toHaveBeenCalledTimes(1);
       expect(db.dataGateway.findUnique).toHaveBeenCalledWith({ where: { id: 'bgg' }, select: { contentFormat: true } });
-      expect(gameUpsert.upsert).toHaveBeenCalledWith(expect.anything(), 'bgg', ContentFormat.Html);
+      expect(gameUpsert.upsert).toHaveBeenCalledWith(expect.anything(), 'bgg', ContentFormat.Html, undefined);
     });
 
-    it("imports an expansion with its DataGateway's content format", async () => {
+    it("imports an expansion with its DataGateway's content format, and its requested game as the fallback base game (#971)", async () => {
       db.dataGateway.findUnique.mockResolvedValue({ contentFormat: ContentFormat.BBCode });
-      gameUpsert.upsertExpansion.mockResolvedValue({ ...imported, baseGameId: 'game-base' });
+      gameUpsert.upsert.mockResolvedValue({ ...imported, baseGameIds: ['game-base'] });
 
-      await processor.process(makeJob(JobNames.ExpansionImport, { ...basePayload, baseGameExternalId: 'base-1' }));
+      await processor.process(makeJob(JobNames.ExpansionImport, { ...basePayload, requestedExternalId: 'base-1' }));
 
-      expect(gameUpsert.upsertExpansion).toHaveBeenCalledWith(expect.anything(), 'base-1', 'bgg', ContentFormat.BBCode);
+      expect(gameUpsert.upsert).toHaveBeenCalledWith(expect.anything(), 'bgg', ContentFormat.BBCode, 'base-1');
     });
 
     it.each([
@@ -147,7 +160,7 @@ describe('GameImportProcessor', () => {
 
       await processor.process(makeJob(JobNames.GameImport, basePayload));
 
-      expect(gameUpsert.upsert).toHaveBeenCalledWith(expect.anything(), 'bgg', null);
+      expect(gameUpsert.upsert).toHaveBeenCalledWith(expect.anything(), 'bgg', null, undefined);
     });
   });
 
@@ -162,6 +175,7 @@ describe('GameImportProcessor', () => {
       gameCreated: true,
       sourceCreated: true,
       platformGames: [],
+      baseGameIds: [],
     });
 
     await processor.process(makeJob(JobNames.GameImport, withExpansions));
@@ -171,7 +185,7 @@ describe('GameImportProcessor', () => {
         baseJobId: 'job-1',
         batchId: 'batch-1',
         gatewayId: 'bgg',
-        baseExternalId: 'ext-1',
+        requestedExternalId: 'ext-1',
         expansionExternalIds: ['exp-a', 'exp-b'],
         locale: 'en',
         userId: 'user-7',
@@ -193,6 +207,7 @@ describe('GameImportProcessor', () => {
       gameCreated: true,
       sourceCreated: true,
       platformGames: [],
+      baseGameIds: [],
     });
 
     await processor.process(makeJob(JobNames.GameImport, basePayload));
@@ -206,6 +221,7 @@ describe('GameImportProcessor', () => {
       gameCreated: true,
       sourceCreated: true,
       platformGames: [],
+      baseGameIds: [],
     });
     // Both markRunning and markCompleted no-op: the row was cancelled (e.g. its
     // base failed) while this flow was in flight.
@@ -220,7 +236,13 @@ describe('GameImportProcessor', () => {
 
   it('persists the durable result summary (platformGames included) and checks batch completion', async () => {
     const platformGames = [{ platformId: 'plat-1', platformGameId: 'pg-1' }];
-    gameUpsert.upsert.mockResolvedValue({ gameId: 'game-1', gameCreated: true, sourceCreated: true, platformGames });
+    gameUpsert.upsert.mockResolvedValue({
+      gameId: 'game-1',
+      gameCreated: true,
+      sourceCreated: true,
+      platformGames,
+      baseGameIds: [],
+    });
 
     await processor.process(makeJob(JobNames.GameImport, basePayload));
 
@@ -243,6 +265,7 @@ describe('GameImportProcessor', () => {
       gameCreated: false,
       sourceCreated: false,
       platformGames: [],
+      baseGameIds: [],
     });
 
     await processor.process(makeJob(JobNames.GameImport, basePayload));
@@ -261,6 +284,7 @@ describe('GameImportProcessor', () => {
       gameCreated: true,
       sourceCreated: true,
       platformGames: [],
+      baseGameIds: [],
     });
 
     await processor.process(makeJob(JobNames.GameImport, basePayload));
@@ -349,7 +373,7 @@ describe('GameImportProcessor', () => {
       await processor.onFailed(
         makeJob(
           JobNames.ExpansionImport,
-          { ...basePayload, baseGameExternalId: 'ext-base' },
+          { ...basePayload, requestedExternalId: 'ext-base' },
           { attemptsMade: 3, attempts: 3 },
         ),
         new Error('boom'),

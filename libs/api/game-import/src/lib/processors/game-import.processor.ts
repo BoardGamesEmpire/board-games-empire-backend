@@ -78,14 +78,12 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
     await this.markRunning(jobId, job.id!.toString());
 
     const contentFormat = await this.contentFormatOf(gatewayId);
-    const result = isExpansion
-      ? await this.gameUpsert.upsertExpansion(
-          gameData,
-          (job.data as ExpansionImportJobPayload).baseGameExternalId,
-          gatewayId,
-          contentFormat,
-        )
-      : await this.gameUpsert.upsert(gameData, gatewayId, contentFormat);
+    const result = await this.gameUpsert.upsert(
+      gameData,
+      gatewayId,
+      contentFormat,
+      isExpansion ? (job.data as ExpansionImportJobPayload).requestedExternalId : undefined,
+    );
 
     // The base GameSource now exists, so its expansions can resolve it. Spawn
     // their flows BEFORE marking this base Completed: the freshly-created
@@ -129,7 +127,7 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
           gameCreated: result.gameCreated,
           sourceCreated: result.sourceCreated,
           platformGames: result.platformGames,
-          baseGameId: result.baseGameId,
+          baseGameId: result.baseGameIds[0],
         },
         initiatedAt,
       ),
@@ -182,7 +180,7 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
         batchId: data.batchId,
         correlationId: data.correlationId,
         gatewayId: data.gatewayId,
-        baseExternalId: data.externalId,
+        requestedExternalId: data.externalId,
         expansionExternalIds,
         locale: data.locale,
         initiatorType: data.initiatorType,
