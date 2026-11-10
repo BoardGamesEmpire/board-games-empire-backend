@@ -393,5 +393,13 @@
   },
   "permission": {
     "condition_unevaluable": "The server could not check a permission this needs, so nothing was changed. Try again later, and tell the server's operator if it keeps happening."
+  },
+  "permission_catalog": {
+    "entry_not_found": "There's no permission called '{slug}' on this server",
+    "entry_not_editable": "The permission '{slug}' belongs to a plugin, so it can't be edited here",
+    "edit_empty": "Nothing to change. Send a new condition, reason or risk level, or retire or revive the permission",
+    "entry_refused": "This change wasn't saved because the permission wouldn't work safely with it. Each problem listed says what to fix",
+    "entry_changed": "This permission was changed while your change was being saved, for example by the server bringing it in line as it started. Your change wasn't saved. Load the permission again and try again",
+    "owner_lockout": "This change wasn't saved because it would take full control of the server away from the Owner, with no way to get it back"
   }
 }

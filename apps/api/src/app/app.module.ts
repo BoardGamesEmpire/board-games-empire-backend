@@ -26,6 +26,7 @@ import { MediaModule } from '@bge/media';
 import { MetricsModule } from '@bge/metrics';
 import { NotificationsModule } from '@bge/notifications';
 import { createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
+import { PermissionCatalogModule } from '@bge/permission-catalog';
 import { AbilityContextMiddleware, PermissionsModule } from '@bge/permissions';
 import { PluginModule } from '@bge/plugin';
 import { PluginsApiModule } from '@bge/plugins';
@@ -201,6 +202,8 @@ import { createThrottlers } from './lib/throttlers';
     MediaModule,
     MetricsModule,
     NotificationsModule,
+    // The Owner's reads and edits of the permission catalog (#772).
+    PermissionCatalogModule,
     PermissionsModule,
 
     // Plugin runtime (#59 Phase B), wired per #212: boot loader, per-plugin

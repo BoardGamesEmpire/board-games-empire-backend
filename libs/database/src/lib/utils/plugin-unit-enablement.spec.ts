@@ -1,4 +1,5 @@
-import { loadPluginUnitEnablement } from './plugin-unit-enablement';
+import { PluginUnitDormantReason } from '../client';
+import { isPluginServing, isPluginUnitServed, loadPluginUnitEnablement } from './plugin-unit-enablement';
 
 describe('loadPluginUnitEnablement', () => {
   const db = {
@@ -76,5 +77,23 @@ describe('loadPluginUnitEnablement', () => {
     await expect(loadPluginUnitEnablement(client, 'plg_1', { scopeType: 'Galaxy' } as never)).rejects.toThrow(
       RangeError,
     );
+  });
+});
+
+describe('the serving predicate (#772)', () => {
+  // The plugin ability read and the permission catalog's consent count share
+  // these, so the two cannot disagree on what serves.
+  it('serves a plugin that is enabled and not uninstalled, and no other', () => {
+    expect(isPluginServing({ enabled: true, uninstalledAt: null })).toBe(true);
+    expect(isPluginServing({ enabled: false, uninstalledAt: null })).toBe(false);
+    expect(isPluginServing({ enabled: true, uninstalledAt: new Date('2026-11-01T00:00:00.000Z') })).toBe(false);
+  });
+
+  it('serves a unit whose enablement is enabled and not dormant, and no other', () => {
+    const served = { enabled: true, dormantReason: null };
+
+    expect(isPluginUnitServed(served)).toBe(true);
+    expect(isPluginUnitServed({ ...served, enabled: false })).toBe(false);
+    expect(isPluginUnitServed({ ...served, dormantReason: PluginUnitDormantReason.ScopeOrphaned })).toBe(false);
   });
 });

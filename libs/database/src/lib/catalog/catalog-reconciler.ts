@@ -1,5 +1,6 @@
 import type { Action, Prisma, PrismaClient, RiskLevel } from '../client';
 import { PermissionOwner } from '../client';
+import { lockCatalogEdits } from './catalog-edit-lock';
 import type { CatalogFindings, EntryProblem } from './catalog-entry-check';
 import {
   catalogFindings,
@@ -35,8 +36,10 @@ import type { PermissionSeedDefinition, RoleSeedDefinition } from './seed-defini
  * exactly those writes, and `reconcileCatalog` runs both in one transaction so
  * a conflict or a failed statement leaves the tables as it found them.
  *
- * What it does NOT do, by design: take an advisory lock (N instances booting at
- * once is #236's boot sequence, which wraps this call), evict caches itself
+ * What it does NOT do, by design: take the boot lock (N instances booting at
+ * once is #236's boot sequence, which wraps this call; the lock it does take,
+ * first in its transaction, is the one the Owner's edits of the permission
+ * catalog hold, `lockCatalogEdits`, #772), evict caches itself
  * (it has no Redis; it hands the applied plan to an optional port and the
  * caller decides — the standalone seed passes nothing), or accept a manifest
  * from anywhere but its caller (the catalog exports are the only production
@@ -152,6 +155,11 @@ export async function reconcileCatalog(
 
   const plan = await prisma.$transaction(
     async (tx) => {
+      // First, before the snapshot: the lock the Owner's edits hold (#772),
+      // so an edit is either in the snapshot, and judged by the entry check
+      // below, or waits for this commit and is checked against what it wrote.
+      await lockCatalogEdits(tx);
+
       const snapshot = await loadCatalogSnapshot(tx);
       // Inside the transaction: the probe needs one for its savepoint, and the
       // entries it judges are the ones the plan then writes.

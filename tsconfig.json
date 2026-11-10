@@ -254,6 +254,9 @@
     },
     {
       "path": "./libs/plugin/artifacts"
+    },
+    {
+      "path": "./libs/api/permission-catalog"
     }
   ]
 }

@@ -32,3 +32,17 @@ export interface PluginRequestedPermissionsReader {
     readonly manifestJson: unknown;
   }): PluginRequestedPermissions;
 }
+
+/**
+ * The manifest bound (#577): whether the active manifest, as `requested`
+ * lists it, requests a decision's permission at that decision's scope. Shared
+ * by the plugin ability read and the permission catalog's count of the
+ * consent decisions an edit affects (#772), so the two cannot disagree.
+ */
+export function requestedByManifest(
+  requested: readonly PluginRequestedPermission[],
+): (decision: { readonly scopeType: PluginGrantScope; readonly permissionSlug: string }) => boolean {
+  const keys = new Set(requested.map(({ slug, scopeType }) => `${scopeType}|${slug}`));
+
+  return ({ scopeType, permissionSlug }) => keys.has(`${scopeType}|${permissionSlug}`);
+}
