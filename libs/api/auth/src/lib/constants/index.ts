@@ -9,13 +9,22 @@ export const AUTH_INSTANCE = Symbol('AUTH_INSTANCE');
 export const AUTH_REQUEST_HANDLER = Symbol('AUTH_REQUEST_HANDLER');
 
 /**
- * Hard app-wide request body cap (256 KB), enforced by the better-auth JSON /
- * URL-encoded parsers. better-auth requires Nest's built-in body parser to be
- * disabled (`bodyParser: false` in `main.ts`) and re-adds its own for every
- * non-auth route, so this is the single place the limit can be set. Also lifts
- * express's 100 KB default, which sits below the feedback field caps (#45).
+ * The request body cap (256 KB) for every route outside `/api/auth`,
+ * enforced by the JSON and URL-encoded parsers `@thallesp/nestjs-better-auth`
+ * re-adds for those routes. better-auth requires Nest's built-in body parser
+ * to be disabled (`bodyParser: false` in `main.ts`), so this is the single
+ * place their limit can be set. Also lifts express's 100 KB default, which
+ * sits below the feedback field caps (#45). `/api/auth/*` reads its own
+ * bodies, capped by {@link MAX_AUTH_REQUEST_BODY_BYTES} (#1057).
  */
 export const MAX_REQUEST_BODY_BYTES = 256 * 1024;
+
+/**
+ * The request body cap (64 KiB) on `/api/auth/*`, which `createAuthNodeHandler`
+ * enforces (#1057). These routes take credentials, tokens and passkey
+ * responses, all far smaller, and anyone can reach them, signed in or not.
+ */
+export const MAX_AUTH_REQUEST_BODY_BYTES = 64 * 1024;
 
 export enum AuthEvent {
   UserCreated = 'auth.user.created',

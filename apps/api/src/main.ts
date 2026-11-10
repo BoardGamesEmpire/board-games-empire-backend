@@ -6,7 +6,13 @@ import { registerShutdownHandlers } from '@bge/otel';
 import { bootstrapLogger, otel } from './app/lib/logger';
 
 // Imports below this line are instrumented by the OTel auto-instrumentations.
-import { AUTH_INSTANCE, AUTH_REQUEST_HANDLER, fallbackLocaleRenderer } from '@bge/auth';
+import {
+  AUTH_INSTANCE,
+  AUTH_REQUEST_HANDLER,
+  createAuthNodeHandler,
+  fallbackLocaleRenderer,
+  MAX_AUTH_REQUEST_BODY_BYTES,
+} from '@bge/auth';
 import { createPrismaCliMigrator, runBootstrap } from '@bge/bootstrap';
 import type { I18nTranslations } from '@bge/i18n';
 import { nestLoggerFromPino } from '@bge/logger';
@@ -16,7 +22,6 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, OpenAPIObject, SwaggerModule } from '@nestjs/swagger';
-import { toNodeHandler } from 'better-auth/node';
 import compression from 'compression';
 import helmet from 'helmet';
 import { I18nService, I18nValidationPipe } from 'nestjs-i18n';
@@ -101,10 +106,10 @@ async function bootstrap() {
     trustedOrigins: configService.getOrThrow<string[]>('auth.trustedOrigins'),
     mediaBaseUrl: configService.getOrThrow<string>('media.baseUrl'),
   };
-  const hostCheck = createHostCheck({
-    rule: createHostRule(serverNames),
-    render: fallbackLocaleRenderer(app.get<I18nService<I18nTranslations>>(I18nService)),
-  });
+  // Refusals ahead of Nest's i18n render in the fallback locale: the Host
+  // check's here, and `/api/auth/*`'s below.
+  const render = fallbackLocaleRenderer(app.get<I18nService<I18nTranslations>>(I18nService));
+  const hostCheck = createHostCheck({ rule: createHostRule(serverNames), render });
 
   if (allowsEveryHost(serverNames)) {
     Logger.warn(
@@ -220,11 +225,17 @@ async function bootstrap() {
   const server = app.getHttpAdapter().getInstance();
   // better-auth reads a client's IP only from the header the first handler
   // writes, by the same rule and configuration as the Nest throttler. Its
-  // handler is served with a code on the answers it gives without one (#640).
+  // handler is served with a code on the answers it gives without one (#640),
+  // and no body is read past MAX_AUTH_REQUEST_BODY_BYTES (#1057).
+  //
+  // @thallesp/nestjs-better-auth mounts a second handler on /api/auth, with
+  // no limit. Every routed path reaches this one first, and it never calls
+  // `next`. Only unrouted paths such as /api/auth/ fall through, and
+  // better-auth answers those 404 before it reads a body.
   server.all(
     `/${globalPrefix}/auth/*any`,
     createAuthClientIpHandler(configService.getOrThrow<number>('throttle.trustedProxyHops')),
-    toNodeHandler(app.get(AUTH_REQUEST_HANDLER)),
+    createAuthNodeHandler(app.get(AUTH_REQUEST_HANDLER), { maxBodyBytes: MAX_AUTH_REQUEST_BODY_BYTES, render }),
   );
 
   // A plugin artifact upload may be 100 MiB from a slow connection, so a request

@@ -20,6 +20,18 @@ const AUTH_UNAVAILABLE = 'AUTH_UNAVAILABLE';
 const AUTH_FAILED = 'AUTH_FAILED';
 
 /**
+ * The requests whose body was cut off at the limit (#1057). The node handler
+ * marks one as the bytes pass the limit, before the failed read reaches
+ * better-auth, and refuses it 413 whatever is answered here.
+ */
+const cutOff = new WeakSet<Request>();
+
+/** Marks `request` as one whose body passed the limit, so its failed read isn't logged as a fault (#1057). */
+export function markBodyCutOff(request: Request): void {
+  cutOff.add(request);
+}
+
+/**
  * better-auth's handler as the api serves it on `/api/auth/*` (#640), with the
  * answers better-auth gives without a stable code given one, alongside a
  * plain-language message, as every other refusal on these routes has.
@@ -51,8 +63,10 @@ const AUTH_FAILED = 'AUTH_FAILED';
  *   code. It keeps its status and headers, `X-Retry-After` among them, and
  *   gets `RATE_LIMITED`. A 429 that already carries a code is left as it is.
  *
- * A throw is logged with its error; a 500 rewritten here is logged as a
- * warning, naming the status it replaced. Every other answer passes through
+ * A throw is logged with its error, unless the request's body was cut off at
+ * the limit: that is the client's doing, and the node handler answers it 413
+ * (#1057). A 500 rewritten here is logged as a warning, naming the status it
+ * replaced. Every other answer passes through
  * as better-auth gave it. Messages are rendered in the fallback locale, as
  * the settings gates' are: `/api/auth/*` runs ahead of Nest's i18n.
  */
@@ -71,7 +85,9 @@ export function createAuthRequestHandler(
     try {
       response = await withStorageFailureRecord(record, () => handler(request));
     } catch (error) {
-      logger.error('better-auth could not answer the request', error instanceof Error ? error.stack : error);
+      if (!cutOff.has(request)) {
+        logger.error('better-auth could not answer the request', error instanceof Error ? error.stack : error);
+      }
 
       return record.failed ? unavailable() : failed();
     }
@@ -107,7 +123,8 @@ async function carriesCode(response: Response): Promise<boolean> {
   }
 }
 
-function coded(status: number, code: string, message: string, headers?: Headers): Response {
+/** A refusal with a stable code and a plain-language message, as every refusal on `/api/auth/*` is. */
+export function coded(status: number, code: string, message: string, headers?: Headers): Response {
   const answer = new Headers(headers);
   answer.set('content-type', 'application/json');
   // Measured the body it replaces, not this one.
