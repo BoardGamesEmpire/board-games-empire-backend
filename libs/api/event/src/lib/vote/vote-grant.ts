@@ -24,11 +24,12 @@ export interface VoterGrant {
  * retired and isn't a denial.
  *
  * The grant is read live, when the votes are counted, so the count follows a
- * grant the permission catalog or a server admin adds to or takes from a role
+ * grant the permission catalog or the Owner adds to or takes from a role
  * (#772). Which role holds it, and who added the edge, makes no difference.
- * A revoked grant confers nothing either: the Owner took it from the role
- * and the row stays so bootstrap doesn't give it back (#772). A retired
- * permission confers nothing. Nor does one an operator inverted:
+ * A revoked grant confers nothing either: the Owner took it from the role, or
+ * a start's entry check revoked it, and the row stays so bootstrap doesn't
+ * give it back (#772). A retired permission confers nothing. Nor does one an
+ * operator inverted:
  * the ability loader reads an inverted row as `cannot`, so its holder can't
  * cast the vote and mustn't count as able to.
  */

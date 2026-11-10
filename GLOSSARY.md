@@ -295,11 +295,11 @@ How dangerous a permission is to hand over: low, medium, high or critical. It de
 _Avoid_: severity, sensitivity
 
 **Retired permission**:
-A core permission that a newer version of the server has dropped. It is kept so its name is never reused, but confers nothing, even through roles or keys that still list it.
+A permission that is kept but confers nothing, even through roles or keys that still list it. A core permission is retired when a newer version of the server drops it, so its name is never reused. A permission the Owner edited is retired when it fails its entry check at a start, and the edit is kept to fix or hand back.
 _Avoid_: tombstone, deleted permission
 
 **Revoked grant**:
-A grant the server ships that the Owner took away on this server. It is kept, so the next start doesn't give it back, and confers nothing until it is handed back.
+A grant that is kept but confers nothing: one the server ships that the Owner took away on this server, or one the Owner edited that failed its entry check at a start. It is kept, so the next start doesn't give it back, and confers nothing until the Owner gives it again or hands it back.
 _Avoid_: deleted grant
 
 **Fail-open grant**:
@@ -317,6 +317,14 @@ _Avoid_: catalog on its own, manifest
 **Managed by**:
 Who maintains a permission catalog entry: shipped with the server, edited on the server, or added by a plugin.
 _Avoid_: owner, Admin, provenance
+
+**Entry check**:
+The checks a permission catalog entry the Owner edits must pass: when the edit is saved, and again at every start, since a newer version of the server can make an edit that once passed fail. It refuses a condition the database cannot run, and a grant that would fail open, confer nothing, or read records past the reach their owners chose. At a start, an edited permission that fails is retired and an edited grant revoked, a grant the server ships that the Owner's edits make fail is withheld (not given until it passes), and the server starts.
+_Avoid_: validation on its own
+
+**Hand back**:
+To mark a permission catalog entry the Owner edited as the server's again, so the next start brings it in line with the permission catalog this version ships: an edited permission gets the shipped version back, a revoked grant the server ships is restored, and a grant it doesn't ship is removed.
+_Avoid_: reset, revert
 
 ### Actors and access
 

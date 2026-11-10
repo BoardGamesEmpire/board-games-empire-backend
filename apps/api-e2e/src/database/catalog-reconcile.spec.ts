@@ -2,12 +2,18 @@ import type { CatalogManifest, ReconcilePlan } from '@bge/database';
 import {
   CATALOG_MANIFEST,
   CatalogReconcileConflictError,
+  DatabaseService,
+  PERMISSION_CATALOG,
   PermissionOwner,
   reconcileCatalog,
+  ResourceType,
   RiskLevel,
   SystemRole,
 } from '@bge/database';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { createActors } from '@bge/testing-e2e';
+import request from 'supertest';
+import { requireBaseUrl } from '../support/e2e-env';
+import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../support/test-db';
 
 /**
  * The catalog reconciler against a real database (#235).
@@ -18,13 +24,15 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
  * SAME row when its slug returns, and that a second run over the shipped
  * catalog is a no-op — the property the seed relies on every time it runs.
  *
- * DB-only, like `deadlock-shape.spec.ts`: no HTTP, so `requireBaseUrl` is not
- * called. The harness has already migrated and seeded the database, and the
- * between-test sweep preserves the three catalog tables, so each spec here
- * mutates them and puts them back by reconciling the shipped manifest — which
- * is also the proof the restore worked. `afterEach` reconciles once more, so
- * a spec that fails before its own restore hands the next one a converged
- * catalog rather than its leftovers.
+ * DB-only, like `deadlock-shape.spec.ts`, but for one spec: the entry check's
+ * retire (#772) has to keep a list answering, so that spec alone calls
+ * `requireBaseUrl` and asks the api. The harness has already migrated and
+ * seeded the database, and the between-test sweep preserves the three catalog
+ * tables, so each spec here mutates them and puts them back by reconciling
+ * the shipped manifest — which is also the proof the restore worked.
+ * `afterEach` reconciles once more, so a spec that fails before its own
+ * restore hands the next one a converged catalog rather than its leftovers.
+ * It leaves an `Admin` row alone, so a spec that marks one puts it back first.
  */
 
 const silent = { log: () => undefined, warn: () => undefined };
@@ -95,7 +103,8 @@ describe('catalog reconciler against Postgres', () => {
 
     expect(dropped.mutations).toBe(1);
     expect(logged).toEqual([
-      'Catalog reconcile: permissions +0 ~0 revived 0 retired 0; roles +0 ~0; grants +0 -1 restored 0',
+      'Catalog reconcile: permissions +0 ~0 revived 0 retired 0; roles +0 ~0; grants +0 -1 restored 0; ' +
+        'edits failing the entry check: retired 0, revoked 0; shipped grants withheld 0',
       `grant 'User → read:game' removed`,
     ]);
     expect(dropped.plan.rolePermissions.delete).toEqual([{ roleName: 'User', permissionSlug: 'read:game' }]);
@@ -107,7 +116,7 @@ describe('catalog reconciler against Postgres', () => {
     expect(await grantCount(SystemRole.User, 'read:game')).toBe(1);
   });
 
-  it('keeps a revoked shipped grant across a restart, and restores it once it is handed back (772)', async () => {
+  it('keeps a revoked shipped grant across a restart, and restores it once it is handed back (#772)', async () => {
     const where = { role: { name: SystemRole.User }, permission: { slug: 'read:game' } };
     const grant = () => db.client.rolePermission.findFirstOrThrow({ where });
     const revokedAt = new Date('2026-11-01T00:00:00.000Z');
@@ -190,6 +199,117 @@ describe('catalog reconciler against Postgres', () => {
       { slug, changes: [{ field: 'riskLevel', from: RiskLevel.Critical, to: RiskLevel.Low }] },
     ]);
     expect((await db.client.permission.findUniqueOrThrow({ where: { slug } })).riskLevel).toBe(RiskLevel.Low);
+  });
+
+  it('retires an edited permission whose condition names a column the schema no longer has, and keeps the edit (#772)', async () => {
+    // The `visibility` → `reach` rename (#808): an Owner's condition written
+    // against a column a newer version dropped. Left live, it fails every
+    // list of games for everyone holding it; the start retires it instead.
+    const slug = 'read:game';
+    const edit = { visibility: 'Public' };
+    const shipped = PERMISSION_CATALOG.find((entry) => entry.slug === slug)?.conditions;
+    const baseUrl = requireBaseUrl(process.env);
+    const actors = createActors({ baseUrl, prisma: db.client });
+    // A user signed up for each request, so no cached ability graph outlives a step.
+    const listGames = async () =>
+      request(baseUrl)
+        .get('/api/games')
+        .set((await actors.user()).headers);
+
+    try {
+      await db.client.permission.update({
+        where: { slug },
+        data: { conditions: edit, managedBy: PermissionOwner.Admin },
+      });
+      // Not vacuous: the edit as it stands breaks the list.
+      expect((await listGames()).status).toBe(500);
+
+      const warnings: string[] = [];
+      const retired = await reconcileCatalog(db.client, CATALOG_MANIFEST, {
+        logger: { log: () => undefined, warn: (message: string) => void warnings.push(message) },
+      });
+
+      expect(retired.mutations).toBe(1);
+      expect(retired.plan.permissions.retireEdited).toEqual([
+        {
+          slug,
+          problems: [
+            { kind: 'query-rejected', slug, message: expect.stringContaining('Unknown argument `visibility`') },
+            {
+              kind: 'reads-past-reach',
+              slug,
+              role: SystemRole.User,
+              subject: ResourceType.Game,
+              reads: 'fixed filter',
+            },
+          ],
+        },
+      ]);
+      expect(warnings).toContain(
+        `Admin-owned permission '${slug}' fails the entry check (query-rejected, reads-past-reach): retired, the edit kept`,
+      );
+      expect(await db.client.permission.findUniqueOrThrow({ where: { slug } })).toMatchObject({
+        managedBy: PermissionOwner.Admin,
+        conditions: edit,
+        retiredAt: expect.any(Date),
+      });
+
+      // The retired permission confers nothing, and the list answers again.
+      expect((await listGames()).status).toBe(200);
+
+      const again = await reconcileCatalog(db.client, CATALOG_MANIFEST, { logger: silent });
+
+      expect(again.mutations).toBe(0);
+      expect(again.plan.permissions.retireEdited).toEqual([]);
+    } finally {
+      // Later specs share this catalog: the afterEach reconcile leaves an Admin row alone.
+      await db.client.permission.update({
+        where: { slug },
+        data: { managedBy: PermissionOwner.System, retiredAt: null },
+      });
+    }
+
+    const converged = await reconcileCatalog(db.client, CATALOG_MANIFEST, { logger: silent });
+
+    expect(converged.plan.permissions.update).toEqual([
+      { slug, changes: [{ field: 'conditions', from: edit, to: shipped }] },
+    ]);
+    expect(await db.client.permission.findUniqueOrThrow({ where: { slug } })).toMatchObject({
+      managedBy: PermissionOwner.System,
+      conditions: shipped,
+      retiredAt: null,
+    });
+  });
+
+  it("retires a failing edit through the api's own client, as the boot's reconcile does (#772)", async () => {
+    // The boot reconciles through `DatabaseService`, whose client carries the
+    // CASL extension; every other spec here uses the plain test client. The
+    // probe's savepoint and count run on that extended client at boot, so
+    // they are run on it here too.
+    const slug = 'read:game';
+    const api = new DatabaseService({ getOrThrow: () => requireDatabaseUrl(), get: () => undefined } as never);
+
+    try {
+      await db.client.permission.update({
+        where: { slug },
+        data: { conditions: { visibility: 'Public' }, managedBy: PermissionOwner.Admin },
+      });
+
+      const result = await reconcileCatalog(api, CATALOG_MANIFEST, { logger: silent });
+
+      expect(result.plan.permissions.retireEdited.map((retired) => retired.slug)).toEqual([slug]);
+      expect(await db.client.permission.findUniqueOrThrow({ where: { slug } })).toMatchObject({
+        managedBy: PermissionOwner.Admin,
+        retiredAt: expect.any(Date),
+      });
+    } finally {
+      // Later specs share this catalog: the afterEach reconcile leaves an Admin row alone.
+      await db.client.permission.update({
+        where: { slug },
+        data: { managedBy: PermissionOwner.System, retiredAt: null },
+      });
+      await api.onApplicationShutdown();
+    }
   });
 
   it('refuses a manifest that claims a Plugin-owned row, and writes nothing at all', async () => {

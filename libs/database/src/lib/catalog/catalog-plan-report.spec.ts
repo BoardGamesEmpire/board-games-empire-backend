@@ -7,9 +7,27 @@ import type { ReconcilePlan } from './catalog-reconcile-plan';
 // call over this (apps/api-e2e/src/database/plan-cli.spec.ts spawns it).
 
 const emptyPlan = (): ReconcilePlan => ({
-  permissions: { create: [], update: [], revive: [], retire: [], skipped: [], retained: [], conflicts: [] },
+  permissions: {
+    create: [],
+    update: [],
+    revive: [],
+    retire: [],
+    retireEdited: [],
+    skipped: [],
+    retained: [],
+    conflicts: [],
+  },
   roles: { create: [], update: [], skipped: [], orphans: [], conflicts: [] },
-  rolePermissions: { create: [], restore: [], delete: [], skipped: [], retained: [], conflicts: [] },
+  rolePermissions: {
+    create: [],
+    restore: [],
+    delete: [],
+    revokeEdited: [],
+    withheld: [],
+    skipped: [],
+    retained: [],
+    conflicts: [],
+  },
 });
 
 const pending = (): ReconcilePlan => ({
@@ -32,7 +50,8 @@ describe('describePlanReport', () => {
 
     expect(report.exitCode).toBe(0);
     expect(report.lines).toContain(
-      '  Catalog reconcile: permissions +0 ~0 revived 0 retired 0; roles +0 ~0; grants +0 -0 restored 0',
+      '  Catalog reconcile: permissions +0 ~0 revived 0 retired 0; roles +0 ~0; grants +0 -0 restored 0; ' +
+        'edits failing the entry check: retired 0, revoked 0; shipped grants withheld 0',
     );
     expect(report.lines).toContain('Catalog: converged, nothing to write.');
     expect(report.lines.at(-1)).toBe('Catalog: converged, nothing to write.');
@@ -44,9 +63,36 @@ describe('describePlanReport', () => {
     expect(report.exitCode).toBe(1);
     expect(report.lines[0]).toMatch(/^Plan only; nothing is written\./);
     expect(report.lines).toContain(
-      '  Catalog reconcile: permissions +1 ~0 revived 0 retired 0; roles +0 ~0; grants +1 -0 restored 0',
+      '  Catalog reconcile: permissions +1 ~0 revived 0 retired 0; roles +0 ~0; grants +1 -0 restored 0; ' +
+        'edits failing the entry check: retired 0, revoked 0; shipped grants withheld 0',
     );
     expect(report.lines).toContain('Catalog: 2 row(s) to write.');
+  });
+
+  it('counts an edited permission the entry check would retire as a write, names why, and exits 1 (#772)', () => {
+    const plan: ReconcilePlan = {
+      ...emptyPlan(),
+      permissions: {
+        ...emptyPlan().permissions,
+        retireEdited: [
+          {
+            slug: 'read:game',
+            problems: [{ kind: 'query-rejected', slug: 'read:game', message: 'Unknown argument `visibility`.' }],
+          },
+        ],
+      },
+    };
+
+    const report = describePlanReport(plan);
+
+    expect(report.exitCode).toBe(1);
+    expect(report.lines).toContain(
+      `  permission 'read:game' retired after its check: query-rejected {"message":"Unknown argument \`visibility\`."}`,
+    );
+    expect(report.lines).toContain(
+      `  Admin-owned permission 'read:game' fails the entry check (query-rejected): retired, the edit kept`,
+    );
+    expect(report.lines.at(-1)).toBe('Catalog: 1 row(s) to write.');
   });
 
   it('leads with the refusal when a plugin owns a claimed row, files the writes under "once resolved", and exits 2', () => {
