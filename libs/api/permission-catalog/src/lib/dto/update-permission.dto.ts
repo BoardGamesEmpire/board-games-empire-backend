@@ -20,7 +20,7 @@ import {
  * copies an object key by key. Left as sent, a value of the wrong kind fails
  * its validator, and a condition reaches the check exactly as written.
  */
-const asSent = ({ obj, key }: { obj: Record<string, unknown>; key: string }): unknown => obj[key];
+export const asSent = ({ obj, key }: { obj: Record<string, unknown>; key: string }): unknown => obj[key];
 
 const NUL = '\u0000';
 

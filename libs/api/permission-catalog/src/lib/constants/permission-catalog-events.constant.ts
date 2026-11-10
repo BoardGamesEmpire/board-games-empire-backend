@@ -5,4 +5,6 @@
  */
 export enum PermissionCatalogEvents {
   PermissionUpdated = 'permission_catalog.permission.updated',
+  RoleUpdated = 'permission_catalog.role.updated',
+  RolePermissionChanged = 'permission_catalog.grant.changed',
 }

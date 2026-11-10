@@ -24,7 +24,11 @@ export class TemplateProblemDto implements ProblemOf<'template'> {
   @ApiProperty({ description: SLUG_DESCRIPTION })
   slug!: string;
 
-  @ApiProperty({ description: 'What is wrong with the template, for the person fixing it.' })
+  @ApiProperty({
+    description:
+      'What is wrong with the template, such as `unknown-variable: user.name`: diagnostic text in English, for ' +
+      'the person fixing the condition. `kind` is the stable part.',
+  })
   detail!: string;
 }
 
@@ -165,7 +169,7 @@ const PROBLEM_MODELS: Readonly<Record<EntryProblem['kind'], abstract new () => o
 
 const PROBLEM_MODEL_LIST = [...new Set(Object.values(PROBLEM_MODELS))];
 
-/** The 422 body of `PATCH /permission-catalog/permissions/:slug`. */
+/** The 422 body of a permission edit, and of a grant added or revoked. */
 @ApiExtraModels(...PROBLEM_MODEL_LIST)
 export class CatalogEditRefusalDto {
   @ApiProperty({
@@ -199,7 +203,8 @@ export class CatalogEditRefusalDto {
 export class CatalogErrorDto {
   @ApiProperty({
     description:
-      'Stable, for a client to act on: CATALOG_ENTRY_NOT_FOUND, CATALOG_ENTRY_NOT_EDITABLE or CATALOG_ENTRY_CHANGED.',
+      'Stable, for a client to act on: CATALOG_ENTRY_NOT_FOUND, CATALOG_ENTRY_NOT_EDITABLE, CATALOG_ENTRY_CHANGED, ' +
+      'CATALOG_PERMISSION_RETIRED or CATALOG_ROLE_NOT_JUDGEABLE.',
   })
   code!: string;
 

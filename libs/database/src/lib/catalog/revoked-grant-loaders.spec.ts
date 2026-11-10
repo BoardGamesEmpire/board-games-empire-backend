@@ -10,8 +10,8 @@ import * as ts from 'typescript';
  * It reads source rather than running a query: a loader that forgets the
  * filter returns the same rows as one that has it until somebody revokes a
  * grant, so a behavioural test would pass for exactly the reader that is
- * wrong. The reconciler's `catalog/` is skipped because it must see revoked
- * rows.
+ * wrong. The two readers that must see revoked rows are skipped, as is the
+ * e2e harness: see {@link ALLOWED_READER_DIRS} and {@link TEST_HARNESS_DIR}.
  *
  * It parses each file with TypeScript, so how a query is laid out across lines
  * makes no difference. A read of a role's grants is a `permissions` key in the
@@ -44,10 +44,7 @@ import * as ts from 'typescript';
 const REPO_ROOT = join(__dirname, '../../../../..');
 const SCANNED_ROOTS = ['libs', 'apps'];
 const SKIPPED_DIRS = new Set(['node_modules', 'dist', 'out-tsc', 'generated', 'coverage']);
-/**
- * The reconciler's directory: the one reader that must see revoked grants.
- * Skipped by path, so a `catalog` directory anywhere else is still scanned.
- */
+/** The reconciler's directory. */
 const RECONCILER_DIR = join(REPO_ROOT, 'libs/database/src/lib/catalog');
 const SCHEMA_DIR = join(REPO_ROOT, 'prisma');
 
@@ -55,6 +52,29 @@ const SCHEMA_DIR = join(REPO_ROOT, 'prisma');
 const READ_KEYS = new Set(['select', 'include']);
 /** What every relation to Role is named, and the Role delegate's name. */
 const ROLE_KEY = 'role';
+/**
+ * The readers allowed to see revoked grants, skipped by path, so a directory
+ * of the same name anywhere else is still scanned (#772). Neither confers
+ * anything: what they read never reaches an ability.
+ *
+ * - The reconciler's `catalog/`, which compares every grant with the
+ *   permission catalog this version ships: a revoked grant it could not see,
+ *   it would create again.
+ * - The permission catalog lib (`@bge/permission-catalog`), the Owner's routes
+ *   that administer grants: they show a revoked grant, give it back and hand
+ *   it back, so they read it.
+ */
+const ALLOWED_READER_DIRS: ReadonlySet<string> = new Set([
+  RECONCILER_DIR,
+  join(REPO_ROOT, 'libs/api/permission-catalog'),
+]);
+
+/**
+ * The e2e harness, skipped as spec files are: test code that reads grants to
+ * arrange and check them, not a loader.
+ */
+const TEST_HARNESS_DIR = join(REPO_ROOT, 'apps/api-e2e');
+
 /**
  * A direct read of `RolePermission` rows: a call on its delegate, the
  * `rolePermissions` relation read as `true` or as an object, or SQL naming
@@ -67,7 +87,7 @@ const DIRECT_READ =
   /\brolePermission\s*\.\s*(find\w*|count|groupBy|aggregate)\b|\brolePermissions:\s*(\{|true\b)|\b(FROM|JOIN)\s+"?role_permissions\b/i;
 
 function skipsDir(path: string): boolean {
-  return SKIPPED_DIRS.has(basename(path)) || path === RECONCILER_DIR;
+  return SKIPPED_DIRS.has(basename(path)) || ALLOWED_READER_DIRS.has(path) || path === TEST_HARNESS_DIR;
 }
 
 function sourceFiles(dir: string, extension = '.ts'): string[] {
@@ -299,7 +319,7 @@ describe('revoked grant loaders (#772)', () => {
     expect(names.filter((name) => name !== ROLE_KEY)).toEqual([]);
   });
 
-  it('nothing outside the catalog reads RolePermission rows directly (#772)', () => {
+  it('nothing but the allowed readers reads RolePermission rows directly (#772)', () => {
     // A direct read would need its own filter; none exists, and this keeps it so
     // until one is added deliberately, with the filter and a scan that covers it.
     const direct = files.flatMap((file) => directReads(relative(REPO_ROOT, file), readFileSync(file, 'utf-8')));
@@ -494,5 +514,35 @@ describe('the revoked grant scan itself (#772)', () => {
     expect(skipsDir(RECONCILER_DIR)).toBe(true);
     expect(skipsDir(join(REPO_ROOT, 'libs/api/game/src/lib/catalog'))).toBe(false);
     expect(skipsDir(join(REPO_ROOT, 'libs/database/src/lib/generated'))).toBe(true);
+  });
+
+  it('catches a direct read of grant rows, on the model or in SQL', () => {
+    expect(
+      directReads(
+        'fixture.ts',
+        [
+          'const grant = await tx.rolePermission.findUnique({ where });',
+          'const held = await client.rolePermission.count({ where });',
+          'await tx.$queryRaw`SELECT * FROM role_permissions`;',
+          'await tx.rolePermission.updateMany({ where, data });',
+        ].join('\n'),
+      ),
+    ).toEqual([
+      'fixture.ts:1 const grant = await tx.rolePermission.findUnique({ where });',
+      'fixture.ts:2 const held = await client.rolePermission.count({ where });',
+      'fixture.ts:3 await tx.$queryRaw`SELECT * FROM role_permissions`;',
+    ]);
+  });
+
+  // The two readers allowed to see revoked grants, and the test harness, are
+  // skipped by path: a reader anywhere else, in a lib or an app, is scanned.
+  it('skips the permission catalog lib and the e2e harness by path, and scans every other lib and app (#772)', () => {
+    expect(skipsDir(join(REPO_ROOT, 'libs/api/permission-catalog'))).toBe(true);
+    expect(skipsDir(join(REPO_ROOT, 'apps/api-e2e'))).toBe(true);
+
+    expect(skipsDir(join(REPO_ROOT, 'libs/api/role'))).toBe(false);
+    expect(skipsDir(join(REPO_ROOT, 'libs/common/permissions'))).toBe(false);
+    expect(skipsDir(join(REPO_ROOT, 'apps/api'))).toBe(false);
+    expect(skipsDir(join(REPO_ROOT, 'apps/worker/src/permission-catalog'))).toBe(false);
   });
 });

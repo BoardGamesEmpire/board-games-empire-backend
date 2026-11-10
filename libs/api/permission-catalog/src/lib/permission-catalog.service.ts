@@ -9,6 +9,7 @@ import {
   PLUGIN_REQUESTED_PERMISSIONS_READER,
   probeConditions,
   RECONCILE_TRANSACTION_TIMEOUT_MS,
+  ROLE_SCOPE,
   type CatalogSnapshot,
   type CatalogView,
   type EntryProblem,
@@ -18,6 +19,8 @@ import {
   type PermissionSnapshotRow,
   type PluginRequestedPermissionsReader,
   type Prisma,
+  type RolePermissionSnapshotRow,
+  type RoleSnapshotRow,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { PermissionsService } from '@bge/permissions';
@@ -36,14 +39,25 @@ import { isDeepStrictEqual } from 'node:util';
 import { lockCatalogEdits } from './catalog-edit-lock';
 import { countConsentDecisionsLost, loadConsentDecisionsInForce } from './consent-effect';
 import {
+  catalogGrant,
   catalogPermission,
-  type CatalogGrantDto,
+  catalogRole,
+  codeUnitOrder,
   type CatalogRoleDto,
+  type GrantEditDto,
   type PermissionCatalogDto,
   type PermissionEditDto,
 } from './dto/catalog.response';
 import type { UpdatePermissionDto } from './dto/update-permission.dto';
-import { PermissionUpdatedEvent, type PermissionSnapshot } from './events/permission-catalog.events';
+import type { UpdateRoleDto } from './dto/update-role.dto';
+import {
+  PermissionUpdatedEvent,
+  RolePermissionChangedEvent,
+  RoleUpdatedEvent,
+  type GrantSnapshot,
+  type PermissionSnapshot,
+  type RoleSnapshot,
+} from './events/permission-catalog.events';
 import { refuseOwnerLockout } from './owner-control';
 
 /** A permission row as the edit reads it: the planner's columns, and what guards the write. */
@@ -61,6 +75,24 @@ const PERMISSION_ROW_SELECT = {
   managedBy: true,
   retiredAt: true,
 } satisfies Prisma.PermissionSelect;
+
+/** A role row as an edit reads it: the planner's columns, and what guards the write. */
+const ROLE_ROW_SELECT = {
+  id: true,
+  updatedAt: true,
+  name: true,
+  description: true,
+  managedBy: true,
+} satisfies Prisma.RoleSelect;
+
+/**
+ * A grant row as an edit reads it. `RolePermission` has no `updatedAt`: who
+ * manages the grant and its revocation are everything an edit or a start
+ * changes on it, so they guard the write.
+ */
+const GRANT_ROW_SELECT = { id: true, managedBy: true, revokedAt: true } satisfies Prisma.RolePermissionSelect;
+
+type GrantRow = Prisma.RolePermissionGetPayload<{ select: typeof GRANT_ROW_SELECT }>;
 
 /**
  * How long an edit's transaction may stay open (#772). The wait for the edit
@@ -82,14 +114,15 @@ const EDITABLE = [
 ] as const satisfies readonly (keyof UpdatePermissionDto)[];
 
 /**
- * The Owner's reads and edits of the permission catalog (#772).
+ * The Owner's reads and edits of the permission catalog (#772): a permission,
+ * a role's description, and a role's grants.
  *
  * Every edit first takes the permission catalog's edit lock (`lockCatalogEdits`), so edits
  * run one at a time and each one's check reads the permission catalog as the
  * last edit left it.
  *
  * An edit is checked before it is written, and refused with the problems the
- * check found: Prisma's verdict on the condition (`probeConditions`) and what
+ * check found: Prisma's verdict on a condition (`probeConditions`) and what
  * the catalog guards find that the permission catalog did not already have
  * (`checkCatalogEntries`). One that would leave the Owner without
  * `manage:all` is refused too (`refuseOwnerLockout`). Then it is written in
@@ -99,7 +132,8 @@ const EDITABLE = [
  *
  * After the commit every cached ability graph goes, since what a role confers
  * changed, and the edit is audited. An edit that changes nothing writes
- * nothing, and none of this happens.
+ * nothing, and none of this happens. A role's description confers nothing, so
+ * it is neither checked nor followed by a flush.
  */
 @Injectable()
 export class PermissionCatalogService {
@@ -241,6 +275,210 @@ export class PermissionCatalogService {
       warnings: edited.warnings,
       consentDecisionsAffected: edited.consentDecisionsAffected,
     };
+  }
+
+  /**
+   * Sets one role's description, and marks the role as managed by the Owner,
+   * so the next start keeps it (#772). Sending the current description again
+   * answers the role as it is and writes nothing.
+   *
+   * A description changes nothing the role confers, so the entry check has
+   * nothing to judge, and no cached permission graph holds one, so none is
+   * flushed.
+   */
+  async updateRole(name: string, edit: UpdateRoleDto): Promise<CatalogRoleDto> {
+    const initiatedAt = new Date();
+
+    const edited = await this.underEditLock(async (tx) => {
+      const { id, updatedAt, ...before } = await readEditableRole(tx, name);
+      const snapshot = await loadCatalogSnapshot(tx);
+
+      if (before.description === edit.description) {
+        return { changed: false as const, role: roleOf(snapshot, before) };
+      }
+
+      const after: RoleSnapshotRow = { ...before, description: edit.description, managedBy: PermissionOwner.Admin };
+
+      // No `limit`, as for a permission: the guard must be rechecked on the row.
+      const { count } = await tx.role.updateMany({
+        where: { id, managedBy: before.managedBy, updatedAt },
+        data: { description: after.description, managedBy: PermissionOwner.Admin },
+      });
+
+      if (count === 0) {
+        throw new ConflictException({
+          code: 'CATALOG_ENTRY_CHANGED',
+          message: t('errors.permission_catalog.role_changed'),
+        });
+      }
+
+      return { changed: true as const, id, before, after, role: roleOf(withRoleRow(snapshot, after), after) };
+    });
+
+    // Deliberately no `flushPermissionGraphs()` here, unlike every grant or
+    // permission edit (#772). A cached graph holds a role's name and grants,
+    // never its description, so a flush would only make every signed-in
+    // user reload a graph that hasn't changed.
+    if (edited.changed) {
+      this.eventEmitter.emit(
+        RoleUpdatedEvent.eventName,
+        new RoleUpdatedEvent(edited.id, roleAudit(edited.before), roleAudit(edited.after), initiatedAt),
+      );
+    }
+
+    return edited.role;
+  }
+
+  /**
+   * Gives a role a permission, or gives back a grant that was revoked (#772).
+   * The grant is the Owner's either way, so the next start keeps it: a new
+   * grant is created managed by the Owner, and a revoked one is cleared and
+   * marked so. A grant the role already holds is answered as it is, and
+   * nothing is written.
+   *
+   * The grant is checked on the permission catalog it would make, against
+   * every guard (`checkCatalogEntries`): a grant whose condition names roles
+   * other than the one given it confers nothing, and is refused. A grant on
+   * `User` is judged on every holder of the permission. Adding a grant
+   * changes no condition, so nothing is probed.
+   *
+   * A grant the check cannot see is refused, so it fails closed. That is a
+   * grant to a role `ROLE_SCOPE` gives no scope, whose grants the check
+   * leaves out (until custom roles get a scope, #1170), and a grant of a
+   * retired permission, since the check judges live permissions only.
+   * Reviving the permission first checks it on every role that holds it,
+   * then the grant is checked as it is added.
+   */
+  async addGrant(roleName: string, slug: string): Promise<GrantEditDto> {
+    const initiatedAt = new Date();
+
+    const edited = await this.underEditLock(async (tx) => {
+      const { role, permission, grant } = await readGrant(tx, roleName, slug);
+
+      if (!Object.hasOwn(ROLE_SCOPE, roleName)) {
+        throw new ConflictException({
+          code: 'CATALOG_ROLE_NOT_JUDGEABLE',
+          message: t('errors.permission_catalog.role_not_judgeable', { name: roleName }),
+        });
+      }
+
+      if (permission.retiredAt !== null) {
+        throw new ConflictException({
+          code: 'CATALOG_PERMISSION_RETIRED',
+          message: t('errors.permission_catalog.permission_retired', { slug }),
+        });
+      }
+
+      const before = grant === null ? null : grantRow(roleName, slug, grant);
+      if (before !== null && before.revokedAt === null) {
+        return { changed: false as const, grant: before };
+      }
+
+      const after: RolePermissionSnapshotRow = {
+        roleName,
+        permissionSlug: slug,
+        managedBy: PermissionOwner.Admin,
+        revokedAt: null,
+      };
+      const warnings = await checkGrantChange(tx, roleName, slug, after);
+
+      const id =
+        grant === null
+          ? await createGrant(tx, role.id, permission.id)
+          : await writeGrant(tx, grant, { revokedAt: null, managedBy: PermissionOwner.Admin });
+
+      return { changed: true as const, id, before, after, warnings };
+    });
+
+    if (!edited.changed) {
+      return { grant: catalogGrant(edited.grant), warnings: [] };
+    }
+
+    await this.flushPermissionGraphs();
+
+    this.eventEmitter.emit(
+      RolePermissionChangedEvent.eventName,
+      new RolePermissionChangedEvent(
+        edited.id,
+        edited.before === null ? null : grantAudit(edited.before),
+        grantAudit(edited.after),
+        initiatedAt,
+      ),
+    );
+
+    return { grant: catalogGrant(edited.after), warnings: edited.warnings };
+  }
+
+  /**
+   * Takes a grant from a role (#772). A grant the permission catalog ships is
+   * kept, revoked and managed by the Owner, so the next start doesn't give it
+   * back; one it doesn't ship, which this server added, is deleted. A shipped
+   * grant the Owner already revoked is answered as it is, and nothing is
+   * written.
+   *
+   * Taking a grant can still break another: the guards excuse every role
+   * holding a permission `User` holds, so revoking `User`'s grant can leave
+   * another role's grant of it failing open. The change is checked as an
+   * added grant is, and refused on any problem; the warnings, such as a role
+   * left holding one half of a pair, are answered. Revoking the Owner's
+   * `manage:all` is refused.
+   *
+   * A grant on a role `ROLE_SCOPE` gives no scope can be revoked, though one
+   * can't be added (#1170). Taking it only narrows what that role confers.
+   * The check leaves the role's grants out either way, and the role is not
+   * `User`, so its grant excuses no other holder: no finding about any other
+   * role changes. Refusing would leave in place the one grant the check
+   * can't see.
+   */
+  async revokeGrant(roleName: string, slug: string): Promise<GrantEditDto> {
+    const initiatedAt = new Date();
+
+    const edited = await this.underEditLock(async (tx) => {
+      const { grant } = await readGrant(tx, roleName, slug);
+      if (grant === null) {
+        throw new NotFoundException({
+          code: 'CATALOG_ENTRY_NOT_FOUND',
+          message: t('errors.permission_catalog.grant_not_found', { name: roleName, slug }),
+        });
+      }
+
+      const before = grantRow(roleName, slug, grant);
+      const after: RolePermissionSnapshotRow | null = catalogListsGrant(roleName, slug)
+        ? { ...before, managedBy: PermissionOwner.Admin, revokedAt: before.revokedAt ?? initiatedAt }
+        : null;
+
+      if (after !== null && sameGrant(before, after)) {
+        return { changed: false as const, grant: before };
+      }
+
+      const warnings = await checkGrantChange(tx, roleName, slug, after);
+
+      if (after === null) {
+        await deleteGrant(tx, grant);
+      } else {
+        await writeGrant(tx, grant, { managedBy: PermissionOwner.Admin, revokedAt: after.revokedAt });
+      }
+
+      return { changed: true as const, id: grant.id, before, after, warnings };
+    });
+
+    if (!edited.changed) {
+      return { grant: catalogGrant(edited.grant), warnings: [] };
+    }
+
+    await this.flushPermissionGraphs();
+
+    this.eventEmitter.emit(
+      RolePermissionChangedEvent.eventName,
+      new RolePermissionChangedEvent(
+        edited.id,
+        grantAudit(edited.before),
+        edited.after === null ? null : grantAudit(edited.after),
+        initiatedAt,
+      ),
+    );
+
+    return { grant: edited.after === null ? null : catalogGrant(edited.after), warnings: edited.warnings };
   }
 
   /**
@@ -395,6 +633,220 @@ function auditSnapshot(row: PermissionSnapshotRow): PermissionSnapshot {
 }
 
 /**
+ * The role, read under the edit lock. A role this server doesn't have
+ * answers 404; a plugin's role belongs to its plugin, as a plugin's
+ * permission does, so neither it nor its grants are the Owner's to change.
+ */
+async function readEditableRole(tx: Prisma.TransactionClient, name: string) {
+  const role = await tx.role.findUnique({ where: { name }, select: ROLE_ROW_SELECT });
+  if (role === null) {
+    throw new NotFoundException({
+      code: 'CATALOG_ENTRY_NOT_FOUND',
+      message: t('errors.permission_catalog.role_not_found', { name }),
+    });
+  }
+
+  if (role.managedBy === PermissionOwner.Plugin) {
+    throw new ConflictException({
+      code: 'CATALOG_ENTRY_NOT_EDITABLE',
+      message: t('errors.permission_catalog.role_not_editable', { name }),
+    });
+  }
+
+  return role;
+}
+
+/**
+ * The role, the permission and the grant between them, if there is one, read
+ * under the edit lock. An unknown role or permission answers 404. A plugin's
+ * permission belongs to its plugin, as do its grants and a plugin's grant,
+ * so giving or taking any of them is refused (#772), as an edit of a plugin's
+ * permission is.
+ */
+async function readGrant(
+  tx: Prisma.TransactionClient,
+  roleName: string,
+  slug: string,
+): Promise<{ role: { id: string }; permission: { id: string; retiredAt: Date | null }; grant: GrantRow | null }> {
+  const role = await readEditableRole(tx, roleName);
+
+  const permission = await tx.permission.findUnique({
+    where: { slug },
+    select: { id: true, retiredAt: true, managedBy: true },
+  });
+  if (permission === null) {
+    throw new NotFoundException({
+      code: 'CATALOG_ENTRY_NOT_FOUND',
+      message: t('errors.permission_catalog.entry_not_found', { slug }),
+    });
+  }
+
+  if (permission.managedBy === PermissionOwner.Plugin) {
+    throw new ConflictException({
+      code: 'CATALOG_ENTRY_NOT_EDITABLE',
+      message: t('errors.permission_catalog.permission_not_grantable', { slug }),
+    });
+  }
+
+  const grant = await tx.rolePermission.findUnique({
+    where: { roleId_permissionId: { roleId: role.id, permissionId: permission.id } },
+    select: GRANT_ROW_SELECT,
+  });
+
+  if (grant?.managedBy === PermissionOwner.Plugin) {
+    throw new ConflictException({
+      code: 'CATALOG_ENTRY_NOT_EDITABLE',
+      message: t('errors.permission_catalog.grant_not_editable', { name: roleName, slug }),
+    });
+  }
+
+  return { role, permission, grant };
+}
+
+/**
+ * The entry check on a grant added or taken (#772), on the permission
+ * catalog as the change would leave it: `after` in place of the grant, or no
+ * grant for null. The change may not leave the Owner without `manage:all`,
+ * and may add no problem the catalog guards find for the grant. A grant on
+ * `User` is judged on every holder of the permission, since `User` holding
+ * a permission is what excuses every other holder from the
+ * unconditioned-grant guards. Answers the warnings.
+ */
+async function checkGrantChange(
+  tx: Prisma.TransactionClient,
+  roleName: string,
+  slug: string,
+  after: RolePermissionSnapshotRow | null,
+): Promise<EntryWarning[]> {
+  const snapshot = await loadCatalogSnapshot(tx);
+  const catalog = withGrantRow(snapshot, roleName, slug, after);
+  refuseOwnerLockout(catalog);
+
+  const { problems, warnings } = checkCatalogEntries(
+    catalogViewFromSnapshot(snapshot),
+    catalogViewFromSnapshot(catalog),
+    [{ roleName, slug }],
+  );
+
+  if (problems.length > 0) {
+    throw new UnprocessableEntityException({
+      code: 'CATALOG_ENTRY_REFUSED',
+      message: t('errors.permission_catalog.grant_refused'),
+      problems,
+    });
+  }
+
+  return warnings;
+}
+
+/**
+ * Creates the grant, managed by the Owner. Skipping a duplicate is the guard
+ * a new row has: a grant a start created after the read leaves nothing
+ * created, and answers 409 rather than a unique-constraint failure.
+ */
+async function createGrant(tx: Prisma.TransactionClient, roleId: string, permissionId: string): Promise<string> {
+  const [created] = await tx.rolePermission.createManyAndReturn({
+    data: [{ roleId, permissionId, managedBy: PermissionOwner.Admin }],
+    skipDuplicates: true,
+    select: { id: true },
+  });
+
+  if (created === undefined) {
+    throw grantChanged();
+  }
+
+  return created.id;
+}
+
+/**
+ * Writes the grant, guarded by who managed it and its revocation as they
+ * were read. No `limit`: Prisma would move the guard into a subquery and stop
+ * rechecking it under concurrent writes.
+ */
+async function writeGrant(
+  tx: Prisma.TransactionClient,
+  grant: GrantRow,
+  data: Pick<RolePermissionSnapshotRow, 'managedBy' | 'revokedAt'>,
+): Promise<string> {
+  const { count } = await tx.rolePermission.updateMany({ where: guardOf(grant), data });
+  if (count === 0) {
+    throw grantChanged();
+  }
+
+  return grant.id;
+}
+
+/** Deletes the grant, guarded as {@link writeGrant} guards a write. */
+async function deleteGrant(tx: Prisma.TransactionClient, grant: GrantRow): Promise<void> {
+  const { count } = await tx.rolePermission.deleteMany({ where: guardOf(grant) });
+  if (count === 0) {
+    throw grantChanged();
+  }
+}
+
+function guardOf({ id, managedBy, revokedAt }: GrantRow): Prisma.RolePermissionWhereInput {
+  return { id, managedBy, revokedAt };
+}
+
+function grantChanged(): ConflictException {
+  return new ConflictException({
+    code: 'CATALOG_ENTRY_CHANGED',
+    message: t('errors.permission_catalog.grant_changed'),
+  });
+}
+
+/** Whether the permission catalog this version ships gives `roleName` the permission `slug`. */
+function catalogListsGrant(roleName: string, slug: string): boolean {
+  const { rolePermissions } = CATALOG_MANIFEST;
+
+  return Object.hasOwn(rolePermissions, roleName) && rolePermissions[roleName].includes(slug);
+}
+
+/** A grant row by the names the snapshot speaks in. */
+function grantRow(roleName: string, slug: string, { managedBy, revokedAt }: GrantRow): RolePermissionSnapshotRow {
+  return { roleName, permissionSlug: slug, managedBy, revokedAt };
+}
+
+/** Whether two states of one grant are the same: who manages it, and whether it is revoked. */
+function sameGrant(a: RolePermissionSnapshotRow, b: RolePermissionSnapshotRow): boolean {
+  return a.managedBy === b.managedBy && (a.revokedAt === null) === (b.revokedAt === null);
+}
+
+/** `snapshot` with `grant` in place of the grant of `slug` to `roleName`, or without it for null. */
+function withGrantRow(
+  snapshot: CatalogSnapshot,
+  roleName: string,
+  slug: string,
+  grant: RolePermissionSnapshotRow | null,
+): CatalogSnapshot {
+  const others = snapshot.rolePermissions.filter((row) => !(row.roleName === roleName && row.permissionSlug === slug));
+
+  return { ...snapshot, rolePermissions: grant === null ? others : [...others, grant] };
+}
+
+/** `snapshot` with the edited role row in place of the one it read. */
+function withRoleRow(snapshot: CatalogSnapshot, row: RoleSnapshotRow): CatalogSnapshot {
+  return { ...snapshot, roles: snapshot.roles.map((role) => (role.name === row.name ? row : role)) };
+}
+
+/** `row` as the routes return it, with its grants and its drift in `snapshot`. */
+function roleOf(snapshot: CatalogSnapshot, row: RoleSnapshotRow): CatalogRoleDto {
+  return catalogRole(
+    row,
+    snapshot.rolePermissions.filter(({ roleName }) => roleName === row.name),
+    catalogDrift(snapshot).roles.get(row.name) ?? [],
+  );
+}
+
+function roleAudit({ name, description, managedBy }: RoleSnapshotRow): RoleSnapshot {
+  return { name, description, managedBy };
+}
+
+function grantAudit({ roleName, permissionSlug, managedBy, revokedAt }: RolePermissionSnapshotRow): GrantSnapshot {
+  return { roleName, permissionSlug, managedBy, revokedAt };
+}
+
+/**
  * The drift of every entry the Owner edited that the permission catalog
  * lists: permissions by slug, roles by name. What a start would report. An
  * entry the server maintains has none, and neither has one the permission
@@ -415,32 +867,19 @@ function catalogDrift(snapshot: CatalogSnapshot): {
 function catalogOf(snapshot: CatalogSnapshot): PermissionCatalogDto {
   const { permissions: permissionDrifts, roles: roleDrifts } = catalogDrift(snapshot);
 
-  const grants = new Map<string, CatalogGrantDto[]>();
-  for (const { roleName, permissionSlug, managedBy, revokedAt } of snapshot.rolePermissions) {
-    const held = grants.get(roleName) ?? [];
-    held.push({ slug: permissionSlug, managedBy, revokedAt });
-    grants.set(roleName, held);
+  const grants = new Map<string, RolePermissionSnapshotRow[]>();
+  for (const grant of snapshot.rolePermissions) {
+    const held = grants.get(grant.roleName) ?? [];
+    held.push(grant);
+    grants.set(grant.roleName, held);
   }
 
   return {
     permissions: [...snapshot.permissions]
-      .sort((a, b) => compare(a.slug, b.slug))
+      .sort((a, b) => codeUnitOrder(a.slug, b.slug))
       .map((row) => catalogPermission(row, permissionDrifts.get(row.slug) ?? [])),
     roles: [...snapshot.roles]
-      .sort((a, b) => compare(a.name, b.name))
-      .map(
-        ({ name, description, managedBy }): CatalogRoleDto => ({
-          name,
-          description,
-          managedBy,
-          drift: [...(roleDrifts.get(name) ?? [])],
-          grants: (grants.get(name) ?? []).sort((a, b) => compare(a.slug, b.slug)),
-        }),
-      ),
+      .sort((a, b) => codeUnitOrder(a.name, b.name))
+      .map((row) => catalogRole(row, grants.get(row.name) ?? [], roleDrifts.get(row.name) ?? [])),
   };
-}
-
-/** Code-unit order: the same on every server, whatever its locale. */
-function compare(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
 }

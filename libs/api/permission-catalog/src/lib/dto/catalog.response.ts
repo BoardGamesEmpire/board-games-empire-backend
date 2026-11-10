@@ -6,6 +6,8 @@ import {
   type FieldChange,
   type PermissionSnapshotRow,
   type Prisma,
+  type RolePermissionSnapshotRow,
+  type RoleSnapshotRow,
 } from '@bge/database';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -167,6 +169,51 @@ export class PermissionEditDto {
       'switched on for. Each such plugin needs consent again.',
   })
   consentDecisionsAffected!: number;
+}
+
+/** `PUT` and `DELETE /permission-catalog/roles/:name/grants/:slug`. */
+export class GrantEditDto {
+  @ApiProperty({
+    type: CatalogGrantDto,
+    nullable: true,
+    description:
+      'The grant as the change left it. Null when a revoke deleted it: a grant this server added, which the ' +
+      'permission catalog does not ship, is deleted rather than kept revoked.',
+  })
+  grant!: CatalogGrantDto | null;
+
+  @ApiProperty({
+    type: [EntryWarningDto],
+    description:
+      'What the change is allowed with but should be seen, such as a role left holding one half of a pair, like ' +
+      "approving a household's invites without revoking them.",
+  })
+  warnings!: EntryWarning[];
+}
+
+/** A grant row as the routes return it, under its role. */
+export function catalogGrant({ permissionSlug, managedBy, revokedAt }: RolePermissionSnapshotRow): CatalogGrantDto {
+  return { slug: permissionSlug, managedBy, revokedAt };
+}
+
+/** A role row as the routes return it: its grants, by slug in code-unit order, and its drift. */
+export function catalogRole(
+  { name, description, managedBy }: RoleSnapshotRow,
+  grants: readonly RolePermissionSnapshotRow[],
+  drift: readonly FieldChange[],
+): CatalogRoleDto {
+  return {
+    name,
+    description,
+    managedBy,
+    drift: [...drift],
+    grants: grants.map(catalogGrant).sort((a, b) => codeUnitOrder(a.slug, b.slug)),
+  };
+}
+
+/** Code-unit order: the same on every server, whatever its locale. */
+export function codeUnitOrder(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 /** A permission row as the routes return it, with its drift. */
