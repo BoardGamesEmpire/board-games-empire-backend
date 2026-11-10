@@ -807,5 +807,61 @@ describe('the shipped catalogs', () => {
 
       expect(creates).toEqual([]);
     });
+
+    it("no role holds a permission on the permission catalog's own tables (#772)", () => {
+      const catalogTables = ['Permission', 'Role', 'RolePermission'];
+
+      // The three are resource types, so a route can name them; the Owner's
+      // manage:all is what reaches them and no role is given a slug on them.
+      for (const table of catalogTables) {
+        expect(Object.values(ResourceType)).toContain(table);
+      }
+
+      const subjectOf = new Map(PERMISSION_CATALOG.map(({ slug, subject }) => [slug, subject as string]));
+      const offenders = Object.entries(ROLE_PERMISSION_CATALOG).flatMap(([roleName, slugs]) =>
+        slugs.filter((slug) => catalogTables.includes(subjectOf.get(slug) ?? '')).map((slug) => `${roleName}: ${slug}`),
+      );
+
+      expect(offenders).toEqual([]);
+      expect(PERMISSION_CATALOG.filter(({ subject }) => catalogTables.includes(subject))).toEqual([]);
+    });
+
+    describe('what reaches the permission catalog tables besides the Owner (#772)', () => {
+      const catalogTablesOrWildcard: readonly string[] = ['Permission', 'Role', 'RolePermission', 'all'];
+      const actionOf = new Map<string, { action: Action; subject: string }>(
+        PERMISSION_CATALOG.map(({ slug, action, subject }) => [slug, { action, subject }]),
+      );
+
+      // Staff may READ these tables through the `all` wildcard, as they read
+      // every type: that is by design, and only the Owner EDITS them (#772).
+      // So read on `all` is the one exception; any other action on one of the
+      // tables, or on `all`, held by a non-Owner role is a write reaching them
+      // through a wildcard.
+      function writesReaching(catalog: Readonly<Record<string, readonly string[]>>): string[] {
+        return Object.entries(catalog)
+          .filter(([roleName]) => roleName !== SystemRole.Owner)
+          .flatMap(([roleName, slugs]) =>
+            slugs
+              .filter((slug) => {
+                const held = actionOf.get(slug);
+                return (
+                  held !== undefined && catalogTablesOrWildcard.includes(held.subject) && held.action !== Action.read
+                );
+              })
+              .map((slug) => `${roleName}: ${slug}`),
+          );
+      }
+
+      it('is read only, for every role but the Owner', () => {
+        expect(writesReaching(ROLE_PERMISSION_CATALOG)).toEqual([]);
+      });
+
+      it('would catch a write on the wildcard, so the check is not vacuous', () => {
+        expect(writesReaching({ ...ROLE_PERMISSION_CATALOG, [SystemRole.Moderator]: ['manage:all'] })).toEqual([
+          'Moderator: manage:all',
+        ]);
+        expect(writesReaching({ [SystemRole.Owner]: ['manage:all'] })).toEqual([]);
+      });
+    });
   });
 });

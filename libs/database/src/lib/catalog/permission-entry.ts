@@ -106,6 +106,10 @@ export type SubjectWhereInput = ForEverySubject<{
   EventGameVote: Prisma.EventGameVoteWhereInput;
   EventOccurrence: Prisma.EventOccurrenceWhereInput;
   EventPolicy: Prisma.EventPolicyWhereInput;
+  // Permission catalog
+  Permission: Prisma.PermissionWhereInput;
+  Role: Prisma.RoleWhereInput;
+  RolePermission: Prisma.RolePermissionWhereInput;
   all: never; // the wildcard filters nothing
 }>;
 
@@ -167,6 +171,10 @@ export type SubjectScalarField = ForEverySubject<{
   EventGameVote: Prisma.EventGameVoteScalarFieldEnum;
   EventOccurrence: Prisma.EventOccurrenceScalarFieldEnum;
   EventPolicy: Prisma.EventPolicyScalarFieldEnum;
+  // Permission catalog
+  Permission: Prisma.PermissionScalarFieldEnum;
+  Role: Prisma.RoleScalarFieldEnum;
+  RolePermission: Prisma.RolePermissionScalarFieldEnum;
   all: never; // the wildcard filters nothing
 }>;
 

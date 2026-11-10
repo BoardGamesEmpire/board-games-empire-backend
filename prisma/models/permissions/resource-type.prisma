@@ -64,5 +64,13 @@ enum ResourceType {
   EventOccurrence
   EventPolicy
 
+  // ─── Permission catalog ─────────────────────────────────
+  // The permission catalog tables, as resource types so routes can name them
+  // (#772). No role is given a slug on them: staff read them through their
+  // read on `all`, and only the Owner's manage:all writes them.
+  Permission
+  Role
+  RolePermission
+
   @@map("resource_types")
 }
