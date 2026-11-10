@@ -110,8 +110,7 @@ describe('UserController', () => {
   // asks for both types.
   it('gates the search on read:User and read:UserProfile', () => {
     const handlers = Reflect.getMetadata(CHECK_POLICIES_KEY, UserController.prototype.search) as
-      | Array<(ability: AppAbility) => boolean>
-      | undefined;
+      Array<(ability: AppAbility) => boolean> | undefined;
     expect(handlers).toHaveLength(2);
 
     const can = jest.fn().mockReturnValue(true);

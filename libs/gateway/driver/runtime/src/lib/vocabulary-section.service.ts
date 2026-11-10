@@ -74,14 +74,12 @@ export class VocabularySectionService {
 
       case DataGatewayCapability.ListPlatforms: {
         const { platforms } = await this.ask(driver.listPlatforms({ correlationId }), signal);
-        const entries = (platforms ?? []).map(
-          (platform): PlatformEntry => ({
-            externalId: platform.externalId,
-            name: platform.name,
-            abbreviation: platform.abbreviation,
-            platformType: toStoredPlatformType(platform.platformType) ?? PlatformType.Other,
-          }),
-        );
+        const entries = (platforms ?? []).map((platform): PlatformEntry => ({
+          externalId: platform.externalId,
+          name: platform.name,
+          abbreviation: platform.abbreviation,
+          platformType: toStoredPlatformType(platform.platformType) ?? PlatformType.Other,
+        }));
         return this.link(signal, () => this.vocabulary.load('platform', gatewayId, entries, signal));
       }
 

@@ -15,10 +15,7 @@ import { InsufficientStorageException } from '../exceptions/insufficient-storage
 const STORAGE_RETRY_AFTER_SECONDS = 30;
 
 type MappableStorageError =
-  | StorageUnavailableError
-  | InsufficientStorageError
-  | StorageMisconfiguredError
-  | DriverNotRegisteredError;
+  StorageUnavailableError | InsufficientStorageError | StorageMisconfiguredError | DriverNotRegisteredError;
 
 /**
  * Translates the storage failure vocabulary into HTTP statuses, mirroring

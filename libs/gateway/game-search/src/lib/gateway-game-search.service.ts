@@ -597,16 +597,14 @@ export class GatewayGameSearchService {
     const sent = { ...game, summary: convertToMarkdown(game.summary, contentFormat) };
 
     return from(this.resolveDedup(gatewayId, game.externalId)).pipe(
-      map(
-        ({ inSystem, gameId }): proto.SearchGameResult => ({
-          correlationId,
-          gatewayId,
-          status: proto.ResultStatus.RESULT_STATUS_RESULT,
-          game: sent,
-          inSystem,
-          gameId,
-        }),
-      ),
+      map(({ inSystem, gameId }): proto.SearchGameResult => ({
+        correlationId,
+        gatewayId,
+        status: proto.ResultStatus.RESULT_STATUS_RESULT,
+        game: sent,
+        inSystem,
+        gameId,
+      })),
     );
   }
 

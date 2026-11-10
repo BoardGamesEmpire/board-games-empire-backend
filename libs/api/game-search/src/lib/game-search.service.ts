@@ -230,52 +230,50 @@ export class GameSearchService {
       },
     });
 
-    return games.map(
-      (game): WsGameSearchResult => ({
-        externalId: game.id,
-        title: game.title,
-        contentType: game.contentType,
-        yearPublished: game.publishYear ?? undefined,
-        thumbnailUrl: game.thumbnail || undefined,
-        sourceUrl: game.gameSources?.[0]?.sourceUrl || undefined,
-        averageRating: game.averageRating ?? undefined,
-        minPlayers: game.minPlayers ?? undefined,
-        maxPlayers: game.maxPlayers ?? undefined,
-        minPlayTime: game.minPlayTime ?? undefined,
-        maxPlayTime: game.maxPlayTime ?? undefined,
-        baseGameExternalIds: [],
-        inSystem: true,
-        gameId: game.id,
+    return games.map((game): WsGameSearchResult => ({
+      externalId: game.id,
+      title: game.title,
+      contentType: game.contentType,
+      yearPublished: game.publishYear ?? undefined,
+      thumbnailUrl: game.thumbnail || undefined,
+      sourceUrl: game.gameSources?.[0]?.sourceUrl || undefined,
+      averageRating: game.averageRating ?? undefined,
+      minPlayers: game.minPlayers ?? undefined,
+      maxPlayers: game.maxPlayers ?? undefined,
+      minPlayTime: game.minPlayTime ?? undefined,
+      maxPlayTime: game.maxPlayTime ?? undefined,
+      baseGameExternalIds: [],
+      inSystem: true,
+      gameId: game.id,
 
-        platforms: game.platformGames?.map((pg) => ({
+      platforms: game.platformGames?.map((pg) => ({
+        externalId: pg.platform.id,
+        name: pg.platform.name,
+        abbreviation: pg.platform.abbreviation ?? undefined,
+        platformType: pg.platform.platformType.toString(),
+      })),
+
+      availableReleases: game.platformGames?.flatMap((pg) =>
+        pg.releases.map((r) => ({
           externalId: pg.platform.id,
-          name: pg.platform.name,
-          abbreviation: pg.platform.abbreviation ?? undefined,
-          platformType: pg.platform.platformType.toString(),
-        })),
+          platform: {
+            externalId: pg.platform.gatewayLinks[0]?.externalId || undefined,
+            name: pg.platform.name,
+            abbreviation: pg.platform.abbreviation ?? undefined,
+            platformType: pg.platform.platformType.toString(),
+          },
 
-        availableReleases: game.platformGames?.flatMap((pg) =>
-          pg.releases.map((r) => ({
-            externalId: pg.platform.id,
-            platform: {
-              externalId: pg.platform.gatewayLinks[0]?.externalId || undefined,
-              name: pg.platform.name,
-              abbreviation: pg.platform.abbreviation ?? undefined,
-              platformType: pg.platform.platformType.toString(),
-            },
-
-            status: r.status,
-            releaseDate: r.releaseDate?.toISOString().split('T')[0] ?? undefined,
-            languages: r.languages.map((l) => ({
-              tag: l.languageTag.tag,
-              iso6393: l.languageTag.language.iso6393,
-              iso6391: l.languageTag.language.iso6391 ?? undefined,
-              name: l.languageTag.name,
-            })),
+          status: r.status,
+          releaseDate: r.releaseDate?.toISOString().split('T')[0] ?? undefined,
+          languages: r.languages.map((l) => ({
+            tag: l.languageTag.tag,
+            iso6393: l.languageTag.language.iso6393,
+            iso6391: l.languageTag.language.iso6391 ?? undefined,
+            name: l.languageTag.name,
           })),
-        ),
-      }),
-    );
+        })),
+      ),
+    }));
   }
 
   private searchExternal(correlationId: string, dto: SearchQueryDto): Observable<SearchGamesResponse> {

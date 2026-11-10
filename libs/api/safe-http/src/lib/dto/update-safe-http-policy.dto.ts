@@ -27,9 +27,7 @@ export class UpdateSafeHttpPolicyDto {
   @Max(20, { message: i18nValidationMessage('validation.max') })
   defaultMaxRedirects?: number;
 
-  @ApiProperty({
-    /* unchanged */
-  })
+  @ApiProperty({/* unchanged */})
   @ValidateIf((_, value) => value !== undefined)
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   strictMode?: boolean;

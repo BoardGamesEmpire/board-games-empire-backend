@@ -49,8 +49,7 @@ describe('HouseholdQuotaController', () => {
   // delegation test above.
   it('gates on read:Quota', () => {
     const handlers = Reflect.getMetadata(CHECK_POLICIES_KEY, HouseholdQuotaController.prototype.list) as
-      | Array<(ability: AppAbility) => boolean>
-      | undefined;
+      Array<(ability: AppAbility) => boolean> | undefined;
     expect(handlers).toHaveLength(1);
 
     const gate = jest.fn().mockReturnValue(true);

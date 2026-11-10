@@ -41,8 +41,7 @@ const withProviders = (list: readonly unknown[]) =>
 /** The genericOAuth plugin an instance was built with, if it has one. */
 const genericOAuthOf = (auth: ReturnType<typeof authFactory>) =>
   auth.options.plugins?.find((plugin) => plugin.id === 'generic-oauth') as
-    | { options: { config: Array<Record<string, unknown>> } }
-    | undefined;
+    { options: { config: Array<Record<string, unknown>> } } | undefined;
 
 /**
  * An instance with sign-in providers fetches each one's discovery document as

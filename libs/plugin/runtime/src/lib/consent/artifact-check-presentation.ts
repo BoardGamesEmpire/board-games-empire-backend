@@ -25,14 +25,12 @@ export const presentArtifactChecks = (
   locale: string | undefined,
   defaultLocale: string,
 ): readonly PluginArtifactCheckPresentation[] =>
-  assessment.validated.permissionChecks.map(
-    (check): PluginArtifactCheckPresentation => ({
-      slug: check.canonicalSlug,
-      origin: check.origin,
-      required: check.required,
-      consentScope: check.consentScope,
-      feature: check.feature ?? null,
-      riskLevel: presentedRiskLevel(check.origin, assessment.corePermissions.get(check.canonicalSlug)?.riskLevel),
-      reason: resolveLocalizedStringDetailed(check.reason, { locale: locale ?? defaultLocale, defaultLocale }),
-    }),
-  );
+  assessment.validated.permissionChecks.map((check): PluginArtifactCheckPresentation => ({
+    slug: check.canonicalSlug,
+    origin: check.origin,
+    required: check.required,
+    consentScope: check.consentScope,
+    feature: check.feature ?? null,
+    riskLevel: presentedRiskLevel(check.origin, assessment.corePermissions.get(check.canonicalSlug)?.riskLevel),
+    reason: resolveLocalizedStringDetailed(check.reason, { locale: locale ?? defaultLocale, defaultLocale }),
+  }));

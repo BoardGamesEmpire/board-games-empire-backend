@@ -288,8 +288,7 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
       expect(Reflect.getMetadata('__guards__', UserPluginsController.prototype.list)).toEqual([PoliciesGuard]);
 
       const handlers = Reflect.getMetadata(CHECK_POLICIES_KEY, UserPluginsController.prototype.list) as
-        | Array<(ability: AppAbility) => boolean>
-        | undefined;
+        Array<(ability: AppAbility) => boolean> | undefined;
       expect(handlers).toHaveLength(1);
       const can = jest.fn().mockReturnValue(true);
       handlers?.[0]({ can } as unknown as AppAbility);
