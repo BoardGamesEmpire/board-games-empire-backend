@@ -245,7 +245,7 @@ export function namedRoles(conditions: unknown): readonly string[] {
  * placeholder in an enum column is refused before any statement is sent
  * (#772). A value only Postgres refuses is reported the same way: a number
  * past an `integer` column's range comes back as a known request error, and a
- * NUL byte in a string as the driver adapter's own error, SQLSTATE class 22.
+ * NUL byte in a string as P2039 around the driver's SQLSTATE 22021.
  * A condition that renders to text that is not JSON is a `template` problem.
  * The Owner's input never makes the probe throw.
  *
@@ -294,7 +294,7 @@ export async function probeConditions(
     await client.$executeRawUnsafe(`ROLLBACK TO SAVEPOINT ${PROBE_SAVEPOINT}`);
 
     if (isVerdictOnCondition(error)) {
-      return [{ kind: 'query-rejected', slug, message: reasonLine(error.message) }];
+      return [{ kind: 'query-rejected', slug, message: reasonFor(error) }];
     }
     throw error;
   }
@@ -325,12 +325,21 @@ function boundedProbe(subject: string, where: unknown): CountArgs {
 /**
  * Whether a failed probe is a verdict on the condition rather than on the
  * database: Prisma's validation, a database error Prisma knows, or a data
- * exception (SQLSTATE class 22) the driver adapter throws bare, such as a NUL
- * byte in a string. A known request error that reports the database or the
+ * exception (SQLSTATE class 22) Prisma has no code of its own for, such as a
+ * NUL byte in a string. A known request error that reports the database or the
  * transaction rather than the query (a lost connection, a pool or transaction
- * timeout, a write conflict) is not one, so it is thrown: at a start it must
+ * timeout, a write conflict, a table or column the database lacks) is not
+ * one, so it is thrown: at a start it must
  * not retire the permission, and on an edit it must not answer 422 blaming the
  * Owner's condition (#772).
+ *
+ * Since `@prisma/client@7.10`, a Postgres error the pg adapter has no name for
+ * arrives as P2039 with the driver error under `meta.driverAdapterError`; up
+ * to 7.8 it escaped as the bare driver error. Either way it is a verdict only
+ * in class 22, because the same code also carries a statement or lock
+ * timeout, an administrator's shutdown, or an aborted transaction, none of
+ * which says anything about the condition. The bare shape is still read, so a
+ * regression to it stays classified.
  */
 function isVerdictOnCondition(error: unknown): error is Error {
   if (error instanceof Prisma.PrismaClientValidationError) {
@@ -338,15 +347,51 @@ function isVerdictOnCondition(error: unknown): error is Error {
   }
 
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    if (error.code === UNMAPPED_DATABASE_ERROR) {
+      return isDataException(wrappedDriverCause(error));
+    }
     return !isInfrastructureCode(error.code);
   }
 
-  return (
-    error instanceof Error &&
-    error.name === 'DriverAdapterError' &&
-    (sqlStateOf(error.cause)?.startsWith(DATA_EXCEPTION_CLASS) ?? false)
-  );
+  return error instanceof Error && error.name === 'DriverAdapterError' && isDataException(error.cause);
 }
+
+/**
+ * The line the Owner is shown: Postgres's own wording where Prisma wraps it in
+ * P2039's "Database error. Code: ... Message: ..." text, and otherwise the
+ * last line of the error, which is where Prisma puts its reason.
+ */
+function reasonFor(error: Error): string {
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === UNMAPPED_DATABASE_ERROR) {
+    const original = wrappedDriverCause(error)?.['originalMessage'];
+    if (typeof original === 'string' && original.length > 0) {
+      return reasonLine(original);
+    }
+  }
+
+  return reasonLine(error.message);
+}
+
+/** The driver adapter error's `cause` that Prisma keeps under `meta`. */
+function wrappedDriverCause(error: Prisma.PrismaClientKnownRequestError): Record<string, unknown> | undefined {
+  const driverAdapterError = error.meta?.['driverAdapterError'];
+  if (!isObject(driverAdapterError)) {
+    return undefined;
+  }
+
+  const cause = driverAdapterError['cause'];
+  return isObject(cause) ? cause : undefined;
+}
+
+function isDataException(cause: unknown): boolean {
+  return sqlStateOf(cause)?.startsWith(DATA_EXCEPTION_CLASS) ?? false;
+}
+
+/**
+ * Prisma's code for a database error it has no code of its own for, which
+ * `@status/codes` does not name yet: `Database error. Code: ... Message: ...`.
+ */
+const UNMAPPED_DATABASE_ERROR = 'P2039';
 
 /** SQLSTATE class 22, data exception: a value in the statement Postgres cannot take. */
 const DATA_EXCEPTION_CLASS = '22';
@@ -355,8 +400,16 @@ const DATA_EXCEPTION_CLASS = '22';
  * Prisma's codes for a failure of the database or the transaction rather
  * than the query: every `P1` code (connecting, authenticating, the server
  * closing the connection), and these.
+ *
+ * A missing table or column is among them. Prisma validates the condition's
+ * field paths against the generated client before any statement is sent, so
+ * Postgres reporting one missing means the database and the client disagree,
+ * a migration not applied say, which the operator repairs. Reported as the
+ * condition's fault, it would retire the Owner's edit (#772).
  */
 const INFRASTRUCTURE_CODES: ReadonlySet<string> = new Set<string>([
+  PrismaError.TableDoesNotExist,
+  PrismaError.ColumnDoesNotExist,
   PrismaError.ConnectionPoolTimeout,
   PrismaError.TransactionApiError,
   PrismaError.TransactionWriteConflict,
@@ -476,12 +529,16 @@ export function catalogFindings({ permissions, rolePermissions }: CatalogView): 
   );
 
   const problems: EntryProblem[] = [
-    ...findTemplateDefects(permissions, KNOWN_TEMPLATE_VARIABLES).map(
-      (defect): EntryProblem => ({ kind: 'template', slug: defect.slug, detail: describeTemplateDefect(defect) }),
-    ),
-    ...findShorthandRelationConditions(permissions).map(
-      ({ slug, path }): EntryProblem => ({ kind: 'shorthand-relation', slug, path }),
-    ),
+    ...findTemplateDefects(permissions, KNOWN_TEMPLATE_VARIABLES).map((defect): EntryProblem => ({
+      kind: 'template',
+      slug: defect.slug,
+      detail: describeTemplateDefect(defect),
+    })),
+    ...findShorthandRelationConditions(permissions).map(({ slug, path }): EntryProblem => ({
+      kind: 'shorthand-relation',
+      slug,
+      path,
+    })),
     ...findUnconditionedScopedGrants(permissions, rolePermissions, ROLE_SCOPE, BASE_ROLE).map(
       ({ slug, role }): EntryProblem => ({ kind: 'fails-open', slug, role }),
     ),
@@ -494,9 +551,11 @@ export function catalogFindings({ permissions, rolePermissions }: CatalogView): 
     ...findReadsIgnoringReach(parsing, parsingGrants, [BASE_ROLE, SystemRole.AnonymousUser], REACH_SUBJECTS).map(
       ({ slug, role, subject, reads }): EntryProblem => ({ kind: 'reads-past-reach', slug, role, subject, reads }),
     ),
-    ...findEventSpanningGrants(permissions, rolePermissions, ROLE_SCOPE).map(
-      ({ slug, role }): EntryProblem => ({ kind: 'event-spanning', slug, role }),
-    ),
+    ...findEventSpanningGrants(permissions, rolePermissions, ROLE_SCOPE).map(({ slug, role }): EntryProblem => ({
+      kind: 'event-spanning',
+      slug,
+      role,
+    })),
     ...findGrantsNamingOtherRoles(permissions, rolePermissions),
   ];
 

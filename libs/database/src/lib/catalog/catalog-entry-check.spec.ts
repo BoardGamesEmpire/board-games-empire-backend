@@ -539,9 +539,10 @@ describe('probeConditions around its query', () => {
       cause: { originalCode: sqlState, originalMessage: message, kind: 'postgres', code: sqlState, message },
     });
 
-  it('refuses a value Postgres rejects as data even when Prisma does not wrap the error (#772)', async () => {
-    // A NUL byte in a string arrives as a bare driver adapter error, SQLSTATE
-    // 22021: class 22, a data exception, is about the condition's values.
+  it('refuses a value Postgres rejects as data when the driver error arrives bare (#772)', async () => {
+    // Up to Prisma 7.8 a NUL byte in a string arrived as a bare driver adapter
+    // error, SQLSTATE 22021: class 22, a data exception, is about the
+    // condition's values. The probe still reads that shape.
     const nul = driverAdapterError('22021', 'invalid byte sequence for encoding "UTF8": 0x00');
     const { statements, tx } = recording(jest.fn().mockRejectedValue(nul));
 
@@ -553,8 +554,54 @@ describe('probeConditions around its query', () => {
     expect(statements).toEqual(['SAVEPOINT catalog_entry_probe', 'ROLLBACK TO SAVEPOINT catalog_entry_probe']);
   });
 
+  /**
+   * The same driver error as `@prisma/client@7.10` raises it for a model query:
+   * P2039 around it, the driver error under `meta`, Postgres's line in the text.
+   */
+  const unmappedDatabaseError = (sqlState: string, message: string) =>
+    new Prisma.PrismaClientKnownRequestError(
+      `\nInvalid \`tx.game.count()\` invocation:\n\n\nDatabase error. Code: \`${sqlState}\`. Message: \`${message}\``,
+      { code: 'P2039', clientVersion: 'test', meta: { driverAdapterError: driverAdapterError(sqlState, message) } },
+    );
+
+  it("refuses a data exception Prisma wraps as P2039, in Postgres's own words (#772)", async () => {
+    // Since Prisma 7.10 the NUL byte's 22021 arrives wrapped, and the Owner is
+    // shown the driver's line rather than Prisma's "Database error" around it.
+    const nul = unmappedDatabaseError('22021', 'invalid byte sequence for encoding "UTF8": 0x00');
+    const { statements, tx } = recording(jest.fn().mockRejectedValue(nul));
+
+    await expect(
+      probeConditions(tx, { slug: 'read:game', subject: ResourceType.Game, conditions: { title: 'a\u0000b' } }),
+    ).resolves.toEqual([
+      { kind: 'query-rejected', slug: 'read:game', message: 'invalid byte sequence for encoding "UTF8": 0x00' },
+    ]);
+    expect(statements).toEqual(['SAVEPOINT catalog_entry_probe', 'ROLLBACK TO SAVEPOINT catalog_entry_probe']);
+  });
+
+  it.each([
+    ['57014', 'canceling statement due to statement timeout'],
+    ['55P03', 'canceling statement due to lock timeout'],
+    ['57P01', 'terminating connection due to administrator command'],
+    ['25P02', 'current transaction is aborted, commands ignored until end of transaction block'],
+  ])(
+    'rethrows a P2039 outside class 22, %s, which is about the database, not the condition (#772)',
+    async (sqlState, message) => {
+      // P2039 carries every Postgres error the adapter has no name for. At a
+      // start, reporting a timeout as the condition's fault would retire the
+      // Owner's edit.
+      const failed = unmappedDatabaseError(sqlState, message);
+      const { tx } = recording(jest.fn().mockRejectedValue(failed));
+
+      await expect(
+        probeConditions(tx, { slug: 'read:game', subject: ResourceType.Game, conditions: { deletedAt: null } }),
+      ).rejects.toBe(failed);
+    },
+  );
+
   it.each([
     ['P1017', 'the server closed the connection'],
+    ['P2021', 'a table the database lacks, which the client has'],
+    ['P2022', 'a column the database lacks, which the client has'],
     ['P2024', 'the connection pool timed out'],
     ['P2028', 'the transaction closed or timed out'],
     ['P2034', 'a write conflict'],

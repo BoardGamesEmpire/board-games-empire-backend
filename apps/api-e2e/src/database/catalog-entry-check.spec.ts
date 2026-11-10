@@ -110,10 +110,12 @@ describe('the entry check probe against Postgres', () => {
     expect(after.permissions).toBeGreaterThan(0);
   });
 
-  it('rejects a NUL byte, which Postgres refuses as data and Prisma does not wrap, and leaves the transaction usable (#772)', async () => {
+  it("rejects a NUL byte, which Postgres refuses as data, in Postgres's words, and leaves the transaction usable (#772)", async () => {
     // Prisma passes the string, and Postgres refuses it with SQLSTATE 22021.
-    // The error reaches the probe as the driver adapter's own, with no Prisma
-    // class around it; it is still a verdict on the condition, not a 500.
+    // The pg adapter has no name for that code, so since Prisma 7.10 it
+    // reaches the probe as P2039 with the driver error under meta (up to 7.8
+    // it was the bare driver error). It is a verdict on the condition, not a
+    // 500, and the Owner is shown Postgres's line, not Prisma's wrapper.
     const after = await db.client.$transaction(async (tx) => {
       const refused = await probeConditions(tx, {
         slug: 'read:game',
