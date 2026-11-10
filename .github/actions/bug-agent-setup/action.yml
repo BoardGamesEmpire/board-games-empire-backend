@@ -9,18 +9,19 @@ description: >-
 runs:
   using: composite
   steps:
+    # Unit specs need no database. Every Nx run in the job stays off Nx Cloud,
+    # the generation in setup-workspace included: each pipeline costs
+    # free-plan credits, and the PR's CI checks the fix again. Set first, so
+    # the steps below see it.
+    - name: Set the environment
+      shell: bash
+      run: |
+        echo "NODE_ENV=test" >> "$GITHUB_ENV"
+        echo "NX_NO_CLOUD=true" >> "$GITHUB_ENV"
+
     - uses: ./.github/actions/setup-workspace
       with:
         save-caches: 'false'
         # No `affected` command runs, and nx-set-shas needs `actions: read`
         # on an issue event.
         set-shas: 'false'
-
-    # Unit specs need no database. The agent's own Nx runs stay off Nx Cloud:
-    # each pipeline costs free-plan credits, and the PR's CI checks the fix
-    # again.
-    - name: Set the environment
-      shell: bash
-      run: |
-        echo "NODE_ENV=test" >> "$GITHUB_ENV"
-        echo "NX_NO_CLOUD=true" >> "$GITHUB_ENV"

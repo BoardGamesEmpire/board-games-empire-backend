@@ -15,9 +15,10 @@ inputs:
     description: >-
       'false' restores the node_modules cache but never saves it, and skips
       the npm download cache, which setup-node can't restore without saving,
-      so a node_modules miss means npm ci downloads everything. For a job that runs code nobody reviewed, such as the bug agent's
-      (#1192): an issue-triggered job saves into master's cache scope, so a
-      node_modules it altered would be restored by master's CI.
+      so a node_modules miss means npm ci downloads everything. For a job
+      that runs code nobody reviewed, such as the bug agent's (#1192): an
+      issue-triggered job saves into master's cache scope, so a node_modules
+      it altered would be restored by master's CI.
     default: 'true'
   set-shas:
     description: >-
