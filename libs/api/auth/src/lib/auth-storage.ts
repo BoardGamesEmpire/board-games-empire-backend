@@ -1,6 +1,7 @@
 import { cacheStoreKey, createCacheStore, type Redis } from '@bge/redis';
 import type { BetterAuthOptions } from 'better-auth';
 import type Keyv from 'keyv';
+import { noteStorageFailure } from './storage-failure-record';
 
 /**
  * What a Keyv store can do of better-auth's `secondaryStorage`: where it keeps
@@ -67,7 +68,12 @@ return count`;
  *   with Redis unreachable no session can be read wherever one is checked,
  *   over HTTP or WebSocket, rather than reading as signed out. better-auth's
  *   rate limiter fails first on every `/api/auth` request, counting it ahead
- *   of every hook, rather than letting the request through unlimited.
+ *   of every hook, rather than letting the request through unlimited. A
+ *   failure is also noted in the request's record, so `createAuthRequestHandler`
+ *   can answer it 503 even where better-auth catches the error and answers
+ *   something of its own (#894). A value that can't be parsed is not a
+ *   failure: it reads as no value, so the request isn't refused 503 for as
+ *   long as the value lives.
  *
  * Keyv can't count, or read and delete, in one step, and better-auth 1.7
  * requires both of its storage (#1016). So this alone is not a storage to give
@@ -81,19 +87,33 @@ export function createAuthStorage(store: Keyv): AuthStorage {
   }
 
   return {
-    get: (key) => store.get(`${KEY_PREFIX}${key}`),
+    get: async (key) => {
+      try {
+        return await store.get(`${KEY_PREFIX}${key}`);
+      } catch (error) {
+        // Keyv reads, then parses outside its own catch, so a value that
+        // isn't JSON surfaces here as a SyntaxError. That is no value, not a
+        // failed read: a Redis error is never a SyntaxError.
+        if (error instanceof SyntaxError) {
+          return undefined;
+        }
 
-    async set(key, value, ttl) {
+        noteStorageFailure();
+        throw error;
+      }
+    },
+
+    set: noting(async (key, value, ttl) => {
       if (ttl !== undefined && ttl <= 0) {
         return;
       }
 
       await store.set(`${KEY_PREFIX}${key}`, value, ttl === undefined ? undefined : ttl * 1000);
-    },
+    }),
 
-    async delete(key) {
+    delete: noting(async (key) => {
       await store.delete(`${KEY_PREFIX}${key}`);
-    },
+    }),
   };
 }
 
@@ -113,7 +133,8 @@ export function createAuthStorage(store: Keyv): AuthStorage {
  *   database. So single use rests on this step. `GETDEL` gives a value, such
  *   as a reset link's, to exactly one of two api processes using it at once.
  *   It returns what `get` would: the value inside Keyv's envelope, or nothing
- *   once the envelope's expiry has passed.
+ *   once the envelope's expiry has passed or when the value can't be read.
+ *   Only the Redis call is noted as a storage failure (#894).
  */
 export function createRedisAuthStorage(client: Redis): CompleteAuthStorage {
   const store = createCacheStore(client, STORE_NAMESPACE, { throwOnErrors: true });
@@ -121,19 +142,19 @@ export function createRedisAuthStorage(client: Redis): CompleteAuthStorage {
   return {
     ...createAuthStorage(store),
 
-    async increment(key, ttl) {
+    increment: noting(async (key, ttl) => {
       // Rounded up, because PEXPIRE takes whole milliseconds and a window such
       // as 1.0005 s would fail the script after its INCR.
       return Number(await client.eval(INCREMENT_SCRIPT, 1, physicalKey(key), Math.ceil(ttl * 1000)));
-    },
+    }),
 
-    async getAndDelete(key) {
-      const raw = await client.getdel(physicalKey(key));
+    getAndDelete: async (key) => {
+      const raw = await noting(() => client.getdel(physicalKey(key)))();
       if (raw === null) {
         return undefined;
       }
 
-      const envelope = await store.deserializeData<unknown>(raw);
+      const envelope = await readEnvelope(store, raw);
       if (!envelope || (typeof envelope.expires === 'number' && Date.now() > envelope.expires)) {
         return undefined;
       }
@@ -143,7 +164,36 @@ export function createRedisAuthStorage(client: Redis): CompleteAuthStorage {
   };
 }
 
+/**
+ * The envelope `raw` holds, or nothing when it can't be read. `GETDEL` has
+ * already removed it, so it is gone either way: better-auth answers it as an
+ * invalid or expired link, as it would a missing one. Noted as a storage
+ * failure, it would be answered 503 "try again", which can never succeed.
+ */
+async function readEnvelope(store: Keyv, raw: string) {
+  try {
+    return await store.deserializeData<unknown>(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 /** The Redis key the store keeps better-auth's `key` under, for a command sent around the store. */
 function physicalKey(key: string): string {
   return cacheStoreKey(STORE_NAMESPACE, `${KEY_PREFIX}${key}`);
+}
+
+/**
+ * `call`, noting a failure in the request's record before the original error
+ * is rethrown unchanged (#894). Outside a request it notes nothing.
+ */
+function noting<A extends unknown[], R>(call: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
+  return async (...args) => {
+    try {
+      return await call(...args);
+    } catch (error) {
+      noteStorageFailure();
+      throw error;
+    }
+  };
 }

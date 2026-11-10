@@ -1,6 +1,7 @@
 import type { Redis } from '@bge/redis';
 import Keyv from 'keyv';
-import { createAuthStorage, createRedisAuthStorage } from './auth-storage';
+import { createAuthStorage, createRedisAuthStorage, type CompleteAuthStorage } from './auth-storage';
+import { withStorageFailureRecord, type StorageFailureRecord } from './storage-failure-record';
 
 /** An in-memory store that raises failures, as the api's Redis-backed one is built to. */
 const memoryStore = () => new Keyv({ throwOnErrors: true });
@@ -81,16 +82,43 @@ describe('createRedisAuthStorage', () => {
     evalResult = 1,
     evalError,
     getdelError,
-  }: { evalResult?: number; evalError?: Error; getdelError?: Error } = {}) {
+    getError,
+    setError,
+    unlinkError,
+  }: {
+    evalResult?: number;
+    evalError?: Error;
+    getdelError?: Error;
+    getError?: Error;
+    setError?: Error;
+    unlinkError?: Error;
+  } = {}) {
     const commands: unknown[][] = [];
     const values = new Map<unknown, unknown>();
     const client = {
       options: { family: 4 },
       on: () => client,
+      async get(key: string) {
+        commands.push(['get', key]);
+        if (getError) {
+          throw getError;
+        }
+        return values.get(key) ?? null;
+      },
       async set(...args: unknown[]) {
         commands.push(['set', ...args]);
+        if (setError) {
+          throw setError;
+        }
         values.set(args[0], args[1]);
         return 'OK';
+      },
+      async unlink(key: string) {
+        commands.push(['unlink', key]);
+        if (unlinkError) {
+          throw unlinkError;
+        }
+        return values.delete(key) ? 1 : 0;
       },
       async eval(...args: unknown[]) {
         commands.push(['eval', ...args]);
@@ -110,7 +138,7 @@ describe('createRedisAuthStorage', () => {
       },
     };
 
-    return { client: client as unknown as Redis, commands };
+    return { client: client as unknown as Redis, commands, values };
   }
 
   it('writes a session where it always lived in Redis, with a PTTL of its full life (#640)', async () => {
@@ -191,5 +219,65 @@ describe('createRedisAuthStorage', () => {
     await expect(createRedisAuthStorage(client).getAndDelete('verification:abc')).rejects.toThrow(
       'Connection is closed.',
     );
+  });
+
+  /**
+   * A failed call is noted in the request's record, so the handler on
+   * `/api/auth/*` can answer it 503 even where better-auth catches the error
+   * and answers a 500 of its own. The original error is rethrown unchanged.
+   */
+  describe('a failed call (#894)', () => {
+    type FailingCommand = 'getError' | 'setError' | 'unlinkError' | 'evalError' | 'getdelError';
+
+    it.each<[string, FailingCommand, (storage: CompleteAuthStorage) => unknown]>([
+      ['get', 'getError', (storage) => storage.get('session-token')],
+      ['set', 'setError', (storage) => storage.set('session-token', 'session', 60)],
+      ['delete', 'unlinkError', (storage) => storage.delete('session-token')],
+      ['increment', 'evalError', (storage) => storage.increment('198.51.100.4/sign-in/email', 10)],
+      ['getAndDelete', 'getdelError', (storage) => storage.getAndDelete('verification:abc')],
+    ])('notes a failed %s in the request and rethrows the original error (#894)', async (_, command, call) => {
+      const error = new Error('Connection is closed.');
+      const { client } = recordingClient({ [command]: error });
+      const storage = createRedisAuthStorage(client);
+      const record: StorageFailureRecord = { failed: false };
+
+      await expect(withStorageFailureRecord(record, async () => call(storage))).rejects.toBe(error);
+
+      expect(record.failed).toBe(true);
+    });
+
+    it('notes nothing when the call succeeds (#894)', async () => {
+      const { client } = recordingClient();
+      const storage = createRedisAuthStorage(client);
+      const record: StorageFailureRecord = { failed: false };
+
+      await withStorageFailureRecord(record, async () => storage.get('session-token'));
+
+      expect(record.failed).toBe(false);
+    });
+
+    it.each<[string, (storage: CompleteAuthStorage) => unknown]>([
+      ['get', (storage) => storage.get('session-token')],
+      ['getAndDelete', (storage) => storage.getAndDelete('session-token')],
+    ])('reads a value that is not JSON as no value from %s, and notes no failure (#894)', async (_, call) => {
+      // A failed parse is not an unreachable Redis: noted, it would be
+      // answered 503 "try again" for as long as the value lives, and a
+      // value GETDEL has taken can never be read again.
+      const { client, values } = recordingClient();
+      values.set('namespace:api:cache:auth_session-token', 'not json');
+      const storage = createRedisAuthStorage(client);
+      const record: StorageFailureRecord = { failed: false };
+
+      await expect(withStorageFailureRecord(record, async () => call(storage))).resolves.toBeUndefined();
+
+      expect(record.failed).toBe(false);
+    });
+
+    it("rethrows a failure outside a request unchanged, as AuthService's session read needs (#894)", async () => {
+      const error = new Error('Connection is closed.');
+      const { client } = recordingClient({ getError: error });
+
+      await expect(createRedisAuthStorage(client).get('session-token')).rejects.toBe(error);
+    });
   });
 });

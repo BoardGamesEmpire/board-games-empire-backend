@@ -2,8 +2,9 @@ export const AUTH_INSTANCE = Symbol('AUTH_INSTANCE');
 
 /**
  * better-auth's handler as the api serves it on `/api/auth/*`: its rate
- * limiter's 429 and a request it could not answer get a stable code and a
- * plain-language message (`createAuthRequestHandler`, #640).
+ * limiter's 429 (#640), a storage failure (503 `AUTH_UNAVAILABLE`) and any
+ * other failure that would answer an empty 500 (500 `AUTH_FAILED`, #894) get
+ * a stable code and a plain-language message (`createAuthRequestHandler`).
  */
 export const AUTH_REQUEST_HANDLER = Symbol('AUTH_REQUEST_HANDLER');
 
