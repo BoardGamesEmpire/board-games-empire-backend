@@ -1,3 +1,4 @@
+export * from './catalog-entry-check';
 export * from './catalog-guards';
 export * from './catalog-integrity';
 export * from './catalog-plan-report';

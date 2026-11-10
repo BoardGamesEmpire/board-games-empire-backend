@@ -587,3 +587,22 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
 };
 
 assertRolePermissionCatalog(ROLE_PERMISSION_CATALOG, PERMISSION_CATALOG);
+
+/**
+ * Grants a role should hold together. Read each pair as "the first is undone
+ * by the second": approving a member's invite lets it out to the invitee, and
+ * revoking takes an invite back. A role that approves with no revoke lets out
+ * an invite it cannot take back, and one that revokes with no approve can turn
+ * a member's invite down but never let it through.
+ *
+ * One first can have several seconds, and a role needs only one of them: a
+ * household owner revokes any invite, while a household admin's revoke stops
+ * at invites offering the member or guest role (#168). So a role is unpaired
+ * when it holds a first and none of the seconds paired with it, or a second
+ * without its first. No shipped role is. An edit on the server (#772) can
+ * leave a role unpaired, which is allowed with a warning rather than refused.
+ */
+export const PAIRED_GRANTS: readonly (readonly [PermissionSlug, PermissionSlug])[] = [
+  ['update:household_invite:approve', 'update:household_invite:revoke'],
+  ['update:household_invite:approve', 'update:household_invite:revoke:as-admin'],
+];
