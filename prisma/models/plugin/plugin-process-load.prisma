@@ -1,0 +1,29 @@
+/// The plugin artifact a running process loaded (#1094): one row per
+/// (process, plugin). A process writes its row before it reads the plugin's
+/// directory, refreshes `heartbeatAt` every minute, writes a row again if it
+/// has gone missing, and deletes its rows at a clean shutdown.
+/// The artifact sweep keeps the directory of any checksum a row with a fresh
+/// heartbeat names, so it never removes code a running process still uses. A
+/// process that dies without cleaning up leaves rows whose heartbeat goes
+/// stale, and the sweep stops honouring them after five minutes.
+///
+/// `processId` is a random id made when the process starts, not a database
+/// key: nothing else refers to it, so it is a plain String.
+model PluginProcessLoad {
+  processId String @map("process_id")
+
+  /// What kind of process wrote the row ('api', and the worker roles later).
+  processRole String @map("process_role")
+
+  slug String
+
+  /// SHA-256 of the plugin artifact the process loaded, lowercase hex.
+  sha256 String
+
+  loadedAt    DateTime @default(now()) @map("loaded_at") @db.Timestamptz(3)
+  heartbeatAt DateTime @default(now()) @map("heartbeat_at") @db.Timestamptz(3)
+
+  @@id([processId, slug])
+  @@index([heartbeatAt])
+  @@map("plugin_process_loads")
+}

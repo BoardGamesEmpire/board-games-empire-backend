@@ -1,10 +1,11 @@
 import { PluginActorScope, SystemActorScope } from '@bge/actor-context';
-import { DatabaseService, PluginCategory, PluginScope, type Plugin } from '@bge/database';
+import { DatabaseService, PluginCategory, PluginScope, Prisma, type Plugin } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import type { PluginArtifactDirectory, PluginContext } from '@boardgamesempire/plugin-contract';
 import { PluginEvent, buildPluginArtifactSha256 as sha } from '@boardgamesempire/plugin-contract';
 import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { validatePluginManifest } from '@boardgamesempire/plugin-manifest';
+import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -15,6 +16,7 @@ import { PluginDisabledEvent, PluginLoadFailedEvent } from '../events/plugin.eve
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './plugin-instance-registry';
+import { PluginLoadRecorder } from './plugin-load-recorder.service';
 import { PluginLoaderService } from './plugin-loader.service';
 import type { PluginModuleImporter } from './plugin-module-importer';
 
@@ -37,6 +39,7 @@ describe('PluginLoaderService', () => {
   let emitter: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
   let systemActorScope: jest.Mocked<Pick<SystemActorScope, 'run'>>;
   let pluginActorScope: jest.Mocked<Pick<PluginActorScope, 'run'>>;
+  let recorder: jest.Mocked<Pick<PluginLoadRecorder, 'record'>>;
   let loader: PluginLoaderService;
 
   const context: PluginContext = {} as PluginContext;
@@ -98,6 +101,7 @@ describe('PluginLoaderService', () => {
     pluginActorScope = {
       run: jest.fn(<T>(_pluginId: string, _unit: unknown, _reason: string, fn: () => T): T => fn()),
     } as unknown as jest.Mocked<Pick<PluginActorScope, 'run'>>;
+    recorder = { record: jest.fn().mockResolvedValue(undefined) };
     validateMock.mockReturnValue({
       manifest,
       permissionChecks: [],
@@ -116,6 +120,7 @@ describe('PluginLoaderService', () => {
       emitter as unknown as EventEmitter2,
       systemActorScope as unknown as SystemActorScope,
       pluginActorScope as unknown as PluginActorScope,
+      recorder as unknown as PluginLoadRecorder,
       options,
     );
   });
@@ -256,6 +261,92 @@ describe('PluginLoaderService', () => {
     });
   });
 
+  describe('load records (#1094)', () => {
+    const loadDemo = async (): Promise<Plugin> => {
+      const row = makePluginRow();
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
+      importer.importModule.mockResolvedValue({ default: jest.fn().mockReturnValue({}) });
+
+      return row;
+    };
+
+    it('records the artifact before anything is read from its directory, from the directory it runs (#1094)', async () => {
+      const row = await loadDemo();
+      // Captured, not asserted, inside the mock: the loader catches and logs
+      // whatever the recorder throws, so an expect failing in there would
+      // never fail the test.
+      const atRecord: { resolved: number; imported: number; registered: boolean }[] = [];
+      recorder.record.mockImplementation(() => {
+        atRecord.push({
+          resolved: directories.resolve.mock.calls.length,
+          imported: importer.importModule.mock.calls.length,
+          registered: registry.has(row.slug),
+        });
+        return Promise.resolve();
+      });
+
+      await loader.loadAllEnabled();
+
+      // Not even resolved yet: resolving reads the directory, and a sweep
+      // could remove it in the meantime.
+      expect(atRecord).toEqual([{ resolved: 0, imported: 0, registered: false }]);
+      expect(recorder.record).toHaveBeenCalledTimes(1);
+      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'));
+      expect(registry.resolve(row.slug).sha256).toBe(sha('a'));
+    });
+
+    it('a failed record is logged and neither retried nor quarantined: the heartbeat writes it again (#1094)', async () => {
+      const row = await loadDemo();
+      recorder.record.mockRejectedValue(new Error('db down'));
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+
+      await loader.loadAllEnabled();
+
+      expect(recorder.record).toHaveBeenCalledTimes(1);
+      expect(registry.isEnabled(row.slug)).toBe(true);
+      expect(configService.evict).not.toHaveBeenCalled();
+      expect(db.plugin.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(expect.stringContaining(`'${row.slug}'`));
+      error.mockRestore();
+    });
+
+    it('keeps the record of a plugin whose import fails, whose code may be partly loaded (#1094)', async () => {
+      const row = makePluginRow();
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
+      importer.importModule.mockRejectedValue(new Error('import failed'));
+
+      await loader.loadAllEnabled();
+
+      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'));
+      expect(db.plugin.update).toHaveBeenCalled();
+    });
+
+    it('keeps the record of a plugin whose directory cannot be resolved, as it keeps a failed import (#1094)', async () => {
+      const row = makePluginRow();
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockRejectedValue(new Error('no such directory'));
+
+      await loader.loadAllEnabled();
+
+      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'));
+      expect(db.plugin.update).toHaveBeenCalled();
+    });
+
+    it('records nothing for a checksum that is not one, and the resolver refuses it (#1094)', async () => {
+      const row = makePluginRow({ installedSha256: 'not-a-checksum' });
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockRejectedValue(new Error('checksum fails the pattern'));
+
+      await loader.loadAllEnabled();
+
+      expect(recorder.record).not.toHaveBeenCalled();
+      expect(db.plugin.update).toHaveBeenCalled();
+    });
+  });
+
   describe('quarantine on load failure', () => {
     it('force-disables in the DB, records the error, emits LoadFailed + Disabled, and continues to the next plugin', async () => {
       const broken = makePluginRow({ id: 'plugin-broken', slug: 'broken-sink' });
@@ -273,7 +364,7 @@ describe('PluginLoaderService', () => {
       await loader.loadAllEnabled();
 
       expect(db.plugin.update).toHaveBeenCalledWith({
-        where: { id: 'plugin-broken' },
+        where: { id: 'plugin-broken', installedSha256: 'a'.repeat(64) },
         data: { enabled: false, loadFailed: true, loadError: 'import exploded' },
         select: { id: true, slug: true, enabled: true, loadFailed: true, loadError: true },
       });
@@ -281,6 +372,59 @@ describe('PluginLoaderService', () => {
       expect(emitter.emit).toHaveBeenCalledWith(PluginEvent.Disabled, expect.any(PluginDisabledEvent));
       expect(registry.has('broken-sink')).toBe(false);
       expect(registry.isEnabled('healthy-sink')).toBe(true);
+    });
+
+    it('leaves a plugin whose row has moved on to another checksum enabled, and emits nothing (#1094)', async () => {
+      // An update approved while this process loaded the old checksum: that
+      // load failing says nothing about the version the row now names.
+      const moved = makePluginRow({ id: 'plugin-moved', slug: 'moved-sink' });
+      const healthy = makePluginRow({ id: 'plugin-ok', slug: 'healthy-sink' });
+      db.plugin.findMany.mockResolvedValue([moved, healthy]);
+      directories.resolve.mockImplementation(async (slug: string) => {
+        if (slug === 'moved-sink') {
+          throw new Error('no such directory');
+        }
+
+        return scaffoldDirectory(slug);
+      });
+      importer.importModule.mockResolvedValue({ default: jest.fn().mockReturnValue({}) });
+      db.plugin.update.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('No record was found for an update.', {
+          code: 'P2025',
+          clientVersion: 'test',
+        }),
+      );
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+
+      await loader.loadAllEnabled();
+
+      expect(db.plugin.update).toHaveBeenCalledTimes(1);
+      expect(db.plugin.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'plugin-moved', installedSha256: 'a'.repeat(64) } }),
+      );
+      expect(emitter.emit).not.toHaveBeenCalled();
+      expect(configService.evict).toHaveBeenCalledWith('moved-sink');
+      expect(registry.has('moved-sink')).toBe(false);
+      expect(registry.isEnabled('healthy-sink')).toBe(true);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(`'moved-sink'`));
+      expect(error).not.toHaveBeenCalledWith(expect.stringContaining('Failed to persist quarantine'));
+      warn.mockRestore();
+      error.mockRestore();
+    });
+
+    it('logs a quarantine the database refuses for another reason as a failure (#1094)', async () => {
+      const row = makePluginRow();
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockRejectedValue(new Error('no such directory'));
+      db.plugin.update.mockRejectedValue(new Error('connection lost'));
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+
+      await loader.loadAllEnabled();
+
+      expect(emitter.emit).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('Failed to persist quarantine'));
+      error.mockRestore();
     });
 
     it('evicts any primed config snapshot so a quarantined plugin stops serving config', async () => {

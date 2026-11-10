@@ -1,6 +1,10 @@
 import { PluginActorScope, SERVER_PLUGIN_UNIT, SystemActorScope } from '@bge/actor-context';
-import { DatabaseService, type Plugin } from '@bge/database';
-import type { PluginFactory } from '@boardgamesempire/plugin-contract';
+import { DatabaseService, isPrismaDependentRecordNotFoundError, type Plugin } from '@bge/database';
+import {
+  parsePluginArtifactSha256,
+  type PluginArtifactSha256,
+  type PluginFactory,
+} from '@boardgamesempire/plugin-contract';
 import { validatePluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -15,6 +19,7 @@ import { assertResolvedEntrypointContained, resolvePluginEntrypoint } from './en
 import { PluginDiskVersionMismatchError, PluginEntrypointError, PluginModuleShapeError } from './loader.errors';
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './plugin-instance-registry';
+import { PluginLoadRecorder } from './plugin-load-recorder.service';
 import { PLUGIN_MODULE_IMPORTER, type PluginModuleImporter } from './plugin-module-importer';
 
 /**
@@ -57,6 +62,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
     private readonly emitter: EventEmitter2,
     private readonly systemActorScope: SystemActorScope,
     private readonly pluginActorScope: PluginActorScope,
+    private readonly recorder: PluginLoadRecorder,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
   ) {}
 
@@ -96,6 +102,23 @@ export class PluginLoaderService implements OnApplicationBootstrap {
 
   private async loadOne(plugin: Plugin): Promise<void> {
     const manifest = this.validateManifest(plugin);
+
+    // Recorded before anything is read from the directory, resolving it
+    // included (#1094). Recorded after the import, a sweep could remove it
+    // mid-load, as when an update is approved during a rolling restart and
+    // the process that ran the old code shuts down. This narrows that window
+    // without closing it: the row was read before the earlier plugins loaded,
+    // and a sweep that read what to keep before this record still walks
+    // after it. A failed load never disables a plugin whose row has since
+    // moved on (see quarantine). A load that fails after this keeps the
+    // record until shutdown, and with it the directory, whose code may be
+    // partly imported. A checksum that is not one records nothing; the
+    // resolver refuses it.
+    const sha256 = parsePluginArtifactSha256(plugin.installedSha256);
+    if (sha256 !== null) {
+      await this.recordLoad(plugin.slug, sha256);
+    }
+
     const directory = await this.directories.resolve(plugin.slug, plugin.installedSha256);
 
     // Before anything else is read from the directory, and before any of its
@@ -136,6 +159,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
         slug: plugin.slug,
         category: plugin.category,
         scope: plugin.scope,
+        sha256: directory.sha256,
         manifest,
         instance,
       },
@@ -161,6 +185,22 @@ export class PluginLoaderService implements OnApplicationBootstrap {
       if (plugin.restartRequired) {
         this.logger.log(`Plugin '${plugin.slug}' v${plugin.version} loaded post-update — restartRequired cleared`);
       }
+    }
+  }
+
+  /**
+   * Records the artifact this process is about to run (#1094). Its failure
+   * never stops the load: it is logged, and the recorder's next heartbeat
+   * writes the record again.
+   */
+  private async recordLoad(slug: string, sha256: PluginArtifactSha256): Promise<void> {
+    try {
+      await this.recorder.record(slug, sha256);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `Failed to record the artifact plugin '${slug}' runs; the next heartbeat writes it again: ${message}`,
+      );
     }
   }
 
@@ -213,6 +253,12 @@ export class PluginLoaderService implements OnApplicationBootstrap {
    * and the audit pipeline picks them up identically to any mutation.
    * Its own failure is caught and logged: one broken quarantine must not
    * abort the remaining plugins' boot.
+   *
+   * It disables the row only while the row still names the checksum this
+   * process tried to load (#1094). An update approved, or an uninstall and
+   * reinstall, while the load ran has moved the row on, and the old
+   * artifact failing says nothing about the one the row names now; that
+   * row is left as it is, with a warning, and nothing is emitted.
    */
   private async quarantine(plugin: Plugin, err: unknown): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
@@ -225,7 +271,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
     try {
       const initiatedAt = new Date();
       const updated = await this.db.plugin.update({
-        where: { id: plugin.id },
+        where: { id: plugin.id, installedSha256: plugin.installedSha256 },
         data: { enabled: false, loadFailed: true, loadError: message },
         select: { id: true, slug: true, enabled: true, loadFailed: true, loadError: true },
       });
@@ -248,6 +294,13 @@ export class PluginLoaderService implements OnApplicationBootstrap {
         ),
       );
     } catch (persistErr) {
+      if (isPrismaDependentRecordNotFoundError(persistErr)) {
+        this.logger.warn(
+          `Left plugin '${plugin.slug}' enabled: its row no longer names the artifact that failed to load`,
+        );
+        return;
+      }
+
       this.logger.error(
         `Failed to persist quarantine for plugin '${plugin.slug}': ${
           persistErr instanceof Error ? persistErr.message : persistErr
