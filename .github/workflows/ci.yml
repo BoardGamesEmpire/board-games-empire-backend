@@ -41,8 +41,12 @@ concurrency:
 # to one doesn't put Renovate's runs back on Nx Cloud. The value reaches Nx as
 # the string 'true' or 'false', and Nx disconnects only on exactly 'true', so
 # every other run is unchanged.
+#
+# Any other app's PR stays off for the same reason, the bug agent's (#1192)
+# included: matched on the author being a bot account, so a new automation
+# needs no edit here.
 env:
-  NX_NO_CLOUD: ${{ github.event_name == 'pull_request' && (startsWith(github.head_ref, 'renovate/') || github.event.pull_request.user.login == 'renovate[bot]') }}
+  NX_NO_CLOUD: ${{ github.event_name == 'pull_request' && (startsWith(github.head_ref, 'renovate/') || github.event.pull_request.user.login == 'renovate[bot]' || github.event.pull_request.user.type == 'Bot') }}
   # Where the images publish (#600): `bge`, `bge-boardgamegeek-gateway` and
   # `bge-igdb-gateway` under it, Compose's local names for the three images.
   IMAGE_NAMESPACE: ghcr.io/boardgamesempire

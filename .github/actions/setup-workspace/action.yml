@@ -10,6 +10,20 @@ description: >-
   step below. The consuming job must check the repository out first (with
   fetch-depth: 0 for nx-set-shas).
 
+inputs:
+  save-caches:
+    description: >-
+      'false' restores the npm and node_modules caches but never saves them.
+      For a job that runs code nobody reviewed, such as the bug agent's
+      (#1192): an issue-triggered job saves into master's cache scope, so a
+      node_modules it altered would be restored by master's CI.
+    default: 'true'
+  set-shas:
+    description: >-
+      'false' skips nx-set-shas, for a job that runs no `affected` command. On
+      a non-PR event it reads workflow runs, which needs `actions: read`.
+    default: 'true'
+
 runs:
   using: composite
   steps:
@@ -17,7 +31,9 @@ runs:
       id: node
       with:
         node-version: 26
-        cache: 'npm'
+        # setup-node has no restore-only mode, so a job that must not save
+        # goes without the npm download cache: npm ci fetches instead.
+        cache: ${{ inputs.save-caches == 'true' && 'npm' || '' }}
 
     - name: Set up environment
       shell: bash
@@ -66,7 +82,23 @@ runs:
     # key of its own, since the key carries the architecture.
     - name: Restore node_modules
       id: node-modules
+      if: inputs.save-caches == 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          node_modules
+          apps/*/node_modules
+          libs/*/node_modules
+          libs/*/*/node_modules
+          libs/*/*/*/node_modules
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node${{ steps.node.outputs.node-version }}-${{ hashFiles('package-lock.json') }}
+
+    # The same entry, restored without the post step that would save it. See
+    # the `save-caches` input.
+    - name: Restore node_modules (no save)
+      id: node-modules-restore-only
+      if: inputs.save-caches != 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           node_modules
@@ -82,7 +114,7 @@ runs:
     # caught on the run that adds it, before any later run can skip `npm ci` and
     # silently resolve its un-hoisted dependencies to the hoisted versions.
     - name: Install dependencies
-      if: steps.node-modules.outputs.cache-hit != 'true'
+      if: steps.node-modules.outputs.cache-hit != 'true' && steps.node-modules-restore-only.outputs.cache-hit != 'true'
       shell: bash
       run: |
         set -euo pipefail
@@ -96,6 +128,7 @@ runs:
         fi
 
     - uses: nrwl/nx-set-shas@e602fada7ad5987b0f7b1905e7a99ea1c661514c # v5.1.0
+      if: inputs.set-shas == 'true'
       with:
         main-branch-name: master
 
