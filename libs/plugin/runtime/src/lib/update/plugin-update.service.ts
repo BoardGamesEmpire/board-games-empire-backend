@@ -303,7 +303,6 @@ export interface PluginUpdatePendingDescription {
   readonly noLongerRequested: readonly string[];
 }
 
-/** One enabled unit that owes re-consent under the activated manifest, with the slugs it has not yet granted. */
 /** Covering inputs for a slug the catalog has no row for: nothing confers. */
 const NO_CATALOG_ROW: Omit<ConsentCheckDecisionInput, 'grant'> = {
   currentRiskLevel: null,
@@ -311,6 +310,7 @@ const NO_CATALOG_ROW: Omit<ConsentCheckDecisionInput, 'grant'> = {
   unboundedUnitScope: false,
 };
 
+/** One enabled unit that owes re-consent under the activated manifest, with the slugs it has not yet granted. */
 interface ReconsentCandidate<TUnit> {
   readonly unit: TUnit;
   readonly outstanding: readonly string[];
