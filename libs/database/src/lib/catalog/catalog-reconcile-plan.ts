@@ -41,6 +41,8 @@ export interface RolePermissionSnapshotRow {
   readonly roleName: string;
   readonly permissionSlug: string;
   readonly managedBy: PermissionOwner;
+  /** Set when the grant is revoked: the row stays, and confers nothing (#772). */
+  readonly revokedAt: Date | null;
 }
 
 /** The current state of the three catalog tables, as `loadCatalogSnapshot` reads it. */
@@ -107,7 +109,7 @@ export interface RolePermissionEdge {
 
 /**
  * What a reconcile would do, decided before anything is written. Mutations
- * are `create`, `update`, `revive`, `retire` and `delete`; the rest is the
+ * are `create`, `update`, `revive`, `retire`, `restore` and `delete`; the rest is the
  * drift report — rows the reconciler saw and deliberately left alone. A
  * non-empty `conflicts` anywhere stops the apply before its first write.
  */
@@ -138,8 +140,12 @@ export interface ReconcilePlan {
   };
   readonly rolePermissions: {
     readonly create: readonly RolePermissionEdge[];
-    /** `System` edge the manifest no longer lists → deleted; this is how a grant is revoked. */
+    /** Listed `System` edge that is revoked (`revokedAt` set) → `revokedAt` cleared; the grant is back (#772). */
+    readonly restore: readonly RolePermissionEdge[];
+    /** `System` edge the manifest no longer lists → deleted (revoked or not); this is how a grant is removed. */
     readonly delete: readonly RolePermissionEdge[];
+    /** Listed `Admin` edge that is revoked → left revoked; the report says so (#772). */
+    readonly skipped: readonly RolePermissionEdge[];
     /** Edge the manifest does not list and the reconciler does not own → left alone. */
     readonly retained: readonly RolePermissionSnapshotRow[];
     readonly conflicts: readonly RolePermissionEdge[];
@@ -186,6 +192,7 @@ export function countMutations(plan: ReconcilePlan): number {
     plan.roles.create.length +
     plan.roles.update.length +
     plan.rolePermissions.create.length +
+    plan.rolePermissions.restore.length +
     plan.rolePermissions.delete.length
   );
 }
@@ -205,7 +212,8 @@ export interface ReconcileCounts {
   readonly rolesCreated: number;
   readonly rolesUpdated: number;
   readonly grantsCreated: number;
-  readonly grantsRevoked: number;
+  readonly grantsRestored: number;
+  readonly grantsRemoved: number;
   readonly mutations: number;
 }
 
@@ -218,7 +226,8 @@ export function reconcileCounts(plan: ReconcilePlan): ReconcileCounts {
     rolesCreated: plan.roles.create.length,
     rolesUpdated: plan.roles.update.length,
     grantsCreated: plan.rolePermissions.create.length,
-    grantsRevoked: plan.rolePermissions.delete.length,
+    grantsRestored: plan.rolePermissions.restore.length,
+    grantsRemoved: plan.rolePermissions.delete.length,
     mutations: countMutations(plan),
   };
 }
@@ -338,7 +347,9 @@ function planRoles(manifest: CatalogManifest, snapshot: CatalogSnapshot): Reconc
 
 function planRolePermissions(manifest: CatalogManifest, snapshot: CatalogSnapshot): ReconcilePlan['rolePermissions'] {
   const create: RolePermissionEdge[] = [];
+  const restore: RolePermissionEdge[] = [];
   const remove: RolePermissionEdge[] = [];
+  const skipped: RolePermissionEdge[] = [];
   const retained: RolePermissionSnapshotRow[] = [];
   const conflicts: RolePermissionEdge[] = [];
 
@@ -358,8 +369,17 @@ function planRolePermissions(manifest: CatalogManifest, snapshot: CatalogSnapsho
 
       switch (row.managedBy) {
         case PermissionOwner.System:
+          // The pair IS the row, so a live edge has nothing to converge. A
+          // revoked one the catalog lists again is handed back (#772).
+          if (row.revokedAt !== null) {
+            restore.push({ roleName, permissionSlug });
+          }
+          break;
         case PermissionOwner.Admin:
-          // The pair IS the row: an edge that exists has nothing to converge.
+          // An Owner's edge: left as it is, and a revocation on it is reported.
+          if (row.revokedAt !== null) {
+            skipped.push({ roleName, permissionSlug });
+          }
           break;
         case PermissionOwner.Plugin:
           conflicts.push({ roleName, permissionSlug });
@@ -388,7 +408,7 @@ function planRolePermissions(manifest: CatalogManifest, snapshot: CatalogSnapsho
     }
   }
 
-  return { create, delete: remove, retained, conflicts };
+  return { create, restore, delete: remove, skipped, retained, conflicts };
 }
 
 /** NUL as the separator: neither a role name nor a slug can contain it, so two pairs cannot share a key. */

@@ -223,6 +223,7 @@ const edgeRow = (overrides: Partial<RolePermissionSnapshotRow> = {}): RolePermis
   roleName: SystemRole.User,
   permissionSlug: 'read:game',
   managedBy: PermissionOwner.System,
+  revokedAt: null,
   ...overrides,
 });
 
@@ -319,6 +320,50 @@ describe('planReconcile — the RolePermission table', () => {
     expect(plan.rolePermissions.create).toEqual([]);
   });
 
+  it('restores a revoked System grant the catalog lists (772)', () => {
+    const plan = planReconcile(
+      manifest({ rolePermissions: { [SystemRole.User]: ['read:game'] } }),
+      snapshot({ rolePermissions: [edgeRow({ revokedAt: new Date('2026-11-01T00:00:00Z') })] }),
+    );
+
+    expect(plan.rolePermissions.restore).toEqual([{ roleName: 'User', permissionSlug: 'read:game' }]);
+    expect(plan.rolePermissions.create).toEqual([]);
+    expect(plan.rolePermissions.delete).toEqual([]);
+    expect(countMutations(plan)).toBe(1);
+    expect(reconcileCounts(plan).grantsRestored).toBe(1);
+  });
+
+  it('keeps a revoked Admin grant the catalog lists and reports it (772)', () => {
+    const plan = planReconcile(
+      manifest({ rolePermissions: { [SystemRole.User]: ['read:game'] } }),
+      snapshot({
+        rolePermissions: [edgeRow({ managedBy: PermissionOwner.Admin, revokedAt: new Date('2026-11-01T00:00:00Z') })],
+      }),
+    );
+
+    expect(plan.rolePermissions.restore).toEqual([]);
+    expect(plan.rolePermissions.skipped).toEqual([{ roleName: 'User', permissionSlug: 'read:game' }]);
+    expect(countMutations(plan)).toBe(0);
+  });
+
+  it('deletes an unlisted System grant whether or not it is revoked (772)', () => {
+    const plan = planReconcile(
+      manifest(),
+      snapshot({
+        rolePermissions: [
+          edgeRow({ permissionSlug: 'read:game' }),
+          edgeRow({ permissionSlug: 'read:job', revokedAt: new Date('2026-11-01T00:00:00Z') }),
+        ],
+      }),
+    );
+
+    expect(plan.rolePermissions.delete).toEqual([
+      { roleName: 'User', permissionSlug: 'read:game' },
+      { roleName: 'User', permissionSlug: 'read:job' },
+    ]);
+    expect(plan.rolePermissions.restore).toEqual([]);
+  });
+
   it('has nothing to converge for a listed edge that already exists, whoever owns it', () => {
     const plan = planReconcile(
       manifest({ rolePermissions: { [SystemRole.User]: ['read:game', 'read:job'] } }),
@@ -327,7 +372,14 @@ describe('planReconcile — the RolePermission table', () => {
       }),
     );
 
-    expect(plan.rolePermissions).toEqual({ create: [], delete: [], retained: [], conflicts: [] });
+    expect(plan.rolePermissions).toEqual({
+      create: [],
+      restore: [],
+      delete: [],
+      skipped: [],
+      retained: [],
+      conflicts: [],
+    });
   });
 
   it('retains an absent edge it does not own, and treats a Plugin-owned listed edge as a conflict', () => {
@@ -343,7 +395,7 @@ describe('planReconcile — the RolePermission table', () => {
 
     expect(plan.rolePermissions.conflicts).toEqual([{ roleName: SystemRole.User, permissionSlug: 'read:game' }]);
     expect(plan.rolePermissions.retained).toEqual([
-      { roleName: SystemRole.User, permissionSlug: 'delete:game', managedBy: PermissionOwner.Admin },
+      { roleName: SystemRole.User, permissionSlug: 'delete:game', managedBy: PermissionOwner.Admin, revokedAt: null },
     ]);
     expect(plan.rolePermissions.delete).toEqual([]);
   });
@@ -434,7 +486,8 @@ describe('planReconcile — normalisation and the mutation count', () => {
       rolesCreated: 1,
       rolesUpdated: 0,
       grantsCreated: 1,
-      grantsRevoked: 0,
+      grantsRestored: 0,
+      grantsRemoved: 0,
       mutations: 5,
     });
   });

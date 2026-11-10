@@ -19,7 +19,7 @@ import {
 const emptyPlan = (): ReconcilePlan => ({
   permissions: { create: [], update: [], revive: [], retire: [], skipped: [], retained: [], conflicts: [] },
   roles: { create: [], update: [], skipped: [], orphans: [], conflicts: [] },
-  rolePermissions: { create: [], delete: [], retained: [], conflicts: [] },
+  rolePermissions: { create: [], restore: [], delete: [], skipped: [], retained: [], conflicts: [] },
 });
 
 describe('what a reconcile says', () => {
@@ -37,11 +37,12 @@ describe('what a reconcile says', () => {
       rolePermissions: {
         ...emptyPlan().rolePermissions,
         delete: [{ roleName: SystemRole.User, permissionSlug: 'read:quota' }],
+        restore: [{ roleName: SystemRole.User, permissionSlug: 'read:game' }],
       },
     };
 
     expect(summarizePlan(plan)).toBe(
-      'Catalog reconcile: permissions +1 ~0 revived 1 retired 2; roles +0 ~0; grants +0 -1',
+      'Catalog reconcile: permissions +1 ~0 revived 1 retired 2; roles +0 ~0; grants +0 -1 restored 1',
     );
   });
 
@@ -66,6 +67,7 @@ describe('what a reconcile says', () => {
         ...emptyPlan().rolePermissions,
         create: [{ roleName: SystemRole.User, permissionSlug: 'read:game' }],
         delete: [{ roleName: SystemRole.Moderator, permissionSlug: 'read:quota' }],
+        restore: [{ roleName: SystemRole.User, permissionSlug: 'read:game' }],
       },
     };
 
@@ -74,7 +76,8 @@ describe('what a reconcile says', () => {
       `permission 'read:job' revived`,
       `permission 'read:quota' retired`,
       `role 'Admin' updated: description "Old" → "Full access"`,
-      `grant 'Moderator → read:quota' revoked`,
+      `grant 'Moderator → read:quota' removed`,
+      `grant 'User → read:game' restored`,
     ]);
   });
 
@@ -97,7 +100,10 @@ describe('what a reconcile says', () => {
       rolePermissions: {
         ...emptyPlan().rolePermissions,
         delete: [{ roleName: 'Librarian', permissionSlug: 'read:quota' }],
-        retained: [{ roleName: 'Librarian', permissionSlug: 'read:game', managedBy: PermissionOwner.Admin }],
+        skipped: [{ roleName: 'User', permissionSlug: 'read:game' }],
+        retained: [
+          { roleName: 'Librarian', permissionSlug: 'read:game', managedBy: PermissionOwner.Admin, revokedAt: null },
+        ],
       },
     };
 
@@ -105,7 +111,8 @@ describe('what a reconcile says', () => {
       `Admin-owned permission 'read:game' left alone; drift: riskLevel "Critical" → "Low"`,
       `Admin-owned permission 'read:job' left alone; no drift`,
       `Plugin-owned permission 'read:quota' is not in the manifest; retained`,
-      `System-owned role 'Librarian' is not in the manifest; the row is kept, 1 of its System grants is revoked`,
+      `System-owned role 'Librarian' is not in the manifest; the row is kept, 1 of its System grants is removed`,
+      `grant 'User → read:game' was revoked on this server`,
       `Admin-owned grant 'Librarian → read:game' is not in the manifest; retained`,
     ]);
   });
@@ -169,6 +176,8 @@ describe('applyReconcilePlan — a batch statement that writes fewer rows than p
       rolePermission: {
         deleteMany: async ({ where }: { where: { OR: unknown[] } }) =>
           count('rolePermission.deleteMany', where.OR.length),
+        updateMany: async ({ where }: { where: { OR: unknown[] } }) =>
+          count('rolePermission.updateMany', where.OR.length),
         createMany: async ({ data }: { data: unknown[] }) => count('rolePermission.createMany', data.length),
       },
     } as unknown as Prisma.TransactionClient;
@@ -189,6 +198,7 @@ describe('applyReconcilePlan — a batch statement that writes fewer rows than p
     rolePermissions: {
       ...emptyPlan().rolePermissions,
       delete: [{ roleName: SystemRole.Moderator, permissionSlug: 'read:quota' }],
+      restore: [{ roleName: SystemRole.Admin, permissionSlug: 'read:job' }],
       create: [
         { roleName: SystemRole.User, permissionSlug: 'read:game' },
         { roleName: SystemRole.User, permissionSlug: 'read:media' },
@@ -206,6 +216,7 @@ describe('applyReconcilePlan — a batch statement that writes fewer rows than p
       'permission.updateMany',
       'role.createMany',
       'rolePermission.deleteMany',
+      'rolePermission.updateMany',
       'rolePermission.createMany',
     ]);
   });
@@ -220,17 +231,24 @@ describe('applyReconcilePlan — a batch statement that writes fewer rows than p
     expect(calls.at(-1)).toBe('rolePermission.createMany');
   });
 
-  it('checks the retire and revoke statements the same way, before anything that follows them', async () => {
+  it('checks the retire, remove and restore statements the same way, before anything that follows them', async () => {
     const retire = fakeTx({ statement: 'permission.updateMany', by: 2 });
     await expect(applyReconcilePlan(retire.tx, CATALOG_MANIFEST, plan)).rejects.toThrow(
       /permission\.updateMany wrote 0 of 2 planned row/,
     );
     expect(retire.calls).toEqual(['permission.createMany', 'permission.updateMany']);
 
-    const revoke = fakeTx({ statement: 'rolePermission.deleteMany', by: 1 });
-    await expect(applyReconcilePlan(revoke.tx, CATALOG_MANIFEST, plan)).rejects.toThrow(
+    const remove = fakeTx({ statement: 'rolePermission.deleteMany', by: 1 });
+    await expect(applyReconcilePlan(remove.tx, CATALOG_MANIFEST, plan)).rejects.toThrow(
       /rolePermission\.deleteMany wrote 0 of 1 planned row/,
     );
-    expect(revoke.calls).not.toContain('rolePermission.createMany');
+    expect(remove.calls).not.toContain('rolePermission.createMany');
+
+    // A revoked grant someone handed back or removed under the plan is a short write too (#772).
+    const restore = fakeTx({ statement: 'rolePermission.updateMany', by: 1 });
+    await expect(applyReconcilePlan(restore.tx, CATALOG_MANIFEST, plan)).rejects.toThrow(
+      /rolePermission\.updateMany wrote 0 of 1 planned row/,
+    );
+    expect(restore.calls).not.toContain('rolePermission.createMany');
   });
 });

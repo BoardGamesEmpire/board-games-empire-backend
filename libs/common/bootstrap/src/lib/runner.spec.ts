@@ -88,7 +88,8 @@ const NO_WRITES: ReconcileSummary = {
   rolesCreated: 0,
   rolesUpdated: 0,
   grantsCreated: 0,
-  grantsRevoked: 0,
+  grantsRestored: 0,
+  grantsRemoved: 0,
   mutations: 0,
   cachesFlushed: false,
 };

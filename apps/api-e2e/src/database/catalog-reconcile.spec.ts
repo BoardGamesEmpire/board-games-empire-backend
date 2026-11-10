@@ -85,7 +85,7 @@ describe('catalog reconciler against Postgres', () => {
     expect(await db.client.permission.count({ where: { retiredAt: { not: null } } })).toBe(0);
   });
 
-  it('revokes a grant the manifest drops, logs the write, and restores it when the manifest lists it again', async () => {
+  it('removes a grant the manifest drops, logs the write, and restores it when the manifest lists it again', async () => {
     expect(await grantCount(SystemRole.User, 'read:game')).toBe(1);
     const logged: string[] = [];
 
@@ -95,8 +95,8 @@ describe('catalog reconciler against Postgres', () => {
 
     expect(dropped.mutations).toBe(1);
     expect(logged).toEqual([
-      'Catalog reconcile: permissions +0 ~0 revived 0 retired 0; roles +0 ~0; grants +0 -1',
-      `grant 'User → read:game' revoked`,
+      'Catalog reconcile: permissions +0 ~0 revived 0 retired 0; roles +0 ~0; grants +0 -1 restored 0',
+      `grant 'User → read:game' removed`,
     ]);
     expect(dropped.plan.rolePermissions.delete).toEqual([{ roleName: 'User', permissionSlug: 'read:game' }]);
     expect(await grantCount(SystemRole.User, 'read:game')).toBe(0);
@@ -105,6 +105,35 @@ describe('catalog reconciler against Postgres', () => {
 
     expect(restored.plan.rolePermissions.create).toEqual([{ roleName: 'User', permissionSlug: 'read:game' }]);
     expect(await grantCount(SystemRole.User, 'read:game')).toBe(1);
+  });
+
+  it('keeps a revoked shipped grant across a restart, and restores it once it is handed back (772)', async () => {
+    const where = { role: { name: SystemRole.User }, permission: { slug: 'read:game' } };
+    const grant = () => db.client.rolePermission.findFirstOrThrow({ where });
+    const revokedAt = new Date('2026-11-01T00:00:00.000Z');
+
+    try {
+      await db.client.rolePermission.updateMany({ where, data: { managedBy: PermissionOwner.Admin, revokedAt } });
+
+      const kept = await reconcileCatalog(db.client, CATALOG_MANIFEST, { logger: silent });
+
+      expect(kept.mutations).toBe(0);
+      expect(kept.plan.rolePermissions.skipped).toEqual([{ roleName: 'User', permissionSlug: 'read:game' }]);
+      expect(await grant()).toMatchObject({ managedBy: PermissionOwner.Admin, revokedAt });
+
+      await db.client.rolePermission.updateMany({ where, data: { managedBy: PermissionOwner.System } });
+
+      const restored = await reconcileCatalog(db.client, CATALOG_MANIFEST, { logger: silent });
+
+      expect(restored.plan.rolePermissions.restore).toEqual([{ roleName: 'User', permissionSlug: 'read:game' }]);
+      expect(await grant()).toMatchObject({ managedBy: PermissionOwner.System, revokedAt: null });
+    } finally {
+      // Later specs share this catalog: the afterEach reconcile leaves an Admin row alone.
+      await db.client.rolePermission.updateMany({
+        where,
+        data: { managedBy: PermissionOwner.System, revokedAt: null },
+      });
+    }
   });
 
   it('retires a permission the manifest drops, then revives the SAME row and its grants when it returns', async () => {

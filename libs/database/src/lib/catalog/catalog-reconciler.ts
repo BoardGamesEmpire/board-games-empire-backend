@@ -201,7 +201,12 @@ export async function loadCatalogSnapshot(client: Prisma.TransactionClient): Pro
   });
   const roles = await client.role.findMany({ select: { name: true, description: true, managedBy: true } });
   const edges = await client.rolePermission.findMany({
-    select: { managedBy: true, role: { select: { name: true } }, permission: { select: { slug: true } } },
+    select: {
+      managedBy: true,
+      revokedAt: true,
+      role: { select: { name: true } },
+      permission: { select: { slug: true } },
+    },
   });
 
   return {
@@ -211,14 +216,15 @@ export async function loadCatalogSnapshot(client: Prisma.TransactionClient): Pro
       roleName: edge.role.name,
       permissionSlug: edge.permission.slug,
       managedBy: edge.managedBy,
+      revokedAt: edge.revokedAt,
     })),
   };
 }
 
 /**
  * Performs the plan's writes and nothing else, in dependency order:
- * permissions, then roles, then the edges between them (deletes before
- * creates). Every write on an existing row is guarded by `managedBy: System`,
+ * permissions, then roles, then the edges between them (deletes, then
+ * restores, then creates). Every write on an existing row is guarded by `managedBy: System`,
  * so a row whose ownership changed between the snapshot and the write is
  * never clobbered. A single-row `update` that finds no row throws on its own.
  * The batch statements (`updateMany`, `deleteMany`, and `createMany` with
@@ -291,7 +297,7 @@ export async function applyReconcilePlan(
     });
   }
 
-  const edges = [...plan.rolePermissions.delete, ...plan.rolePermissions.create];
+  const edges = [...plan.rolePermissions.delete, ...plan.rolePermissions.restore, ...plan.rolePermissions.create];
   if (edges.length === 0) {
     return;
   }
@@ -324,6 +330,18 @@ export async function applyReconcilePlan(
     assertWrote('rolePermission.deleteMany', count, plan.rolePermissions.delete.length);
   }
 
+  if (plan.rolePermissions.restore.length > 0) {
+    const { count } = await tx.rolePermission.updateMany({
+      where: {
+        managedBy: PermissionOwner.System,
+        revokedAt: { not: null },
+        OR: plan.rolePermissions.restore.map(resolve),
+      },
+      data: { revokedAt: null },
+    });
+    assertWrote('rolePermission.updateMany', count, plan.rolePermissions.restore.length);
+  }
+
   if (plan.rolePermissions.create.length > 0) {
     const { count } = await tx.rolePermission.createMany({
       data: plan.rolePermissions.create.map((edge) => ({ ...resolve(edge), managedBy: PermissionOwner.System })),
@@ -352,14 +370,15 @@ export function summarizePlan(plan: ReconcilePlan): string {
     `Catalog reconcile: permissions +${permissions.create.length} ~${permissions.update.length} ` +
     `revived ${permissions.revive.length} retired ${permissions.retire.length}; ` +
     `roles +${roles.create.length} ~${roles.update.length}; ` +
-    `grants +${rolePermissions.create.length} -${rolePermissions.delete.length}`
+    `grants +${rolePermissions.create.length} -${rolePermissions.delete.length} ` +
+    `restored ${rolePermissions.restore.length}`
   );
 }
 
 /**
  * Every write that changes or removes authority, one line each: updated
  * permissions and roles with their field changes, revived and retired slugs,
- * revoked grants. Creates only add and stay counted by the summary — the
+ * removed and restored grants. Creates only add and stay counted by the summary — the
  * first run would otherwise print one line per catalog entry.
  */
 export function describeWrites(plan: ReconcilePlan): string[] {
@@ -378,7 +397,10 @@ export function describeWrites(plan: ReconcilePlan): string[] {
     lines.push(`role '${name}' updated: ${formatChanges(changes)}`);
   }
   for (const { roleName, permissionSlug } of plan.rolePermissions.delete) {
-    lines.push(`grant '${roleName} → ${permissionSlug}' revoked`);
+    lines.push(`grant '${roleName} → ${permissionSlug}' removed`);
+  }
+  for (const { roleName, permissionSlug } of plan.rolePermissions.restore) {
+    lines.push(`grant '${roleName} → ${permissionSlug}' restored`);
   }
 
   return lines;
@@ -402,12 +424,15 @@ export function describeDrift(plan: ReconcilePlan): string[] {
   }
   for (const name of plan.roles.orphans) {
     // The row is kept — that is what "never mutated" covers; its System grants
-    // follow the RolePermission rule and are revoked with the rest.
-    const revoked = plan.rolePermissions.delete.filter((edge) => edge.roleName === name).length;
+    // follow the RolePermission rule and are removed with the rest.
+    const removed = plan.rolePermissions.delete.filter((edge) => edge.roleName === name).length;
     lines.push(
-      `System-owned role '${name}' is not in the manifest; the row is kept, ${revoked} of its System grants ` +
-        `${revoked === 1 ? 'is' : 'are'} revoked`,
+      `System-owned role '${name}' is not in the manifest; the row is kept, ${removed} of its System grants ` +
+        `${removed === 1 ? 'is' : 'are'} removed`,
     );
+  }
+  for (const { roleName, permissionSlug } of plan.rolePermissions.skipped) {
+    lines.push(`grant '${roleName} → ${permissionSlug}' was revoked on this server`);
   }
   for (const { roleName, permissionSlug, managedBy } of plan.rolePermissions.retained) {
     lines.push(`${managedBy}-owned grant '${roleName} → ${permissionSlug}' is not in the manifest; retained`);

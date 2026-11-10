@@ -298,6 +298,10 @@ _Avoid_: severity, sensitivity
 A core permission that a newer version of the server has dropped. It is kept so its name is never reused, but confers nothing, even through roles or keys that still list it.
 _Avoid_: tombstone, deleted permission
 
+**Revoked grant**:
+A grant the server ships that the Owner took away on this server. It is kept, so the next start doesn't give it back, and confers nothing until it is handed back.
+_Avoid_: deleted grant
+
 **Fail-open grant**:
 A scoped role holding a permission with no condition, so it reaches every matching record on the server rather than only its own household or event.
 _Avoid_: unconditioned scoped grant

@@ -9,7 +9,7 @@ import type { ReconcilePlan } from './catalog-reconcile-plan';
 const emptyPlan = (): ReconcilePlan => ({
   permissions: { create: [], update: [], revive: [], retire: [], skipped: [], retained: [], conflicts: [] },
   roles: { create: [], update: [], skipped: [], orphans: [], conflicts: [] },
-  rolePermissions: { create: [], delete: [], retained: [], conflicts: [] },
+  rolePermissions: { create: [], restore: [], delete: [], skipped: [], retained: [], conflicts: [] },
 });
 
 const pending = (): ReconcilePlan => ({
@@ -32,7 +32,7 @@ describe('describePlanReport', () => {
 
     expect(report.exitCode).toBe(0);
     expect(report.lines).toContain(
-      '  Catalog reconcile: permissions +0 ~0 revived 0 retired 0; roles +0 ~0; grants +0 -0',
+      '  Catalog reconcile: permissions +0 ~0 revived 0 retired 0; roles +0 ~0; grants +0 -0 restored 0',
     );
     expect(report.lines).toContain('Catalog: converged, nothing to write.');
     expect(report.lines.at(-1)).toBe('Catalog: converged, nothing to write.');
@@ -44,7 +44,7 @@ describe('describePlanReport', () => {
     expect(report.exitCode).toBe(1);
     expect(report.lines[0]).toMatch(/^Plan only; nothing is written\./);
     expect(report.lines).toContain(
-      '  Catalog reconcile: permissions +1 ~0 revived 0 retired 0; roles +0 ~0; grants +1 -0',
+      '  Catalog reconcile: permissions +1 ~0 revived 0 retired 0; roles +0 ~0; grants +1 -0 restored 0',
     );
     expect(report.lines).toContain('Catalog: 2 row(s) to write.');
   });
