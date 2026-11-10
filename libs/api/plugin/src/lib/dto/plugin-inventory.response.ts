@@ -232,8 +232,9 @@ class UnitStateDto implements PluginInventoryUnitState {
       'admin, not as a prompt the household or user can accept. ' +
       'needs_configuration: the retained configuration no longer fits the active schema; supplying a conforming ' +
       'document heals it. unavailable: switched on, but the server cannot run it for this unit, because the ' +
-      'server switch is off (serverEnabled false) or the plugin no longer has this axis; only a server admin ' +
-      'restores it. Worked out on every read, never stored.',
+      'server switch is off (serverEnabled false), the stored manifest cannot be read (manifestUnreadable true) ' +
+      'or the plugin no longer has this axis; only a server admin restores it. Worked out on every read, never ' +
+      'stored.',
   })
   state!: PluginUnitStateCode;
 

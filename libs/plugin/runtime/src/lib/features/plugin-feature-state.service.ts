@@ -284,6 +284,9 @@ export class PluginFeatureStateService {
       // since the switch is not theirs to flip (#1149).
       enabled: unit.scopeType === 'Server' ? plugin.enabled : unitState.enabled,
       serverEnabled: plugin.enabled,
+      // `revalidateStoredManifest` above threw for an unreadable manifest, so
+      // a read that reaches this point has a readable one.
+      manifestUnreadable: false,
       dormantReason: unitState.dormantReason,
       outstandingCount: consent.outstanding.length,
     });

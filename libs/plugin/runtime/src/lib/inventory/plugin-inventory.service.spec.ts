@@ -565,7 +565,7 @@ describe('PluginInventoryService', () => {
       ]);
     });
 
-    it('a row whose manifest cannot be read keeps its marker and reports an empty standing (#1149)', async () => {
+    it('a row whose manifest cannot be read keeps its marker, reads unavailable and reports an empty standing (#1149)', async () => {
       db.plugin.findMany.mockResolvedValue([
         householdRow({ scope: PluginScope.Household, manifestJson: { nonsense: true } }, [
           { enabled: true, dormantReason: null },
@@ -576,10 +576,12 @@ describe('PluginInventoryService', () => {
       const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
       expect(rows[0].manifestUnreadable).toBe(true);
+      // `on` would tell a client announcing the code alone that the unit runs,
+      // while the ability path refuses an unreadable manifest (PR #1155 review).
       expect(rows[0].unit).toEqual({
         anchored: true,
         enabled: true,
-        state: 'on',
+        state: 'unavailable',
         consent: { outstanding: [], optionalOff: [] },
       });
       expect(db.pluginGrant.findMany).not.toHaveBeenCalled();

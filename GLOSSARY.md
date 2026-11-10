@@ -1163,7 +1163,7 @@ Retyping each Critical-risk permission that an install or update gives server co
 _Avoid_: second factor, typed confirmation
 
 **Unit enablement**:
-A household's or user's own participation in a plugin: their on/off choice and their settings. A household creates it by switching the plugin on; a user's is created by their first grant. A client receives one of five state codes for a unit: `off` (not switched on, or no unit enablement), `on` (running with everything the plugin asks for), `review_pending` (running on what was agreed while a required permission is outstanding), `needs_configuration` (switched on but its settings no longer fit the plugin) and `unavailable` (switched on, but the server cannot run it for this unit: the server switch is off, or this version has no surface at the unit's scope).
+A household's or user's own participation in a plugin: their on/off choice and their settings. A household creates it by switching the plugin on; a user's is created by their first grant. A client receives one of five state codes for a unit: `off` (not switched on, or no unit enablement), `on` (running with everything the plugin asks for), `review_pending` (running on what was agreed while a required permission is outstanding), `needs_configuration` (switched on but its settings no longer fit the plugin) and `unavailable` (switched on, but the server cannot run it for this unit: the server switch is off, the stored manifest cannot be read, or this version has no surface at the unit's scope).
 _Avoid_: enablement row, anchor, enrolled, unit row
 
 **Re-consent**:

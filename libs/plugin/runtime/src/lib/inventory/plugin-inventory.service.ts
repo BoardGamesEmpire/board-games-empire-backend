@@ -182,8 +182,9 @@ export interface PluginInventoryUnitState {
    * the household entry's `dormantReason` used to say, the review pending
    * that the stored suspension flag used to say (#1149; #1061, #1063, #1147),
    * and the server switch: a switched-on unit under a plugin a server admin
-   * switched off reads `unavailable`, and `serverEnabled` on the entry says
-   * which of its two causes applies.
+   * switched off reads `unavailable`, as does one whose stored manifest
+   * cannot be read, since the ability path refuses it; `serverEnabled` and
+   * `manifestUnreadable` on the entry say which of its causes applies.
    */
   readonly state: PluginUnitStateCode;
   /**
@@ -667,9 +668,11 @@ export class PluginInventoryService {
    *
    * The standing is resolved here, per row, from the manifest already
    * re-validated for the localized fields. A row whose manifest cannot be
-   * read keeps its marker and owes nothing, since nothing manifest-derived
-   * about it can be trusted. The per-row classification is accepted for now;
-   * caching is deferred.
+   * read keeps its marker, owes nothing, since nothing manifest-derived
+   * about it can be trusted, and reads `unavailable` rather than `on`: the
+   * ability path refuses such a manifest, so a client announcing the code
+   * alone must not hear that the unit runs (PR #1155 review). The per-row
+   * classification is accepted for now; caching is deferred.
    */
   private async toUnitInventoryEntry(
     row: UnitRow,
@@ -687,7 +690,7 @@ export class PluginInventoryService {
       ...this.identityOf(row),
       serverEnabled: row.enabled,
       ...this.localize(validated, locale),
-      unit: this.toUnitState(unitRow, row.enabled, consent),
+      unit: this.toUnitState(unitRow, row.enabled, validated === null, consent),
     };
   }
 
@@ -699,6 +702,7 @@ export class PluginInventoryService {
   private toUnitState(
     row: UnitStateRow | undefined,
     serverEnabled: boolean,
+    manifestUnreadable: boolean,
     consent: PluginConsentStanding,
   ): PluginInventoryUnitState {
     const anchored = row !== undefined;
@@ -711,6 +715,7 @@ export class PluginInventoryService {
         anchored,
         enabled,
         serverEnabled,
+        manifestUnreadable,
         dormantReason: row?.dormantReason ?? null,
         outstandingCount: consent.outstanding.length,
       }),

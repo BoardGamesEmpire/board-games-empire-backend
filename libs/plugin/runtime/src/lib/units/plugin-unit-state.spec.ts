@@ -4,7 +4,14 @@ import { derivePluginUnitState, PLUGIN_UNIT_STATE_CODES, type PluginUnitStateCod
 describe('derivePluginUnitState (#1149)', () => {
   type Input = Parameters<typeof derivePluginUnitState>[0];
 
-  const base: Input = { anchored: true, enabled: true, serverEnabled: true, dormantReason: null, outstandingCount: 0 };
+  const base: Input = {
+    anchored: true,
+    enabled: true,
+    serverEnabled: true,
+    manifestUnreadable: false,
+    dormantReason: null,
+    outstandingCount: 0,
+  };
 
   // Precedence, strongest first (#1149): off, unavailable,
   // needs_configuration, review_pending, on.
@@ -17,10 +24,26 @@ describe('derivePluginUnitState (#1149)', () => {
         anchored: true,
         enabled: false,
         serverEnabled: false,
+        manifestUnreadable: true,
         dormantReason: PluginUnitDormantReason.ScopeOrphaned,
         outstandingCount: 3,
       },
       'off',
+    ],
+    [
+      'a stored manifest the server cannot read reads unavailable: the ability refuses it, so nothing runs',
+      { ...base, manifestUnreadable: true },
+      'unavailable',
+    ],
+    [
+      'an unreadable manifest outranks a non-conforming configuration and outstanding consent',
+      {
+        ...base,
+        manifestUnreadable: true,
+        dormantReason: PluginUnitDormantReason.NeedsConfiguration,
+        outstandingCount: 1,
+      },
+      'unavailable',
     ],
     [
       'the server switch off reads unavailable for a switched-on, fully consented unit: nothing runs while it is off',
