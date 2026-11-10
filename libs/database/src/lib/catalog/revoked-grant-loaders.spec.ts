@@ -37,6 +37,13 @@ const ROLE_LOOKBACK = 8;
 const ROLE_RELATION = /\brole:\s*\{|\brole\.\w+\(/;
 /** How far on from `permissions:` its `where` must sit to count as its filter. */
 const WHERE_LOOKAHEAD = 3;
+/**
+ * A direct read of `RolePermission` rows: a call on its delegate, the
+ * `rolePermissions` relation read as `true` or as an object, or SQL naming
+ * its table. Each names a permission, as the runtime input needs.
+ */
+const DIRECT_READ =
+  /\brolePermission\.(find\w*|count|groupBy|aggregate)\b|\brolePermissions:\s*(\{|true\b)|\b(FROM|JOIN)\s+"?role_permissions\b/i;
 
 function skipsDir(path: string): boolean {
   return SKIPPED_DIRS.has(basename(path)) || path === RECONCILER_DIR;
@@ -134,11 +141,7 @@ describe('revoked grant loaders (#772)', () => {
       readFileSync(file, 'utf-8')
         .split('\n')
         .flatMap((text, index) =>
-          /\brolePermission\.(find\w*|count|groupBy|aggregate)\b|\brolePermissions:\s*\{|\b(FROM|JOIN)\s+"?role_permissions\b/i.test(
-            text,
-          )
-            ? [`${relative(REPO_ROOT, file)}:${index + 1} ${text.trim()}`]
-            : [],
+          DIRECT_READ.test(text) ? [`${relative(REPO_ROOT, file)}:${index + 1} ${text.trim()}`] : [],
         ),
     );
 
@@ -147,6 +150,15 @@ describe('revoked grant loaders (#772)', () => {
 });
 
 describe('the revoked grant scan itself (#772)', () => {
+  it('counts the rolePermissions relation as a direct read whether it is read as true or as an object', () => {
+    // `include: { rolePermissions: true }` returns revoked grants as surely as
+    // a select does, and is the shorter way to write the read.
+    expect(DIRECT_READ.test('include: { rolePermissions: true },')).toBe(true);
+    expect(DIRECT_READ.test('select: { rolePermissions: { select: { roleId: true } } },')).toBe(true);
+    expect(DIRECT_READ.test('_count: { select: { rolePermissions: true } },')).toBe(true);
+    expect(DIRECT_READ.test('rolePermissions: truly,')).toBe(false);
+  });
+
   /** The lines `scanSource` reports unfiltered in `source`, 1-based. */
   const unfilteredLines = (source: readonly string[]) =>
     scanSource('fixture.ts', source.join('\n')).unfiltered.map(({ line }) => line);
