@@ -208,12 +208,7 @@ export interface ConsentCheckDecisionInput {
  * check.
  */
 export type ConsentCheckNonConferringCause =
-  | 'no_row'
-  | 'denied'
-  | 'wildcard_subject'
-  | 'unbound_unit_scope'
-  | 'no_catalog_row'
-  | 'stale_risk';
+  'no_row' | 'denied' | 'wildcard_subject' | 'unbound_unit_scope' | 'no_catalog_row' | 'stale_risk';
 
 /**
  * The two catalog-derived inputs of the rule, read the same way wherever the
