@@ -425,7 +425,8 @@ export class PermissionsService {
    * What a user's permission graph is read with. Every role → permission hop
    * filters `permission.retiredAt: null` (#235): a retired catalog row keeps
    * whatever grants still reference it and confers nothing through any of
-   * them.
+   * them. It also filters `revokedAt: null` (#772): a revoked grant stays so
+   * bootstrap doesn't give it back, and confers nothing.
    */
   private static userGraphSelect() {
     return {
@@ -436,7 +437,7 @@ export class PermissionsService {
             select: {
               name: true,
               permissions: {
-                where: { permission: { retiredAt: null } },
+                where: { revokedAt: null, permission: { retiredAt: null } },
                 select: {
                   permission: true,
                 },
@@ -459,7 +460,7 @@ export class PermissionsService {
                 select: {
                   name: true,
                   permissions: {
-                    where: { permission: { retiredAt: null } },
+                    where: { revokedAt: null, permission: { retiredAt: null } },
                     select: {
                       permission: true,
                     },
@@ -480,7 +481,7 @@ export class PermissionsService {
                 select: {
                   name: true,
                   permissions: {
-                    where: { permission: { retiredAt: null } },
+                    where: { revokedAt: null, permission: { retiredAt: null } },
                     select: {
                       permission: true,
                     },

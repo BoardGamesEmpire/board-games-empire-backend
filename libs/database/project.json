@@ -59,7 +59,7 @@
     },
     "test": {
       "dependsOn": ["generate"],
-      "// inputs": "The inferred list plus the generated TypeScript itself (the last entry, which hashes generate's output). The specs read what generate writes into the gitignored generated directory, the client and unit-id-columns.ts (#994), so without it a schema-only change keeps this task's hash and replays a cached pass. See docs/NX_CACHING.md.",
+      "// inputs": "The inferred list plus the generated TypeScript itself (the dependentTasksOutputFiles entry, which hashes generate's output), plus a hash of the path and content of every TypeScript source file under libs/ and apps/ that mentions a permission (the runtime entry). The specs read what generate writes into the gitignored generated directory, the client and unit-id-columns.ts (#994), so without it a schema-only change keeps this task's hash and replays a cached pass. revoked-grant-loaders.spec.ts scans the source of every project for a reader of role grants that keeps revoked ones (#772); those projects depend on this one, not the reverse, so without the runtime entry a new reader is a cache hit here and is never scanned. Every line the scan can flag names a permission (permissions:, rolePermission, role_permissions), so a file that never mentions one cannot change its result, and a change to it leaves this task cached. A runtime input, not file globs: a {workspaceRoot} glob would also make this project affected by every .ts change, and with it everything that depends on it. See docs/NX_CACHING.md.",
       "inputs": [
         "default",
         "^production",
@@ -69,6 +69,9 @@
         },
         {
           "dependentTasksOutputFiles": "**/*.ts"
+        },
+        {
+          "runtime": "git grep -l -i -F --untracked permission -- 'libs/*.ts' 'apps/*.ts' ':!*.spec.ts' ':!*.d.ts' | (paths=$(cat); printf '%s\\n' \"$paths\"; printf '%s\\n' \"$paths\" | git hash-object --stdin-paths) | git hash-object --stdin"
         }
       ]
     }
