@@ -1,5 +1,7 @@
 import {
   Action,
+  CATALOG_MANIFEST,
+  edgeKey,
   PermissionOwner,
   RiskLevel,
   type EntryWarning,
@@ -9,7 +11,7 @@ import {
   type RolePermissionSnapshotRow,
   type RoleSnapshotRow,
 } from '@bge/database';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiExtraModels, ApiProperty, ApiPropertyOptional, getSchemaPath } from '@nestjs/swagger';
 
 /**
  * OpenAPI models for the permission catalog as the Owner's routes return it
@@ -44,6 +46,12 @@ const DRIFT_DESCRIPTION =
   'How the entry differs from the permission catalog this version ships. Only an entry the Owner edited (managedBy ' +
   "Admin) can differ: every start brings the server's own entries in line, so theirs is always empty.";
 
+/**
+ * Who maintains an entry, published under the glossary's name for it (#772).
+ * The Prisma enum keeps its own name, `PermissionOwner`.
+ */
+const MANAGED_BY = { enum: PermissionOwner, enumName: 'ManagedBy' } as const;
+
 export class CatalogPermissionDto {
   @ApiProperty({ description: "The permission's stable name, such as update:event." })
   slug!: string;
@@ -72,8 +80,7 @@ export class CatalogPermissionDto {
   riskLevel!: RiskLevel;
 
   @ApiProperty({
-    enum: PermissionOwner,
-    enumName: 'PermissionOwner',
+    ...MANAGED_BY,
     description: 'Who maintains it: System, the server; Admin, the Owner, who edited it; Plugin, a plugin.',
   })
   managedBy!: PermissionOwner;
@@ -85,6 +92,13 @@ export class CatalogPermissionDto {
   })
   retiredAt!: Date | null;
 
+  @ApiProperty({
+    description:
+      'Whether the permission catalog this version ships lists the permission. False for one a plugin added, or ' +
+      'one a newer version stopped shipping, which a start retires.',
+  })
+  shipped!: boolean;
+
   @ApiProperty({ type: [CatalogFieldChangeDto], description: DRIFT_DESCRIPTION })
   drift!: CatalogFieldChangeDto[];
 }
@@ -93,7 +107,7 @@ export class CatalogGrantDto {
   @ApiProperty({ description: 'The slug of the permission the role holds.' })
   slug!: string;
 
-  @ApiProperty({ enum: PermissionOwner, enumName: 'PermissionOwner' })
+  @ApiProperty(MANAGED_BY)
   managedBy!: PermissionOwner;
 
   @ApiProperty({
@@ -103,6 +117,14 @@ export class CatalogGrantDto {
       'When it was revoked. A revoked grant is kept, so the next start does not give it back, and confers nothing.',
   })
   revokedAt!: Date | null;
+
+  @ApiProperty({
+    description:
+      'Whether the permission catalog this version ships gives the role this permission. A grant the Owner ' +
+      'added on this server is not shipped, so revoking it deletes it and handing it back removes it at the next ' +
+      'start; a shipped grant the Owner revoked and gave back is shipped, though the Owner manages it.',
+  })
+  shipped!: boolean;
 }
 
 export class CatalogRoleDto {
@@ -112,7 +134,7 @@ export class CatalogRoleDto {
   @ApiProperty({ type: String, nullable: true })
   description!: string | null;
 
-  @ApiProperty({ enum: PermissionOwner, enumName: 'PermissionOwner' })
+  @ApiProperty(MANAGED_BY)
   managedBy!: PermissionOwner;
 
   @ApiProperty({ type: [CatalogFieldChangeDto], description: DRIFT_DESCRIPTION })
@@ -191,9 +213,27 @@ export class GrantEditDto {
   warnings!: EntryWarning[];
 }
 
+const SHIPPED_PERMISSIONS: ReadonlySet<string> = new Set(CATALOG_MANIFEST.permissions.map(({ slug }) => slug));
+
+const SHIPPED_GRANTS: ReadonlySet<string> = new Set(
+  Object.entries(CATALOG_MANIFEST.rolePermissions).flatMap(([roleName, slugs]) =>
+    slugs.map((slug) => edgeKey(roleName, slug)),
+  ),
+);
+
+/** Whether the permission catalog this version ships gives `roleName` the permission `slug`. */
+export function catalogListsGrant(roleName: string, slug: string): boolean {
+  return SHIPPED_GRANTS.has(edgeKey(roleName, slug));
+}
+
 /** A grant row as the routes return it, under its role. */
-export function catalogGrant({ permissionSlug, managedBy, revokedAt }: RolePermissionSnapshotRow): CatalogGrantDto {
-  return { slug: permissionSlug, managedBy, revokedAt };
+export function catalogGrant({
+  roleName,
+  permissionSlug,
+  managedBy,
+  revokedAt,
+}: RolePermissionSnapshotRow): CatalogGrantDto {
+  return { slug: permissionSlug, managedBy, revokedAt, shipped: catalogListsGrant(roleName, permissionSlug) };
 }
 
 /** A role row as the routes return it: its grants, by slug in code-unit order, and its drift. */
@@ -228,6 +268,25 @@ export function catalogPermission(row: PermissionSnapshotRow, drift: readonly Fi
     riskLevel: row.riskLevel,
     managedBy: row.managedBy,
     retiredAt: row.retiredAt,
+    shipped: SHIPPED_PERMISSIONS.has(row.slug),
     drift: [...drift],
   };
+}
+
+/** `POST /permission-catalog/.../hand-back`. */
+@ApiExtraModels(CatalogFieldChangeDto)
+export class HandBackDto {
+  @ApiProperty({
+    oneOf: [
+      { type: 'array', items: { $ref: getSchemaPath(CatalogFieldChangeDto) } },
+      { type: 'string', enum: ['grant-restored', 'grant-removed'] },
+    ],
+    description:
+      'What the next start changes. For a permission or a role, the columns it restores, `from` what this server ' +
+      "holds `to` what this version ships; a permission it retires or revives shows `retiredAt`: 'retired' as `to` " +
+      'for one this version no longer ships, and null for one it ships again. For a grant, grant-restored when the ' +
+      'next start gives back a revoked grant, or grant-removed when it deletes a grant this version does not ship. ' +
+      'An empty list means the next start changes nothing.',
+  })
+  nextStart!: FieldChange[] | 'grant-restored' | 'grant-removed';
 }

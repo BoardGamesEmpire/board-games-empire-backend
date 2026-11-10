@@ -28,9 +28,17 @@ export function ownerKeepsControl(snapshot: CatalogSnapshot): boolean {
 /**
  * Refuses an edit of the permission catalog that would leave the Owner role
  * without a live `manage:all` (#772), given the permission catalog as the
- * edit would leave it. Every edit of the permission catalog calls it under
- * the lock `lockCatalogEdits` takes: a permission retired, a grant revoked,
- * an entry handed back.
+ * edit would leave it. Every edit that can take a power away calls it under
+ * the lock `lockCatalogEdits` takes: a permission edited or retired, a grant
+ * given or revoked.
+ *
+ * A hand back does not call it, and needs no call. It changes only who
+ * manages the entry, which {@link ownerKeepsControl} does not read, and the
+ * next start brings the entry in line with the permission catalog this
+ * version ships, which gives the Owner role a live `manage:all`: a retired
+ * `manage:all` handed back is revived, and a revoked Owner grant of it is
+ * restored. A role's description confers nothing, so its edit does not call
+ * it either.
  *
  * Nothing else would catch it. A retired permission and a revoked grant drop
  * out of what the catalog guards judge, so no guard names them, and a start

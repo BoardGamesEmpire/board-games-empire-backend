@@ -1,4 +1,5 @@
 import {
+  CATALOG_EDIT_LOCK_NAME,
   CATALOG_MANIFEST,
   loadCatalogSnapshot,
   PermissionOwner,
@@ -22,7 +23,6 @@ import { CacheFlushError } from '@bge/redis';
 import { createTestingModuleWithDb, rawQueryText, unwrapTransaction, type MockDatabaseService } from '@bge/testing';
 import { ConflictException, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { CATALOG_EDIT_LOCK_NAME } from './catalog-edit-lock';
 import {
   PermissionUpdatedEvent,
   RolePermissionChangedEvent,
@@ -124,19 +124,20 @@ const withGrant = (
   slug: string,
   overrides: Partial<RolePermissionSnapshotRow> | null,
 ): CatalogSnapshot => {
-  const isIt = (grant: RolePermissionSnapshotRow) => grant.roleName === roleName && grant.permissionSlug === slug;
-  const current = snapshot.rolePermissions.find(isIt) ?? {
+  const isThisGrant = (grant: RolePermissionSnapshotRow) =>
+    grant.roleName === roleName && grant.permissionSlug === slug;
+  const current = snapshot.rolePermissions.find(isThisGrant) ?? {
     roleName,
     permissionSlug: slug,
     managedBy: PermissionOwner.System,
     revokedAt: null,
   };
-  const others = snapshot.rolePermissions.filter((grant) => !isIt(grant));
+  const others = snapshot.rolePermissions.filter((grant) => !isThisGrant(grant));
 
   return { ...snapshot, rolePermissions: overrides === null ? others : [...others, { ...current, ...overrides }] };
 };
 
-describe('PermissionCatalogService', () => {
+describe('PermissionCatalogService (#772)', () => {
   let service: PermissionCatalogService;
   let db: MockDatabaseService;
   let snapshot: CatalogSnapshot;
@@ -238,6 +239,7 @@ describe('PermissionCatalogService', () => {
         slug: 'create:event',
         managedBy: PermissionOwner.Admin,
         revokedAt,
+        shipped: true,
       });
       expect(roles.find(({ name }) => name === SystemRole.HouseholdMember)).toEqual(
         expect.objectContaining({
@@ -252,6 +254,42 @@ describe('PermissionCatalogService', () => {
           ],
         }),
       );
+    });
+
+    // Both of these grants are the Owner's and live; only `shipped` tells a
+    // grant this server added from a shipped one the Owner revoked and gave back.
+    it('says whether the permission catalog this version ships each permission and each grant (#772)', async () => {
+      snapshot = withGrant(snapshot, SystemRole.User, 'create:event', { managedBy: PermissionOwner.Admin });
+      snapshot = withGrant(snapshot, SystemRole.HouseholdGuest, 'read:event_game:household', {
+        managedBy: PermissionOwner.Admin,
+      });
+      snapshot = {
+        ...snapshot,
+        permissions: [
+          ...snapshot.permissions,
+          { ...rowOf(snapshot, SLUG), slug: 'read:made_up', retiredAt: new Date('2026-11-04T00:00:00.000Z') },
+        ],
+      };
+
+      const { permissions: rows, roles } = await service.getCatalog();
+      const grantOf = (role: string, slug: string) =>
+        roles.find(({ name }) => name === role)?.grants.find((grant) => grant.slug === slug);
+
+      expect(rows.find(({ slug }) => slug === SLUG)?.shipped).toBe(true);
+      expect(rows.find(({ slug }) => slug === 'read:made_up')?.shipped).toBe(false);
+      expect(rows.filter(({ shipped }) => shipped)).toHaveLength(CATALOG_MANIFEST.permissions.length);
+      expect(grantOf(SystemRole.User, 'create:event')).toEqual({
+        slug: 'create:event',
+        managedBy: PermissionOwner.Admin,
+        revokedAt: null,
+        shipped: true,
+      });
+      expect(grantOf(SystemRole.HouseholdGuest, 'read:event_game:household')).toEqual({
+        slug: 'read:event_game:household',
+        managedBy: PermissionOwner.Admin,
+        revokedAt: null,
+        shipped: false,
+      });
     });
   });
 
@@ -694,6 +732,8 @@ describe('PermissionCatalogService', () => {
       ],
       ['a grant added', (s: PermissionCatalogService) => s.addGrant(SystemRole.HouseholdGuest, HOUSEHOLD_READ)],
       ['a grant revoked', (s: PermissionCatalogService) => s.revokeGrant(SystemRole.User, 'read:game')],
+      ['a role handed back', (s: PermissionCatalogService) => s.handBackRole(SystemRole.HouseholdMember)],
+      ['a grant handed back', (s: PermissionCatalogService) => s.handBackGrant(SystemRole.User, 'read:game')],
     ])("takes the permission catalog's edit lock before reading anything, for %s", async (_label, edit) => {
       const statements: string[] = [];
       db.$executeRaw.mockImplementation((async (query: unknown, ...values: unknown[]) => {
@@ -738,7 +778,7 @@ describe('PermissionCatalogService', () => {
           managedBy: PermissionOwner.Admin,
           drift: [{ field: 'description', from: null, to: shipped }],
           grants: expect.arrayContaining([
-            { slug: 'read:household', managedBy: PermissionOwner.System, revokedAt: null },
+            { slug: 'read:household', managedBy: PermissionOwner.System, revokedAt: null, shipped: true },
           ]),
         });
         expect(role.grants).toHaveLength(CATALOG_MANIFEST.rolePermissions[NAME].length);
@@ -815,7 +855,7 @@ describe('PermissionCatalogService', () => {
           select: { id: true },
         });
         expect(answer).toEqual({
-          grant: { slug: HOUSEHOLD_READ, managedBy: PermissionOwner.Admin, revokedAt: null },
+          grant: { slug: HOUSEHOLD_READ, managedBy: PermissionOwner.Admin, revokedAt: null, shipped: false },
           warnings: [],
         });
       });
@@ -838,7 +878,12 @@ describe('PermissionCatalogService', () => {
           data: { revokedAt: null, managedBy: PermissionOwner.Admin },
         });
         expect(db.rolePermission.createManyAndReturn).not.toHaveBeenCalled();
-        expect(grant).toEqual({ slug: 'create:event', managedBy: PermissionOwner.Admin, revokedAt: null });
+        expect(grant).toEqual({
+          slug: 'create:event',
+          managedBy: PermissionOwner.Admin,
+          revokedAt: null,
+          shipped: true,
+        });
       });
 
       it('adding update:household to HouseholdGuest answers CATALOG_ENTRY_REFUSED naming the roles its conditions name', async () => {
@@ -868,11 +913,35 @@ describe('PermissionCatalogService', () => {
         expect(db.rolePermission.createManyAndReturn).toHaveBeenCalledTimes(1);
       });
 
+      // The household admin's approve and revoke are both revoked; giving back
+      // approve alone leaves the role able to approve an invite it cannot revoke.
+      it('giving back one half of a pair warns unpaired, and still writes', async () => {
+        const approve = 'update:household_invite:approve';
+        for (const slug of [approve, 'update:household_invite:revoke:as-admin']) {
+          snapshot = withGrant(snapshot, SystemRole.HouseholdAdmin, slug, {
+            managedBy: PermissionOwner.Admin,
+            revokedAt: REVOKED_AT,
+          });
+        }
+
+        const { warnings } = await service.addGrant(SystemRole.HouseholdAdmin, approve);
+
+        expect(warnings).toEqual([
+          {
+            kind: 'unpaired',
+            slug: approve,
+            role: SystemRole.HouseholdAdmin,
+            partners: ['update:household_invite:revoke', 'update:household_invite:revoke:as-admin'],
+          },
+        ]);
+        expect(db.rolePermission.updateMany).toHaveBeenCalledTimes(1);
+      });
+
       it("answers a grant the role holds with the grant as it is, still the server's, and writes nothing", async () => {
         const answer = await service.addGrant(SystemRole.User, 'read:game');
 
         expect(answer).toEqual({
-          grant: { slug: 'read:game', managedBy: PermissionOwner.System, revokedAt: null },
+          grant: { slug: 'read:game', managedBy: PermissionOwner.System, revokedAt: null, shipped: true },
           warnings: [],
         });
         expectNothingWritten();
@@ -968,6 +1037,36 @@ describe('PermissionCatalogService', () => {
         expect(emitter.emit).not.toHaveBeenCalled();
       });
 
+      it('emits RolePermissionChangedEvent as an update, with the revoked grant as before, when it gives one back', async () => {
+        snapshot = withGrant(snapshot, SystemRole.User, 'create:event', {
+          managedBy: PermissionOwner.Admin,
+          revokedAt: REVOKED_AT,
+        });
+
+        await service.addGrant(SystemRole.User, 'create:event');
+
+        expect(order).toEqual(['commit', 'flush', 'emit']);
+        const [name, event] = emitter.emit.mock.calls[0];
+        expect(name).toBe(RolePermissionChangedEvent.eventName);
+        expect(event).toMatchObject({
+          subject: ResourceType.RolePermission,
+          subjectId: grantId(SystemRole.User, 'create:event'),
+          action: 'update',
+          before: {
+            roleName: SystemRole.User,
+            permissionSlug: 'create:event',
+            managedBy: PermissionOwner.Admin,
+            revokedAt: REVOKED_AT,
+          },
+          after: {
+            roleName: SystemRole.User,
+            permissionSlug: 'create:event',
+            managedBy: PermissionOwner.Admin,
+            revokedAt: null,
+          },
+        });
+      });
+
       it('flushes every permission graph after commit, then emits RolePermissionChangedEvent with no before for a new grant', async () => {
         await service.addGrant(SystemRole.HouseholdGuest, HOUSEHOLD_READ);
 
@@ -1000,7 +1099,12 @@ describe('PermissionCatalogService', () => {
           data: { managedBy: PermissionOwner.Admin, revokedAt: expect.any(Date) },
         });
         expect(db.rolePermission.deleteMany).not.toHaveBeenCalled();
-        expect(grant).toEqual({ slug: 'read:game', managedBy: PermissionOwner.Admin, revokedAt: expect.any(Date) });
+        expect(grant).toEqual({
+          slug: 'read:game',
+          managedBy: PermissionOwner.Admin,
+          revokedAt: expect.any(Date),
+          shipped: true,
+        });
       });
 
       it('revoking a grant added on this server deletes it', async () => {
@@ -1074,7 +1178,7 @@ describe('PermissionCatalogService', () => {
         const answer = await service.revokeGrant(SystemRole.User, 'create:event');
 
         expect(answer).toEqual({
-          grant: { slug: 'create:event', managedBy: PermissionOwner.Admin, revokedAt: REVOKED_AT },
+          grant: { slug: 'create:event', managedBy: PermissionOwner.Admin, revokedAt: REVOKED_AT, shipped: true },
           warnings: [],
         });
         expectNothingWritten();
@@ -1188,6 +1292,287 @@ describe('PermissionCatalogService', () => {
           subjectId: grantId(SystemRole.HouseholdGuest, HOUSEHOLD_READ),
           action: 'delete',
           after: null,
+        });
+      });
+    });
+
+    describe('handing an entry back (#772)', () => {
+      const expectHandBackOrder = () => {
+        expect(order).toEqual(['commit', 'emit']);
+        expect(permissions.invalidateAllGraphs).not.toHaveBeenCalled();
+      };
+
+      describe('handBackPermission', () => {
+        it('hand back reports the fields the next start will restore', async () => {
+          const shipped = rowOf(snapshot, SLUG);
+          snapshot = withPermission(snapshot, SLUG, {
+            reason: 'Edited on this server',
+            riskLevel: RiskLevel.Critical,
+            managedBy: PermissionOwner.Admin,
+          });
+
+          const { nextStart } = await service.handBackPermission(SLUG);
+
+          expect(nextStart).toEqual([
+            { field: 'reason', from: 'Edited on this server', to: shipped.reason },
+            { field: 'riskLevel', from: RiskLevel.Critical, to: shipped.riskLevel },
+          ]);
+          expect(db.permission.updateMany).toHaveBeenCalledTimes(1);
+          expect(db.permission.updateMany).toHaveBeenCalledWith({
+            where: { id: permissionId(SLUG), managedBy: PermissionOwner.Admin, updatedAt: UPDATED_AT },
+            data: { managedBy: PermissionOwner.System },
+          });
+          expect(emitter.emit).toHaveBeenCalledTimes(1);
+          expect(emitter.emit.mock.calls[0][0]).toBe(PermissionUpdatedEvent.eventName);
+          expect(emitter.emit.mock.calls[0][1]).toMatchObject({
+            subjectId: permissionId(SLUG),
+            before: { slug: SLUG, managedBy: PermissionOwner.Admin, reason: 'Edited on this server' },
+            after: { slug: SLUG, managedBy: PermissionOwner.System, reason: 'Edited on this server' },
+          });
+          expectHandBackOrder();
+        });
+
+        it("waits for the edit lock as every edit does, with an edit's transaction timeout (#772)", async () => {
+          snapshot = withPermission(snapshot, SLUG, { managedBy: PermissionOwner.Admin });
+
+          await service.handBackPermission(SLUG);
+
+          expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+            timeout: CATALOG_EDIT_TRANSACTION_TIMEOUT_MS,
+          });
+        });
+
+        it('shows the revival of a retired permission the permission catalog ships as a retiredAt change', async () => {
+          const retiredAt = new Date('2026-11-05T00:00:00.000Z');
+          snapshot = withPermission(snapshot, SLUG, { managedBy: PermissionOwner.Admin, retiredAt });
+
+          const { nextStart } = await service.handBackPermission(SLUG);
+
+          expect(nextStart).toEqual([{ field: 'retiredAt', from: retiredAt, to: null }]);
+        });
+
+        it('says the next start retires a permission the permission catalog does not ship', async () => {
+          snapshot = {
+            ...snapshot,
+            permissions: [
+              ...snapshot.permissions,
+              { ...rowOf(snapshot, SLUG), slug: 'read:made_up', managedBy: PermissionOwner.Admin },
+            ],
+          };
+
+          const { nextStart } = await service.handBackPermission('read:made_up');
+
+          expect(nextStart).toEqual([{ field: 'retiredAt', from: null, to: 'retired' }]);
+          expect(db.permission.updateMany).toHaveBeenCalledTimes(1);
+        });
+
+        it('answers an empty list when the next start changes nothing about the permission', async () => {
+          snapshot = withPermission(snapshot, SLUG, { managedBy: PermissionOwner.Admin });
+
+          await expect(service.handBackPermission(SLUG)).resolves.toEqual({ nextStart: [] });
+        });
+
+        it('handing back an entry already marked System is a no-op answering an empty change list', async () => {
+          await expect(service.handBackPermission(SLUG)).resolves.toEqual({ nextStart: [] });
+
+          expect(db.permission.updateMany).not.toHaveBeenCalled();
+          expect(emitter.emit).not.toHaveBeenCalled();
+          expect(permissions.invalidateAllGraphs).not.toHaveBeenCalled();
+        });
+
+        it('answers 404 with CATALOG_ENTRY_NOT_FOUND for a slug no permission has', async () => {
+          await expect(service.handBackPermission('read:nothing')).rejects.toBeInstanceOf(NotFoundException);
+          await expect(service.handBackPermission('read:nothing')).rejects.toMatchObject({
+            response: { code: 'CATALOG_ENTRY_NOT_FOUND' },
+          });
+          expect(db.permission.updateMany).not.toHaveBeenCalled();
+        });
+
+        it("refuses a plugin's permission with 409 CATALOG_ENTRY_NOT_EDITABLE, which the plugin keeps", async () => {
+          snapshot = withPermission(snapshot, SLUG, { managedBy: PermissionOwner.Plugin });
+
+          await expect(service.handBackPermission(SLUG)).rejects.toMatchObject({
+            status: HttpStatus.CONFLICT,
+            response: { code: 'CATALOG_ENTRY_NOT_EDITABLE' },
+          });
+          expect(db.permission.updateMany).not.toHaveBeenCalled();
+          expect(emitter.emit).not.toHaveBeenCalled();
+        });
+
+        it('answers CATALOG_ENTRY_CHANGED, with no event or flush, when the row changed since it was read', async () => {
+          snapshot = withPermission(snapshot, SLUG, { managedBy: PermissionOwner.Admin });
+          db.permission.updateMany.mockResolvedValue({ count: 0 });
+
+          await expect(service.handBackPermission(SLUG)).rejects.toMatchObject({
+            status: HttpStatus.CONFLICT,
+            response: { code: 'CATALOG_ENTRY_CHANGED' },
+          });
+          expect(emitter.emit).not.toHaveBeenCalled();
+          expect(permissions.invalidateAllGraphs).not.toHaveBeenCalled();
+        });
+      });
+
+      describe('handBackRole', () => {
+        const description = () =>
+          CATALOG_MANIFEST.roles.find(({ name }) => name === SystemRole.HouseholdMember)?.description;
+
+        it('reports the description the next start will restore, and writes only the mark', async () => {
+          snapshot = withRole(snapshot, SystemRole.HouseholdMember, {
+            description: 'Edited',
+            managedBy: PermissionOwner.Admin,
+          });
+
+          const { nextStart } = await service.handBackRole(SystemRole.HouseholdMember);
+
+          expect(nextStart).toEqual([{ field: 'description', from: 'Edited', to: description() }]);
+          expect(db.role.updateMany).toHaveBeenCalledWith({
+            where: {
+              id: roleId(SystemRole.HouseholdMember),
+              managedBy: PermissionOwner.Admin,
+              updatedAt: ROLE_UPDATED_AT,
+            },
+            data: { managedBy: PermissionOwner.System },
+          });
+          expect(emitter.emit.mock.calls[0][0]).toBe(RoleUpdatedEvent.eventName);
+          expect(emitter.emit.mock.calls[0][1]).toMatchObject({
+            before: { name: SystemRole.HouseholdMember, description: 'Edited', managedBy: PermissionOwner.Admin },
+            after: { name: SystemRole.HouseholdMember, description: 'Edited', managedBy: PermissionOwner.System },
+          });
+          expectHandBackOrder();
+        });
+
+        it('is a no-op for a role already marked System, answering an empty change list', async () => {
+          await expect(service.handBackRole(SystemRole.HouseholdMember)).resolves.toEqual({ nextStart: [] });
+
+          expectNothingWritten();
+        });
+
+        it('answers 404 with CATALOG_ENTRY_NOT_FOUND for a role this server does not have', async () => {
+          await expect(service.handBackRole('Nobody')).rejects.toMatchObject({
+            status: HttpStatus.NOT_FOUND,
+            response: { code: 'CATALOG_ENTRY_NOT_FOUND' },
+          });
+        });
+
+        it("refuses a plugin's role with 409 CATALOG_ENTRY_NOT_EDITABLE", async () => {
+          snapshot = withRole(snapshot, SystemRole.HouseholdMember, { managedBy: PermissionOwner.Plugin });
+
+          await expect(service.handBackRole(SystemRole.HouseholdMember)).rejects.toMatchObject({
+            status: HttpStatus.CONFLICT,
+            response: { code: 'CATALOG_ENTRY_NOT_EDITABLE' },
+          });
+          expectNothingWritten();
+        });
+
+        it('answers CATALOG_ENTRY_CHANGED when the role changed since it was read', async () => {
+          snapshot = withRole(snapshot, SystemRole.HouseholdMember, { managedBy: PermissionOwner.Admin });
+          db.role.updateMany.mockResolvedValue({ count: 0 });
+
+          await expect(service.handBackRole(SystemRole.HouseholdMember)).rejects.toMatchObject({
+            status: HttpStatus.CONFLICT,
+            response: { code: 'CATALOG_ENTRY_CHANGED' },
+          });
+          expect(emitter.emit).not.toHaveBeenCalled();
+        });
+      });
+
+      describe('handBackGrant', () => {
+        it('says the next start gives back a revoked grant the permission catalog ships', async () => {
+          snapshot = withGrant(snapshot, SystemRole.User, 'read:game', {
+            managedBy: PermissionOwner.Admin,
+            revokedAt: REVOKED_AT,
+          });
+
+          await expect(service.handBackGrant(SystemRole.User, 'read:game')).resolves.toEqual({
+            nextStart: 'grant-restored',
+          });
+
+          expect(db.rolePermission.updateMany).toHaveBeenCalledWith({
+            where: {
+              id: grantId(SystemRole.User, 'read:game'),
+              managedBy: PermissionOwner.Admin,
+              revokedAt: REVOKED_AT,
+            },
+            data: { managedBy: PermissionOwner.System },
+          });
+          expect(emitter.emit.mock.calls[0][0]).toBe(RolePermissionChangedEvent.eventName);
+          expect(emitter.emit.mock.calls[0][1]).toMatchObject({
+            action: 'update',
+            before: { managedBy: PermissionOwner.Admin, revokedAt: REVOKED_AT },
+            after: { managedBy: PermissionOwner.System, revokedAt: REVOKED_AT },
+          });
+          expectHandBackOrder();
+        });
+
+        it('handing back a grant the permission catalog does not list says the next start removes it', async () => {
+          snapshot = withGrant(snapshot, SystemRole.HouseholdGuest, HOUSEHOLD_READ, {
+            managedBy: PermissionOwner.Admin,
+          });
+
+          await expect(service.handBackGrant(SystemRole.HouseholdGuest, HOUSEHOLD_READ)).resolves.toEqual({
+            nextStart: 'grant-removed',
+          });
+
+          // The grant stays until the start deletes it; the hand-back writes only the mark.
+          expect(db.rolePermission.deleteMany).not.toHaveBeenCalled();
+          expect(db.rolePermission.updateMany).toHaveBeenCalledWith({
+            where: {
+              id: grantId(SystemRole.HouseholdGuest, HOUSEHOLD_READ),
+              managedBy: PermissionOwner.Admin,
+              revokedAt: null,
+            },
+            data: { managedBy: PermissionOwner.System },
+          });
+        });
+
+        it('answers an empty list for a live grant the permission catalog ships, which the start leaves as it is', async () => {
+          snapshot = withGrant(snapshot, SystemRole.User, 'read:game', { managedBy: PermissionOwner.Admin });
+
+          await expect(service.handBackGrant(SystemRole.User, 'read:game')).resolves.toEqual({ nextStart: [] });
+        });
+
+        it('is a no-op for a grant already marked System, with no event or flush', async () => {
+          await expect(service.handBackGrant(SystemRole.User, 'read:game')).resolves.toEqual({ nextStart: [] });
+
+          expectNothingWritten();
+        });
+
+        it('still says a System grant the Owner never touched but that is revoked will be given back, writing nothing', async () => {
+          snapshot = withGrant(snapshot, SystemRole.User, 'read:game', { revokedAt: REVOKED_AT });
+
+          await expect(service.handBackGrant(SystemRole.User, 'read:game')).resolves.toEqual({
+            nextStart: 'grant-restored',
+          });
+          expectNothingWritten();
+        });
+
+        it('answers 404 with CATALOG_ENTRY_NOT_FOUND for a grant the role does not have', async () => {
+          await expect(service.handBackGrant(SystemRole.HouseholdGuest, HOUSEHOLD_READ)).rejects.toMatchObject({
+            status: HttpStatus.NOT_FOUND,
+            response: { code: 'CATALOG_ENTRY_NOT_FOUND' },
+          });
+          expectNothingWritten();
+        });
+
+        it("refuses a plugin's grant with 409 CATALOG_ENTRY_NOT_EDITABLE", async () => {
+          snapshot = withGrant(snapshot, SystemRole.User, 'read:game', { managedBy: PermissionOwner.Plugin });
+
+          await expect(service.handBackGrant(SystemRole.User, 'read:game')).rejects.toMatchObject({
+            status: HttpStatus.CONFLICT,
+            response: { code: 'CATALOG_ENTRY_NOT_EDITABLE' },
+          });
+          expectNothingWritten();
+        });
+
+        it('answers CATALOG_ENTRY_CHANGED when the grant changed since it was read', async () => {
+          snapshot = withGrant(snapshot, SystemRole.User, 'read:game', { managedBy: PermissionOwner.Admin });
+          db.rolePermission.updateMany.mockResolvedValue({ count: 0 });
+
+          await expect(service.handBackGrant(SystemRole.User, 'read:game')).rejects.toMatchObject({
+            status: HttpStatus.CONFLICT,
+            response: { code: 'CATALOG_ENTRY_CHANGED' },
+          });
+          expect(emitter.emit).not.toHaveBeenCalled();
         });
       });
     });

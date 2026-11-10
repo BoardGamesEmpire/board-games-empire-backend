@@ -1,6 +1,8 @@
 import {
   Action,
+  CATALOG_MANIFEST,
   PermissionOwner,
+  planReconcile,
   RiskLevel,
   SystemRole,
   type CatalogSnapshot,
@@ -89,6 +91,24 @@ describe('refuseOwnerLockout (#772)', () => {
     expect(thrown).toMatchObject({
       status: HttpStatus.UNPROCESSABLE_ENTITY,
       response: { code: 'CATALOG_OWNER_LOCKOUT' },
+    });
+  });
+});
+
+describe('a hand back and the Owner role (#772)', () => {
+  it('needs no lockout check: the next start revives a handed-back manage:all and restores the Owner grant of it', () => {
+    // A hand back changes only who manages the entry. What leaves the Owner
+    // in control is that the permission catalog this version ships gives the
+    // Owner role manage:all, so the next start converges both back.
+    const handedBack = snapshot({ retiredAt: RETIRED }, { revokedAt: RETIRED });
+    expect(ownerKeepsControl(handedBack)).toBe(false);
+
+    const plan = planReconcile(CATALOG_MANIFEST, handedBack);
+
+    expect(plan.permissions.revive).toContain(OWNER_PERMISSION_SLUG);
+    expect(plan.rolePermissions.restore).toContainEqual({
+      roleName: SystemRole.Owner,
+      permissionSlug: OWNER_PERMISSION_SLUG,
     });
   });
 });

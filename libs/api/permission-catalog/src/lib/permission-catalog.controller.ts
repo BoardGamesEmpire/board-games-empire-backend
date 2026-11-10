@@ -1,10 +1,17 @@
 import { Action, ResourceType } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { Body, Controller, Delete, Get, Param, Patch, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
+import { CatalogEntryNamePipe } from './catalog-entry-name.pipe';
 import { CatalogEditRefusalDto, CatalogErrorDto } from './dto/catalog-refusal.response';
-import { CatalogRoleDto, GrantEditDto, PermissionCatalogDto, PermissionEditDto } from './dto/catalog.response';
+import {
+  CatalogRoleDto,
+  GrantEditDto,
+  HandBackDto,
+  PermissionCatalogDto,
+  PermissionEditDto,
+} from './dto/catalog.response';
 import { UpdatePermissionDto } from './dto/update-permission.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { PermissionCatalogService } from './permission-catalog.service';
@@ -15,9 +22,19 @@ const GRANT_CHECK_REFUSAL =
   'fails-open for a household or event role that would reach every household or event. Or it would leave the ' +
   'Owner without full control of the server (code CATALOG_OWNER_LOCKOUT).';
 
-const CHANGED_WHILE_SAVING =
-  'it was changed while the change was being saved, for example by a server start bringing it in line, and the ' +
-  'change was not saved; read the role again and retry (code CATALOG_ENTRY_CHANGED)';
+/**
+ * The 409 for an entry that changed between the read and the write, and what
+ * to read again before retrying: the entry itself, or for a grant the role it
+ * is listed under.
+ */
+function changedWhileSaving(entry: 'permission' | 'role' | 'grant'): string {
+  const readAgain = entry === 'grant' ? 'the role' : `the ${entry}`;
+
+  return (
+    `the ${entry} was changed while the change was being saved, and the change was not saved; read ` +
+    `${readAgain} again and retry (code CATALOG_ENTRY_CHANGED)`
+  );
+}
 
 /**
  * The permission catalog as the Owner reads and edits it (#772).
@@ -77,10 +94,7 @@ export class PermissionCatalogController {
   @ApiResponse({
     status: Http.Conflict,
     type: CatalogErrorDto,
-    description:
-      'The permission belongs to a plugin, which keeps it (code CATALOG_ENTRY_NOT_EDITABLE). Or it was changed ' +
-      'while the edit was being saved, for example by a server start bringing it in line, and the edit was not ' +
-      'saved; read it again and retry (code CATALOG_ENTRY_CHANGED)',
+    description: `The permission belongs to a plugin, which keeps it (code CATALOG_ENTRY_NOT_EDITABLE). Or ${changedWhileSaving('permission')}`,
   })
   @ApiResponse({
     status: Http.UnprocessableEntity,
@@ -93,7 +107,10 @@ export class PermissionCatalogController {
   })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Permission))
   @Patch('permissions/:slug')
-  updatePermission(@Param('slug') slug: string, @Body() body: UpdatePermissionDto): Promise<PermissionEditDto> {
+  updatePermission(
+    @Param('slug', CatalogEntryNamePipe) slug: string,
+    @Body() body: UpdatePermissionDto,
+  ): Promise<PermissionEditDto> {
     return this.permissionCatalogService.updatePermission(slug, body);
   }
 
@@ -116,11 +133,11 @@ export class PermissionCatalogController {
   @ApiResponse({
     status: Http.Conflict,
     type: CatalogErrorDto,
-    description: `The role belongs to a plugin, which keeps it (code CATALOG_ENTRY_NOT_EDITABLE). Or ${CHANGED_WHILE_SAVING}`,
+    description: `The role belongs to a plugin, which keeps it (code CATALOG_ENTRY_NOT_EDITABLE). Or ${changedWhileSaving('role')}`,
   })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Role))
   @Patch('roles/:name')
-  updateRole(@Param('name') name: string, @Body() body: UpdateRoleDto): Promise<CatalogRoleDto> {
+  updateRole(@Param('name', CatalogEntryNamePipe) name: string, @Body() body: UpdateRoleDto): Promise<CatalogRoleDto> {
     return this.permissionCatalogService.updateRole(name, body);
   }
 
@@ -147,12 +164,15 @@ export class PermissionCatalogController {
       'permission is retired, so the grant would do nothing; revive the permission first (code ' +
       'CATALOG_PERMISSION_RETIRED). Or the role has no scope this version of the server knows, so the grant ' +
       'could not be checked (code CATALOG_ROLE_NOT_JUDGEABLE). Or ' +
-      CHANGED_WHILE_SAVING,
+      changedWhileSaving('grant'),
   })
   @ApiResponse({ status: Http.UnprocessableEntity, type: CatalogEditRefusalDto, description: GRANT_CHECK_REFUSAL })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.RolePermission))
   @Put('roles/:name/grants/:slug')
-  addGrant(@Param('name') name: string, @Param('slug') slug: string): Promise<GrantEditDto> {
+  addGrant(
+    @Param('name', CatalogEntryNamePipe) name: string,
+    @Param('slug', CatalogEntryNamePipe) slug: string,
+  ): Promise<GrantEditDto> {
     return this.permissionCatalogService.addGrant(name, slug);
   }
 
@@ -176,12 +196,97 @@ export class PermissionCatalogController {
   @ApiResponse({
     status: Http.Conflict,
     type: CatalogErrorDto,
-    description: `The role, the permission or the grant belongs to a plugin (code CATALOG_ENTRY_NOT_EDITABLE). Or ${CHANGED_WHILE_SAVING}`,
+    description: `The role, the permission or the grant belongs to a plugin (code CATALOG_ENTRY_NOT_EDITABLE). Or ${changedWhileSaving('grant')}`,
   })
   @ApiResponse({ status: Http.UnprocessableEntity, type: CatalogEditRefusalDto, description: GRANT_CHECK_REFUSAL })
   @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.RolePermission))
   @Delete('roles/:name/grants/:slug')
-  revokeGrant(@Param('name') name: string, @Param('slug') slug: string): Promise<GrantEditDto> {
+  revokeGrant(
+    @Param('name', CatalogEntryNamePipe) name: string,
+    @Param('slug', CatalogEntryNamePipe) slug: string,
+  ): Promise<GrantEditDto> {
     return this.permissionCatalogService.revokeGrant(name, slug);
+  }
+
+  @ApiOperation({
+    summary: 'Hand a permission back to the server',
+    description:
+      'Marks the permission as maintained by the server again, so the next start brings it in line with the permission catalog this version ships: its edits are undone, a retired permission it ships is revived, and one it no longer ships is retired. ' +
+      'Nothing else changes now: the next start brings it in line, which `nextStart` says. An entry the server already maintains is answered the same way and nothing is written.',
+  })
+  @ApiResponse({ status: Http.Ok, type: HandBackDto })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({
+    status: Http.NotFound,
+    type: CatalogErrorDto,
+    description: 'No permission has this slug (code CATALOG_ENTRY_NOT_FOUND)',
+  })
+  @ApiResponse({
+    status: Http.Conflict,
+    type: CatalogErrorDto,
+    description: `The permission belongs to a plugin, which keeps it (code CATALOG_ENTRY_NOT_EDITABLE). Or ${changedWhileSaving('permission')}`,
+  })
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Permission))
+  @HttpCode(Http.Ok)
+  @Post('permissions/:slug/hand-back')
+  handBackPermission(@Param('slug', CatalogEntryNamePipe) slug: string): Promise<HandBackDto> {
+    return this.permissionCatalogService.handBackPermission(slug);
+  }
+
+  @ApiOperation({
+    summary: 'Hand a role back to the server',
+    description:
+      'Marks the role as maintained by the server again, so the next start restores the description this version ships. ' +
+      'Nothing else changes now: the next start brings it in line, which `nextStart` says. An entry the server already maintains is answered the same way and nothing is written.',
+  })
+  @ApiResponse({ status: Http.Ok, type: HandBackDto })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({
+    status: Http.NotFound,
+    type: CatalogErrorDto,
+    description: 'No role has this name (code CATALOG_ENTRY_NOT_FOUND)',
+  })
+  @ApiResponse({
+    status: Http.Conflict,
+    type: CatalogErrorDto,
+    description: `The role belongs to a plugin, which keeps it (code CATALOG_ENTRY_NOT_EDITABLE). Or ${changedWhileSaving('role')}`,
+  })
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Role))
+  @HttpCode(Http.Ok)
+  @Post('roles/:name/hand-back')
+  handBackRole(@Param('name', CatalogEntryNamePipe) name: string): Promise<HandBackDto> {
+    return this.permissionCatalogService.handBackRole(name);
+  }
+
+  @ApiOperation({
+    summary: 'Hand a grant back to the server',
+    description:
+      'Marks the grant as maintained by the server again, so the next start does what this version ships: a revoked grant it lists is given back (`grant-restored`), and a grant it does not list, which this server added, is deleted (`grant-removed`). ' +
+      'Nothing else changes now: the next start brings it in line, which `nextStart` says. An entry the server already maintains is answered the same way and nothing is written.',
+  })
+  @ApiResponse({ status: Http.Ok, type: HandBackDto })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({
+    status: Http.NotFound,
+    type: CatalogErrorDto,
+    description:
+      'No role has this name, no permission this slug, or the role does not hold it (code CATALOG_ENTRY_NOT_FOUND)',
+  })
+  @ApiResponse({
+    status: Http.Conflict,
+    type: CatalogErrorDto,
+    description: `The role, the permission or the grant belongs to a plugin (code CATALOG_ENTRY_NOT_EDITABLE). Or ${changedWhileSaving('grant')}`,
+  })
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.RolePermission))
+  @HttpCode(Http.Ok)
+  @Post('roles/:name/grants/:slug/hand-back')
+  handBackGrant(
+    @Param('name', CatalogEntryNamePipe) name: string,
+    @Param('slug', CatalogEntryNamePipe) slug: string,
+  ): Promise<HandBackDto> {
+    return this.permissionCatalogService.handBackGrant(name, slug);
   }
 }

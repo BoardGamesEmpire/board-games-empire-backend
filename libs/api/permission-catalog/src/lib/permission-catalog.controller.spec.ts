@@ -1,11 +1,13 @@
 import { Action, ResourceType, RiskLevel } from '@bge/database';
 import { CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
 import { createTestingModuleWithDb } from '@bge/testing';
+import { ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { CatalogEntryNamePipe } from './catalog-entry-name.pipe';
 import { PermissionCatalogController } from './permission-catalog.controller';
 import { PermissionCatalogService } from './permission-catalog.service';
 
-describe('PermissionCatalogController', () => {
+describe('PermissionCatalogController (#772)', () => {
   let controller: PermissionCatalogController;
   const service = {
     getCatalog: jest.fn(),
@@ -13,6 +15,9 @@ describe('PermissionCatalogController', () => {
     updateRole: jest.fn(),
     addGrant: jest.fn(),
     revokeGrant: jest.fn(),
+    handBackPermission: jest.fn(),
+    handBackRole: jest.fn(),
+    handBackGrant: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -23,6 +28,9 @@ describe('PermissionCatalogController', () => {
     service.updateRole.mockReset().mockResolvedValue({ name: 'HouseholdMember' });
     service.addGrant.mockReset().mockResolvedValue({ grant: {}, warnings: [] });
     service.revokeGrant.mockReset().mockResolvedValue({ grant: null, warnings: [] });
+    service.handBackPermission.mockReset().mockResolvedValue({ nextStart: [] });
+    service.handBackRole.mockReset().mockResolvedValue({ nextStart: [] });
+    service.handBackGrant.mockReset().mockResolvedValue({ nextStart: 'grant-restored' });
 
     const { module } = await createTestingModuleWithDb({
       providers: [{ provide: PermissionCatalogService, useValue: service }],
@@ -65,9 +73,46 @@ describe('PermissionCatalogController', () => {
     expect(service.addGrant).toHaveBeenCalledWith('HouseholdGuest', 'read:household');
     expect(service.revokeGrant).toHaveBeenCalledWith('HouseholdGuest', 'read:household');
   });
+
+  it('hands the names of the entry to hand back to the service (#772)', async () => {
+    await expect(controller.handBackPermission('update:event')).resolves.toEqual({ nextStart: [] });
+    await expect(controller.handBackRole('HouseholdMember')).resolves.toEqual({ nextStart: [] });
+    await expect(controller.handBackGrant('User', 'read:game')).resolves.toEqual({ nextStart: 'grant-restored' });
+
+    expect(service.handBackPermission).toHaveBeenCalledWith('update:event');
+    expect(service.handBackRole).toHaveBeenCalledWith('HouseholdMember');
+    expect(service.handBackGrant).toHaveBeenCalledWith('User', 'read:game');
+  });
 });
 
-describe('PermissionCatalogController policies', () => {
+describe('PermissionCatalogController path parameters (#772)', () => {
+  /** Every route parameter the controller declares, by handler: its name and the pipes it runs. */
+  const routeParams = () =>
+    Object.getOwnPropertyNames(PermissionCatalogController.prototype)
+      .filter((method) => method !== 'constructor')
+      .flatMap((method) =>
+        Object.values(
+          (Reflect.getMetadata(ROUTE_ARGS_METADATA, PermissionCatalogController, method) ?? {}) as Record<
+            string,
+            { data?: unknown; pipes: unknown[] }
+          >,
+        )
+          .filter(({ data }) => data === 'slug' || data === 'name')
+          .map(({ data, pipes }) => ({ method, data, pipes })),
+      );
+
+  // A NUL in a slug or a name would otherwise reach Postgres, which refuses
+  // it with a bare 500; the pipe answers 404 as for any unknown name.
+  it('runs every :slug and :name through CatalogEntryNamePipe', () => {
+    const params = routeParams();
+
+    // Not vacuous: seven routes take one or both.
+    expect(params).toHaveLength(10);
+    expect(params.filter(({ pipes }) => !pipes.includes(CatalogEntryNamePipe))).toEqual([]);
+  });
+});
+
+describe('PermissionCatalogController policies (#772)', () => {
   // Only the Owner's manage:all reaches a write on Permission, Role or
   // RolePermission: no role holds a slug on any of them (#772). Staff read
   // every type, so they can read the permission catalog.
@@ -77,6 +122,9 @@ describe('PermissionCatalogController policies', () => {
     ['updateRole', Action.update, ResourceType.Role],
     ['addGrant', Action.create, ResourceType.RolePermission],
     ['revokeGrant', Action.delete, ResourceType.RolePermission],
+    ['handBackPermission', Action.update, ResourceType.Permission],
+    ['handBackRole', Action.update, ResourceType.Role],
+    ['handBackGrant', Action.update, ResourceType.RolePermission],
   ] as const)('%s requires %s on %s', (method, action, subject) => {
     const handlers = Reflect.getMetadata(CHECK_POLICIES_KEY, PermissionCatalogController.prototype[method]) as Array<
       (ability: AppAbility) => boolean
@@ -117,6 +165,16 @@ describe('PermissionCatalogController OpenAPI (#772)', () => {
     expect(document).toMatchObject({
       paths: {
         '/permission-catalog/permissions/{slug}': { patch: refusals },
+        '/permission-catalog/permissions/{slug}/hand-back': {
+          post: {
+            responses: {
+              '200': { content: { 'application/json': { schema: schema('HandBackDto') } } },
+              '409': { content: { 'application/json': { schema: schema('CatalogErrorDto') } } },
+            },
+          },
+        },
+        '/permission-catalog/roles/{name}/hand-back': { post: {} },
+        '/permission-catalog/roles/{name}/grants/{slug}/hand-back': { post: {} },
         '/permission-catalog/roles/{name}/grants/{slug}': {
           put: {
             responses: {
