@@ -1,6 +1,7 @@
 import {
   countPendingJobs,
   drainQueue,
+  eventStreamReader,
   markQueueEvents,
   testQueueConnection,
   waitForStableJobCount,
@@ -273,6 +274,19 @@ describe('markQueueEvents', () => {
     // BullMQ creates the stream with its first event, and `obliterate` deletes
     // it, so an absent stream is the normal state at a file's start.
     await expect(markQueueEvents(scriptedStream('feedback'))).resolves.toEqual({ queueName: 'feedback', id: '0-0' });
+  });
+});
+
+describe('eventStreamReader', () => {
+  // BullMQ types a queue's client as its own IRedisClient, which declares no
+  // range reads; the reader checks for them rather than casting (#1007).
+  it("refuses a client without the stream's range reads, naming the queue", async () => {
+    const queue: DrainableQueue = {
+      ...scriptedStream('feedback'),
+      client: Promise.resolve({ xread: () => Promise.resolve(null) }),
+    };
+
+    await expect(eventStreamReader(queue)).rejects.toThrow(/^Queue 'feedback': .*xrange\/xrevrange/);
   });
 });
 

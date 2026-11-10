@@ -131,6 +131,19 @@
       "enabled": false
     },
     {
+      "description": "The cache stores hand the shared iovalkey client to @keyv/valkey, which builds on its own iovalkey: the two have to be one copy, or the client's type stops matching the adapter's and the build fails. @keyv/valkey moves to a new iovalkey only in a major, which also needs a new keyv major, so all three move as one PR. iovalkey 0.4 came alone in the weekly group and broke #1007. separateMajorMinor is off for the reason it is off for better-auth's group, and a major in the group waits for approval on the Dependency Dashboard and holds the whole group with it, as OpenTelemetry's does.",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["iovalkey", "keyv", "@keyv/valkey"],
+      "groupName": "Keyv",
+      "separateMajorMinor": false
+    },
+    {
+      "description": "ts-loader 9.5.7 stopped clearing rootDir before it transpiles a file, so every lib source an app bundles fails with TS6059: each app's tsconfig.app.json sets rootDir to its src (TypeStrong/ts-loader#1709, open). The root manifest's override holds it at 9.5.4, the last release before the change, until the upstream fix ships or Nx stops sending lib sources through ts-loader.",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["ts-loader"],
+      "allowedVersions": "<9.5.7"
+    },
+    {
       "description": "Nx gets a PR of its own, in the Monday window, because its minors bring migrations as well as its majors (#613). A major still opens separately, once approved. The Mend-hosted app can't run nx migrate (arbitrary post-upgrade commands need a paid plan), so the PR says how, and a person runs it on the branch before merging. A migration can also move other packages, and writes them as ranges: Nx 23.1's moves TypeScript to 6, which #816 decides.",
       "matchManagers": ["npm"],
       "matchPackageNames": ["nx", "@nx/**"],

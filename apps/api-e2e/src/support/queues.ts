@@ -203,11 +203,37 @@ export interface EventStreamReader {
   xrevrange(key: string, end: string, start: string, countToken: 'COUNT', count: number): Promise<StreamEntry[]>;
 }
 
-/** The slice of a BullMQ `Queue` {@link drainQueue} reads. */
+/**
+ * The slice of a BullMQ `Queue` {@link drainQueue} reads. `client` is only an
+ * object here, as BullMQ types it no closer than its own `IRedisClient`;
+ * {@link eventStreamReader} finds the stream reads on it.
+ */
 export interface DrainableQueue extends QueueLike {
-  readonly client: Promise<EventStreamReader>;
+  readonly client: Promise<object>;
   toKey(type: string): string;
   getJob(jobId: string): Promise<{ readonly failedReason?: string } | undefined>;
+}
+
+/**
+ * The queue's connection, as the stream reads the drain makes (#1007).
+ *
+ * BullMQ types `queue.client` as `IRedisClient`, an interface over every Redis
+ * client it supports that declares only the commands BullMQ itself sends, and
+ * the range reads aren't among them. The queues here connect with
+ * {@link testQueueConnection}'s options, so BullMQ builds an ioredis client and
+ * wraps it in an adapter that passes every command outside its own table
+ * through to ioredis, `xrange` and `xrevrange` included. Checked rather than
+ * cast, so a queue on a client without them fails here, by name, and not as
+ * "undefined is not a function" inside the drain.
+ */
+export async function eventStreamReader(queue: DrainableQueue): Promise<EventStreamReader> {
+  const client: Partial<EventStreamReader> = await queue.client;
+
+  if (typeof client.xrange !== 'function' || typeof client.xrevrange !== 'function') {
+    throw new Error(`Queue '${queue.name}': its Redis client has no xrange/xrevrange to read the events stream with`);
+  }
+
+  return client as EventStreamReader;
 }
 
 /**
@@ -228,7 +254,7 @@ export interface QueueEventMark {
  * event, and `obliterate` deletes it along with the queue.
  */
 export async function markQueueEvents(queue: DrainableQueue): Promise<QueueEventMark> {
-  const client = await queue.client;
+  const client = await eventStreamReader(queue);
   const [latest] = await client.xrevrange(queue.toKey('events'), '+', '-', 'COUNT', 1);
 
   return { queueName: queue.name, id: latest?.[0] ?? '0-0' };
@@ -327,7 +353,7 @@ export async function drainQueue(
     throw new Error(`drainQueue: this mark was taken on '${mark.queueName}', not '${queue.name}'`);
   }
 
-  const client = await queue.client;
+  const client = await eventStreamReader(queue);
   const key = queue.toKey('events');
   const started = new Set<string>();
   let cursor = mark.id;

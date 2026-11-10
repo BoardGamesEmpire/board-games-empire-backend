@@ -135,7 +135,7 @@
     "helmet": "8.3.0",
     "http-terminator": "3.2.0",
     "image-size": "2.0.4",
-    "iovalkey": "0.4.0",
+    "iovalkey": "0.3.3",
     "iso-639-3": "3.0.1",
     "joi": "18.3.2",
     "jose": "6.2.15",
@@ -263,6 +263,7 @@
     }
   },
   "overrides": {
-    "ts-loader": "9.6.2"
+    "multer": "$multer",
+    "ts-loader": "9.5.4"
   }
 }
