@@ -95,9 +95,9 @@ export class UserPluginsController {
     summary: 'Record an own-user consent decision for one requested permission',
     description:
       'Grant or durably deny a permission the active manifest requests at user consent scope, for your own ' +
-      'account. A Granted decision creates your unit enablement (#225); a Denied decision creates nothing — ' +
-      'and a denial that leaves a REQUIRED user check outstanding leaves the unit running with state review_pending ' +
-      'until you grant it.',
+      'account. A Granted decision creates your unit enablement (#225); a Denied decision creates nothing, so ' +
+      'without an enablement the plugin stays off for you (state off). Once you hold one, a denial that leaves a ' +
+      'REQUIRED user check outstanding leaves the unit running with state review_pending until you grant it.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'A categorically ungrantable permission' })

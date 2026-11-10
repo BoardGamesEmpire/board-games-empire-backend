@@ -139,8 +139,10 @@ export class HouseholdPluginsController {
     summary: 'Record a household-scope consent decision for one requested permission',
     description:
       'Grant or durably deny a permission the active manifest requests at household consent scope, for this ' +
-      'household. Idempotent on exact re-statement (changed: false). A denial that leaves a REQUIRED household ' +
-      'check outstanding leaves the unit running with state review_pending until it is granted.',
+      'household. Idempotent on exact re-statement (changed: false). A decision never creates or flips the unit ' +
+      'enablement: a household that has not switched the plugin on stays off (state off), and one that has keeps ' +
+      'running while a denial leaves a REQUIRED household check outstanding, with state review_pending until it ' +
+      'is granted.',
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
