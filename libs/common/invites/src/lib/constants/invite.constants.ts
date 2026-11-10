@@ -64,5 +64,9 @@ export const OUTSTANDING_INVITE_UNIQUE_INDEXES = [
   'invites_event_invitee_email_outstanding_unique',
 ] as const;
 
-/** `Invite.token`'s `@unique`, as the driver adapter and a restored `meta.target` both spell it. */
+/**
+ * `Invite.token`'s `@unique`: the index name `@prisma/adapter-pg@7.10` reports,
+ * and the column the 7.8 adapter and a restored `meta.target` both spell it by.
+ */
+export const INVITE_TOKEN_UNIQUE_INDEX = 'invites_token_key';
 export const INVITE_TOKEN_UNIQUE_COLUMNS = ['token'] as const;

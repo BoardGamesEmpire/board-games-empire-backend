@@ -44,10 +44,12 @@ export class TransactionDeadlockError extends HttpException {
  * once.
  *
  * An INTERCEPTOR rather than an exception filter, deliberately. A deadlock
- * reaches the edge in two shapes (#398): a `PrismaClientKnownRequestError`
- * (P2010) when the losing statement was raw, and a bare `DriverAdapterError`
- * when it was an ordinary model write. That second class is internal to the
- * driver adapter, so there is no constructor to hand `@Catch(...)` — and the
+ * reaches the edge as a `PrismaClientKnownRequestError` whose code depends on
+ * the losing statement — P2010 when it was raw, P2034 when it was a model write
+ * — and up to `@prisma/adapter-pg@7.8` the model-write case escaped as a bare
+ * `DriverAdapterError` (#398). That class is internal to the driver adapter,
+ * so there is no constructor to hand `@Catch(...)`, and a filter on the Prisma
+ * class alone would go blind again if the shape regressed — and the
  * alternative, a catch-all filter, would have to sit ahead of
  * `I18nExceptionFilter` and take over the rendering of every OTHER exception in
  * the app to reach this one. Converting in the error channel instead leaves that

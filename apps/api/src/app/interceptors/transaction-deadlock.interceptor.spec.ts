@@ -32,8 +32,11 @@ describe('TransactionDeadlockInterceptor', () => {
     expect(failure.cause).toBe(victim);
   });
 
-  it('renders the raw-statement shape too, not only the model-write one', async () => {
-    const failure = await intercepted(deadlock({ wrapped: true })).catch((error: unknown) => error);
+  it.each([
+    ['raw-statement', 'raw'],
+    ['pre-7.10 bare model-write', 'bare'],
+  ] as const)('renders the %s shape too, not only the model-write one', async (_label, shape) => {
+    const failure = await intercepted(deadlock({ shape })).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(TransactionDeadlockError);
   });

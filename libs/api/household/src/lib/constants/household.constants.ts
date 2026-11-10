@@ -43,7 +43,8 @@ export const HOUSEHOLD_BAN_MAX_REASON_LENGTH = 1_000;
  * DB name of the `@@unique([householdId, userId])` constraint, as mapped in
  * `prisma/models/household/household-member.prisma`.
  *
- * NAME OF RECORD ONLY — nothing compares against it on Postgres.
+ * The spelling that matches on `@prisma/adapter-pg@7.10`, which reports it under
+ * `meta.driverAdapterError.cause.constraint.index`.
  *
  * The constraint was named rather than left to Prisma's default so that a P2002
  * could be matched against it exactly. That reasoning was sound and the mechanism
@@ -54,11 +55,9 @@ export const HOUSEHOLD_BAN_MAX_REASON_LENGTH = 1_000;
  * different route (#298, found by #257's coverage).
  *
  * FIXED in #298. The discriminator now reads the constraint identity from
- * `meta.driverAdapterError.cause.constraint.fields` via `constraintIdentity` in
- * `@bge/database`, which on this stack reports the raw column pair — see
- * {@link HOUSEHOLD_MEMBER_UNIQUE_COLUMNS}. This name survives only as the
- * database's name of record, so a rename in the schema is visible from
- * TypeScript, and as the spelling MySQL's `constraint.index` would report.
+ * `meta.driverAdapterError.cause.constraint` via `constraintIdentity` in
+ * `@bge/database`. On 7.8 that reported the raw column pair (see
+ * {@link HOUSEHOLD_MEMBER_UNIQUE_COLUMNS}); 7.10 reports this name.
  */
 export const HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT = 'household_member_household_user_unique';
 
@@ -68,14 +67,14 @@ export const HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT = 'household_member_household_us
  * `meta.driverAdapterError.cause.constraint.fields`.
  *
  * MEASURED 2026-08-10 against `@prisma/client@7.8.0` + `@prisma/adapter-pg` on
- * Postgres 17 (#298), and pinned end-to-end in
- * `apps/api-e2e/src/database/p2002-shape.spec.ts`. Both package versions are named
- * because the claim is version-specific: the field is not public API, and Prisma
- * intends to restore `meta.target`.
+ * Postgres 17 (#298). The claim was version-specific: the field is not public
+ * API, and 7.10 reports the constraint name instead, which
+ * `apps/api-e2e/src/database/p2002-shape.spec.ts` pins. The adapter still falls
+ * back to this spelling when Postgres names no constraint.
  *
- * This is the spelling that actually matches today. It is compared as an unordered
- * EXACT set, so reordering the `@@unique([...])` declaration cannot change the
- * status code and a future third column cannot be mistaken for this constraint.
+ * It is compared as an unordered EXACT set, so reordering the `@@unique([...])`
+ * declaration cannot change the status code and a future third column cannot be
+ * mistaken for this constraint.
  */
 export const HOUSEHOLD_MEMBER_UNIQUE_COLUMNS = ['household_id', 'user_id'] as const;
 

@@ -12,10 +12,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  *
  * `originalCode` is the field the adapter sets for every error it forwards and is
  * what {@link constraintIdentity} reads for the unique-violation case, so it is
- * preferred. `code` is the postgres passthrough copy, present because an error the
- * adapter has no mapped `kind` for arrives with the raw pg fields alongside — a
- * deadlock is one of those. Reading both means a driver release that keeps only
- * one of them still classifies.
+ * preferred. `code` is the postgres passthrough copy, present when the adapter has
+ * no mapped `kind` for an error and forwards the raw pg fields alongside — a
+ * deadlock was one of those up to `@prisma/adapter-pg@7.8`. Reading both means a
+ * driver release that keeps only one of them still classifies.
  */
 function sqlStateOf(cause: unknown): string | undefined {
   if (!isRecord(cause)) {
@@ -37,18 +37,21 @@ function sqlStateOf(cause: unknown): string | undefined {
  * Whether an error is Postgres aborting this transaction as a deadlock victim.
  *
  * Measured against a real database (#398, `apps/api-e2e/src/database/deadlock-shape.spec.ts`),
- * because a deadlock arrives in TWO shapes on this stack and the difference is the
- * whole reason it rendered as an untyped 500:
+ * because a deadlock arrives in more than one shape and the difference is the whole
+ * reason it once rendered as an untyped 500. On `@prisma/adapter-pg@7.10`:
  *
- * - the losing statement was a model write → a bare `DriverAdapterError`, no Prisma
- *   class around it and no Prisma `code` at all;
+ * - the losing statement was a model write → `PrismaClientKnownRequestError`
+ *   P2034 ("write conflict or a deadlock"), driver error under
+ *   `meta.driverAdapterError`;
  * - the losing statement was raw → `PrismaClientKnownRequestError` P2010, driver
- *   error tucked under `meta.driverAdapterError`.
+ *   error under `meta.driverAdapterError`.
  *
- * So this reads the SQLSTATE rather than the Prisma code, from either position. It
- * additionally accepts Prisma's own P2034 ("write conflict or a deadlock"), which
- * this stack does not currently emit — the shape pin records that — because the code
- * means, by definition, the thing a retry answers.
+ * Up to 7.8 the model-write case was a bare `DriverAdapterError` with no Prisma
+ * class around it and no Prisma `code` at all — the #398 shape.
+ *
+ * So this accepts P2034, which means by definition the thing a retry answers, and
+ * otherwise reads the SQLSTATE rather than the Prisma code, from the bare position
+ * as well as under `meta`, so a regression to the old shape still classifies.
  *
  * Deliberately NOT a type predicate: the two shapes share no class, so narrowing to
  * one of them would be a lie about the other.

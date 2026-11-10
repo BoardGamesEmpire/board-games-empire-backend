@@ -899,12 +899,13 @@ export class HouseholdMemberService {
    * `(householdId, userId)` unique.
    *
    * Every known SPELLING of that one constraint is accepted, because the spelling
-   * depends on which source the identity came from: raw columns from the driver
-   * adapter (what ships today), Prisma field names from a restored `meta.target`,
-   * the mapped index name on MySQL. Each is compared as an unordered EXACT set,
-   * so this is not a return to the accept-list this replaced — a superset such as
-   * a future `@@unique([householdId, userId, ...])` is correctly refused rather
-   * than mistaken for this constraint.
+   * depends on which source the identity came from: the mapped index name from
+   * the driver adapter (what ships on `@prisma/adapter-pg@7.10`), the raw columns
+   * it reported up to 7.8, and Prisma field names from a restored `meta.target`.
+   * Each is compared as an unordered EXACT set, so this is not a return to the
+   * accept-list this replaced — a superset such as a future
+   * `@@unique([householdId, userId, ...])` is correctly refused rather than
+   * mistaken for this constraint.
    *
    * Takes the identity rather than the error so the caller can distinguish "not
    * this constraint" from "no identity at all" and answer them differently.

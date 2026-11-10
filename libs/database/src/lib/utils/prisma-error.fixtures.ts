@@ -21,8 +21,9 @@ interface DriverAdapterCause {
   readonly constraint?: { readonly fields?: readonly string[]; readonly index?: string };
   /**
    * The postgres passthrough fields, present when the adapter has no mapped
-   * `kind` for the error — measured on a real 40P01 (#398). Absent from the
-   * mapped shapes, which is why they are optional rather than required.
+   * `kind` for the error — measured on a real 40P01 under 7.8 (#398), which 7.10
+   * maps. Absent from the mapped shapes, which is why they are optional rather
+   * than required.
    */
   readonly code?: string;
   readonly severity?: string;
@@ -63,17 +64,22 @@ class DriverAdapterError extends Error {
 
 export interface UniqueViolationOptions {
   /**
-   * Raw DB column names, as `@prisma/adapter-pg` reports them under
-   * `cause.constraint.fields`. This is the shape that actually ships.
+   * Raw DB column names under `cause.constraint.fields`, which
+   * `@prisma/adapter-pg` reported up to 7.8 and reports since 7.10 only when
+   * Postgres names no constraint.
    */
   readonly fields?: readonly string[];
 
-  /** MySQL-shaped index name under `cause.constraint.index`. Not this stack. */
+  /**
+   * The constraint name under `cause.constraint.index`, which
+   * `@prisma/adapter-pg@7.10` reports. This is the shape that actually ships.
+   */
   readonly index?: string;
 
   /**
-   * Legacy `meta.target`. Absent on `@prisma/client@7.8.0` + `@prisma/adapter-pg`
-   * (prisma/prisma#28953); supply it only to exercise the restored-`target` path.
+   * Legacy `meta.target`. Absent on `@prisma/client@7.8.0` through 7.10 with
+   * `@prisma/adapter-pg` (prisma/prisma#28953); supply it only to exercise the
+   * restored-`target` path.
    */
   readonly target?: string | readonly string[];
 
@@ -101,8 +107,8 @@ export interface UniqueViolationOptions {
 }
 
 /**
- * A P2002 in the shape `@prisma/client@7.8.0` + `@prisma/adapter-pg` on Postgres 17
- * actually raises, measured 2026-08-10 (#298).
+ * A P2002 in the shape `@prisma/client` + `@prisma/adapter-pg` on Postgres 17
+ * actually raises: `index` for 7.10, `fields` for 7.8 (measured 2026-08-10, #298).
  *
  * Defaults to a well-formed driver-adapter payload so a spec must opt IN to
  * degradation. The old helper defaulted to a fabricated `meta.target`, which is why
@@ -159,64 +165,82 @@ export function uniqueViolationWithoutMeta(): Prisma.PrismaClientKnownRequestErr
 
 export interface DeadlockOptions {
   /**
-   * WRAPPED is the shape a deadlock takes when the losing statement was raw
-   * (`$queryRaw`/`$executeRaw`): Prisma wraps it as P2010 and keeps the driver
-   * error under `meta.driverAdapterError`. The default is the UNWRAPPED shape,
-   * which is what a deadlock on an ordinary model write raises — the driver
-   * error escapes with no Prisma class around it at all, and it is the shape
-   * #398's production case actually produced.
+   * Which statement lost, which decides the class around the driver error:
+   *
+   * - `model-write` (the default): an ordinary model write. Since
+   *   `@prisma/adapter-pg@7.10` the adapter maps 40P01 to
+   *   `TransactionWriteConflict` and the client wraps it as P2034, driver error
+   *   under `meta.driverAdapterError`.
+   * - `raw`: `$queryRaw`/`$executeRaw`. Wrapped as P2010 whatever the kind,
+   *   driver error under `meta.driverAdapterError`.
+   * - `bare`: the model-write shape up to 7.8, which #398's production case
+   *   produced. The adapter had no mapped kind for 40P01 and passed it through as
+   *   `kind: 'postgres'` with the raw pg fields alongside, so the driver error
+   *   escaped with no Prisma class around it and no Prisma `code` at all.
    */
-  readonly wrapped?: boolean;
+  readonly shape?: 'model-write' | 'raw' | 'bare';
 
-  /** SQLSTATE. `40P01` is deadlock_detected. */
+  /** SQLSTATE on the driver error. `40P01` is deadlock_detected. */
   readonly sqlState?: string;
 
   /**
-   * Drop `cause.originalCode`, leaving only the postgres-passthrough `code`.
-   * Models a driver release that renames the field the reader prefers.
+   * Drop `cause.originalCode`. On the `bare` shape that leaves only the
+   * postgres-passthrough `code`, modelling a driver release that renames the
+   * field the reader prefers.
    */
   readonly omitOriginalCode?: boolean;
 }
 
 /**
- * A deadlock in the shape `@prisma/client@7.8.0` + `@prisma/adapter-pg` on
- * Postgres 17 actually raises, measured 2026-08-27 (#398).
+ * A deadlock in the shape `@prisma/client@7.10` + `@prisma/adapter-pg@7.10` on
+ * Postgres 17 raises, pinned by `apps/api-e2e/src/database/deadlock-shape.spec.ts`.
+ * First measured against 7.8.0 on 2026-08-27 (#398); `shape: 'bare'` keeps that
+ * version's model-write shape, which `isDeadlockError` still classifies.
  *
- * There are TWO shapes, not one, and the difference is load-bearing: a raw
- * statement's deadlock arrives as a `PrismaClientKnownRequestError` (P2010),
- * while a model write's deadlock arrives as a bare `DriverAdapterError` with no
- * Prisma `code` at all. A predicate that tests only `instanceof
- * PrismaClientKnownRequestError` is blind to exactly the case that mattered.
- *
- * `kind: 'postgres'` rather than a mapped kind, because the adapter maps only
- * the errors it has names for and passes everything else through — which is why
- * the extra postgres fields (`severity`, `detail`, `hint`) appear here and not
- * on {@link uniqueViolation}.
+ * The shapes differ in class and in Prisma `code`, which is why a predicate
+ * testing only `instanceof PrismaClientKnownRequestError`, or only one code, is
+ * blind to one of them.
  */
 export function deadlock(options: DeadlockOptions = {}): Error {
-  const { wrapped = false, sqlState = '40P01', omitOriginalCode = false } = options;
+  const { shape = 'model-write', sqlState = '40P01', omitOriginalCode = false } = options;
+  const originalCode = omitOriginalCode ? {} : { originalCode: sqlState };
+
+  if (shape === 'bare') {
+    return new DriverAdapterError({
+      ...originalCode,
+      originalMessage: 'deadlock detected',
+      kind: 'postgres',
+      code: sqlState,
+      severity: 'ERROR',
+      message: 'deadlock detected',
+      detail:
+        'Process 596 waits for ShareLock on transaction 2646; blocked by process 594.\n' +
+        'Process 594 waits for ShareLock on transaction 2647; blocked by process 596.',
+      hint: 'See server log for query details.',
+    });
+  }
 
   const driverError = new DriverAdapterError({
-    ...(omitOriginalCode ? {} : { originalCode: sqlState }),
+    ...originalCode,
     originalMessage: 'deadlock detected',
-    kind: 'postgres',
-    code: sqlState,
-    severity: 'ERROR',
-    message: 'deadlock detected',
-    detail:
-      'Process 596 waits for ShareLock on transaction 2646; blocked by process 594.\n' +
-      'Process 594 waits for ShareLock on transaction 2647; blocked by process 596.',
-    hint: 'See server log for query details.',
+    kind: 'TransactionWriteConflict',
   });
 
-  if (!wrapped) {
-    return driverError;
+  if (shape === 'raw') {
+    return new Prisma.PrismaClientKnownRequestError(
+      '\nInvalid `prisma.$queryRaw()` invocation:\n\n\nRaw query failed. Code: `40P01`. Message: `deadlock detected`',
+      {
+        code: PrismaError.RawQueryFailed,
+        clientVersion: 'test',
+        meta: { driverAdapterError: driverError },
+      },
+    );
   }
 
   return new Prisma.PrismaClientKnownRequestError(
-    '\nInvalid `prisma.$queryRaw()` invocation:\n\n\nRaw query failed. Code: `40P01`. Message: `deadlock detected`',
+    'Transaction failed due to a write conflict or a deadlock. Please retry your transaction',
     {
-      code: PrismaError.RawQueryFailed,
+      code: PrismaError.TransactionWriteConflict,
       clientVersion: 'test',
       meta: { driverAdapterError: driverError },
     },
@@ -225,9 +249,8 @@ export function deadlock(options: DeadlockOptions = {}): Error {
 
 /**
  * Prisma's OWN spelling for a deadlock — P2034, documented as "write conflict or
- * deadlock". This stack does not emit it (the e2e pin records that), and the
- * predicate accepts it anyway: the code means, by definition, the thing the
- * retry answers.
+ * deadlock" — with nothing under `meta`. The predicate accepts the code alone:
+ * it means, by definition, the thing the retry answers.
  */
 export function transactionWriteConflict(): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError(

@@ -17,7 +17,7 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
  * makes their absence loud.
  *
  * It also pins the P2002 identity each index reports. `InviteService` maps a
- * duplicate to 409 by the raw column pair the driver adapter names, and
+ * duplicate to 409 by the index name the driver adapter reports, and
  * answers 409 for an UNIDENTIFIABLE P2002 on the strength of what `invites`
  * can collide on. Both halves of that reasoning are characterized here, on
  * the model of `apps/api-e2e/src/database/p2002-shape.spec.ts`.
@@ -106,7 +106,7 @@ describe('outstanding invite uniqueness (#161)', () => {
   };
 
   describe('a user-bound invite', () => {
-    it('refuses a second outstanding invite to the same user, naming the household and invitee columns', async () => {
+    it('refuses a second outstanding invite to the same user, naming the household and invitee index', async () => {
       const { inviter, inviteeId, householdId } = await arrange();
 
       await arrangeInvite(db.client, { inviter, householdId, inviteeId });
@@ -117,10 +117,12 @@ describe('outstanding invite uniqueness (#161)', () => {
       );
 
       // The identity `InviteService.translateCreateFailure` maps to 409. The
-      // raw column pair, from the driver adapter, is what ships on this stack.
+      // index name, from the driver adapter, is what ships on this stack:
+      // `@prisma/adapter-pg@7.10` reports the constraint Postgres names, where
+      // 7.8 parsed the column pair out of the DETAIL line instead.
       expect(constraintIdentity(error)).toEqual({
-        source: 'driverAdapterError.fields',
-        names: ['household_id', 'invitee_id'],
+        source: 'driverAdapterError.index',
+        names: ['invites_household_invitee_outstanding_unique'],
         sqlState: SQLSTATE_UNIQUE_VIOLATION,
       });
     });
@@ -175,7 +177,7 @@ describe('outstanding invite uniqueness (#161)', () => {
   });
 
   describe('an email-only invite', () => {
-    it('refuses a second outstanding invite to the same address, naming the household and email columns', async () => {
+    it('refuses a second outstanding invite to the same address, naming the household and email index', async () => {
       const { inviter, householdId } = await arrange();
       const inviteeEmail = `invitee-${randomUUID()}@e2e.invalid`;
 
@@ -187,8 +189,8 @@ describe('outstanding invite uniqueness (#161)', () => {
       );
 
       expect(constraintIdentity(error)).toEqual({
-        source: 'driverAdapterError.fields',
-        names: ['household_id', 'invitee_email'],
+        source: 'driverAdapterError.index',
+        names: ['invites_household_invitee_email_outstanding_unique'],
         sqlState: SQLSTATE_UNIQUE_VIOLATION,
       });
     });
@@ -224,7 +226,7 @@ describe('outstanding invite uniqueness (#161)', () => {
     // the service maps their P2002 the same way. The catalog assertion below
     // sees names and predicates only, so the columns each one holds and the
     // identity each one reports are pinned here, by a real collision.
-    it('refuses a second outstanding invite to the same user, naming the event and invitee columns', async () => {
+    it('refuses a second outstanding invite to the same user, naming the event and invitee index', async () => {
       const { inviter, inviteeId, eventId } = await arrangeEvent();
 
       await arrangeInvite(db.client, { inviter, eventId, inviteeId });
@@ -235,13 +237,13 @@ describe('outstanding invite uniqueness (#161)', () => {
       );
 
       expect(constraintIdentity(error)).toEqual({
-        source: 'driverAdapterError.fields',
-        names: ['event_id', 'invitee_id'],
+        source: 'driverAdapterError.index',
+        names: ['invites_event_invitee_outstanding_unique'],
         sqlState: SQLSTATE_UNIQUE_VIOLATION,
       });
     });
 
-    it('refuses a second outstanding invite to the same address, naming the event and email columns', async () => {
+    it('refuses a second outstanding invite to the same address, naming the event and email index', async () => {
       const { inviter, eventId } = await arrangeEvent();
       const inviteeEmail = `invitee-${randomUUID()}@e2e.invalid`;
 
@@ -253,8 +255,8 @@ describe('outstanding invite uniqueness (#161)', () => {
       );
 
       expect(constraintIdentity(error)).toEqual({
-        source: 'driverAdapterError.fields',
-        names: ['event_id', 'invitee_email'],
+        source: 'driverAdapterError.index',
+        names: ['invites_event_invitee_email_outstanding_unique'],
         sqlState: SQLSTATE_UNIQUE_VIOLATION,
       });
     });
