@@ -27,8 +27,8 @@ concurrency:
 jobs:
   bug-agent:
     if: github.event.label.name == 'bug' && github.event.sender.type == 'User'
-    # At `main`, which is what the federation rule trusts.
-    uses: BoardGamesEmpire/automation/.github/workflows/bug-agent.yml@main
+    # At `master`, which is what the federation rule trusts.
+    uses: BoardGamesEmpire/automation/.github/workflows/bug-agent.yml@master
     with:
       bge-agent-client-id: ${{ vars.BGE_AGENT_CLIENT_ID }}
       anthropic-federation-rule-id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
