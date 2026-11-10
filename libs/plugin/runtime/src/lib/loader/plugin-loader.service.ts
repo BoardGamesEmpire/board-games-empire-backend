@@ -1,6 +1,10 @@
 import { PluginActorScope, SERVER_PLUGIN_UNIT, SystemActorScope } from '@bge/actor-context';
-import { DatabaseService, type Plugin } from '@bge/database';
-import type { PluginArtifactSha256, PluginFactory } from '@boardgamesempire/plugin-contract';
+import { DatabaseService, isPrismaDependentRecordNotFoundError, type Plugin } from '@bge/database';
+import {
+  parsePluginArtifactSha256,
+  type PluginArtifactSha256,
+  type PluginFactory,
+} from '@boardgamesempire/plugin-contract';
 import { validatePluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -98,16 +102,24 @@ export class PluginLoaderService implements OnApplicationBootstrap {
 
   private async loadOne(plugin: Plugin): Promise<void> {
     const manifest = this.validateManifest(plugin);
-    const directory = await this.directories.resolve(plugin.slug, plugin.installedSha256);
 
-    // Recorded before anything is read from the directory (#1094), so the
-    // artifact sweep keeps it from here on. Recorded after the import, a
-    // sweep could remove it mid-load, as when an update is approved during a
-    // rolling restart and the process that ran the old code shuts down. The
-    // load would then fail, and a failed load force-disables the plugin. A
-    // load that fails after this keeps the record until shutdown, and with it
-    // the directory, whose code may be partly imported.
-    await this.recordLoad(plugin.slug, directory.sha256);
+    // Recorded before anything is read from the directory, resolving it
+    // included (#1094). Recorded after the import, a sweep could remove it
+    // mid-load, as when an update is approved during a rolling restart and
+    // the process that ran the old code shuts down. This narrows that window
+    // without closing it: the row was read before the earlier plugins loaded,
+    // and a sweep that read what to keep before this record still walks
+    // after it. A failed load never disables a plugin whose row has since
+    // moved on (see quarantine). A load that fails after this keeps the
+    // record until shutdown, and with it the directory, whose code may be
+    // partly imported. A checksum that is not one records nothing; the
+    // resolver refuses it.
+    const sha256 = parsePluginArtifactSha256(plugin.installedSha256);
+    if (sha256 !== null) {
+      await this.recordLoad(plugin.slug, sha256);
+    }
+
+    const directory = await this.directories.resolve(plugin.slug, plugin.installedSha256);
 
     // Before anything else is read from the directory, and before any of its
     // code is imported. Every plugin artifact has a directory of its own
@@ -241,6 +253,12 @@ export class PluginLoaderService implements OnApplicationBootstrap {
    * and the audit pipeline picks them up identically to any mutation.
    * Its own failure is caught and logged: one broken quarantine must not
    * abort the remaining plugins' boot.
+   *
+   * It disables the row only while the row still names the checksum this
+   * process tried to load (#1094). An update approved, or an uninstall and
+   * reinstall, while the load ran has moved the row on, and the old
+   * artifact failing says nothing about the one the row names now; that
+   * row is left as it is, with a warning, and nothing is emitted.
    */
   private async quarantine(plugin: Plugin, err: unknown): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
@@ -253,7 +271,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
     try {
       const initiatedAt = new Date();
       const updated = await this.db.plugin.update({
-        where: { id: plugin.id },
+        where: { id: plugin.id, installedSha256: plugin.installedSha256 },
         data: { enabled: false, loadFailed: true, loadError: message },
         select: { id: true, slug: true, enabled: true, loadFailed: true, loadError: true },
       });
@@ -276,6 +294,13 @@ export class PluginLoaderService implements OnApplicationBootstrap {
         ),
       );
     } catch (persistErr) {
+      if (isPrismaDependentRecordNotFoundError(persistErr)) {
+        this.logger.warn(
+          `Left plugin '${plugin.slug}' enabled: its row no longer names the artifact that failed to load`,
+        );
+        return;
+      }
+
       this.logger.error(
         `Failed to persist quarantine for plugin '${plugin.slug}': ${
           persistErr instanceof Error ? persistErr.message : persistErr

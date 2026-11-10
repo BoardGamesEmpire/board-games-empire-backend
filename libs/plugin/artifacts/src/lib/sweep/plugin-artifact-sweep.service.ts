@@ -132,7 +132,11 @@ const summarize = (result: PluginArtifactSweepResult): string =>
  * checksum it loads before it reads that directory, and refreshes the record
  * every minute until it shuts down. A record five minutes without a refresh
  * is taken for a process that died, and deleted; a process that is still
- * running writes it again at its next refresh.
+ * running writes it again at its next refresh. A record written after a run
+ * read what to keep is not seen by that run, and a process records a
+ * checksum some time after it read the plugin row, so a load can still lose
+ * its directory to a run that overlaps it. Such a load fails, and the loader
+ * disables the plugin only while its row still names that checksum.
  *
  * It never follows a symbolic link it finds inside the root, and removing a
  * real directory recursively does not follow the links inside it either. The
