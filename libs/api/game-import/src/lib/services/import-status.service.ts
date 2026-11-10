@@ -4,7 +4,7 @@ import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permi
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { ImportBatchStatusResponseDto, ImportJobStatusDto } from '../dto/import-status.dto';
-import type { PersistedJobFailure, PersistedJobResult } from '../interfaces/import-job.interface';
+import type { ImportJobOrigin, PersistedJobFailure, PersistedJobResult } from '../interfaces/import-job.interface';
 import { deriveBatchStatus } from '../utils/batch-status';
 import { importErrorMarker } from '../utils/sanitize-import-error';
 
@@ -205,17 +205,22 @@ export class GameImportStatusService {
   }
 
   private toJobDto(job: JobRow): ImportJobStatusDto {
-    const payload = (job.payload ?? {}) as { externalId?: string; expansionExternalIds?: string[] };
+    const payload = (job.payload ?? {}) as {
+      externalId?: string;
+      expansionExternalIds?: string[];
+      origin: ImportJobOrigin;
+    };
     const result = (job.result ?? undefined) as Partial<PersistedJobResult & PersistedJobFailure> | undefined;
 
     return {
       jobId: job.id,
       status: job.status as JobStatus,
-      isExpansion: job.parentJobId !== null,
+      // Every producer stamps it on the row's payload (#971).
+      origin: payload.origin,
       parentJobId: job.parentJobId,
-      // Present on base rows (the coordinator snapshots the requested set on the
-      // base payload). Lets the graph show expansions not yet spawned — or never
-      // spawned, if the base failed — as pending/skipped nodes off the base.
+      // Present on the requested game's row (the coordinator snapshots the
+      // chosen set on its payload). Lets the graph show expansions not yet
+      // spawned — or never spawned, if it failed — as pending/skipped nodes.
       requestedExpansions: payload.expansionExternalIds,
       externalId: payload.externalId ?? '',
       gameId: job.gameId ?? result?.gameId,

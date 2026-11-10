@@ -36,6 +36,7 @@ const hit = (
     platformType,
   })),
   availableReleases: [],
+  baseGameExternalIds: [],
 });
 
 const catan = hit('catan', BASE_GAME, [TABLETOP]);

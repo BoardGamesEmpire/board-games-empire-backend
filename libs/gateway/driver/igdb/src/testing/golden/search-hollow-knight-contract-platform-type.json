@@ -944,7 +944,8 @@
             }
           ]
         }
-      ]
+      ],
+      "baseGameExternalIds": []
     }
   },
   {
@@ -1745,7 +1746,8 @@
             }
           ]
         }
-      ]
+      ],
+      "baseGameExternalIds": []
     }
   },
   {
@@ -1789,7 +1791,8 @@
             }
           ]
         }
-      ]
+      ],
+      "baseGameExternalIds": []
     }
   },
   {

@@ -700,7 +700,7 @@ describe('BoardGameGeekDriver', () => {
 
       expect(result?.game?.externalId).toBe(String(SEAFARERS_EXPANSION_THING.id));
       expect(result?.game?.title).toBe('Catan: Seafarers');
-      expect(result?.game?.baseGameExternalId).toBe(String(CATAN_THING.id));
+      expect(result?.game?.baseGameExternalIds).toEqual([String(CATAN_THING.id)]);
     });
 
     it('emits only SOURCE_DONE when the base thing is not found, without a batch lookup', async () => {

@@ -55,7 +55,7 @@ describe('NotificationsService', () => {
           batchId: 'b-1',
           gatewayId: 'gw-1',
           externalId: 'x-1',
-          isExpansion: false,
+          origin: 'Requested',
           errorCode: 'GATEWAY_ERROR',
           error: t('errors.game_import.failure.gateway_error'),
         },

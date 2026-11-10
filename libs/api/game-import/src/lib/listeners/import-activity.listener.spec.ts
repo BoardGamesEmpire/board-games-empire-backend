@@ -1,6 +1,7 @@
 import type { Actor, AuditContextService } from '@bge/actor-context';
 import { JobStatus, type DatabaseService } from '@bge/database';
 import { ImportJobCompletedEvent, type ImportJobCompletedContext } from '../events/import.events';
+import { ImportJobOrigin } from '../interfaces/import-job.interface';
 import { ImportActivityListener } from './import-activity.listener';
 
 const USER_ACTOR: Actor = { kind: 'user', userId: 'user-7' };
@@ -14,12 +15,14 @@ const makeCompleted = (ctx: Partial<ImportJobCompletedContext> = {}) =>
       batchId: 'batch-1',
       gatewayId: 'bgg',
       externalId: 'ext-1',
-      isExpansion: false,
+      origin: ImportJobOrigin.Requested,
       gameTitle: 'Catan',
       thumbnail: 'http://x/y.png',
       gameCreated: true,
       sourceCreated: true,
       platformGames: [],
+      baseGameIds: [],
+      isExpansion: false,
       ...ctx,
     },
     new Date(),

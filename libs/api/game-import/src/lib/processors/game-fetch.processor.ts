@@ -9,7 +9,7 @@ import { Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Job } from 'bullmq';
 import { firstValueFrom } from 'rxjs';
-import { JobNames, QueueNames } from '../constants/queue.constants';
+import { QueueNames } from '../constants/queue.constants';
 import { ImportJobStartedEvent } from '../events/import.events';
 import type {
   ExpansionFetchJobPayload,
@@ -54,7 +54,7 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
 
   protected async processJob(job: Job<GameFetchJobPayload | ExpansionFetchJobPayload>): Promise<proto.GameData> {
     const initiatedAt = new Date();
-    const { jobId, batchId, gatewayId, externalId, locale, correlationId } = job.data;
+    const { jobId, batchId, gatewayId, externalId, locale, correlationId, origin } = job.data;
 
     this.logger.log(`${job.name} jobId=${jobId} gatewayId=${gatewayId} externalId=${externalId} — fetching`);
 
@@ -67,8 +67,6 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
     });
 
     if (transitioned.count === 1) {
-      const isExpansion = job.name === JobNames.ExpansionFetch;
-
       // Actor / source / correlationId ride CLS (restored per job by
       // ActorAwareWorkerHost), so the event carries only row state + context.
       this.events.emit(
@@ -76,7 +74,7 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
         new ImportJobStartedEvent(
           { id: jobId, status: JobStatus.Pending },
           { id: jobId, status: JobStatus.Running },
-          { batchId, gatewayId, externalId, isExpansion },
+          { batchId, gatewayId, externalId, origin },
           initiatedAt,
         ),
       );
@@ -86,7 +84,7 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
         webhookEnvelope({
           subjectId: jobId,
           occurrenceId: jobId,
-          data: { jobId, batchId, gatewayId, externalId, isExpansion },
+          data: { jobId, batchId, gatewayId, externalId, origin },
         }),
       );
     }
@@ -132,7 +130,7 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
 
   @OnWorkerEvent('failed')
   async onFailed(job: Job<GameFetchJobPayload | ExpansionFetchJobPayload>, error: Error): Promise<void> {
-    const { jobId, batchId, gatewayId, externalId } = job.data;
+    const { jobId, batchId, gatewayId, externalId, origin } = job.data;
 
     // Only mark the DB job as failed after all retry attempts are exhausted.
     // BullMQ fires this event on every failed attempt; check attemptsMade vs
@@ -155,7 +153,6 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
       this.runInActorScope(job, async () => {
         this.logger.error(`${job.name} jobId=${jobId} failed permanently`, error.stack);
 
-        const isExpansion = job.name === JobNames.ExpansionFetch;
         const sanitized = sanitizeImportError(error, 'fetch');
         const persistedFailure: PersistedJobFailure = { errorCode: sanitized.code, error: sanitized.message };
 
@@ -196,12 +193,7 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
           return;
         }
 
-        emitJobFailedEvents(
-          this.events,
-          { jobId, batchId, gatewayId, externalId, isExpansion },
-          sanitized,
-          initiatedAt,
-        );
+        emitJobFailedEvents(this.events, { jobId, batchId, gatewayId, externalId, origin }, sanitized, initiatedAt);
 
         await this.batchCompletion.checkAndEmit(batchId);
       }),

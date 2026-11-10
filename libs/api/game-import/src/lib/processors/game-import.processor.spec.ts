@@ -5,7 +5,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Job } from 'bullmq';
 import { JobNames } from '../constants/queue.constants';
 import { ImportJobCompletedEvent, ImportJobFailedEvent } from '../events/import.events';
-import type { GameImportJobPayload, ImportJobResult } from '../interfaces/import-job.interface';
+import { ImportJobOrigin, type GameImportJobPayload, type ImportJobResult } from '../interfaces/import-job.interface';
 import { ImportBatchCompletionService } from '../services/batch-completion.service';
 import { ExpansionSpawnerService } from '../services/expansion-spawner.service';
 import { GameUpsertService } from '../services/game.service';
@@ -18,10 +18,10 @@ const extractMock = extractGameDataFromChildren as jest.MockedFunction<typeof ex
 describe('GameImportProcessor', () => {
   let processor: GameImportProcessor;
   let db: { job: { update: jest.Mock; updateMany: jest.Mock }; dataGateway: { findUnique: jest.Mock } };
-  let gameUpsert: jest.Mocked<Pick<GameUpsertService, 'upsert' | 'upsertExpansion'>>;
+  let gameUpsert: jest.Mocked<Pick<GameUpsertService, 'upsert'>>;
   let events: { emit: jest.Mock };
   let batchCompletion: { checkAndEmit: jest.Mock };
-  let expansionSpawner: { spawn: jest.Mock };
+  let expansionSpawner: { spawn: jest.Mock; spawnBaseGame: jest.Mock };
   let runWith: jest.Mock;
 
   const meta: JobActorMeta = { actor: { kind: 'user', userId: 'user-7' }, correlationId: 'corr-1' };
@@ -33,6 +33,7 @@ describe('GameImportProcessor', () => {
     externalId: 'ext-1',
     initiatorType: InitiatorType.User,
     userId: 'user-7',
+    origin: ImportJobOrigin.Requested,
   };
 
   const makeJob = (name: string, payload: object, over: { attemptsMade?: number; attempts?: number } = {}): Job =>
@@ -54,10 +55,13 @@ describe('GameImportProcessor', () => {
       },
       dataGateway: { findUnique: jest.fn().mockResolvedValue({ contentFormat: ContentFormat.PlainText }) },
     };
-    gameUpsert = { upsert: jest.fn(), upsertExpansion: jest.fn() };
+    gameUpsert = { upsert: jest.fn() };
     events = { emit: jest.fn() };
     batchCompletion = { checkAndEmit: jest.fn().mockResolvedValue(undefined) };
-    expansionSpawner = { spawn: jest.fn().mockResolvedValue(undefined) };
+    expansionSpawner = {
+      spawn: jest.fn().mockResolvedValue(undefined),
+      spawnBaseGame: jest.fn().mockResolvedValue(undefined),
+    };
     runWith = jest.fn((_init: unknown, fn: () => unknown) => fn());
     extractMock.mockReturnValue({ externalId: 'ext-1', title: 'Catan', thumbnailUrl: 'http://x/y.png' } as ReturnType<
       typeof extractGameDataFromChildren
@@ -78,7 +82,14 @@ describe('GameImportProcessor', () => {
 
   it('processes a base game inside the actor scope and emits an ImportJobCompletedEvent', async () => {
     const platformGames = [{ platformId: 'plat-1', platformGameId: 'pg-1' }];
-    const result: ImportJobResult = { gameId: 'game-1', gameCreated: true, sourceCreated: true, platformGames };
+    const result: ImportJobResult = {
+      gameId: 'game-1',
+      gameCreated: true,
+      sourceCreated: true,
+      platformGames,
+      baseGameIds: [],
+      isExpansion: false,
+    };
     gameUpsert.upsert.mockResolvedValue(result);
 
     const returned = await processor.process(makeJob(JobNames.GameImport, basePayload));
@@ -91,6 +102,7 @@ describe('GameImportProcessor', () => {
       expect.objectContaining({ externalId: 'ext-1' }),
       'bgg',
       ContentFormat.PlainText,
+      undefined,
     );
 
     const completedCall = events.emit.mock.calls.find(([name]) => name === ImportJobCompletedEvent.eventName);
@@ -106,7 +118,9 @@ describe('GameImportProcessor', () => {
       batchId: 'batch-1',
       gatewayId: 'bgg',
       externalId: 'ext-1',
+      origin: 'Requested',
       isExpansion: false,
+      baseGameIds: [],
       gameTitle: 'Catan',
       platformGames,
     });
@@ -116,7 +130,14 @@ describe('GameImportProcessor', () => {
   });
 
   describe('content format', () => {
-    const imported: ImportJobResult = { gameId: 'game-1', gameCreated: true, sourceCreated: true, platformGames: [] };
+    const imported: ImportJobResult = {
+      gameId: 'game-1',
+      gameCreated: true,
+      sourceCreated: true,
+      platformGames: [],
+      baseGameIds: [],
+      isExpansion: false,
+    };
 
     it("imports a game with its DataGateway's content format, read once for the job", async () => {
       db.dataGateway.findUnique.mockResolvedValue({ contentFormat: ContentFormat.Html });
@@ -126,16 +147,22 @@ describe('GameImportProcessor', () => {
 
       expect(db.dataGateway.findUnique).toHaveBeenCalledTimes(1);
       expect(db.dataGateway.findUnique).toHaveBeenCalledWith({ where: { id: 'bgg' }, select: { contentFormat: true } });
-      expect(gameUpsert.upsert).toHaveBeenCalledWith(expect.anything(), 'bgg', ContentFormat.Html);
+      expect(gameUpsert.upsert).toHaveBeenCalledWith(expect.anything(), 'bgg', ContentFormat.Html, undefined);
     });
 
     it("imports an expansion with its DataGateway's content format", async () => {
       db.dataGateway.findUnique.mockResolvedValue({ contentFormat: ContentFormat.BBCode });
-      gameUpsert.upsertExpansion.mockResolvedValue({ ...imported, baseGameId: 'game-base' });
+      gameUpsert.upsert.mockResolvedValue({ ...imported, baseGameIds: ['game-base'], isExpansion: true });
 
-      await processor.process(makeJob(JobNames.ExpansionImport, { ...basePayload, baseGameExternalId: 'base-1' }));
+      await processor.process(
+        makeJob(JobNames.ExpansionImport, {
+          ...basePayload,
+          origin: ImportJobOrigin.ChosenExpansion,
+          requestedExternalId: 'base-1',
+        }),
+      );
 
-      expect(gameUpsert.upsertExpansion).toHaveBeenCalledWith(expect.anything(), 'base-1', 'bgg', ContentFormat.BBCode);
+      expect(gameUpsert.upsert).toHaveBeenCalledWith(expect.anything(), 'bgg', ContentFormat.BBCode, 'base-1');
     });
 
     it.each([
@@ -147,7 +174,7 @@ describe('GameImportProcessor', () => {
 
       await processor.process(makeJob(JobNames.GameImport, basePayload));
 
-      expect(gameUpsert.upsert).toHaveBeenCalledWith(expect.anything(), 'bgg', null);
+      expect(gameUpsert.upsert).toHaveBeenCalledWith(expect.anything(), 'bgg', null, undefined);
     });
   });
 
@@ -162,6 +189,8 @@ describe('GameImportProcessor', () => {
       gameCreated: true,
       sourceCreated: true,
       platformGames: [],
+      baseGameIds: [],
+      isExpansion: false,
     });
 
     await processor.process(makeJob(JobNames.GameImport, withExpansions));
@@ -171,7 +200,7 @@ describe('GameImportProcessor', () => {
         baseJobId: 'job-1',
         batchId: 'batch-1',
         gatewayId: 'bgg',
-        baseExternalId: 'ext-1',
+        requestedExternalId: 'ext-1',
         expansionExternalIds: ['exp-a', 'exp-b'],
         locale: 'en',
         userId: 'user-7',
@@ -193,6 +222,8 @@ describe('GameImportProcessor', () => {
       gameCreated: true,
       sourceCreated: true,
       platformGames: [],
+      baseGameIds: [],
+      isExpansion: false,
     });
 
     await processor.process(makeJob(JobNames.GameImport, basePayload));
@@ -206,6 +237,8 @@ describe('GameImportProcessor', () => {
       gameCreated: true,
       sourceCreated: true,
       platformGames: [],
+      baseGameIds: [],
+      isExpansion: false,
     });
     // Both markRunning and markCompleted no-op: the row was cancelled (e.g. its
     // base failed) while this flow was in flight.
@@ -220,7 +253,14 @@ describe('GameImportProcessor', () => {
 
   it('persists the durable result summary (platformGames included) and checks batch completion', async () => {
     const platformGames = [{ platformId: 'plat-1', platformGameId: 'pg-1' }];
-    gameUpsert.upsert.mockResolvedValue({ gameId: 'game-1', gameCreated: true, sourceCreated: true, platformGames });
+    gameUpsert.upsert.mockResolvedValue({
+      gameId: 'game-1',
+      gameCreated: true,
+      sourceCreated: true,
+      platformGames,
+      baseGameIds: [],
+      isExpansion: false,
+    });
 
     await processor.process(makeJob(JobNames.GameImport, basePayload));
 
@@ -243,6 +283,8 @@ describe('GameImportProcessor', () => {
       gameCreated: false,
       sourceCreated: false,
       platformGames: [],
+      baseGameIds: [],
+      isExpansion: false,
     });
 
     await processor.process(makeJob(JobNames.GameImport, basePayload));
@@ -261,6 +303,8 @@ describe('GameImportProcessor', () => {
       gameCreated: true,
       sourceCreated: true,
       platformGames: [],
+      baseGameIds: [],
+      isExpansion: false,
     });
 
     await processor.process(makeJob(JobNames.GameImport, basePayload));
@@ -269,6 +313,178 @@ describe('GameImportProcessor', () => {
     expect(runningCall).toBeDefined();
     expect(runningCall![0].data).toEqual({ status: JobStatus.Running, bullmqJobId: '1' });
     expect(runningCall![0].data).not.toHaveProperty('startedAt');
+  });
+
+  // #971: why a job is in its batch is its origin; whether its game is an
+  // expansion is the link step's answer, from its content type and links.
+  describe('origin and base game links', () => {
+    const linkedTo = (baseGameIds: string[], isExpansion = baseGameIds.length > 0): ImportJobResult => ({
+      gameId: 'game-1',
+      gameCreated: true,
+      sourceCreated: true,
+      platformGames: [],
+      baseGameIds,
+      isExpansion,
+    });
+
+    const completedEvent = () =>
+      events.emit.mock.calls.find(
+        ([name]) => name === ImportJobCompletedEvent.eventName,
+      )?.[1] as ImportJobCompletedEvent;
+
+    it('reports a requested game linked to a base game as an expansion', async () => {
+      gameUpsert.upsert.mockResolvedValue(linkedTo(['g-13']));
+
+      await processor.process(makeJob(JobNames.GameImport, basePayload));
+
+      expect(completedEvent()).toMatchObject({ origin: 'Requested', isExpansion: true, baseGameIds: ['g-13'] });
+      expect(events.emit).toHaveBeenCalledWith(
+        WebhookEventType.GameImported,
+        expect.objectContaining({
+          data: expect.objectContaining({ origin: 'Requested', isExpansion: true, baseGameIds: ['g-13'] }),
+        }),
+      );
+    });
+
+    it('reports a game linked to its original but not an add-on, a remaster say, as not an expansion', async () => {
+      gameUpsert.upsert.mockResolvedValue(linkedTo(['g-13'], false));
+
+      await processor.process(makeJob(JobNames.GameImport, basePayload));
+
+      expect(completedEvent()).toMatchObject({ origin: 'Requested', isExpansion: false, baseGameIds: ['g-13'] });
+    });
+
+    it('reports a chosen expansion linked to no base game as not an expansion', async () => {
+      gameUpsert.upsert.mockResolvedValue(linkedTo([]));
+
+      await processor.process(
+        makeJob(JobNames.ExpansionImport, {
+          ...basePayload,
+          origin: ImportJobOrigin.ChosenExpansion,
+          requestedExternalId: 'ext-base',
+        }),
+      );
+
+      expect(completedEvent()).toMatchObject({ origin: 'ChosenExpansion', isExpansion: false, baseGameIds: [] });
+    });
+
+    it('passes the requested game as the fallback base game for a chosen expansion only', async () => {
+      gameUpsert.upsert.mockResolvedValue(linkedTo([]));
+
+      await processor.process(
+        makeJob(JobNames.ExpansionImport, {
+          ...basePayload,
+          origin: ImportJobOrigin.ChosenExpansion,
+          requestedExternalId: 'ext-base',
+        }),
+      );
+      await processor.process(
+        makeJob(JobNames.GameImport, {
+          ...basePayload,
+          origin: ImportJobOrigin.AddedBaseGame,
+          requestedExternalId: 'x',
+        }),
+      );
+
+      expect(gameUpsert.upsert.mock.calls.map((call) => call[3])).toEqual(['ext-base', undefined]);
+    });
+
+    it('carries the origin on the failed event and webhook, with no isExpansion', async () => {
+      await processor.onFailed(
+        makeJob(
+          JobNames.GameImport,
+          { ...basePayload, origin: ImportJobOrigin.AddedBaseGame },
+          { attemptsMade: 3, attempts: 3 },
+        ),
+        new Error('boom'),
+      );
+
+      const failed = events.emit.mock.calls.find(([name]) => name === ImportJobFailedEvent.eventName)?.[1];
+      expect(failed).toMatchObject({ origin: 'AddedBaseGame' });
+      expect(failed).not.toHaveProperty('isExpansion');
+      expect(events.emit).toHaveBeenCalledWith(
+        WebhookEventType.ImportJobFailed,
+        expect.objectContaining({ data: expect.not.objectContaining({ isExpansion: expect.anything() }) }),
+      );
+    });
+  });
+
+  // #971: an expansion, DLC or mod whose base game is not in the game catalog
+  // adds it to its import batch.
+  describe('adding a base game', () => {
+    const needsBaseGame: ImportJobResult = {
+      gameId: 'game-1',
+      gameCreated: true,
+      sourceCreated: true,
+      platformGames: [],
+      baseGameIds: [],
+      baseGameToAdd: '13',
+      isExpansion: true,
+    };
+
+    beforeEach(() => gameUpsert.upsert.mockResolvedValue(needsBaseGame));
+
+    it('reports an expansion whose base game it adds as an expansion, linked to none yet', async () => {
+      await processor.process(makeJob(JobNames.GameImport, basePayload));
+
+      expect(events.emit.mock.calls.find(([name]) => name === ImportJobCompletedEvent.eventName)?.[1]).toMatchObject({
+        isExpansion: true,
+        baseGameIds: [],
+      });
+    });
+
+    it('adds the base game a requested expansion needs before marking it Completed', async () => {
+      await processor.process(makeJob(JobNames.GameImport, { ...basePayload, locale: 'en' }));
+
+      expect(expansionSpawner.spawnBaseGame).toHaveBeenCalledWith(
+        {
+          parentJobId: 'job-1',
+          batchId: 'batch-1',
+          correlationId: 'corr-1',
+          gatewayId: 'bgg',
+          externalId: '13',
+          locale: 'en',
+          initiatorType: InitiatorType.User,
+          userId: 'user-7',
+        },
+        meta,
+      );
+      // The added row must be visible to batch completion before this job's
+      // Completed write can let the batch finish.
+      const upsertOrder = gameUpsert.upsert.mock.invocationCallOrder[0];
+      const spawnOrder = expansionSpawner.spawnBaseGame.mock.invocationCallOrder[0];
+      const completedIdx = db.job.updateMany.mock.calls.findIndex(([arg]) => arg?.data?.status === JobStatus.Completed);
+      expect(upsertOrder).toBeLessThan(spawnOrder);
+      expect(spawnOrder).toBeLessThan(db.job.updateMany.mock.invocationCallOrder[completedIdx]);
+    });
+
+    it.each([ImportJobOrigin.Requested, ImportJobOrigin.ChosenExpansion])(
+      'adds the base game a %s job needs',
+      async (origin) => {
+        await processor.process(
+          makeJob(JobNames.ExpansionImport, { ...basePayload, origin, requestedExternalId: 'ext-requested' }),
+        );
+
+        expect(expansionSpawner.spawnBaseGame).toHaveBeenCalledWith(
+          expect.objectContaining({ parentJobId: 'job-1', externalId: '13' }),
+          meta,
+        );
+      },
+    );
+
+    it('never adds a base game for an added base game', async () => {
+      await processor.process(makeJob(JobNames.GameImport, { ...basePayload, origin: ImportJobOrigin.AddedBaseGame }));
+
+      expect(expansionSpawner.spawnBaseGame).not.toHaveBeenCalled();
+    });
+
+    it('adds nothing for a game that needs no base game', async () => {
+      gameUpsert.upsert.mockResolvedValue({ ...needsBaseGame, baseGameToAdd: undefined });
+
+      await processor.process(makeJob(JobNames.GameImport, basePayload));
+
+      expect(expansionSpawner.spawnBaseGame).not.toHaveBeenCalled();
+    });
   });
 
   it('throws on an unknown job name', async () => {
@@ -325,12 +541,12 @@ describe('GameImportProcessor', () => {
         status: JobStatus.Failed,
         result: { errorCode: 'INTERNAL_ERROR', error: 'The import failed due to an internal error.' },
       });
-      expect(failed.isExpansion).toBe(false);
+      expect(failed.origin).toBe(ImportJobOrigin.Requested);
       expect(failed).not.toHaveProperty('userId');
       expect(batchCompletion.checkAndEmit).toHaveBeenCalledWith('batch-1');
     });
 
-    it('cancels still-Pending expansion children when a base import fails permanently', async () => {
+    it('cancels still-Pending children when the requested game fails permanently', async () => {
       await processor.onFailed(
         makeJob(JobNames.GameImport, basePayload, { attemptsMade: 3, attempts: 3 }),
         new Error('boom'),
@@ -340,24 +556,50 @@ describe('GameImportProcessor', () => {
         where: { parentJobId: 'job-1', status: JobStatus.Pending },
         data: {
           status: JobStatus.Cancelled,
-          result: { errorCode: 'BASE_IMPORT_FAILED', error: 'Skipped because the base game import failed.' },
+          result: {
+            errorCode: 'BASE_IMPORT_FAILED',
+            error: 'Skipped because the import that added it to the batch failed.',
+          },
         },
       });
     });
 
-    it('does not run the child-cancellation sweep when an expansion import fails', async () => {
+    // #971: a chosen expansion adds its base game as a child, so its failure
+    // leaves the same orphans a requested game's would.
+    it('cancels still-Pending children of any import job that fails, since a chosen expansion can add a base game', async () => {
       await processor.onFailed(
         makeJob(
           JobNames.ExpansionImport,
-          { ...basePayload, baseGameExternalId: 'ext-base' },
+          { ...basePayload, jobId: 'exp-job', origin: ImportJobOrigin.ChosenExpansion, requestedExternalId: 'ext-1' },
           { attemptsMade: 3, attempts: 3 },
         ),
         new Error('boom'),
       );
 
-      expect(db.job.updateMany).not.toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ parentJobId: expect.anything() }) }),
+      expect(db.job.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { parentJobId: 'exp-job', status: JobStatus.Pending } }),
       );
+    });
+
+    it('leaves the requested game Completed when its added base game fails', async () => {
+      await processor.onFailed(
+        makeJob(
+          JobNames.GameImport,
+          { ...basePayload, jobId: 'added-base-job', origin: ImportJobOrigin.AddedBaseGame },
+          { attemptsMade: 3, attempts: 3 },
+        ),
+        new Error('boom'),
+      );
+
+      // Only the added base game's own row, and its own (absent) children, are
+      // written; the game that needed it keeps its Completed status, and the
+      // batch ends PartiallyCompleted rather than cancelled.
+      const wheres = db.job.updateMany.mock.calls.map(([args]) => args.where);
+      expect(wheres).toEqual([
+        { id: 'added-base-job', status: { in: [JobStatus.Pending, JobStatus.Running] } },
+        { parentJobId: 'added-base-job', status: JobStatus.Pending },
+      ]);
+      expect(batchCompletion.checkAndEmit).toHaveBeenCalledWith('batch-1');
     });
 
     it(

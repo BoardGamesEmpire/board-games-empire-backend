@@ -41,7 +41,7 @@ export function emitJobFailedEvents(
   sanitized: SanitizedImportError,
   initiatedAt: Date,
 ): void {
-  const { jobId, batchId, gatewayId, externalId, isExpansion } = context;
+  const { jobId, batchId, gatewayId, externalId, origin } = context;
 
   events.emit(
     ImportJobFailedEvent.eventName,
@@ -56,7 +56,7 @@ export function emitJobFailedEvents(
         status: JobStatus.Failed,
         result: { errorCode: sanitized.code, error: sanitized.message },
       },
-      { batchId, gatewayId, externalId, isExpansion },
+      { batchId, gatewayId, externalId, origin },
       initiatedAt,
     ),
   );
@@ -75,7 +75,7 @@ export function emitJobFailedEvents(
         batchId,
         gatewayId,
         externalId,
-        isExpansion,
+        origin,
         errorCode: sanitized.code,
         error: sanitized.message,
       },

@@ -110,11 +110,15 @@ function toContentType(thing: Pick<BggThing, 'type'>): proto.ContentType {
   return BGG_CONTENT_TYPE_MAP[thing.type] ?? proto.ContentType.CONTENT_TYPE_UNSPECIFIED;
 }
 
-function toBaseGameExternalId(thing: Pick<BggThing, 'links'>): string | undefined {
-  const inboundExpansion = (thing.links ?? []).find(
-    (link) => link.type === BggLinkType.BoardGameExpansion && isInbound(link.inbound),
-  );
-  return inboundExpansion ? String(inboundExpansion.id) : undefined;
+/**
+ * The BGG ids of every base game a thing expands: its inbound expansion
+ * links, in BGG order. An expansion that fits several base games lists each
+ * one (#971).
+ */
+function toBaseGameExternalIds(thing: Pick<BggThing, 'links'>): string[] {
+  return (thing.links ?? [])
+    .filter((link) => link.type === BggLinkType.BoardGameExpansion && isInbound(link.inbound))
+    .map((link) => String(link.id));
 }
 
 function toSourceUrl(thing: Pick<BggThing, 'id' | 'type'>): string {
@@ -309,10 +313,11 @@ export function searchItemToGameSearchData(item: BggSearchItem, thing?: BggThing
     sourceUrl: toSourceUrl({ id: item.id, type: item.type }),
     availablePlatforms: [TABLETOP_PLATFORM],
     availableReleases: [],
-  } satisfies proto.GameSearchData;
+  } satisfies Omit<proto.GameSearchData, 'baseGameExternalIds'>;
 
   if (!thing) {
-    return found;
+    // A search item carries no links, so it names no base game (#971).
+    return { ...found, baseGameExternalIds: [] } satisfies proto.GameSearchData;
   }
 
   const fromThing = thingToGameSearchData(thing);
@@ -344,7 +349,7 @@ export function thingToGameSearchData(thing: BggThing): proto.GameSearchData {
     averageRating: coercePositive(thing.statistics?.ratings?.average),
     ...toPlayerCounts(thing),
     ...toPlayTimes(thing),
-    baseGameExternalId: toBaseGameExternalId(thing),
+    baseGameExternalIds: toBaseGameExternalIds(thing),
     summary: decodeDescription(thing.description),
     availablePlatforms: [TABLETOP_PLATFORM],
     availableReleases: [toSyntheticTabletopRelease(thing)],
@@ -404,7 +409,7 @@ export function thingToGameData(thing: BggThing, locale?: string): proto.GameDat
     minAge: coercePositive(thing.minage),
     complexityWeight,
 
-    baseGameExternalId: toBaseGameExternalId(thing),
+    baseGameExternalIds: toBaseGameExternalIds(thing),
 
     platforms: [TABLETOP_PLATFORM],
     releases: toReleases(thing),

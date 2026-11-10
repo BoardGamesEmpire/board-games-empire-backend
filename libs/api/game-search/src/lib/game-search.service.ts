@@ -243,6 +243,7 @@ export class GameSearchService {
         maxPlayers: game.maxPlayers ?? undefined,
         minPlayTime: game.minPlayTime ?? undefined,
         maxPlayTime: game.maxPlayTime ?? undefined,
+        baseGameExternalIds: [],
         inSystem: true,
         gameId: game.id,
 
@@ -461,7 +462,7 @@ export class GameSearchService {
       maxPlayers: game.maxPlayers,
       minPlayTime: game.minPlaytime,
       maxPlayTime: game.maxPlaytime,
-      baseGameExternalId: game.baseGameExternalId,
+      baseGameExternalIds: game.baseGameExternalIds ?? [],
       inSystem: result.inSystem ?? false,
       gameId: result.gameId,
 

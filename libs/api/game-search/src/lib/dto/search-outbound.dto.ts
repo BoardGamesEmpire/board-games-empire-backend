@@ -38,7 +38,13 @@ export interface WsReleaseData {
 export interface WsGameSearchResult {
   availableReleases: WsReleaseData[];
   averageRating?: number;
-  baseGameExternalId?: string;
+
+  /**
+   * Every base game the DataGateway says this add-on fits, primary first.
+   * Empty for a game that names none, and on a result from the game catalog
+   * itself (#971).
+   */
+  baseGameExternalIds: string[];
   contentType: string;
   externalId: string;
 

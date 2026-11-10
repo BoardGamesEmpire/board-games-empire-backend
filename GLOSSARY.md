@@ -867,7 +867,7 @@ _Avoid_: upsert; fetch (that is only the first half)
 Asking one DataGateway for a game's full data: the first half of an import, before the result is stored.
 
 **Import batch**:
-One import request, a base game plus any expansions chosen with it, tracked and reported as a group with one overall outcome.
+One import request, the game asked for plus any expansions chosen with it and any base game the server added because one of them needed it, tracked and reported as a group with one overall outcome.
 _Avoid_: import flow, co-import
 
 **Re-import**:

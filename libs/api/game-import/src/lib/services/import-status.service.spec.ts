@@ -8,7 +8,7 @@ import {
   type MockAbilityService,
 } from '@bge/testing';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { ImportBatchStatus } from '../interfaces/import-job.interface';
+import { ImportBatchStatus, ImportJobOrigin } from '../interfaces/import-job.interface';
 import { GameImportStatusService } from './import-status.service';
 
 const ME = 'user-7';
@@ -83,7 +83,7 @@ describe('GameImportStatusService', () => {
         parentJobId: null,
         gameId: 'game-1',
         result: { gameId: 'game-1', gameTitle: 'Catan', thumbnail: 'http://x/y.png', platformGames },
-        payload: { correlationId: 'corr-1', externalId: 'ext-1', expansionExternalIds: ['ext-2'] },
+        payload: { correlationId: 'corr-1', externalId: 'ext-1', expansionExternalIds: ['ext-2'], origin: 'Requested' },
         startedAt,
         completedAt,
       },
@@ -93,7 +93,7 @@ describe('GameImportStatusService', () => {
         parentJobId: 'base-job',
         gameId: null,
         result: null,
-        payload: { correlationId: 'corr-1', externalId: 'ext-2' },
+        payload: { correlationId: 'corr-1', externalId: 'ext-2', origin: 'ChosenExpansion' },
         startedAt,
         completedAt: null,
       },
@@ -118,7 +118,7 @@ describe('GameImportStatusService', () => {
         {
           jobId: 'base-job',
           status: JobStatus.Completed,
-          isExpansion: false,
+          origin: ImportJobOrigin.Requested,
           parentJobId: null,
           requestedExpansions: ['ext-2'],
           externalId: 'ext-1',
@@ -134,7 +134,7 @@ describe('GameImportStatusService', () => {
         {
           jobId: 'exp-job',
           status: JobStatus.Running,
-          isExpansion: true,
+          origin: ImportJobOrigin.ChosenExpansion,
           parentJobId: 'base-job',
           requestedExpansions: undefined,
           externalId: 'ext-2',

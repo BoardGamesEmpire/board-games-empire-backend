@@ -1,4 +1,4 @@
-import { type ContentFormat, DatabaseService, JobStatus, Prisma } from '@bge/database';
+import { DatabaseService, JobStatus, Prisma, type ContentFormat } from '@bge/database';
 import { ActorAwareWorkerHost, extractJobMeta } from '@bge/queue-actor-context';
 import { guardWorkerEvent } from '@bge/utils';
 import { WebhookEventType, webhookEnvelope } from '@bge/webhooks';
@@ -8,12 +8,13 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Job } from 'bullmq';
 import { JobNames, QueueNames } from '../constants/queue.constants';
 import { ImportJobCompletedEvent } from '../events/import.events';
-import type {
-  ExpansionImportJobPayload,
-  GameImportJobPayload,
-  ImportJobResult,
-  PersistedJobFailure,
-  PersistedJobResult,
+import {
+  ImportJobOrigin,
+  type ExpansionImportJobPayload,
+  type GameImportJobPayload,
+  type ImportJobResult,
+  type PersistedJobFailure,
+  type PersistedJobResult,
 } from '../interfaces/import-job.interface';
 import { ImportBatchCompletionService } from '../services/batch-completion.service';
 import { ExpansionSpawnerService } from '../services/expansion-spawner.service';
@@ -22,6 +23,17 @@ import { emitJobFailedEvents } from '../utils/emit-job-failed';
 import { extractGameDataFromChildren } from '../utils/extract-game-data';
 import { ImportErrorCode, importErrorMessage, sanitizeImportError } from '../utils/sanitize-import-error';
 
+/**
+ * Persists each game of an import batch, in apps/worker, from the GameData its
+ * fetch child returned.
+ *
+ * A requested game, once persisted, adds the flows of the expansions chosen
+ * with it. Any game the request named — the requested game or a chosen
+ * expansion — that needs a base game the game catalog lacks adds that base
+ * game to the batch; an added base game adds none (#971). Base game links are
+ * made by whichever of the two games persists second, so the order the flows
+ * finish in doesn't matter.
+ */
 @Processor(QueueNames.GamesImport)
 export class GameImportProcessor extends ActorAwareWorkerHost<
   GameImportJobPayload | ExpansionImportJobPayload,
@@ -41,12 +53,9 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
 
   protected processJob(job: Job<GameImportJobPayload | ExpansionImportJobPayload>): Promise<ImportJobResult> {
     switch (job.name) {
-      case JobNames.GameImport: {
-        return this.processImport(job, false);
-      }
-
+      case JobNames.GameImport:
       case JobNames.ExpansionImport: {
-        return this.processImport(job as Job<ExpansionImportJobPayload>, true);
+        return this.processImport(job);
       }
 
       default: {
@@ -55,20 +64,15 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
     }
   }
 
-  private async processImport(
-    job: Job<GameImportJobPayload | ExpansionImportJobPayload>,
-    isExpansion: boolean,
-  ): Promise<ImportJobResult> {
+  private async processImport(job: Job<GameImportJobPayload | ExpansionImportJobPayload>): Promise<ImportJobResult> {
     const initiatedAt = new Date();
-    const { jobId, batchId, gatewayId } = job.data;
+    const { jobId, batchId, gatewayId, origin } = job.data;
 
     // GameData is the return value of this job's fetch child, run by the
     // gateway-worker. BullMQ stores it under the child's queue:jobId key.
     const gameData = extractGameDataFromChildren(await job.getChildrenValues());
 
-    this.logger.log(
-      `${isExpansion ? 'Expansion' : 'Base game'} import: jobId=${jobId} externalId=${gameData.externalId}`,
-    );
+    this.logger.log(`${origin} game import: jobId=${jobId} externalId=${gameData.externalId}`);
 
     // Fetch processor already moved status to Running and stamped startedAt on
     // the Pending → Running transition. This call only records the import job's
@@ -78,22 +82,32 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
     await this.markRunning(jobId, job.id!.toString());
 
     const contentFormat = await this.contentFormatOf(gatewayId);
-    const result = isExpansion
-      ? await this.gameUpsert.upsertExpansion(
-          gameData,
-          (job.data as ExpansionImportJobPayload).baseGameExternalId,
-          gatewayId,
-          contentFormat,
-        )
-      : await this.gameUpsert.upsert(gameData, gatewayId, contentFormat);
+    // A chosen expansion falls back on the requested game as its base game
+    // when its DataGateway names none (#971).
+    const result = await this.gameUpsert.upsert(
+      gameData,
+      gatewayId,
+      contentFormat,
+      origin === ImportJobOrigin.ChosenExpansion
+        ? (job.data as ExpansionImportJobPayload).requestedExternalId
+        : undefined,
+    );
 
-    // The base GameSource now exists, so its expansions can resolve it. Spawn
-    // their flows BEFORE marking this base Completed: the freshly-created
-    // Pending expansion rows must be visible to batch-completion so it can't
-    // fire on the base alone. Idempotent, so a retry after a mid-spawn crash
-    // converges rather than duplicating work.
-    if (!isExpansion) {
+    // The requested game's GameSource now exists, so the expansions chosen
+    // with it can fall back on it. Spawn their flows BEFORE marking it
+    // Completed: the freshly-created Pending expansion rows must be visible to
+    // batch-completion so it can't fire on the requested game alone.
+    // Idempotent, so a retry after a mid-spawn crash converges rather than
+    // duplicating work.
+    if (origin === ImportJobOrigin.Requested) {
       await this.spawnExpansions(job as Job<GameImportJobPayload>);
+    }
+
+    // A game that needs a base game the game catalog lacks adds it to the
+    // batch, before Completed for the same reason. Only the games the request
+    // named do: an added base game never adds another (#971).
+    if (result.baseGameToAdd && origin !== ImportJobOrigin.AddedBaseGame) {
+      await this.spawnBaseGame(job, result.baseGameToAdd);
     }
 
     const completed = await this.markCompleted(jobId, {
@@ -123,13 +137,14 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
           batchId,
           gatewayId,
           externalId: gameData.externalId,
-          isExpansion,
+          origin,
           gameTitle: gameData.title,
           thumbnail: gameData.thumbnailUrl ?? null,
           gameCreated: result.gameCreated,
           sourceCreated: result.sourceCreated,
           platformGames: result.platformGames,
-          baseGameId: result.baseGameId,
+          baseGameIds: result.baseGameIds,
+          isExpansion: result.isExpansion,
         },
         initiatedAt,
       ),
@@ -155,10 +170,10 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
   }
 
   /**
-   * Spawns the expansion flows for a just-persisted base game. The spawn list
-   * comes from the base job's own payload, and the originating actor is
-   * re-derived from the job meta so the expansion jobs are attributed to the
-   * same user. Row creation + enqueue (and their idempotency) live in
+   * Spawns the flows of the expansions chosen with a just-persisted requested
+   * game. The spawn list comes from its job's own payload, and the originating
+   * actor is re-derived from the job meta so the expansion jobs are attributed
+   * to the same user. Row creation + enqueue (and their idempotency) live in
    * ExpansionSpawnerService.
    */
   private async spawnExpansions(job: Job<GameImportJobPayload>): Promise<void> {
@@ -182,8 +197,35 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
         batchId: data.batchId,
         correlationId: data.correlationId,
         gatewayId: data.gatewayId,
-        baseExternalId: data.externalId,
+        requestedExternalId: data.externalId,
         expansionExternalIds,
+        locale: data.locale,
+        initiatorType: data.initiatorType,
+        userId: data.userId,
+      },
+      meta,
+    );
+  }
+
+  /**
+   * Adds the base game a just-persisted game needs to its import batch, under
+   * that game's job and attributed to the same actor (#971).
+   */
+  private async spawnBaseGame(job: Job<GameImportJobPayload>, externalId: string): Promise<void> {
+    const data = job.data;
+    const meta = extractJobMeta(job.data);
+    if (!meta) {
+      // Unreachable in practice, as for spawnExpansions.
+      throw new Error(`Cannot add a base game for job ${job.id}: missing actor meta envelope`);
+    }
+
+    await this.expansionSpawner.spawnBaseGame(
+      {
+        parentJobId: data.jobId,
+        batchId: data.batchId,
+        correlationId: data.correlationId,
+        gatewayId: data.gatewayId,
+        externalId,
         locale: data.locale,
         initiatorType: data.initiatorType,
         userId: data.userId,
@@ -194,7 +236,7 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
 
   @OnWorkerEvent('failed')
   async onFailed(job: Job<GameImportJobPayload | ExpansionImportJobPayload>, error: Error): Promise<void> {
-    const { jobId, batchId, gatewayId, externalId } = job.data;
+    const { jobId, batchId, gatewayId, externalId, origin } = job.data;
 
     const attempts = job.opts.attempts ?? 1;
     if (attempts > 1 && job.attemptsMade < attempts) {
@@ -242,36 +284,31 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
           return;
         }
 
-        // Base failure: cancel any still-Pending expansion rows this base
-        // spawned. In the common cases the base never persisted, so no expansion
-        // rows exist and this is a no-op — but it guarantees the batch can't hang
-        // Running forever on orphaned children (e.g. a crash after row creation
-        // but before their flows enqueued, with retries then exhausted).
+        // Cancel any still-Pending rows this job added to the batch: the
+        // expansions chosen with a requested game, or the base game a game
+        // needed (#971), so any job can have them. In the common cases the job
+        // never persisted, so it added no rows and this is a no-op — but it
+        // guarantees the batch can't hang Running forever on orphaned children
+        // (e.g. a crash after row creation but before their flows enqueued,
+        // with retries then exhausted).
         //
-        // Deliberately scoped to Pending only: an expansion already Running when
+        // Deliberately scoped to Pending only: a child already Running when
         // this sweep fires is left alone and proceeds to its own guarded
         // markRunning/markCompleted normally — it was never a cancellation
         // target, not "healing" from one. Conversely, a Pending row this sweep
         // does cancel is safe from resurrection: markRunning/markCompleted only
         // transition rows still in [Pending, Running], so they silently no-op
         // against an already-Cancelled row instead of overwriting it.
-        if (job.name === JobNames.GameImport) {
-          const cancellation: PersistedJobFailure = {
-            errorCode: ImportErrorCode.BaseImportFailed,
-            error: importErrorMessage(ImportErrorCode.BaseImportFailed),
-          };
-          await this.db.job.updateMany({
-            where: { parentJobId: jobId, status: JobStatus.Pending },
-            data: { status: JobStatus.Cancelled, result: cancellation as unknown as Prisma.InputJsonValue },
-          });
-        }
+        const cancellation: PersistedJobFailure = {
+          errorCode: ImportErrorCode.BaseImportFailed,
+          error: importErrorMessage(ImportErrorCode.BaseImportFailed),
+        };
+        await this.db.job.updateMany({
+          where: { parentJobId: jobId, status: JobStatus.Pending },
+          data: { status: JobStatus.Cancelled, result: cancellation as unknown as Prisma.InputJsonValue },
+        });
 
-        emitJobFailedEvents(
-          this.events,
-          { jobId, batchId, externalId, gatewayId, isExpansion: job.name === JobNames.ExpansionImport },
-          sanitized,
-          initiatedAt,
-        );
+        emitJobFailedEvents(this.events, { jobId, batchId, externalId, gatewayId, origin }, sanitized, initiatedAt);
 
         await this.batchCompletion.checkAndEmit(batchId);
       }),
@@ -308,8 +345,9 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
           gameCreated: event.gameCreated,
           sourceCreated: event.sourceCreated,
           platformGames: event.platformGames,
+          origin: event.origin,
           isExpansion: event.isExpansion,
-          baseGameId: event.baseGameId,
+          baseGameIds: event.baseGameIds,
           gatewayId: event.gatewayId,
           externalId: event.externalId,
         },

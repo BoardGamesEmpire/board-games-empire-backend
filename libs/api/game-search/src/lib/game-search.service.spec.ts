@@ -396,6 +396,7 @@ describe('GameSearchService', () => {
         contentType: proto.ContentType.CONTENT_TYPE_EXPANSION,
         availablePlatforms: [],
         availableReleases: [],
+        baseGameExternalIds: [],
       },
       inSystem: false,
     });
@@ -685,6 +686,7 @@ describe('GameSearchService', () => {
         contentType: proto.ContentType.CONTENT_TYPE_BASE_GAME,
         availablePlatforms: [],
         availableReleases: [],
+        baseGameExternalIds: [],
         ...game,
       },
     });
@@ -725,6 +727,7 @@ describe('GameSearchService', () => {
             contentType: proto.ContentType.CONTENT_TYPE_BASE_GAME,
             availablePlatforms: [],
             availableReleases: [],
+            baseGameExternalIds: [],
             summary: '**Trade** and build',
           },
         },

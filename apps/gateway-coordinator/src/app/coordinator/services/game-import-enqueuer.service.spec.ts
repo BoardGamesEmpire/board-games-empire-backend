@@ -58,6 +58,15 @@ describe('GameImportEnqueuerService', () => {
     );
   });
 
+  it("marks the requested game's job row and both flow nodes as Requested (#971)", async () => {
+    await service.enqueue(baseInput);
+
+    const flow = add.mock.calls[0][0] as FlowJob;
+    expect(create.mock.calls[0][0].data.payload).toEqual(expect.objectContaining({ origin: 'Requested' }));
+    expect((flow.data as { origin?: string }).origin).toBe('Requested');
+    expect((flow.children?.[0]?.data as { origin?: string }).origin).toBe('Requested');
+  });
+
   it('stamps the base import + fetch nodes with the originating actor + correlation', async () => {
     await service.enqueue(baseInput);
 

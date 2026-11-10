@@ -3,7 +3,6 @@ import {
   ContentFormat,
   ContentType,
   DatabaseService,
-  ExpansionType,
   isPrismaUniqueConstraintError,
   Prisma,
   Reach,
@@ -12,8 +11,9 @@ import { toStoredContentType } from '@bge/gateway-registry';
 import { ServiceAccountService } from '@bge/services';
 import { VocabularyLinkService } from '@bge/vocabulary';
 import { DlcData, type GameData } from '@boardgamesempire/proto-gateway';
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { ImportJobResult, PlatformGameRef } from '../interfaces/import-job.interface';
+import { BaseGameLinkService } from './base-game-link.service';
 import { toReleaseDate, toReleaseRegion } from './helpers';
 import { PersonUpsertService } from './person.service';
 import { PlatformUpsertService } from './platform.service';
@@ -28,60 +28,42 @@ export class GameUpsertService {
     private readonly persons: PersonUpsertService,
     private readonly platform: PlatformUpsertService,
     private readonly serviceAccount: ServiceAccountService,
+    private readonly baseGameLinks: BaseGameLinkService,
   ) {}
 
   /**
    * Imports a game from `gatewayId`, whose free text arrives in
    * `contentFormat`, null when the DataGateway declared none.
+   *
+   * The game's DataGateway link stores the base game ids its DataGateway sent,
+   * and the game is then linked to its base games and its add-ons in the game
+   * catalog. `fallbackBaseExternalId` is the requested game of the import
+   * batch, for an expansion chosen with it: linked as its base game when the
+   * DataGateway names none (#971).
    */
-  async upsert(fetched: GameData, gatewayId: string, contentFormat: ContentFormat | null): Promise<ImportJobResult> {
-    const gameData = inMarkdown(fetched, contentFormat);
-    const { gameId, gameCreated, sourceCreated } = await this.upsertGameRecord(gameData, gatewayId);
-
-    const platformGames = await this.upsertRelations(gameId, gameData, gatewayId);
-    return { gameId, gameCreated, sourceCreated, platformGames };
-  }
-
-  async upsertExpansion(
+  async upsert(
     fetched: GameData,
-    baseGameExternalId: string,
     gatewayId: string,
     contentFormat: ContentFormat | null,
+    fallbackBaseExternalId?: string,
   ): Promise<ImportJobResult> {
-    const baseSource = await this.db.gameSource.findUnique({
-      where: { gatewayId_externalId: { gatewayId, externalId: baseGameExternalId } },
-      select: { gameId: true },
-    });
-
-    if (!baseSource) {
-      throw new NotFoundException(
-        `Base game source not found for gatewayId=${gatewayId} externalId=${baseGameExternalId}. ` +
-          `The base game import must complete before expansions.`,
-      );
-    }
-
     const gameData = inMarkdown(fetched, contentFormat);
     const { gameId, gameCreated, sourceCreated } = await this.upsertGameRecord(gameData, gatewayId);
+
     const platformGames = await this.upsertRelations(gameId, gameData, gatewayId);
 
-    const baseGameId = baseSource.gameId;
-    const contentType = toDbContentType(gameData.contentType);
-
-    await this.db.gameExpansion.upsert({
-      where: { baseGameId_expansionGameId: { baseGameId, expansionGameId: gameId } },
-      create: {
-        baseGameId,
-        expansionGameId: gameId,
-        expansionType: toExpansionType(contentType),
-        isStandalone: contentType === ContentType.StandaloneExpansion,
-      },
-      update: {
-        expansionType: toExpansionType(contentType),
-        isStandalone: contentType === ContentType.StandaloneExpansion,
-      },
+    // After the DataGateway link holds the base game ids, which is what lets
+    // an add-on and its base game find each other in either order (#971).
+    const { baseGameIds, baseGameToAdd, isExpansion } = await this.baseGameLinks.link({
+      gameId,
+      gatewayId,
+      externalId: gameData.externalId,
+      contentType: toDbContentType(gameData.contentType),
+      baseExternalIds: gameData.baseGameExternalIds ?? [],
+      fallbackBaseExternalId,
     });
 
-    return { gameId, gameCreated, sourceCreated, baseGameId, platformGames };
+    return { gameId, gameCreated, sourceCreated, platformGames, baseGameIds, baseGameToAdd, isExpansion };
   }
 
   private async upsertGameRecord(
@@ -90,7 +72,7 @@ export class GameUpsertService {
   ): Promise<{ gameId: string; gameCreated: boolean; sourceCreated: boolean }> {
     const existingSource = await this.findGameSource(gatewayId, gameData.externalId);
     if (existingSource) {
-      return this.applyExistingGameUpdate(existingSource.game, gameData);
+      return this.applyExistingGameUpdate(existingSource, gameData, gatewayId);
     }
 
     // An imported game is the server's, not the requester's, and that ownership
@@ -111,6 +93,7 @@ export class GameUpsertService {
               gatewayId,
               externalId: gameData.externalId,
               sourceUrl: gameData.sourceUrl,
+              baseExternalIds: gameData.baseGameExternalIds ?? [],
             },
           },
         },
@@ -137,7 +120,7 @@ export class GameUpsertService {
           this.logger.debug(
             `Concurrent import race for externalId=${gameData.externalId}; recovered game id=${raced.game.id}`,
           );
-          return this.applyExistingGameUpdate(raced.game, gameData);
+          return this.applyExistingGameUpdate(raced, gameData, gatewayId);
         }
       }
 
@@ -148,15 +131,30 @@ export class GameUpsertService {
   private findGameSource(gatewayId: string, externalId: string) {
     return this.db.gameSource.findUnique({
       where: { gatewayId_externalId: { gatewayId, externalId } },
-      select: { gameId: true, game: { select: { id: true, frozenAt: true } } },
+      select: { baseExternalIds: true, game: { select: { id: true, frozenAt: true } } },
     });
   }
 
-  /** Applies the re-import update path to an already-persisted game (skipping frozen rows). */
+  /**
+   * Applies the re-import update path to an already-persisted game (skipping
+   * frozen rows). Its DataGateway link takes the base game ids either way: they
+   * describe the DataGateway's data, not the game's, and the links rest on
+   * them (#971). They rarely change, so an unchanged list is not written.
+   */
   private async applyExistingGameUpdate(
-    game: { id: string; frozenAt: Date | null },
+    source: { baseExternalIds: string[]; game: { id: string; frozenAt: Date | null } },
     gameData: GameData,
+    gatewayId: string,
   ): Promise<{ gameId: string; gameCreated: boolean; sourceCreated: boolean }> {
+    const { game } = source;
+    const baseExternalIds = gameData.baseGameExternalIds ?? [];
+    if (!sameIds(source.baseExternalIds, baseExternalIds)) {
+      await this.db.gameSource.update({
+        where: { gatewayId_externalId: { gatewayId, externalId: gameData.externalId } },
+        data: { baseExternalIds },
+      });
+    }
+
     if (game.frozenAt) {
       this.logger.debug(`Skipped update for frozen game id=${game.id}`);
     } else {
@@ -419,38 +417,7 @@ function toDbContentType(protoType: string | undefined): ContentType {
   return toStoredContentType(protoType) ?? ContentType.Unknown;
 }
 
-/**
- * Derives the GameExpansion.expansionType from the expansion game's ContentType.
- * ContentType describes what the game IS; ExpansionType describes the relationship.
- */
-function toExpansionType(contentType: ContentType): ExpansionType {
-  switch (contentType) {
-    case ContentType.StandaloneExpansion: {
-      return ExpansionType.StandaloneExpansion;
-    }
-
-    case ContentType.DLC: {
-      return ExpansionType.DLC;
-    }
-
-    case ContentType.Accessory: {
-      return ExpansionType.Accessory;
-    }
-
-    case ContentType.ExpandedEdition: {
-      return ExpansionType.ExpandedEdition;
-    }
-
-    case ContentType.Port: {
-      return ExpansionType.Port;
-    }
-
-    case ContentType.Mod: {
-      return ExpansionType.Mod;
-    }
-
-    default: {
-      return ExpansionType.Expansion;
-    }
-  }
+/** True when two id lists hold the same ids in the same order: the order names the primary base game. */
+function sameIds(stored: readonly string[] | undefined, sent: readonly string[]): boolean {
+  return stored !== undefined && stored.length === sent.length && stored.every((id, index) => id === sent[index]);
 }

@@ -215,6 +215,7 @@
     "maxPlaytime": 90,
     "minAge": 13,
     "complexityWeight": 3663,
+    "baseGameExternalIds": [],
     "platforms": [
       {
         "externalId": "bgg-tabletop",

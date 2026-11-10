@@ -317,7 +317,10 @@ message GameSearchData {
   optional float average_rating = 7;
   optional int32 min_players = 8;
   optional int32 max_players = 9;
-  optional string base_game_external_id = 10;
+
+  // Every base game the add-on fits, primary first. The import adds only the
+  // first when none of them is in the game catalog (#971).
+  repeated string base_game_external_ids = 10;
   optional string summary = 11;
 
   // The platforms the game is on. A search filtered by platform type matches
@@ -362,7 +365,9 @@ message GameData {
   optional int32 min_age = 22;
   optional int32 complexity_weight = 23;
 
-  optional string base_game_external_id = 24;
+  // Every base game the add-on fits, primary first. The import adds only the
+  // first when none of them is in the game catalog (#971).
+  repeated string base_game_external_ids = 24;
 
   repeated PlatformData platforms = 25;
   repeated GameReleaseData releases = 26;
