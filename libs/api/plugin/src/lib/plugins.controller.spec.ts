@@ -669,8 +669,7 @@ describe('PluginsController (delegation)', () => {
   describe('policy gates', () => {
     const policiesFor = (handler: keyof PluginsController) =>
       Reflect.getMetadata(CHECK_POLICIES_KEY, PluginsController.prototype[handler]) as
-        | Array<(ability: AppAbility) => boolean>
-        | undefined;
+        Array<(ability: AppAbility) => boolean> | undefined;
 
     // A bare `can(read, Plugin)` would pass every user's identity-column grant,
     // so each server read asks about a column that grant leaves out.

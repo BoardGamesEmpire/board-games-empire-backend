@@ -4,11 +4,14 @@ import { isPrismaUniqueConstraintError } from './prisma-errors';
  * Sources, in the order they are tried. Grouped by provenance: both driver-adapter
  * sources rank above Prisma's own.
  *
- * `driverAdapterError.fields` is parsed from Postgres's `DETAIL` line, so it names
- * the constraint that actually fired. `index` is the MySQL shape, mutually
- * exclusive with `fields` in practice; it sits above `target` because it comes from
- * the same place. `meta.target` is EMPTY under `@prisma/client@7.8.0` +
- * `@prisma/adapter-pg` (prisma/prisma#28953) and ranks last despite being the only
+ * `driverAdapterError.index` is the constraint name Postgres reports, which
+ * `@prisma/adapter-pg@7.10` passes through; `driverAdapterError.fields` is the
+ * column list parsed from Postgres's `DETAIL` line, which the adapter reports only
+ * when Postgres names no constraint (and which 7.8 reported instead). Both name the
+ * constraint that actually fired, and the adapter sets one or the other, never
+ * both, so their relative order decides nothing. `meta.target` is EMPTY under
+ * `@prisma/client@7.8.0` through `7.10` with `@prisma/adapter-pg`
+ * (prisma/prisma#28953) and ranks last despite being the only
  * public one: if Prisma restores it, there is no reason to assume it arrives free
  * of the nested-create defect that makes `meta.modelName` unusable
  * (prisma/prisma#29595), so preferring it could let an upstream fix silently
@@ -139,23 +142,27 @@ function driverAdapterCause(meta: Record<string, unknown>): Record<string, unkno
  * answer, so a shape change degrades PRECISION and never correctness. A caller that
  * lets this decide something it cannot recover from is misusing it.
  *
- * Shape measured against `@prisma/client@7.8.0` + `@prisma/adapter-pg` on Postgres
- * 17 (2026-08-10, #298), and pinned in
- * `apps/api-e2e/src/database/p2002-shape.spec.ts` so a change is loud:
+ * Shape on `@prisma/client@7.10` + `@prisma/adapter-pg@7.10` on Postgres 17, pinned
+ * in `apps/api-e2e/src/database/p2002-shape.spec.ts` so a change is loud:
  *
  * ```
  * meta: {
  *   modelName: string,
+ *   table: string,
  *   driverAdapterError: DriverAdapterError {
  *     cause: {
  *       originalCode:    '23505',
  *       originalMessage: 'duplicate key value violates unique constraint "<name>"',
  *       kind:            'UniqueConstraintViolation',
- *       constraint:      { fields: [ ...raw column names ] },
+ *       constraint:      { index: '<name>' },
+ *       table:           string,
  *     },
  *   },
  * }
  * ```
+ *
+ * Measured first against 7.8.0 (2026-08-10, #298), where `constraint` was
+ * `{ fields: [ ...raw column names ] }` instead. Callers accept both spellings.
  *
  * `meta.modelName` is deliberately never read — see #302. `cause.originalMessage`
  * carries the constraint name verbatim, but parsing a message is strictly more
@@ -206,9 +213,10 @@ export function isIdentifiedConstraint(identity: ConstraintIdentity): identity i
  * constraint, compared as an unordered set.
  *
  * SEVERAL SPELLINGS because the same constraint is reported differently per source:
- * raw columns from the driver adapter, Prisma field names from a restored
- * `meta.target`, an index name from MySQL. Accepting only the measured spelling
- * would silently stop matching the day Prisma restores `target`.
+ * the index name from the driver adapter, the raw columns it reported up to 7.8,
+ * and Prisma field names from a restored `meta.target`. Accepting only the
+ * measured spelling is how a Prisma upgrade silently stops matching: 7.10
+ * switched the adapter from columns to the index name.
  *
  * EXACT rather than membership, so a superset cannot match — a future
  * `@@unique([householdId, userId, x])` reports three names and is a different

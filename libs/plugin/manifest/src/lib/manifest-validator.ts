@@ -163,13 +163,11 @@ export const validatePluginManifest = (
 
   if (!parsed.success) {
     throw new PluginManifestValidationError(
-      parsed.error.issues.map(
-        (issue): ManifestIssue => ({
-          code: ManifestErrorCode.SCHEMA_INVALID,
-          path: formatIssuePath(issue.path),
-          message: issue.message,
-        }),
-      ),
+      parsed.error.issues.map((issue): ManifestIssue => ({
+        code: ManifestErrorCode.SCHEMA_INVALID,
+        path: formatIssuePath(issue.path),
+        message: issue.message,
+      })),
     );
   }
 

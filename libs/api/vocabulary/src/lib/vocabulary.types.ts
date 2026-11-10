@@ -34,8 +34,7 @@ export interface LoadSummary {
 
 /** How an admin's accept of a Pending link went (#715). */
 export type AcceptOutcome =
-  | { readonly accepted: true; readonly recordId: string }
-  | { readonly accepted: false; readonly reason: 'not_pending' };
+  { readonly accepted: true; readonly recordId: string } | { readonly accepted: false; readonly reason: 'not_pending' };
 
 /** The record a link points at, as the review routes show it. */
 export interface VocabularyRecordView {

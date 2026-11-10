@@ -19,9 +19,7 @@ export interface PluginPackageDescriptor {
  * starting with '.') or condition maps.
  */
 export type PackageExportsField =
-  | string
-  | ReadonlyArray<PackageExportsField>
-  | { readonly [key: string]: PackageExportsField | null };
+  string | ReadonlyArray<PackageExportsField> | { readonly [key: string]: PackageExportsField | null };
 
 /**
  * Conditions honored when walking a condition map, in priority order. The

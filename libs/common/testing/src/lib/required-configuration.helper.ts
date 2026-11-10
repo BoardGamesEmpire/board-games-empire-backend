@@ -155,8 +155,7 @@ async function configFactories(root: Type): Promise<ConfigFactory[]> {
     if (dynamic?.module === ConfigModule) {
       for (const provider of dynamic.providers ?? []) {
         const factory = (provider as Partial<FactoryProvider>).useFactory as
-          | (ConfigFactory & { KEY?: string })
-          | undefined;
+          (ConfigFactory & { KEY?: string }) | undefined;
         if (factory?.KEY) {
           factories.add(factory);
         }

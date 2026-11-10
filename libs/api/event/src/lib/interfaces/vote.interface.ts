@@ -28,9 +28,7 @@ export interface VoteTally {
 
 /** The statuses a resolve can end a nomination in. */
 export type ResolvedStatus =
-  | typeof NominationStatus.Passed
-  | typeof NominationStatus.Failed
-  | typeof NominationStatus.QuorumNotMet;
+  typeof NominationStatus.Passed | typeof NominationStatus.Failed | typeof NominationStatus.QuorumNotMet;
 
 export interface ResolutionResult {
   status: ResolvedStatus;

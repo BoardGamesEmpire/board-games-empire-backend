@@ -273,8 +273,7 @@ describe('PluginArtifactsController (#1094)', () => {
   describe('policy gates', () => {
     const policiesFor = (handler: string) =>
       Reflect.getMetadata(CHECK_POLICIES_KEY, PluginArtifactsController.prototype[handler as never]) as
-        | Array<(ability: AppAbility) => boolean>
-        | undefined;
+        Array<(ability: AppAbility) => boolean> | undefined;
 
     it.each(['post', 'read', 'install'] as const)('%s needs manage:plugin (#1094)', (handler) => {
       const policies = policiesFor(handler);

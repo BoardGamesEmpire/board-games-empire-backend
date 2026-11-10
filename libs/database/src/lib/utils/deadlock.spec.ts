@@ -4,16 +4,22 @@ import { DEADLOCK_SQLSTATE, isDeadlockError, retryOnDeadlock } from './deadlock'
 import { deadlock, transactionWriteConflict, uniqueViolation } from './prisma-error.fixtures';
 
 describe('isDeadlockError', () => {
-  it('reads the SQLSTATE off a bare DriverAdapterError — the model-write shape', () => {
+  it('accepts the P2034 a model write raises — the model-write shape', () => {
     expect(isDeadlockError(deadlock())).toBe(true);
   });
 
   it('reads the SQLSTATE out of meta.driverAdapterError — the raw-statement shape', () => {
-    expect(isDeadlockError(deadlock({ wrapped: true }))).toBe(true);
+    expect(isDeadlockError(deadlock({ shape: 'raw' }))).toBe(true);
+  });
+
+  // The model-write shape up to @prisma/adapter-pg 7.8, kept classified so a
+  // regression to it cannot bring back #398's untyped 500.
+  it('reads the SQLSTATE off a bare DriverAdapterError — the pre-7.10 model-write shape', () => {
+    expect(isDeadlockError(deadlock({ shape: 'bare' }))).toBe(true);
   });
 
   it('falls back to the postgres passthrough `code` when originalCode is gone', () => {
-    expect(isDeadlockError(deadlock({ omitOriginalCode: true }))).toBe(true);
+    expect(isDeadlockError(deadlock({ shape: 'bare', omitOriginalCode: true }))).toBe(true);
   });
 
   it("accepts Prisma's own P2034, which means a write conflict or a deadlock", () => {
@@ -28,7 +34,7 @@ describe('isDeadlockError', () => {
     const otherRawFailure = new Prisma.PrismaClientKnownRequestError('Raw query failed', {
       code: PrismaError.RawQueryFailed,
       clientVersion: 'test',
-      meta: { driverAdapterError: deadlock({ sqlState: '42P01' }) },
+      meta: { driverAdapterError: deadlock({ shape: 'bare', sqlState: '42P01' }) },
     });
 
     expect(isDeadlockError(otherRawFailure)).toBe(false);

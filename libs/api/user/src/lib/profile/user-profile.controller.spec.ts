@@ -11,8 +11,7 @@ import { UserProfileService } from './user-profile.service';
 /** The `@CheckPolicies` handlers on a controller method, each called with a recording `can`. */
 const policyChecksOf = (method: object) => {
   const handlers = Reflect.getMetadata(CHECK_POLICIES_KEY, method) as
-    | Array<(ability: AppAbility) => boolean>
-    | undefined;
+    Array<(ability: AppAbility) => boolean> | undefined;
   const can = jest.fn().mockReturnValue(true);
   for (const handler of handlers ?? []) {
     handler({ can } as unknown as AppAbility);

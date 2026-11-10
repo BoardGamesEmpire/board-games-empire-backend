@@ -2070,18 +2070,19 @@ describe('HouseholdMemberService', () => {
      */
     describe('duplicate discrimination (#298)', () => {
       // Each entry is a SPELLING of the one membership constraint, keyed to the
-      // source it arrives from. The column pair is what ships; the others are
-      // accepted so that Prisma restoring `meta.target`, or a second adapter,
-      // cannot silently demote every real conflict to the unknown fallback.
+      // source it arrives from. The index name is what ships on
+      // @prisma/adapter-pg 7.10, the column pair is what 7.8 reported; the field
+      // names are accepted so that Prisma restoring `meta.target` cannot silently
+      // demote every real conflict to the unknown fallback.
       it.each([
+        [
+          'the mapped index name, via the driver adapter',
+          () => uniqueViolation({ index: HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT }),
+        ],
         ['raw columns, via the driver adapter', () => uniqueViolation({ fields: HOUSEHOLD_MEMBER_UNIQUE_COLUMNS })],
         [
           'Prisma field names, via a restored meta.target',
           () => uniqueViolation({ target: HOUSEHOLD_MEMBER_UNIQUE_FIELDS }),
-        ],
-        [
-          'the mapped index name, via a MySQL adapter',
-          () => uniqueViolation({ index: HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT }),
         ],
       ])('maps a duplicate reported as %s to Conflict', async (_label, build: () => Error) => {
         stubAdmissible();

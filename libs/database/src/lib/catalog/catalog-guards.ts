@@ -69,8 +69,7 @@ import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
  * renders to `''`.
  */
 export type TemplateProblem =
-  | { kind: 'malformed-template'; message: string }
-  | { kind: 'unsupported-token-type'; tokenType: string };
+  { kind: 'malformed-template'; message: string } | { kind: 'unsupported-token-type'; tokenType: string };
 
 export interface ParsedTemplate {
   /** The variables the template interpolates or sections on, once each, in order of first use. */

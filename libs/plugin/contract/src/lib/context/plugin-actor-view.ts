@@ -20,12 +20,7 @@
  * is absent at runtime because of that projection, not because of the type.
  */
 export type PluginActorView =
-  | UserActorView
-  | AnonymousActorView
-  | ApiKeyActorView
-  | SystemActorView
-  | ExternalActorView
-  | PluginChainActorView;
+  UserActorView | AnonymousActorView | ApiKeyActorView | SystemActorView | ExternalActorView | PluginChainActorView;
 
 /** Authenticated registered user via session. */
 export interface UserActorView {

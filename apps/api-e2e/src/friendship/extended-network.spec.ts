@@ -5,7 +5,7 @@ import { befriend, createActors, type Actors, type AuthenticatedActor } from '@b
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
-import { drainQueue, markQueueEvents, type DrainQueueOptions } from '../support/queues';
+import { drainQueue, eventStreamReader, markQueueEvents, type DrainQueueOptions } from '../support/queues';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { useWorker } from '../support/worker';
 import { friendshipEnvelope } from './friendship-wire';
@@ -294,7 +294,7 @@ describe('the extended network table (#497)', () => {
       // It went back to the queue at least once: a step, not a retry, since
       // the drain would have failed on a retry.
       const queue = extendedNetworkQueue();
-      const events = await (await queue.client).xrange(queue.toKey('events'), mark.id, '+');
+      const events = await (await eventStreamReader(queue)).xrange(queue.toKey('events'), mark.id, '+');
       const steps = events.filter(([, fields]) => fields[0] === 'event' && fields[1] === 'delayed');
       expect(steps.length).toBeGreaterThanOrEqual(1);
     } finally {

@@ -211,13 +211,11 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
 
     const results = (this.fixtures.searchResults ?? [])
       .filter((game) => this.matchesFilter(game, request.filter))
-      .map(
-        (game): proto.GatewaySearchResult => ({
-          correlationId: request.correlationId,
-          status: proto.ResultStatus.RESULT_STATUS_RESULT,
-          game,
-        }),
-      );
+      .map((game): proto.GatewaySearchResult => ({
+        correlationId: request.correlationId,
+        status: proto.ResultStatus.RESULT_STATUS_RESULT,
+        game,
+      }));
 
     return concat(
       from(results),
@@ -262,13 +260,11 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
     const expansions = this.fixtures.expansionsByBaseExternalId?.[request.baseExternalId] ?? [];
 
     return from(
-      expansions.map(
-        (game): proto.GatewaySearchResult => ({
-          correlationId: request.correlationId,
-          status: proto.ResultStatus.RESULT_STATUS_RESULT,
-          game,
-        }),
-      ),
+      expansions.map((game): proto.GatewaySearchResult => ({
+        correlationId: request.correlationId,
+        status: proto.ResultStatus.RESULT_STATUS_RESULT,
+        game,
+      })),
     );
   }
 

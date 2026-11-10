@@ -65,13 +65,11 @@ export class PluginConfigSchemaService {
       return [];
     }
 
-    return (validator.errors ?? []).map(
-      (error): PluginConfigIssue => ({
-        path: error.instancePath,
-        keyword: error.keyword,
-        message: error.message ?? error.keyword,
-      }),
-    );
+    return (validator.errors ?? []).map((error): PluginConfigIssue => ({
+      path: error.instancePath,
+      keyword: error.keyword,
+      message: error.message ?? error.keyword,
+    }));
   }
 
   private compiledValidator(input: Omit<PluginConfigValidationInput, 'config'>): ValidateFunction {

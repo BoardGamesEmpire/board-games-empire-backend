@@ -63,10 +63,7 @@ export class PluginArtifactTooLargeError extends Error {
 
 /** Why the server would not fetch a link. */
 export type PluginArtifactLinkRefusal =
-  | 'invalid-link'
-  | 'blocked-by-policy'
-  | 'redirect-blocked'
-  | 'too-many-redirects';
+  'invalid-link' | 'blocked-by-policy' | 'redirect-blocked' | 'too-many-redirects';
 
 const LINK_REFUSALS: Readonly<Record<PluginArtifactLinkRefusal, string>> = {
   'invalid-link':

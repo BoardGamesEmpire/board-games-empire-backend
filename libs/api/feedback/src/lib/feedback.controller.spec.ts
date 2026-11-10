@@ -97,8 +97,7 @@ describe('FeedbackController', () => {
 
     it('declares a CASL policy requiring create:FeedbackReport', () => {
       const handlers = Reflect.getMetadata(CHECK_POLICIES_KEY, controller.submitReport) as
-        | Array<(ability: AppAbility) => boolean>
-        | undefined;
+        Array<(ability: AppAbility) => boolean> | undefined;
 
       expect(handlers).toBeDefined();
       expect(handlers?.length).toBeGreaterThan(0);

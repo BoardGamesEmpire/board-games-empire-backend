@@ -26,6 +26,7 @@ import {
   INVITE_TOKEN_BYTES,
   INVITE_TOKEN_MINT_ATTEMPTS,
   INVITE_TOKEN_UNIQUE_COLUMNS,
+  INVITE_TOKEN_UNIQUE_INDEX,
   OUTSTANDING_INVITE_STATUSES,
   OUTSTANDING_INVITE_UNIQUE_COLUMNS,
   OUTSTANDING_INVITE_UNIQUE_FIELDS,
@@ -1018,7 +1019,7 @@ export class InviteService {
       return new ConflictException(t('errors.invite.already_outstanding'));
     }
 
-    if (identifiesConstraint(identity, INVITE_TOKEN_UNIQUE_COLUMNS)) {
+    if (identifiesConstraint(identity, [INVITE_TOKEN_UNIQUE_INDEX], INVITE_TOKEN_UNIQUE_COLUMNS)) {
       // The probe said free and the insert said taken. Not a client error and
       // not retryable here (the transaction is aborted); the payload is left
       // out of the line because it is the one place the token could appear.

@@ -49,10 +49,13 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
  * than an application constant, and a mismatch fails here with both values printed.
  */
 
-/** DB name of `@@unique([householdId, userId])`, as mapped in the schema. */
+/**
+ * DB name of `@@unique([householdId, userId])`, as mapped in the schema. The pg
+ * adapter reports this name under `constraint.index` since `@prisma/adapter-pg@7.10`.
+ */
 const HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT = 'household_member_household_user_unique';
 
-/** Raw column pair the pg adapter reports for that constraint. */
+/** Raw column pair the pg adapter reported for that constraint up to 7.8. */
 const HOUSEHOLD_MEMBER_UNIQUE_COLUMNS = ['household_id', 'user_id'] as const;
 
 /** Prisma field-name spelling, which a restored `meta.target` would use. */
@@ -136,7 +139,7 @@ describe('P2002 payload shape (#298 characterization)', () => {
   describe('the membership unique', () => {
     // The real `addMemberWithin` call site: nested member+role create, inside an
     // interactive transaction, duplicating a membership that is already committed.
-    it('identifies itself by raw column pair from a NESTED create inside a transaction', async () => {
+    it('identifies itself by constraint name from a NESTED create inside a transaction', async () => {
       const { householdId, ownerUserId } = await arrange();
 
       const error = await captureUniqueViolation(
@@ -159,9 +162,14 @@ describe('P2002 payload shape (#298 characterization)', () => {
       // not be assumed: a constraint violation inside an interactive transaction
       // still arrives as a PrismaClientKnownRequestError with `meta` intact,
       // rather than as a "current transaction is aborted" error from the driver.
+      //
+      // `@prisma/adapter-pg@7.10` reports the constraint Postgres names under
+      // `constraint.index`, and only falls back to the DETAIL line's column list
+      // under `constraint.fields` when Postgres names none. 7.8 reported the
+      // column pair here.
       expect(identity).toEqual({
-        source: 'driverAdapterError.fields',
-        names: [...HOUSEHOLD_MEMBER_UNIQUE_COLUMNS],
+        source: 'driverAdapterError.index',
+        names: [HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT],
         sqlState: SQLSTATE_UNIQUE_VIOLATION,
       });
 
@@ -184,8 +192,8 @@ describe('P2002 payload shape (#298 characterization)', () => {
       );
 
       expect(constraintIdentity(error)).toEqual({
-        source: 'driverAdapterError.fields',
-        names: [...HOUSEHOLD_MEMBER_UNIQUE_COLUMNS],
+        source: 'driverAdapterError.index',
+        names: [HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT],
         sqlState: SQLSTATE_UNIQUE_VIOLATION,
       });
     });
@@ -207,9 +215,9 @@ describe('P2002 payload shape (#298 characterization)', () => {
         throw new Error(
           `Prisma now populates meta.target (${JSON.stringify(target)}). That is a CHANGE, not a defect, and the ` +
             `fix keeps working: constraintIdentity reads it as a FALLBACK behind the driver payload and accepts ` +
-            `the Prisma field-name spelling. Do NOT promote it above driverAdapterError.cause.constraint.fields ` +
-            `on the grounds that it is public API — the driver payload is parsed from Postgres's own DETAIL line ` +
-            `and cannot name the wrong table, whereas a restored target may carry the nested-create defect that ` +
+            `the Prisma field-name spelling. Do NOT promote it above driverAdapterError.cause.constraint ` +
+            `on the grounds that it is public API — the driver payload is Postgres's own report of the ` +
+            `constraint and cannot name the wrong table, whereas a restored target may carry the nested-create defect that ` +
             `already makes meta.modelName unusable (prisma/prisma#29595, #302). Confirm the spelling matches ` +
             `HOUSEHOLD_MEMBER_UNIQUE_FIELDS, then update this assertion and the notes on #298 / #292 ` +
             `deliberately. Observed payload: ${describePayload(error.meta)}`,
@@ -222,7 +230,7 @@ describe('P2002 payload shape (#298 characterization)', () => {
 
   // The comparator for "identified, but not the membership constraint → rethrow".
   // Without a measured primary-key payload that branch could not be written.
-  it('identifies a primary-key collision as its own single-column constraint', async () => {
+  it('identifies a primary-key collision as its own constraint', async () => {
     const { householdId, ownerMemberId, spareUserId } = await arrange();
 
     // A DIFFERENT userId, so the composite unique cannot fire first and steal the
@@ -235,12 +243,16 @@ describe('P2002 payload shape (#298 characterization)', () => {
     const identity = constraintIdentity(error);
 
     expect(identity).toEqual({
-      source: 'driverAdapterError.fields',
-      names: ['id'],
+      source: 'driverAdapterError.index',
+      names: ['household_members_pkey'],
       sqlState: SQLSTATE_UNIQUE_VIOLATION,
     });
 
-    expect(identifiesConstraint(identity, HOUSEHOLD_MEMBER_UNIQUE_COLUMNS, HOUSEHOLD_MEMBER_UNIQUE_FIELDS)).toBe(false);
+    expect(
+      identifiesConstraint(identity, HOUSEHOLD_MEMBER_UNIQUE_COLUMNS, HOUSEHOLD_MEMBER_UNIQUE_FIELDS, [
+        HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT,
+      ]),
+    ).toBe(false);
   });
 
   /**
@@ -260,7 +272,7 @@ describe('P2002 payload shape (#298 characterization)', () => {
    *
    * Because the first version of this guard asked `pg_constraint` and got an empty
    * list while the constraint plainly worked — the three cases above had already
-   * read `['household_id', 'user_id']` off a live violation.
+   * read it off a live violation.
    *
    * Prisma's migration engine emits `CREATE UNIQUE INDEX` for `@@unique`, not
    * `ALTER TABLE ... ADD CONSTRAINT ... UNIQUE`. In Postgres those are different
@@ -280,8 +292,7 @@ describe('P2002 payload shape (#298 characterization)', () => {
    * Worth noting for anyone reading a raw payload: Postgres words the violation as
    * `duplicate key value violates unique constraint "<name>"` even when the object
    * is a plain unique index. That phrasing is why the mapped name reads like a
-   * constraint name, and why MySQL's `constraint.index` and this name are the same
-   * kind of thing.
+   * constraint name, and why the adapter reports it under `constraint.index`.
    */
   it('holds household_members to exactly one uniqueness rule besides its primary key', async () => {
     const relation = `${db.schema}.household_members`;

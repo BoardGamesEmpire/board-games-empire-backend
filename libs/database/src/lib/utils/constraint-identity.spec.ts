@@ -22,8 +22,21 @@ describe('constraintIdentity', () => {
   const MEMBER_FIELDS = ['householdId', 'userId'] as const;
 
   describe('the shape that ships', () => {
+    // @prisma/adapter-pg 7.10 on Postgres 17: the constraint name Postgres
+    // reports, under the driver adapter. Pinned by p2002-shape.spec.ts.
+    it('reads the constraint name from driverAdapterError.cause.constraint.index', () => {
+      const identity = constraintIdentity(uniqueViolation({ index: 'household_member_household_user_unique' }));
+
+      expect(identity).toEqual({
+        source: 'driverAdapterError.index',
+        names: ['household_member_household_user_unique'],
+        sqlState: '23505',
+      });
+    });
+
     // MEASURED 2026-08-10 against @prisma/client@7.8.0 + @prisma/adapter-pg on
-    // Postgres 17 (#298). Raw snake_case columns, under the driver adapter.
+    // Postgres 17 (#298). Raw snake_case columns, under the driver adapter; 7.10
+    // still reports these when Postgres names no constraint.
     it('reads raw column names from driverAdapterError.cause.constraint.fields', () => {
       const identity = constraintIdentity(uniqueViolation({ fields: MEMBER_COLUMNS }));
 
@@ -84,15 +97,6 @@ describe('constraintIdentity', () => {
 
       expect(identity).toMatchObject({
         source: 'meta.target',
-        names: ['household_member_household_user_unique'],
-      });
-    });
-
-    it('falls through to the MySQL index shape when no fields are reported', () => {
-      const identity = constraintIdentity(uniqueViolation({ index: 'household_member_household_user_unique' }));
-
-      expect(identity).toMatchObject({
-        source: 'driverAdapterError.index',
         names: ['household_member_household_user_unique'],
       });
     });

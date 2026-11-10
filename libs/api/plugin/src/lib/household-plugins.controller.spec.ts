@@ -459,8 +459,7 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
   describe('policy gates', () => {
     const policiesFor = (handler: string) =>
       Reflect.getMetadata(CHECK_POLICIES_KEY, HouseholdPluginsController.prototype[handler as never]) as
-        | Array<(ability: AppAbility) => boolean>
-        | undefined;
+        Array<(ability: AppAbility) => boolean> | undefined;
 
     // The rows are plugins, so the list composes a `Plugin` ceiling and an
     // actor with no rule on `Plugin` is refused here, not served an empty page.

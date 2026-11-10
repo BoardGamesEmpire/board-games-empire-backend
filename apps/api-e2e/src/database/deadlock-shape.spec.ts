@@ -8,24 +8,28 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
  * ## Why this file exists
  *
  * `isDeadlockError` decides whether a failure is retryable and whether the edge
- * renders a typed 409 or a bare 500 (#398). It reads SQLSTATE out of the driver
- * adapter's `cause` — not public Prisma API — and it does so from two POSITIONS,
- * because a deadlock does not arrive in one shape:
+ * renders a typed 409 or a bare 500 (#398). It accepts Prisma's own P2034 and
+ * otherwise reads SQLSTATE out of the driver adapter's `cause` — not public
+ * Prisma API — because a deadlock does not arrive in one shape. On
+ * `@prisma/client@7.10` + `@prisma/adapter-pg@7.10`:
  *
  * - losing statement raw → `PrismaClientKnownRequestError` (P2010), driver error
  *   under `meta.driverAdapterError`;
- * - losing statement an ordinary model write → the `DriverAdapterError` itself,
- *   with no Prisma class around it and no Prisma `code` at all.
+ * - losing statement an ordinary model write → `PrismaClientKnownRequestError`
+ *   (P2034), driver error under `meta.driverAdapterError`.
  *
- * That second shape is the one #398's production case produced, and it is why
- * the untyped 500 existed: nothing in the tree recognised it. A unit test can
+ * Up to 7.8 the adapter had no mapped `kind` for 40P01, so the model-write case
+ * escaped as the bare `DriverAdapterError` with no Prisma class and no Prisma
+ * `code`. That is the shape #398's production case produced, and why the untyped
+ * 500 existed: nothing in the tree recognised it. `isDeadlockError` still reads
+ * that position, so a regression to it stays classified. A unit test can
  * only assert against a fabricated payload, so this is what keeps the fixtures
  * in `@bge/database/testing` honest — the same relationship
  * `p2002-shape.spec.ts` has with the unique-violation fixtures.
  *
- * These assertions are CHARACTERIZATION. Going red is not necessarily a defect —
- * Prisma wrapping the model-write case would be welcome — but it must be a
- * decision rather than a drift, so each failure prints the observed payload.
+ * These assertions are CHARACTERIZATION. Going red is not necessarily a defect,
+ * but it must be a decision rather than a drift, so each failure prints the
+ * observed payload.
  *
  * ## Plumbing
  *
@@ -108,16 +112,21 @@ describe('the shape of a Postgres deadlock', () => {
     tx.user.update({ where: { id }, data: { username: `touched-${id.slice(0, 6)}` } });
 
   describe('when the losing statement is an ordinary model write', () => {
-    it('escapes as a bare DriverAdapterError — no Prisma class, no Prisma code', async () => {
+    it("arrives as P2034, Prisma's own code for a write conflict or deadlock", async () => {
       const victim = await raceToDeadlock(writeThroughPrisma);
 
-      // The finding that made the 500 untyped: this is NOT a
-      // PrismaClientKnownRequestError, so every `instanceof` guard in the tree
-      // was blind to it. If Prisma starts wrapping this, say so deliberately.
-      expect(victim).not.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
-      expect((victim as { name?: unknown }).name).toBe('DriverAdapterError');
-      expect((victim as { code?: unknown }).code).toBeUndefined();
-      expect((victim as { cause?: { originalCode?: unknown } }).cause?.originalCode).toBe(DEADLOCK_SQLSTATE);
+      // Up to 7.8 this escaped as a bare DriverAdapterError, which is what made
+      // #398's 500 untyped. 7.10's adapter maps 40P01 to `TransactionWriteConflict`
+      // and the client wraps it as P2034. If it stops, say so deliberately.
+      expect(victim).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+      expect((victim as Prisma.PrismaClientKnownRequestError).code).toBe('P2034');
+
+      const meta = (victim as Prisma.PrismaClientKnownRequestError).meta as {
+        driverAdapterError?: { cause?: { originalCode?: unknown; kind?: unknown } };
+      };
+
+      expect(meta.driverAdapterError?.cause?.originalCode).toBe(DEADLOCK_SQLSTATE);
+      expect(meta.driverAdapterError?.cause?.kind).toBe('TransactionWriteConflict');
     });
 
     it('is classified as a deadlock', async () => {
@@ -142,10 +151,10 @@ describe('the shape of a Postgres deadlock', () => {
       };
 
       expect(meta.driverAdapterError?.cause?.originalCode).toBe(DEADLOCK_SQLSTATE);
-      // `kind: 'postgres'` rather than a mapped name: the adapter maps the errors
-      // it has names for and passes the rest through, which is why the raw pg
-      // fields ride along on a deadlock and not on a unique violation.
-      expect(meta.driverAdapterError?.cause?.kind).toBe('postgres');
+      // A mapped kind since 7.10; 7.8 passed 40P01 through as `kind: 'postgres'`
+      // with the raw pg fields alongside. The raw path keeps P2010 either way:
+      // a raw query's failure is P2010 whatever its kind.
+      expect(meta.driverAdapterError?.cause?.kind).toBe('TransactionWriteConflict');
     });
 
     it('is classified as a deadlock', async () => {
@@ -155,13 +164,12 @@ describe('the shape of a Postgres deadlock', () => {
     });
   });
 
-  it('never arrives as P2034, the code Prisma documents for a deadlock', async () => {
+  it("keeps Postgres's own wording in the payload", async () => {
     const victim = await raceToDeadlock(writeThroughPrisma);
 
-    // Characterization, not a requirement: `isDeadlockError` accepts P2034 too,
-    // so this going red is informational — it would mean the driver started
-    // reporting deadlocks in Prisma's own vocabulary.
-    expect((victim as { code?: unknown }).code).not.toBe('P2034');
+    // P2034's message is Prisma's "write conflict or a deadlock", which does not
+    // say which. The driver's message does, and it is what an operator reading
+    // the log needs.
     expect(describePayload(victim)).toContain('deadlock detected');
   });
 });

@@ -8,8 +8,7 @@ import { formatLinkLifetime } from './link-lifetime';
  * the queue past it rather than mail a dead link (#654).
  */
 export type MailMessage =
-  | { kind: 'password-reset'; link: string; lifetimeMinutes: number; expiresAt: string }
-  | { kind: 'test' };
+  { kind: 'password-reset'; link: string; lifetimeMinutes: number; expiresAt: string } | { kind: 'test' };
 
 export interface MailRenderContext {
   readonly lang: string;

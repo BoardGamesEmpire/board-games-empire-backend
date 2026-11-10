@@ -88,9 +88,14 @@ import {
 
 /**
  * `PluginGrant`'s decision unique, in every spelling `constraintIdentity` can
- * report it: raw columns from the driver adapter (the shape that ships), and
- * Prisma field names in case a release restores `meta.target`.
+ * report it: the index name the driver adapter reports since
+ * `@prisma/adapter-pg@7.10` (the shape that ships), the raw columns it reported
+ * before, and Prisma field names in case a release restores `meta.target`.
+ *
+ * The index name is Prisma's default for the `@@unique`, as created in
+ * `20260722232927_plugins`; naming it in the schema with `map:` would change it.
  */
+const GRANT_DECISION_UNIQUE_INDEX = 'plugin_grants_plugin_id_scope_type_scope_id_permission_slug_key';
 const GRANT_DECISION_UNIQUE_COLUMNS = ['plugin_id', 'scope_type', 'scope_id', 'permission_slug'] as const;
 const GRANT_DECISION_UNIQUE_FIELDS = ['pluginId', 'scopeType', 'scopeId', 'permissionSlug'] as const;
 
@@ -105,7 +110,12 @@ const GRANT_DECISION_UNIQUE_FIELDS = ['pluginId', 'scopeType', 'scopeId', 'permi
  * error into the same error, later.
  */
 function isGrantDecisionCollision(error: unknown): boolean {
-  return identifiesConstraint(constraintIdentity(error), GRANT_DECISION_UNIQUE_COLUMNS, GRANT_DECISION_UNIQUE_FIELDS);
+  return identifiesConstraint(
+    constraintIdentity(error),
+    [GRANT_DECISION_UNIQUE_INDEX],
+    GRANT_DECISION_UNIQUE_COLUMNS,
+    GRANT_DECISION_UNIQUE_FIELDS,
+  );
 }
 
 /**

@@ -994,37 +994,50 @@ describe('PluginUpdateService', () => {
      * snapshot that can see the decision — and its bounds.
      */
     describe('a decision that commits between the tx-local read and the seeding write', () => {
+      const GRANT_DECISION_UNIQUE_INDEX = 'plugin_grants_plugin_id_scope_type_scope_id_permission_slug_key';
+
+      // The index name is what `@prisma/adapter-pg@7.10` reports; the column
+      // list is what 7.8 reported. Both must retry: a spelling the matcher
+      // misses turns this race into a 500.
       const grantCollision = () =>
+        uniqueViolation({ index: GRANT_DECISION_UNIQUE_INDEX, constraintName: GRANT_DECISION_UNIQUE_INDEX });
+      const grantCollisionByColumns = () =>
         uniqueViolation({
           fields: ['plugin_id', 'scope_type', 'scope_id', 'permission_slug'],
-          constraintName: 'plugin_grants_plugin_id_scope_type_scope_id_permission_slug_key',
+          constraintName: GRANT_DECISION_UNIQUE_INDEX,
         });
 
-      it('retries the whole transaction, and the second snapshot drops the decided check from the seed set', async () => {
-        db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
-        const seeded = makeGrant({ id: 'grant-3', permissionSlug: 'plugin|demo-sink|manage:digest' });
-        db.pluginGrant.create.mockRejectedValueOnce(grantCollision()).mockResolvedValue(seeded);
-        db.pluginGrant.findMany
-          .mockResolvedValueOnce([]) // compare()
-          .mockResolvedValueOnce([]); // serverChecksToSeed()
-        queueGrantLock([]); // first attempt's locked read: nothing decided, so it seeds both and loses the race
-        // The retry's locked read SEES the decision the first attempt
-        // collided with, so the check drops out rather than colliding again.
-        queueGrantLock([lockedRow('feedback:read', PluginGrantStatus.Granted)]);
+      it.each([
+        ['the index name', grantCollision],
+        ['the column list', grantCollisionByColumns],
+      ])(
+        'retries the whole transaction on a collision reported by %s, and the second snapshot drops the decided check from the seed set',
+        async (_spelling, makeCollision) => {
+          db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
+          const seeded = makeGrant({ id: 'grant-3', permissionSlug: 'plugin|demo-sink|manage:digest' });
+          db.pluginGrant.create.mockRejectedValueOnce(makeCollision()).mockResolvedValue(seeded);
+          db.pluginGrant.findMany
+            .mockResolvedValueOnce([]) // compare()
+            .mockResolvedValueOnce([]); // serverChecksToSeed()
+          queueGrantLock([]); // first attempt's locked read: nothing decided, so it seeds both and loses the race
+          // The retry's locked read SEES the decision the first attempt
+          // collided with, so the check drops out rather than colliding again.
+          queueGrantLock([lockedRow('feedback:read', PluginGrantStatus.Granted)]);
 
-        const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
+          const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
 
-        expect(result.seededGrants).toEqual([seeded]);
-        expect(db.pluginGrant.create).toHaveBeenCalledTimes(2);
-        expect(db.pluginGrant.create).toHaveBeenLastCalledWith({
-          data: expect.objectContaining({ permissionSlug: 'plugin|demo-sink|manage:digest' }),
-        });
-        // Re-claimed, not carried over: the rolled-back attempt released it.
-        expect(db.plugin.updateMany).toHaveBeenCalledTimes(2);
-        // One approval, one event — the abandoned attempt emits nothing,
-        // because emission waits for the commit.
-        expect(emitter.emit).toHaveBeenCalledTimes(1);
-      });
+          expect(result.seededGrants).toEqual([seeded]);
+          expect(db.pluginGrant.create).toHaveBeenCalledTimes(2);
+          expect(db.pluginGrant.create).toHaveBeenLastCalledWith({
+            data: expect.objectContaining({ permissionSlug: 'plugin|demo-sink|manage:digest' }),
+          });
+          // Re-claimed, not carried over: the rolled-back attempt released it.
+          expect(db.plugin.updateMany).toHaveBeenCalledTimes(2);
+          // One approval, one event — the abandoned attempt emits nothing,
+          // because emission waits for the commit.
+          expect(emitter.emit).toHaveBeenCalledTimes(1);
+        },
+      );
 
       it('reaches the typed denial refusal when the racing decision was a durable denial', async () => {
         const next = nextManifest({
@@ -1073,6 +1086,11 @@ describe('PluginUpdateService', () => {
         [
           'a unique violation on some other constraint',
           () => uniqueViolation({ fields: ['plugin_id', 'slug'], constraintName: 'plugin_permissions_slug_key' }),
+        ],
+        [
+          'a unique violation on some other index',
+          () =>
+            uniqueViolation({ index: 'plugin_permissions_slug_key', constraintName: 'plugin_permissions_slug_key' }),
         ],
         // "Could not tell which constraint" is not "it was mine": retrying a
         // violation this transaction cannot explain would replay a

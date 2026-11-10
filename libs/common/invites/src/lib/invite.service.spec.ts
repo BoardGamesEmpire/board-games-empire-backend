@@ -601,7 +601,13 @@ describe('InviteService', () => {
       expect(expired).toEqual([]);
     });
 
-    it('maps a duplicate outstanding invite to 409 by the column pair the database names', async () => {
+    it('maps a duplicate outstanding invite to 409 by the index name the database names', async () => {
+      tx.invite.create.mockRejectedValue(uniqueViolation({ index: 'invites_household_invitee_outstanding_unique' }));
+
+      await expect(service.createWithin(asTx(tx), params)).rejects.toThrow(ConflictException);
+    });
+
+    it('maps a duplicate outstanding invite to 409 by the column pair the pre-7.10 adapter named', async () => {
       tx.invite.create.mockRejectedValue(uniqueViolation({ fields: ['household_id', 'invitee_id'] }));
 
       await expect(service.createWithin(asTx(tx), params)).rejects.toThrow(ConflictException);
@@ -628,12 +634,18 @@ describe('InviteService', () => {
       expect(warn).toHaveBeenCalledTimes(1);
     });
 
-    it('rethrows a token collision at insert as the server error it is', async () => {
-      const collision = uniqueViolation({ fields: ['token'] });
+    // Both spellings rethrow either way; the log line is what tells them apart.
+    // A spelling the matcher misses logs as an "unexpected unique" instead.
+    it.each([
+      ['index name', { index: 'invites_token_key' }],
+      ['column', { fields: ['token'] }],
+    ])('rethrows a token collision reported by %s as the server error it is', async (_spelling, source) => {
+      const collision = uniqueViolation(source);
       tx.invite.create.mockRejectedValue(collision);
 
       await expect(service.createWithin(asTx(tx), params)).rejects.toBe(collision);
       expect(error).toHaveBeenCalledTimes(1);
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('collided at insert'), collision);
     });
 
     it('rethrows an unrelated identified unique rather than calling it a duplicate', async () => {

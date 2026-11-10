@@ -96,8 +96,7 @@ describe('FriendshipController (delegation)', () => {
     const boundQueryDto = () =>
       (
         Reflect.getMetadata('design:paramtypes', FriendshipController.prototype, 'listRequests') as
-          | [new () => object]
-          | undefined
+          [new () => object] | undefined
       )?.[0];
 
     it('binds a query DTO that does not declare status', () => {
