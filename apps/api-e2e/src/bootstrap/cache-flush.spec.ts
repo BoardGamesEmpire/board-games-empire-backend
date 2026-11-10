@@ -1,7 +1,6 @@
 import {
   PgAdvisoryLock,
   PrismaSchemaLedger,
-  RedisKeyFlush,
   RegistryDataMigrations,
   runBootstrapSequence,
   RunSeedsSeeder,
@@ -16,7 +15,7 @@ import {
   type DataMigrationEntry,
 } from '@bge/database';
 import { PERMISSIONS_CACHE_NAMESPACE, PermissionsService } from '@bge/permissions';
-import { createCacheStore } from '@bge/redis';
+import { createCacheStore, RedisKeyFlush } from '@bge/redis';
 import type { Logger } from '@nestjs/common';
 import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
 import Redis from 'iovalkey';

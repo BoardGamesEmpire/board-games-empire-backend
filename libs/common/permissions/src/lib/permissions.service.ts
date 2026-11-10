@@ -13,12 +13,14 @@ import {
   type PluginRequestedPermissionsReader,
   type RiskLevel,
 } from '@bge/database';
+import { CACHE_REDIS_CLIENT, RedisKeyFlush, type Redis } from '@bge/redis';
 import { isPluginPermissionSlug, parsePluginPermissionSlug } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
 import { randomUUID } from 'node:crypto';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type { ApikeyWithScopes, PluginGrantSnapshot, UserWithRoles } from './interfaces';
+import { permissionGraphFlushPatterns } from './permission-graph-flush-patterns';
 import { PERMISSIONS_CACHE } from './permissions-cache';
 
 /**
@@ -61,6 +63,11 @@ export class PermissionsService {
     private readonly db: DatabaseService,
     @Inject(PERMISSIONS_CACHE) private readonly cache: Cache,
     /**
+     * The shared cache client, for {@link invalidateAllGraphs}'s key scan. It
+     * belongs to `RedisModule`, so this service never closes it (#772).
+     */
+    @Inject(CACHE_REDIS_CLIENT) private readonly redis: Redis,
+    /**
      * Provided by the plugin runtime (#577). Optional because this lib cannot
      * import the runtime, and a process without it confers nothing on plugin
      * actors rather than every decision on file.
@@ -96,6 +103,20 @@ export class PermissionsService {
    */
   static cacheVersionKey(cacheKey: string): string {
     return `bge:cache-version:${cacheKey}`;
+  }
+
+  /**
+   * Removes every cached ability graph and API-key scope graph, with the
+   * version tokens that guard them, from the store every process reads (#772).
+   * A catalog edit changes what every role confers, so no cached graph can be
+   * trusted: the edit's route calls this after its transaction commits, the
+   * same flush bootstrap runs after a reconcile that wrote rows. Resolves to
+   * how many keys went; rejects with a `CacheFlushError` when it cannot finish.
+   * The client is shared with every other reader of the cache, so this never
+   * closes it.
+   */
+  async invalidateAllGraphs(): Promise<number> {
+    return new RedisKeyFlush(this.redis, permissionGraphFlushPatterns()).flush();
   }
 
   async getUserRoleGraph(userId: string): Promise<UserWithRoles | null> {

@@ -12,6 +12,7 @@ import {
   User,
   type PluginRequestedPermissions,
 } from '@bge/database';
+import { CACHE_REDIS_CLIENT, type FlushClient } from '@bge/redis';
 import {
   createTestingModuleWithDb,
   makePermission,
@@ -21,27 +22,60 @@ import {
 } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { createCache, type Cache } from 'cache-manager';
+import { Readable } from 'node:stream';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type { ApikeyWithScopes, UserPermissionWithPermission, UserWithRoles } from './interfaces';
 import { PERMISSIONS_CACHE } from './permissions-cache';
 import { PermissionsService } from './permissions.service';
 
+/** A Redis client that records what the flush scans and unlinks, and whether anything closed it. */
+function fakeFlushClient(keys: readonly string[] = []) {
+  const scanned: string[] = [];
+  const unlinked: string[] = [];
+  const closed: string[] = [];
+  const client = {
+    scanned,
+    unlinked,
+    closed,
+    scanStream(options: { match: string }): AsyncIterable<string[]> {
+      scanned.push(options.match);
+      return Readable.from([keys.slice()]);
+    },
+    async unlink(...removed: string[]): Promise<number> {
+      unlinked.push(...removed);
+      return removed.length;
+    },
+    disconnect(): void {
+      closed.push('disconnect');
+    },
+    async quit(): Promise<void> {
+      closed.push('quit');
+    },
+  } satisfies FlushClient & Record<string, unknown>;
+  return client;
+}
+
+type FakeFlushClient = ReturnType<typeof fakeFlushClient>;
+
 describe('PermissionsService', () => {
   let service: PermissionsService;
   let db: MockDatabaseService;
   let cache: Cache;
+  let redis: FakeFlushClient;
   let reader: { read: jest.Mock<PluginRequestedPermissions, [unknown]> };
 
   beforeEach(async () => {
     // A real in-memory cache, not a stub: whether a cached graph still counts
     // as a hit depends on what an eviction wrote since it was cached.
     cache = createCache();
+    redis = fakeFlushClient();
     reader = { read: jest.fn().mockReturnValue({ valid: true, requested: [] }) };
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
       providers: [
         PermissionsService,
         { provide: PERMISSIONS_CACHE, useValue: cache },
+        { provide: CACHE_REDIS_CLIENT, useValue: redis },
         { provide: PLUGIN_REQUESTED_PERMISSIONS_READER, useValue: reader },
       ],
     });
@@ -678,6 +712,36 @@ describe('PermissionsService', () => {
     }
   });
 
+  describe('invalidateAllGraphs (#772)', () => {
+    it('invalidateAllGraphs removes every user and API-key graph and their version tokens', async () => {
+      redis = fakeFlushClient(['namespace:permissions:cache:bge:user:permissions:u1']);
+      const { module } = await createTestingModuleWithDb({
+        providers: [
+          PermissionsService,
+          { provide: PERMISSIONS_CACHE, useValue: cache },
+          { provide: CACHE_REDIS_CLIENT, useValue: redis },
+          { provide: PLUGIN_REQUESTED_PERMISSIONS_READER, useValue: reader },
+        ],
+      });
+
+      const removed = await module.get(PermissionsService).invalidateAllGraphs();
+
+      expect(redis.scanned).toEqual([
+        'namespace:permissions:cache:bge:user:permissions:*',
+        'namespace:permissions:cache:bge:cache-version:bge:user:permissions:*',
+        'namespace:permissions:cache:bge:apikey:scopes:*',
+        'namespace:permissions:cache:bge:cache-version:bge:apikey:scopes:*',
+      ]);
+      expect(removed).toBe(4);
+    });
+
+    it('leaves the shared client open, because every other reader of the cache uses it (#772)', async () => {
+      await service.invalidateAllGraphs();
+
+      expect(redis.closed).toEqual([]);
+    });
+  });
+
   describe('getPluginGrantSnapshot (#60)', () => {
     const HOUSEHOLD_UNIT: PluginUnit = { scopeType: 'Household', householdId: 'hh-1' };
 
@@ -1112,7 +1176,7 @@ describe('PermissionsService', () => {
 
       it('confers nothing on a plugin actor when no reader is registered', async () => {
         jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-        const withoutReader = new PermissionsService(db as never, cache);
+        const withoutReader = new PermissionsService(db as never, cache, redis as never);
         db.pluginGrant.findMany.mockResolvedValue([grantRow('read:game')] as never);
         db.permission.findMany.mockResolvedValue([makePermission({ slug: 'read:game' })] as never);
 

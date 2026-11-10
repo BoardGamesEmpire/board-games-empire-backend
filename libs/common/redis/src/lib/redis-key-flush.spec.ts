@@ -1,6 +1,5 @@
 import { Readable } from 'node:stream';
-import { CacheFlushError } from './ports';
-import { RedisKeyFlush } from './redis-key-flush';
+import { CacheFlushError, RedisKeyFlush } from './redis-key-flush';
 
 // What the flush does with a client: one SCAN per pattern, an UNLINK per batch
 // the scan yields, none for a pattern that matches nothing; what it says when

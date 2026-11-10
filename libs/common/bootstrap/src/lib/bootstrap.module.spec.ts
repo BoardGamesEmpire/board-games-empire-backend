@@ -1,10 +1,9 @@
-import { makeRedisConfig } from '@bge/redis';
+import { makeRedisConfig, RedisKeyFlush } from '@bge/redis';
 import type { DynamicModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { CACHE_FLUSH } from './bootstrap-options';
 import { BootstrapModule } from './bootstrap.module';
 import type { CacheFlush } from './ports';
-import { RedisKeyFlush } from './redis-key-flush';
 
 // The cache is a capability the entrypoint passes, like the migrator (#236):
 // only a context given one loads the Redis config and registers the flush.
