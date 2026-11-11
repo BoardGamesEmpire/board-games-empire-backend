@@ -16,9 +16,6 @@ on:
 permissions:
   contents: read
   issues: read
-  # The Claude API token comes from workload identity federation, which
-  # exchanges this run's GitHub OIDC token.
-  id-token: write
 
 concurrency:
   group: bug-agent-${{ github.event.issue.number }}
@@ -27,13 +24,11 @@ concurrency:
 jobs:
   bug-agent:
     if: github.event.label.name == 'bug' && github.event.sender.type == 'User'
-    # At `master`, which is what the federation rule trusts.
+    # At `master`, unpinned: the shared workflow reads its prompts and scripts
+    # from master whatever ref this names, so a pin would freeze nothing.
     uses: BoardGamesEmpire/automation/.github/workflows/bug-agent.yml@master
     with:
       bge-agent-client-id: ${{ vars.BGE_AGENT_CLIENT_ID }}
-      anthropic-federation-rule-id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
-      anthropic-organization-id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
-      anthropic-service-account-id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
       fix-tools: 'Bash(npm run nx:*)'
       # Schema and migrations, the gRPC contracts and dependencies each need a
       # person's review.
@@ -65,7 +60,7 @@ jobs:
         needs a person.
     secrets:
       bge-agent-private-key: ${{ secrets.BGE_AGENT_PRIVATE_KEY }}
-      # Used instead of federation while promotional credit pays only for
-      # key-authenticated requests (#1192). Without the secret, the shared
-      # workflow falls back to federation.
+      # The agent runs through the Claude Agent SDK on this key. Not workload
+      # identity federation for now: it came with the Claude Code GitHub
+      # Action, whose requests promotional credit doesn't cover (#1192).
       anthropic-api-key: ${{ secrets.BGE_AGENT_ANTHROPIC_API_KEY }}
