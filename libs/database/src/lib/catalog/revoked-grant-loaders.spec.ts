@@ -58,10 +58,13 @@ const ROLE_KEY = 'role';
 /**
  * A direct read of `RolePermission` rows: a call on its delegate, the
  * `rolePermissions` relation read as `true` or as an object, or SQL naming
- * its table. Each names a permission, as the runtime input needs.
+ * its table. Each names a permission, as the runtime input needs. It is
+ * matched against a whole file, and allows line breaks wherever a formatter
+ * puts them: Prettier breaks a chain of three calls before its first `.`
+ * (`tx.rolePermission\n  .findMany(…)\n  .then(…)`).
  */
 const DIRECT_READ =
-  /\brolePermission\.(find\w*|count|groupBy|aggregate)\b|\brolePermissions:\s*(\{|true\b)|\b(FROM|JOIN)\s+"?role_permissions\b/i;
+  /\brolePermission\s*\.\s*(find\w*|count|groupBy|aggregate)\b|\brolePermissions:\s*(\{|true\b)|\b(FROM|JOIN)\s+"?role_permissions\b/i;
 
 function skipsDir(path: string): boolean {
   return SKIPPED_DIRS.has(basename(path)) || path === RECONCILER_DIR;
@@ -238,6 +241,16 @@ function scanSource(file: string, source: string): Scan {
   return { reads, unfiltered };
 }
 
+/** Every direct read of `RolePermission` rows in one file's source, as `file:line text`, at the line it starts on. */
+function directReads(file: string, source: string): string[] {
+  const lines = source.split('\n');
+
+  return [...source.matchAll(new RegExp(DIRECT_READ.source, 'gi'))].map(({ index }) => {
+    const line = source.slice(0, index).split('\n').length;
+    return `${file}:${line} ${lines[line - 1].trim()}`;
+  });
+}
+
 function scan(files: string[]): Scan {
   const scans = files.map((file) => scanSource(relative(REPO_ROOT, file), readFileSync(file, 'utf-8')));
 
@@ -289,13 +302,7 @@ describe('revoked grant loaders (#772)', () => {
   it('nothing outside the catalog reads RolePermission rows directly (#772)', () => {
     // A direct read would need its own filter; none exists, and this keeps it so
     // until one is added deliberately, with the filter and a scan that covers it.
-    const direct = files.flatMap((file) =>
-      readFileSync(file, 'utf-8')
-        .split('\n')
-        .flatMap((text, index) =>
-          DIRECT_READ.test(text) ? [`${relative(REPO_ROOT, file)}:${index + 1} ${text.trim()}`] : [],
-        ),
-    );
+    const direct = files.flatMap((file) => directReads(relative(REPO_ROOT, file), readFileSync(file, 'utf-8')));
 
     expect(direct).toEqual([]);
   });
@@ -309,6 +316,27 @@ describe('the revoked grant scan itself (#772)', () => {
     expect(DIRECT_READ.test('select: { rolePermissions: { select: { roleId: true } } },')).toBe(true);
     expect(DIRECT_READ.test('_count: { select: { rolePermissions: true } },')).toBe(true);
     expect(DIRECT_READ.test('rolePermissions: truly,')).toBe(false);
+  });
+
+  it('counts a direct read that a formatter split across lines, at the line it starts on', () => {
+    // Prettier breaks a chain of three calls before its first `.`, so a line
+    // by line check would pass exactly this read.
+    expect(
+      directReads(
+        'fixture.ts',
+        [
+          'const rows = await tx.rolePermission',
+          '  .findMany({ where: { roleId } })',
+          '  .then((found) => found.map(({ permissionId }) => permissionId))',
+          '  .catch(() => []);',
+          'const sql = Prisma.sql`SELECT * FROM',
+          '  role_permissions`;',
+        ].join('\n'),
+      ),
+    ).toEqual([
+      'fixture.ts:1 const rows = await tx.rolePermission',
+      'fixture.ts:5 const sql = Prisma.sql`SELECT * FROM',
+    ]);
   });
 
   /** The lines `scanSource` reports unfiltered in `source`, 1-based. */
