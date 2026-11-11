@@ -264,6 +264,7 @@ export class PermissionCatalogController {
     summary: 'Hand a grant back to the server',
     description:
       'Marks the grant as maintained by the server again, so the next start does what this version ships: a revoked grant it lists is given back (`grant-restored`), and a grant it does not list, which this server added, is deleted (`grant-removed`). ' +
+      "A revoked grant it lists that the entry check fails because of this server's other edits, such as a condition changed to name other roles, is withheld (`grant-withheld`): left revoked and judged again at each start, with `problems` saying why. " +
       'Nothing else changes now: the next start brings it in line, which `nextStart` says. An entry the server already maintains is answered the same way and nothing is written.',
   })
   @ApiResponse({ status: Http.Ok, type: HandBackDto })

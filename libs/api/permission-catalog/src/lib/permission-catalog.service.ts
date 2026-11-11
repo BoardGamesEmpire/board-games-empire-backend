@@ -3,6 +3,7 @@ import {
   catalogViewFromSnapshot,
   checkCatalogEntries,
   DatabaseService,
+  findFailingEditedEntries,
   loadCatalogSnapshot,
   lockCatalogEdits,
   PermissionOwner,
@@ -232,7 +233,17 @@ export class PermissionCatalogService {
         throw permissionChanged();
       }
 
-      const decisions = await loadConsentDecisionsInForce(tx, slug, this.requestedPermissionsReader);
+      // No consent decision is judged on the reason, so an edit of the reason
+      // alone takes nothing from a plugin, and the decisions are not read
+      // under the edit lock to say so.
+      const reasonOnly = sameEntry({ ...before, reason: after.reason }, after);
+      const consentDecisionsAffected = reasonOnly
+        ? 0
+        : countConsentDecisionsLost(
+            before,
+            after,
+            await loadConsentDecisionsInForce(tx, slug, this.requestedPermissionsReader),
+          );
 
       return {
         changed: true as const,
@@ -241,7 +252,7 @@ export class PermissionCatalogService {
         after,
         catalog,
         warnings,
-        consentDecisionsAffected: countConsentDecisionsLost(before, after, decisions),
+        consentDecisionsAffected,
       };
     });
 
@@ -572,7 +583,9 @@ export class PermissionCatalogService {
    * Hands a grant back to the server (#772): marks it `System`, and the next
    * start does what the permission catalog says of it: gives it back if it
    * was revoked and the permission catalog lists it, deletes it if the
-   * permission catalog doesn't, and leaves a live listed grant as it is. The
+   * permission catalog doesn't, and leaves a live listed grant as it is. A
+   * revoked grant the Owner's other edits make fail the entry check is
+   * withheld instead: left revoked, and judged again at each start. The
    * grant is not deleted here, so the answer is what will happen, not what
    * has.
    */
@@ -589,7 +602,7 @@ export class PermissionCatalogService {
       const snapshot = await loadCatalogSnapshot(tx);
 
       if (before.managedBy === PermissionOwner.System) {
-        return { changed: false as const, nextStart: grantNextStart(snapshot, roleName, slug) };
+        return { changed: false as const, answer: await grantNextStart(tx, snapshot, roleName, slug) };
       }
 
       const after: RolePermissionSnapshotRow = { ...before, managedBy: PermissionOwner.System };
@@ -600,7 +613,7 @@ export class PermissionCatalogService {
         id: grant.id,
         before,
         after,
-        nextStart: grantNextStart(withGrantRow(snapshot, roleName, slug, after), roleName, slug),
+        answer: await grantNextStart(tx, withGrantRow(snapshot, roleName, slug, after), roleName, slug),
       };
     });
 
@@ -616,7 +629,7 @@ export class PermissionCatalogService {
       );
     }
 
-    return { nextStart: handedBack.nextStart };
+    return handedBack.answer;
   }
 
   /**
@@ -821,17 +834,38 @@ function roleNextStart(snapshot: CatalogSnapshot, name: string): FieldChange[] {
   return [...(update.find((entry) => entry.name === name)?.changes ?? [])];
 }
 
-/** What the next start does to a grant on `snapshot` (#772), or `[]` when it leaves it as it is. */
-function grantNextStart(snapshot: CatalogSnapshot, roleName: string, slug: string): HandBackDto['nextStart'] {
-  const { restore, delete: removed } = planReconcile(CATALOG_MANIFEST, snapshot).rolePermissions;
+/**
+ * What the next start does to a grant on `snapshot` (#772), or `[]` when it
+ * leaves it as it is. Planned as a start plans, after the entry check a start
+ * runs (`findFailingEditedEntries`): a shipped grant the Owner's other edits
+ * make fail is withheld, not given back, and the answer says so, with why.
+ * Without the check, the answer would promise a grant the start then leaves
+ * revoked.
+ *
+ * `tx` must be an interactive transaction's client: the check probes the
+ * Owner's conditions in a savepoint.
+ */
+async function grantNextStart(
+  tx: Prisma.TransactionClient,
+  snapshot: CatalogSnapshot,
+  roleName: string,
+  slug: string,
+): Promise<HandBackDto> {
+  const failing = await findFailingEditedEntries(tx, CATALOG_MANIFEST, snapshot);
+  const { restore, delete: removed, withheld } = planReconcile(CATALOG_MANIFEST, snapshot, failing).rolePermissions;
   const isThisGrant = (edge: { roleName: string; permissionSlug: string }) =>
     edge.roleName === roleName && edge.permissionSlug === slug;
 
-  if (restore.some(isThisGrant)) {
-    return 'grant-restored';
+  const held = withheld.find(isThisGrant);
+  if (held !== undefined) {
+    return { nextStart: 'grant-withheld', problems: [...held.problems] };
   }
 
-  return removed.some(isThisGrant) ? 'grant-removed' : [];
+  if (restore.some(isThisGrant)) {
+    return { nextStart: 'grant-restored' };
+  }
+
+  return { nextStart: removed.some(isThisGrant) ? 'grant-removed' : [] };
 }
 
 /**

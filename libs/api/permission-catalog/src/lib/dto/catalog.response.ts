@@ -4,6 +4,7 @@ import {
   edgeKey,
   PermissionOwner,
   RiskLevel,
+  type EntryProblem,
   type EntryWarning,
   type FieldChange,
   type PermissionSnapshotRow,
@@ -12,6 +13,7 @@ import {
   type RoleSnapshotRow,
 } from '@bge/database';
 import { ApiExtraModels, ApiProperty, ApiPropertyOptional, getSchemaPath } from '@nestjs/swagger';
+import { ENTRY_PROBLEM_SCHEMA, PROBLEM_MODEL_LIST } from './catalog-refusal.response';
 
 /**
  * OpenAPI models for the permission catalog as the Owner's routes return it
@@ -274,19 +276,30 @@ export function catalogPermission(row: PermissionSnapshotRow, drift: readonly Fi
 }
 
 /** `POST /permission-catalog/.../hand-back`. */
-@ApiExtraModels(CatalogFieldChangeDto)
+@ApiExtraModels(CatalogFieldChangeDto, ...PROBLEM_MODEL_LIST)
 export class HandBackDto {
   @ApiProperty({
     oneOf: [
       { type: 'array', items: { $ref: getSchemaPath(CatalogFieldChangeDto) } },
-      { type: 'string', enum: ['grant-restored', 'grant-removed'] },
+      { type: 'string', enum: ['grant-restored', 'grant-removed', 'grant-withheld'] },
     ],
     description:
       'What the next start changes. For a permission or a role, the columns it restores, `from` what this server ' +
       "holds `to` what this version ships; a permission it retires or revives shows `retiredAt`: 'retired' as `to` " +
       'for one this version no longer ships, and null for one it ships again. For a grant, grant-restored when the ' +
       'next start gives back a revoked grant, or grant-removed when it deletes a grant this version does not ship. ' +
+      "grant-withheld when it would give back a revoked grant but the entry check fails it because of this server's " +
+      'other edits: the grant stays revoked, is judged again at each start, and `problems` says why. ' +
       'An empty list means the next start changes nothing.',
   })
-  nextStart!: FieldChange[] | 'grant-restored' | 'grant-removed';
+  nextStart!: FieldChange[] | 'grant-restored' | 'grant-removed' | 'grant-withheld';
+
+  @ApiPropertyOptional({
+    description:
+      'With grant-withheld, each problem the entry check finds for the grant, by `kind`: what to change, or hand ' +
+      'back, for the next start to give it back.',
+    type: 'array',
+    items: ENTRY_PROBLEM_SCHEMA,
+  })
+  problems?: EntryProblem[];
 }

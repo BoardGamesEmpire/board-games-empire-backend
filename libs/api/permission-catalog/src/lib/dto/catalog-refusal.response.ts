@@ -167,7 +167,19 @@ const PROBLEM_MODELS: Readonly<Record<EntryProblem['kind'], abstract new () => o
   'query-rejected': QueryRejectedProblemDto,
 };
 
-const PROBLEM_MODEL_LIST = [...new Set(Object.values(PROBLEM_MODELS))];
+export const PROBLEM_MODEL_LIST = [...new Set(Object.values(PROBLEM_MODELS))];
+
+/**
+ * The OpenAPI schema of one entry problem, by `kind`: for the refusal below,
+ * and for a grant the next start withholds (`HandBackDto`).
+ */
+export const ENTRY_PROBLEM_SCHEMA = {
+  oneOf: PROBLEM_MODEL_LIST.map((model) => ({ $ref: getSchemaPath(model) })),
+  discriminator: {
+    propertyName: 'kind',
+    mapping: Object.fromEntries(Object.entries(PROBLEM_MODELS).map(([kind, model]) => [kind, getSchemaPath(model)])),
+  },
+};
 
 /** The 422 body of a permission edit, and of a grant added or revoked. */
 @ApiExtraModels(...PROBLEM_MODEL_LIST)
@@ -186,15 +198,7 @@ export class CatalogEditRefusalDto {
   @ApiPropertyOptional({
     description: 'With CATALOG_ENTRY_REFUSED, each problem the entry check found, by `kind`.',
     type: 'array',
-    items: {
-      oneOf: PROBLEM_MODEL_LIST.map((model) => ({ $ref: getSchemaPath(model) })),
-      discriminator: {
-        propertyName: 'kind',
-        mapping: Object.fromEntries(
-          Object.entries(PROBLEM_MODELS).map(([kind, model]) => [kind, getSchemaPath(model)]),
-        ),
-      },
-    },
+    items: ENTRY_PROBLEM_SCHEMA,
   })
   problems?: EntryProblem[];
 }

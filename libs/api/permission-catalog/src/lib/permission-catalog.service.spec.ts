@@ -667,6 +667,27 @@ describe('PermissionCatalogService (#772)', () => {
 
         expect(consentDecisionsAffected).toBe(0);
       });
+
+      it('reads no decision for an edit of the reason alone, which no decision is judged on (#772)', async () => {
+        db.pluginGrant.findMany.mockResolvedValue([serverDecision(RiskLevel.Medium)] as never);
+
+        const { consentDecisionsAffected } = await service.updatePermission(SLUG, { reason: 'Edited on this server' });
+
+        expect(consentDecisionsAffected).toBe(0);
+        expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
+        expect(db.permission.updateMany).toHaveBeenCalledTimes(1);
+      });
+
+      it('still reads the decisions when the reason changes with a column they are judged on (#772)', async () => {
+        db.pluginGrant.findMany.mockResolvedValue([serverDecision(RiskLevel.Medium)] as never);
+
+        const { consentDecisionsAffected } = await service.updatePermission(SLUG, {
+          reason: 'Edited on this server',
+          riskLevel: RiskLevel.High,
+        });
+
+        expect(consentDecisionsAffected).toBe(1);
+      });
     });
   });
 
@@ -1544,6 +1565,65 @@ describe('PermissionCatalogService (#772)', () => {
             nextStart: 'grant-restored',
           });
           expectNothingWritten();
+        });
+
+        describe("a grant the Owner's other edits make fail the entry check (#772)", () => {
+          /** update:household's condition, narrowed to name the household's owners alone. */
+          const OWNERS_ONLY = {
+            id: '{{ householdId }}',
+            members: {
+              some: {
+                userId: '{{ user.id }}',
+                role: { is: { role: { is: { name: SystemRole.HouseholdOwner } } } },
+              },
+            },
+          };
+          const WITHHELD = {
+            nextStart: 'grant-withheld',
+            problems: [
+              expect.objectContaining({
+                kind: 'names-other-roles',
+                slug: 'update:household',
+                role: SystemRole.HouseholdAdmin,
+                named: [SystemRole.HouseholdOwner],
+              }),
+            ],
+          };
+
+          beforeEach(() => {
+            // Revoked first, so the narrowed condition passed the edit check:
+            // no live holder was left for it to name others to.
+            snapshot = withPermission(snapshot, 'update:household', {
+              conditions: OWNERS_ONLY,
+              managedBy: PermissionOwner.Admin,
+            });
+          });
+
+          it('says the next start withholds it, with why, rather than promising it back', async () => {
+            snapshot = withGrant(snapshot, SystemRole.HouseholdAdmin, 'update:household', {
+              managedBy: PermissionOwner.Admin,
+              revokedAt: REVOKED_AT,
+            });
+
+            await expect(service.handBackGrant(SystemRole.HouseholdAdmin, 'update:household')).resolves.toEqual(
+              WITHHELD,
+            );
+
+            // The hand-back itself is still written: the start judges the grant again each time.
+            expect(db.rolePermission.updateMany).toHaveBeenCalledWith(
+              expect.objectContaining({ data: { managedBy: PermissionOwner.System } }),
+            );
+            expectHandBackOrder();
+          });
+
+          it('answers the same for a System grant already handed back, writing nothing', async () => {
+            snapshot = withGrant(snapshot, SystemRole.HouseholdAdmin, 'update:household', { revokedAt: REVOKED_AT });
+
+            await expect(service.handBackGrant(SystemRole.HouseholdAdmin, 'update:household')).resolves.toEqual(
+              WITHHELD,
+            );
+            expectNothingWritten();
+          });
         });
 
         it('answers 404 with CATALOG_ENTRY_NOT_FOUND for a grant the role does not have', async () => {
