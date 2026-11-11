@@ -26,11 +26,15 @@ import {
 } from '@bge/testing';
 import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ATTENDEE_USER_AND_ROLE_INCLUDE } from '../constants/attendee-user-and-role.constant';
 import {
   GameRemovedFromEventEvent,
   NominationPausedEvent,
   NominationResumedEvent,
 } from '../nomination/events/nomination.events';
+import { makeOfferedGameEntry } from '../offered-game/offered-game.fixture';
+import { OFFERED_GAME_ORDER, OFFERED_GAME_SELECT } from '../offered-game/offered-game.select';
+import { OfferedGameService } from '../offered-game/offered-game.service';
 import { lineupStillAhead } from './attendance';
 import { EventAttendeeService } from './event-attendee.service';
 import {
@@ -50,6 +54,7 @@ describe('EventAttendeeService', () => {
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser'>>;
   let emitter: { emit: jest.Mock };
   let compose: jest.SpyInstance;
+  let forAttendees: jest.SpyInstance;
 
   beforeEach(async () => {
     abilityService = createMockAbilityService();
@@ -60,6 +65,9 @@ describe('EventAttendeeService', () => {
     const ctx = await createTestingModuleWithDb({
       providers: [
         EventAttendeeService,
+        // The REAL offered-game reads, so the selects and scopes asserted
+        // below are the ones the attendee routes run (#1187).
+        OfferedGameService,
         // The REAL composer, over the mocked ability service, so the where
         // clauses asserted below are the merge the reads actually run.
         ScopeComposer,
@@ -72,6 +80,7 @@ describe('EventAttendeeService', () => {
     db = ctx.db;
     service = ctx.module.get(EventAttendeeService);
     compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
+    forAttendees = jest.spyOn(ctx.module.get(OfferedGameService), 'forAttendees');
 
     // The writes run their statements on the transaction client; the mock
     // hands the callback the same delegates. The paged list read (#373) is the
@@ -80,6 +89,11 @@ describe('EventAttendeeService', () => {
     unwrapTransaction(db);
     db.eventGameNomination.updateManyAndReturn.mockResolvedValue([]);
     db.eventGame.findMany.mockResolvedValue([]);
+    // No attendee offers a game, and no offered game has base games or open
+    // nominations, unless a test says so (#1187).
+    db.eventAttendeeGameList.findMany.mockResolvedValue([]);
+    db.gameExpansion.findMany.mockResolvedValue([]);
+    db.eventGameNomination.findMany.mockResolvedValue([]);
     // Every user an add names is a person unless a test says otherwise. The
     // invite checks' other reads find no row: the default policy and
     // preference, and no friendship.
@@ -719,29 +733,96 @@ describe('EventAttendeeService', () => {
   });
 
   describe('EventAttendeeGameList resource', () => {
-    // #512. A collection read, scoped to the path's attendee, which was already
-    // its filter. Still unpaginated; paging it is #1001.
-    it('getGameList asks the composer for its where clause, declaring the path attendee as its scope', async () => {
+    // #512 composed it; #1001 pages it, through the same read as the
+    // offered-games route, with the attendee fixed. The attendee's own clause
+    // drops their entries the moment they're removed, as the event-wide read
+    // does (#1187).
+    it("pages one attendee's offered games in title order, removed entries left out (#1001)", async () => {
       db.event.count.mockResolvedValue(1);
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
-      db.eventAttendeeGameList.findMany.mockResolvedValue([]);
+      db.eventAttendeeGameList.findMany.mockResolvedValue([makeOfferedGameEntry('gl-2')] as never);
+      db.eventAttendeeGameList.count.mockResolvedValue(3);
 
-      await service.getGameList('event-1', 'att-1');
+      const page = await service.getGameList('event-1', 'att-1', paginationQuery({ page: 2, limit: 1 }));
 
-      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendeeGameList, Action.read, {
+      const scope = {
         attendeeId: 'att-1',
         removedAt: null,
+        attendee: { is: { eventId: 'event-1', removedAt: null } },
+      };
+      const where = { ...scope, AND: [COND] };
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendeeGameList, Action.read, scope);
+      expect(db.eventAttendeeGameList.findMany).toHaveBeenCalledWith({
+        where,
+        select: OFFERED_GAME_SELECT,
+        orderBy: OFFERED_GAME_ORDER,
+        skip: 1,
+        take: 1,
       });
-      expect(db.eventAttendeeGameList.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { attendeeId: 'att-1', removedAt: null, AND: [COND] } }),
+      expect(db.eventAttendeeGameList.count).toHaveBeenCalledWith({ where });
+      expect(batchTransactionCall(db).options).toEqual({
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      });
+      expect(page.total).toBe(3);
+      expect(page.rows.map((row) => row.id)).toEqual(['gl-2']);
+      expect(page.rows[0].supplies).toEqual({ nominations: 0, lineup: 0 });
+    });
+
+    it('answers 404 for an attendee not on the event, before reading their games', async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findUnique.mockResolvedValue(null);
+
+      await expect(service.getGameList('event-1', 'att-x', paginationQuery())).rejects.toThrow(NotFoundException);
+      expect(db.eventAttendeeGameList.findMany).not.toHaveBeenCalled();
+    });
+
+    // The owner's rating, comment, play count and quantity are theirs, not
+    // the event's. One select serves every site, and naming its collection
+    // keys pins them, so a column added to GameCollection reaches none.
+    it('serves no collection column beyond id and medium at any offered-game site (#1185)', async () => {
+      expect(Object.keys(OFFERED_GAME_SELECT.collection.select)).toEqual(['id', 'medium', 'platformGame']);
+
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+      db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-1', deletedAt: null } as GameCollection);
+      db.eventAttendeeGameList.create.mockResolvedValue(makeOfferedGameEntry('gl-1') as never);
+      db.eventAttendeeGameList.update.mockResolvedValue(makeOfferedGameEntry('gl-2') as never);
+
+      await service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' });
+      db.eventAttendeeGameList.findFirst.mockResolvedValue(
+        makeEventAttendeeGameList('att-1', 'col-2', { id: 'gl-2', removedAt: new Date('2026-10-15T12:00:00Z') }),
       );
+      await service.addGameToList('event-1', 'att-1', { collectionId: 'col-2' });
+
+      const [created] = db.eventAttendeeGameList.create.mock.calls[0];
+      const [revived] = db.eventAttendeeGameList.update.mock.calls[0];
+      expect(created).toEqual(expect.objectContaining({ select: OFFERED_GAME_SELECT }));
+      expect(created).not.toHaveProperty('include');
+      expect(revived).toEqual(expect.objectContaining({ select: OFFERED_GAME_SELECT }));
+      expect(revived).not.toHaveProperty('include');
+    });
+
+    it('answers the add with the offered game, its base games and supplies read (#1187)', async () => {
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+      db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-1', deletedAt: null } as GameCollection);
+      db.eventAttendeeGameList.create.mockResolvedValue(makeOfferedGameEntry('gl-1', 'game-exp') as never);
+      db.gameExpansion.findMany.mockResolvedValue([
+        { expansionGameId: 'game-exp', baseGameId: 'game-base', isStandalone: false },
+      ] as never);
+
+      const entry = await service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' });
+
+      expect(entry.id).toBe('gl-1');
+      expect(entry.collection.platformGame.game.baseGames).toEqual([{ gameId: 'game-base', isStandalone: false }]);
+      expect(entry.supplies).toEqual({ nominations: 0, lineup: 0 });
     });
 
     it('addGameToList emits a GameAddedToListEvent (create) for the new row', async () => {
       db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
       db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-1', deletedAt: null } as GameCollection);
-      db.eventAttendeeGameList.create.mockResolvedValue(makeEventAttendeeGameList('att-1', 'col-1', { id: 'gl-1' }));
+      db.eventAttendeeGameList.create.mockResolvedValue(makeOfferedGameEntry('gl-1') as never);
 
       await service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' });
 
@@ -765,7 +846,7 @@ describe('EventAttendeeService', () => {
       db.eventAttendeeGameList.findFirst.mockResolvedValue(
         makeEventAttendeeGameList('att-1', 'col-1', { id: 'gl-1', removedAt }),
       );
-      db.eventAttendeeGameList.update.mockResolvedValue(makeEventAttendeeGameList('att-1', 'col-1', { id: 'gl-1' }));
+      db.eventAttendeeGameList.update.mockResolvedValue(makeOfferedGameEntry('gl-1') as never);
 
       await service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' });
 
@@ -789,7 +870,7 @@ describe('EventAttendeeService', () => {
       db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: 'hh-1' } as Event);
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
       db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-1', deletedAt: null } as GameCollection);
-      db.eventAttendeeGameList.create.mockResolvedValue(makeEventAttendeeGameList('att-1', 'col-1', { id: 'gl-1' }));
+      db.eventAttendeeGameList.create.mockResolvedValue(makeOfferedGameEntry('gl-1') as never);
 
       await service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' });
 
@@ -926,6 +1007,152 @@ describe('EventAttendeeService', () => {
         expect(emitted.before).toEqual({ id: 'gl-1', attendeeId: 'att-1', collectionId: 'col-1', removedAt: null });
         expect(emitted.after).toEqual({ id: 'gl-1', attendeeId: 'att-1', collectionId: 'col-1', removedAt });
       });
+    });
+  });
+  // #404's sixth site: the attendee routes' embed was an include, so it reached
+  // anyone who could read attendees, whatever their read on offered games.
+  // It's now a read of its own under the offered-games read ceiling, in the
+  // offered-game shape.
+  describe("the attendee routes' offered games (#404, #1187)", () => {
+    const withGames = (id: string, gameListIds: string[]) =>
+      db.eventAttendeeGameList.findMany.mockResolvedValue(
+        gameListIds.map((gameListId) => makeOfferedGameEntry(gameListId, 'game-1', id)) as never,
+      );
+
+    it("attaches the attendee list's games from their own read under the offered-games read ceiling (#404)", async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findMany.mockResolvedValue([
+        attendeeRow({ id: 'att-1' }),
+        attendeeRow({ id: 'att-2', userId: 'user-2' }),
+      ]);
+      withGames('att-1', ['gl-1']);
+
+      const page = await service.getAttendees('event-1', paginationQuery({ limit: 10 }));
+
+      expect(db.eventAttendee.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ include: ATTENDEE_USER_AND_ROLE_INCLUDE }),
+      );
+      expect(forAttendees).toHaveBeenCalledWith(['att-1', 'att-2'], expect.any(Date));
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendeeGameList, Action.read, {
+        attendeeId: { in: ['att-1', 'att-2'] },
+        removedAt: null,
+      });
+      expect(db.eventAttendeeGameList.findMany).toHaveBeenCalledWith({
+        where: { attendeeId: { in: ['att-1', 'att-2'] }, removedAt: null, AND: [COND] },
+        select: OFFERED_GAME_SELECT,
+        orderBy: OFFERED_GAME_ORDER,
+      });
+      expect(page.rows.map((row) => row.availableGames.map((game) => game.id))).toEqual([['gl-1'], []]);
+    });
+
+    it("attaches one attendee's games to getAttendee", async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findUnique.mockResolvedValue(attendeeRow());
+      withGames('att-1', ['gl-1', 'gl-2']);
+
+      const attendee = await service.getAttendee('event-1', 'att-1');
+
+      expect(db.eventAttendee.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ include: ATTENDEE_USER_AND_ROLE_INCLUDE }),
+      );
+      expect(forAttendees).toHaveBeenCalledWith(['att-1'], expect.any(Date));
+      expect(attendee.availableGames.map((game) => game.id)).toEqual(['gl-1', 'gl-2']);
+    });
+
+    it("attaches the answered attendee's games to updateStatus, after the write commits", async () => {
+      const order: string[] = [];
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+      lockedStatus(EventParticipationStatus.Invited);
+      db.eventAttendee.update.mockResolvedValue(attendeeRow({ status: EventParticipationStatus.Attending }));
+      db.$transaction.mockImplementation((async (callback: (tx: MockDatabaseService) => Promise<unknown>) => {
+        const result = await callback(db);
+        order.push('commit');
+        return result;
+      }) as never);
+      forAttendees.mockImplementation(async () => {
+        order.push('attach');
+        return new Map([['att-1', []]]);
+      });
+
+      const updated = await service.updateStatus('event-1', 'att-1', { status: 'Attending' } as never);
+
+      expect(db.eventAttendee.update).toHaveBeenCalledWith(
+        expect.objectContaining({ include: ATTENDEE_USER_AND_ROLE_INCLUDE }),
+      );
+      expect(order).toEqual(['commit', 'attach']);
+      expect(updated.availableGames).toEqual([]);
+    });
+
+    it("attaches the added attendee's games to addAttendee", async () => {
+      abilityService.getActingUserId.mockReturnValue('user-actor');
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-actor' } as EventAttendee);
+      db.eventAttendee.create.mockResolvedValue(
+        makeEventAttendee({ id: 'att-new', eventId: 'event-1', userId: 'user-2' }),
+      );
+
+      const added = await service.addAttendee('event-1', { userId: 'user-2' });
+
+      expect(db.eventAttendee.create).toHaveBeenCalledWith(
+        expect.objectContaining({ include: ATTENDEE_USER_AND_ROLE_INCLUDE }),
+      );
+      expect(forAttendees).toHaveBeenCalledWith(['att-new'], expect.any(Date));
+      expect(added.availableGames).toEqual([]);
+    });
+
+    it("attaches the removed attendee's games to removeAttendee's answer", async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+      db.eventAttendee.update.mockResolvedValue({ id: 'att-1' } as EventAttendee);
+      db.eventAttendee.findUniqueOrThrow.mockResolvedValue(attendeeRow({ removedAt: new Date() }));
+      withGames('att-1', ['gl-1']);
+
+      const removed = await service.removeAttendee('event-1', 'att-1');
+
+      expect(db.eventAttendee.findUniqueOrThrow).toHaveBeenCalledWith(
+        expect.objectContaining({ include: ATTENDEE_USER_AND_ROLE_INCLUDE }),
+      );
+      expect(removed.availableGames.map((game) => game.id)).toEqual(['gl-1']);
+    });
+
+    // The games are read after the write commits. A failure there is the
+    // read's: mapped as the write's, a unique-key or no-row error would
+    // answer 409 or 403 for a write that went through.
+    it('answers a failure of the games read after a committed write as itself, not as a refused write (#1187)', async () => {
+      const unique = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 'test',
+      });
+      const noRow = new Prisma.PrismaClientKnownRequestError('No record was found', {
+        code: 'P2025',
+        clientVersion: 'test',
+      });
+
+      abilityService.getActingUserId.mockReturnValue('user-actor');
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-actor' } as EventAttendee);
+      db.eventAttendee.create.mockResolvedValue(makeEventAttendee({ id: 'att-new', eventId: 'event-1' }));
+      forAttendees.mockRejectedValueOnce(unique);
+      await expect(service.addAttendee('event-1', { userId: 'user-2' })).rejects.toBe(unique);
+      expect(db.eventAttendee.create).toHaveBeenCalledTimes(1);
+
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+      db.eventAttendee.update.mockResolvedValue(attendeeRow());
+      db.eventAttendee.findUniqueOrThrow.mockResolvedValue(attendeeRow({ removedAt: new Date() }));
+      forAttendees.mockRejectedValueOnce(noRow);
+      await expect(service.removeAttendee('event-1', 'att-1')).rejects.toBe(noRow);
+
+      lockedStatus(EventParticipationStatus.Invited);
+      forAttendees.mockRejectedValueOnce(noRow);
+      await expect(service.updateStatus('event-1', 'att-1', { status: 'Attending' } as never)).rejects.toBe(noRow);
+
+      db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-1', deletedAt: null } as GameCollection);
+      db.eventAttendeeGameList.create.mockResolvedValue(makeOfferedGameEntry('gl-1') as never);
+      db.gameExpansion.findMany.mockRejectedValueOnce(unique);
+      await expect(service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' })).rejects.toBe(unique);
+      expect(emitter.emit).toHaveBeenCalledWith(GameAddedToListEvent.eventName, expect.anything());
     });
   });
 });

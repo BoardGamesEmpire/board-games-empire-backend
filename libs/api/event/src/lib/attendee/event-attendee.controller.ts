@@ -119,14 +119,29 @@ export class EventAttendeeController {
     );
   }
 
-  @ApiOperation({ summary: "Get an attendee's available game list" })
+  @ApiOperation({
+    summary: 'List the games an attendee offers',
+    description:
+      "One attendee's offered games, in the shape and order of `GET /events/:eventId/offered-games`: game title, " +
+      'then entry id. Games taken back are left out. **Paginated since #1001**, this read used to return ' +
+      'every game: `?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and ' +
+      "`hasMore`. To filter one attendee's games, use `?attendeeIds=` on the offered-games read.",
+  })
   @ApiParam({ name: 'eventId', type: String })
   @ApiParam({ name: 'attendeeId', type: String })
-  @ApiResponse({ status: Http.Ok, description: 'Game list retrieved' })
+  @ApiPaginatedEnvelope('games')
+  @ApiResponse({ status: Http.BadRequest, description: 'A page or limit out of range, or an unknown query parameter' })
+  @ApiResponse({ status: Http.NotFound, description: 'Event or attendee not found' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.EventAttendeeGameList))
   @Get(':attendeeId/games')
-  getGameList(@Param('eventId') eventId: string, @Param('attendeeId') attendeeId: string) {
-    return from(this.attendeeService.getGameList(eventId, attendeeId)).pipe(map((games) => ({ games })));
+  getGameList(
+    @Param('eventId') eventId: string,
+    @Param('attendeeId') attendeeId: string,
+    @Query() pagination: DefaultPaginationQueryDto,
+  ) {
+    return from(this.attendeeService.getGameList(eventId, attendeeId, pagination)).pipe(
+      map((page) => paginated('games', page, pagination, ResourceType.EventAttendeeGameList)),
+    );
   }
 
   @ApiOperation({ summary: "Add a game to an attendee's available list" })

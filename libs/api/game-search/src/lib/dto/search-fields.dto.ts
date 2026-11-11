@@ -2,31 +2,10 @@ import { PlatformType } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { CappedOffsetPaginationQueryDto, NotLessThanProperty, TransformBoolean } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
+import { Type } from 'class-transformer';
 import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { SEARCHABLE_CONTENT_TYPES, type SearchableContentType } from '../search-filter';
-
-/**
- * The range a search filter's bound can take: the proto carries each as an
- * int32, which would wrap a larger one into some other value (#719, #869).
- */
-const INT32_MIN = -(2 ** 31);
-const INT32_MAX = 2 ** 31 - 1;
-
-/**
- * Converts only a number or a numeric string into a range's bound, and reads
- * a blank one as absent. Implicit conversion would make a blank string,
- * `false` or `[]` 0 and `true` 1, each a bound like any other, so a
- * `?publishYearMin=` or `?playTimeMax=` left empty, or a frame's `false`,
- * would silently narrow the search by it. Anything else stays as sent, for
- * `@IsInt` to refuse (#719, #869).
- */
-const TransformRangeBound = () =>
-  Transform(({ obj, key, value }) => {
-    const raw: unknown = obj[key];
-    if (typeof raw === 'string') return raw.trim() === '' ? undefined : value;
-    return typeof raw === 'number' ? value : raw;
-  });
+import { INT32_MAX, INT32_MIN, TransformRangeBound } from './range-bound';
 
 /**
  * The fields a game search takes over REST and over the WebSocket, declared

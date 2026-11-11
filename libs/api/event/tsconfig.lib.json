@@ -18,25 +18,28 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
-      "path": "../../common/webhooks/tsconfig.lib.json"
-    },
-    {
-      "path": "../../common/invites/tsconfig.lib.json"
+      "path": "../game-search/tsconfig.lib.json"
     },
     {
       "path": "../household/tsconfig.lib.json"
     },
     {
+      "path": "../../common/webhooks/tsconfig.lib.json"
+    },
+    {
       "path": "../../common/notifications/tsconfig.lib.json"
     },
     {
-      "path": "../../common/shared/tsconfig.lib.json"
+      "path": "../../common/invites/tsconfig.lib.json"
     },
     {
       "path": "../../common/actor-context/tsconfig.lib.json"
     },
     {
       "path": "../../common/testing/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/shared/tsconfig.lib.json"
     },
     {
       "path": "../../common/permissions/tsconfig.lib.json"

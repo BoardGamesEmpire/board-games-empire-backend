@@ -10,7 +10,11 @@ import type {
   EventPolicy,
   EventStatus,
   Game,
+  GameMedium,
   Platform,
+  PlatformGame,
+  User,
+  UserProfile,
 } from '@bge/database';
 import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
 
@@ -128,6 +132,68 @@ export interface ListOccurrencesEnvelope {
 
 export interface ListAttendeesEnvelope {
   readonly attendees: readonly EventAttendeeWire[];
+  readonly total: number;
+}
+
+/**
+ * An offered game as the reads and the add serve it (#1185, #1187), restated
+ * rather than imported from `@bge/event`, since the suite checks the wire
+ * contract. Its collection entry carries its id and medium, and nothing else
+ * of the owner's row.
+ */
+export interface OfferedGameWire {
+  readonly id: string;
+  readonly attendeeId: string;
+  readonly createdAt: string;
+  readonly collection: {
+    readonly id: string;
+    readonly medium: GameMedium;
+    readonly platformGame: Pick<
+      Wire<PlatformGame>,
+      'id' | 'image' | 'thumbnail' | 'minPlayers' | 'maxPlayers' | 'minPlayTime' | 'maxPlayTime'
+    > & {
+      readonly platform: Pick<Wire<Platform>, 'id' | 'name' | 'slug' | 'platformType'>;
+      readonly game: Pick<
+        Wire<Game>,
+        | 'id'
+        | 'title'
+        | 'subtitle'
+        | 'thumbnail'
+        | 'image'
+        | 'contentType'
+        | 'publishYear'
+        | 'complexity'
+        | 'minPlayers'
+        | 'maxPlayers'
+        | 'minPlayTime'
+        | 'maxPlayTime'
+      > & { readonly baseGames: readonly { readonly gameId: string; readonly isStandalone: boolean }[] };
+    };
+  };
+  readonly supplies: { readonly nominations: number | null; readonly lineup: number | null };
+}
+
+/** A row of `GET /api/events/:eventId/offered-games`: the offered game and its attendee, or null (#1187). */
+export type OfferedGameRowWire = OfferedGameWire & {
+  readonly attendee: {
+    readonly id: string;
+    readonly status: EventParticipationStatus;
+    readonly guestName: string | null;
+    readonly user:
+      | (Pick<Wire<User>, 'id' | 'username'> & {
+          readonly profile: Pick<Wire<UserProfile>, 'displayName' | 'avatarUrl'> | null;
+        })
+      | null;
+  } | null;
+};
+
+export interface ListOfferedGamesEnvelope {
+  readonly offeredGames: readonly OfferedGameRowWire[];
+  readonly total: number;
+}
+
+export interface ListAttendeeGamesEnvelope {
+  readonly games: readonly OfferedGameWire[];
   readonly total: number;
 }
 
@@ -389,4 +455,63 @@ export function resolutionEnvelope(
   }
 
   return { nomination: nominationEnvelope(response, request), resolution: resolution as unknown as ResolutionWire };
+}
+
+/** What a row must be for {@link offeredGameRow}. */
+const OFFERED_GAME_ROW = "an object with a string id, a 'collection' object and a 'supplies' object";
+
+/**
+ * An offered game: an id, its collection entry and its supplies, since those
+ * are what a renamed select or a dropped enrichment breaks. The fields are
+ * compared against definite values by the specs.
+ */
+function offeredGameRow(value: unknown): OfferedGameWire | undefined {
+  const row = withId<OfferedGameWire>(value);
+
+  return row !== undefined && isRecord(row.collection) && isRecord(row.supplies) ? row : undefined;
+}
+
+/** What a row must be for {@link offeredGameListRow}. */
+const OFFERED_GAME_LIST_ROW = `${OFFERED_GAME_ROW}, and an 'attendee' object or null`;
+
+/** An offered-games row: an offered game, and its `attendee`, an object or `null` (#1187). */
+function offeredGameListRow(value: unknown): OfferedGameRowWire | undefined {
+  const row = offeredGameRow(value) as (OfferedGameWire & { readonly attendee?: unknown }) | undefined;
+
+  return row !== undefined && (row.attendee === null || isRecord(row.attendee))
+    ? (row as OfferedGameRowWire)
+    : undefined;
+}
+
+/** `GET /api/events/:eventId/offered-games`: `{ offeredGames: [...], pagination }` (#1187). */
+export function listOfferedGamesEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): ListOfferedGamesEnvelope {
+  const { rows, total } = paginatedEnvelope(
+    'offeredGames',
+    offeredGameListRow,
+    OFFERED_GAME_LIST_ROW,
+    response,
+    request,
+  );
+
+  return { offeredGames: rows, total };
+}
+
+/** `GET /api/events/:eventId/attendees/:attendeeId/games`: `{ games: [...], pagination }`, paged since #1001. */
+export function listAttendeeGamesEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): ListAttendeeGamesEnvelope {
+  const { rows, total } = paginatedEnvelope('games', offeredGameRow, OFFERED_GAME_ROW, response, request);
+
+  return { games: rows, total };
+}
+
+/** `POST /api/events/:eventId/attendees/:attendeeId/games`: `{ message, entry }`, in the offered-game shape (#1185). */
+export function offeredGameEnvelope(response: HttpResponseLike, request: RequestDescription): OfferedGameWire {
+  const entry = isRecord(response.body) ? offeredGameRow(response.body['entry']) : undefined;
+
+  return entry ?? fail(`it carried no 'entry' that is ${OFFERED_GAME_ROW}`, request, response);
 }

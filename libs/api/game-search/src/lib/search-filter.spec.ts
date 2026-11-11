@@ -1,4 +1,5 @@
-import { localFilterConditions, toProtoSearchFilter } from './search-filter';
+import { ContentType, PlatformType } from '@bge/database';
+import { gameRangeConditions, localFilterConditions, toProtoSearchFilter } from './search-filter';
 
 describe('the publish-year filter on the api (#719)', () => {
   describe('toProtoSearchFilter', () => {
@@ -142,5 +143,30 @@ describe('the player-count and play-time filters on the api (#869)', () => {
         localFilterConditions({ playerCountIncludeUnknown: true, playTimeIncludeUnknown: true, playTimeMin: null }),
       ).toEqual([]);
     });
+  });
+});
+
+describe('gameRangeConditions (#1187)', () => {
+  it('narrows nothing without a bound', () => {
+    expect(gameRangeConditions({})).toEqual([]);
+    expect(gameRangeConditions({ playTimeIncludeUnknown: true })).toEqual([]);
+  });
+
+  it('is the range half of localFilterConditions', () => {
+    // The offered-games read nests these under an entry's game, so they must be
+    // exactly the conditions the search applies, after its two list filters.
+    const filter = {
+      contentTypes: [ContentType.BaseGame],
+      platformTypes: [PlatformType.Tabletop],
+      publishYearMin: 2000,
+      playerCountMin: 4,
+      playTimeMax: 60,
+      playTimeIncludeUnknown: true,
+    };
+
+    const ranges = gameRangeConditions(filter);
+
+    expect(ranges).toHaveLength(3);
+    expect(localFilterConditions(filter).slice(2)).toEqual(ranges);
   });
 });
