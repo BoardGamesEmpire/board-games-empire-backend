@@ -65,3 +65,7 @@ jobs:
         needs a person.
     secrets:
       bge-agent-private-key: ${{ secrets.BGE_AGENT_PRIVATE_KEY }}
+      # Used instead of federation while promotional credit pays only for
+      # key-authenticated requests (#1192). Without the secret, the shared
+      # workflow falls back to federation.
+      anthropic-api-key: ${{ secrets.BGE_AGENT_ANTHROPIC_API_KEY }}
