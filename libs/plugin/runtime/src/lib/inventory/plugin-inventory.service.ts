@@ -1,3 +1,4 @@
+import type { PluginUnit } from '@bge/actor-context';
 import {
   DatabaseService,
   PluginCategory,
@@ -9,10 +10,13 @@ import {
 import { parsePluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { resolveLocalizedString, type PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
+import { PluginConsentStandingService } from '../consent/plugin-consent-standing.service';
+import type { PluginConsentStanding } from '../consent/plugin-consent-standing.types';
 import type { PluginProvenance } from '../events/plugin.events';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import { derivePluginUnitState, type PluginUnitStateCode } from '../units/plugin-unit-state';
 import {
   PluginInventoryManifestError,
   PluginInventoryNotFoundError,
@@ -159,18 +163,36 @@ export interface PluginInventoryEntry extends PluginInventoryIdentity {
   readonly pendingUpdate: PluginInventoryPendingUpdate | null;
 }
 
-/** A unit's own enablement state, LEFT JOINed onto the plugin (D-CE). */
+/**
+ * A unit's own enablement state, LEFT JOINed onto the plugin, with the
+ * state code and consent standing worked out when read (#1149).
+ */
 export interface PluginInventoryUnitState {
   /**
-   * Whether an enablement row exists at all. False is a real, common state:
+   * Whether a unit enablement exists at all. False is a real, common state:
    * per #225 `decide()` is the only `UserPlugin` creator, so a user who has
    * consented to nothing is unanchored on every plugin — which is why this
    * is distinct from `enabled: false`.
    */
   readonly anchored: boolean;
   readonly enabled: boolean;
-  readonly suspendedForConsent: boolean;
-  readonly suspendedAt: Date | null;
+  /**
+   * The one code a client announces for this unit: `off`, `on`,
+   * `review_pending`, `needs_configuration` or `unavailable`. It carries what
+   * the household entry's `dormantReason` used to say, the review pending
+   * that the stored suspension flag used to say (#1149; #1061, #1063, #1147),
+   * and the server switch: a switched-on unit under a plugin a server admin
+   * switched off reads `unavailable`, as does one whose stored manifest
+   * cannot be read, since the ability path refuses it; `serverEnabled` and
+   * `manifestUnreadable` on the entry say which of its causes applies.
+   */
+  readonly state: PluginUnitStateCode;
+  /**
+   * What this unit still owes the plugin, for the manifest's checks the unit
+   * consumes. Empty for a row whose manifest cannot be read, since nothing
+   * manifest-derived about it can be trusted ({@link PluginInventoryIdentity.manifestUnreadable}).
+   */
+  readonly consent: PluginConsentStanding;
 }
 
 export interface PluginUnitInventoryEntry extends PluginInventoryIdentity {
@@ -185,25 +207,17 @@ export interface PluginUnitInventoryEntry extends PluginInventoryIdentity {
   readonly unit: PluginInventoryUnitState;
 }
 
-export interface PluginHouseholdInventoryEntry extends PluginUnitInventoryEntry {
-  /**
-   * Why this household's retained row cannot serve, or `null` when it can
-   * (#369, #370, D-CM). `ScopeOrphaned` is the case D-CF's boolean used to
-   * report — the household holds a row for a plugin whose current scope has no
-   * household axis — and `NeedsConfiguration` is the retained document that no
-   * longer satisfies the active schema.
-   *
-   * Read from the row rather than recomputed from `scope` and `unit.anchored`,
-   * which is what replaced the boolean: dormancy is written where it is decided
-   * (activation, reinstall), so the list reports the same state the serving
-   * predicate uses instead of a second derivation that can disagree with it.
-   *
-   * Listed rather than filtered out deliberately: a row that exists and serves
-   * nothing is exactly what an admin needs to see, and hiding one costs a
-   * support ticket where showing it costs a glance.
-   */
-  readonly dormantReason: PluginUnitDormantReason | null;
-}
+/**
+ * The household entry adds nothing to the unit entry. Dormancy (#369, #370)
+ * is read from the household's row and reported through `unit.state`
+ * (`unavailable` for a scope orphan, `needs_configuration` for a retained
+ * document the active schema no longer accepts), so the list reports the same
+ * state the serving predicate uses (#1149).
+ *
+ * Dormant rows are listed rather than filtered out deliberately: a row that
+ * exists and serves nothing is exactly what a household admin needs to see.
+ */
+export type PluginHouseholdInventoryEntry = PluginUnitInventoryEntry;
 
 /** The single-plugin read: the list entry plus what the manifest adds. */
 export interface PluginInventoryDetail extends PluginInventoryEntry {
@@ -266,19 +280,23 @@ const SERVER_SELECT = {
 const UNIT_SELECT = { ...IDENTITY_SELECT, enabled: true } satisfies Prisma.PluginSelect;
 
 /**
- * Checked against both models it selects from. The household list spreads it
- * into a wider select, and a spread's keys are not checked there.
+ * The user axis holds a switch and nothing else: no stored suspension (#1149,
+ * which replaced #1061/#1063/#1147's flag with a read-time rule) and no
+ * dormancy (#225 leaves the user axis without it).
  */
-const UNIT_STATE_SELECT = {
+const USER_UNIT_STATE_SELECT = { enabled: true } as const satisfies Prisma.UserPluginSelect;
+
+/** The household axis adds dormancy, written where it is decided (activation, reinstall). */
+const HOUSEHOLD_UNIT_STATE_SELECT = {
   enabled: true,
-  suspendedForConsent: true,
-  suspendedAt: true,
-} as const satisfies Prisma.UserPluginSelect satisfies Prisma.HouseholdPluginSelect;
+  dormantReason: true,
+} as const satisfies Prisma.HouseholdPluginSelect;
 
 type IdentityRow = Prisma.PluginGetPayload<{ select: typeof IDENTITY_SELECT }>;
 type ServerRow = Prisma.PluginGetPayload<{ select: typeof SERVER_SELECT }>;
 type UnitRow = Prisma.PluginGetPayload<{ select: typeof UNIT_SELECT }>;
-type UnitStateRow = { enabled: boolean; suspendedForConsent: boolean; suspendedAt: Date | null };
+/** A user row has no `dormantReason`; the household row always has one. */
+type UnitStateRow = { enabled: boolean; dormantReason?: PluginUnitDormantReason | null };
 
 /**
  * The installed-plugin inventory (#354): the reads that answer "what is on
@@ -310,13 +328,14 @@ type UnitStateRow = { enabled: boolean; suspendedForConsent: boolean; suspendedA
 export class PluginInventoryService {
   constructor(
     private readonly db: DatabaseService,
+    private readonly standing: PluginConsentStandingService,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
   ) {}
 
   /**
-   * Every installed plugin from the server viewpoint. No unit state: the
-   * `suspendedForConsent` column lives on `HouseholdPlugin`/`UserPlugin`, so
-   * there is no such fact to report here — the unit variants carry it.
+   * Every installed plugin from the server viewpoint. No unit state: unit
+   * enablement and consent standing belong to a household or user, so the unit
+   * variants carry them and this one does not.
    */
   async listForServer(
     paging: PluginInventoryPaging,
@@ -344,11 +363,15 @@ export class PluginInventoryService {
 
   /**
    * The household viewpoint (D-CE): every plugin the household axis admits,
-   * with this household's enablement row joined on — PLUS any plugin this
+   * with this household's unit enablement joined on — PLUS any plugin this
    * household already holds a row for, whatever its current scope says
    * (D-CF). Driven from the plugin table, never from `HouseholdPlugin`
    * rows, so a household that has enabled nothing still sees what it could
    * enable.
+   *
+   * Each row reports `unit.state` and `unit.consent` (#1149): the household's
+   * switch and dormancy from its row, and the consent standing worked out from
+   * the row's own manifest on this read, one classification per listed plugin.
    */
   async listForHousehold(
     householdId: string,
@@ -374,13 +397,7 @@ export class PluginInventoryService {
           where,
           select: {
             ...UNIT_SELECT,
-            householdPlugins: {
-              where: { householdId },
-              // Dormancy is household-only (#225 leaves the user axis without
-              // it), so it is selected here rather than in the shared
-              // UNIT_STATE_SELECT the user list also binds.
-              select: { ...UNIT_STATE_SELECT, dormantReason: true },
-            },
+            householdPlugins: { where: { householdId }, select: HOUSEHOLD_UNIT_STATE_SELECT },
           },
           orderBy: { slug: 'asc' },
           skip: paging.skip,
@@ -391,21 +408,16 @@ export class PluginInventoryService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    return {
-      rows: rows.map((row) => {
-        // `@@unique([householdId, pluginId])` makes the filtered relation at
-        // most one row, so the first element is the whole answer.
-        const unit = this.toUnitState(row.householdPlugins[0]);
+    const unit: PluginUnit = { scopeType: 'Household', householdId };
 
-        return {
-          ...this.toUnitEntry(row, options.locale),
-          unit,
-          // `null` for a plugin this household holds no row for — there is
-          // nothing to be dormant. Anchored rows carry whatever activation
-          // wrote.
-          dormantReason: row.householdPlugins[0]?.dormantReason ?? null,
-        };
-      }),
+    return {
+      rows: await Promise.all(
+        rows.map((row) =>
+          // `@@unique([householdId, pluginId])` makes the filtered relation at
+          // most one row, so the first element is the whole answer.
+          this.toUnitInventoryEntry(row, row.householdPlugins[0], unit, options.locale),
+        ),
+      ),
       total,
     };
   }
@@ -425,6 +437,10 @@ export class PluginInventoryService {
    * D-CD requires. The field-level exposure is already closed — this read
    * serves no version, provenance, install history or tombstones — so what
    * #381 weighs is the enumeration alone.
+   *
+   * Each row reports `unit.state` and `unit.consent` (#1149). The user axis
+   * has no dormancy, so an unanchored or switched-off row reads `off` and any
+   * other reads `review_pending` while a required user-scope check is owed.
    */
   async listForUser(
     userId: string,
@@ -439,7 +455,7 @@ export class PluginInventoryService {
       [
         this.db.plugin.findMany({
           where,
-          select: { ...UNIT_SELECT, userPlugins: { where: { userId }, select: UNIT_STATE_SELECT } },
+          select: { ...UNIT_SELECT, userPlugins: { where: { userId }, select: USER_UNIT_STATE_SELECT } },
           orderBy: { slug: 'asc' },
           skip: paging.skip,
           take: paging.pageSize,
@@ -449,11 +465,12 @@ export class PluginInventoryService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
+    const unit: PluginUnit = { scopeType: 'User', userId };
+
     return {
-      rows: rows.map((row) => ({
-        ...this.toUnitEntry(row, options.locale),
-        unit: this.toUnitState(row.userPlugins[0]),
-      })),
+      rows: await Promise.all(
+        rows.map((row) => this.toUnitInventoryEntry(row, row.userPlugins[0], unit, options.locale)),
+      ),
       total,
     };
   }
@@ -549,23 +566,11 @@ export class PluginInventoryService {
    * name is what makes "uninstalled 3 days ago" legible.
    */
   private localize(
-    row: IdentityRow,
+    validated: PluginManifestValidationResult | null,
     locale?: string,
   ): Pick<PluginInventoryIdentity, 'displayName' | 'description' | 'manifestUnreadable'> {
-    let validated: PluginManifestValidationResult;
-
-    try {
-      validated = revalidateStoredManifest(
-        row,
-        this.options,
-        (pluginSlug, detail, issues) => new PluginInventoryManifestError(pluginSlug, detail, issues),
-      );
-    } catch (err) {
-      if (err instanceof PluginInventoryManifestError) {
-        return { displayName: null, description: null, manifestUnreadable: true };
-      }
-
-      throw err;
+    if (validated === null) {
+      return { displayName: null, description: null, manifestUnreadable: true };
     }
 
     const resolveText = this.textResolver(locale);
@@ -575,6 +580,27 @@ export class PluginInventoryService {
       description: resolveText(validated.manifest.description),
       manifestUnreadable: false,
     };
+  }
+
+  /**
+   * The stored manifest re-validated, or `null` when it fails. Read
+   * once per list row and shared by the localized fields and the consent
+   * standing, so the two cannot disagree about whether the row is readable.
+   */
+  private validatedOrNull(row: IdentityRow): PluginManifestValidationResult | null {
+    try {
+      return revalidateStoredManifest(
+        row,
+        this.options,
+        (pluginSlug, detail, issues) => new PluginInventoryManifestError(pluginSlug, detail, issues),
+      );
+    } catch (err) {
+      if (err instanceof PluginInventoryManifestError) {
+        return null;
+      }
+
+      throw err;
+    }
   }
 
   /** The columns every viewpoint may see, without reading the manifest. */
@@ -628,28 +654,72 @@ export class PluginInventoryService {
   }
 
   private toEntry(row: ServerRow, locale?: string): PluginInventoryEntry {
-    return { ...this.identityOf(row), ...this.serverColumns(row), ...this.localize(row, locale) };
+    return {
+      ...this.identityOf(row),
+      ...this.serverColumns(row),
+      ...this.localize(this.validatedOrNull(row), locale),
+    };
   }
 
   /**
-   * A unit row: identity, the server switch, and nothing else from the
-   * operational set — those columns are not even selected for these reads.
+   * A unit list row: identity, the server switch, and nothing else from the
+   * operational set — those columns are not even selected for these reads —
+   * plus the unit's state and consent standing (#1149).
+   *
+   * The standing is resolved here, per row, from the manifest already
+   * re-validated for the localized fields. A row whose manifest cannot be
+   * read keeps its marker, owes nothing, since nothing manifest-derived
+   * about it can be trusted, and reads `unavailable` rather than `on`: the
+   * ability path refuses such a manifest, so a client announcing the code
+   * alone must not hear that the unit runs (PR #1155 review). The per-row
+   * classification is accepted for now; caching is deferred.
    */
-  private toUnitEntry(row: UnitRow, locale?: string): Omit<PluginUnitInventoryEntry, 'unit'> {
-    return { ...this.identityOf(row), serverEnabled: row.enabled, ...this.localize(row, locale) };
-  }
-
-  /** A missing enablement row is an unanchored unit, not a disabled one. */
-  private toUnitState(row: UnitStateRow | undefined): PluginInventoryUnitState {
-    if (row === undefined) {
-      return { anchored: false, enabled: false, suspendedForConsent: false, suspendedAt: null };
-    }
+  private async toUnitInventoryEntry(
+    row: UnitRow,
+    unitRow: UnitStateRow | undefined,
+    unit: PluginUnit,
+    locale?: string,
+  ): Promise<PluginUnitInventoryEntry> {
+    const validated = this.validatedOrNull(row);
+    const consent: PluginConsentStanding =
+      validated === null
+        ? { outstanding: [], optionalOff: [] }
+        : await this.standing.resolve(row.id, unit, validated.permissionChecks, locale);
 
     return {
-      anchored: true,
-      enabled: row.enabled,
-      suspendedForConsent: row.suspendedForConsent,
-      suspendedAt: row.suspendedAt,
+      ...this.identityOf(row),
+      serverEnabled: row.enabled,
+      ...this.localize(validated, locale),
+      unit: this.toUnitState(unitRow, row.enabled, validated === null, consent),
+    };
+  }
+
+  /**
+   * A missing unit enablement is an unanchored unit, not a disabled one. The
+   * user unit enablement has no dormancy field, so its dormant reason reads
+   * `null`.
+   */
+  private toUnitState(
+    row: UnitStateRow | undefined,
+    serverEnabled: boolean,
+    manifestUnreadable: boolean,
+    consent: PluginConsentStanding,
+  ): PluginInventoryUnitState {
+    const anchored = row !== undefined;
+    const enabled = row?.enabled ?? false;
+
+    return {
+      anchored,
+      enabled,
+      state: derivePluginUnitState({
+        anchored,
+        enabled,
+        serverEnabled,
+        manifestUnreadable,
+        dormantReason: row?.dormantReason ?? null,
+        outstandingCount: consent.outstanding.length,
+      }),
+      consent,
     };
   }
 

@@ -13,6 +13,7 @@ import {
   arrangeServerGrant,
   GRANT_DECISION_CLAIM,
   SERVER_GRANT_INSERT,
+  UNIT_ROW_LOCK,
 } from './lock-fixtures';
 import {
   CLAIMED_LOCK_ORDER,
@@ -52,9 +53,10 @@ import {
  * other would exercise the real code, but a deadlock is probabilistic: a green
  * run proves nothing, and making contention reliable enough to prove something
  * is the shape #330 tracks. So the two application transactions are replayed as
- * the statements they ship — every stage below is lifted from source, only the
- * sequencing is this spec's — and the sequencing itself is pinned back against
- * the shipped text.
+ * the statements they ship — every stage below is lifted from source except the
+ * unit enablement, which no shipped statement locks by raw SQL any more (#1149), and
+ * only the sequencing is this spec's — and the sequencing itself is pinned back
+ * against the shipped text.
  */
 describe('the plugin consent path is one lock order (#360)', () => {
   const { unitLifecycle: UNIT_LIFECYCLE, unitScopeLock: UNIT_SCOPE_LOCK } = LOCK_SOURCES;
@@ -130,14 +132,13 @@ describe('the plugin consent path is one lock order (#360)', () => {
     matching: /FOR UPDATE/,
   });
 
-  /** Stage 4: the unit row, as the mirror passes take it. */
-  // Anchored on the DECLARATION, like the user twin: `lockHouseholdUnit` is
-  // called twice above the statement it names, and resolving by bare name works
-  // only while this method happens to be declared before its sibling.
-  const unitRowLock = readShippedSql(GRANT_SERVICE, ['householdId', 'pluginId'], {
-    after: 'private async lockHouseholdUnit',
-    matching: /household_plugins/,
-  });
+  /**
+   * Stage 4: the unit enablement (the `unit row` stage). The one stage replayed from a fixture rather than
+   * lifted: since #1149 no shipped statement locks the unit enablement by raw SQL,
+   * and the unit writers take it through Prisma writes. `UNIT_ROW_LOCK` says
+   * why it may stand in for them.
+   */
+  const unitRowLock = { text: UNIT_ROW_LOCK };
 
   let db: TestDatabase;
 

@@ -35,14 +35,52 @@ const PRESENTATION = {
 const GRANT = { id: 'grant-1', permissionSlug: 'update:calendar', status: PluginGrantStatus.Granted } as never;
 const UNIT_ROW = { id: 'hp-1', householdId: 'hh-1', pluginId: 'plugin-1', enabled: true } as never;
 const INVENTORY_PAGE = {
-  rows: [{ id: 'plugin-1', slug: 'demo-sink', serverEnabled: true, unit: { anchored: false }, dormantReason: null }],
+  rows: [
+    {
+      id: 'plugin-1',
+      slug: 'demo-sink',
+      serverEnabled: true,
+      unit: {
+        anchored: true,
+        enabled: true,
+        state: 'review_pending',
+        consent: {
+          outstanding: [
+            {
+              slug: 'update:calendar',
+              kind: 'never_asked',
+              required: true,
+              feature: null,
+              riskLevel: 'Medium',
+              reason: 'Lets the plugin change the household calendar',
+            },
+          ],
+          optionalOff: [],
+        },
+      },
+    },
+  ],
   total: 1,
 };
 const FEATURE_STATE = {
   plugin: { id: 'plugin-1', slug: 'demo-sink' },
   unit: { scopeType: 'Household', householdId: 'hh-1' },
   served: true,
-  suspendedForConsent: false,
+  serverEnabled: true,
+  state: 'review_pending',
+  consent: {
+    outstanding: [
+      {
+        slug: 'update:calendar',
+        kind: 'never_asked',
+        required: true,
+        feature: null,
+        riskLevel: 'Medium',
+        reason: 'Lets the plugin change the household calendar',
+      },
+    ],
+    optionalOff: [],
+  },
   features: [],
 } as unknown as PluginFeatureUnitState;
 

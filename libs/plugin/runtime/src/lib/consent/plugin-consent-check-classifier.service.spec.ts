@@ -363,7 +363,7 @@ describe('PluginConsentCheckClassifier', () => {
     });
   });
 
-  it('a Granted row whose catalog row vanished confers nothing (mirrors the read path, not unitConsentSatisfied)', async () => {
+  it('a Granted row whose catalog row vanished confers nothing (mirrors the ability read path)', async () => {
     db.pluginGrant.findMany.mockResolvedValue([
       {
         permissionSlug: 'create:notification',

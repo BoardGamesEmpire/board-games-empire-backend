@@ -109,11 +109,11 @@ describe('extractSqlTemplate', () => {
   });
 
   it('anchors on a whole name, not on a prefix of a longer one', () => {
-    // `lockHouseholdUnit` is a prefix of `lockHouseholdUnitScope`, and the
-    // plugin runtime ships both — one importing the other at the top of the
-    // file, far above either statement. A substring anchor resolves to the
-    // import and lifts whichever template happens to follow it, which is a
-    // silently wrong test whenever the two bind the same parameters.
+    // `lockUnit` is a prefix of `lockUnitScope`, and the file imports the
+    // longer one at the top, far above either statement. A substring anchor
+    // resolves to the import and lifts whichever template happens to follow
+    // it, which is a silently wrong test whenever the two bind the same
+    // parameters.
     const source = [
       "import { lockUnitScope } from './unit-scope-lock';",
       'async function lockUnitScope(tx) {',

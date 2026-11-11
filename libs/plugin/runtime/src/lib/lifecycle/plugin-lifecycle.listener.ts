@@ -14,9 +14,8 @@ import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginDisabledEvent,
   HouseholdPluginEnabledEvent,
-  HouseholdPluginUnitDisabledEvent,
+  HouseholdPluginReconsentRequestedEvent,
   HouseholdPluginUnitDormantEvent,
-  HouseholdPluginUnitEnabledEvent,
   HouseholdPluginUnitRevivedEvent,
   PluginConfigUpdatedEvent,
   PluginGrantCreatedEvent,
@@ -31,8 +30,7 @@ import {
   PluginUpdateRejectedEvent,
   UserPluginDisabledEvent,
   UserPluginEnabledEvent,
-  UserPluginUnitDisabledEvent,
-  UserPluginUnitEnabledEvent,
+  UserPluginReconsentRequestedEvent,
 } from '../events/plugin.events';
 
 /**
@@ -240,14 +238,7 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
         scopeType: PluginGrantScope.Household,
         scopeId: event.after.householdId,
         manifestVersion: null,
-        // A born-suspended creation gets its "why" recorded here: no
-        // UnitDisabled event fires for a birth state, so this row is the
-        // suspension's only durable record — the same contract every
-        // consent-machinery suspension satisfies through its own event.
-        payload:
-          event instanceof HouseholdPluginEnabledEvent && event.bornSuspendedSlugs.length > 0
-            ? { bornSuspendedSlugs: event.bornSuspendedSlugs }
-            : {},
+        payload: {},
       };
     }
 
@@ -262,35 +253,35 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
       };
     }
 
-    if (event instanceof HouseholdPluginUnitDisabledEvent) {
+    // Re-consent announcements (#1149) share the plugin.re_consent_requested
+    // routing key across both axes; the class IS the scope. The outstanding
+    // slugs are the durable "why" for the review, read from here by the
+    // notification listener and the timeline, never from a mutable column.
+    if (event instanceof HouseholdPluginReconsentRequestedEvent) {
       return {
         pluginId: event.after.pluginId,
         pluginSlug: null,
         scopeType: PluginGrantScope.Household,
         scopeId: event.after.householdId,
         manifestVersion: event.manifestVersion,
-        // The escalating slugs are the durable "why" for this suspension —
-        // the notification listener and the #67 timeline read them from
-        // here, never from a mutable column.
-        payload: { requiredPermissionSlugs: event.requiredPermissionSlugs },
+        payload: { outstandingPermissionSlugs: event.outstandingPermissionSlugs },
       };
     }
 
-    if (event instanceof HouseholdPluginUnitEnabledEvent) {
+    if (event instanceof UserPluginReconsentRequestedEvent) {
       return {
         pluginId: event.after.pluginId,
         pluginSlug: null,
-        scopeType: PluginGrantScope.Household,
-        scopeId: event.after.householdId,
+        scopeType: PluginGrantScope.User,
+        scopeId: event.after.userId,
         manifestVersion: event.manifestVersion,
-        payload: { grantedPermissionSlug: event.grantedPermissionSlug },
+        payload: { outstandingPermissionSlugs: event.outstandingPermissionSlugs },
       };
     }
 
     // Dormancy (#369, #370) is household-only: the user axis has no orphan
     // state, since user consent is legal at any plugin scope (#225), and
-    // per-user config is #228's. The reason is the durable "why" here, exactly
-    // as the escalated slugs are for a suspension.
+    // per-user config is #228's. The reason is the durable "why" here.
     if (event instanceof HouseholdPluginUnitDormantEvent) {
       return {
         pluginId: event.after.pluginId,
@@ -310,30 +301,6 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
         scopeId: event.after.householdId,
         manifestVersion: event.manifestVersion,
         payload: { clearedReason: event.clearedReason },
-      };
-    }
-
-    // User-unit suspension events (#225) share the UnitDisabled/UnitEnabled
-    // routing keys with the household classes; the class IS the scope.
-    if (event instanceof UserPluginUnitDisabledEvent) {
-      return {
-        pluginId: event.after.pluginId,
-        pluginSlug: null,
-        scopeType: PluginGrantScope.User,
-        scopeId: event.after.userId,
-        manifestVersion: event.manifestVersion,
-        payload: { requiredPermissionSlugs: event.requiredPermissionSlugs },
-      };
-    }
-
-    if (event instanceof UserPluginUnitEnabledEvent) {
-      return {
-        pluginId: event.after.pluginId,
-        pluginSlug: null,
-        scopeType: PluginGrantScope.User,
-        scopeId: event.after.userId,
-        manifestVersion: event.manifestVersion,
-        payload: { grantedPermissionSlug: event.grantedPermissionSlug },
       };
     }
 

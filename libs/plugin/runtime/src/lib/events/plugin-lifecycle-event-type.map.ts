@@ -22,8 +22,7 @@ export const PLUGIN_EVENT_TO_LIFECYCLE_TYPE: Readonly<Record<PluginEvent, Plugin
   [PluginEvent.GrantCreated]: PluginLifecycleEventType.GrantCreated,
   [PluginEvent.GrantRejected]: PluginLifecycleEventType.GrantRejected,
   [PluginEvent.GrantRevoked]: PluginLifecycleEventType.GrantRevoked,
-  [PluginEvent.UnitDisabled]: PluginLifecycleEventType.UnitDisabled,
-  [PluginEvent.UnitEnabled]: PluginLifecycleEventType.UnitEnabled,
+  [PluginEvent.ReconsentRequested]: PluginLifecycleEventType.ReconsentRequested,
   [PluginEvent.UnitDormant]: PluginLifecycleEventType.UnitDormant,
   [PluginEvent.UnitRevived]: PluginLifecycleEventType.UnitRevived,
 };

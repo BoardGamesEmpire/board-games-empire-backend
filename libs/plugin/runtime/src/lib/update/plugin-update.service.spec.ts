@@ -31,14 +31,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import {
-  HouseholdPluginUnitDisabledEvent,
+  HouseholdPluginReconsentRequestedEvent,
   HouseholdPluginUnitDormantEvent,
   HouseholdPluginUnitRevivedEvent,
   PluginGrantRevokedEvent,
   PluginUpdateApprovedEvent,
   PluginUpdatePendingEvent,
   PluginUpdateRejectedEvent,
-  UserPluginUnitDisabledEvent,
+  UserPluginReconsentRequestedEvent,
 } from '../events/plugin.events';
 import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import type { PluginStaticAnalysisService } from '../install/plugin-static-analysis.service';
@@ -123,6 +123,26 @@ describe('PluginUpdateService', () => {
       template.join('').includes('FROM plugin_grants'),
     );
 
+  /**
+   * The re-consent announcements activation emitted (#1149). Both scopes share
+   * one routing key, so the class tells them apart, exactly as listeners do.
+   */
+  const householdReconsentEvents = (): HouseholdPluginReconsentRequestedEvent[] =>
+    (emitter.emit.mock.calls as [string, unknown][])
+      .filter(([name]) => name === HouseholdPluginReconsentRequestedEvent.eventName)
+      .map(([, event]) => event)
+      .filter(
+        (event): event is HouseholdPluginReconsentRequestedEvent =>
+          event instanceof HouseholdPluginReconsentRequestedEvent,
+      );
+  const userReconsentEvents = (): UserPluginReconsentRequestedEvent[] =>
+    (emitter.emit.mock.calls as [string, unknown][])
+      .filter(([name]) => name === UserPluginReconsentRequestedEvent.eventName)
+      .map(([, event]) => event)
+      .filter(
+        (event): event is UserPluginReconsentRequestedEvent => event instanceof UserPluginReconsentRequestedEvent,
+      );
+
   const makeGrant = (overrides: Partial<PluginGrant> = {}): PluginGrant => ({
     id: 'grant-1',
     pluginId: 'plugin-1',
@@ -145,8 +165,6 @@ describe('PluginUpdateService', () => {
     pluginId: 'plugin-1',
     enabled: true,
     config: {},
-    suspendedForConsent: false,
-    suspendedAt: null,
     dormantReason: null,
     dormantAt: null,
     createdAt: new Date(0),
@@ -1206,7 +1224,7 @@ describe('PluginUpdateService', () => {
       ).rejects.toThrow(PluginUpdateCriticalConfirmationError);
     });
 
-    it('activates: seeds ONLY undecided server checks Granted, promotes pending, suspends unconsented units', async () => {
+    it('activates: seeds ONLY undecided server checks Granted, promotes pending, announces re-consent to unconsented units (#1149)', async () => {
       const next = nextManifest({
         scope: 'household',
         permissions: {
@@ -1271,7 +1289,6 @@ describe('PluginUpdateService', () => {
         lockedRow('plugin|demo-sink|manage:digest', PluginGrantStatus.Granted),
       ]); // tx-local locked server re-read: unchanged since the gates
       db.householdPlugin.findMany.mockResolvedValue([makeUnit()]);
-      db.householdPlugin.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await service.approve({
         slug: 'demo-sink',
@@ -1293,14 +1310,16 @@ describe('PluginUpdateService', () => {
           decidedRiskLevel: RiskLevel.Critical,
         }),
       });
-      // One write for every unit, and one grouped grant read — the query
-      // count must not follow the number of households (the transaction
-      // would time out and roll the whole update back).
-      expect(db.householdPlugin.updateMany).toHaveBeenCalledTimes(1);
-      expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
-        where: { id: { in: ['hp-1'] }, suspendedForConsent: false },
-        data: { suspendedForConsent: true, suspendedAt: expect.any(Date) },
-      });
+      // Enabled units only: a switched-off unit's standing is read when it
+      // switches on, not announced now.
+      expect(db.householdPlugin.findMany).toHaveBeenCalledWith({ where: { pluginId: 'plugin-1', enabled: true } });
+      // Activation writes nothing to unit enablements (#1149): the unit keeps running
+      // on the grants it gave, and its consent standing reports the review.
+      expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
+      expect(db.userPlugin.updateMany).not.toHaveBeenCalled();
+      // One grouped grant read — the query count must not follow the number
+      // of households (the transaction would time out and roll the whole
+      // update back).
       expect(db.pluginGrant.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
@@ -1310,20 +1329,28 @@ describe('PluginUpdateService', () => {
           }),
         }),
       );
-      expect(emitter.emit).toHaveBeenCalledWith(
-        HouseholdPluginUnitDisabledEvent.eventName,
-        expect.objectContaining({ requiredPermissionSlugs: ['calendar:read'], manifestVersion: '1.3.0' }),
-      );
+      const announced = householdReconsentEvents();
+      expect(announced).toHaveLength(1);
+      expect(announced[0]).toMatchObject({
+        outstandingPermissionSlugs: ['calendar:read'],
+        manifestVersion: '1.3.0',
+        subjectId: 'hp-1',
+        before: { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true },
+      });
+      // The snapshot is the switch alone: nothing on the row moved.
+      expect(announced[0].before).toEqual(announced[0].after);
+      expect(announced[0].after).not.toHaveProperty('suspendedForConsent');
+      expect(userReconsentEvents()).toEqual([]);
       expect(emitter.emit).toHaveBeenCalledWith(
         PluginUpdateApprovedEvent.eventName,
         expect.objectContaining({
           grantedPermissions: [expect.objectContaining({ slug: 'user:impersonate', consentScope: 'server' })],
         }),
       );
-      // The per-unit consequences ride the result (#321): the admin who
+      // The per-unit consequences ride the result (#321): the server admin who
       // approved sees them synchronously, not only on the event stream.
-      expect(result.suspendedHouseholdUnits).toEqual([{ householdId: 'household-1', outstanding: ['calendar:read'] }]);
-      expect(result.suspendedUserUnits).toEqual([]);
+      expect(result.reconsentHouseholdUnits).toEqual([{ householdId: 'household-1', outstanding: ['calendar:read'] }]);
+      expect(result.reconsentUserUnits).toEqual([]);
     });
 
     /**
@@ -1827,7 +1854,7 @@ describe('PluginUpdateService', () => {
       );
     });
 
-    it('suspends a unit holding a STALE Granted row — presence of a grant is not consent at the new risk', async () => {
+    it('announces re-consent to a unit holding a STALE Granted row — presence of a grant is not consent at the new risk', async () => {
       const next = nextManifest({
         scope: 'household',
         permissions: {
@@ -1871,21 +1898,17 @@ describe('PluginUpdateService', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([staleGrant]);
       db.householdPlugin.findMany.mockResolvedValue([makeUnit()]);
-      db.householdPlugin.updateMany.mockResolvedValue({ count: 1 });
 
-      await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
+      const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
 
-      expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
-        where: { id: { in: ['hp-1'] }, suspendedForConsent: false },
-        data: { suspendedForConsent: true, suspendedAt: expect.any(Date) },
-      });
-      expect(emitter.emit).toHaveBeenCalledWith(
-        HouseholdPluginUnitDisabledEvent.eventName,
-        expect.objectContaining({ requiredPermissionSlugs: ['feedback:read'] }),
-      );
+      expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
+      expect(householdReconsentEvents()).toEqual([
+        expect.objectContaining({ subjectId: 'hp-1', outstandingPermissionSlugs: ['feedback:read'] }),
+      ]);
+      expect(result.reconsentHouseholdUnits).toEqual([{ householdId: 'household-1', outstanding: ['feedback:read'] }]);
     });
 
-    it('emits and reports only the units the write actually flipped when a concurrent writer takes one', async () => {
+    it('reports and announces every uncovered unit, the result and the events naming the same units and slugs', async () => {
       const next = nextManifest({
         scope: 'household',
         permissions: {
@@ -1916,30 +1939,28 @@ describe('PluginUpdateService', () => {
         .mockResolvedValueOnce([]);
       // tx-local locked server re-read
       queueGrantLock([lockedRow('plugin|demo-sink|manage:digest', PluginGrantStatus.Granted)]);
-      db.householdPlugin.findMany.mockResolvedValueOnce([
-        makeUnit(),
-        makeUnit({ id: 'hp-2', householdId: 'household-2' }),
-      ]);
-      // Two candidates, one write — a concurrent writer suspended hp-2 first.
-      db.householdPlugin.updateMany.mockResolvedValue({ count: 1 });
-      // Read-back projects `select: { id }`; the delegate mock is typed
-      // against the full row, so the projection is asserted.
-      db.householdPlugin.findMany.mockResolvedValueOnce([{ id: 'hp-1' } as HouseholdPlugin]);
+      db.householdPlugin.findMany.mockResolvedValue([makeUnit(), makeUnit({ id: 'hp-2', householdId: 'household-2' })]);
 
       const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
 
-      const suspensionEvents = emitter.emit.mock.calls.filter(
-        ([name]) => name === HouseholdPluginUnitDisabledEvent.eventName,
+      // One announcement per unit, and the result names exactly the units and
+      // slugs the events do (#321, #1149).
+      const announced = householdReconsentEvents();
+      expect(announced.map((event) => [event.before.householdId, event.outstandingPermissionSlugs])).toEqual([
+        ['household-1', ['feedback:read']],
+        ['household-2', ['feedback:read']],
+      ]);
+      expect(result.reconsentHouseholdUnits).toEqual(
+        announced.map((event) => ({
+          householdId: event.before.householdId,
+          outstanding: event.outstandingPermissionSlugs,
+        })),
       );
-      expect(suspensionEvents).toHaveLength(1);
-      expect(suspensionEvents[0][1]).toMatchObject({ after: expect.objectContaining({ id: 'hp-1' }) });
-      // The result reports the same post-write filtered set the events
-      // describe — never the candidate list (#321).
-      expect(result.suspendedHouseholdUnits).toEqual([{ householdId: 'household-1', outstanding: ['feedback:read'] }]);
-      expect(result.suspendedUserUnits).toEqual([]);
+      expect(result.reconsentUserUnits).toEqual([]);
+      expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
     });
 
-    it('does NOT suspend when the recorded risk still covers the current classification', async () => {
+    it('does NOT announce re-consent when the recorded risk still covers the current classification', async () => {
       const householdChecks = activeManifest.permissions.checks.map((check) =>
         check.slug === 'feedback:read' ? { ...check, consentScope: 'household' as const, required: true } : check,
       );
@@ -1974,12 +1995,66 @@ describe('PluginUpdateService', () => {
         .mockResolvedValueOnce([coveringGrant]);
       db.householdPlugin.findMany.mockResolvedValue([makeUnit()]);
 
-      await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
+      const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
 
+      expect(householdReconsentEvents()).toEqual([]);
+      expect(result.reconsentHouseholdUnits).toEqual([]);
       expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
     });
 
-    it('leaves already-suspended units untouched (one suspension, no re-stamp)', async () => {
+    it('a unit that already covers the new slug at covering risk is neither reported nor announced', async () => {
+      // A household that granted the new permission on the staged manifest
+      // ahead of time (pre-consent) owes nothing once it lands; one that did
+      // not still does. Both run the plugin.
+      const next = nextManifest({
+        scope: 'household',
+        permissions: {
+          ...activeManifest.permissions,
+          checks: [
+            ...activeManifest.permissions.checks,
+            {
+              slug: 'calendar:read',
+              required: true,
+              reason: { en: 'Schedules digests around events.' },
+              consentScope: 'household' as const,
+            },
+          ],
+        },
+      });
+      db.plugin.findUnique.mockResolvedValue(pendingPlugin(next));
+      db.permission.findMany.mockResolvedValue([
+        feedbackRead,
+        {
+          slug: 'calendar:read',
+          ...UNIT_BOUND_RULES.Household,
+          riskLevel: RiskLevel.Medium,
+        } as unknown as Permission,
+      ]);
+      const preConsent = makeGrant({
+        id: 'grant-pre',
+        scopeType: PluginGrantScope.Household,
+        scopeId: 'household-1',
+        permissionSlug: 'calendar:read',
+        decidedRiskLevel: RiskLevel.Medium,
+        manifestVersion: '1.3.0',
+      });
+      // compare() → serverChecksToSeed() → activate() grouped household read
+      db.pluginGrant.findMany
+        .mockResolvedValueOnce([makeGrant(), preConsent])
+        .mockResolvedValueOnce([makeGrant()])
+        .mockResolvedValueOnce([preConsent]);
+      db.householdPlugin.findMany.mockResolvedValue([makeUnit(), makeUnit({ id: 'hp-2', householdId: 'household-2' })]);
+
+      const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
+
+      expect(result.reconsentHouseholdUnits).toEqual([{ householdId: 'household-2', outstanding: ['calendar:read'] }]);
+      expect(householdReconsentEvents()).toEqual([
+        expect.objectContaining({ subjectId: 'hp-2', outstandingPermissionSlugs: ['calendar:read'] }),
+      ]);
+      expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('a disabled unit is not announced; its standing is read when it switches on', async () => {
       const next = nextManifest({
         scope: 'household',
         permissions: {
@@ -2004,42 +2079,43 @@ describe('PluginUpdateService', () => {
           riskLevel: RiskLevel.Low,
         } as unknown as Permission,
       ]);
-      // Call order: compare() → serverChecksToSeed() → activate() household loop
+      // Call order: compare() → serverChecksToSeed(); no enabled unit, so the
+      // household grant read never runs.
       db.pluginGrant.findMany
         .mockResolvedValueOnce([makeGrant()]) // compare()
-        .mockResolvedValueOnce([makeGrant()]) // serverChecksToSeed()
-        .mockResolvedValueOnce([]); // activate() – household grants for the (already-suspended) unit
-      // Already-suspended units are excluded by the query itself, so the
-      // suspension cannot be re-stamped or double-reported.
-      db.householdPlugin.findMany.mockResolvedValue([]);
+        .mockResolvedValueOnce([makeGrant()]); // serverChecksToSeed()
+      // The household switched the plugin off and consented to nothing. The
+      // mock honours the `enabled` filter the way the database would, so the
+      // assertion is on behaviour, not on the query's spelling alone.
+      const switchedOff = makeUnit({ enabled: false });
+      db.householdPlugin.findMany.mockImplementation(((args: { where?: { enabled?: boolean } }) =>
+        Promise.resolve(
+          [switchedOff].filter((unit) => args.where?.enabled === undefined || unit.enabled === args.where.enabled),
+        )) as never);
 
-      await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
+      const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
 
-      expect(db.householdPlugin.findMany).toHaveBeenCalledWith({
-        where: { pluginId: 'plugin-1', suspendedForConsent: false },
-      });
+      expect(db.householdPlugin.findMany).toHaveBeenCalledWith({ where: { pluginId: 'plugin-1', enabled: true } });
+      expect(result.reconsentHouseholdUnits).toEqual([]);
+      expect(householdReconsentEvents()).toEqual([]);
       expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
-      expect(emitter.emit).not.toHaveBeenCalledWith(HouseholdPluginUnitDisabledEvent.eventName, expect.anything());
     });
   });
 
   /**
    * The household pass's exact user-scope mirror (#225): same batched
-   * candidate/write/read-back shape against `UserPlugin`, driven by
-   * `userReconsentSlugs`. Household coverage above owns the full matrix;
-   * these assert the mirrored wiring plus the two behaviors unique to the
-   * scope — user escalations never server-gate, and rowless users are
-   * untouched by construction.
+   * candidate shape against `UserPlugin`, driven by `userReconsentSlugs`.
+   * Household coverage above owns the full matrix; these assert the mirrored
+   * wiring plus the two behaviors unique to the scope — user escalations never
+   * server-gate, and rowless users are untouched by construction.
    */
-  describe('user-scope suspension (#225)', () => {
+  describe('user-scope re-consent (#225, #1149)', () => {
     const makeUserUnit = (overrides: Partial<UserPlugin> = {}): UserPlugin => ({
       id: 'up-1',
       userId: 'user-1',
       pluginId: 'plugin-1',
       enabled: true,
       config: {},
-      suspendedForConsent: false,
-      suspendedAt: null,
       createdAt: new Date(0),
       updatedAt: new Date(0),
       ...overrides,
@@ -2075,9 +2151,8 @@ describe('PluginUpdateService', () => {
       ]);
     });
 
-    it('a new required user check does NOT server-gate: the update activates in place and suspends uncovered user units', async () => {
+    it('a new required user check does NOT server-gate: the update activates in place and announces re-consent to uncovered user units', async () => {
       db.userPlugin.findMany.mockResolvedValue([makeUserUnit()]);
-      db.userPlugin.updateMany.mockResolvedValue({ count: 1 });
       // stage(): compare() → immediate activation (nothing server-gates, so
       // serverChecksToSeed never runs) → activate() reads user grants.
       db.pluginGrant.findMany
@@ -2098,7 +2173,7 @@ describe('PluginUpdateService', () => {
       expect(result.comparison.serverGating).toBe(false);
       expect(result.comparison.userReconsentSlugs).toEqual(['read:user_digest']);
       expect(db.userPlugin.findMany).toHaveBeenCalledWith({
-        where: { pluginId: 'plugin-1', suspendedForConsent: false },
+        where: { pluginId: 'plugin-1', enabled: true },
       });
       expect(db.pluginGrant.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -2109,22 +2184,61 @@ describe('PluginUpdateService', () => {
           }),
         }),
       );
-      expect(db.userPlugin.updateMany).toHaveBeenCalledTimes(1);
-      expect(db.userPlugin.updateMany).toHaveBeenCalledWith({
-        where: { id: { in: ['up-1'] }, suspendedForConsent: false },
-        data: { suspendedForConsent: true, suspendedAt: expect.any(Date) },
+      expect(db.userPlugin.updateMany).not.toHaveBeenCalled();
+      expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
+      const announced = userReconsentEvents();
+      expect(announced).toHaveLength(1);
+      expect(announced[0]).toMatchObject({
+        outstandingPermissionSlugs: ['read:user_digest'],
+        manifestVersion: '1.3.0',
+        subjectId: 'up-1',
+        after: { id: 'up-1', userId: 'user-1', pluginId: 'plugin-1', enabled: true },
       });
-      expect(emitter.emit).toHaveBeenCalledWith(
-        UserPluginUnitDisabledEvent.eventName,
-        expect.objectContaining({
-          requiredPermissionSlugs: ['read:user_digest'],
-          manifestVersion: '1.3.0',
-          after: expect.objectContaining({ userId: 'user-1', suspendedForConsent: true }),
-        }),
-      );
+      expect(announced[0].after).not.toHaveProperty('suspendedForConsent');
+      expect(householdReconsentEvents()).toEqual([]);
     });
 
-    it('does not suspend a unit whose Granted row still covers the current risk — and rowless users never enter the pass', async () => {
+    it('approve reports the user units that owe re-consent, matching the events (#321, #1149)', async () => {
+      const next = nextWithUserCheck();
+      db.plugin.findUnique.mockResolvedValue(
+        makePlugin({
+          pendingVersion: next.version,
+          pendingManifestJson: next as unknown as Prisma.JsonValue,
+          pendingSha256: 'f'.repeat(64),
+          pendingSince: new Date('2026-07-29T00:00:00Z'),
+          pendingStagingId: 'staging-a',
+        }),
+      );
+      db.userPlugin.findMany.mockResolvedValue([makeUserUnit(), makeUserUnit({ id: 'up-2', userId: 'user-2' })]);
+      // compare() → serverChecksToSeed() → activate() user grants: user-2
+      // already granted the new check (pre-consent), user-1 did not.
+      db.pluginGrant.findMany
+        .mockResolvedValueOnce([makeGrant()])
+        .mockResolvedValueOnce([makeGrant()])
+        .mockResolvedValueOnce([
+          makeGrant({
+            id: 'grant-u2',
+            scopeType: PluginGrantScope.User,
+            scopeId: 'user-2',
+            permissionSlug: 'read:user_digest',
+            decidedRiskLevel: RiskLevel.Low,
+          }),
+        ]);
+
+      const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
+
+      expect(result.reconsentUserUnits).toEqual([{ userId: 'user-1', outstanding: ['read:user_digest'] }]);
+      expect(result.reconsentHouseholdUnits).toEqual([]);
+      expect(
+        userReconsentEvents().map((event) => ({
+          userId: event.before.userId,
+          outstanding: event.outstandingPermissionSlugs,
+        })),
+      ).toEqual(result.reconsentUserUnits);
+      expect(db.userPlugin.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('does not announce re-consent to a unit whose Granted row still covers the current risk — and rowless users never enter the pass', async () => {
       db.userPlugin.findMany.mockResolvedValue([makeUserUnit()]);
       db.pluginGrant.findMany
         .mockResolvedValueOnce([
@@ -2154,12 +2268,12 @@ describe('PluginUpdateService', () => {
       await service.stage(input());
 
       // The unit query is the whole universe: users with no UserPlugin row
-      // never appear, so nothing rowless can be suspended by construction.
+      // never appear, so nothing rowless can be announced by construction.
       expect(db.userPlugin.updateMany).not.toHaveBeenCalled();
-      expect(emitter.emit).not.toHaveBeenCalledWith(UserPluginUnitDisabledEvent.eventName, expect.anything());
+      expect(userReconsentEvents()).toEqual([]);
     });
 
-    it('suspends a unit holding a STALE Granted row — presence is not consent at the new risk', async () => {
+    it('announces re-consent to a unit holding a STALE Granted row — presence is not consent at the new risk', async () => {
       // Active AND next both request the user check; only the catalog risk
       // moved (Low → High) above the risk the user consented under.
       const shared = nextWithUserCheck();
@@ -2186,16 +2300,15 @@ describe('PluginUpdateService', () => {
         .mockResolvedValueOnce([makeGrant(), staleUserGrant]) // compare()
         .mockResolvedValueOnce([staleUserGrant]); // activate() – user grants
       db.userPlugin.findMany.mockResolvedValue([makeUserUnit()]);
-      db.userPlugin.updateMany.mockResolvedValue({ count: 1 });
       await writeManifest(shared);
 
       const result = await service.stage(input());
 
       expect(result.comparison.userReconsentSlugs).toEqual(['read:user_digest']);
-      expect(db.userPlugin.updateMany).toHaveBeenCalledWith({
-        where: { id: { in: ['up-1'] }, suspendedForConsent: false },
-        data: { suspendedForConsent: true, suspendedAt: expect.any(Date) },
-      });
+      expect(db.userPlugin.updateMany).not.toHaveBeenCalled();
+      expect(userReconsentEvents()).toEqual([
+        expect.objectContaining({ subjectId: 'up-1', outstandingPermissionSlugs: ['read:user_digest'] }),
+      ]);
     });
   });
 

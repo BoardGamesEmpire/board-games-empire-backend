@@ -1,15 +1,7 @@
 import type { HouseholdPlugin, Plugin, UserPlugin } from '@bge/database';
-import {
-  DatabaseService,
-  lockLiveHousehold,
-  PluginGrantScope,
-  PluginGrantStatus,
-  PluginScope,
-  PluginUnitDormantReason,
-  Prisma,
-} from '@bge/database';
+import { DatabaseService, lockLiveHousehold, PluginScope, PluginUnitDormantReason, Prisma } from '@bge/database';
 import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
@@ -74,36 +66,22 @@ type LivingPluginRef = Pick<Plugin, 'id' | 'slug' | 'scope'>;
 
 type HouseholdEnableOutcome =
   | { readonly kind: 'unchanged'; readonly row: HouseholdPlugin }
-  | { readonly kind: 'created'; readonly row: HouseholdPlugin; readonly bornSuspendedSlugs: readonly string[] }
+  | { readonly kind: 'created'; readonly row: HouseholdPlugin }
   | { readonly kind: 'updated'; readonly before: HouseholdPlugin; readonly row: HouseholdPlugin };
 
 /**
  * Per-unit plugin enablement (#323): the household admin's
  * enable/disable/config writes and the user's own enable/disable —
- * `enabled` is the unit's OWN switch and only theirs;
- * `suspendedForConsent` stays system state written exclusively by the
- * consent machinery, so an enable flip cannot clear a suspension and a
- * suspended unit stays suspended (the serving predicate remains
- * `enabled && !suspendedForConsent`).
+ * `enabled` is the unit's OWN switch and only theirs.
+ * Consent standing is not stored on the row: it is derived at read time
+ * from the grants (#1149), so no write here reads or sets it. A first
+ * enable beside a durable refusal of a required household check creates the
+ * row `enabled`, and the unit reads review pending while it runs.
  *
- * Household enable is the one creator of `HouseholdPlugin` rows, and two
- * hardenings ride that (both from the #322/PR #359 review rounds, recorded
- * on #59):
+ * Household enable is the one creator of `HouseholdPlugin` rows, and one
+ * hardening rides that (from the #322/PR #359 review rounds, recorded on
+ * #59):
  *
- * - **Born suspended over an existing refusal**: a row created while a
- *   required household-scope check of the active manifest carries a durable
- *   `Denied` is initialized `suspendedForConsent: true`. Before the row
- *   exists, its absence is what keeps the unit unserved; creating it
- *   unsuspended would put the unit IN service beside the denial without
- *   the outstanding predicate ever running. Denied specifically — merely
- *   pending required checks never suspend (a unit working through its
- *   initial consent set is legitimately enabled), and that deliberately
- *   includes a `Granted` row whose decided risk went stale: re-consent is
- *   a pending state, so it blocks features and the update pass suspends
- *   existing rows, but it does not veto the admin's enable. Late
- *   acceptance heals the unit as usual, and the blocking slugs ride the
- *   creation event into the lifecycle table so the suspension has a
- *   durable "why".
  * - **The advisory-lock scheme**: every transaction here opens the same
  *   way — the plugin row under `FOR SHARE`, then the `(scopeId, pluginId)`
  *   advisory lock, then the unit row (`openHouseholdUnit` /
@@ -137,14 +115,10 @@ type HouseholdEnableOutcome =
  *   row created for a plugin that just became server-scope is an artifact
  *   the manifest gate says cannot exist and nothing else cleans up; and a
  *   caller that DERIVED something from the manifest — the config schema it
- *   validated against, the required-check set the born-suspended probe
- *   consulted — refuses when the manifest CONTENT moved rather than applying
- *   a stale judgment (#368). A version move is one way that happens, not the
- *   test: an A→B→A activation pair replaces the content and returns the
- *   version to where the caller found it. Activation's own suspension pass cannot cover for it: that
- *   pass runs inside the activation transaction, so a row created after it
- *   committed is invisible to it, which is the whole reason the probe
- *   exists.
+ *   validated against — refuses when the manifest CONTENT moved rather than
+ *   applying a stale judgment (#368). A version move is one way that
+ *   happens, not the test: an A→B→A activation pair replaces the content
+ *   and returns the version to where the caller found it.
  *
  * Enable/disable are idempotent: a request matching current state returns
  * it unchanged — no write, no event, and no re-litigation of the config
@@ -160,8 +134,6 @@ type HouseholdEnableOutcome =
  */
 @Injectable()
 export class PluginUnitLifecycleService {
-  private readonly logger = new Logger(PluginUnitLifecycleService.name);
-
   constructor(
     private readonly db: DatabaseService,
     private readonly authority: PluginGrantAuthorityService,
@@ -251,21 +223,16 @@ export class PluginUnitLifecycleService {
       }
 
       if (existing === null) {
-        const bornSuspendedSlugs = await this.deniedRequiredHouseholdSlugs(tx, plugin, validated, input.householdId);
-        const bornSuspended = bornSuspendedSlugs.length > 0;
-
         const created = await tx.householdPlugin.create({
           data: {
             householdId: input.householdId,
             pluginId: plugin.id,
             enabled: true,
-            suspendedForConsent: bornSuspended,
-            suspendedAt: bornSuspended ? initiatedAt : null,
             config: (input.config ?? {}) as Prisma.InputJsonValue,
           },
         });
 
-        return { kind: 'created', row: created, bornSuspendedSlugs };
+        return { kind: 'created', row: created };
       }
 
       // The enable gate above has just proven a conforming document — supplied
@@ -285,12 +252,7 @@ export class PluginUnitLifecycleService {
     if (outcome.kind === 'created') {
       this.emitter.emit(
         HouseholdPluginEnabledEvent.eventName,
-        new HouseholdPluginEnabledEvent(
-          null,
-          this.householdSwitchSnapshot(outcome.row),
-          initiatedAt,
-          outcome.bornSuspendedSlugs,
-        ),
+        new HouseholdPluginEnabledEvent(null, this.householdSwitchSnapshot(outcome.row), initiatedAt),
       );
 
       if (input.config !== undefined) {
@@ -303,13 +265,6 @@ export class PluginUnitLifecycleService {
             outcome.row,
             initiatedAt,
           ),
-        );
-      }
-
-      if (outcome.bornSuspendedSlugs.length > 0) {
-        this.logger.warn(
-          `Household '${input.householdId}' enabled plugin '${plugin.slug}' born suspended: required ` +
-            `household-scope consent is durably denied (${outcome.bornSuspendedSlugs.join(', ')})`,
         );
       }
     } else if (outcome.kind === 'updated') {
@@ -605,45 +560,6 @@ export class PluginUnitLifecycleService {
   }
 
   /**
-   * The born-suspended probe for the household row creator: the canonical
-   * slugs of required household-scope checks of the ACTIVE manifest that
-   * carry a durable `Denied` for this household. Runs under the advisory
-   * lock, so a concurrent denial commits either before this probe (born
-   * suspended, correct) or waits behind this transaction and runs its own
-   * suspend pass against the row it then sees. The slugs — not just a
-   * count — because they ride the creation event into the lifecycle table
-   * as the suspension's durable "why", the same record every
-   * consent-machinery suspension leaves.
-   */
-  private async deniedRequiredHouseholdSlugs(
-    tx: Prisma.TransactionClient,
-    plugin: LivingPluginRef,
-    validated: PluginManifestValidationResult,
-    householdId: string,
-  ): Promise<readonly string[]> {
-    const requiredSlugs = validated.permissionChecks
-      .filter((check) => check.consentScope === 'household' && check.required)
-      .map((check) => check.canonicalSlug);
-
-    if (requiredSlugs.length === 0) {
-      return [];
-    }
-
-    const denied = await tx.pluginGrant.findMany({
-      where: {
-        pluginId: plugin.id,
-        scopeType: PluginGrantScope.Household,
-        scopeId: householdId,
-        status: PluginGrantStatus.Denied,
-        permissionSlug: { in: requiredSlugs },
-      },
-      select: { permissionSlug: true },
-    });
-
-    return denied.map((grant) => grant.permissionSlug).sort();
-  }
-
-  /**
    * The unsupplied-config half of the enable gate: a retained row config
    * must satisfy the ACTIVE schema, or the enable is refused with the
    * retained document's violations — never silently enabled over config
@@ -784,7 +700,6 @@ export class PluginUnitLifecycleService {
       householdId: row.householdId,
       pluginId: row.pluginId,
       enabled: row.enabled,
-      suspendedForConsent: row.suspendedForConsent,
     };
   }
 
@@ -794,7 +709,6 @@ export class PluginUnitLifecycleService {
       userId: row.userId,
       pluginId: row.pluginId,
       enabled: row.enabled,
-      suspendedForConsent: row.suspendedForConsent,
     };
   }
 }

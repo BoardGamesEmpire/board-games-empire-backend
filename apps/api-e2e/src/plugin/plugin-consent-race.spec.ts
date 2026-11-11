@@ -12,10 +12,11 @@ import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plug
  *
  * These are the cheap ones, and they exercise the real code end to end rather
  * than a replay of its statements: two requests at once, then an assertion
- * about the state they left behind. Both invariants below were found VIOLATED
- * during PR #359's review rounds — first by an unlocked read/write pair, then
- * by a suspend pass that asked only whether the outstanding set was non-empty —
- * and neither was caught by a test, because no test at this tier existed.
+ * about the state they left behind. Invariants of this shape were found
+ * VIOLATED during PR #359's review rounds, and none was caught by a test,
+ * because no test at this tier existed. Since #1149 a consent decision writes
+ * only its grant row, so the household case pins that the unit enablement stays
+ * untouched and that the consent standing agrees with the surviving decision.
  *
  * Two rules these cases follow, and both are about staying useful rather than
  * becoming flaky (#330):
@@ -59,8 +60,9 @@ describe('consent decisions under concurrency (#360)', () => {
   };
 
   /**
-   * REQUIRED at household scope: denying it must suspend the unit. An
-   * allowlisted public read, which a household-scope consent may hold (#591).
+   * REQUIRED at household scope: denying it leaves the unit's consent standing
+   * reporting the refusal. An allowlisted public read, which a household-scope
+   * consent may hold (#591).
    */
   const HOUSEHOLD_CHECK: Check = {
     slug: 'read:game:public',
@@ -106,6 +108,20 @@ describe('consent decisions under concurrency (#360)', () => {
   const decideServer = (actor: SessionActor, slug: string, body: Record<string, unknown>) =>
     request(baseUrl).post(`${PLUGINS_PATH}/${slug}/grants`).set(actor.headers).send(body);
 
+  const readHouseholdFeatures = (actor: SessionActor, householdId: string, slug: string) =>
+    request(baseUrl).get(`/api/households/${householdId}/plugins/${slug}/features`).set(actor.headers);
+
+  /** The slugs the household unit's consent standing reports as refused. */
+  const refusedSlugs = async (actor: SessionActor, householdId: string, slug: string): Promise<string[]> => {
+    const response = await readHouseholdFeatures(actor, householdId, slug).expect(200);
+    const outstanding: { slug: string; kind: string }[] = response.body.featureState.consent.outstanding;
+
+    return outstanding.filter((check) => check.kind === 'refused').map((check) => check.slug);
+  };
+
+  const unitRow = (householdId: string, pluginId: string) =>
+    db.client.householdPlugin.findFirstOrThrow({ where: { householdId, pluginId } });
+
   const approve = (actor: SessionActor, slug: string) =>
     request(baseUrl)
       .post(`${PLUGINS_PATH}/${slug}/update/approve`)
@@ -113,7 +129,7 @@ describe('consent decisions under concurrency (#360)', () => {
       .send({ stagingId: INVENTORY_STAGING_ID });
 
   describe('Granted against Denied on the same required household check', () => {
-    it('never leaves the unit serving over a durable denial, or suspended with nothing outstanding', async () => {
+    it('leaves the unit enablement untouched and reports the refusal exactly when the surviving decision is Denied (#1149)', async () => {
       const owner = await actors.user();
       const { household } = await actors.householdWithMembers({ owner });
       const plugin = await arrangePlugin();
@@ -123,6 +139,7 @@ describe('consent decisions under concurrency (#360)', () => {
         .set(owner.headers)
         .send({})
         .expect(200);
+      const before = await unitRow(household.id, plugin.id);
 
       const [first, second] = await Promise.all([
         decideHousehold(owner, household.id, plugin.slug, {
@@ -149,13 +166,16 @@ describe('consent decisions under concurrency (#360)', () => {
           permissionSlug: HOUSEHOLD_CHECK.slug,
         },
       });
-      const unit = await db.client.householdPlugin.findFirstOrThrow({
-        where: { householdId: household.id, pluginId: plugin.id },
-      });
+      const unit = await unitRow(household.id, plugin.id);
 
       // THE invariant, both halves. Which decision won is the race's business;
-      // that the mirror agrees with it is not.
-      expect(unit.suspendedForConsent).toBe(grant.status === PluginGrantStatus.Denied);
+      // that neither touched the unit enablement, and that the consent standing
+      // agrees with the survivor, is not.
+      expect(unit.enabled).toBe(true);
+      expect(unit.updatedAt).toEqual(before.updatedAt);
+      expect((await refusedSlugs(owner, household.id, plugin.slug)).includes(HOUSEHOLD_CHECK.slug)).toBe(
+        grant.status === PluginGrantStatus.Denied,
+      );
 
       // One row, not two: the upsert is what makes the loser update rather than
       // collide, and a P2002 here would have surfaced as a 500 above.
@@ -179,6 +199,7 @@ describe('consent decisions under concurrency (#360)', () => {
         .set(owner.headers)
         .send({})
         .expect(200);
+      const before = await unitRow(household.id, plugin.id);
 
       const [granted, denied] = await Promise.all([
         decideHousehold(owner, household.id, plugin.slug, {
@@ -196,11 +217,13 @@ describe('consent decisions under concurrency (#360)', () => {
       const grant = await db.client.pluginGrant.findFirstOrThrow({
         where: { pluginId: plugin.id, scopeId: household.id, permissionSlug: HOUSEHOLD_CHECK.slug },
       });
-      const unit = await db.client.householdPlugin.findFirstOrThrow({
-        where: { householdId: household.id, pluginId: plugin.id },
-      });
+      const unit = await unitRow(household.id, plugin.id);
 
-      expect(unit.suspendedForConsent).toBe(grant.status === PluginGrantStatus.Denied);
+      expect(unit.enabled).toBe(true);
+      expect(unit.updatedAt).toEqual(before.updatedAt);
+      expect((await refusedSlugs(owner, household.id, plugin.slug)).includes(HOUSEHOLD_CHECK.slug)).toBe(
+        grant.status === PluginGrantStatus.Denied,
+      );
     });
   });
 

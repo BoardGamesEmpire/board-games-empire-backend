@@ -5,8 +5,8 @@ import { ACTIVATION_VERSION_BUMP, arrangePlugin, UNINSTALL_CLAIM } from './lock-
 import { LOCK_SOURCES } from './lock-order';
 
 /**
- * The consent decision's claim on the `plugins` row, and the claim each
- * post-commit pass opens with (#361), run against Postgres.
+ * The consent decision's claim on the `plugins` row (#361), run against
+ * Postgres.
  *
  * `decide()` judges a decision against the plugin manifest it read before its
  * transaction. An uninstall or an activation committing in between would leave
@@ -17,14 +17,12 @@ import { LOCK_SOURCES } from './lock-order';
  * document the decision read. An uninstalled plugin or a move refuses the
  * decision.
  *
- * The passes that run after the decision commits (late acceptance, and the
- * reconcile path's suspension) are separate transactions. Each claims the row
- * `FOR SHARE` too, and judges against the plugin manifest that claim reads, so a
- * late acceptance arriving after an activation cannot clear a suspension that
- * activation just imposed.
+ * The decision is the whole transaction: it writes one grant row and, for a
+ * user's first grant, the user's unit enablement, and no pass runs after it
+ * commits, because consent standing is worked out when read (#1149).
  *
- * The unit suite mocks `$queryRaw`: it pins the statements' text and the
- * service's answer to each row, and nothing about what Postgres returns. Four
+ * The unit suite mocks `$queryRaw`: it pins the statement's text and the
+ * service's answer to each row, and nothing about what Postgres returns. Three
  * things are visible only here:
  *
  *  - the decision's claim waits for an uninstall's claim and, once released,
@@ -34,10 +32,8 @@ import { LOCK_SOURCES } from './lock-order';
  *  - the comparison answers both ways against real columns. A replacement at
  *    the same version is seen; a copy differing only in key order and spacing
  *    is not.
- *  - a pass's claim waits for an activation's write and reads the version and
- *    plugin manifest that activation committed.
  */
-describe('the consent decision and its post-commit passes claim the plugin row (FOR SHARE, #361)', () => {
+describe('the consent decision claims the plugin row (FOR SHARE, #361)', () => {
   const { grantService: GRANT_SERVICE } = LOCK_SOURCES;
 
   /**
@@ -45,22 +41,11 @@ describe('the consent decision and its post-commit passes claim the plugin row (
    * read ahead of `${plugin.id}`: the comparison sits in the SELECT list and the
    * id in the WHERE clause.
    *
-   * Anchored on the attempt's declaration because the file ships several
-   * `FROM plugins` claims, one per post-commit pass.
+   * Anchored on the attempt's declaration, where the transaction that issues
+   * it begins.
    */
   const decisionClaim = readShippedSql(GRANT_SERVICE, ['bindManifest(plugin.manifestJson)', 'plugin.id'], {
     after: 'const attempt',
-    matching: /FROM plugins/,
-  });
-
-  /**
-   * The claim a post-commit pass opens with, lifted from the household
-   * late acceptance pass. Its three siblings ship the same text; this one
-   * stands for them because a late acceptance is the pass whose stale judgment
-   * does the damage.
-   */
-  const passClaim = readShippedSql(GRANT_SERVICE, ['plugin.id'], {
-    after: 'private async maybeReenableSuspendedHousehold',
     matching: /FROM plugins/,
   });
 
@@ -77,13 +62,6 @@ describe('the consent decision and its post-commit passes claim the plugin row (
     readonly version: string;
     readonly installed_at: Date;
     readonly manifest_matches: boolean | null;
-  }
-
-  interface PassClaimRow {
-    readonly slug: string;
-    readonly version: string;
-    readonly manifest_json: unknown;
-    readonly uninstalled_at: Date | null;
   }
 
   let db: TestDatabase;
@@ -245,52 +223,6 @@ describe('the consent decision and its post-commit passes claim the plugin row (
       const rows = await holder.query<DecisionClaimRow>(decisionClaim.text, [reordered, plugin.pluginId]);
 
       expect(rows[0]?.manifest_matches).toBe(true);
-    });
-  });
-
-  it("a late acceptance's claim waits out an activation, then reads its plugin manifest", async () => {
-    // The window the post-commit passes had. A late acceptance running after
-    // its decision committed reaches the row while an activation holds it, and the
-    // activation then replaces the plugin manifest. A pass that did not wait,
-    // or read the row version it first found, would judge against the plugin
-    // manifest the activation just replaced and could clear a suspension that
-    // activation imposed.
-    const plugin = await arrangePlugin(db.client);
-    const stored = await readStored(plugin.pluginId);
-    const replaced = {
-      ...(stored.manifestJson as Record<string, unknown>),
-      version: '2.0.0',
-      permissions: ['feedback:write'],
-    };
-
-    await withBarrier(async (barrier) => {
-      const { holder, waiter } = barrier;
-
-      await holder.begin();
-      await expect(holder.query(ACTIVATION_VERSION_BUMP, [plugin.pluginId, '2.0.0'])).resolves.toHaveLength(1);
-
-      await waiter.begin();
-      const pending = waiter.issue<PassClaimRow>(passClaim.text, [plugin.pluginId], "the late acceptance's claim");
-
-      await expectBlocked(barrier, pending);
-
-      // The activation's second write: the waiting statement's re-evaluation
-      // follows the row's update chain to the activation's LAST write, not
-      // its first, so the replaced plugin manifest is what it reads.
-      await expect(
-        holder.query(MANIFEST_REPLACEMENT, [plugin.pluginId, JSON.stringify(replaced)]),
-      ).resolves.toHaveLength(1);
-      await holder.commit();
-
-      const rows = await pending.result();
-
-      expect(rows).toHaveLength(1);
-      expect(rows[0]?.slug).toBe(plugin.slug);
-      expect(rows[0]?.version).toBe('2.0.0');
-      expect(rows[0]?.manifest_json).toEqual(replaced);
-      expect(rows[0]?.uninstalled_at).toBeNull();
-
-      await waiter.commit();
     });
   });
 });

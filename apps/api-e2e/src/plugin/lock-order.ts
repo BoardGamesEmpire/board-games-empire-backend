@@ -147,15 +147,19 @@ export const CLAIMED_LOCK_ORDER = [
   },
   {
     /**
-     * The unit row locked (`lockHouseholdUnit`), delegated to a pass that locks
-     * it (`suspendHouseholdUnit`), or WRITTEN through Prisma, which locks it
-     * just as surely. Reads are excluded: see the note above.
+     * The unit enablement WRITTEN through Prisma, which locks it as surely as a
+     * `FOR UPDATE` would, or written by the dormancy pass activation delegates
+     * to (`reconcileHouseholdDormancy`, whose `updateMany` is the write). No
+     * shipped statement locks the unit enablement by raw SQL any more: the consent
+     * passes that did went when consent standing became a read-time
+     * derivation (#1149). The raw-SQL alternative stays for the replayed
+     * statement and for any raw lock someone writes later. Reads are excluded:
+     * see the note above.
      */
     name: 'unit row',
     pattern: anyOf(
-      /lock(?:Household|User)Unit\(/,
-      /suspend(?:Household|User)Unit\(/,
       /tx\.(?:householdPlugin|userPlugin)\.(?:create|update|updateMany|upsert|delete|deleteMany)/,
+      /reconcileHouseholdDormancy\(/,
       relationLock(['household_plugins', 'user_plugins'], 'FOR UPDATE'),
     ),
   },
@@ -235,11 +239,12 @@ export const LOCK_SOURCES = {
  * Every writer that takes more than one of these locks.
  *
  * A path taking a single lock cannot be out of order with itself, so the list
- * is exactly the set where the claim has content. `decide()` appears twice
- * because its two branches are independent: a required denial delegates to a
- * suspend pass, a granted user decision creates the anchor, and neither runs in
- * the other's transaction — so checking their first occurrences against one
- * another would compare two paths that never interleave.
+ * is exactly the set where the claim has content. `decide()` appears more than
+ * once because its branches are independent: a household decision takes the
+ * household row and writes no unit enablement, a granted user decision creates the
+ * user's unit enablement and takes no household row, and neither runs in the
+ * other's transaction — so one claim over both would describe a path that
+ * never runs.
  */
 export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
   {
@@ -261,17 +266,18 @@ export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
     because: 'The user-scope twin, which takes the same prefix for the same reason.',
   },
   {
-    label: 'decide() — the required-denial branch',
+    label: 'decide() — a household decision',
     file: GRANT_SERVICE,
     functionName: 'decide',
-    stages: ['household row', 'plugin row', 'grant row', 'unit row'],
+    stages: ['household row', 'plugin row', 'grant row'],
     because:
       'A household decision opens with the household share lock (#548), then the plugin-row claim (#398), ' +
-      'then the upsert takes the grant row, then the suspend mirror rides the same transaction. The ' +
-      'plugin-row lock is not optional decoration: the grant INSERT takes FOR KEY SHARE on that row through ' +
-      'the FK anyway, and takes it AFTER writing the grant tuple, so without the claim this path holds the ' +
-      'plugin row LAST and deadlocks against activation. The same claim compares the plugin manifest the ' +
-      'gates were judged against, so nothing is re-read after the write (#361).',
+      'then the upsert takes the grant row, and writes nothing else: consent standing is worked out when ' +
+      'read, so no unit enablement follows (#1149). The plugin-row lock is not optional decoration: the grant ' +
+      'INSERT takes FOR KEY SHARE on that row through the FK anyway, and takes it AFTER writing the grant ' +
+      'tuple, so without the claim this path holds the plugin row LAST and deadlocks against activation. ' +
+      'The same claim compares the plugin manifest the gates were judged against, so nothing is re-read ' +
+      'after the write (#361).',
   },
   {
     label: 'decide() — the grant row precedes the unit-scope key',
@@ -279,72 +285,20 @@ export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
     functionName: 'decide',
     stages: ['plugin row', 'grant row', 'advisory key'],
     because:
-      'The consent act is the enabling act (#225), so a granted user decision creates the anchor in the ' +
-      'decision transaction — which puts the key after the upsert that already holds the grant row, and ' +
-      'both after the claim that opens the transaction.',
+      "The consent act is the enabling act (#225), so a granted user decision creates the user's unit " +
+      'enablement in the decision transaction — which puts the key after the upsert that already holds the ' +
+      'grant row, and both after the claim that opens the transaction.',
   },
   {
-    label: 'decide() — inside the granted user-anchor branch',
+    label: "decide() — inside the branch that creates the user's unit enablement",
     file: GRANT_SERVICE,
     functionName: 'decide',
     branch: /Granted && input\.scopeType === PluginGrantScope\.User/,
     stages: ['advisory key', 'unit row'],
     because:
-      'Scoped to the branch, because the two entries above are judged over the whole body and the mirror ' +
-      'branch runs first — so an anchor created BEFORE its key still dated after the mirror and left them ' +
-      'green. Taking those two the other way round is a cycle against the suspend pass, which takes exactly ' +
-      'this suffix.',
-  },
-  {
-    label: 'suspendHouseholdUnit (the mirror suspend pass)',
-    file: GRANT_SERVICE,
-    functionName: 'suspendHouseholdUnit',
-    stages: ['advisory key', 'unit row'],
-    because: 'A suffix of the order: the key before the row, so it waits out an uncommitted creation.',
-  },
-  {
-    label: 'suspendUserUnit (the mirror suspend pass, user scope)',
-    file: GRANT_SERVICE,
-    functionName: 'suspendUserUnit',
-    stages: ['advisory key', 'unit row'],
-    because: 'The user-scope twin of the same suffix.',
-  },
-  {
-    label: 'maybeReenableSuspendedHousehold (late acceptance, household scope)',
-    file: GRANT_SERVICE,
-    functionName: 'maybeReenableSuspendedHousehold',
-    stages: ['plugin row', 'advisory key', 'unit row'],
-    because:
-      'The pass runs in its own transaction after the decision commits, so it claims the plugin row to judge ' +
-      'against the current plugin manifest (#361), and then takes the same suffix the mirror passes take: the ' +
-      'key before the row, so it waits out an uncommitted creation.',
-  },
-  {
-    label: 'maybeReenableSuspendedUser (late acceptance, user scope)',
-    file: GRANT_SERVICE,
-    functionName: 'maybeReenableSuspendedUser',
-    stages: ['plugin row', 'advisory key', 'unit row'],
-    because:
-      'The user-scope twin: its own transaction after the decision commits, the same claim, the same suffix (#361).',
-  },
-  {
-    label: 'maybeSuspendHousehold (the reconcile-path suspension)',
-    file: GRANT_SERVICE,
-    functionName: 'maybeSuspendHousehold',
-    stages: ['plugin row', 'unit row'],
-    because:
-      'The pass runs in its own transaction after the decision commits, so it claims the plugin row to judge ' +
-      'against the current plugin manifest (#361). The advisory key is taken inside the suspendHouseholdUnit ' +
-      'delegate, whose own entry pins key -> row; here the delegate call is the unit-row stage.',
-  },
-  {
-    label: 'maybeSuspendUser (the reconcile-path suspension, user scope)',
-    file: GRANT_SERVICE,
-    functionName: 'maybeSuspendUser',
-    stages: ['plugin row', 'unit row'],
-    because:
-      'The user-scope twin: its own transaction after the decision commits, the same claim (#361), and the key ' +
-      'taken inside the suspendUserUnit delegate, whose own entry pins key -> row.',
+      'Scoped to the branch, so the pin reads the suffix where it is taken: the key before the row, so the ' +
+      "first grant waits out an uncommitted creation by the user's own enable toggle, which takes the same " +
+      'key first (#323). Taking those two the other way round is a cycle against every unit writer.',
   },
   {
     label: 'activateInTransaction (approval)',
@@ -354,11 +308,12 @@ export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
     because:
       "Activation takes the plugin row first via D-CN's `FOR UPDATE` config read, ahead of the claiming write " +
       'that used to be this stage on its own (#370) — both are the plugin row, and either dates it. Then it ' +
-      'locks server grants (#356), then WRITES units — its unit-set read comes earlier and is deliberately not ' +
-      'the stage, because that read takes no lock at all. The unlocked read is safe because every unit-row ' +
-      'writer claims the plugin row before the advisory key, so a unit write either committed before ' +
-      "activation's claim or waits behind it (#361). It never takes the advisory key, which is " +
-      "exactly why the unit paths need the plugin row's share lock to order against it.",
+      'locks server grants (#356), then WRITES household units through the dormancy pass. Its re-consent ' +
+      'unit-set reads come earlier, write nothing (#1149) and are deliberately not the stage, because they ' +
+      'take no lock at all. The unlocked reads are safe because every unit-enablement writer claims the plugin row ' +
+      "before the advisory key, so a unit write either committed before activation's claim or waits behind " +
+      "it (#361). It never takes the advisory key, which is exactly why the unit paths need the plugin row's " +
+      'share lock to order against it.',
   },
   {
     label: 'uninstall (the purge)',

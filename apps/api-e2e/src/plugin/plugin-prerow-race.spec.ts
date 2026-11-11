@@ -91,9 +91,9 @@ describe('the pre-row races (#360)', () => {
 
   /**
    * The same arrangement the C4 suites use, minus everything these cases do not
-   * touch. The household check is OPTIONAL here on purpose: a required one
-   * would make the enable born-suspended, and this is a test about WAITING, not
-   * about what the row is born as.
+   * touch. The household check is OPTIONAL here on purpose: this is a test
+   * about WAITING, and a required one would only add a review pending to a
+   * consent standing these cases never read (#1149).
    */
   const arrangePlugin = async (): Promise<Plugin> => {
     const manifest = buildPluginManifest({
@@ -224,11 +224,12 @@ describe('the pre-row races (#360)', () => {
     });
   });
 
-  it('makes a granted user decision wait for the key it creates the anchor behind', async () => {
+  it('makes a granted user decision wait for the key it creates the unit enablement behind', async () => {
     // The user-scope twin, and the site the advisory scheme was introduced for:
     // the consent act IS the enabling act (#225), so `decide()` creates the
-    // anchor row inside the decision transaction. Before the row exists, the
-    // key is the only thing ordering that creation against a concurrent writer.
+    // user's unit enablement inside the decision transaction. Before the row
+    // exists, the key is the only thing ordering that creation against a
+    // concurrent writer.
     const user = await actors.user();
     const plugin = await arrangePlugin();
     const key = bindTemplate(userKeyFormat, [user.user.id, plugin.id]);

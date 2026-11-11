@@ -690,7 +690,7 @@ describe('PermissionsService', () => {
       });
     };
 
-    const servedUnitRow = { enabled: true, suspendedForConsent: false };
+    const servedUnitRow = { enabled: true };
 
     beforeEach(() => {
       db.plugin.findUnique.mockResolvedValue(pluginRow() as never);
@@ -720,20 +720,14 @@ describe('PermissionsService', () => {
         expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
       });
 
-      it.each<[string, { enabled: boolean; suspendedForConsent: boolean; dormantReason?: string | null } | null]>([
-        ['the household enablement row is missing', null],
-        ['the household unit is disabled', { enabled: false, suspendedForConsent: false }],
-        ['the household unit is suspended for consent', { enabled: true, suspendedForConsent: true }],
-        // Dormancy is the third, independent component (#369, D-CK): the row is
-        // enabled and unsuspended, and abilities must still stop resolving.
-        [
-          'the household row is dormant for scope',
-          { enabled: true, suspendedForConsent: false, dormantReason: 'ScopeOrphaned' },
-        ],
-        [
-          'the household row is dormant for configuration',
-          { enabled: true, suspendedForConsent: false, dormantReason: 'NeedsConfiguration' },
-        ],
+      it.each<[string, { enabled: boolean; dormantReason?: string | null } | null]>([
+        ['the household unit enablement is missing', null],
+        ['the household unit is disabled', { enabled: false }],
+        // Dormancy is independent of the household's own `enabled` intent
+        // (#369): the unit enablement is enabled, and abilities must still stop
+        // resolving.
+        ['the household unit is dormant for scope', { enabled: true, dormantReason: 'ScopeOrphaned' }],
+        ['the household unit is dormant for configuration', { enabled: true, dormantReason: 'NeedsConfiguration' }],
       ])('is not servable when %s', async (_label, row) => {
         db.householdPlugin.findUnique.mockResolvedValue(row as never);
 
@@ -747,8 +741,33 @@ describe('PermissionsService', () => {
         );
       });
 
+      it('is servable while a required permission is still pending, and confers only what was granted (#1149)', async () => {
+        // The grant read selects Granted rows only, so the pending slug never
+        // reaches the snapshot; the unit keeps serving on what it did grant
+        // (#1061, #1063: consent no longer gates serving).
+        grantRows([grantRow('read:game', RiskLevel.Medium)]);
+        db.permission.findMany.mockResolvedValue([
+          makePermission({ slug: 'read:game', riskLevel: RiskLevel.Medium }),
+        ] as never);
+        reader.read.mockReturnValue({
+          valid: true,
+          requested: [
+            { slug: 'read:game', scopeType: PluginGrantScope.Server },
+            { slug: 'update:game', scopeType: PluginGrantScope.Server },
+          ],
+        });
+
+        const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+
+        expect(snapshot).toMatchObject({ servable: true });
+        expect(snapshot?.corePermissions.map((permission) => permission.slug)).toEqual(['read:game']);
+        expect(db.pluginGrant.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({ where: expect.objectContaining({ status: PluginGrantStatus.Granted }) }),
+        );
+      });
+
       it('checks the UserPlugin row for user units (#225 parity)', async () => {
-        db.userPlugin.findUnique.mockResolvedValue({ enabled: true, suspendedForConsent: true } as never);
+        db.userPlugin.findUnique.mockResolvedValue({ enabled: false } as never);
 
         const snapshot = await service.getPluginGrantSnapshot('plugin-1', { scopeType: 'User', userId: 'u-1' });
 

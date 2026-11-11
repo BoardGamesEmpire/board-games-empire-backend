@@ -82,15 +82,15 @@ describe('shipped-function', () => {
       const source = `
         function pathA(tx) {
           lockHouseholdUnitScope(tx);
-          // this used to call suspendHouseholdUnit(tx)
+          // this used to call writeHouseholdUnit(tx)
         }
       `;
 
-      expect(blankComments(source)).not.toMatch(/suspendHouseholdUnit/);
+      expect(blankComments(source)).not.toMatch(/writeHouseholdUnit/);
     });
 
     it('blanks a comment that is the whole body of a function', () => {
-      expect(blankComments('function f() { /* suspendHouseholdUnit(tx) */ }')).not.toMatch(/suspendHouseholdUnit/);
+      expect(blankComments('function f() { /* writeHouseholdUnit(tx) */ }')).not.toMatch(/writeHouseholdUnit/);
     });
 
     it('treats an interpolation as code, so a comment inside one still blanks', () => {
@@ -225,11 +225,11 @@ describe('shipped-function', () => {
 
     it('matches whole names, so a longer function does not answer for a shorter one', () => {
       const both = `
-        function lockHouseholdUnitScope(tx) { return advisory(tx); }
-        function lockHouseholdUnit(tx) { return rowLock(tx); }
+        function claimHouseholdUnitScope(tx) { return advisory(tx); }
+        function claimHouseholdUnit(tx) { return rowLock(tx); }
       `;
 
-      expect(extractFunctionBody(both, 'lockHouseholdUnit', 'lock.ts').body).toMatch(/rowLock/);
+      expect(extractFunctionBody(both, 'claimHouseholdUnit', 'lock.ts').body).toMatch(/rowLock/);
     });
 
     it('is not fooled by a call site above the declaration', () => {
@@ -286,7 +286,7 @@ describe('shipped-function', () => {
           await tx.pluginGrant.upsert({});
 
           if (input.status === Denied && check.required) {
-            await this.suspendHouseholdUnit(tx);
+            await this.writeHouseholdUnit(tx);
           }
 
           if (input.status === Granted && input.scopeType === Scope.User) {
@@ -302,17 +302,17 @@ describe('shipped-function', () => {
 
       expect(body).toMatch(/lockUserUnitScope/);
       expect(body).toMatch(/userPlugin\.upsert/);
-      expect(body).not.toMatch(/suspendHouseholdUnit/);
+      expect(body).not.toMatch(/writeHouseholdUnit/);
       expect(body).not.toMatch(/pluginGrant\.upsert/);
     });
 
     it('scopes the order to that branch, which the whole body cannot', () => {
-      // Two independent branches, and the mirror runs first — so over the whole
-      // body the mirror's unit work dates the anchor branch's key, and the
+      // Two independent branches, and the household one runs first — so over
+      // the whole body its unit work dates the user branch's key, and the
       // claim 'key before unit row' is unjudgeable there in BOTH directions.
       const stages: readonly OrderedStage[] = [
         { name: 'advisory key', pattern: /lockUserUnitScope\(/ },
-        { name: 'unit row', pattern: /userPlugin\.upsert\(|suspendHouseholdUnit\(/ },
+        { name: 'unit row', pattern: /userPlugin\.upsert\(|writeHouseholdUnit\(/ },
       ];
 
       // Correct code, and the whole body still cries foul: a false alarm, which
@@ -330,8 +330,8 @@ describe('shipped-function', () => {
         ),
       ).toBeUndefined();
 
-      // And false when the anchor is created ahead of its key, which is the
-      // inversion that deadlocks against the mirror pass.
+      // And false when the user's row is created ahead of its key, which is
+      // the inversion that deadlocks against a writer taking the key first.
       const inverted = source.replace(
         'await lockUserUnitScope(tx);\n            await tx.userPlugin.upsert({});',
         'await tx.userPlugin.upsert({});\n            await lockUserUnitScope(tx);',
@@ -442,14 +442,14 @@ describe('shipped-function', () => {
     const STAGES: readonly OrderedStage[] = [
       { name: 'plugin row', pattern: /assertStillLiving\(/ },
       { name: 'advisory key', pattern: /lockHouseholdUnitScope\(/ },
-      { name: 'unit row', pattern: /lockHouseholdUnit\(/ },
+      { name: 'unit row', pattern: /claimHouseholdUnit\(/ },
     ];
 
     it('passes a body that takes the stages in order', () => {
       const body = `
         await this.assertStillLiving(tx);
         await lockHouseholdUnitScope(tx);
-        await this.lockHouseholdUnit(tx);
+        await this.claimHouseholdUnit(tx);
       `;
 
       expect(orderMismatch(body, STAGES, 'openHouseholdUnit')).toBeUndefined();
@@ -461,7 +461,7 @@ describe('shipped-function', () => {
       // path was one rename from asserting nothing.
       const body = `
         await this.assertStillLiving(tx);
-        await this.lockHouseholdUnit(tx);
+        await this.claimHouseholdUnit(tx);
       `;
       const message = orderMismatch(body, STAGES, 'openHouseholdUnit');
 
@@ -481,7 +481,7 @@ describe('shipped-function', () => {
       // row. What is refused is claiming a stage and not taking it.
       const body = `
         await lockHouseholdUnitScope(tx);
-        await this.lockHouseholdUnit(tx);
+        await this.claimHouseholdUnit(tx);
       `;
 
       expect(orderMismatch(body, STAGES.slice(1), 'decide')).toBeUndefined();
@@ -492,7 +492,7 @@ describe('shipped-function', () => {
       const body = `
         await lockHouseholdUnitScope(tx);
         await this.assertStillLiving(tx);
-        await this.lockHouseholdUnit(tx);
+        await this.claimHouseholdUnit(tx);
       `;
       const message = orderMismatch(body, STAGES, 'openHouseholdUnit');
 
@@ -505,7 +505,7 @@ describe('shipped-function', () => {
       const body = `
         await lockHouseholdUnitScope(tx);
         await this.assertStillLiving(tx);
-        await this.lockHouseholdUnit(tx);
+        await this.claimHouseholdUnit(tx);
         await this.assertStillLiving(tx);
       `;
 
@@ -587,7 +587,7 @@ describe('shipped-function', () => {
 
       expect('await this.assertStillLiving(tx);').toMatch(stage);
       expect('FROM plugins WHERE id = $1 FOR SHARE').toMatch(stage);
-      expect('await this.lockHouseholdUnit(tx);').not.toMatch(stage);
+      expect('await this.claimHouseholdUnit(tx);').not.toMatch(stage);
     });
 
     it('refuses combining nothing, which would match every body at offset 0', () => {

@@ -132,20 +132,15 @@ export class PluginUnitConfigRequiredError extends Error {
  * The plugin's active manifest was replaced between this request's
  * pre-transaction read and the plugin row's `FOR SHARE` lock, so every
  * manifest-derived judgment the request already made — the config schema it
- * validated against, the required-check set the born-suspended probe
- * consulted — describes a manifest that is no longer active. Detected by
- * comparing the manifest content under that lock, so a replacement that
- * leaves `version` and `installedAt` untouched is seen too (#368).
+ * validated against — describes a manifest that is no longer active.
+ * Detected by comparing the manifest content under that lock, so a
+ * replacement that leaves `version` and `installedAt` untouched is seen too
+ * (#368).
  *
- * Refused rather than applied. For an activation the stakes are concrete: a
- * stale probe can create a serving row beside a durable denial of a newly
- * required check (activation keeps the grants the probe reads), or suspend a
- * row over a check the new manifest no longer requires and no decision can
- * heal. A reinstall's stakes are lower — its uninstall purged the grants the
- * probe reads, so the probe cannot be misled, and a config document judged
- * against the removed schema lands in the stale-retained state the write
- * path already heals — but the guard covers it anyway rather than resting on
- * a coincidence two versions of this code apart (#323 review).
+ * Refused rather than applied. A config document judged against the removed
+ * schema lands in the stale-retained state the write path already heals,
+ * but the guard covers it anyway rather than resting on a coincidence two
+ * versions of this code apart (#323 review).
  *
  * Retryable, and immediately: whatever replaced the manifest has committed
  * by the time this is raised.

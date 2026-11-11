@@ -9,12 +9,15 @@
  * Listeners that care about the distinction discriminate on `instanceof`
  * (or `subject`), not on the routing key.
  *
+ * `plugin.re_consent_requested` is likewise shared by a household and a user
+ * class (#1149): it announces that an activation left a unit without
+ * consent for the new manifest's re-consent slugs, and changes no unit
+ * enablement.
+ *
  * `plugin.unit_dormant` / `plugin.unit_revived` are deliberately NOT folded
- * into `unit_disabled`/`unit_enabled`: those two mean consent suspension and
- * late acceptance, and their payloads are permission slugs. Dormancy is a
- * different cause with no slugs (#369, #370, D-CK), so a listener filtering
- * for consent transitions must not have to inspect a payload to tell them
- * apart.
+ * into `re_consent_requested`: its payload is permission slugs, and dormancy
+ * is a different cause with no slugs (#369, #370), so a listener filtering
+ * for re-consent must not have to inspect a payload to tell them apart.
  */
 export enum PluginEvent {
   Installed = 'plugin.installed',
@@ -30,8 +33,7 @@ export enum PluginEvent {
   GrantCreated = 'plugin.grant_created',
   GrantRejected = 'plugin.grant_rejected',
   GrantRevoked = 'plugin.grant_revoked',
-  UnitDisabled = 'plugin.unit_disabled',
-  UnitEnabled = 'plugin.unit_enabled',
+  ReconsentRequested = 'plugin.re_consent_requested',
   UnitDormant = 'plugin.unit_dormant',
   UnitRevived = 'plugin.unit_revived',
 }

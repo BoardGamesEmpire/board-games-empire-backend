@@ -54,7 +54,7 @@ const COMPARISON = {
   blockedByDenial: [],
 } as unknown as UpdateEscalationComparison;
 const SEEDED_GRANTS = [{ id: 'grant-1', permissionSlug: 'user:impersonate' }] as never[];
-const SUSPENDED_HOUSEHOLDS = [{ householdId: 'hh-1', outstanding: ['calendar:read'] }];
+const RECONSENT_HOUSEHOLDS = [{ householdId: 'hh-1', outstanding: ['calendar:read'] }];
 const PENDING_PLUGIN = {
   id: 'plugin-1',
   slug: 'demo-sink',
@@ -87,7 +87,9 @@ const FEATURE_STATE = {
   plugin: { id: 'plugin-1', slug: 'demo-sink' },
   unit: SERVER_PLUGIN_UNIT,
   served: true,
-  suspendedForConsent: false,
+  serverEnabled: true,
+  state: 'on',
+  consent: { outstanding: [], optionalOff: [] },
   features: [
     {
       name: 'digest',
@@ -218,8 +220,8 @@ describe('PluginsController (delegation)', () => {
         plugin: APPROVED_PLUGIN,
         comparison: COMPARISON,
         seededGrants: SEEDED_GRANTS,
-        suspendedHouseholdUnits: SUSPENDED_HOUSEHOLDS,
-        suspendedUserUnits: [],
+        reconsentHouseholdUnits: RECONSENT_HOUSEHOLDS,
+        reconsentUserUnits: [],
       }),
       reject: jest.fn().mockResolvedValue(PLUGIN),
       describePending: jest.fn().mockResolvedValue({
@@ -341,8 +343,8 @@ describe('PluginsController (delegation)', () => {
         comparison: COMPARISON,
         seededGrants: SEEDED_GRANTS,
         restartRequired: true,
-        suspendedHouseholdUnits: SUSPENDED_HOUSEHOLDS,
-        suspendedUserUnits: [],
+        reconsentHouseholdUnits: RECONSENT_HOUSEHOLDS,
+        reconsentUserUnits: [],
       });
     });
 

@@ -61,8 +61,9 @@ export class UserPluginsController {
     description:
       'Every installed plugin, with no narrowing on the user axis: user-scope consent is legal at any plugin scope ' +
       '(#225), so unlike the household axis there is no plugin you cannot be anchored on. `unit.anchored` is ' +
-      'false until your first Granted decision creates the anchor — which is why an empty enablement history ' +
-      'shows a populated list of not-yet-enabled plugins rather than nothing. Carries no version, provenance or ' +
+      'false until your first Granted decision creates your unit enablement — which is why an empty enablement ' +
+      'history shows a populated list of not-yet-enabled plugins rather than nothing. `unit.state` is the stable ' +
+      'unit state code and `unit.consent` the consent standing behind it. Carries no version, provenance or ' +
       'install history, and never tombstones: this surface exists to decide your own participation, not to ' +
       'inspect the server.',
   })
@@ -94,8 +95,9 @@ export class UserPluginsController {
     summary: 'Record an own-user consent decision for one requested permission',
     description:
       'Grant or durably deny a permission the active manifest requests at user consent scope, for your own ' +
-      'account. A Granted decision creates your enablement anchor (#225); a Denied decision creates nothing — ' +
-      'and a denial that leaves a REQUIRED user check unsatisfied suspends your unit until late acceptance.',
+      'account. A Granted decision creates your unit enablement (#225); a Denied decision creates nothing, so ' +
+      'without an enablement the plugin stays off for you (state off). Once you hold one, a denial that leaves a ' +
+      'REQUIRED user check outstanding leaves the unit running with state review_pending until you grant it.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'A categorically ungrantable permission' })
@@ -161,9 +163,10 @@ export class UserPluginsController {
   @ApiOperation({
     summary: 'Enable your own unit for this plugin',
     description:
-      'Flips your own switch (enabled) back on. The enablement row is created by your first Granted user-scope ' +
-      'consent decision (#225) — without one there is nothing to enable (404). Consent suspension is separate ' +
-      'state this endpoint never writes: a suspended unit stays suspended until late acceptance clears it.',
+      'Flips your own switch (enabled) back on. Your unit enablement is created by your first Granted user-scope ' +
+      'consent decision (#225) — without one there is nothing to enable (404). Consent standing is worked out ' +
+      'on every read and this endpoint never writes it: a required check still outstanding leaves the unit ' +
+      'running with state review_pending until it is granted.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not a session user (API keys cannot exercise this axis)' })
@@ -198,8 +201,9 @@ export class UserPluginsController {
   @ApiOperation({
     summary: 'Per-feature activation state for your own unit (#60)',
     description:
-      'Why a feature is or is not running for you: per-feature active|disabled with a denied|pending|suspended ' +
-      'reason paired with the blocking permission slugs, plus the unit-level served and suspendedForConsent state.',
+      'Why a feature is or is not running for you: per-feature active|disabled with a denied|pending ' +
+      'reason paired with the blocking permission slugs, plus the unit-level served, the unit state code and ' +
+      'consent standing.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not a session user (API keys cannot exercise this axis)' })

@@ -12,18 +12,24 @@ import type { Prisma } from '@bge/database';
  * round 6). The advisory key exists before the row does, so whichever
  * transaction takes it second observes the first's commit.
  *
- * EVERY writer of `HouseholdPlugin`/`UserPlugin` enablement state takes
- * the matching lock, unconditionally — even call sites operating on
- * existing rows, where a row `FOR UPDATE` would technically suffice
- * (locked on #59 for #323). Do NOT remove the lock from such a site as an
- * optimization: uniformity is what keeps the total lock order
+ * EVERY writer of one unit's enablement — its switch, its settings, the row
+ * itself — takes the matching lock, unconditionally: switching a plugin on
+ * or off, a settings write, and `decide()` creating a user's row with their
+ * first grant. That holds even at call sites operating on existing rows,
+ * where a row `FOR UPDATE` would technically suffice (locked on #59 for
+ * #323). Do NOT remove the lock from such a site as an optimization:
+ * uniformity is what keeps the total lock order
  * (plugin row → grant row → advisory → unit row) a rule instead of a
  * per-site argument, and a writer that skips the advisory reopens the
- * pre-row race class for every creator it can overlap with. The one
- * deliberate exception is activation's batched suspension pass, which
- * predates the scheme; it is ordered anyway, because every unit-row writer
- * claims the plugin row before this lock, so a unit write either committed
- * before activation's claim or waits behind it (#361).
+ * pre-row race class for every creator it can overlap with.
+ *
+ * Plugin-wide passes are the exception, and only because they hold the
+ * plugin row exclusively first: uninstall's purge, and the dormancy
+ * reconciliation a version activation or reinstall runs
+ * (`household-dormancy.ts`). Every per-unit writer locks the plugin row
+ * `FOR SHARE` before this lock, so its write either committed before the claim or waits
+ * behind it. Activation no longer writes a unit's enablement at all: it
+ * only reads which units owe re-consent (#1149).
  *
  * The plugin row sorts BEFORE this lock, and that is a correctness
  * constraint rather than a convention: uninstall and activation both claim

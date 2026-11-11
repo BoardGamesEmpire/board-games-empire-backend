@@ -8,6 +8,8 @@ _Decision codes appear in this doc and in the issue decision logs, which is wher
 
 _All C2 decisions are now recorded on #59 through D-AM. D-AL (declared gates / resolved advises) loosens D-AC as written — the amendment states what it gives up, so revisit there rather than in code if the trade looks wrong._
 
+_2026-11-07: consent standing is derived at read time and the stored suspension is removed; a unit missing a required permission keeps running on its grants and reports review pending. See [ADR 0004](adr/0004-plugin-consent-is-worked-out-when-read.md), epic #1154 and #1149 (this change)._
+
 ## Recommended order
 
 Check items off as PRs merge. Ordering rationale in the notes column; parallelizable work is marked.

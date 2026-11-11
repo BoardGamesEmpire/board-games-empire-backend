@@ -38,7 +38,7 @@ model PluginLifecycleEvent {
   scopeId   String?           @map("scope_id")
 
   /// Event-specific context: provenance + grants + audit findings on
-  /// Installed, error detail on LoadFailed, escalation slug on UnitDisabled…
+  /// Installed, error detail on LoadFailed, the escalating slugs on ReconsentRequested…
   payload Json @default("{}")
 
   /// Mutation completion time (event construction) — UIs sort by this.

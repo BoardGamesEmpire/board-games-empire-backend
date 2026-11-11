@@ -101,9 +101,10 @@ export class HouseholdPluginsController {
       "Driven from the installed set, not from this household's enablement rows: every plugin the household axis " +
       'admits appears, with `unit.anchored` false where no row exists yet — so a household that has enabled ' +
       'nothing still sees what it could enable. A plugin whose scope no longer admits household enablement but ' +
-      'which this household still holds a row for is listed too, carrying a top-level `dormantReason` — a retained row ' +
-      'that serves nothing is exactly what an admin needs to see, and the reason says whether a re-scope or a ' +
-      'fresh configuration is what would revive it. Tombstoned plugins never ' +
+      'which this household still holds a row for is listed too, with `unit.state` unavailable or needs_configuration — a ' +
+      'retained unit enablement that serves nothing is exactly what a household admin needs to see, and the ' +
+      'state code says whether a server admin (re-scoping the plugin, or switching it back on: `serverEnabled`) ' +
+      'or a fresh configuration is what would revive it. Tombstoned plugins never ' +
       'appear — there is no path to participate in one again — and unlike `GET /plugins` this route accepts no ' +
       'flag to admit them.',
   })
@@ -138,8 +139,10 @@ export class HouseholdPluginsController {
     summary: 'Record a household-scope consent decision for one requested permission',
     description:
       'Grant or durably deny a permission the active manifest requests at household consent scope, for this ' +
-      'household. Idempotent on exact re-statement (changed: false). A denial that leaves a REQUIRED household ' +
-      "check unsatisfied suspends the household's unit (suspendedForConsent) — late acceptance re-enables it.",
+      'household. Idempotent on exact re-statement (changed: false). A decision never creates or flips the unit ' +
+      'enablement: a household that has not switched the plugin on stays off (state off), and one that has keeps ' +
+      'running while a denial leaves a REQUIRED household check outstanding, with state review_pending until it ' +
+      'is granted.',
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
@@ -221,12 +224,14 @@ export class HouseholdPluginsController {
   @ApiOperation({
     summary: 'Enable the plugin for this household',
     description:
-      "The household admin's own switch (enabled), layered under the server-level one — consent suspension is " +
-      'separate state this endpoint never writes, so a consent-suspended unit stays suspended across an enable. ' +
-      'First enable creates the enablement row; optional config is validated against the manifest config.schema ' +
+      "The household admin's own switch (enabled), layered under the server-level one — consent standing is " +
+      'worked out on every read and this endpoint never writes it, so a required check still outstanding leaves ' +
+      'the unit running with state review_pending. ' +
+      'First enable creates the unit enablement; optional config is validated against the manifest config.schema ' +
       'and written atomically with it. When the manifest requires household config, enabling without config ' +
-      'demands a valid retained document (409 with the violations otherwise). A row created while a required ' +
-      'household permission carries a durable denial is born consent-suspended and heals through late acceptance.',
+      'demands a valid retained document (409 with the violations otherwise). A unit enablement created while a required ' +
+      'household permission carries a durable denial starts in state review_pending and clears when the ' +
+      'household grants the permission.',
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
@@ -267,11 +272,12 @@ export class HouseholdPluginsController {
   @ApiOperation({
     summary: 'Disable the plugin for this household',
     description:
-      "Flips the household's own switch off. Consent state is untouched: a durable denial or suspension keeps " +
-      'its record, and re-enabling restores exactly the consent state the unit had. Unlike enable and the config ' +
-      'write, this route accepts a row whose plugin scope no longer admits household enablement (`dormantReason`): ' +
-      'the row is listed for this household, and switching it off is the only action left that makes sense. The ' +
-      "dormancy itself is not cleared — it is not the switch, and lifting it is an activation's business.",
+      "Flips the household's own switch off. Consent standing is untouched: a durable denial keeps its " +
+      'record, and re-enabling restores exactly the consent standing the unit had. Unlike enable and the config ' +
+      'write, this route accepts a unit enablement whose plugin scope no longer admits household enablement ' +
+      '(state unavailable): it is listed for this household, and switching it off is the only action left that ' +
+      'makes sense. The unavailable state itself is not cleared — it is not the switch, and lifting it is an ' +
+      "activation's business.",
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
@@ -341,9 +347,9 @@ export class HouseholdPluginsController {
   @ApiOperation({
     summary: "Per-feature activation state for this household's unit (#60)",
     description:
-      'Why a feature is or is not running here: per-feature active|disabled with a denied|pending|suspended ' +
+      'Why a feature is or is not running here: per-feature active|disabled with a denied|pending ' +
       'reason paired with the blocking permission slugs (the client renders actionable "why is this missing" ' +
-      'feedback from the pairing), plus the unit-level served and suspendedForConsent state.',
+      'feedback from the pairing), plus the unit-level served, the unit state code and consent standing.',
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })

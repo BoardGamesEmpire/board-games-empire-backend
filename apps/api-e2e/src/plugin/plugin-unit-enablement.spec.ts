@@ -10,9 +10,8 @@ import { pluginRowData } from './plugin-row-fixtures';
  * The wire half of #323: household and user unit enablement plus the
  * feature-state read (#60), over real rows. Pinned here: the inline-config
  * gate (409 with the retained document's issues[], 422 with the supplied
- * document's), the born-suspended creation and its late-acceptance
- * heal through decide(), the serving predicate (`enabled &&
- * !suspendedForConsent`) surviving an admin enable flip, the scope-coherence
+ * document's), a row created beside a durable required denial serving while
+ * its consent standing reports the refusal (#1149), the scope-coherence
  * refusal, the user axis's no-row 404 (decide() stays the only creator,
  * #225), and the feature read's reason/blockingSlugs pairing per unit
  * viewpoint.
@@ -48,7 +47,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
   };
 
   /**
-   * REQUIRED household check bound to the fixture feature — the feature read and the born-suspended probe both key on it.
+   * REQUIRED household check bound to the fixture feature — the feature read and the consent-standing probe both key on it.
    * An allowlisted public read, which a household-scope consent may hold (#591).
    */
   const HOUSEHOLD_CHECK: Check = {
@@ -155,7 +154,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
       const plugin = await arrangePlugin();
 
       const enabled = await enableHousehold(owner, household.id, plugin.slug).expect(200);
-      expect(enabled.body.unit).toMatchObject({ enabled: true, suspendedForConsent: false, config: {} });
+      expect(enabled.body.unit).toMatchObject({ enabled: true, config: {} });
 
       // Idempotent re-enable: same state back, still one row.
       await enableHousehold(owner, household.id, plugin.slug).expect(200);
@@ -256,52 +255,33 @@ describe('plugin unit enablement + feature state (#323)', () => {
     });
   });
 
-  describe('born suspended over a durable required denial, healed by late acceptance', () => {
-    it('a row created beside a required household denial starts suspended; the Granted flip re-enables it', async () => {
+  describe('consent standing beside a durable required denial (#1149)', () => {
+    it('a row created beside a durable required denial is enabled, served, and reports review_pending with the denied slug as refused', async () => {
       const owner = await actors.user();
       const { household } = await actors.householdWithMembers({ owner });
       const plugin = await arrangePlugin();
 
-      // The durable refusal lands first — rowless, so nothing suspends yet.
+      // The durable refusal lands before any unit enablement exists.
       await decideHousehold(owner, household.id, plugin.slug, {
         permissionSlug: 'read:game:public',
         status: PluginGrantStatus.Denied,
       }).expect(200);
 
+      // The household admin's switch is the only thing enable writes: consent
+      // never decides whether the row is created or switched on.
       const enabled = await enableHousehold(owner, household.id, plugin.slug).expect(200);
-      expect(enabled.body.unit).toMatchObject({ enabled: true, suspendedForConsent: true });
-      expect(enabled.body.unit.suspendedAt).not.toBeNull();
+      expect(enabled.body.unit).toMatchObject({ enabled: true });
+      expect(await unitRow(household.id, plugin.id)).toMatchObject({ enabled: true });
 
-      // The serving predicate holds: enabled by the admin, still not served.
-      const blocked = await readHouseholdFeatures(owner, household.id, plugin.slug).expect(200);
-      expect(blocked.body.featureState.served).toBe(false);
-
-      // Late acceptance is the heal — the admin switch never was.
-      await decideHousehold(owner, household.id, plugin.slug, {
-        permissionSlug: 'read:game:public',
-        status: PluginGrantStatus.Granted,
-      }).expect(200);
-
-      const row = await unitRow(household.id, plugin.id);
-      expect(row).toMatchObject({ enabled: true, suspendedForConsent: false, suspendedAt: null });
-    });
-
-    it('a suspended unit stays suspended across an admin enable flip', async () => {
-      const owner = await actors.user();
-      const { household } = await actors.householdWithMembers({ owner });
-      const plugin = await arrangePlugin();
-      await db.client.householdPlugin.create({
-        data: {
-          householdId: household.id,
-          pluginId: plugin.id,
-          enabled: false,
-          suspendedForConsent: true,
-          suspendedAt: new Date(),
-        },
-      });
-
-      const enabled = await enableHousehold(owner, household.id, plugin.slug).expect(200);
-      expect(enabled.body.unit).toMatchObject({ enabled: true, suspendedForConsent: true });
+      // The unit runs on the grants it holds; the refusal is reported, not
+      // enforced by holding the whole unit back.
+      const read = await readHouseholdFeatures(owner, household.id, plugin.slug).expect(200);
+      expect(read.body.featureState).toMatchObject({ served: true, state: 'review_pending' });
+      expect(read.body.featureState.consent.outstanding).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ slug: 'read:game:public', kind: 'refused', required: true }),
+        ]),
+      );
     });
   });
 
@@ -419,7 +399,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
   });
 
   describe('user enable/disable (#225: decide() stays the creator)', () => {
-    it('404s with no anchor row, then round-trips the switch once a Granted decision created one', async () => {
+    it('404s with no unit enablement, then round-trips the switch once a Granted decision created one', async () => {
       const user = await actors.user();
       const plugin = await arrangePlugin();
 
@@ -433,7 +413,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
       }).expect(200);
 
       const disabled = await disableUser(user, plugin.slug).expect(200);
-      expect(disabled.body.unit).toMatchObject({ enabled: false, suspendedForConsent: false });
+      expect(disabled.body.unit).toMatchObject({ enabled: false });
 
       const enabled = await enableUser(user, plugin.slug).expect(200);
       expect(enabled.body.unit.enabled).toBe(true);
@@ -442,7 +422,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
     it('the user axis is a real surface on a SERVER-scope plugin — the switch and the read both work there', async () => {
       // The manifest gate refuses household consent on a server-scope
       // plugin but permits user consent at any scope (#225), and decide()
-      // creates a real anchor there. So the household 422 must not
+      // creates a real unit enablement there. So the household 422 must not
       // generalize to this axis: the user would be toggling a unit whose
       // blocked features they could never read.
       const user = await actors.user();
@@ -451,7 +431,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
         permissions: { checks: [MANAGE_DIGEST_CHECK, { ...USER_CHECK, required: true, feature: 'weekly-digest' }] },
       });
 
-      // Readable before any anchor exists: never-enabled, not impossible.
+      // Readable before any unit enablement exists: never-enabled, not impossible.
       const rowless = await readUserFeatures(user, plugin.slug).expect(200);
       expect(rowless.body.featureState).toMatchObject({
         served: false,
@@ -484,7 +464,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
         plugin: { slug: plugin.slug },
         unit: { scopeType: 'Household', householdId: household.id },
         served: true,
-        suspendedForConsent: false,
+        state: 'review_pending',
       });
       const digest = pending.body.featureState.features.find(
         (feature: { name: string }) => feature.name === 'weekly-digest',
@@ -506,9 +486,10 @@ describe('plugin unit enablement + feature state (#323)', () => {
         (feature: { name: string }) => feature.name === 'weekly-digest',
       );
       expect(deniedDigest).toMatchObject({ reason: 'denied', blockingSlugs: ['read:game:public'] });
-      // The required denial also suspended the unit — reported at the
-      // unit level while the per-feature slot keeps the actionable reason.
-      expect(denied.body.featureState).toMatchObject({ served: false, suspendedForConsent: true });
+      // The required denial leaves the unit served: the unit-level state
+      // reports the review pending, while the per-feature slot keeps the
+      // actionable reason (#1149).
+      expect(denied.body.featureState).toMatchObject({ served: true, state: 'review_pending' });
     });
 
     it('a household-consented check is per-unit from the USER viewpoint, never a false green or a false block', async () => {

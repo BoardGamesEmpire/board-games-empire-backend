@@ -216,19 +216,14 @@ export class HouseholdPluginConfigUpdatedEvent extends MutationEvent<HouseholdPl
   }
 }
 
-type HouseholdPluginSwitchSnapshot = Readonly<
-  Pick<HouseholdPlugin, 'id' | 'householdId' | 'pluginId' | 'enabled' | 'suspendedForConsent'>
->;
+type HouseholdPluginSwitchSnapshot = Readonly<Pick<HouseholdPlugin, 'id' | 'householdId' | 'pluginId' | 'enabled'>>;
 
 /**
  * The household admin flipped their unit's `enabled` switch ON — or first
  * enabled the plugin, creating the row (`before` is `null` exactly then;
  * #323). Shares the `plugin.enabled` routing key with the server-scope
  * class (the documented `ConfigUpdated` two-class precedent): listeners
- * discriminate on `instanceof` / `subject`, never on the key. Deliberately
- * NOT `UnitEnabled` — that key means a consent suspension lifted, and
- * listeners for consent transitions must not have to filter admin
- * kill-switch flips.
+ * discriminate on `instanceof` / `subject`, never on the key.
  */
 export class HouseholdPluginEnabledEvent extends MutationEvent<HouseholdPlugin> {
   static readonly eventName = PluginEvent.Enabled;
@@ -239,21 +234,7 @@ export class HouseholdPluginEnabledEvent extends MutationEvent<HouseholdPlugin> 
   readonly subject = ResourceType.HouseholdPlugin;
   readonly subjectId: string;
 
-  constructor(
-    before: HouseholdPluginSwitchSnapshot | null,
-    after: HouseholdPluginSwitchSnapshot,
-    initiatedAt: Date,
-    /**
-     * Required household-scope permissions whose durable denial made the
-     * row be CREATED suspended — non-empty only on a born-suspended
-     * creation. Context for the lifecycle row, not row state: no
-     * consent-machinery suspension event fires for a birth state (nothing
-     * transitioned), so without this the durable record of WHY the unit
-     * started suspended would not exist — every other suspension leaves
-     * one.
-     */
-    public readonly bornSuspendedSlugs: readonly string[] = [],
-  ) {
+  constructor(before: HouseholdPluginSwitchSnapshot | null, after: HouseholdPluginSwitchSnapshot, initiatedAt: Date) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
@@ -275,9 +256,7 @@ export class HouseholdPluginDisabledEvent extends MutationEvent<HouseholdPlugin>
   }
 }
 
-type UserPluginSwitchSnapshot = Readonly<
-  Pick<UserPlugin, 'id' | 'userId' | 'pluginId' | 'enabled' | 'suspendedForConsent'>
->;
+type UserPluginSwitchSnapshot = Readonly<Pick<UserPlugin, 'id' | 'userId' | 'pluginId' | 'enabled'>>;
 
 /**
  * The user flipped their own unit's `enabled` switch ON (#323). Never
@@ -533,75 +512,8 @@ export class PluginGrantRevokedEvent extends MutationEvent<PluginGrant> {
   }
 }
 
-type HouseholdPluginSuspensionSnapshot = Readonly<
-  Pick<HouseholdPlugin, 'id' | 'householdId' | 'pluginId' | 'enabled' | 'suspendedForConsent'>
->;
-
-/**
- * A consent unit was SUSPENDED because an update escalated a permission to
- * required at its consent scope and the unit has not accepted (#59
- * consent-unit escalation semantics). Suspension is explicit state
- * (`suspendedForConsent`), never an `enabled` flip — the admin's prior
- * intent survives, and late acceptance restores exactly it.
- * The escalating slugs and manifest version ride the event: the lifecycle
- * row is the durable "why".
- */
-export class HouseholdPluginUnitDisabledEvent extends MutationEvent<HouseholdPlugin> {
-  static readonly eventName = PluginEvent.UnitDisabled;
-
-  declare readonly before: HouseholdPluginSuspensionSnapshot;
-  declare readonly after: HouseholdPluginSuspensionSnapshot;
-
-  readonly subject = ResourceType.HouseholdPlugin;
-  readonly subjectId: string;
-
-  constructor(
-    before: HouseholdPluginSuspensionSnapshot,
-    after: HouseholdPluginSuspensionSnapshot,
-    /** Every escalated required-at-scope permission the unit has not accepted — one suspension, however many slugs forced it. */
-    public readonly requiredPermissionSlugs: readonly string[],
-    /** The manifest version whose escalation suspended the unit. */
-    public readonly manifestVersion: string,
-    initiatedAt: Date,
-  ) {
-    super(before, after, initiatedAt);
-    this.subjectId = after.id;
-  }
-}
-
-/**
- * Late acceptance re-enabled a suspended unit: a `Granted` decision
- * cleared the last outstanding required-at-scope permission, so
- * `PluginGrantService.decide()` lifted the suspension in the same flow —
- * the consent act is the re-enable trigger by definition. Own routing key,
- * symmetric with `UnitDisabled`: listeners for consent-suspension
- * transitions must not have to filter server kill-switch flips.
- */
-export class HouseholdPluginUnitEnabledEvent extends MutationEvent<HouseholdPlugin> {
-  static readonly eventName = PluginEvent.UnitEnabled;
-
-  declare readonly before: HouseholdPluginSuspensionSnapshot;
-  declare readonly after: HouseholdPluginSuspensionSnapshot;
-
-  readonly subject = ResourceType.HouseholdPlugin;
-  readonly subjectId: string;
-
-  constructor(
-    before: HouseholdPluginSuspensionSnapshot,
-    after: HouseholdPluginSuspensionSnapshot,
-    /** The decision that cleared the last outstanding requirement. */
-    public readonly grantedPermissionSlug: string,
-    /** The active manifest version whose requirements are now fully consented. */
-    public readonly manifestVersion: string,
-    initiatedAt: Date,
-  ) {
-    super(before, after, initiatedAt);
-    this.subjectId = after.id;
-  }
-}
-
 type HouseholdPluginDormancySnapshot = Readonly<
-  Pick<HouseholdPlugin, 'id' | 'householdId' | 'pluginId' | 'enabled' | 'suspendedForConsent' | 'dormantReason'>
+  Pick<HouseholdPlugin, 'id' | 'householdId' | 'pluginId' | 'enabled' | 'dormantReason'>
 >;
 
 /**
@@ -611,17 +523,9 @@ type HouseholdPluginDormancySnapshot = Readonly<
  * leaves the row with no surface, a schema tightening leaves its retained
  * config non-conforming.
  *
- * Its own routing key rather than `UnitDisabled`, which means consent
- * suspension and carries the escalated permission slugs as its durable "why".
- * Dormancy has no slugs and a different cause and a different cure, so sharing
- * that key would force every consent listener to inspect a payload to find out
- * whether the event was about consent at all — and would record a lie in
- * `plugin_lifecycle_events`, where the kind IS the explanation.
- *
  * `enabled` is deliberately part of the snapshot and deliberately untouched by
  * the writer: dormancy is not the admin's intent, so their switch survives it
- * and a revival restores exactly the state they chose — the same discipline
- * consent suspension follows.
+ * and a revival restores exactly the state they chose.
  */
 export class HouseholdPluginUnitDormantEvent extends MutationEvent<HouseholdPlugin> {
   static readonly eventName = PluginEvent.UnitDormant;
@@ -651,10 +555,9 @@ export class HouseholdPluginUnitDormantEvent extends MutationEvent<HouseholdPlug
  * household axis, so the row's surface exists once more and the retained
  * document conforms to the schema now in force (#369, D-CP).
  *
- * Symmetric with {@link HouseholdPluginUnitDormantEvent} and, like it, distinct
- * from `UnitEnabled` — that key means a consent decision lifted a suspension,
- * which is a different act by a different actor. A revival is a side effect of
- * an admin activating a version, and no household consented to anything.
+ * Symmetric with {@link HouseholdPluginUnitDormantEvent}. A revival is a side
+ * effect of an admin activating a version, and no household consented to
+ * anything.
  */
 export class HouseholdPluginUnitRevivedEvent extends MutationEvent<HouseholdPlugin> {
   static readonly eventName = PluginEvent.UnitRevived;
@@ -679,68 +582,63 @@ export class HouseholdPluginUnitRevivedEvent extends MutationEvent<HouseholdPlug
   }
 }
 
-type UserPluginSuspensionSnapshot = Readonly<
-  Pick<UserPlugin, 'id' | 'userId' | 'pluginId' | 'enabled' | 'suspendedForConsent'>
->;
-
 /**
- * A USER consent unit was suspended pending re-consent (#225) — the exact
- * user-scope mirror of `HouseholdPluginUnitDisabledEvent`. Shares the
- * `plugin.unit_disabled` routing key (the documented `ConfigUpdated`
- * two-class precedent): listeners discriminate on `instanceof` / `subject`,
- * never on the key. Suspension is explicit state (`suspendedForConsent`),
- * exactly as at household scope: the user's `enabled` intent survives, and
- * late acceptance restores exactly it.
+ * Activating a plugin update announced that this household unit does not cover
+ * the new manifest's re-consent slugs (#1149). Nothing on the unit enablement
+ * changed and nothing was suspended: the household's consent standing is worked out
+ * when read, so this event is the durable, notifiable record that a household
+ * admin has a review pending, not a state transition. Hence `before` and
+ * `after` are the same snapshot, as in {@link PluginUpdateCheckCompletedEvent}.
+ *
+ * Shares the `plugin.re_consent_requested` routing key with
+ * {@link UserPluginReconsentRequestedEvent}; listeners discriminate on
+ * `instanceof` / `subject`, never on the key.
  */
-export class UserPluginUnitDisabledEvent extends MutationEvent<UserPlugin> {
-  static readonly eventName = PluginEvent.UnitDisabled;
+export class HouseholdPluginReconsentRequestedEvent extends MutationEvent<HouseholdPlugin> {
+  static readonly eventName = PluginEvent.ReconsentRequested;
 
-  declare readonly before: UserPluginSuspensionSnapshot;
-  declare readonly after: UserPluginSuspensionSnapshot;
+  declare readonly before: HouseholdPluginSwitchSnapshot;
+  declare readonly after: HouseholdPluginSwitchSnapshot;
 
-  readonly subject = ResourceType.UserPlugin;
+  readonly subject = ResourceType.HouseholdPlugin;
   readonly subjectId: string;
 
   constructor(
-    before: UserPluginSuspensionSnapshot,
-    after: UserPluginSuspensionSnapshot,
-    /** Every escalated re-consent permission the user has not accepted — one suspension, however many slugs forced it. */
-    public readonly requiredPermissionSlugs: readonly string[],
-    /** The manifest version whose escalation suspended the unit. */
+    unit: HouseholdPluginSwitchSnapshot,
+    /** The re-consent slugs of the activated manifest that this unit does not yet cover. */
+    public readonly outstandingPermissionSlugs: readonly string[],
+    /** The manifest version whose activation announced the review. */
     public readonly manifestVersion: string,
     initiatedAt: Date,
   ) {
-    super(before, after, initiatedAt);
-    this.subjectId = after.id;
+    super(unit, unit, initiatedAt);
+    this.subjectId = unit.id;
   }
 }
 
 /**
- * Late acceptance re-enabled a suspended USER unit (#225): a `Granted`
- * decision cleared the last outstanding user-scope
- * requirement, so `PluginGrantService.decide()` lifted the suspension in
- * the same flow. Shares the `plugin.unit_enabled` routing key with the
- * household class; `subject` disambiguates.
+ * The user-scope mirror of {@link HouseholdPluginReconsentRequestedEvent}
+ * (#1149): an activation announced that this user's unit does not cover the
+ * new manifest's re-consent slugs. The unit enablement is untouched.
  */
-export class UserPluginUnitEnabledEvent extends MutationEvent<UserPlugin> {
-  static readonly eventName = PluginEvent.UnitEnabled;
+export class UserPluginReconsentRequestedEvent extends MutationEvent<UserPlugin> {
+  static readonly eventName = PluginEvent.ReconsentRequested;
 
-  declare readonly before: UserPluginSuspensionSnapshot;
-  declare readonly after: UserPluginSuspensionSnapshot;
+  declare readonly before: UserPluginSwitchSnapshot;
+  declare readonly after: UserPluginSwitchSnapshot;
 
   readonly subject = ResourceType.UserPlugin;
   readonly subjectId: string;
 
   constructor(
-    before: UserPluginSuspensionSnapshot,
-    after: UserPluginSuspensionSnapshot,
-    /** The decision that cleared the last outstanding requirement. */
-    public readonly grantedPermissionSlug: string,
-    /** The active manifest version whose requirements are now fully consented. */
+    unit: UserPluginSwitchSnapshot,
+    /** The re-consent slugs of the activated manifest that this unit does not yet cover. */
+    public readonly outstandingPermissionSlugs: readonly string[],
+    /** The manifest version whose activation announced the review. */
     public readonly manifestVersion: string,
     initiatedAt: Date,
   ) {
-    super(before, after, initiatedAt);
-    this.subjectId = after.id;
+    super(unit, unit, initiatedAt);
+    this.subjectId = unit.id;
   }
 }
