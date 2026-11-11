@@ -28,7 +28,7 @@ jobs:
   bug-agent:
     if: github.event.label.name == 'bug' && github.event.sender.type == 'User'
     # At `master`, which is what the federation rule trusts.
-    uses: BoardGamesEmpire/automation/.github/workflows/bug-agent.yml@master
+    uses: BoardGamesEmpire/automation/.github/workflows/bug-agent.yml@5a8d7a678c88a5c5606201bcbf76ca994c272fd9 # master
     with:
       bge-agent-client-id: ${{ vars.BGE_AGENT_CLIENT_ID }}
       anthropic-federation-rule-id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
