@@ -146,6 +146,38 @@ export function toProtoSearchFilter(filter: GameSearchFilter): proto.SearchFilte
 export function localFilterConditions(filter: GameSearchFilter): Prisma.GameWhereInput[] {
   const platformTypes = filter.platformTypes ?? [];
   const contentTypes = filter.contentTypes ?? [];
+
+  return [
+    ...(contentTypes.length > 0 ? [{ contentType: { in: contentTypes } }] : []),
+    ...(platformTypes.length > 0
+      ? [{ platformGames: { some: { platform: { platformType: { in: platformTypes } } } } }]
+      : []),
+    ...gameRangeConditions(filter),
+  ];
+}
+
+/** The range fields of a {@link GameSearchFilter}, which a caller filtering games of its own can take alone. */
+export type GameRangeFilter = Pick<
+  GameSearchFilter,
+  | 'publishYearMin'
+  | 'publishYearMax'
+  | 'publishYearIncludeUnknown'
+  | 'playerCountMin'
+  | 'playerCountMax'
+  | 'playerCountIncludeUnknown'
+  | 'playTimeMin'
+  | 'playTimeMax'
+  | 'playTimeIncludeUnknown'
+>;
+
+/**
+ * The publish-year, player-count and play-time conditions on a game, in that
+ * order, each present only when its range gives a bound: the range half of
+ * {@link localFilterConditions}. The offered-games read nests them under an
+ * offered entry's game, so a range means the same there as in a search
+ * (#1187).
+ */
+export function gameRangeConditions(filter: GameRangeFilter): Prisma.GameWhereInput[] {
   const { publishYear, playerCount, playTime } = filterRanges(filter);
   const inRange: Prisma.GameWhereInput | undefined = publishYear && {
     publishYear: {
@@ -155,10 +187,6 @@ export function localFilterConditions(filter: GameSearchFilter): Prisma.GameWher
   };
 
   return [
-    ...(contentTypes.length > 0 ? [{ contentType: { in: contentTypes } }] : []),
-    ...(platformTypes.length > 0
-      ? [{ platformGames: { some: { platform: { platformType: { in: platformTypes } } } } }]
-      : []),
     ...(publishYear && inRange ? [orUnknown(publishYear, inRange, { publishYear: null })] : []),
     ...(playerCount ? [supportsPlayerCount(playerCount)] : []),
     ...(playTime ? [fitsPlayTime(playTime)] : []),
