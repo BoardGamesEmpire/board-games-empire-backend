@@ -39,6 +39,12 @@ const BAD_REQUEST = 'BAD_REQUEST';
  * - **A body better-call doesn't read is not counted:** a GET's or HEAD's, or
  *   one with no `content-type`. The route answers without it, and node
  *   discards it once the answer is sent.
+ * - **A route that answers before it reads the body keeps its answer,** as
+ *   better-auth's router does for an unknown path, or its `onRequest` checks
+ *   for a refusal. The route answered without the body, so its answer stands
+ *   however much of the body arrives after it. No more of it is held:
+ *   better-call stops keeping the body once it passes the limit, or, when the
+ *   first chunk was smaller, pauses the request (#1197).
  *
  * The refusal is 413 `REQUEST_TOO_LARGE` with a plain-language message. It
  * keeps the connection, and node reads the rest of the body and discards it,

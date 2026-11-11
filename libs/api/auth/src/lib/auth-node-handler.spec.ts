@@ -191,6 +191,31 @@ describe('createAuthNodeHandler', () => {
     expect(answer.headers['set-cookie']).toEqual(['bge.session_token=; Max-Age=0; Path=/']);
   });
 
+  it('keeps the answer of a route that answered before reading a body that then grew past the limit (#1057)', async () => {
+    // As better-auth's router does for an unknown path: it answers 404 before
+    // it reads the body. The body is sent only once the route has answered,
+    // so the adapter has already checked the count when the bytes arrive. One
+    // chunk past the limit is read and counted; a smaller first chunk would
+    // leave the request paused unread (#1197), and nothing to count.
+    let answered!: () => void;
+    const routeAnswered = new Promise<void>((resolve) => (answered = resolve));
+    await serve(async () => {
+      answered();
+      return new Response(null, { status: 404 });
+    });
+
+    const answer = await send(
+      'POST',
+      { 'content-type': 'application/json', 'transfer-encoding': 'chunked' },
+      (request) => {
+        request.flushHeaders();
+        void routeAnswered.then(() => request.end('x'.repeat(LIMIT * 4)));
+      },
+    );
+
+    expect(answer.status).toBe(404);
+  });
+
   it("answers a request whose URL can't be built 400 with a code, where Express answered an uncoded 500", async () => {
     const handler = jest.fn<Promise<Response>, [Request]>();
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
