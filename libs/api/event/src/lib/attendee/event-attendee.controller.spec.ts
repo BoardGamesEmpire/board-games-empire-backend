@@ -3,7 +3,10 @@ import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { createTestingModuleWithDb, makeEventAttendee, paginationQuery } from '@bge/testing';
+import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { DECORATORS } from '@nestjs/swagger';
+import { Http } from '@status/codes';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import type { OfferedGame } from '../offered-game/offered-game.types';
@@ -11,6 +14,7 @@ import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { UpdateAttendeeStatusDto } from './dto/update-attendee-status.dto';
 import { EventAttendeeController } from './event-attendee.controller';
 import { EventAttendeeService, type AttendeeWithGames } from './event-attendee.service';
+import { OFFER_REFUSALS, OfferRefusal, type OfferResult } from './offer-outcome';
 
 describe('EventAttendeeController', () => {
   let controller: EventAttendeeController;
@@ -24,6 +28,7 @@ describe('EventAttendeeController', () => {
       | 'updateStatus'
       | 'getGameList'
       | 'addGameToList'
+      | 'offerGames'
       | 'removeGameFromList'
     >
   >;
@@ -36,6 +41,7 @@ describe('EventAttendeeController', () => {
       updateStatus: jest.fn(),
       getGameList: jest.fn(),
       addGameToList: jest.fn(),
+      offerGames: jest.fn(),
       removeGameFromList: jest.fn(),
     } satisfies Partial<jest.Mocked<EventAttendeeService>> as typeof service;
 
@@ -201,6 +207,48 @@ describe('EventAttendeeController', () => {
         collectionId: 'gc-1',
       });
       expect(result).toEqual({ message: t('success.attendee.game_added'), entry });
+    });
+  });
+
+  // #1188: a batch whose ids partly fail still succeeds as a request, so it
+  // answers 200, not 201, and the results say what happened to each.
+  describe('offerGames', () => {
+    it('answers 200 with the results in request order', async () => {
+      const results: OfferResult[] = [
+        { collectionId: 'col-1', outcome: 'added', entry: { id: 'gl-1' } as OfferedGame },
+        {
+          collectionId: 'col-2',
+          outcome: 'refused',
+          reason: OfferRefusal.NotFound,
+          message: t('errors.attendee.game_collection_entry_not_found', { collectionId: 'col-2' }),
+        },
+      ];
+      service.offerGames.mockResolvedValue(results);
+
+      const body = { items: [{ collectionId: 'col-1' }, { collectionId: 'col-2' }] };
+      const result = await firstValueFrom(controller.offerGames('event-1', 'att-1', body));
+
+      expect(service.offerGames).toHaveBeenCalledWith('event-1', 'att-1', body);
+      expect(result).toEqual({ results });
+      expect(Reflect.getMetadata(HTTP_CODE_METADATA, EventAttendeeController.prototype.offerGames)).toBe(Http.Ok);
+    });
+
+    // A client generated from the OpenAPI document branches on `reason`, so
+    // the document carries it as an enum, not only as prose (#1188).
+    it('documents each result, its outcome and its refusal reason as enums', () => {
+      const responses = Reflect.getMetadata(DECORATORS.API_RESPONSE, EventAttendeeController.prototype.offerGames);
+      const result = responses['200'].schema.properties.results.items;
+
+      expect(result.required).toEqual(['collectionId', 'outcome']);
+      expect(result.properties.outcome.enum).toEqual(['added', 'alreadyOffered', 'refused']);
+      expect(result.properties.reason.enum).toEqual(OFFER_REFUSALS);
+      expect(OFFER_REFUSALS).toEqual([
+        'notFound',
+        'notInAttendeesCollection',
+        'removedFromCollection',
+        'notAnExpansionOfBase',
+        'baseRefused',
+      ]);
     });
   });
 

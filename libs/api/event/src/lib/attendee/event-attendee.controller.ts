@@ -2,15 +2,47 @@ import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated } from '@bge/shared';
-import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { AddGameToListDto } from './dto/add-game-to-list.dto';
+import { OFFER_GAMES_MAX_IDS, OfferGamesDto } from './dto/offer-games.dto';
 import { UpdateAttendeeStatusDto } from './dto/update-attendee-status.dto';
 import { EventAttendeeService } from './event-attendee.service';
+import { OFFER_REFUSALS } from './offer-outcome';
+
+/**
+ * The batch offer's answer (#1188). `reason` and `outcome` are enums here, not
+ * only prose, so a client generated from the document can branch on them.
+ * The entry is the offered-game shape, which has no model of its own yet.
+ */
+const OFFER_RESULTS_SCHEMA = {
+  type: 'object',
+  required: ['results'],
+  properties: {
+    results: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['collectionId', 'outcome'],
+        properties: {
+          collectionId: { type: 'string' },
+          outcome: { type: 'string', enum: ['added', 'alreadyOffered', 'refused'] },
+          entry: {
+            type: 'object',
+            additionalProperties: true,
+            description: 'The offered game, for `added` and `alreadyOffered`',
+          },
+          reason: { type: 'string', enum: [...OFFER_REFUSALS], description: 'Why it was refused, for `refused`' },
+          message: { type: 'string', description: "The refusal, in the caller's language, for `refused`" },
+        },
+      },
+    },
+  },
+};
 
 @ApiBearerAuth()
 @ApiSecurity('api_key')
@@ -159,6 +191,38 @@ export class EventAttendeeController {
     return from(this.attendeeService.addGameToList(eventId, attendeeId, dto)).pipe(
       map((entry) => ({ message: t('success.attendee.game_added'), entry })),
     );
+  }
+
+  @ApiOperation({
+    summary: 'Offer several games at once',
+    description:
+      "Offers several of the attendee's collection entries to the event, each a game with a choice of its " +
+      `expansions: at most ${OFFER_GAMES_MAX_IDS} entries in all, counting expansions, each named once. Each ` +
+      'entry is judged as the single add judges one, and an expansion must also expand its game. A bad entry ' +
+      'loses nothing else, so the request answers 200 with one result per entry, in request order, each ' +
+      'expansion right after its game: `added` (new, or taken back earlier and offered again with its id) or ' +
+      '`alreadyOffered`, each with its `entry` in the offered-game shape, or `refused`, with a stable `reason` ' +
+      `(${OFFER_REFUSALS.join(', ')}) beside a translated \`message\`. The expansions of a refused game are ` +
+      '`baseRefused`; those of a game already offered go ahead.',
+  })
+  @ApiParam({ name: 'eventId', type: String })
+  @ApiParam({ name: 'attendeeId', type: String })
+  @ApiResponse({
+    status: Http.Ok,
+    description: 'What happened to each collection entry, under `results`',
+    schema: OFFER_RESULTS_SCHEMA,
+  })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description: 'No items, more entries than the cap, an entry named twice, or a malformed item',
+  })
+  @ApiResponse({ status: Http.Forbidden, description: 'No grant to offer games for this attendee' })
+  @ApiResponse({ status: Http.NotFound, description: 'Event or attendee not found' })
+  @CheckPolicies((ability) => ability.can(Action.create, ResourceType.EventAttendeeGameList))
+  @HttpCode(Http.Ok)
+  @Post(':attendeeId/games/batch')
+  offerGames(@Param('eventId') eventId: string, @Param('attendeeId') attendeeId: string, @Body() dto: OfferGamesDto) {
+    return from(this.attendeeService.offerGames(eventId, attendeeId, dto)).pipe(map((results) => ({ results })));
   }
 
   @ApiOperation({ summary: "Remove a game from an attendee's available list" })

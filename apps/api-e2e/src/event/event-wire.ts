@@ -197,6 +197,11 @@ export interface ListAttendeeGamesEnvelope {
   readonly total: number;
 }
 
+/** One result of `POST /api/events/:eventId/attendees/:attendeeId/games/batch` (#1188). */
+export type OfferResultWire =
+  | { readonly collectionId: string; readonly outcome: 'added' | 'alreadyOffered'; readonly entry: OfferedGameWire }
+  | { readonly collectionId: string; readonly outcome: 'refused'; readonly reason: string; readonly message: string };
+
 /**
  * One occurrence's entry in the availability summary, restated to the fields
  * a spec asserts on.
@@ -514,4 +519,48 @@ export function offeredGameEnvelope(response: HttpResponseLike, request: Request
   const entry = isRecord(response.body) ? offeredGameRow(response.body['entry']) : undefined;
 
   return entry ?? fail(`it carried no 'entry' that is ${OFFERED_GAME_ROW}`, request, response);
+}
+
+/** What a result must be for {@link offerResult}. */
+const OFFER_RESULT = `an object with a string collectionId, and an 'entry' that is ${OFFERED_GAME_ROW} or a string reason and message`;
+
+/** A batch offer's result: an `entry` when offered, a `reason` and a translated `message` when refused (#1188). */
+function offerResult(value: unknown): OfferResultWire | undefined {
+  if (!isRecord(value) || typeof value['collectionId'] !== 'string') {
+    return undefined;
+  }
+
+  if (value['outcome'] === 'refused') {
+    return typeof value['reason'] === 'string' && typeof value['message'] === 'string'
+      ? (value as unknown as OfferResultWire)
+      : undefined;
+  }
+
+  return (value['outcome'] === 'added' || value['outcome'] === 'alreadyOffered') &&
+    offeredGameRow(value['entry']) !== undefined
+    ? (value as unknown as OfferResultWire)
+    : undefined;
+}
+
+/** `POST /api/events/:eventId/attendees/:attendeeId/games/batch`: `{ results: [...] }` (#1188). */
+export function offerResultsEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): readonly OfferResultWire[] {
+  const entries = isRecord(response.body) ? response.body['results'] : undefined;
+  if (!Array.isArray(entries)) {
+    return fail("it carried no 'results' array", request, response);
+  }
+
+  const results: OfferResultWire[] = [];
+  for (const entry of entries) {
+    const result = offerResult(entry);
+    if (result === undefined) {
+      return fail(`one of its results is not ${OFFER_RESULT}`, request, response);
+    }
+
+    results.push(result);
+  }
+
+  return results;
 }
