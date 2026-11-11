@@ -1,0 +1,67 @@
+name: Bug agent
+
+# When someone with write access labels an issue `bug`, the bug agent triages
+# it and, for a small fix that needs no decision, opens a draft PR (#1192).
+# The workflow itself, its prompts and its rules live in
+# BoardGamesEmpire/automation and are shared with the other repositories; this
+# file only sets this repository's limits and notes. The agent installs and
+# verifies through .github/actions/bug-agent-setup.
+#
+# Only `labeled`, not `opened`: an issue created with a label fires both
+# events, which would start two runs.
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: read
+  issues: read
+  # The Claude API token comes from workload identity federation, which
+  # exchanges this run's GitHub OIDC token.
+  id-token: write
+
+concurrency:
+  group: bug-agent-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  bug-agent:
+    if: github.event.label.name == 'bug' && github.event.sender.type == 'User'
+    # At `master`, which is what the federation rule trusts.
+    uses: BoardGamesEmpire/automation/.github/workflows/bug-agent.yml@master
+    with:
+      bge-agent-client-id: ${{ vars.BGE_AGENT_CLIENT_ID }}
+      anthropic-federation-rule-id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+      anthropic-organization-id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+      anthropic-service-account-id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+      fix-tools: 'Bash(npm run nx:*)'
+      # Schema and migrations, the gRPC contracts and dependencies each need a
+      # person's review.
+      protected-paths: |
+        prisma/*
+        *.proto
+        package.json
+        */package.json
+        package-lock.json
+      test-paths: |
+        *.spec.ts
+        *.e2e-spec.ts
+        */fixtures/*
+        */__fixtures__/*
+      # One feature lib per fix.
+      module-pattern: '^libs/api/([^/]+)/'
+      max-lines: 100
+      notes: |
+        Read `AGENTS.md`. Use the vocabulary in `GLOSSARY.md`, and read
+        `docs/agents/gotchas.md` before touching anything it lists.
+
+        Run Nx as `npm run nx <command>`, never `npx nx`. Verify each affected
+        project with `npm run nx run <project>:test`,
+        `npm run nx run <project>:lint` and
+        `npm run nx run <project>:typecheck`, then
+        `npm run nx -- format:check --all`.
+
+        A fix that changes the permission catalog or a permission condition
+        needs a person.
+    secrets:
+      bge-agent-private-key: ${{ secrets.BGE_AGENT_PRIVATE_KEY }}
