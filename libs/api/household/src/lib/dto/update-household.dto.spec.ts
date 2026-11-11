@@ -37,6 +37,14 @@ describe('UpdateHouseholdDto', () => {
     },
   );
 
+  it('rejects a null name, which the non-nullable column would answer with a 500 (#788)', async () => {
+    await expect(propertiesWithErrors({ name: null })).resolves.toEqual(['name']);
+  });
+
+  it('accepts a null description and image, which clear their nullable columns (#788)', async () => {
+    await expect(propertiesWithErrors({ description: null, image: null })).resolves.toEqual([]);
+  });
+
   it('rejects clientRequestId, which belongs to the create it keys (#534)', async () => {
     // The key is how a retried create finds the row it already made. An edit
     // that rewrites it strands that retry, which then makes a second household;

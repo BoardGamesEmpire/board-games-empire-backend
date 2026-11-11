@@ -2,7 +2,7 @@ import { MemberInvitePolicy, MemberSharePolicy } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsObject, IsOptional, ValidateIf, ValidateNested } from 'class-validator';
+import { IsEnum, IsObject, IsOptional, IsString, ValidateIf, ValidateNested } from 'class-validator';
 import { CreateHouseholdDto, HouseholdReachProperty, type HouseholdReach } from './create-household.dto';
 
 /**
@@ -49,10 +49,20 @@ export class UpdateHouseholdSettingsDto {
  * `(createdById, clientRequestId)` unique (#534). Omitted rather than
  * ignored: under the global `forbidNonWhitelisted` pipe a PATCH carrying it
  * answers 400, and the published schema no longer offers it.
+ *
+ * `name` can't be cleared, so it is redeclared with `ValidateIf` rather than
+ * `PartialType`'s `IsOptional`: `null` answers 400 instead of reaching the
+ * non-nullable column as a 500 (#788). `description` and `image` keep `null`,
+ * which clears them.
  */
 export class UpdateHouseholdDto extends PartialType(
-  OmitType(CreateHouseholdDto, ['clientRequestId', 'reach'] as const),
+  OmitType(CreateHouseholdDto, ['clientRequestId', 'name', 'reach'] as const),
 ) {
+  @ApiPropertyOptional()
+  @ValidateIf((_, value) => value !== undefined)
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  name?: string;
+
   @HouseholdReachProperty()
   reach?: HouseholdReach;
 
