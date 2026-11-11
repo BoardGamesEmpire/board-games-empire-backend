@@ -10,7 +10,7 @@ import { Logger, type LoggerService } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { betterAuth } from 'better-auth';
-import { createAuthMiddleware, getOAuthState } from 'better-auth/api';
+import { createAuthMiddleware, getOAuthState, isAPIError } from 'better-auth/api';
 import {
   admin,
   anonymous,
@@ -235,6 +235,15 @@ export function authFactory(
   return betterAuth({
     telemetry: { enabled: false },
     logger: betterAuthLogger(new Logger('BetterAuth')),
+    // Otherwise better-auth logs any error that isn't its own `APIError` and
+    // answers an empty 500, which no client can announce or tell from a bug.
+    // Rethrown, it reaches `createAuthRequestHandler`, which answers it with a
+    // code (#894). better-call's router still turns an `APIError` into its
+    // response, and a redirect returns before this is read. An endpoint's
+    // `APIError` never reached that handler over HTTP: better-auth answers it
+    // as a response before the router sees it. The after hook below logs the
+    // 500s among them.
+    onAPIError: { throw: true },
     advanced: {
       cookiePrefix: AUTH_COOKIE_PREFIX,
       disableOriginCheck: options.disableOriginCheck,
@@ -310,6 +319,17 @@ export function authFactory(
         await signOutHook.beforeRoute(context);
         idTokenGate.beforeRoute(context);
         await providerLinkFreshness.beforeRoute(context);
+      }),
+      // better-auth answers an endpoint's 500 over HTTP without its cause,
+      // which only the error carries, so it is logged here with it (#894).
+      // Only a request: a direct `auth.api` call, such as AuthService's
+      // session read, gets the error itself and handles it, and logging it
+      // here too would add a line per call while the storage is down.
+      after: createAuthMiddleware(async (context) => {
+        const returned = context.context.returned;
+        if (context.request && isAPIError(returned) && returned.statusCode === 500) {
+          context.context.logger.error('INTERNAL_SERVER_ERROR', returned);
+        }
       }),
     },
     secret: options.secret,

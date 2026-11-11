@@ -189,6 +189,9 @@
     "sign_out_failed": "Your session could not be ended, so you are still signed in. Try again in a moment",
     "session_unavailable": "Your session could not be checked just now. Try again in a moment",
     "unavailable": "Sign-in and accounts are unavailable just now. Try again in a moment",
+    "failed": "Something went wrong on the server, so your request wasn't completed. Try again, and if it keeps happening, tell the server's admin",
+    "request_too_large": "This request was too large for the server to read, so nothing was changed",
+    "bad_request": "The server couldn't read where this request was sent, so nothing was changed. If it keeps happening, tell the server's admin",
     "rate_limited": "Too many attempts in a short time. Wait a minute, then try again"
   },
   "household": {
