@@ -14,6 +14,7 @@ import { EventGameNominationController } from './nomination/event-game-nominatio
 import { EventGameNominationService } from './nomination/event-game-nomination.service';
 import { EventOccurrenceController } from './occurrence/event-occurrence.controller';
 import { EventOccurrenceService } from './occurrence/event-occurrence.service';
+import { OfferedGameService } from './offered-game/offered-game.service';
 
 @Module({
   imports: [DatabaseModule, PermissionsModule, NotificationsServiceModule],
@@ -32,6 +33,7 @@ import { EventOccurrenceService } from './occurrence/event-occurrence.service';
     EventGameNominationService,
     EventOccurrenceService,
     EventNotificationListener,
+    OfferedGameService,
   ],
   exports: [EventService, EventAttendeeService, EventGameNominationService, EventOccurrenceService],
 })
