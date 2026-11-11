@@ -85,7 +85,10 @@ const AVAILABILITY_GRANT_SELECT = {
       role: {
         select: {
           permissions: {
-            where: { permission: { is: { slug: 'create:event_availability_vote', retiredAt: null, inverted: false } } },
+            where: {
+              revokedAt: null,
+              permission: { is: { slug: 'create:event_availability_vote', retiredAt: null, inverted: false } },
+            },
             select: { id: true },
             take: 1,
           },

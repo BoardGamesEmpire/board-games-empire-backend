@@ -28,7 +28,8 @@ model Permission {
 
   /// Tombstone (#235). Set when the catalog drops a `System`-owned slug and
   /// cleared when the slug reappears, so a slug is never inserted twice.
-  /// Every ability loader and every plugin core-slug existence gate filters
+  /// Also set on an `Admin` row when a start's entry check fails it; the row
+  /// stays `Admin` with the Owner's edit kept (#772). Every ability loader and every plugin core-slug existence gate filters
   /// `retired_at IS NULL`; grants that still reference the row survive it and
   /// confer nothing.
   retiredAt DateTime? @map("retired_at") @db.Timestamptz(3)

@@ -3,7 +3,14 @@
 import 'dotenv/config';
 
 import { openCliClient } from './cli-client';
-import { CATALOG_MANIFEST, describePlanReport, loadCatalogSnapshot, planReconcile } from './lib/catalog';
+import {
+  CATALOG_MANIFEST,
+  describePlanReport,
+  findFailingEditedEntries,
+  loadCatalogSnapshot,
+  planReconcile,
+  RECONCILE_TRANSACTION_TIMEOUT_MS,
+} from './lib/catalog';
 import {
   DATA_MIGRATIONS,
   describeDataMigrationsReport,
@@ -53,8 +60,20 @@ async function main(): Promise<number> {
       return schemaReport.exitCode;
     }
 
-    const catalog = await client.prisma.$transaction(async (tx) =>
-      planReconcile(CATALOG_MANIFEST, await loadCatalogSnapshot(tx)),
+    // The boot's own plan, the Owner's entries that fail the entry check
+    // included (#772); the probe's savepoints need the transaction. The boot's
+    // budget too: Prisma's default of five seconds could time the plan out
+    // where the boot, given thirty, would go on.
+    const catalog = await client.prisma.$transaction(
+      async (tx) => {
+        const snapshot = await loadCatalogSnapshot(tx);
+        return planReconcile(
+          CATALOG_MANIFEST,
+          snapshot,
+          await findFailingEditedEntries(tx, CATALOG_MANIFEST, snapshot),
+        );
+      },
+      { timeout: RECONCILE_TRANSACTION_TIMEOUT_MS },
     );
     const catalogReport = describePlanReport(catalog);
     print(['', ...catalogReport.lines]);

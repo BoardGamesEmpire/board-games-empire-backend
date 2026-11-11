@@ -237,7 +237,10 @@ describe('EventGameNominationService', () => {
               role: {
                 select: {
                   permissions: {
-                    where: { permission: { is: { slug: 'create:event_game_vote', retiredAt: null, inverted: false } } },
+                    where: {
+                      revokedAt: null,
+                      permission: { is: { slug: 'create:event_game_vote', retiredAt: null, inverted: false } },
+                    },
                     select: { id: true },
                     take: 1,
                   },

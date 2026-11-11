@@ -250,3 +250,54 @@ what `generate` writes into the gitignored directory, the client and, since
 a cached pass. Its `dependsOn` already holds `generate`. The `test` targets of
 the projects that depend on `@bge/database` do not have it yet, so a
 schema-only change still replays theirs.
+
+## `@bge/database:test` hashes the TypeScript that names a permission
+
+The same `inputs` list ends with a `runtime` entry:
+
+```sh
+git grep -l -i -F --untracked permission -- 'libs/*.ts' 'apps/*.ts' ':!*.spec.ts' ':!*.d.ts' \
+  | (paths=$(cat); printf '%s\n' "$paths"; printf '%s\n' "$paths" | git hash-object --stdin-paths) \
+  | git hash-object --stdin
+```
+
+`revoked-grant-loaders.spec.ts` reads the source of every project for a reader
+of a role's grants that does not skip a revoked grant (#772). Those readers
+live in projects that depend on `@bge/database`, never in its dependencies, so
+the inferred inputs do not cover them: a pull request adding an unfiltered
+reader under `libs/api` kept this task's hash, CI's `run-many -t test` restored
+the cached pass, and the scan never ran.
+
+The runtime entry hashes the path and content of every `.ts` source file git
+tracks or would track under `libs/` and `apps/` (a git pathspec's `*` matches
+across `/`) that mentions a permission, in any case. Every line the scan can
+flag names one: `permissions:`, `rolePermission`, `role_permissions`. So a
+file that never does cannot change what the scan finds, and a change to it
+leaves the task cached; about one source file in eight mentions a permission.
+The paths are hashed too, so moving a file into or out of a directory the scan
+skips re-runs it. Spec and declaration files are left out, as the scan leaves
+them out. The only other files the scan reads that it leaves out are the
+gitignored `buf generate` output in `libs/proto/gateway/src/gen`, which holds
+no Prisma reads. The command takes about a tenth of a second, and the suite,
+when it does run, about two seconds.
+
+A new pattern in the scan must name a permission too, or this entry must widen
+with it: a reader the scan can flag in a file this entry does not hash is a
+cache hit, and is never scanned.
+
+It is a runtime input, not `{workspaceRoot}/libs/**/*.ts` and
+`{workspaceRoot}/apps/**/*.ts`. Nx makes a project affected by every file that
+one of its targets names under `{workspaceRoot}`, and with it every project
+that depends on it. With those two globs, a change to one file in
+`libs/api/event` affected 57 of 86 projects instead of 3, measured with
+`nx show projects --affected --files=…`, and every `affected` step in CI ran
+for most of the workspace. A runtime input only changes the task's hash.
+
+It needs git: outside a repository, `git grep` prints nothing and the hash
+stays the same whatever changes. CI always checks out with git.
+
+To check that it works, run the target twice, so that the second run is a
+cache hit. Then change a `.ts` file under `libs/api` that mentions a
+permission and run it again: it should execute rather than restore. A change
+to one that does not should restore. `nx show projects --affected
+--files=<that file>` should not list `@bge/database`.

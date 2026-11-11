@@ -23,6 +23,26 @@ Only the api applies migrations. Every role runs from the same image, so every c
 
 Only the schema step needs DDL; the lock, the reads of `_prisma_migrations`, the reconcile and the seeds are ordinary reads and writes. So the migrations may have a database role of their own: give the api `DATABASE_MIGRATION_URL`, and `prisma migrate deploy` connects with it, while everything else, in the api and in every other process role, connects with `DATABASE_URL`. Without it, the migrations use `DATABASE_URL`, whose database role then needs the DDL rights a `prisma migrate deploy` run by hand would.
 
+## The Owner's edits to the permission catalog
+
+The catalog reconcile brings every entry the server ships in line with this build, and leaves alone the entries the Owner edited on the server (`managedBy` is `Admin`). A newer build can still break such an edit: a column its condition names is renamed, a check is added, or the build gives the permission to another role. So every reconcile, at each api boot and each `npm run db:seed`, runs the entry check again over every edited entry that still confers something (#772):
+
+- First, every grant this build ships that the start would give, created or restored, is checked on its own role. One that fails is withheld: the start does not give it, and the next start checks it again. The shipped catalog passes these checks, so only the Owner's edits can make such a grant fail: a condition the Owner changed, or a `User` grant the Owner revoked, which had exempted the other holders. So a build that gives an edited permission to one more role withholds that grant rather than retiring the permission for every role that holds it.
+- An edited permission fails when Prisma refuses its condition, or when the catalog's checks find a problem the edit adds, on any role that holds it. It is retired.
+- An edited grant fails when the checks find a problem it adds. It is revoked. Revoking one grant can leave another without the exemption it relied on (`User` holding the same permission), so the rest, with the shipped grants the first step let through, are checked again, and any that fail are revoked or withheld in the same start.
+
+An edited permission or grant that fails stays `Admin`, with the edit as the Owner left it, and confers nothing. The api boots. The Owner can fix the edit, or hand the entry back (mark it `System` again) so the next start brings it in line with this build. An entry already retired or revoked is not checked again, so the next boot writes nothing for it.
+
+In the boot log:
+
+- the reconcile's summary line ends with `edits failing the entry check: retired 1, revoked 0; shipped grants withheld 0`, and `Bootstrap complete` carries the same counts among its reconcile fields, as `permissionsRetiredAfterCheck` and `grantsRevokedAfterCheck`;
+- a line for each entry gives every problem in full: `grant 'HouseholdGuest → read:audit_log' revoked after its check: fails-open {"role":"HouseholdGuest"}`;
+- a warning for each entry names its kinds of problem: `Admin-owned permission 'read:game' fails the entry check (query-rejected): retired, the edit kept`. On that boot and every later one, the entry's drift line is marked `(retired)` or `(revoked)`, so it never reads as live.
+
+- a warning for each withheld grant gives every problem in full: `System grant 'HouseholdMember → read:household' fails the entry check against the Owner's edits: not given, and judged again at the next start: fails-open {"role":"HouseholdMember"}`. Withholding writes nothing, so the warning repeats at every start until the Owner's edits stop making the grant fail.
+
+`npm run db:plan` runs the same check and prints the same lines. An entry that would fail counts as a write, so the plan exits 1; a withheld grant is not a write.
+
 ## The migration credential
 
 `DATABASE_MIGRATION_URL` is optional, and set for the api only. Empty counts as unset.
@@ -95,7 +115,7 @@ A process that dies while it holds the lock loses it with its connection: Postgr
 
 ## Forward only
 
-Prisma has no down migrations. A migration that must be undone is undone by a new migration. Rolling back a **build** is fine as long as the newer migration was additive, which forward-only already requires of every migration; the older build logs the unknown migration as a warning and boots. It does not run its seeds or its data migrations over that database: the seeds include the catalog reconcile, and an older manifest would retire the permissions and revoke the grants the newer build added, while an older registry could not know what the newer build's entries already shaped. During a rolling deploy, or after a rollback, the reference data belongs to the build that knows the newer migration.
+Prisma has no down migrations. A migration that must be undone is undone by a new migration. Rolling back a **build** is fine as long as the newer migration was additive, which forward-only already requires of every migration; the older build logs the unknown migration as a warning and boots. It does not run its seeds or its data migrations over that database: the seeds include the catalog reconcile, and an older manifest would retire the permissions and remove the grants the newer build added, while an older registry could not know what the newer build's entries already shaped. During a rolling deploy, or after a rollback, the reference data belongs to the build that knows the newer migration.
 
 ## One-time data migrations
 

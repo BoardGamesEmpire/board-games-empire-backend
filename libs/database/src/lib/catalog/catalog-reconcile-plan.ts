@@ -1,5 +1,6 @@
 import type { Action, Prisma, RiskLevel } from '../client';
 import { PermissionOwner } from '../client';
+import type { EntryProblem } from './catalog-entry-check';
 import type { PermissionSeedDefinition, RoleSeedDefinition } from './seed-definitions';
 
 /**
@@ -41,6 +42,8 @@ export interface RolePermissionSnapshotRow {
   readonly roleName: string;
   readonly permissionSlug: string;
   readonly managedBy: PermissionOwner;
+  /** Set when the grant is revoked: the row stays, and confers nothing (#772). */
+  readonly revokedAt: Date | null;
 }
 
 /** The current state of the three catalog tables, as `loadCatalogSnapshot` reads it. */
@@ -87,6 +90,8 @@ export interface PermissionSkip {
 export interface RetainedPermission {
   readonly slug: string;
   readonly managedBy: PermissionOwner;
+  /** Set when the row is retired, so the report can say it confers nothing (#772). */
+  readonly retiredAt: Date | null;
 }
 
 export interface RoleUpdate {
@@ -106,10 +111,42 @@ export interface RolePermissionEdge {
 }
 
 /**
+ * The Owner's entries that fail the entry check at this start (#772), with
+ * why: permissions by slug, grants by {@link edgeKey}. `findFailingEditedEntries`
+ * finds them; the planner retires or revokes the ones that still confer
+ * something.
+ */
+export interface FailingEntries {
+  readonly permissions: ReadonlyMap<string, readonly EntryProblem[]>;
+  readonly grants: ReadonlyMap<string, readonly EntryProblem[]>;
+  /**
+   * Grants the permission catalog ships, by {@link edgeKey}, that this start
+   * would create or restore and that the Owner's edits make fail the entry
+   * check: the planner leaves them out (#772).
+   */
+  readonly withheld: ReadonlyMap<string, readonly EntryProblem[]>;
+}
+
+/** An `Admin` permission the entry check failed, retired with its edit kept (#772). */
+export interface EditedPermissionRetire {
+  readonly slug: string;
+  readonly problems: readonly EntryProblem[];
+}
+
+/** An `Admin` grant the entry check failed, revoked with the row kept (#772). */
+export type EditedGrantRevoke = RolePermissionEdge & { readonly problems: readonly EntryProblem[] };
+
+/** A shipped grant this start does not give, because the Owner's edits make it fail the entry check (#772). */
+export type WithheldGrant = RolePermissionEdge & { readonly problems: readonly EntryProblem[] };
+
+const NO_FAILING_ENTRIES: FailingEntries = { permissions: new Map(), grants: new Map(), withheld: new Map() };
+
+/**
  * What a reconcile would do, decided before anything is written. Mutations
- * are `create`, `update`, `revive`, `retire` and `delete`; the rest is the
- * drift report — rows the reconciler saw and deliberately left alone. A
- * non-empty `conflicts` anywhere stops the apply before its first write.
+ * are `create`, `update`, `revive`, `retire`, `retireEdited`, `restore`,
+ * `delete` and `revokeEdited`; the rest is the drift report — rows the
+ * reconciler saw and deliberately left alone. A non-empty `conflicts`
+ * anywhere stops the apply before its first write.
  */
 export interface ReconcilePlan {
   readonly permissions: {
@@ -121,6 +158,12 @@ export interface ReconcilePlan {
     readonly revive: readonly string[];
     /** `System` row the manifest no longer lists and not yet retired → tombstoned. */
     readonly retire: readonly string[];
+    /**
+     * `Admin` row, not yet retired, that fails the entry check → retired and
+     * left `Admin`, its edit kept to fix and hand back (#772). It is also in
+     * `skipped` or `retained`, as every `Admin` row is.
+     */
+    readonly retireEdited: readonly EditedPermissionRetire[];
     /** `Admin` row the manifest lists → left alone; its drift is the report. */
     readonly skipped: readonly PermissionSkip[];
     /** Row the manifest does not list and the reconciler does not own → left alone. */
@@ -138,8 +181,25 @@ export interface ReconcilePlan {
   };
   readonly rolePermissions: {
     readonly create: readonly RolePermissionEdge[];
-    /** `System` edge the manifest no longer lists → deleted; this is how a grant is revoked. */
+    /** Listed `System` edge that is revoked (`revokedAt` set) → `revokedAt` cleared; the grant is back (#772). */
+    readonly restore: readonly RolePermissionEdge[];
+    /** `System` edge the manifest no longer lists → deleted (revoked or not); this is how a grant is removed. */
     readonly delete: readonly RolePermissionEdge[];
+    /**
+     * `Admin` edge, not yet revoked, that fails the entry check → revoked and
+     * left `Admin`, the row kept to fix and hand back (#772). One the
+     * permission catalog does not list is also in `retained`.
+     */
+    readonly revokeEdited: readonly EditedGrantRevoke[];
+    /**
+     * Listed edge this start would create, or `System` edge it would restore,
+     * that the Owner's edits make fail the entry check → not written, so the
+     * grant stays absent or revoked; the next start judges it again (#772).
+     * Not a write, so it is part of the report.
+     */
+    readonly withheld: readonly WithheldGrant[];
+    /** Listed `Admin` edge that is revoked → left revoked; the report says so (#772). */
+    readonly skipped: readonly RolePermissionEdge[];
     /** Edge the manifest does not list and the reconciler does not own → left alone. */
     readonly retained: readonly RolePermissionSnapshotRow[];
     readonly conflicts: readonly RolePermissionEdge[];
@@ -159,12 +219,19 @@ const PERMISSION_FIELDS: readonly PermissionField[] = [
 /**
  * Decides what the database needs to match the manifest, without touching it.
  * Pure: every input is data, so every row of the reconcile table is a unit test.
+ * `failing` is what the entry check found wrong with the Owner's entries; the
+ * planner retires or revokes only those the snapshot shows still confer
+ * something, so an entry already failing closed is never written again.
  */
-export function planReconcile(manifest: CatalogManifest, snapshot: CatalogSnapshot): ReconcilePlan {
+export function planReconcile(
+  manifest: CatalogManifest,
+  snapshot: CatalogSnapshot,
+  failing: FailingEntries = NO_FAILING_ENTRIES,
+): ReconcilePlan {
   return {
-    permissions: planPermissions(manifest, snapshot),
+    permissions: planPermissions(manifest, snapshot, failing),
     roles: planRoles(manifest, snapshot),
-    rolePermissions: planRolePermissions(manifest, snapshot),
+    rolePermissions: planRolePermissions(manifest, snapshot, failing),
   };
 }
 
@@ -183,10 +250,13 @@ export function countMutations(plan: ReconcilePlan): number {
     plan.permissions.create.length +
     converged.size +
     plan.permissions.retire.length +
+    plan.permissions.retireEdited.length +
     plan.roles.create.length +
     plan.roles.update.length +
     plan.rolePermissions.create.length +
-    plan.rolePermissions.delete.length
+    plan.rolePermissions.restore.length +
+    plan.rolePermissions.delete.length +
+    plan.rolePermissions.revokeEdited.length
   );
 }
 
@@ -201,11 +271,17 @@ export interface ReconcileCounts {
   readonly permissionsCreated: number;
   readonly permissionsUpdated: number;
   readonly permissionsRevived: number;
+  /** `System` permissions the catalog no longer lists. */
   readonly permissionsRetired: number;
+  /** The Owner's permissions that failed the entry check (#772). */
+  readonly permissionsRetiredAfterCheck: number;
   readonly rolesCreated: number;
   readonly rolesUpdated: number;
   readonly grantsCreated: number;
-  readonly grantsRevoked: number;
+  readonly grantsRestored: number;
+  readonly grantsRemoved: number;
+  /** The Owner's grants that failed the entry check (#772). */
+  readonly grantsRevokedAfterCheck: number;
   readonly mutations: number;
 }
 
@@ -215,19 +291,27 @@ export function reconcileCounts(plan: ReconcilePlan): ReconcileCounts {
     permissionsUpdated: plan.permissions.update.length,
     permissionsRevived: plan.permissions.revive.length,
     permissionsRetired: plan.permissions.retire.length,
+    permissionsRetiredAfterCheck: plan.permissions.retireEdited.length,
     rolesCreated: plan.roles.create.length,
     rolesUpdated: plan.roles.update.length,
     grantsCreated: plan.rolePermissions.create.length,
-    grantsRevoked: plan.rolePermissions.delete.length,
+    grantsRestored: plan.rolePermissions.restore.length,
+    grantsRemoved: plan.rolePermissions.delete.length,
+    grantsRevokedAfterCheck: plan.rolePermissions.revokeEdited.length,
     mutations: countMutations(plan),
   };
 }
 
-function planPermissions(manifest: CatalogManifest, snapshot: CatalogSnapshot): ReconcilePlan['permissions'] {
+function planPermissions(
+  manifest: CatalogManifest,
+  snapshot: CatalogSnapshot,
+  failing: FailingEntries,
+): ReconcilePlan['permissions'] {
   const create: PermissionSeedDefinition[] = [];
   const update: PermissionUpdate[] = [];
   const revive: string[] = [];
   const retire: string[] = [];
+  const retireEdited: EditedPermissionRetire[] = [];
   const skipped: PermissionSkip[] = [];
   const retained: RetainedPermission[] = [];
   const conflicts: { slug: string }[] = [];
@@ -277,13 +361,23 @@ function planPermissions(manifest: CatalogManifest, snapshot: CatalogSnapshot): 
     }
 
     if (row.managedBy !== PermissionOwner.System) {
-      retained.push({ slug: row.slug, managedBy: row.managedBy });
+      retained.push({ slug: row.slug, managedBy: row.managedBy, retiredAt: row.retiredAt });
     } else if (row.retiredAt === null) {
       retire.push(row.slug);
     }
   }
 
-  return { create, update, revive, retire, skipped, retained, conflicts };
+  // Listed or not, an Owner's permission that fails its check is retired,
+  // unless it already is: a retired one confers nothing, and writing it again
+  // would make every later start a write.
+  for (const row of snapshot.permissions) {
+    const problems = failing.permissions.get(row.slug);
+    if (problems !== undefined && row.managedBy === PermissionOwner.Admin && row.retiredAt === null) {
+      retireEdited.push({ slug: row.slug, problems });
+    }
+  }
+
+  return { create, update, revive, retire, retireEdited, skipped, retained, conflicts };
 }
 
 function planRoles(manifest: CatalogManifest, snapshot: CatalogSnapshot): ReconcilePlan['roles'] {
@@ -336,9 +430,17 @@ function planRoles(manifest: CatalogManifest, snapshot: CatalogSnapshot): Reconc
   return { create, update, skipped, orphans, conflicts };
 }
 
-function planRolePermissions(manifest: CatalogManifest, snapshot: CatalogSnapshot): ReconcilePlan['rolePermissions'] {
+function planRolePermissions(
+  manifest: CatalogManifest,
+  snapshot: CatalogSnapshot,
+  failing: FailingEntries,
+): ReconcilePlan['rolePermissions'] {
   const create: RolePermissionEdge[] = [];
+  const restore: RolePermissionEdge[] = [];
   const remove: RolePermissionEdge[] = [];
+  const revokeEdited: EditedGrantRevoke[] = [];
+  const withheld: WithheldGrant[] = [];
+  const skipped: RolePermissionEdge[] = [];
   const retained: RolePermissionSnapshotRow[] = [];
   const conflicts: RolePermissionEdge[] = [];
 
@@ -350,16 +452,34 @@ function planRolePermissions(manifest: CatalogManifest, snapshot: CatalogSnapsho
       const key = edgeKey(roleName, permissionSlug);
       listed.add(key);
       const row = rowsByKey.get(key);
+      const problems = failing.withheld.get(key);
 
       if (row === undefined) {
-        create.push({ roleName, permissionSlug });
+        if (problems === undefined) {
+          create.push({ roleName, permissionSlug });
+        } else {
+          withheld.push({ roleName, permissionSlug, problems });
+        }
         continue;
       }
 
       switch (row.managedBy) {
         case PermissionOwner.System:
+          // The pair IS the row, so a live edge has nothing to converge. A
+          // revoked one the catalog lists again is handed back (#772).
+          if (row.revokedAt !== null) {
+            if (problems === undefined) {
+              restore.push({ roleName, permissionSlug });
+            } else {
+              withheld.push({ roleName, permissionSlug, problems });
+            }
+          }
+          break;
         case PermissionOwner.Admin:
-          // The pair IS the row: an edge that exists has nothing to converge.
+          // An Owner's edge: left as it is, and a revocation on it is reported.
+          if (row.revokedAt !== null) {
+            skipped.push({ roleName, permissionSlug });
+          }
           break;
         case PermissionOwner.Plugin:
           conflicts.push({ roleName, permissionSlug });
@@ -388,11 +508,23 @@ function planRolePermissions(manifest: CatalogManifest, snapshot: CatalogSnapsho
     }
   }
 
-  return { create, delete: remove, retained, conflicts };
+  // Listed or not, an Owner's grant that fails its check is revoked, unless it
+  // already is; the row stays, so the Owner can fix it and hand it back.
+  for (const { roleName, permissionSlug, managedBy, revokedAt } of snapshot.rolePermissions) {
+    const problems = failing.grants.get(edgeKey(roleName, permissionSlug));
+    if (problems !== undefined && managedBy === PermissionOwner.Admin && revokedAt === null) {
+      revokeEdited.push({ roleName, permissionSlug, problems });
+    }
+  }
+
+  return { create, restore, delete: remove, revokeEdited, withheld, skipped, retained, conflicts };
 }
 
-/** NUL as the separator: neither a role name nor a slug can contain it, so two pairs cannot share a key. */
-function edgeKey(roleName: string, permissionSlug: string): string {
+/**
+ * A grant's key in {@link FailingEntries}. NUL as the separator: neither a
+ * role name nor a slug can contain it, so two pairs cannot share a key.
+ */
+export function edgeKey(roleName: string, permissionSlug: string): string {
   return `${roleName}\u0000${permissionSlug}`;
 }
 

@@ -5,9 +5,9 @@ model Role {
   description String?
 
   /// Provenance (#235). `System` for every catalog role. No default: a writer
-  /// of custom roles (#772) names another owner or fails the typecheck;
+  /// of custom roles (#1170) names another owner or fails the typecheck;
   /// households never write one (#169). The reconciler leaves a role it does
-  /// not own alone, but revokes `System` grants the manifest does not list.
+  /// not own alone, but removes `System` grants the manifest does not list.
   managedBy PermissionOwner @map("managed_by")
 
   permissions RolePermission[]
@@ -34,10 +34,19 @@ model RolePermission {
 
   /// Provenance (#235). A `System` edge the manifest no longer lists is
   /// deleted — removing a slug from a role's catalog list is how a grant is
-  /// revoked. An `Admin` edge is left alone either way. No default, as on
-  /// `Permission`: a grant written without an owner must not become
-  /// revocable by omission.
+  /// removed. An `Admin` edge is never converged or deleted, listed or not,
+  /// but each start's entry check revokes one that fails it (#772). No
+  /// default, as on `Permission`: a grant written without an owner must not
+  /// become removable by omission.
   managedBy PermissionOwner @map("managed_by")
+
+  /// Revocation (#772). Set when the Owner takes a shipped grant away on this
+  /// server, or when a start's entry check revokes an `Admin` grant that
+  /// fails it: the row stays, so the next start's reconcile does not create
+  /// it again, and it confers nothing. A listed `System` edge with this set is
+  /// cleared back to live by the reconcile; an `Admin` edge is left revoked.
+  /// Every ability loader filters `revoked_at IS NULL`.
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(3)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 

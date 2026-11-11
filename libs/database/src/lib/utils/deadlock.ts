@@ -15,9 +15,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * preferred. `code` is the postgres passthrough copy, present when the adapter has
  * no mapped `kind` for an error and forwards the raw pg fields alongside — a
  * deadlock was one of those up to `@prisma/adapter-pg@7.8`. Reading both means a
- * driver release that keeps only one of them still classifies.
+ * driver release that keeps only one of them still classifies. The catalog entry
+ * check reads it too, to tell a value Postgres refused from a database that
+ * failed (#772).
  */
-function sqlStateOf(cause: unknown): string | undefined {
+export function sqlStateOf(cause: unknown): string | undefined {
   if (!isRecord(cause)) {
     return undefined;
   }

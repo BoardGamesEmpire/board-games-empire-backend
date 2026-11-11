@@ -11,7 +11,10 @@ import type { PrismaClient } from '../client';
  * `@bge/database` (#233), and so is the reconciler that writes it (#235):
  * `System`-owned rows converge to the manifest, `Admin`-owned rows are left
  * alone with their drift logged, a `System` grant the manifest no longer lists
- * is revoked, and a `System` permission it no longer defines is retired.
+ * is removed, and a `System` permission it no longer defines is retired. The
+ * entry check judges every `Admin` row that still confers something, and the
+ * reconcile retires a permission or revokes a grant that fails it, keeping
+ * the Owner's edit (#772).
  *
  * This is the one call into it, reached from `runSeeds` by the CLI and by the
  * boot sequence alike. `invalidate` is the reconciler's port: the boot sequence

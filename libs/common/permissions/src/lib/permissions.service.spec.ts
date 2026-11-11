@@ -285,7 +285,10 @@ describe('PermissionsService', () => {
                 role: {
                   select: {
                     name: true,
-                    permissions: { where: { permission: { retiredAt: null } }, select: { permission: true } },
+                    permissions: {
+                      where: { revokedAt: null, permission: { retiredAt: null } },
+                      select: { permission: true },
+                    },
                   },
                 },
               },
@@ -320,6 +323,30 @@ describe('PermissionsService', () => {
       );
       expect(set).toHaveBeenCalledWith('bge:user:permissions:user-1', expect.anything(), expect.any(Number));
       expect(result).toBe(graph);
+    });
+
+    it('userGraphSelect filters revoked grants on every role hop (#772)', async () => {
+      db.user.findUnique.mockResolvedValue(makeUserGraph() as unknown as User);
+
+      await service.getUserRoleGraph('user-1');
+
+      const { select } = db.user.findUnique.mock.calls[0][0] as {
+        select: {
+          roles: { select: { role: { select: { permissions: { where: unknown } } } } };
+          householdMember: { select: { role: { select: { role: { select: { permissions: { where: unknown } } } } } } };
+          eventsAttended: { select: { role: { select: { role: { select: { permissions: { where: unknown } } } } } } };
+        };
+      };
+      const hops = [
+        select.roles.select.role.select.permissions.where,
+        select.householdMember.select.role.select.role.select.permissions.where,
+        select.eventsAttended.select.role.select.role.select.permissions.where,
+      ];
+
+      expect(hops).toHaveLength(3);
+      for (const where of hops) {
+        expect(where).toEqual({ revokedAt: null, permission: { retiredAt: null } });
+      }
     });
 
     it('returns null and does not cache when the user is missing', async () => {
