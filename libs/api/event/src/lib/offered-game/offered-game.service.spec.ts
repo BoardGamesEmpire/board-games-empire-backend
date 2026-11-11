@@ -1,4 +1,4 @@
-import { Action, Prisma, ResourceType } from '@bge/database';
+import { Action, EventParticipationStatus, Prisma, ResourceType } from '@bge/database';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
@@ -9,10 +9,14 @@ import {
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
+import { NotFoundException } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
 import { ACTIVE_NOMINATION_STATUSES, lineupStillAhead } from '../attendee/attendance';
+import { ListOfferedGamesQueryDto } from './dto/list-offered-games.query.dto';
 import { makeOfferedGameEntry } from './offered-game.fixture';
-import { OFFERED_GAME_ORDER, OFFERED_GAME_SELECT } from './offered-game.select';
+import { OFFERED_GAME_ATTENDEE_SELECT, OFFERED_GAME_ORDER, OFFERED_GAME_SELECT } from './offered-game.select';
 import { OfferedGameService } from './offered-game.service';
+import { offeredGamesFilter } from './offered-games.filter';
 
 const COND = { id: 'sentinel-condition' };
 const NOW = new Date('2026-11-11T12:00:00Z');
@@ -195,6 +199,122 @@ describe('OfferedGameService (#1185, #1187)', () => {
       await expect(service.forAttendees([], NOW)).resolves.toEqual(new Map());
 
       expect(db.eventAttendeeGameList.findMany).not.toHaveBeenCalled();
+    });
+  });
+  describe('listOfferedGames (#1187)', () => {
+    const query = (init: Record<string, unknown> = {}) =>
+      plainToInstance(ListOfferedGamesQueryDto, { limit: 10, ...init }, { enableImplicitConversion: true });
+
+    /** The attendee read's row, as `OFFERED_GAME_ATTENDEE_SELECT` reads it. */
+    const attendee = (id: string, overrides: Record<string, unknown> = {}) => ({
+      id,
+      status: EventParticipationStatus.Attending,
+      guestName: null,
+      user: { id: `user-${id}`, username: `name-${id}`, profile: { displayName: null, avatarUrl: null } },
+      ...overrides,
+    });
+
+    let page: jest.SpyInstance;
+
+    beforeEach(() => {
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findMany.mockResolvedValue([]);
+      db.eventAttendeeGameList.count.mockResolvedValue(0);
+      page = jest.spyOn(service, 'page');
+    });
+
+    // Removed entries, and every entry of a removed attendee, leave both the
+    // rows and the total; the query's filters are ANDed beside them.
+    it("scopes the read to the event's live attendees and live entries, with the filters ANDed", async () => {
+      const listed = query({ excludeAttendeeIds: 'att-9', q: 'catan', playerCountMin: '4' });
+
+      await service.listOfferedGames('event-1', listed);
+
+      const scope = {
+        removedAt: null,
+        attendee: { is: { eventId: 'event-1', removedAt: null } },
+        AND: offeredGamesFilter(listed),
+      };
+      expect(page).toHaveBeenCalledWith(scope, listed, expect.any(Date));
+      expect(scope.AND).toHaveLength(3);
+      expect(db.eventAttendeeGameList.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { ...scope, AND: [...offeredGamesFilter(listed), COND] },
+          skip: 0,
+          take: 10,
+        }),
+      );
+    });
+
+    // In the entry's select, the attendee's name and avatar would reach a key
+    // holding only read on offered games (#404, #559).
+    it("reads the page's attendees once, under the attendee read ceiling (#1187)", async () => {
+      db.eventAttendeeGameList.findMany.mockResolvedValue([
+        makeOfferedGameEntry('a', 'game-1', 'att-1'),
+        makeOfferedGameEntry('b', 'game-2', 'att-2'),
+        makeOfferedGameEntry('c', 'game-3', 'att-1'),
+      ] as never);
+      db.eventAttendeeGameList.count.mockResolvedValue(3);
+      db.eventAttendee.findMany.mockResolvedValue([attendee('att-1')] as never);
+
+      const listed = await service.listOfferedGames('event-1', query());
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, { id: { in: ['att-1', 'att-2'] } });
+      expect(db.eventAttendee.findMany).toHaveBeenCalledTimes(1);
+      expect(db.eventAttendee.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['att-1', 'att-2'] }, AND: [COND] },
+        select: OFFERED_GAME_ATTENDEE_SELECT,
+      });
+      expect(listed.total).toBe(3);
+      expect(listed.rows.map((row) => [row.id, row.attendeeId, row.attendee?.id ?? null])).toEqual([
+        ['a', 'att-1', 'att-1'],
+        ['b', 'att-2', null],
+        ['c', 'att-1', 'att-1'],
+      ]);
+    });
+
+    // Not attending is an answer an attendee can change; their games stay on
+    // their list, and the row says why they can't be nominated.
+    it('keeps an attendee answering Not attending, with their status', async () => {
+      db.eventAttendeeGameList.findMany.mockResolvedValue([makeOfferedGameEntry('a', 'game-1', 'att-1')] as never);
+      db.eventAttendee.findMany.mockResolvedValue([
+        attendee('att-1', { status: EventParticipationStatus.NotAttending }),
+      ] as never);
+
+      const listed = await service.listOfferedGames('event-1', query());
+
+      expect(JSON.stringify(page.mock.calls[0][0])).not.toContain('status');
+      expect(listed.rows[0].attendee?.status).toBe(EventParticipationStatus.NotAttending);
+    });
+
+    // A host can offer games for a guest added by name (#1210), whose row has
+    // no user.
+    it('serves a guest attendee with a null user', async () => {
+      db.eventAttendeeGameList.findMany.mockResolvedValue([makeOfferedGameEntry('a', 'game-1', 'att-guest')] as never);
+      db.eventAttendee.findMany.mockResolvedValue([attendee('att-guest', { user: null, guestName: 'Sam' })] as never);
+
+      const listed = await service.listOfferedGames('event-1', query());
+
+      expect(listed.rows[0].attendee).toEqual({
+        id: 'att-guest',
+        status: EventParticipationStatus.Attending,
+        guestName: 'Sam',
+        user: null,
+      });
+    });
+
+    it("answers 404 for an event that doesn't exist, before reading", async () => {
+      db.event.count.mockResolvedValue(0);
+
+      await expect(service.listOfferedGames('missing', query())).rejects.toThrow(NotFoundException);
+      expect(db.eventAttendeeGameList.findMany).not.toHaveBeenCalled();
+      expect(db.eventAttendee.findMany).not.toHaveBeenCalled();
+    });
+
+    it('reads no attendee for an empty page', async () => {
+      await expect(service.listOfferedGames('event-1', query())).resolves.toEqual({ rows: [], total: 0 });
+
+      expect(db.eventAttendee.findMany).not.toHaveBeenCalled();
     });
   });
 });

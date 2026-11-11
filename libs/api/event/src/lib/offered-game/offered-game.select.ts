@@ -71,3 +71,24 @@ export const OFFERED_GAME_ORDER = [
   { collection: { platformGame: { game: { title: 'asc' } } } },
   { id: 'asc' },
 ] satisfies Prisma.EventAttendeeGameListOrderByWithRelationInput[];
+
+/**
+ * The attendee on an offered-games row (#1187): who they are and their
+ * answer, read for the page's attendees under the attendee read ceiling,
+ * never through the entry's select. Their status says when they answered Not
+ * attending, whose games can't be nominated. A guest added by name has no
+ * user. The role isn't carried.
+ */
+export const OFFERED_GAME_ATTENDEE_SELECT = {
+  id: true,
+  status: true,
+  guestName: true,
+
+  user: {
+    select: {
+      id: true,
+      username: true,
+      profile: { select: { displayName: true, avatarUrl: true } },
+    },
+  },
+} as const satisfies Prisma.EventAttendeeSelect;

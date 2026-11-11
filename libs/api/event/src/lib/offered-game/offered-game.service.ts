@@ -4,8 +4,11 @@ import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { Injectable } from '@nestjs/common';
 import { ACTIVE_NOMINATION_STATUSES, lineupStillAhead } from '../attendee/attendance';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
-import { OFFERED_GAME_ORDER, OFFERED_GAME_SELECT } from './offered-game.select';
-import type { OfferedGame, OfferedGameEntry } from './offered-game.types';
+import { assertEventExists } from '../event-access.helpers';
+import type { ListOfferedGamesQueryDto } from './dto/list-offered-games.query.dto';
+import { OFFERED_GAME_ATTENDEE_SELECT, OFFERED_GAME_ORDER, OFFERED_GAME_SELECT } from './offered-game.select';
+import type { OfferedGame, OfferedGameAttendee, OfferedGameEntry, OfferedGameRow } from './offered-game.types';
+import { offeredGamesFilter } from './offered-games.filter';
 
 /**
  * Offered games, in the one shape the reads and the add serve them (#1185,
@@ -18,6 +21,36 @@ export class OfferedGameService {
     private readonly abilityService: AbilityService,
     private readonly scopeComposer: ScopeComposer,
   ) {}
+
+  /**
+   * One page of every game the event's attendees offer, as far as the caller
+   * may read them, with the query's filters ANDed (#1187).
+   *
+   * - A row is one offered entry: two attendees offering the same game give
+   *   two rows.
+   * - Entries taken back, and every entry of an attendee removed from
+   *   the event, leave both the rows and the total. An attendee answering
+   *   Not attending keeps their rows, and the row's attendee says so.
+   * - The order is game title, then entry id.
+   * - Each row's attendee is read once for the page, under the attendee read
+   *   ceiling, and is `null` for a caller who can't read them.
+   *
+   * The existence probe runs first, so a missing event answers 404 rather
+   * than an empty page. As in `getAttendees`, an event deleted between the
+   * probe and the read answers its rows.
+   */
+  async listOfferedGames(eventId: string, query: ListOfferedGamesQueryDto): Promise<PaginatedRows<OfferedGameRow>> {
+    await assertEventExists(this.db, eventId);
+
+    const { rows, total } = await this.page(
+      { ...NOT_REMOVED, attendee: { is: { eventId, ...NOT_REMOVED } }, AND: offeredGamesFilter(query) },
+      query,
+      new Date(),
+    );
+    const attendees = await this.attendeesFor(rows);
+
+    return { rows: rows.map((row) => ({ ...row, attendee: attendees.get(row.attendeeId) ?? null })), total };
+  }
 
   /**
    * One page of the offered games matching `where` that the caller may read,
@@ -133,6 +166,27 @@ export class OfferedGameService {
         lineup: lineup === null ? null : (lineup.get(entry.id) ?? 0),
       },
     }));
+  }
+
+  /**
+   * The attendees of `games`, keyed by id, as far as the caller may read
+   * them: a top-level read under the attendee read ceiling. In the entry's
+   * select, a key holding only read on offered games would see the names and
+   * avatars it can't read on the attendee routes (#404, #559).
+   */
+  private async attendeesFor(games: readonly OfferedGame[]): Promise<ReadonlyMap<string, OfferedGameAttendee>> {
+    const attendeeIds = [...new Set(games.map((game) => game.attendeeId))];
+
+    if (attendeeIds.length === 0) {
+      return new Map();
+    }
+
+    const attendees = await this.db.eventAttendee.findMany({
+      where: this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { id: { in: attendeeIds } }),
+      select: OFFERED_GAME_ATTENDEE_SELECT,
+    });
+
+    return new Map(attendees.map((attendee) => [attendee.id, attendee]));
   }
 
   /** The open nominations naming each entry, or null for a caller who can't read nominations. */
