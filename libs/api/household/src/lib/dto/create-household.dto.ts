@@ -2,7 +2,8 @@ import { Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ClientRequestIdProperty, ReachProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 const HOUSEHOLD_REACHES = [Reach.Private, Reach.Friends] as const;
 export type HouseholdReach = (typeof HOUSEHOLD_REACHES)[number];
@@ -27,8 +28,14 @@ export function HouseholdReachProperty(defaultReach?: HouseholdReach): PropertyD
 }
 
 export class CreateHouseholdDto {
-  @ApiProperty()
+  /**
+   * Trimmed, and refused when that leaves it empty, so no household is stored
+   * without a name (#884). `UpdateHouseholdDto` inherits both rules.
+   */
+  @ApiProperty({ description: 'Trimmed. Refused when empty.' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
   name!: string;
 
   @HouseholdReachProperty(Reach.Private)

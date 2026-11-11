@@ -37,6 +37,19 @@ describe('CreateHouseholdDto', () => {
     await expect(propertiesWithErrors(payload)).resolves.toEqual([]);
   });
 
+  describe('name (#884)', () => {
+    it.each([
+      ['an empty string', ''],
+      ['whitespace only', '   '],
+    ])('rejects %s, so no household is stored without a name', async (_label, name) => {
+      await expect(propertiesWithErrors({ ...VALID_PAYLOAD, name })).resolves.toEqual(['name']);
+    });
+
+    it('trims surrounding whitespace, so padding is never stored', () => {
+      expect(instantiate({ ...VALID_PAYLOAD, name: '  Game Night  ' }).name).toBe('Game Night');
+    });
+  });
+
   it.each([Reach.Private, Reach.Friends])('accepts reach %s', async (reach) => {
     await expect(propertiesWithErrors({ ...VALID_PAYLOAD, reach })).resolves.toEqual([]);
   });

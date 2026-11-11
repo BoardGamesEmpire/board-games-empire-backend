@@ -27,6 +27,25 @@ describe('UpdateHouseholdDto', () => {
     await expect(propertiesWithErrors(payload)).resolves.toEqual([]);
   });
 
+  describe('name (#884)', () => {
+    it.each([
+      ['an empty string', ''],
+      ['whitespace only', '   '],
+    ])('rejects %s, so an edit cannot blank the name', async (_label, name) => {
+      await expect(propertiesWithErrors({ name })).resolves.toEqual(['name']);
+    });
+
+    it('trims surrounding whitespace, so padding is never stored', () => {
+      const dto = plainToInstance(UpdateHouseholdDto, { name: '  Game Night  ' }, { enableImplicitConversion: true });
+
+      expect(dto.name).toBe('Game Night');
+    });
+
+    it('leaves name optional', async () => {
+      await expect(propertiesWithErrors({ language: 'en' })).resolves.toEqual([]);
+    });
+  });
+
   // The rungs a household read rule serves, and no others. `Public` waits on
   // #231 (#495), and so do `FriendsOfFriends` (#496) and `ExtendedNetwork`
   // (#497). Null would reach a non-nullable column as a 500.
