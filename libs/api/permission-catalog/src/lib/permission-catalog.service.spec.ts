@@ -442,9 +442,9 @@ describe('PermissionCatalogService (#772)', () => {
       expect(db.permission.updateMany).not.toHaveBeenCalled();
     });
 
-    it('flushes every permission graph after commit, and still answers when the flush fails (#772)', async () => {
+    it('emits, then flushes every permission graph after commit, and still answers when the flush fails (#772)', async () => {
       await service.updatePermission(SLUG, { reason: 'Hosts edit their events' });
-      expect(order).toEqual(['commit', 'flush', 'emit']);
+      expect(order).toEqual(['commit', 'emit', 'flush']);
 
       permissions.invalidateAllGraphs.mockRejectedValue(new CacheFlushError('bge:*', 0, new Error('ECONNREFUSED')));
 
@@ -452,6 +452,16 @@ describe('PermissionCatalogService (#772)', () => {
         expect.objectContaining({ permission: expect.objectContaining({ slug: SLUG }) }),
       );
       expect(emitter.emit).toHaveBeenCalledTimes(2);
+    });
+
+    it('records the audit event even while the flush never settles, as a Redis that stops replying leaves it (#772)', async () => {
+      permissions.invalidateAllGraphs.mockReturnValue(new Promise<number>(() => undefined));
+
+      void service.updatePermission(SLUG, { reason: 'Hosts edit their events' });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(permissions.invalidateAllGraphs).toHaveBeenCalledTimes(1);
+      expect(emitter.emit).toHaveBeenCalledWith(PermissionUpdatedEvent.eventName, expect.any(PermissionUpdatedEvent));
     });
 
     it('emits PermissionUpdatedEvent with before and after (#772)', async () => {
@@ -1066,7 +1076,7 @@ describe('PermissionCatalogService (#772)', () => {
 
         await service.addGrant(SystemRole.User, 'create:event');
 
-        expect(order).toEqual(['commit', 'flush', 'emit']);
+        expect(order).toEqual(['commit', 'emit', 'flush']);
         const [name, event] = emitter.emit.mock.calls[0];
         expect(name).toBe(RolePermissionChangedEvent.eventName);
         expect(event).toMatchObject({
@@ -1088,10 +1098,10 @@ describe('PermissionCatalogService (#772)', () => {
         });
       });
 
-      it('flushes every permission graph after commit, then emits RolePermissionChangedEvent with no before for a new grant', async () => {
+      it('emits RolePermissionChangedEvent with no before for a new grant after commit, then flushes every permission graph', async () => {
         await service.addGrant(SystemRole.HouseholdGuest, HOUSEHOLD_READ);
 
-        expect(order).toEqual(['commit', 'flush', 'emit']);
+        expect(order).toEqual(['commit', 'emit', 'flush']);
         const [name, event] = emitter.emit.mock.calls[0];
         expect(name).toBe(RolePermissionChangedEvent.eventName);
         expect(event).toBeInstanceOf(RolePermissionChangedEvent);
@@ -1284,10 +1294,10 @@ describe('PermissionCatalogService (#772)', () => {
         expect(emitter.emit).not.toHaveBeenCalled();
       });
 
-      it('flushes, then emits RolePermissionChangedEvent: before and after on a revoke, no after on a delete', async () => {
+      it('emits RolePermissionChangedEvent, then flushes: before and after on a revoke, no after on a delete', async () => {
         await service.revokeGrant(SystemRole.User, 'read:game');
 
-        expect(order).toEqual(['commit', 'flush', 'emit']);
+        expect(order).toEqual(['commit', 'emit', 'flush']);
         expect(emitter.emit.mock.calls[0][1]).toMatchObject({
           subject: ResourceType.RolePermission,
           subjectId: grantId(SystemRole.User, 'read:game'),

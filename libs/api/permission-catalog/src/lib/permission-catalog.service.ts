@@ -260,12 +260,12 @@ export class PermissionCatalogService {
       return { permission: edited.permission, warnings: [], consentDecisionsAffected: 0 };
     }
 
-    await this.flushPermissionGraphs();
-
     this.eventEmitter.emit(
       PermissionUpdatedEvent.eventName,
       new PermissionUpdatedEvent(edited.id, auditSnapshot(edited.before), auditSnapshot(edited.after), initiatedAt),
     );
+
+    await this.flushPermissionGraphs();
 
     return {
       permission: catalogPermission(edited.after, catalogDrift(edited.catalog).permissions.get(slug) ?? []),
@@ -388,8 +388,6 @@ export class PermissionCatalogService {
       return { grant: catalogGrant(edited.grant), warnings: [] };
     }
 
-    await this.flushPermissionGraphs();
-
     this.eventEmitter.emit(
       RolePermissionChangedEvent.eventName,
       new RolePermissionChangedEvent(
@@ -399,6 +397,8 @@ export class PermissionCatalogService {
         initiatedAt,
       ),
     );
+
+    await this.flushPermissionGraphs();
 
     return { grant: catalogGrant(edited.after), warnings: edited.warnings };
   }
@@ -457,8 +457,6 @@ export class PermissionCatalogService {
       return { grant: catalogGrant(edited.grant), warnings: [] };
     }
 
-    await this.flushPermissionGraphs();
-
     this.eventEmitter.emit(
       RolePermissionChangedEvent.eventName,
       new RolePermissionChangedEvent(
@@ -468,6 +466,8 @@ export class PermissionCatalogService {
         initiatedAt,
       ),
     );
+
+    await this.flushPermissionGraphs();
 
     return { grant: edited.after === null ? null : catalogGrant(edited.after), warnings: edited.warnings };
   }
@@ -650,6 +650,13 @@ export class PermissionCatalogService {
   /**
    * The edit is committed, so a flush that fails is logged and the edit still
    * answers success, as at start: a graph left cached expires on its own TTL.
+   *
+   * Every caller emits its audit event before this, not after. The flush
+   * waits on Redis, and the shared cache client sets no command timeout, so a
+   * Redis that stops replying without closing the connection would otherwise
+   * hold back the audit record of an edit that is already saved. The audit
+   * listener reads no permission graph, so it needs nothing this flush does
+   * (#772).
    */
   private async flushPermissionGraphs(): Promise<void> {
     try {
