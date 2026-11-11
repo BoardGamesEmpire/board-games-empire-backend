@@ -33,6 +33,8 @@ The catalog reconcile brings every entry the server ships in line with this buil
 
 An edited permission or grant that fails stays `Admin`, with the edit as the Owner left it, and confers nothing. The api boots. The Owner can fix the edit, or hand the entry back (mark it `System` again) so the next start brings it in line with this build. An entry already retired or revoked is not checked again, so the next boot writes nothing for it.
 
+The reconcile first takes the lock the Owner's edits hold (`bge:permission-catalog-edit`), so an edit saved on another instance while this one starts is either in the tables this check reads, or waits for the start to commit and is checked against what it wrote.
+
 In the boot log:
 
 - the reconcile's summary line ends with `edits failing the entry check: retired 1, revoked 0; shipped grants withheld 0`, and `Bootstrap complete` carries the same counts among its reconcile fields, as `permissionsRetiredAfterCheck` and `grantsRevokedAfterCheck`;

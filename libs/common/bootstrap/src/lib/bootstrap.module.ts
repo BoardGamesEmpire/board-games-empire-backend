@@ -1,12 +1,11 @@
-import { DatabaseModule, databaseConfig, databaseConfigValidationSchema } from '@bge/database';
+import { databaseConfig, databaseConfigValidationSchema, DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
-import { createRedisClient, type BgeRedisConnectionConfig } from '@bge/redis';
+import { createRedisClient, RedisKeyFlush, type BgeRedisConnectionConfig } from '@bge/redis';
 import { Module, type DynamicModule, type Provider } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import Joi from 'joi';
 import { BOOTSTRAP_OPTIONS, CACHE_FLUSH, type BootstrapModuleOptions } from './bootstrap-options';
 import { BootstrapService } from './bootstrap.service';
-import { RedisKeyFlush } from './redis-key-flush';
 
 /**
  * The standalone context the boot sequence runs in, before the application

@@ -26,6 +26,25 @@ export interface PluginUnitEnablement {
 }
 
 /**
+ * The plugin half of the serving predicate: the plugin is enabled and not
+ * uninstalled. Shared by the plugin ability read (#60) and the permission
+ * catalog's count of the consent decisions an edit affects (#772), so the two
+ * cannot disagree on which plugins serve.
+ */
+export function isPluginServing(plugin: { readonly enabled: boolean; readonly uninstalledAt: Date | null }): boolean {
+  return plugin.enabled && plugin.uninstalledAt === null;
+}
+
+/**
+ * The unit half of the serving predicate collapsed to a boolean: the unit
+ * enablement is enabled and not dormant. Consent is not a component (#1149).
+ * Shared for the reason {@link isPluginServing} is.
+ */
+export function isPluginUnitServed(state: Pick<PluginUnitEnablement, 'enabled' | 'dormantReason'>): boolean {
+  return state.enabled && state.dormantReason === null;
+}
+
+/**
  * The unit half of the serving predicate (#225): the
  * `HouseholdPlugin`/`UserPlugin` enablement for `(unit, pluginId)`, with a
  * missing one reading as not anchored and not enabled — for these scopes the
@@ -37,8 +56,8 @@ export interface PluginUnitEnablement {
  * `PermissionsService`) and the feature-state derivation for the same
  * reason `grantScopeCoordinatesForUnit` lives here: the two surfaces must
  * agree on what "served" means, and the reader side cannot import the
- * runtime. Callers collapse to a boolean
- * (`enabled && dormantReason === null`) or report the components separately.
+ * runtime. Callers collapse it to a boolean with {@link isPluginUnitServed},
+ * or report the components separately.
  */
 export async function loadPluginUnitEnablement(
   db: Pick<PrismaClient, 'householdPlugin' | 'userPlugin'>,

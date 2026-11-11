@@ -16,6 +16,7 @@ import {
 import { createPrismaCliMigrator, runBootstrap } from '@bge/bootstrap';
 import type { I18nTranslations } from '@bge/i18n';
 import { nestLoggerFromPino } from '@bge/logger';
+import { permissionGraphFlushPatterns } from '@bge/permissions';
 import { createWebClient } from '@bge/web-client';
 import { Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -29,7 +30,6 @@ import { Logger as PinoLogger } from 'nestjs-pino';
 import { join } from 'node:path';
 import { RedisIoAdapter } from './app/adapters/redis-io.adapter';
 import { AppModule } from './app/app.module';
-import { bootstrapCacheFlushPatterns } from './app/configuration/cache-flush';
 import redisConfig, { redisConfigValidationSchema } from './app/configuration/redis.config';
 import { API_REQUEST_TIMEOUT_MS, installRequestBodyRateGuard } from './app/http/request-body-rate-guard';
 import { createAuthClientIpHandler } from './app/lib/auth-client-ip';
@@ -57,7 +57,7 @@ async function bootstrap() {
     // wrote rows flushes the cached ability graphs before the first request.
     cache: {
       redis: { config: redisConfig, validationSchema: redisConfigValidationSchema },
-      flushPatterns: bootstrapCacheFlushPatterns(),
+      flushPatterns: permissionGraphFlushPatterns(),
     },
   });
 

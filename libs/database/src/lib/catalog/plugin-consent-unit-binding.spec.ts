@@ -1,10 +1,12 @@
 import type { Prisma } from '../client';
-import { Action, PluginGrantScope, ResourceType } from '../client';
+import { Action, PluginGrantScope, ResourceType, RiskLevel } from '../client';
 import { hasBoundingConditions } from '../utils/permission-conditions';
 import { parseTemplate } from './catalog-guards';
 import { PERMISSION_CATALOG } from './permission.catalog';
 import {
   bindsConsentUnit,
+  isWildcardSubject,
+  judgeConsentDecision,
   PLUGIN_UNIT_CONSENT_PUBLIC_READS,
   type PluginUnitGrantScope,
 } from './plugin-consent-unit-binding';
@@ -485,5 +487,61 @@ describe('bindsConsentUnit (#591)', () => {
         bounding: true,
       });
     }
+  });
+});
+
+describe('judgeConsentDecision (#772)', () => {
+  // The per-decision checks the plugin ability read applies, shared with the
+  // permission catalog's count of the decisions an edit stops conferring, so
+  // the two cannot disagree.
+  /** `row` with a risk level, which the binding rule never reads and the risk check does. */
+  const permission = <Row extends object>(row: Row, riskLevel: RiskLevel = RiskLevel.Low) => ({ ...row, riskLevel });
+  const decision = (scopeType: PluginGrantScope, decidedRiskLevel: RiskLevel = RiskLevel.Low) => ({
+    scopeType,
+    decidedRiskLevel,
+  });
+
+  const householdBound = permission(ruleRow({ householdId: '{{ unit.householdId }}' }, ResourceType.Event));
+  const unconditioned = permission(ruleRow({}, ResourceType.Event));
+
+  it('confers a decision the unit binds, and a server decision on any permission, while its risk covers it', () => {
+    expect(judgeConsentDecision(householdBound, decision(PluginGrantScope.Household))).toBe('confers');
+    expect(judgeConsentDecision(unconditioned, decision(PluginGrantScope.Server))).toBe('confers');
+    expect(judgeConsentDecision(permission(catalogRow('read:game:public')), decision(PluginGrantScope.User))).toBe(
+      'confers',
+    );
+  });
+
+  it('answers wildcard-subject for a permission on all, at every scope and risk, before anything else', () => {
+    const wildcard = permission(ruleRow({}, 'all'));
+
+    for (const scopeType of Object.values(PluginGrantScope)) {
+      expect(judgeConsentDecision(wildcard, decision(scopeType, RiskLevel.Critical))).toBe('wildcard-subject');
+    }
+  });
+
+  it('answers unit-unbound for a household or user decision on a permission its unit cannot bind', () => {
+    expect(judgeConsentDecision(unconditioned, decision(PluginGrantScope.Household))).toBe('unit-unbound');
+    expect(judgeConsentDecision(householdBound, decision(PluginGrantScope.User))).toBe('unit-unbound');
+    // Unbound comes first: raising the risk too still answers it.
+    expect(
+      judgeConsentDecision(
+        permission(ruleRow({}, ResourceType.Event), RiskLevel.High),
+        decision(PluginGrantScope.User),
+      ),
+    ).toBe('unit-unbound');
+  });
+
+  it('answers stale-consent when the permission carries a higher risk than the decision was made under', () => {
+    const raised = permission(ruleRow({ householdId: '{{ unit.householdId }}' }, ResourceType.Event), RiskLevel.Medium);
+
+    expect(judgeConsentDecision(raised, decision(PluginGrantScope.Household, RiskLevel.Low))).toBe('stale-consent');
+    expect(judgeConsentDecision(raised, decision(PluginGrantScope.Server, RiskLevel.Low))).toBe('stale-consent');
+    expect(judgeConsentDecision(raised, decision(PluginGrantScope.Household, RiskLevel.Medium))).toBe('confers');
+  });
+
+  it('isWildcardSubject reads the subject alone', () => {
+    expect(isWildcardSubject({ subject: 'all' })).toBe(true);
+    expect(isWildcardSubject({ subject: ResourceType.Game })).toBe(false);
   });
 });

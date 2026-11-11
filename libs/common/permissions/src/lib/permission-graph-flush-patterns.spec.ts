@@ -1,4 +1,4 @@
-import { bootstrapCacheFlushPatterns } from './cache-flush';
+import { permissionGraphFlushPatterns } from './permission-graph-flush-patterns';
 
 // The boot flush SCANs physical keys. The permissions cache writes each key
 // under `cacheStoreKey(PERMISSIONS_CACHE_NAMESPACE, key)`, and `@bge/redis`
@@ -7,9 +7,9 @@ import { bootstrapCacheFlushPatterns } from './cache-flush';
 // the namespace, the store's prefix or a PermissionsService key format moves
 // the keys, and fails here before it moves them unannounced.
 
-describe('bootstrapCacheFlushPatterns (#236, #449, #786)', () => {
+describe('permissionGraphFlushPatterns (#236, #449, #786)', () => {
   it('names the physical keys of both permission graphs and their version tokens, and nothing else', () => {
-    expect(bootstrapCacheFlushPatterns()).toEqual([
+    expect(permissionGraphFlushPatterns()).toEqual([
       'namespace:permissions:cache:bge:user:permissions:*',
       'namespace:permissions:cache:bge:cache-version:bge:user:permissions:*',
       'namespace:permissions:cache:bge:apikey:scopes:*',

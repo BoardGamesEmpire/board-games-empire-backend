@@ -1,24 +1,31 @@
 import type { PluginUnit } from '@bge/actor-context';
 import {
-  bindsConsentUnit,
   CONSENT_UNIT_BINDING_REFUSAL,
   DatabaseService,
   grantScopeCoordinatesForUnit,
+  isPluginServing,
+  isPluginUnitServed,
+  isWildcardSubject,
+  judgeConsentDecision,
   loadPluginUnitEnablement,
   PLUGIN_REQUESTED_PERMISSIONS_READER,
   PluginGrantScope,
   PluginGrantStatus,
   Prisma,
+  requestedByManifest,
   riskCovers,
+  type ConsentDecisionVerdict,
   type PluginRequestedPermissionsReader,
   type RiskLevel,
 } from '@bge/database';
+import { CACHE_REDIS_CLIENT, RedisKeyFlush, type Redis } from '@bge/redis';
 import { isPluginPermissionSlug, parsePluginPermissionSlug } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
 import { randomUUID } from 'node:crypto';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type { ApikeyWithScopes, PluginGrantSnapshot, UserWithRoles } from './interfaces';
+import { permissionGraphFlushPatterns } from './permission-graph-flush-patterns';
 import { PERMISSIONS_CACHE } from './permissions-cache';
 
 /**
@@ -61,6 +68,11 @@ export class PermissionsService {
     private readonly db: DatabaseService,
     @Inject(PERMISSIONS_CACHE) private readonly cache: Cache,
     /**
+     * The shared cache client, for {@link invalidateAllGraphs}'s key scan. It
+     * belongs to `RedisModule`, so this service never closes it (#772).
+     */
+    @Inject(CACHE_REDIS_CLIENT) private readonly redis: Redis,
+    /**
      * Provided by the plugin runtime (#577). Optional because this lib cannot
      * import the runtime, and a process without it confers nothing on plugin
      * actors rather than every decision on file.
@@ -96,6 +108,20 @@ export class PermissionsService {
    */
   static cacheVersionKey(cacheKey: string): string {
     return `bge:cache-version:${cacheKey}`;
+  }
+
+  /**
+   * Removes every cached ability graph and API-key scope graph, with the
+   * version tokens that guard them, from the store every process reads (#772).
+   * An edit of the permission catalog changes what every role confers, so no
+   * cached graph can be trusted: the edit's route calls this after its
+   * transaction commits, the same flush bootstrap runs after a reconcile that
+   * wrote rows. Resolves to how many keys went; rejects with a
+   * `CacheFlushError` when it cannot finish. The client is shared with every
+   * other reader of the cache, so this never closes it.
+   */
+  async invalidateAllGraphs(): Promise<number> {
+    return new RedisKeyFlush(this.redis, permissionGraphFlushPatterns()).flush();
   }
 
   async getUserRoleGraph(userId: string): Promise<UserWithRoles | null> {
@@ -559,6 +585,10 @@ export class PermissionsService {
    *   confer before its update lands. The manifest is re-validated, never
    *   trusted; one that fails rejects the whole ability.
    *
+   * On a core permission, the wildcard, unit-binding and risk checks are
+   * `judgeConsentDecision`'s, which the permission catalog's count of the
+   * consent decisions an edit stops conferring applies too (#772).
+   *
    * Returns `null` when no `Plugin` row exists for the id — the caller
    * decides what a dangling plugin actor means. Deliberately uncached: a
    * consent decision must take effect on the next resolution, and no
@@ -590,7 +620,7 @@ export class PermissionsService {
     }
 
     const base = { plugin: { id: plugin.id, slug: plugin.slug }, unit };
-    const servable = plugin.enabled && plugin.uninstalledAt === null && unitServed;
+    const servable = isPluginServing(plugin) && unitServed;
 
     if (!servable) {
       return { ...base, servable: false, corePermissions: [], ownGrantSlugs: [] };
@@ -672,7 +702,7 @@ export class PermissionsService {
     // riskCovers guard — the decision no longer describes the permission —
     // but warned rather than debug-logged, because it is always anomalous.
     const wildcardSlugs = new Set(
-      corePermissions.filter((permission) => permission.subject === 'all').map((permission) => permission.slug),
+      corePermissions.filter((permission) => isWildcardSubject(permission)).map((permission) => permission.slug),
     );
     for (const slug of wildcardSlugs) {
       this.logger.warn(
@@ -698,24 +728,6 @@ export class PermissionsService {
     // unit); it confers when ANY of its grants still covers current risk.
     const conferringSlugs = new Set<string>();
     for (const grant of requestedGrants) {
-      if (wildcardSlugs.has(grant.permissionSlug)) {
-        continue;
-      }
-
-      const corePermission = corePermissionsBySlug.get(grant.permissionSlug);
-
-      if (
-        grant.scopeType !== PluginGrantScope.Server &&
-        corePermission !== undefined &&
-        !bindsConsentUnit(corePermission, grant.scopeType)
-      ) {
-        this.logger.warn(
-          `Plugin ${pluginId} grant over '${grant.permissionSlug}' at ${grant.scopeType} scope: ` +
-            `${CONSENT_UNIT_BINDING_REFUSAL} — conferring nothing (seed a unit-conditioned variant instead, #315)`,
-        );
-        continue;
-      }
-
       const currentRisk = currentRiskBySlug.get(grant.permissionSlug);
 
       if (currentRisk === undefined) {
@@ -725,15 +737,42 @@ export class PermissionsService {
         continue;
       }
 
-      if (!riskCovers(grant.decidedRiskLevel, currentRisk)) {
-        this.logger.debug(
-          `Plugin ${pluginId} grant over '${grant.permissionSlug}' was decided at ${grant.decidedRiskLevel} ` +
-            `but the permission now carries ${currentRisk}; conferring nothing until re-consent`,
-        );
-        continue;
-      }
+      // A core permission takes every per-decision check, shared with the
+      // permission catalog's count of the decisions an edit stops conferring
+      // (#772); the plugin's own declared permission, enveloped to the plugin,
+      // takes the risk check alone.
+      const corePermission = corePermissionsBySlug.get(grant.permissionSlug);
+      const verdict: ConsentDecisionVerdict =
+        corePermission === undefined
+          ? riskCovers(grant.decidedRiskLevel, currentRisk)
+            ? 'confers'
+            : 'stale-consent'
+          : judgeConsentDecision(corePermission, grant);
 
-      conferringSlugs.add(grant.permissionSlug);
+      switch (verdict) {
+        case 'confers':
+          conferringSlugs.add(grant.permissionSlug);
+          break;
+        case 'wildcard-subject':
+          // Warned above, once per slug.
+          break;
+        case 'unit-unbound':
+          // The consent seams refuse such a decision when it is made, so the
+          // permission changed after consent: in a newer version of the
+          // server, or by the Owner's edit, which is allowed and reported (#772).
+          this.logger.warn(
+            `Plugin ${pluginId} grant over '${grant.permissionSlug}' at ${grant.scopeType} scope: ` +
+              `${CONSENT_UNIT_BINDING_REFUSAL} — conferring nothing (seed a unit-conditioned variant instead, #315, ` +
+              'or the Owner edited the permission, #772)',
+          );
+          break;
+        case 'stale-consent':
+          this.logger.debug(
+            `Plugin ${pluginId} grant over '${grant.permissionSlug}' was decided at ${grant.decidedRiskLevel} ` +
+              `but the permission now carries ${currentRisk}; conferring nothing until re-consent`,
+          );
+          break;
+      }
     }
 
     return {
@@ -781,10 +820,10 @@ export class PermissionsService {
       });
     }
 
-    const requested = new Set(result.requested.map(({ slug, scopeType }) => `${scopeType}|${slug}`));
+    const requested = requestedByManifest(result.requested);
 
     return grants.filter((grant) => {
-      if (requested.has(`${grant.scopeType}|${grant.permissionSlug}`)) {
+      if (requested(grant)) {
         return true;
       }
 
@@ -816,7 +855,7 @@ export class PermissionsService {
   private async isUnitServed(pluginId: string, unit: PluginUnit): Promise<boolean> {
     const state = await loadPluginUnitEnablement(this.db, pluginId, unit);
 
-    return state.enabled && state.dormantReason === null;
+    return isPluginUnitServed(state);
   }
 
   private loadApiKeyGraph(apiKeyId: string) {

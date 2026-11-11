@@ -1,6 +1,8 @@
 import * as Mustache from 'mustache';
+import type { RiskLevel } from '../client';
 import { PluginGrantScope } from '../client';
 import { UNIT_ID_COLUMNS } from '../generated/unit-id-columns';
+import { riskCovers } from '../utils/risk-ordering';
 import { parseTemplate } from './catalog-guards';
 import { matchesCatalogRule, type PermissionRuleColumns } from './catalog-reconcile-plan';
 import { PERMISSION_CATALOG } from './permission.catalog';
@@ -140,6 +142,53 @@ export function bindsConsentUnit(
     !hasTemplatedKey(permission.conditions) &&
     restrictsToUnit(permission.conditions, UNIT_ID[scope], permission.subject)
   );
+}
+
+/**
+ * Whether a permission is written against every resource type (`all`). No
+ * consent decision confers one: consent refuses it outright, so a decided
+ * permission carrying it changed after consent (#60).
+ */
+export function isWildcardSubject(permission: { readonly subject: string }): boolean {
+  return permission.subject === 'all';
+}
+
+/**
+ * What a consent decision does with a core permission as it stands, the first
+ * that applies:
+ *
+ * - `wildcard-subject`: the permission is written against every resource type
+ *   ({@link isWildcardSubject}).
+ * - `unit-unbound`: a household or user decision on a permission that unit's
+ *   consent cannot bind to the unit ({@link bindsConsentUnit}).
+ * - `stale-consent`: the decision was made under a lower risk level than the
+ *   permission carries now (`riskCovers`).
+ * - `confers`: none of these.
+ */
+export type ConsentDecisionVerdict = 'confers' | 'wildcard-subject' | 'unit-unbound' | 'stale-consent';
+
+/**
+ * The per-decision checks the plugin ability read applies to a granted
+ * consent decision on a core permission (`PermissionsService`, #60, #591),
+ * shared with the permission catalog's count of the decisions an edit stops
+ * conferring (#772), so the two cannot disagree on what an edit takes from a
+ * plugin. The rest is each caller's to settle first: that the decision is
+ * granted, its plugin and unit serve, the plugin's active manifest requests
+ * the permission, and the permission is not retired.
+ */
+export function judgeConsentDecision(
+  permission: PermissionRuleColumns & { readonly slug: string; readonly riskLevel: RiskLevel },
+  decision: { readonly scopeType: PluginGrantScope; readonly decidedRiskLevel: RiskLevel },
+): ConsentDecisionVerdict {
+  if (isWildcardSubject(permission)) {
+    return 'wildcard-subject';
+  }
+
+  if (decision.scopeType !== PluginGrantScope.Server && !bindsConsentUnit(permission, decision.scopeType)) {
+    return 'unit-unbound';
+  }
+
+  return riskCovers(decision.decidedRiskLevel, permission.riskLevel) ? 'confers' : 'stale-consent';
 }
 
 /**

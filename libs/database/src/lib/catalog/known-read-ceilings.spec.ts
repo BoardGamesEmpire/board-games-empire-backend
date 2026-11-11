@@ -347,6 +347,12 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
     EventGuest: { 'read:event_policy': 'binds eventId' },
     EventSpectator: { 'read:event_policy': 'binds eventId' },
   },
+  // The permission catalog's tables carry no slug of their own (#772): the
+  // Owner's manage:all and the staff roles' read:public_content, both under
+  // `all` above, are the only grants that reach them.
+  Permission: {},
+  Role: {},
+  RolePermission: {},
 };
 
 describe('the shipped catalog', () => {

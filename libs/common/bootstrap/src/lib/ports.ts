@@ -106,34 +106,16 @@ export interface DataMigrationsPhase {
 
 /**
  * Removes every cached ability graph and API-key scope graph after a reconcile
- * that wrote rows, or a data migration that applied (#236). Only the api build has one, passed by its entrypoint
- * like the migrator; a boot without it leaves the caches to their TTL and the
- * reconcile says so. `flush` resolves to how many keys went and rejects with a
- * {@link CacheFlushError} when it cannot finish; `close` hands the connection
- * back once the sequence is over, used or not.
+ * that wrote rows, or a data migration that applied (#236). Only the api build
+ * has one, passed by its entrypoint like the migrator; a boot without it
+ * leaves the caches to their TTL and the reconcile says so. `flush` resolves
+ * to how many keys went and rejects with a `CacheFlushError` (`@bge/redis`)
+ * when it cannot finish; `close` hands the connection back once the sequence
+ * is over, used or not.
  */
 export interface CacheFlush {
   flush(): Promise<number>;
   close(): Promise<void>;
-}
-
-/**
- * A flush that could not finish: the pattern it stopped on and how many keys
- * had already gone, so the log can say which half of the cache is still there
- * rather than that nothing was touched.
- */
-export class CacheFlushError extends Error {
-  constructor(
-    readonly pattern: string,
-    readonly removed: number,
-    readonly reason: unknown,
-  ) {
-    super(
-      `Cache flush failed on '${pattern}' after removing ${removed} key(s): ` +
-        (reason instanceof Error ? reason.message : String(reason)),
-    );
-    this.name = 'CacheFlushError';
-  }
 }
 
 /**

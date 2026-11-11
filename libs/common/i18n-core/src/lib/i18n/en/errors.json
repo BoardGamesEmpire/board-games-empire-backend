@@ -396,5 +396,23 @@
   },
   "permission": {
     "condition_unevaluable": "The server could not check a permission this needs, so nothing was changed. Try again later, and tell the server's operator if it keeps happening."
+  },
+  "permission_catalog": {
+    "entry_not_found": "There's no permission called '{slug}' on this server",
+    "entry_not_editable": "The permission '{slug}' belongs to a plugin, so it can't be edited here",
+    "edit_empty": "Nothing to change. Send a new condition, reason or risk level, or retire or revive the permission",
+    "entry_refused": "This change wasn't saved because the permission wouldn't work safely with it. Each problem listed says what to fix",
+    "entry_changed": "This permission was changed while your change was being saved. Your change wasn't saved. Load the permission again and try again",
+    "owner_lockout": "This change wasn't saved because it would take full control of the server away from the Owner, with no way to get it back",
+    "role_not_found": "There's no role called '{name}' on this server",
+    "role_not_editable": "The role '{name}' belongs to a plugin, so it can't be edited here",
+    "role_changed": "This role was changed while your change was being saved. Your change wasn't saved. Load the role again and try again",
+    "grant_not_found": "The role '{name}' doesn't hold the permission '{slug}'",
+    "grant_not_editable": "The role '{name}' holds the permission '{slug}' through a plugin, so it can't be changed here",
+    "grant_refused": "This change wasn't saved because the roles holding this permission wouldn't work safely with it. Each problem listed says what to fix",
+    "grant_changed": "This grant was changed while your change was being saved. Your change wasn't saved. Load the role again and try again",
+    "permission_retired": "The permission '{slug}' is retired, so giving it to a role would do nothing. Revive the permission first, then give it to the role",
+    "permission_not_grantable": "The permission '{slug}' belongs to a plugin, so which roles hold it can't be changed here",
+    "role_not_judgeable": "The role '{name}' isn't one this version of the server can check permissions for, so it can't be given a permission. You can still take permissions away from it"
   }
 }

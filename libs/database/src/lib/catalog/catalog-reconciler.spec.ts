@@ -1,4 +1,5 @@
-import { Action, PermissionOwner, Prisma, ResourceType, RiskLevel, SystemRole } from '../client';
+import { Action, PermissionOwner, Prisma, ResourceType, RiskLevel, SystemRole, type PrismaClient } from '../client';
+import { CATALOG_EDIT_LOCK_NAME } from './catalog-edit-lock';
 import type { EntryProblem } from './catalog-entry-check';
 import type { CatalogManifest, CatalogSnapshot, ReconcilePlan } from './catalog-reconcile-plan';
 import { countMutations, edgeKey, planReconcile } from './catalog-reconcile-plan';
@@ -10,6 +11,7 @@ import {
   describeDrift,
   describeWrites,
   findFailingEditedEntries,
+  reconcileCatalog,
   summarizePlan,
 } from './catalog-reconciler';
 import type { PermissionSeedDefinition } from './seed-definitions';
@@ -277,6 +279,44 @@ describe('what a reconcile says', () => {
       `grant 'User → read:game' is Plugin-owned but the manifest lists it`,
     ]);
     expect(describeConflicts(emptyPlan())).toEqual([]);
+  });
+});
+
+describe('reconcileCatalog and the edits of the permission catalog (#772)', () => {
+  // A start's reconcile writes the permission catalog as the Owner's edits do,
+  // and the entry check on either side reads the whole of it. So the start
+  // takes the edits' lock before it reads anything: an edit then either
+  // commits before the start reads the tables and is judged by its check, or
+  // waits for the start to commit and checks against what the start wrote.
+  it("takes the permission catalog's edit lock as its transaction's first statement", async () => {
+    const statements: string[] = [];
+    const read = (statement: string) => async () => {
+      statements.push(statement);
+      return [];
+    };
+    const tx = {
+      $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+        statements.push(`${strings.join('?')} ${JSON.stringify(values)}`);
+        return 1;
+      },
+      permission: { findMany: read('permission.findMany') },
+      role: { findMany: read('role.findMany') },
+      rolePermission: { findMany: read('rolePermission.findMany') },
+    };
+    // Only `$transaction`: a statement outside the transaction would throw.
+    const prisma = {
+      $transaction: async (run: (client: typeof tx) => Promise<unknown>) => run(tx),
+    } as unknown as PrismaClient;
+    const nothingShipped: CatalogManifest = { permissions: [], roles: [], rolePermissions: {} };
+
+    await reconcileCatalog(prisma, nothingShipped);
+
+    expect(statements).toEqual([
+      `SELECT pg_advisory_xact_lock(hashtextextended(?, 0)) ${JSON.stringify([CATALOG_EDIT_LOCK_NAME])}`,
+      'permission.findMany',
+      'role.findMany',
+      'rolePermission.findMany',
+    ]);
   });
 });
 

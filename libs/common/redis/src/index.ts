@@ -3,5 +3,6 @@ export * from './lib/cache-store';
 export * from './lib/make-redis-config';
 export * from './lib/redis-client.factory';
 export * from './lib/redis-connection.config';
+export * from './lib/redis-key-flush';
 export * from './lib/redis.module';
 export * from './lib/redis.tokens';
