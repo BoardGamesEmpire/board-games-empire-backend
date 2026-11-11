@@ -27,6 +27,9 @@ import { ATTENDEE_ORDER } from '../constants/attendee-order.constant';
 import { ATTENDEE_USER_AND_ROLE_INCLUDE } from '../constants/attendee-user-and-role.constant';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { assertEventExists, requireEvent } from '../event-access.helpers';
+import { OFFERED_GAME_SELECT } from '../offered-game/offered-game.select';
+import { OfferedGameService } from '../offered-game/offered-game.service';
+import type { OfferedGame, OfferedGameEntry } from '../offered-game/offered-game.types';
 import {
   ACTIVE_NOMINATION_STATUSES,
   emitSuppliedGameChanges,
@@ -46,6 +49,18 @@ import {
 } from './events/attendee.events';
 import { assertInvitable } from './invitable';
 
+/** An attendee row with their user and role. */
+type AttendeeRow = Prisma.EventAttendeeGetPayload<{ include: typeof ATTENDEE_USER_AND_ROLE_INCLUDE }>;
+
+/**
+ * An attendee as every attendee route serves one: their user and role, and
+ * the games they offer, read on their own under the offered-games read
+ * ceiling (#404, #1187).
+ */
+export type AttendeeWithGames = AttendeeRow & {
+  availableGames: OfferedGame[];
+};
+
 @Injectable()
 export class EventAttendeeService {
   private readonly logger = new Logger(EventAttendeeService.name);
@@ -56,6 +71,7 @@ export class EventAttendeeService {
     private readonly abilityService: AbilityService,
     private readonly permissions: PermissionsService,
     private readonly scopeComposer: ScopeComposer,
+    private readonly offeredGames: OfferedGameService,
   ) {}
 
   /**
@@ -78,8 +94,11 @@ export class EventAttendeeService {
    * deleted between the two answers 200 with its attendees rather than 404, as
    * a read just ahead of the delete would. The rows and count share one
    * snapshot.
+   *
+   * Each attendee's games are read after the page, under their own ceiling
+   * (#404, #1187).
    */
-  async getAttendees(eventId: string, pagination: PaginationQueryDto): Promise<PaginatedRows<EventAttendee>> {
+  async getAttendees(eventId: string, pagination: PaginationQueryDto): Promise<PaginatedRows<AttendeeWithGames>> {
     await assertEventExists(this.db, eventId);
 
     const where = this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { eventId, ...NOT_REMOVED });
@@ -88,7 +107,7 @@ export class EventAttendeeService {
       [
         this.db.eventAttendee.findMany({
           where,
-          include: ATTENDEE_INCLUDE,
+          include: ATTENDEE_USER_AND_ROLE_INCLUDE,
           orderBy: ATTENDEE_ORDER,
           skip: pagination.skip,
           take: pagination.pageSize,
@@ -99,10 +118,10 @@ export class EventAttendeeService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    return { rows, total };
+    return { rows: await this.withGames(rows, new Date()), total };
   }
 
-  async getAttendee(eventId: string, attendeeId: string): Promise<EventAttendee> {
+  async getAttendee(eventId: string, attendeeId: string): Promise<AttendeeWithGames> {
     await assertEventExists(this.db, eventId);
 
     const attendee = await this.db.eventAttendee.findUnique({
@@ -113,17 +132,17 @@ export class EventAttendeeService {
         // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendee, Action.read),
       },
-      include: ATTENDEE_INCLUDE,
+      include: ATTENDEE_USER_AND_ROLE_INCLUDE,
     });
 
     if (!attendee) {
       throw new NotFoundException(t('errors.attendee.not_found', { attendeeId, eventId }));
     }
 
-    return attendee;
+    return this.withGamesOf(attendee, new Date());
   }
 
-  async getAttendeeByUserId(eventId: string, userId: string): Promise<EventAttendee> {
+  async getAttendeeByUserId(eventId: string, userId: string): Promise<AttendeeWithGames> {
     await assertEventExists(this.db, eventId);
 
     const attendee = await this.db.eventAttendee.findUnique({
@@ -133,14 +152,14 @@ export class EventAttendeeService {
         // eslint-disable-next-line no-restricted-syntax -- single-row fetch by its unique (event, user) key, not a collection read
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendee, Action.read),
       },
-      include: ATTENDEE_INCLUDE,
+      include: ATTENDEE_USER_AND_ROLE_INCLUDE,
     });
 
     assert(attendee, new NotFoundException(t('errors.attendee.not_found_for_user', { userId, eventId })));
-    return attendee;
+    return this.withGamesOf(attendee, new Date());
   }
 
-  async addAttendee(eventId: string, dto: AddAttendeeDto): Promise<EventAttendee> {
+  async addAttendee(eventId: string, dto: AddAttendeeDto): Promise<AttendeeWithGames> {
     const initiatedAt = new Date();
     const event = await requireEvent(this.db, eventId);
     const invitedByUserId = this.abilityService.getActingUserId();
@@ -184,6 +203,7 @@ export class EventAttendeeService {
     }
 
     const removed = existing;
+    let added: AttendeeRow;
 
     try {
       const fields = {
@@ -213,7 +233,7 @@ export class EventAttendeeService {
               user: dto.userId ? { connect: { id: dto.userId } } : undefined,
               invitedBy: inviter ? { connect: { id: inviter.id } } : undefined,
             },
-            include: ATTENDEE_INCLUDE,
+            include: ATTENDEE_USER_AND_ROLE_INCLUDE,
           });
 
           return { attendee, changes: null };
@@ -229,7 +249,7 @@ export class EventAttendeeService {
             rsvpDate: null,
             invitedBy: inviter ? { connect: { id: inviter.id } } : { disconnect: true },
           },
-          include: ATTENDEE_INCLUDE,
+          include: ATTENDEE_USER_AND_ROLE_INCLUDE,
         });
 
         return { attendee, changes: await syncSuppliedGames(tx, attendee, initiatedAt) };
@@ -259,8 +279,7 @@ export class EventAttendeeService {
       // The added user's cached graph predates this row, so their role here
       // would otherwise reach them only when the cache expires.
       await this.permissions.invalidateUser(attendee.userId);
-
-      return attendee;
+      added = attendee;
     } catch (error) {
       this.logger.error(`Error adding attendee to event ${eventId}`, error);
 
@@ -270,6 +289,10 @@ export class EventAttendeeService {
 
       throw error;
     }
+
+    // Outside the try: the add has committed, so a failure here is the
+    // read's, never a duplicate add (#1187).
+    return this.withGamesOf(added, initiatedAt);
   }
 
   /**
@@ -283,7 +306,7 @@ export class EventAttendeeService {
    * of the event, as someone not attending is: the games they supply are
    * brought into line in the same transaction (`syncSuppliedGames`).
    */
-  async removeAttendee(eventId: string, attendeeId: string): Promise<EventAttendee> {
+  async removeAttendee(eventId: string, attendeeId: string): Promise<AttendeeWithGames> {
     const initiatedAt = new Date();
     // Attribution guard: removal must be performed by a user-attributed
     // actor — system/external actors throw here instead of silently removing
@@ -298,6 +321,7 @@ export class EventAttendeeService {
     });
 
     assert(attendee, new NotFoundException(t('errors.attendee.not_found', { attendeeId, eventId })));
+    let taken: AttendeeRow;
 
     try {
       const { removed, changes } = await this.db.$transaction(async (tx) => {
@@ -317,7 +341,7 @@ export class EventAttendeeService {
 
         const removed = await tx.eventAttendee.findUniqueOrThrow({
           where: { id: marked.id },
-          include: ATTENDEE_INCLUDE,
+          include: ATTENDEE_USER_AND_ROLE_INCLUDE,
         });
         return { removed, changes: await syncSuppliedGames(tx, removed, initiatedAt) };
       });
@@ -344,8 +368,7 @@ export class EventAttendeeService {
       // The event just left this user's ability surface. Without the eviction
       // a removed co-host keeps co-hosting until the cached graph expires.
       await this.permissions.invalidateUser(removed.userId);
-
-      return removed;
+      taken = removed;
     } catch (error) {
       this.logger.error(`Error removing attendee ${attendeeId} from event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -353,9 +376,13 @@ export class EventAttendeeService {
       }
       throw error;
     }
+
+    // Outside the try: the removal has committed, so a failure here is the
+    // read's, never a refused removal (#1187).
+    return this.withGamesOf(taken, initiatedAt);
   }
 
-  async updateStatus(eventId: string, attendeeId: string, dto: UpdateAttendeeStatusDto): Promise<EventAttendee> {
+  async updateStatus(eventId: string, attendeeId: string, dto: UpdateAttendeeStatusDto): Promise<AttendeeWithGames> {
     const initiatedAt = new Date();
     const actingUserId = resolveActingUserIdOrNull(this.abilityService);
     await assertEventExists(this.db, eventId);
@@ -373,6 +400,7 @@ export class EventAttendeeService {
       dto.status === EventParticipationStatus.Attending || dto.status === EventParticipationStatus.NotAttending
         ? new Date()
         : undefined;
+    let answered: AttendeeRow;
 
     try {
       // Not attending takes the attendee out of the event, and any other
@@ -401,7 +429,7 @@ export class EventAttendeeService {
             notes: dto.notes ?? undefined,
             rsvpDate,
           },
-          include: ATTENDEE_INCLUDE,
+          include: ATTENDEE_USER_AND_ROLE_INCLUDE,
         });
 
         return { previous, updated, changes: await syncSuppliedGames(tx, updated, initiatedAt) };
@@ -417,8 +445,7 @@ export class EventAttendeeService {
         ),
       );
       emitSuppliedGameChanges(this.eventEmitter, eventId, changes, initiatedAt);
-
-      return updated;
+      answered = updated;
     } catch (error) {
       this.logger.error(`Error updating status for attendee ${attendeeId} in event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -426,58 +453,39 @@ export class EventAttendeeService {
       }
       throw error;
     }
+
+    // Outside the try: the answer has committed, so a failure here is the
+    // read's, never a refused update (#1187).
+    return this.withGamesOf(answered, initiatedAt);
   }
 
   /**
-   * The games an attendee has brought to the event, as far as the caller may
-   * read them. The scope is the path's attendee, composed with the caller's
-   * ceiling (#512), without the games taken off the list (#551). Unpaginated;
-   * paging it is #1001.
+   * One page of the games an attendee offers, as far as the caller may read
+   * them (#1001): the offered-games read with the attendee fixed, in its
+   * shape and order (#1187). The attendee's own clause leaves their entries
+   * out the moment they're removed, as the event-wide read does. Filtering
+   * one attendee's games is `?attendeeIds=` on that read.
    */
-  async getGameList(eventId: string, attendeeId: string): Promise<EventAttendeeGameList[]> {
+  async getGameList(
+    eventId: string,
+    attendeeId: string,
+    pagination: PaginationQueryDto,
+  ): Promise<PaginatedRows<OfferedGame>> {
     await assertEventExists(this.db, eventId);
     await this.assertAttendeeExists(eventId, attendeeId);
 
-    return this.db.eventAttendeeGameList.findMany({
-      where: this.scopeComposer.compose(ResourceType.EventAttendeeGameList, Action.read, {
-        attendeeId,
-        ...NOT_REMOVED,
-      }),
-      include: {
-        collection: {
-          include: {
-            platformGame: {
-              select: {
-                id: true,
-
-                game: {
-                  select: {
-                    id: true,
-                    title: true,
-                    thumbnail: true,
-                    minPlayers: true,
-                    maxPlayers: true,
-                    minPlayTime: true,
-                    maxPlayTime: true,
-                    complexity: true,
-                  },
-                },
-
-                platform: {
-                  select: {
-                    id: true,
-                    name: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
+    return this.offeredGames.page(
+      { attendeeId, ...NOT_REMOVED, attendee: { is: { eventId, ...NOT_REMOVED } } },
+      pagination,
+      new Date(),
+    );
   }
 
-  async addGameToList(eventId: string, attendeeId: string, dto: AddGameToListDto): Promise<EventAttendeeGameList> {
+  /**
+   * Offers one of the attendee's collection entries to the event, answering
+   * with it in the offered-game shape (#1185, #1187).
+   */
+  async addGameToList(eventId: string, attendeeId: string, dto: AddGameToListDto): Promise<OfferedGame> {
     const initiatedAt = new Date();
     const event = await requireEvent(this.db, eventId);
     const attendee = await this.assertAttendeeExists(eventId, attendeeId);
@@ -516,34 +524,36 @@ export class EventAttendeeService {
       select: { id: true, attendeeId: true, collectionId: true, removedAt: true },
     });
 
+    let entry: OfferedGameEntry;
+
     try {
-      const entry = removed
+      entry = removed
         ? await this.db.eventAttendeeGameList.update({
             // Matches nothing once a concurrent add has revived it, which
             // answers as the duplicate it then is.
             where: { id: removed.id, removedAt: { not: null } },
             data: { removedAt: null },
-            include: GAME_LIST_ENTRY_INCLUDE,
+            select: OFFERED_GAME_SELECT,
           })
         : await this.db.eventAttendeeGameList.create({
             data: {
               attendee: { connect: { id: attendeeId } },
               collection: { connect: { id: dto.collectionId } },
             },
-            include: GAME_LIST_ENTRY_INCLUDE,
+            select: OFFERED_GAME_SELECT,
           });
 
       this.eventEmitter.emit(
         GameAddedToListEvent.eventName,
         new GameAddedToListEvent(
           removed ?? null,
-          { id: entry.id, attendeeId: entry.attendeeId, collectionId: entry.collectionId, removedAt: entry.removedAt },
+          // The shape carries neither column, and both are known: the entry
+          // offers the named collection entry, and is on the list.
+          { id: entry.id, attendeeId: entry.attendeeId, collectionId: dto.collectionId, removedAt: null },
           eventId,
           initiatedAt,
         ),
       );
-
-      return entry;
     } catch (error) {
       if (isPrismaUniqueConstraintError(error) || (removed && isPrismaDependentRecordNotFoundError(error))) {
         throw new ConflictException(t('errors.attendee.game_already_in_list'));
@@ -552,6 +562,11 @@ export class EventAttendeeService {
       this.logger.error(`Error adding game to list for attendee ${attendeeId}`, error);
       throw error;
     }
+
+    // Outside the try: the offer has committed, so a failure here is the
+    // read's, never a duplicate offer (#1187).
+    const [offered] = await this.offeredGames.enrich([entry], initiatedAt);
+    return offered;
   }
 
   /**
@@ -657,6 +672,33 @@ export class EventAttendeeService {
     }
   }
 
+  /**
+   * Each attendee with the games they offer, read under the offered-games
+   * read ceiling after the attendees themselves (#404, #1187). A write calls it after its
+   * transaction commits, so the games are the ones offered now.
+   */
+  private async withGames<T extends { id: string }>(
+    attendees: readonly T[],
+    now: Date,
+  ): Promise<(T & { availableGames: OfferedGame[] })[]> {
+    const games = await this.offeredGames.forAttendees(
+      attendees.map((attendee) => attendee.id),
+      now,
+    );
+
+    return attendees.map((attendee) => ({ ...attendee, availableGames: games.get(attendee.id) ?? [] }));
+  }
+
+  /** One attendee with the games they offer, as {@link withGames} reads them. */
+  private async withGamesOf<T extends { id: string }>(
+    attendee: T,
+    now: Date,
+  ): Promise<T & { availableGames: OfferedGame[] }> {
+    const [withGames] = await this.withGames([attendee], now);
+
+    return withGames;
+  }
+
   private async assertAttendeeExists(
     eventId: string,
     attendeeId: string,
@@ -673,69 +715,3 @@ export class EventAttendeeService {
     return attendee;
   }
 }
-
-/** A list entry as the add serves it: the game and its platform. */
-const GAME_LIST_ENTRY_INCLUDE = {
-  collection: {
-    include: {
-      platformGame: {
-        select: {
-          id: true,
-
-          game: {
-            select: {
-              id: true,
-              title: true,
-              thumbnail: true,
-            },
-          },
-
-          platform: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-      },
-    },
-  },
-} as const satisfies Prisma.EventAttendeeGameListInclude;
-
-// Include object for attendee queries, to ensure consistent user and role data is always fetched
-const ATTENDEE_INCLUDE = {
-  ...ATTENDEE_USER_AND_ROLE_INCLUDE,
-  availableGames: {
-    where: NOT_REMOVED,
-    include: {
-      collection: {
-        include: {
-          platformGame: {
-            select: {
-              id: true,
-
-              game: {
-                select: {
-                  id: true,
-                  title: true,
-                  thumbnail: true,
-                  minPlayers: true,
-                  maxPlayers: true,
-                  minPlayTime: true,
-                  maxPlayTime: true,
-                },
-              },
-
-              platform: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-} as const satisfies Prisma.EventAttendeeInclude;

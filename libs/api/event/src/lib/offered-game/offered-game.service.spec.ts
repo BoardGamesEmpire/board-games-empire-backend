@@ -1,54 +1,23 @@
-import { Action, ContentType, GameMedium, PlatformType, ResourceType } from '@bge/database';
+import { Action, Prisma, ResourceType } from '@bge/database';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
+  batchTransactionCall,
   createMockAbilityService,
   createTestingModuleWithDb,
+  paginationQuery,
+  unwrapTransaction,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
 import { ACTIVE_NOMINATION_STATUSES, lineupStillAhead } from '../attendee/attendance';
+import { makeOfferedGameEntry } from './offered-game.fixture';
+import { OFFERED_GAME_ORDER, OFFERED_GAME_SELECT } from './offered-game.select';
 import { OfferedGameService } from './offered-game.service';
-import type { OfferedGameEntry } from './offered-game.types';
 
 const COND = { id: 'sentinel-condition' };
 const NOW = new Date('2026-11-11T12:00:00Z');
 
-/** An offered entry as `OFFERED_GAME_SELECT` reads it, of game `gameId`. */
-const entry = (id: string, gameId: string): OfferedGameEntry => ({
-  id,
-  attendeeId: 'att-1',
-  createdAt: new Date('2026-11-01T00:00:00Z'),
-  collection: {
-    id: `col-${id}`,
-    medium: GameMedium.Physical,
-    platformGame: {
-      id: `pg-${gameId}`,
-      image: null,
-      thumbnail: null,
-      minPlayers: null,
-      maxPlayers: null,
-      minPlayTime: null,
-      maxPlayTime: null,
-      platform: { id: 'plat-1', name: 'Tabletop', slug: 'tabletop', platformType: PlatformType.Tabletop },
-      game: {
-        id: gameId,
-        title: `Game ${gameId}`,
-        subtitle: null,
-        thumbnail: null,
-        image: null,
-        contentType: ContentType.BaseGame,
-        publishYear: null,
-        complexity: null,
-        minPlayers: 2,
-        maxPlayers: 4,
-        minPlayTime: 30,
-        maxPlayTime: 60,
-      },
-    },
-  },
-});
-
-describe('OfferedGameService', () => {
+describe('OfferedGameService (#1185, #1187)', () => {
   let service: OfferedGameService;
   let db: MockDatabaseService;
   let abilityService: MockAbilityService;
@@ -72,9 +41,11 @@ describe('OfferedGameService', () => {
     service = ctx.module.get(OfferedGameService);
     compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
 
+    unwrapTransaction(db);
     db.gameExpansion.findMany.mockResolvedValue([]);
     db.eventGameNomination.findMany.mockResolvedValue([]);
     db.eventGame.findMany.mockResolvedValue([]);
+    db.eventAttendeeGameList.findMany.mockResolvedValue([]);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -89,7 +60,11 @@ describe('OfferedGameService', () => {
       ] as never);
 
       const enriched = await service.enrich(
-        [entry('a', 'game-exp'), entry('b', 'game-base'), entry('c', 'game-exp')],
+        [
+          makeOfferedGameEntry('a', 'game-exp'),
+          makeOfferedGameEntry('b', 'game-base'),
+          makeOfferedGameEntry('c', 'game-exp'),
+        ],
         NOW,
       );
 
@@ -118,7 +93,10 @@ describe('OfferedGameService', () => {
       db.eventGameNomination.findMany.mockResolvedValue([{ suppliedFromId: 'a' }, { suppliedFromId: 'a' }] as never);
       db.eventGame.findMany.mockResolvedValue([{ suppliedById: 'a' }] as never);
 
-      const enriched = await service.enrich([entry('a', 'game-1'), entry('b', 'game-2')], NOW);
+      const enriched = await service.enrich(
+        [makeOfferedGameEntry('a', 'game-1'), makeOfferedGameEntry('b', 'game-2')],
+        NOW,
+      );
 
       const nominationScope = { suppliedFromId: { in: ['a', 'b'] }, status: { in: ACTIVE_NOMINATION_STATUSES } };
       const lineupScope = { suppliedById: { in: ['a', 'b'] }, ...lineupStillAhead(NOW) };
@@ -147,7 +125,7 @@ describe('OfferedGameService', () => {
           types.map((type) => [type, { [Action.read]: type === ResourceType.EventGameNomination ? 'none' : 'some' }]),
         )) as never);
 
-      const [row] = await service.enrich([entry('a', 'game-1')], NOW);
+      const [row] = await service.enrich([makeOfferedGameEntry('a', 'game-1')], NOW);
 
       expect(row.supplies).toEqual({ nominations: null, lineup: 0 });
       expect(db.eventGameNomination.findMany).not.toHaveBeenCalled();
@@ -160,6 +138,63 @@ describe('OfferedGameService', () => {
       expect(db.gameExpansion.findMany).not.toHaveBeenCalled();
       expect(db.eventGameNomination.findMany).not.toHaveBeenCalled();
       expect(db.eventGame.findMany).not.toHaveBeenCalled();
+    });
+  });
+  describe('page (#1001, #1187)', () => {
+    // A count through any other where, or outside the rows' snapshot, lets
+    // `totalPages` promise a page that comes back short (#373, #1187).
+    it('reads one page and its total under the offered-games read ceiling, in one REPEATABLE READ transaction', async () => {
+      db.eventAttendeeGameList.findMany.mockResolvedValue([makeOfferedGameEntry('a')] as never);
+      db.eventAttendeeGameList.count.mockResolvedValue(4);
+
+      const page = await service.page({ attendeeId: 'att-1' }, paginationQuery({ page: 3, limit: 1 }), NOW);
+
+      const where = { attendeeId: 'att-1', AND: [COND] };
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendeeGameList, Action.read, { attendeeId: 'att-1' });
+      expect(db.eventAttendeeGameList.findMany).toHaveBeenCalledWith({
+        where,
+        select: OFFERED_GAME_SELECT,
+        orderBy: OFFERED_GAME_ORDER,
+        skip: 2,
+        take: 1,
+      });
+      expect(db.eventAttendeeGameList.count).toHaveBeenCalledWith({ where });
+      const { operations, options } = batchTransactionCall(db);
+      expect(operations).toHaveLength(2);
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+      expect(page.total).toBe(4);
+      expect(page.rows).toEqual([expect.objectContaining({ id: 'a', supplies: { nominations: 0, lineup: 0 } })]);
+    });
+  });
+
+  describe('forAttendees (#404)', () => {
+    it("groups each attendee's live offered games in title order, an attendee with none mapped to []", async () => {
+      db.eventAttendeeGameList.findMany.mockResolvedValue([
+        makeOfferedGameEntry('a', 'game-1', 'att-2'),
+        makeOfferedGameEntry('b', 'game-2', 'att-1'),
+        makeOfferedGameEntry('c', 'game-3', 'att-2'),
+      ] as never);
+
+      const games = await service.forAttendees(['att-1', 'att-2', 'att-3'], NOW);
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendeeGameList, Action.read, {
+        attendeeId: { in: ['att-1', 'att-2', 'att-3'] },
+        removedAt: null,
+      });
+      expect(db.eventAttendeeGameList.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ select: OFFERED_GAME_SELECT, orderBy: OFFERED_GAME_ORDER }),
+      );
+      expect([...games].map(([id, rows]) => [id, rows.map((row) => row.id)])).toEqual([
+        ['att-1', ['b']],
+        ['att-2', ['a', 'c']],
+        ['att-3', []],
+      ]);
+    });
+
+    it('reads nothing for no attendees', async () => {
+      await expect(service.forAttendees([], NOW)).resolves.toEqual(new Map());
+
+      expect(db.eventAttendeeGameList.findMany).not.toHaveBeenCalled();
     });
   });
 });

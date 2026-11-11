@@ -1,7 +1,10 @@
-import { Action, DatabaseService, readBaseGameLinks, ResourceType } from '@bge/database';
+import { Action, DatabaseService, Prisma, readBaseGameLinks, ResourceType } from '@bge/database';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
+import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { Injectable } from '@nestjs/common';
 import { ACTIVE_NOMINATION_STATUSES, lineupStillAhead } from '../attendee/attendance';
+import { NOT_REMOVED } from '../constants/not-removed.constant';
+import { OFFERED_GAME_ORDER, OFFERED_GAME_SELECT } from './offered-game.select';
 import type { OfferedGame, OfferedGameEntry } from './offered-game.types';
 
 /**
@@ -15,6 +18,75 @@ export class OfferedGameService {
     private readonly abilityService: AbilityService,
     private readonly scopeComposer: ScopeComposer,
   ) {}
+
+  /**
+   * One page of the offered games matching `where` that the caller may read,
+   * plus the total for the envelope (#1001, #1187).
+   *
+   * The offered-games read ceiling is composed over `where` at the top level.
+   * The rows and the count share one REPEATABLE READ snapshot, so `total`
+   * agrees with the rows. The order is {@link OFFERED_GAME_ORDER}. Pages are
+   * offsets into a live list, so an entry offered or taken back between
+   * requests can shift the rows after it.
+   */
+  async page(
+    where: Prisma.EventAttendeeGameListWhereInput,
+    pagination: PaginationQueryDto,
+    now: Date,
+  ): Promise<PaginatedRows<OfferedGame>> {
+    const scoped = this.scopeComposer.compose(ResourceType.EventAttendeeGameList, Action.read, where);
+
+    const [entries, total] = await this.db.$transaction(
+      [
+        this.db.eventAttendeeGameList.findMany({
+          where: scoped,
+          select: OFFERED_GAME_SELECT,
+          orderBy: OFFERED_GAME_ORDER,
+          skip: pagination.skip,
+          take: pagination.pageSize,
+        }),
+
+        this.db.eventAttendeeGameList.count({ where: scoped }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    return { rows: await this.enrich(entries, now), total };
+  }
+
+  /**
+   * The games each attendee offers, as far as the caller may read them, for
+   * the attendee routes' embed (#404, #1187). Entries taken back are left out.
+   * Every attendee named has a key, `[]` when they offer nothing the caller
+   * can see.
+   *
+   * The embed used to be an include, which reached anyone who could read
+   * attendees whatever their read on offered games. It's a read of its own
+   * now, under the offered-games read ceiling. How many games it carries is
+   * #404's question; it carries them all.
+   */
+  async forAttendees(attendeeIds: readonly string[], now: Date): Promise<ReadonlyMap<string, OfferedGame[]>> {
+    const byAttendee = new Map(attendeeIds.map((id): [string, OfferedGame[]] => [id, []]));
+
+    if (attendeeIds.length === 0) {
+      return byAttendee;
+    }
+
+    const entries = await this.db.eventAttendeeGameList.findMany({
+      where: this.scopeComposer.compose(ResourceType.EventAttendeeGameList, Action.read, {
+        attendeeId: { in: [...attendeeIds] },
+        ...NOT_REMOVED,
+      }),
+      select: OFFERED_GAME_SELECT,
+      orderBy: OFFERED_GAME_ORDER,
+    });
+
+    for (const game of await this.enrich(entries, now)) {
+      byAttendee.get(game.attendeeId)?.push(game);
+    }
+
+    return byAttendee;
+  }
 
   /**
    * Each entry with its game's base games and what it supplies, in the

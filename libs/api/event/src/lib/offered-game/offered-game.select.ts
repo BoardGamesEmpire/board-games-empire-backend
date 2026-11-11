@@ -70,4 +70,4 @@ export const OFFERED_GAME_SELECT = {
 export const OFFERED_GAME_ORDER = [
   { collection: { platformGame: { game: { title: 'asc' } } } },
   { id: 'asc' },
-] as const satisfies Prisma.EventAttendeeGameListOrderByWithRelationInput[];
+] satisfies Prisma.EventAttendeeGameListOrderByWithRelationInput[];

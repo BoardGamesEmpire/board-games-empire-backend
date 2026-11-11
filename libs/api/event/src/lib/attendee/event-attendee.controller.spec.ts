@@ -6,10 +6,11 @@ import { createTestingModuleWithDb, makeEventAttendee, paginationQuery } from '@
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
+import type { OfferedGame } from '../offered-game/offered-game.types';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { UpdateAttendeeStatusDto } from './dto/update-attendee-status.dto';
 import { EventAttendeeController } from './event-attendee.controller';
-import { EventAttendeeService } from './event-attendee.service';
+import { EventAttendeeService, type AttendeeWithGames } from './event-attendee.service';
 
 describe('EventAttendeeController', () => {
   let controller: EventAttendeeController;
@@ -162,20 +163,36 @@ describe('EventAttendeeController', () => {
   });
 
   describe('getGameList', () => {
-    it('delegates with abilities and returns { games }', async () => {
-      const games = [{ id: 'gl-1' }] as EventAttendeeGameList[];
-      service.getGameList.mockResolvedValue(games);
+    it('wraps the per-attendee games in the paged envelope (#1001)', async () => {
+      const games = [{ id: 'gl-1' }] as OfferedGame[];
+      service.getGameList.mockResolvedValue({ rows: games, total: 3 });
 
-      const result = await firstValueFrom(controller.getGameList('event-1', 'att-1'));
+      const pagination = paginationQuery({ limit: 1 });
+      const result = await firstValueFrom(controller.getGameList('event-1', 'att-1', pagination));
 
-      expect(service.getGameList).toHaveBeenCalledWith('event-1', 'att-1');
-      expect(result).toEqual({ games });
+      expect(service.getGameList).toHaveBeenCalledWith('event-1', 'att-1', pagination);
+      expect(result).toEqual({
+        games,
+        pagination: { page: 1, limit: 1, total: 3, totalPages: 3, hasMore: true },
+      });
+    });
+
+    // The service composes the offered-games scope; the envelope checks for it
+    // under the type the handler names, as the attendee list's does.
+    it('builds its envelope under the EventAttendeeGameList scope guard', async () => {
+      service.getGameList.mockResolvedValue({ rows: [], total: 0 });
+
+      const envelope = ClsServiceManager.getClsService().runWith({}, () =>
+        firstValueFrom(controller.getGameList('event-1', 'att-1', paginationQuery({ limit: 10 }))),
+      );
+
+      await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.EventAttendeeGameList}'`);
     });
   });
 
   describe('addGameToList', () => {
     it('delegates and returns { entry }', async () => {
-      const entry = { id: 'gl-new' } as EventAttendeeGameList;
+      const entry = { id: 'gl-new' } as OfferedGame;
       service.addGameToList.mockResolvedValue(entry);
 
       const result = await firstValueFrom(controller.addGameToList('event-1', 'att-1', { collectionId: 'gc-1' }));
@@ -200,10 +217,15 @@ describe('EventAttendeeController', () => {
   });
 });
 
-function stubAttendee(overrides: Partial<EventAttendee> = {}): EventAttendee {
-  return makeEventAttendee({
-    eventId: 'event-1',
-    userId: 'user-1',
-    ...overrides,
-  });
+function stubAttendee(overrides: Partial<EventAttendee> = {}): AttendeeWithGames {
+  return {
+    ...makeEventAttendee({
+      eventId: 'event-1',
+      userId: 'user-1',
+      ...overrides,
+    }),
+    user: null,
+    role: null,
+    availableGames: [],
+  };
 }
