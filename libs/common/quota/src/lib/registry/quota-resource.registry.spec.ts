@@ -1,4 +1,4 @@
-import { DatabaseService, InviteType, QuotaScope } from '@bge/database';
+import { DatabaseService, InviteType, QuotaScope, WebhookSubscriptionStatus } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { QuotaResourceRegistry } from './quota-resource.registry';
 
@@ -69,13 +69,23 @@ describe('QuotaResourceRegistry', () => {
       expect(usage).toBe(3n);
     });
 
-    it("counts the user's live (non-deleted) webhook subscriptions", async () => {
+    it("counts the user's webhook subscriptions that are neither deleted nor off (#1253)", async () => {
       db.webhookSubscription.count.mockResolvedValue(2);
 
       const usage = await registry.requireUsage('webhook_subscription_count')(QuotaScope.User, 'user_1');
 
       expect(db.webhookSubscription.count).toHaveBeenCalledWith({
-        where: { createdById: 'user_1', deletedAt: null },
+        where: {
+          createdById: 'user_1',
+          deletedAt: null,
+          status: {
+            notIn: [
+              WebhookSubscriptionStatus.Disabled,
+              WebhookSubscriptionStatus.Failed,
+              WebhookSubscriptionStatus.Revoked,
+            ],
+          },
+        },
       });
       expect(usage).toBe(2n);
     });

@@ -1,10 +1,21 @@
-import { DatabaseService, InviteType, QuotaScope } from '@bge/database';
+import { DatabaseService, InviteType, QuotaScope, WebhookSubscriptionStatus } from '@bge/database';
 import { Injectable } from '@nestjs/common';
 import type { QuotaResource } from '../constants/quota-resource';
 import type { QuotaExecutor, QuotaResourceDefinition, QuotaUsageProvider } from '../interfaces';
 
 /** How far back `household_invite_daily_count` looks. Fixed here, not set per row. */
 const HOUSEHOLD_INVITE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The webhook subscription statuses that take no place in
+ * `webhook_subscription_count` (#1253). Listed as the ones that are off, so a
+ * status added later counts until someone decides it shouldn't.
+ */
+export const WEBHOOK_SUBSCRIPTION_OFF: readonly WebhookSubscriptionStatus[] = [
+  WebhookSubscriptionStatus.Disabled,
+  WebhookSubscriptionStatus.Failed,
+  WebhookSubscriptionStatus.Revoked,
+];
 
 /**
  * Stateless catalogue of every quota-eligible resource. Mirrors
@@ -36,6 +47,9 @@ export class QuotaResourceRegistry {
       {
         key: 'webhook_subscription_count',
         // User-scoped: WebhookSubscription.householdId is optional, createdById is not.
+        // Counts the subscriptions that are on: one disabled by its owner or by
+        // failed deliveries frees its place, and reactivating it takes one
+        // back (#1253).
         applicableScopes: [QuotaScope.User],
         usage: this.countWebhookSubscriptions.bind(this),
       },
@@ -122,7 +136,9 @@ export class QuotaResourceRegistry {
 
   private async countWebhookSubscriptions(_scope: QuotaScope, scopeId: string, db?: QuotaExecutor) {
     const client = db ?? this.databaseService;
-    const count = await client.webhookSubscription.count({ where: { createdById: scopeId, deletedAt: null } });
+    const count = await client.webhookSubscription.count({
+      where: { createdById: scopeId, deletedAt: null, status: { notIn: [...WEBHOOK_SUBSCRIPTION_OFF] } },
+    });
     return BigInt(count);
   }
 

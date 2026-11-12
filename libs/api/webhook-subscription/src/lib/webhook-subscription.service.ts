@@ -17,6 +17,7 @@ import {
   ScopeComposer,
   type AppAbility,
 } from '@bge/permissions';
+import { QuotaExceededException, QuotaService, WEBHOOK_SUBSCRIPTION_OFF, type QuotaSoftOverageEvent } from '@bge/quota';
 import { EncryptionService } from '@bge/services';
 import {
   CreateWebhookSubscriptionDto,
@@ -62,6 +63,7 @@ export class WebhookSubscriptionService {
     private readonly scopeComposer: ScopeComposer,
     private readonly permissions: PermissionsService,
     private readonly abilityFactory: AbilityFactory,
+    private readonly quotas: QuotaService,
   ) {}
 
   /**
@@ -79,6 +81,10 @@ export class WebhookSubscriptionService {
    *
    * A webhook subscription made through an API key records that key, and
    * dispatch holds it to the key's scope as well as its creator's (#723).
+   *
+   * Each subscription that is on counts against its creator's
+   * `webhook_subscription_count` quota (#1253): 402 past a hard quota, and a
+   * soft quota's warning only after the insert commits.
    */
   async create(dto: CreateWebhookSubscriptionDto): Promise<WebhookSubscriptionWithEventTypes> {
     const userId = this.abilityService.getActingUserId();
@@ -100,7 +106,7 @@ export class WebhookSubscriptionService {
     const secret = this.encryption.encrypt(plaintextSecret);
     const householdId = dto.householdId;
 
-    const created = await this.db.$transaction(async (tx) => {
+    const { created, softOverages } = await this.db.$transaction(async (tx) => {
       // The readability check above saw the household live but locked nothing,
       // so a soft-delete can commit before the insert lands (#552). The share
       // lock waits out one in flight and reports one that committed. Its
@@ -110,7 +116,9 @@ export class WebhookSubscriptionService {
         throw new ForbiddenException(t('errors.webhook_subscription.forbidden_household', { householdId }));
       }
 
-      return tx.webhookSubscription.create({
+      const softOverages = await this.takeQuotaPlace(userId, tx);
+
+      const subscription = await tx.webhookSubscription.create({
         data: {
           url: dto.url,
           secret,
@@ -126,8 +134,11 @@ export class WebhookSubscriptionService {
         },
         include: { eventTypes: true },
       });
+
+      return { created: subscription, softOverages };
     });
 
+    this.quotas.emitSoftOverages(softOverages);
     this.logger.debug(`Created webhook subscription ${created.id} for user ${userId} on ${created.resourceType}`);
 
     return this.reveal(created, plaintextSecret);
@@ -228,7 +239,7 @@ export class WebhookSubscriptionService {
         secret: rotatedSecret !== undefined ? this.encryption.encrypt(rotatedSecret) : undefined,
       },
       // `@IsOptional()` lets `null` through validation; null leaves the event types alone.
-      dto.eventTypes ?? undefined,
+      { eventTypes: dto.eventTypes ?? undefined },
     );
 
     return rotatedSecret !== undefined ? this.reveal(updated, rotatedSecret) : this.redact(updated);
@@ -256,6 +267,11 @@ export class WebhookSubscriptionService {
    * regardless, but re-activation should not silently restore a scope the
    * creator can no longer reach.) The checks run against the recorded key too
    * ({@link withRecordedKey}).
+   *
+   * A subscription that is off takes no place in its creator's
+   * `webhook_subscription_count` quota, so turning it back on takes one: 402
+   * when the quota is already full, and a soft quota's warning only after the
+   * write commits (#1253). One already on is counted, and takes nothing more.
    */
   async reactivate(id: string): Promise<WebhookSubscriptionWithEventTypes> {
     const actorAbilities = this.requireAbilities(t('errors.webhook_subscription.forbidden_reactivate'));
@@ -274,11 +290,20 @@ export class WebhookSubscriptionService {
       await this.assertCanReceiveFromInstance(types, existing.resourceType, existing.resourceId, abilities);
     }
 
-    const updated = await this.writeScoped(id, Action.update, {
-      status: WebhookSubscriptionStatus.Active,
-      consecutiveFailures: 0,
-      disabledAt: null,
+    const takesPlace = WEBHOOK_SUBSCRIPTION_OFF.includes(existing.status);
+    const { updated, softOverages } = await this.db.$transaction(async (tx) => {
+      const softOverages = takesPlace ? await this.takeQuotaPlace(existing.createdById, tx) : [];
+      const updated = await this.writeScoped(
+        id,
+        Action.update,
+        { status: WebhookSubscriptionStatus.Active, consecutiveFailures: 0, disabledAt: null },
+        { tx },
+      );
+
+      return { updated, softOverages };
     });
+
+    this.quotas.emitSoftOverages(softOverages);
 
     return this.redact(updated);
   }
@@ -342,6 +367,32 @@ export class WebhookSubscriptionService {
   }
 
   /**
+   * Takes one place in `userId`'s `webhook_subscription_count` quota (#1253),
+   * or refuses with 402. It runs under the quota's lock in `tx`, the
+   * transaction of the write that turns a subscription on, so two writes can't
+   * both take the last place. Returns the soft quotas it passed, for the
+   * caller to warn of once `tx` commits.
+   */
+  private async takeQuotaPlace(
+    userId: string,
+    tx: Prisma.TransactionClient,
+  ): Promise<readonly QuotaSoftOverageEvent[]> {
+    const decision = await this.quotas.consume('webhook_subscription_count', 1n, { userId }, tx);
+    if (!decision.allowed) {
+      throw new QuotaExceededException(
+        // eslint-disable-next-line no-restricted-syntax -- quota metric key, not user copy; QuotaExceededException localizes its message in @bge/quota
+        'webhook_subscription_count',
+        decision.scope!,
+        decision.limit!,
+        decision.currentUsage!,
+        1n,
+      );
+    }
+
+    return decision.softOverages;
+  }
+
+  /**
    * Writes one subscription through `action`'s ceiling (#590). The type gate
    * on the route and the read in `getById` both pass for an actor who may read
    * the row but not change it, such as an API key with `read` on every
@@ -370,13 +421,19 @@ export class WebhookSubscriptionService {
    * row, which is the statement that waits for the delete and re-checks it.
    * The UPDATE sets `updatedAt` itself, since a PATCH of the event types alone
    * names no column, and Prisma skips the UPDATE of a patch that names none.
+   *
+   * A write that must commit with something else, such as the quota place a
+   * reactivation takes (#1253), runs in the caller's `tx`. Such a write can't
+   * replace event types, which take a transaction of their own.
    */
   private async writeScoped(
     id: string,
     action: typeof Action.update | typeof Action.delete,
     data: Prisma.WebhookSubscriptionUpdateInput,
-    eventTypes?: readonly string[],
+    options: { eventTypes?: readonly string[] } | { tx: Prisma.TransactionClient } = {},
   ): Promise<WebhookSubscriptionWithEventTypes> {
+    const tx = 'tx' in options ? options.tx : undefined;
+    const eventTypes = 'eventTypes' in options ? options.eventTypes : undefined;
     const apiKeyId = this.abilityService.getActingApiKeyId();
     const where: Prisma.WebhookSubscriptionWhereUniqueInput = {
       id,
@@ -388,7 +445,7 @@ export class WebhookSubscriptionService {
 
     try {
       if (eventTypes === undefined) {
-        return await this.db.webhookSubscription.update({ where, data, include: { eventTypes: true } });
+        return await (tx ?? this.db).webhookSubscription.update({ where, data, include: { eventTypes: true } });
       }
 
       return await this.db.$transaction(async (tx) => {

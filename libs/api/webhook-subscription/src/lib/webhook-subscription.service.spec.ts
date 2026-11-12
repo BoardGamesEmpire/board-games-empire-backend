@@ -1,4 +1,11 @@
-import { Action, Prisma, ResourceType, WebhookSubscriptionEventType, WebhookSubscriptionStatus } from '@bge/database';
+import {
+  Action,
+  Prisma,
+  QuotaScope,
+  ResourceType,
+  WebhookSubscriptionEventType,
+  WebhookSubscriptionStatus,
+} from '@bge/database';
 import { t } from '@bge/i18n';
 import {
   AbilityFactory,
@@ -8,6 +15,7 @@ import {
   type ApikeyWithScopes,
   type AppAbility,
 } from '@bge/permissions';
+import { QuotaExceededException, QuotaService, type QuotaCheckResult, type QuotaSoftOverageEvent } from '@bge/quota';
 import { EncryptionService } from '@bge/services';
 import {
   createMockAbilityService,
@@ -33,6 +41,16 @@ import { WEBHOOK_SECRET_REDACTED, WebhookSubscriptionService } from './webhook-s
 type WebhookWithEvents = Prisma.WebhookSubscriptionGetPayload<{ include: { eventTypes: true } }>;
 
 const ACTING_USER_ID = 'user-1';
+
+const UNCONSTRAINED: QuotaCheckResult = {
+  allowed: true,
+  scope: null,
+  currentUsage: null,
+  limit: null,
+  softOverage: false,
+  constraints: [],
+  softOverages: [],
+};
 
 function makeEventType(overrides: Partial<WebhookSubscriptionEventType> = {}): WebhookSubscriptionEventType {
   return {
@@ -74,6 +92,7 @@ describe('WebhookSubscriptionService', () => {
   let encryption: jest.Mocked<Pick<EncryptionService, 'encrypt' | 'decrypt'>>;
   let ability: MockAbilityService;
   let permissions: jest.Mocked<Pick<PermissionsService, 'loadApiKeyScopeGraphs'>>;
+  let quotas: jest.Mocked<Pick<QuotaService, 'consume' | 'emitSoftOverages'>>;
   let compose: jest.SpyInstance;
 
   const allowAll = createPrismaAbility([{ action: Action.manage, subject: 'all' }]) as AppAbility;
@@ -107,6 +126,7 @@ describe('WebhookSubscriptionService', () => {
     ability.getActingUserId.mockReturnValue(ACTING_USER_ID);
     primeAbilities(allowAll);
     permissions = { loadApiKeyScopeGraphs: jest.fn().mockResolvedValue(new Map()) };
+    quotas = { consume: jest.fn().mockResolvedValue(UNCONSTRAINED), emitSoftOverages: jest.fn() };
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
       providers: [
@@ -119,6 +139,7 @@ describe('WebhookSubscriptionService', () => {
         { provide: EncryptionService, useValue: encryption },
         { provide: AbilityService, useValue: ability },
         { provide: PermissionsService, useValue: permissions },
+        { provide: QuotaService, useValue: quotas },
         AbilityFactory,
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('development-secret') } },
       ],
@@ -367,6 +388,105 @@ describe('WebhookSubscriptionService', () => {
 
         expect(db.$queryRaw).not.toHaveBeenCalled();
         expect(db.webhookSubscription.create).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe("the creator's webhook subscription quota (#1253)", () => {
+      const overage: QuotaSoftOverageEvent = {
+        scope: QuotaScope.User,
+        scopeId: ACTING_USER_ID,
+        resource: 'webhook_subscription_count',
+        currentUsage: '3',
+        attemptedAmount: '1',
+        limit: '3',
+      };
+
+      // The advisory lock `consume` takes holds only for the life of the
+      // transaction it is handed. Handed the root client, it would serialize
+      // nothing, and two concurrent creates could both take the last place. The
+      // transaction gets its own client here, so a test that passed `db` to both
+      // can't mistake one for the other.
+      it("takes one webhook subscription from the creator's quota, in the create's transaction", async () => {
+        const tx = {
+          ...db,
+          webhookSubscription: {
+            ...db.webhookSubscription,
+            create: jest.fn().mockResolvedValue(makeWebhookSub()),
+          },
+        } as unknown as MockDatabaseService;
+        db.$transaction.mockImplementation(((work: (client: MockDatabaseService) => Promise<unknown>) =>
+          work(tx)) as never);
+
+        await service.create(baseDto());
+
+        expect(quotas.consume).toHaveBeenCalledWith('webhook_subscription_count', 1n, { userId: ACTING_USER_ID }, tx);
+        expect(tx.webhookSubscription.create).toHaveBeenCalledTimes(1);
+        expect(db.webhookSubscription.create).not.toHaveBeenCalled();
+        expect(quotas.consume.mock.invocationCallOrder[0]).toBeLessThan(
+          tx.webhookSubscription.create.mock.invocationCallOrder[0] as number,
+        );
+      });
+
+      it('refuses with 402 past a hard quota, and writes nothing', async () => {
+        quotas.consume.mockResolvedValue({
+          ...UNCONSTRAINED,
+          allowed: false,
+          scope: QuotaScope.User,
+          currentUsage: 1n,
+          limit: 1n,
+        });
+
+        const error = await service.create(baseDto()).then(
+          () => undefined,
+          (reason: unknown) => reason,
+        );
+
+        expect(error).toBeInstanceOf(QuotaExceededException);
+        expect((error as QuotaExceededException).getStatus()).toBe(402);
+        expect((error as QuotaExceededException).getResponse()).toMatchObject({
+          resource: 'webhook_subscription_count',
+          scope: QuotaScope.User,
+          limit: '1',
+          currentUsage: '1',
+          attemptedAmount: '1',
+        });
+        expect(db.webhookSubscription.create).not.toHaveBeenCalled();
+        expect(quotas.emitSoftOverages).not.toHaveBeenCalled();
+      });
+
+      it('warns of a soft quota only after the transaction commits', async () => {
+        quotas.consume.mockResolvedValue({ ...UNCONSTRAINED, softOverages: [overage] });
+        db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
+        let warnedInside: boolean | undefined;
+        db.$transaction.mockImplementation((async (work: (tx: MockDatabaseService) => Promise<unknown>) => {
+          const result = await work(db);
+          warnedInside = quotas.emitSoftOverages.mock.calls.length > 0;
+
+          return result;
+        }) as never);
+
+        await service.create(baseDto());
+
+        expect(warnedInside).toBe(false);
+        expect(quotas.emitSoftOverages).toHaveBeenCalledWith([overage]);
+      });
+
+      it('warns of nothing when the insert fails', async () => {
+        quotas.consume.mockResolvedValue({ ...UNCONSTRAINED, softOverages: [overage] });
+        db.webhookSubscription.create.mockRejectedValue(new Error('insert failed'));
+
+        await expect(service.create(baseDto())).rejects.toThrow('insert failed');
+
+        expect(quotas.emitSoftOverages).not.toHaveBeenCalled();
+      });
+
+      it('takes nothing from the quota for a create the household lock refuses', async () => {
+        db.household.count.mockResolvedValue(1);
+        db.$queryRaw.mockResolvedValue([] as never);
+
+        await expect(service.create(baseDto({ householdId: 'hh-1' }))).rejects.toThrow(ForbiddenException);
+
+        expect(quotas.consume).not.toHaveBeenCalled();
       });
     });
   });
@@ -879,6 +999,110 @@ describe('WebhookSubscriptionService', () => {
     it('refuses with no abilities present', async () => {
       primeAbilities();
       await expect(service.reactivate('sub-1')).rejects.toThrow(ForbiddenException);
+    });
+
+    // A subscription that is off takes no place in its creator's quota, so
+    // turning it back on takes one.
+    describe("the creator's webhook subscription quota (#1253)", () => {
+      const off = (status: WebhookSubscriptionStatus) =>
+        makeWebhookSub({
+          status,
+          createdById: 'creator-1',
+          eventTypes: [makeEventType({ eventType: WebhookEventType.EventCreated })],
+        });
+
+      beforeEach(() => {
+        db.webhookSubscription.update.mockResolvedValue(makeWebhookSub());
+      });
+
+      // The quota's lock holds only for the transaction it is handed, so the
+      // place and the write have to share one. The transaction gets its own
+      // client, so a test can't mistake the root client for it.
+      it.each([WebhookSubscriptionStatus.Disabled, WebhookSubscriptionStatus.Failed])(
+        'takes one place from the creator’s quota for one that is %s, in the write’s transaction',
+        async (status) => {
+          db.webhookSubscription.findFirst.mockResolvedValue(off(status));
+          const tx = {
+            ...db,
+            webhookSubscription: {
+              ...db.webhookSubscription,
+              update: jest.fn().mockResolvedValue(makeWebhookSub()),
+            },
+          } as unknown as MockDatabaseService;
+          db.$transaction.mockImplementation(((work: (client: MockDatabaseService) => Promise<unknown>) =>
+            work(tx)) as never);
+
+          await service.reactivate('sub-1');
+
+          expect(quotas.consume).toHaveBeenCalledWith('webhook_subscription_count', 1n, { userId: 'creator-1' }, tx);
+          expect(tx.webhookSubscription.update).toHaveBeenCalledTimes(1);
+          expect(db.webhookSubscription.update).not.toHaveBeenCalled();
+          expect(quotas.consume.mock.invocationCallOrder[0]).toBeLessThan(
+            tx.webhookSubscription.update.mock.invocationCallOrder[0] as number,
+          );
+        },
+      );
+
+      it('takes nothing more for one already on, which the quota already counts', async () => {
+        db.webhookSubscription.findFirst.mockResolvedValue(off(WebhookSubscriptionStatus.Active));
+
+        await service.reactivate('sub-1');
+
+        expect(quotas.consume).not.toHaveBeenCalled();
+        expect(db.webhookSubscription.update).toHaveBeenCalledTimes(1);
+      });
+
+      it('refuses with 402 when the quota is already full, and writes nothing', async () => {
+        db.webhookSubscription.findFirst.mockResolvedValue(off(WebhookSubscriptionStatus.Failed));
+        quotas.consume.mockResolvedValue({
+          ...UNCONSTRAINED,
+          allowed: false,
+          scope: QuotaScope.User,
+          currentUsage: 2n,
+          limit: 2n,
+        });
+
+        const error = await service.reactivate('sub-1').then(
+          () => undefined,
+          (reason: unknown) => reason,
+        );
+
+        expect(error).toBeInstanceOf(QuotaExceededException);
+        expect((error as QuotaExceededException).getResponse()).toMatchObject({
+          resource: 'webhook_subscription_count',
+          scope: QuotaScope.User,
+          limit: '2',
+          currentUsage: '2',
+          attemptedAmount: '1',
+        });
+        expect(db.webhookSubscription.update).not.toHaveBeenCalled();
+        expect(quotas.emitSoftOverages).not.toHaveBeenCalled();
+      });
+
+      it('warns of a soft quota only after the transaction commits', async () => {
+        const overage: QuotaSoftOverageEvent = {
+          scope: QuotaScope.User,
+          scopeId: 'creator-1',
+          resource: 'webhook_subscription_count',
+          currentUsage: '3',
+          attemptedAmount: '1',
+          limit: '3',
+        };
+        db.webhookSubscription.findFirst.mockResolvedValue(off(WebhookSubscriptionStatus.Disabled));
+        quotas.consume.mockResolvedValue({ ...UNCONSTRAINED, softOverages: [overage] });
+        let warnedInside: boolean | undefined;
+        db.$transaction.mockImplementation((async (work: (tx: MockDatabaseService) => Promise<unknown>) => {
+          const result = await work(db);
+          warnedInside = quotas.emitSoftOverages.mock.calls.length > 0;
+
+          return result;
+        }) as never);
+
+        await service.reactivate('sub-1');
+
+        expect(warnedInside).toBe(false);
+        expect(quotas.emitSoftOverages).toHaveBeenCalledWith([overage]);
+      });
     });
 
     describe('a webhook subscription made through a key (#723)', () => {
