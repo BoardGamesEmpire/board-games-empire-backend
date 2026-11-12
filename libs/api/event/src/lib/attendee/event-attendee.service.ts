@@ -329,6 +329,19 @@ export class EventAttendeeService {
 
     try {
       const { removed, changes } = await this.db.$transaction(async (tx) => {
+        // Read again under the row lock the update takes anyway. A removal
+        // that lost a race to another removal answers 404, as one arriving
+        // second would. The lock keeps an add from reviving the row (#551)
+        // before the update, so a failed update after this read is the grant
+        // refusing the removal (#1064).
+        const [current] = await tx.$queryRaw<{ removedAt: Date | null }[]>(
+          Prisma.sql`SELECT removed_at AS "removedAt" FROM event_attendees WHERE id = ${attendeeId} AND event_id = ${eventId} FOR NO KEY UPDATE`,
+        );
+        assert(
+          current && !current.removedAt,
+          new NotFoundException(t('errors.attendee.not_found', { attendeeId, eventId })),
+        );
+
         // The check reads the row's role, so it runs before the role goes.
         const marked = await tx.eventAttendee.update({
           where: {
@@ -415,10 +428,15 @@ export class EventAttendeeService {
         // takes anyway. The read above runs before the lock, so two RSVPs
         // racing each other would both report the status neither left, and
         // the listener would take the second for an RSVP sent again
-        // unchanged and tell nobody (#802). A row gone by now fails the
-        // update below, as before.
-        const [previous] = await tx.$queryRaw<{ status: EventParticipationStatus }[]>(
-          Prisma.sql`SELECT status FROM event_attendees WHERE id = ${attendeeId} FOR NO KEY UPDATE`,
+        // unchanged and tell nobody (#802). An RSVP that lost a race to the
+        // attendee's removal answers 404, as one arriving second would, so a
+        // failed update after this read is the grant refusing it (#1064).
+        const [previous] = await tx.$queryRaw<{ status: EventParticipationStatus; removedAt: Date | null }[]>(
+          Prisma.sql`SELECT status, removed_at AS "removedAt" FROM event_attendees WHERE id = ${attendeeId} FOR NO KEY UPDATE`,
+        );
+        assert(
+          previous && !previous.removedAt,
+          new NotFoundException(t('errors.attendee.not_found', { attendeeId, eventId })),
         );
 
         const updated = await tx.eventAttendee.update({

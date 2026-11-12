@@ -590,6 +590,9 @@ describe('EventOccurrenceService', () => {
   });
 
   describe('updateOccurrence', () => {
+    const recordNotFound = () =>
+      new Prisma.PrismaClientKnownRequestError('No record was found', { code: 'P2025', clientVersion: 'test' });
+
     it('filters by UPDATE conditions (tightened from read)', async () => {
       db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
       db.eventOccurrence.update.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
@@ -622,6 +625,35 @@ describe('EventOccurrenceService', () => {
       expect(emitted.subjectId).toBe('occ-1');
       expect(emitted.before).toEqual({ id: 'occ-1', label: 'Old' });
       expect(emitted.after).toEqual({ id: 'occ-1', label: 'New' });
+    });
+
+    it('answers 404 when the date is gone by the time the lock is held (#1064)', async () => {
+      // The first read finds the date; the one under the event's lock finds
+      // it removed, and the update would match nothing, which alone reads as
+      // a refusal (403).
+      db.eventOccurrence.findUnique
+        .mockResolvedValueOnce(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }))
+        .mockResolvedValueOnce(null);
+      db.eventOccurrence.update.mockRejectedValue(recordNotFound());
+
+      await expect(service.updateOccurrence('event-1', 'occ-1', { label: 'x' })).rejects.toThrow(NotFoundException);
+
+      expect(db.eventOccurrence.findUnique).toHaveBeenLastCalledWith({
+        where: { id: 'occ-1', eventId: 'event-1' },
+        select: { id: true },
+      });
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        db.eventOccurrence.findUnique.mock.invocationCallOrder[1],
+      );
+      expect(db.eventOccurrence.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('still answers 403 when the update conditions refuse the write after the locked read (#1064)', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
+      db.eventOccurrence.update.mockRejectedValue(recordNotFound());
+
+      await expect(service.updateOccurrence('event-1', 'occ-1', { label: 'x' })).rejects.toThrow(ForbiddenException);
     });
 
     it('rejects an empty patch', async () => {
