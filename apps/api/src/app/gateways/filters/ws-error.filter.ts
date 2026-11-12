@@ -1,5 +1,5 @@
 import { AuditContextService } from '@bge/actor-context';
-import { type I18nTranslations, translateException, translateValidationErrors } from '@bge/i18n';
+import { type I18nTranslations, reasonPhrase, renderErrorBody, translateValidationErrors } from '@bge/i18n';
 import { WsErrorEvents, type WsErrorPayload } from '@bge/shared';
 import { ArgumentsHost, Catch, HttpException, Logger, WsExceptionFilter } from '@nestjs/common';
 import { Http } from '@status/codes';
@@ -66,14 +66,16 @@ export class WsErrorFilter implements WsExceptionFilter {
    *
    * An `I18nValidationException` keeps its messages on `errors`, and its body
    * is only the status text, so it is formatted from those. Anything else goes
-   * through the same `translateException` the HTTP filter uses, which renders
-   * a marker body, sends a marker whose copy cannot render as its key, and
-   * leaves every other body as it is.
+   * through the same `renderErrorBody` the HTTP filter uses, which renders a
+   * marker, sends a marker whose copy cannot render as its key, and reads
+   * every body into the error envelope (#1260).
    *
    * Validation messages that cannot render (a template string-format rejects)
    * are logged, and the frame is answered with the exception's status and its
-   * own message, the status text. Nest does not await this filter, so a throw
-   * here would go unhandled and the frame would get no answer.
+   * reason phrase. Never the exception's own message: a marker's names its key
+   * and args, and some args carry request input. Nest does not await this
+   * filter, so a throw here would go unhandled and the frame would get no
+   * answer.
    */
   private translatedPayload(exception: HttpException, frame: WsFrame): WsErrorPayload {
     try {
@@ -82,10 +84,12 @@ export class WsErrorFilter implements WsExceptionFilter {
         return wsErrorPayload(exception.getStatus(), messages, frame);
       }
 
-      return wsExceptionPayload(translateException(exception, this.i18n, this.auditContext), frame);
+      const status = exception.getStatus();
+      return wsExceptionPayload(renderErrorBody(status, exception.getResponse(), this.i18n, this.auditContext), frame);
     } catch (error) {
-      this.logger.error(`Could not translate the ${exception.getStatus()} on ${frame.pattern}`, error);
-      return wsErrorPayload(exception.getStatus(), exception.message, frame);
+      const status = exception.getStatus();
+      this.logger.error(`Could not translate the ${status} on ${frame.pattern}`, error);
+      return wsErrorPayload(status, reasonPhrase(status), frame);
     }
   }
 }

@@ -9,7 +9,10 @@ interface Answer {
 
 const KIB = 1024;
 
+// Our own answer on `/api/auth/*`, in the api's error envelope (#1260).
 const tooLarge = {
+  statusCode: 413,
+  error: 'Payload Too Large',
   code: 'REQUEST_TOO_LARGE',
   message: 'This request was too large for the server to read, so nothing was changed',
 };

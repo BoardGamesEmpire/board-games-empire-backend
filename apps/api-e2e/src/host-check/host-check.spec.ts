@@ -62,6 +62,7 @@ describe('the inbound Host check (#977)', () => {
       const response = await request(baseUrl).get(path).set('Host', FOREIGN_NAME);
 
       expect(response.status).toBe(421);
+      expect(response.body).toMatchObject({ statusCode: 421, error: 'Misdirected Request' });
       expect(response.body.code).toBe(REFUSED_CODE);
       expect(response.body.message).toEqual(expect.any(String));
       expect(response.text).not.toContain(FOREIGN_NAME);

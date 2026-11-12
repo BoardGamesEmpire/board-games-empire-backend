@@ -1,4 +1,4 @@
-import type { I18nPath } from '@bge/i18n';
+import { errorEnvelope, type I18nPath } from '@bge/i18n';
 import { Logger } from '@nestjs/common';
 import { withStorageFailureRecord, type StorageFailureRecord } from './storage-failure-record';
 
@@ -123,12 +123,17 @@ async function carriesCode(response: Response): Promise<boolean> {
   }
 }
 
-/** A refusal with a stable code and a plain-language message, as every refusal on `/api/auth/*` is. */
+/**
+ * A refusal with a stable code and a plain-language message, as every refusal
+ * on `/api/auth/*` is. Our own answers there leave in the error envelope the
+ * rest of the api uses (#1260); the bodies better-auth writes itself keep its
+ * `{ code, message }` shape.
+ */
 export function coded(status: number, code: string, message: string, headers?: Headers): Response {
   const answer = new Headers(headers);
   answer.set('content-type', 'application/json');
   // Measured the body it replaces, not this one.
   answer.delete('content-length');
 
-  return new Response(JSON.stringify({ code, message }), { status, headers: answer });
+  return new Response(JSON.stringify(errorEnvelope(status, message, { code })), { status, headers: answer });
 }

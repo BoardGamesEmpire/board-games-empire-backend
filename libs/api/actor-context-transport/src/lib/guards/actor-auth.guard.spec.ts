@@ -1,6 +1,6 @@
 import type { Actor, AuditContextService } from '@bge/actor-context';
-import { t } from '@bge/i18n';
-import { HttpException, UnauthorizedException, type ExecutionContext } from '@nestjs/common';
+import { CodedHttpException, t } from '@bge/i18n';
+import { HttpException, type ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import {
   AllowAnonymous,
@@ -88,7 +88,7 @@ describe('ActorAuthGuard', () => {
     expect(guard.canActivate(contextFor(Routes, Routes.prototype.guarded))).toBe(true);
   });
 
-  it("refuses a request with no actor with a 401 in better-auth's body", () => {
+  it("refuses a request with no actor with a 401 carrying better-auth's code, in the error envelope (#1260)", () => {
     let thrown: unknown;
     try {
       guard.canActivate(contextFor(Routes, Routes.prototype.guarded));
@@ -96,8 +96,11 @@ describe('ActorAuthGuard', () => {
       thrown = error;
     }
 
-    expect(thrown).toBeInstanceOf(UnauthorizedException);
-    expect((thrown as UnauthorizedException).getResponse()).toEqual({
+    expect(thrown).toBeInstanceOf(CodedHttpException);
+    expect((thrown as CodedHttpException).getStatus()).toBe(401);
+    expect((thrown as CodedHttpException).getResponse()).toEqual({
+      statusCode: 401,
+      error: 'Unauthorized',
       code: 'UNAUTHORIZED',
       message: t('errors.auth.unauthenticated'),
     });

@@ -90,7 +90,7 @@ describe('refuseOwnerLockout (#772)', () => {
 
     expect(thrown).toMatchObject({
       status: HttpStatus.UNPROCESSABLE_ENTITY,
-      response: { code: 'CATALOG_OWNER_LOCKOUT' },
+      response: { statusCode: 422, error: 'Unprocessable Entity', code: 'CATALOG_OWNER_LOCKOUT' },
     });
   });
 });

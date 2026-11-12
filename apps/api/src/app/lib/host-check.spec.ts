@@ -59,7 +59,12 @@ describe('createHostCheck (#977)', () => {
 
       expect(res.statusCode).toBe(421);
       expect(headers.get('content-type')).toBe('application/json');
-      expect(body()).toEqual({ code: 'HOST_NOT_ALLOWED', message: 'rendered:errors.host.not_allowed' });
+      expect(body()).toEqual({
+        statusCode: 421,
+        error: 'Misdirected Request',
+        code: 'HOST_NOT_ALLOWED',
+        message: 'rendered:errors.host.not_allowed',
+      });
       expect(next).not.toHaveBeenCalled();
     });
 

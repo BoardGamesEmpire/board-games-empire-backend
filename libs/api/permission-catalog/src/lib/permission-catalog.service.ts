@@ -24,19 +24,11 @@ import {
   type RolePermissionSnapshotRow,
   type RoleSnapshotRow,
 } from '@bge/database';
-import { t } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import { PermissionsService } from '@bge/permissions';
-import {
-  BadRequestException,
-  ConflictException,
-  Inject,
-  Injectable,
-  Logger,
-  NotFoundException,
-  Optional,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Http } from '@status/codes';
 import { isDeepStrictEqual } from 'node:util';
 import { countConsentDecisionsLost, loadConsentDecisionsInForce } from './consent-effect';
 import {
@@ -181,10 +173,7 @@ export class PermissionCatalogService {
     // hears so. One that names the current values is answered below as an
     // edit that changes nothing.
     if (!EDITABLE.some((key) => edit[key] !== undefined)) {
-      throw new BadRequestException({
-        code: 'CATALOG_EDIT_EMPTY',
-        message: t('errors.permission_catalog.edit_empty'),
-      });
+      throw new CodedHttpException(Http.BadRequest, 'CATALOG_EDIT_EMPTY', t('errors.permission_catalog.edit_empty'));
     }
 
     const initiatedAt = new Date();
@@ -209,11 +198,12 @@ export class PermissionCatalogService {
       const { problems, warnings } = await checkEdit(tx, snapshot, catalog, after, edit.conditions !== undefined);
 
       if (problems.length > 0) {
-        throw new UnprocessableEntityException({
-          code: 'CATALOG_ENTRY_REFUSED',
-          message: t('errors.permission_catalog.entry_refused'),
-          problems,
-        });
+        throw new CodedHttpException(
+          Http.UnprocessableEntity,
+          'CATALOG_ENTRY_REFUSED',
+          t('errors.permission_catalog.entry_refused'),
+          { fields: { problems } },
+        );
       }
 
       // No `limit`: Prisma would move the guard into a subquery and stop
@@ -350,17 +340,19 @@ export class PermissionCatalogService {
       const { role, permission, grant } = await readGrant(tx, roleName, slug);
 
       if (!Object.hasOwn(ROLE_SCOPE, roleName)) {
-        throw new ConflictException({
-          code: 'CATALOG_ROLE_NOT_JUDGEABLE',
-          message: t('errors.permission_catalog.role_not_judgeable', { name: roleName }),
-        });
+        throw new CodedHttpException(
+          Http.Conflict,
+          'CATALOG_ROLE_NOT_JUDGEABLE',
+          t('errors.permission_catalog.role_not_judgeable', { name: roleName }),
+        );
       }
 
       if (permission.retiredAt !== null) {
-        throw new ConflictException({
-          code: 'CATALOG_PERMISSION_RETIRED',
-          message: t('errors.permission_catalog.permission_retired', { slug }),
-        });
+        throw new CodedHttpException(
+          Http.Conflict,
+          'CATALOG_PERMISSION_RETIRED',
+          t('errors.permission_catalog.permission_retired', { slug }),
+        );
       }
 
       const before = grant === null ? null : grantRow(roleName, slug, grant);
@@ -803,10 +795,11 @@ async function readEditablePermission(tx: Prisma.TransactionClient, slug: string
   }
 
   if (row.managedBy === PermissionOwner.Plugin) {
-    throw new ConflictException({
-      code: 'CATALOG_ENTRY_NOT_EDITABLE',
-      message: t('errors.permission_catalog.entry_not_editable', { slug }),
-    });
+    throw new CodedHttpException(
+      Http.Conflict,
+      'CATALOG_ENTRY_NOT_EDITABLE',
+      t('errors.permission_catalog.entry_not_editable', { slug }),
+    );
   }
 
   return row;
@@ -883,17 +876,19 @@ async function grantNextStart(
 async function readEditableRole(tx: Prisma.TransactionClient, name: string) {
   const role = await tx.role.findUnique({ where: { name }, select: ROLE_ROW_SELECT });
   if (role === null) {
-    throw new NotFoundException({
-      code: 'CATALOG_ENTRY_NOT_FOUND',
-      message: t('errors.permission_catalog.role_not_found', { name }),
-    });
+    throw new CodedHttpException(
+      Http.NotFound,
+      'CATALOG_ENTRY_NOT_FOUND',
+      t('errors.permission_catalog.role_not_found', { name }),
+    );
   }
 
   if (role.managedBy === PermissionOwner.Plugin) {
-    throw new ConflictException({
-      code: 'CATALOG_ENTRY_NOT_EDITABLE',
-      message: t('errors.permission_catalog.role_not_editable', { name }),
-    });
+    throw new CodedHttpException(
+      Http.Conflict,
+      'CATALOG_ENTRY_NOT_EDITABLE',
+      t('errors.permission_catalog.role_not_editable', { name }),
+    );
   }
 
   return role;
@@ -922,10 +917,11 @@ async function readGrant(
   }
 
   if (permission.managedBy === PermissionOwner.Plugin) {
-    throw new ConflictException({
-      code: 'CATALOG_ENTRY_NOT_EDITABLE',
-      message: t('errors.permission_catalog.permission_not_grantable', { slug }),
-    });
+    throw new CodedHttpException(
+      Http.Conflict,
+      'CATALOG_ENTRY_NOT_EDITABLE',
+      t('errors.permission_catalog.permission_not_grantable', { slug }),
+    );
   }
 
   const grant = await tx.rolePermission.findUnique({
@@ -934,10 +930,11 @@ async function readGrant(
   });
 
   if (grant?.managedBy === PermissionOwner.Plugin) {
-    throw new ConflictException({
-      code: 'CATALOG_ENTRY_NOT_EDITABLE',
-      message: t('errors.permission_catalog.grant_not_editable', { name: roleName, slug }),
-    });
+    throw new CodedHttpException(
+      Http.Conflict,
+      'CATALOG_ENTRY_NOT_EDITABLE',
+      t('errors.permission_catalog.grant_not_editable', { name: roleName, slug }),
+    );
   }
 
   return { role, permission, grant };
@@ -969,11 +966,12 @@ async function checkGrantChange(
   );
 
   if (problems.length > 0) {
-    throw new UnprocessableEntityException({
-      code: 'CATALOG_ENTRY_REFUSED',
-      message: t('errors.permission_catalog.grant_refused'),
-      problems,
-    });
+    throw new CodedHttpException(
+      Http.UnprocessableEntity,
+      'CATALOG_ENTRY_REFUSED',
+      t('errors.permission_catalog.grant_refused'),
+      { fields: { problems } },
+    );
   }
 
   return warnings;
@@ -1032,39 +1030,32 @@ function guardOf({ id, managedBy, revokedAt }: GrantRow): Prisma.RolePermissionW
 // One builder per refusal the routes answer in more than one place, so each
 // keeps one code and one message.
 
-function permissionNotFound(slug: string): NotFoundException {
-  return new NotFoundException({
-    code: 'CATALOG_ENTRY_NOT_FOUND',
-    message: t('errors.permission_catalog.entry_not_found', { slug }),
-  });
+function permissionNotFound(slug: string): CodedHttpException {
+  return new CodedHttpException(
+    Http.NotFound,
+    'CATALOG_ENTRY_NOT_FOUND',
+    t('errors.permission_catalog.entry_not_found', { slug }),
+  );
 }
 
-function grantNotFound(roleName: string, slug: string): NotFoundException {
-  return new NotFoundException({
-    code: 'CATALOG_ENTRY_NOT_FOUND',
-    message: t('errors.permission_catalog.grant_not_found', { name: roleName, slug }),
-  });
+function grantNotFound(roleName: string, slug: string): CodedHttpException {
+  return new CodedHttpException(
+    Http.NotFound,
+    'CATALOG_ENTRY_NOT_FOUND',
+    t('errors.permission_catalog.grant_not_found', { name: roleName, slug }),
+  );
 }
 
-function permissionChanged(): ConflictException {
-  return new ConflictException({
-    code: 'CATALOG_ENTRY_CHANGED',
-    message: t('errors.permission_catalog.entry_changed'),
-  });
+function permissionChanged(): CodedHttpException {
+  return new CodedHttpException(Http.Conflict, 'CATALOG_ENTRY_CHANGED', t('errors.permission_catalog.entry_changed'));
 }
 
-function roleChanged(): ConflictException {
-  return new ConflictException({
-    code: 'CATALOG_ENTRY_CHANGED',
-    message: t('errors.permission_catalog.role_changed'),
-  });
+function roleChanged(): CodedHttpException {
+  return new CodedHttpException(Http.Conflict, 'CATALOG_ENTRY_CHANGED', t('errors.permission_catalog.role_changed'));
 }
 
-function grantChanged(): ConflictException {
-  return new ConflictException({
-    code: 'CATALOG_ENTRY_CHANGED',
-    message: t('errors.permission_catalog.grant_changed'),
-  });
+function grantChanged(): CodedHttpException {
+  return new CodedHttpException(Http.Conflict, 'CATALOG_ENTRY_CHANGED', t('errors.permission_catalog.grant_changed'));
 }
 
 /** A grant row by the names the snapshot speaks in. */

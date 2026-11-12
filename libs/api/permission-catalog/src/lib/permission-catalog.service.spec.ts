@@ -21,7 +21,7 @@ import {
 import { PermissionsService } from '@bge/permissions';
 import { CacheFlushError } from '@bge/redis';
 import { createTestingModuleWithDb, rawQueryText, unwrapTransaction, type MockDatabaseService } from '@bge/testing';
-import { ConflictException, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import { HttpException, HttpStatus } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   PermissionUpdatedEvent,
@@ -343,8 +343,10 @@ describe('PermissionCatalogService (#772)', () => {
 
       const refused = service.updatePermission(SLUG, { reason: 'Mine now' });
 
-      await expect(refused).rejects.toThrow(ConflictException);
-      await expect(refused).rejects.toMatchObject({ response: { code: 'CATALOG_ENTRY_NOT_EDITABLE' } });
+      await expect(refused).rejects.toMatchObject({
+        status: HttpStatus.CONFLICT,
+        response: { code: 'CATALOG_ENTRY_NOT_EDITABLE' },
+      });
       expect(probe).not.toHaveBeenCalled();
       expect(db.permission.updateMany).not.toHaveBeenCalled();
     });
@@ -370,8 +372,10 @@ describe('PermissionCatalogService (#772)', () => {
 
       const refused = service.updatePermission('read:nothing', { reason: 'x' });
 
-      await expect(refused).rejects.toThrow(NotFoundException);
-      await expect(refused).rejects.toMatchObject({ response: { code: 'CATALOG_ENTRY_NOT_FOUND' } });
+      await expect(refused).rejects.toMatchObject({
+        status: HttpStatus.NOT_FOUND,
+        response: { code: 'CATALOG_ENTRY_NOT_FOUND' },
+      });
       expect(db.permission.updateMany).not.toHaveBeenCalled();
     });
 
@@ -426,8 +430,10 @@ describe('PermissionCatalogService (#772)', () => {
 
       const refused = service.updatePermission(SLUG, { reason: 'Hosts edit their events' });
 
-      await expect(refused).rejects.toThrow(ConflictException);
-      await expect(refused).rejects.toMatchObject({ response: { code: 'CATALOG_ENTRY_CHANGED' } });
+      await expect(refused).rejects.toMatchObject({
+        status: HttpStatus.CONFLICT,
+        response: { code: 'CATALOG_ENTRY_CHANGED' },
+      });
       expect(permissions.invalidateAllGraphs).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();
     });
@@ -844,8 +850,10 @@ describe('PermissionCatalogService (#772)', () => {
       it('answers 404 with CATALOG_ENTRY_NOT_FOUND for a role this server does not have', async () => {
         const refused = service.updateRole('Treasurer', { description: 'x' });
 
-        await expect(refused).rejects.toThrow(NotFoundException);
-        await expect(refused).rejects.toMatchObject({ response: { code: 'CATALOG_ENTRY_NOT_FOUND' } });
+        await expect(refused).rejects.toMatchObject({
+          status: HttpStatus.NOT_FOUND,
+          response: { code: 'CATALOG_ENTRY_NOT_FOUND' },
+        });
         expectNothingWritten();
       });
 
@@ -864,8 +872,10 @@ describe('PermissionCatalogService (#772)', () => {
 
         const refused = service.updateRole(NAME, { description: 'Everyone who lives here' });
 
-        await expect(refused).rejects.toThrow(ConflictException);
-        await expect(refused).rejects.toMatchObject({ response: { code: 'CATALOG_ENTRY_CHANGED' } });
+        await expect(refused).rejects.toMatchObject({
+          status: HttpStatus.CONFLICT,
+          response: { code: 'CATALOG_ENTRY_CHANGED' },
+        });
         expect(emitter.emit).not.toHaveBeenCalled();
       });
     });
@@ -1021,8 +1031,10 @@ describe('PermissionCatalogService (#772)', () => {
       ])('answers 404 with CATALOG_ENTRY_NOT_FOUND for a %s this server does not have', async (_label, role, slug) => {
         const refused = service.addGrant(role, slug);
 
-        await expect(refused).rejects.toThrow(NotFoundException);
-        await expect(refused).rejects.toMatchObject({ response: { code: 'CATALOG_ENTRY_NOT_FOUND' } });
+        await expect(refused).rejects.toMatchObject({
+          status: HttpStatus.NOT_FOUND,
+          response: { code: 'CATALOG_ENTRY_NOT_FOUND' },
+        });
         expectNothingWritten();
       });
 
@@ -1235,8 +1247,10 @@ describe('PermissionCatalogService (#772)', () => {
       it('answers 404 with CATALOG_ENTRY_NOT_FOUND for a grant the role does not have', async () => {
         const refused = service.revokeGrant(SystemRole.HouseholdGuest, 'update:household');
 
-        await expect(refused).rejects.toThrow(NotFoundException);
-        await expect(refused).rejects.toMatchObject({ response: { code: 'CATALOG_ENTRY_NOT_FOUND' } });
+        await expect(refused).rejects.toMatchObject({
+          status: HttpStatus.NOT_FOUND,
+          response: { code: 'CATALOG_ENTRY_NOT_FOUND' },
+        });
         expectNothingWritten();
       });
 
@@ -1412,8 +1426,8 @@ describe('PermissionCatalogService (#772)', () => {
         });
 
         it('answers 404 with CATALOG_ENTRY_NOT_FOUND for a slug no permission has', async () => {
-          await expect(service.handBackPermission('read:nothing')).rejects.toBeInstanceOf(NotFoundException);
           await expect(service.handBackPermission('read:nothing')).rejects.toMatchObject({
+            status: HttpStatus.NOT_FOUND,
             response: { code: 'CATALOG_ENTRY_NOT_FOUND' },
           });
           expect(db.permission.updateMany).not.toHaveBeenCalled();

@@ -119,7 +119,12 @@ describe('createAuthRequestHandler', () => {
     const refused = await signIn(handle);
 
     expect(refused.status).toBe(429);
-    await expect(refused.json()).resolves.toEqual({ code: 'RATE_LIMITED', message: 'errors.auth.rate_limited' });
+    await expect(refused.json()).resolves.toEqual({
+      statusCode: 429,
+      error: 'Too Many Requests',
+      code: 'RATE_LIMITED',
+      message: 'errors.auth.rate_limited',
+    });
     expect(refused.headers.get('content-type')).toMatch(/^application\/json/);
     expect(Number(refused.headers.get('x-retry-after'))).toBeGreaterThan(0);
   });
@@ -133,7 +138,12 @@ describe('createAuthRequestHandler', () => {
     const response = await signIn(handle);
 
     expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({ code: 'AUTH_UNAVAILABLE', message: 'errors.auth.unavailable' });
+    await expect(response.json()).resolves.toEqual({
+      statusCode: 503,
+      error: 'Service Unavailable',
+      code: 'AUTH_UNAVAILABLE',
+      message: 'errors.auth.unavailable',
+    });
     expect(logged).toHaveBeenCalledWith(expect.any(String), expect.stringContaining('Connection is closed.'));
     logged.mockRestore();
   });
@@ -157,7 +167,12 @@ describe('createAuthRequestHandler', () => {
 
     const refused = await handle(new Request('http://localhost:33333/api/auth/sign-in/email'));
 
-    await expect(refused.json()).resolves.toEqual({ code: 'RATE_LIMITED', message: 'errors.auth.rate_limited' });
+    await expect(refused.json()).resolves.toEqual({
+      statusCode: 429,
+      error: 'Too Many Requests',
+      code: 'RATE_LIMITED',
+      message: 'errors.auth.rate_limited',
+    });
   });
 
   it('leaves a 429 that already carries a code as it is (#640)', async () => {
@@ -187,8 +202,19 @@ describe('createAuthRequestHandler', () => {
     });
     afterEach(() => jest.restoreAllMocks());
 
-    const unavailable = { code: 'AUTH_UNAVAILABLE', message: 'errors.auth.unavailable' };
-    const failed = { code: 'AUTH_FAILED', message: 'errors.auth.failed' };
+    // Our own answers, in the api's error envelope (#1260).
+    const unavailable = {
+      statusCode: 503,
+      error: 'Service Unavailable',
+      code: 'AUTH_UNAVAILABLE',
+      message: 'errors.auth.unavailable',
+    };
+    const failed = {
+      statusCode: 500,
+      error: 'Internal Server Error',
+      code: 'AUTH_FAILED',
+      message: 'errors.auth.failed',
+    };
 
     const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
       new Request(`http://localhost:33333/api/auth${path}`, {

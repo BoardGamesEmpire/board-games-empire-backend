@@ -1,7 +1,8 @@
 import { AuditContextService } from '@bge/actor-context';
-import { t } from '@bge/i18n';
-import { Injectable, UnauthorizedException, type CanActivate, type ExecutionContext } from '@nestjs/common';
+import { CodedHttpException, t } from '@bge/i18n';
+import { Injectable, type CanActivate, type ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { Http } from '@status/codes';
 
 /**
  * The metadata keys `@AllowAnonymous()` and `@OptionalAuth()` from
@@ -70,6 +71,6 @@ export class ActorAuthGuard implements CanActivate {
       return true;
     }
 
-    throw new UnauthorizedException({ code: 'UNAUTHORIZED', message: t('errors.auth.unauthenticated') });
+    throw new CodedHttpException(Http.Unauthorized, 'UNAUTHORIZED', t('errors.auth.unauthenticated'));
   }
 }

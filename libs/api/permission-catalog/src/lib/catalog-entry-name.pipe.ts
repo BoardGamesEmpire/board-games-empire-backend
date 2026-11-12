@@ -1,5 +1,6 @@
-import { t } from '@bge/i18n';
-import { Injectable, NotFoundException, type ArgumentMetadata, type PipeTransform } from '@nestjs/common';
+import { CodedHttpException, t } from '@bge/i18n';
+import { Injectable, type ArgumentMetadata, type PipeTransform } from '@nestjs/common';
+import { Http } from '@status/codes';
 
 /**
  * A permission's slug or a role's name, as a path parameter of the permission
@@ -18,12 +19,12 @@ export class CatalogEntryNamePipe implements PipeTransform<string, string> {
       return value;
     }
 
-    throw new NotFoundException({
-      code: 'CATALOG_ENTRY_NOT_FOUND',
-      message:
-        data === 'name'
-          ? t('errors.permission_catalog.role_not_found', { name: value })
-          : t('errors.permission_catalog.entry_not_found', { slug: value }),
-    });
+    throw new CodedHttpException(
+      Http.NotFound,
+      'CATALOG_ENTRY_NOT_FOUND',
+      data === 'name'
+        ? t('errors.permission_catalog.role_not_found', { name: value })
+        : t('errors.permission_catalog.entry_not_found', { slug: value }),
+    );
   }
 }

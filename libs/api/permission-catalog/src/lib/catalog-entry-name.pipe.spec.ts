@@ -1,4 +1,5 @@
-import { NotFoundException, type ArgumentMetadata } from '@nestjs/common';
+import { CodedHttpException } from '@bge/i18n';
+import { type ArgumentMetadata } from '@nestjs/common';
 import { CatalogEntryNamePipe } from './catalog-entry-name.pipe';
 
 const param = (data: 'slug' | 'name'): ArgumentMetadata => ({ type: 'param', data, metatype: String });
@@ -18,10 +19,13 @@ describe('CatalogEntryNamePipe (#772)', () => {
   it('answers a slug holding NUL with 404 CATALOG_ENTRY_NOT_FOUND, before any query', () => {
     const slug = 'read:game\u0000';
 
-    expect(() => pipe.transform(slug, param('slug'))).toThrow(NotFoundException);
+    expect(() => pipe.transform(slug, param('slug'))).toThrow(CodedHttpException);
     expect(() => pipe.transform(slug, param('slug'))).toThrow(
       expect.objectContaining({
+        status: 404,
         response: {
+          statusCode: 404,
+          error: 'Not Found',
           code: 'CATALOG_ENTRY_NOT_FOUND',
           message: expect.objectContaining({ key: 'errors.permission_catalog.entry_not_found', args: { slug } }),
         },
@@ -35,6 +39,8 @@ describe('CatalogEntryNamePipe (#772)', () => {
     expect(() => pipe.transform(name, param('name'))).toThrow(
       expect.objectContaining({
         response: {
+          statusCode: 404,
+          error: 'Not Found',
           code: 'CATALOG_ENTRY_NOT_FOUND',
           message: expect.objectContaining({ key: 'errors.permission_catalog.role_not_found', args: { name } }),
         },

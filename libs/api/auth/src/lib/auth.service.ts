@@ -1,5 +1,6 @@
-import { t } from '@bge/i18n';
-import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { CodedHttpException, t } from '@bge/i18n';
+import { Inject, Injectable } from '@nestjs/common';
+import { Http } from '@status/codes';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { APIError } from 'better-auth/api';
 import { parseUserOutput } from 'better-auth/db';
@@ -55,9 +56,13 @@ export class AuthService {
       });
     } catch (error) {
       if (error instanceof APIError && error.status === 'INTERNAL_SERVER_ERROR') {
-        throw new ServiceUnavailableException(
-          { code: SESSION_UNAVAILABLE, message: t('errors.auth.session_unavailable') },
-          { cause: error },
+        throw new CodedHttpException(
+          Http.ServiceUnavailable,
+          SESSION_UNAVAILABLE,
+          t('errors.auth.session_unavailable'),
+          {
+            cause: error,
+          },
         );
       }
 

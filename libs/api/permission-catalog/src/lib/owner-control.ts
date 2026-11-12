@@ -1,6 +1,6 @@
 import { SystemRole, type CatalogSnapshot, type PermissionSlug } from '@bge/database';
-import { t } from '@bge/i18n';
-import { UnprocessableEntityException } from '@nestjs/common';
+import { CodedHttpException, t } from '@bge/i18n';
+import { Http } from '@status/codes';
 
 /**
  * The one permission the Owner role holds, which every Owner power comes from
@@ -49,9 +49,10 @@ export function ownerKeepsControl(snapshot: CatalogSnapshot): boolean {
  */
 export function refuseOwnerLockout(after: CatalogSnapshot): void {
   if (!ownerKeepsControl(after)) {
-    throw new UnprocessableEntityException({
-      code: 'CATALOG_OWNER_LOCKOUT',
-      message: t('errors.permission_catalog.owner_lockout'),
-    });
+    throw new CodedHttpException(
+      Http.UnprocessableEntity,
+      'CATALOG_OWNER_LOCKOUT',
+      t('errors.permission_catalog.owner_lockout'),
+    );
   }
 }

@@ -1,5 +1,6 @@
-import type { I18nPath } from '@bge/i18n';
+import { errorEnvelope, type I18nPath } from '@bge/i18n';
 import { Logger } from '@nestjs/common';
+import { Http } from '@status/codes';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { HostRule } from './host-rule';
 
@@ -93,9 +94,10 @@ export function createHostCheck({ rule, render, logger = new Logger('HostCheck')
         return;
       }
 
-      res.statusCode = 421;
+      // Written before Nest sees the request, in the api's error envelope (#1260).
+      res.statusCode = Http.MisdirectedRequest;
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ code: REFUSAL_CODE, message: refusalMessage() }));
+      res.end(JSON.stringify(errorEnvelope(Http.MisdirectedRequest, refusalMessage(), { code: REFUSAL_CODE })));
     },
 
     // engine.io has its own refusal shape, so the code travels in the message.

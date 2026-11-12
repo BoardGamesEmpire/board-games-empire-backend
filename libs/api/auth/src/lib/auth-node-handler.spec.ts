@@ -7,7 +7,13 @@ import { createAuthRequestHandler, type AuthRequestHandler } from './auth-reques
 /** The limit the adapter is built with here, small enough to cross in a few chunks. */
 const LIMIT = 1024;
 
-const tooLarge = { code: 'REQUEST_TOO_LARGE', message: 'errors.auth.request_too_large' };
+// Our own answer, in the api's error envelope (#1260).
+const tooLarge = {
+  statusCode: 413,
+  error: 'Payload Too Large',
+  code: 'REQUEST_TOO_LARGE',
+  message: 'errors.auth.request_too_large',
+};
 
 interface Answer {
   readonly status: number;
@@ -224,7 +230,12 @@ describe('createAuthNodeHandler', () => {
     const answer = await send('POST', { 'x-forwarded-proto': 'not a scheme' }, (request) => request.end());
 
     expect(answer.status).toBe(400);
-    expect(JSON.parse(answer.body)).toEqual({ code: 'BAD_REQUEST', message: 'errors.auth.bad_request' });
+    expect(JSON.parse(answer.body)).toEqual({
+      statusCode: 400,
+      error: 'Bad Request',
+      code: 'BAD_REQUEST',
+      message: 'errors.auth.bad_request',
+    });
     expect(handler).not.toHaveBeenCalled();
   });
 

@@ -189,14 +189,18 @@ describe('WsErrorFilter', () => {
       });
     });
 
-    it("sends an exception's own message when its copy cannot be translated and it carries no marker, and logs why", async () => {
+    // An exception's own message can name a marker's key and args, and some
+    // args carry request input, so it never stands in for the copy (#1260).
+    it("sends the status's reason phrase, never the exception's own message, when its copy cannot be translated, and logs why", async () => {
       const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
       const malformed = new Error('cannot switch from implicit to explicit numbering');
       failTranslation(malformed);
       const payload = { correlationId: 'corr-1', query: 42 };
       const { client, host } = hostFor('search:start', payload);
+      const failure = await failureOf(new I18nValidationPipe(), MarkedDto, payload);
+      failure.message = 'errors.game.not_found {"id":"request-input"}';
 
-      await filter.catch(await failureOf(new I18nValidationPipe(), MarkedDto, payload), host);
+      await filter.catch(failure, host);
 
       expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
         statusCode: 400,

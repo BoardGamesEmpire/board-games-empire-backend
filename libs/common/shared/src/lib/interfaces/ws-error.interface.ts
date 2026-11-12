@@ -33,10 +33,7 @@ export enum WsErrorEvents {
 export interface WsErrorPayload {
   readonly statusCode: number;
 
-  /**
-   * The HTTP body's `error` field: the status text, or a structured
-   * exception's own label.
-   */
+  /** The HTTP body's `error` field: the status's reason phrase, never a custom label (#1260). */
   readonly error: string;
 
   /** A list for validation failures, as over HTTP. */
