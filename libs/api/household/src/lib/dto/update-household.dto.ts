@@ -2,8 +2,13 @@ import { MemberInvitePolicy, MemberSharePolicy } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsObject, IsOptional, IsString, ValidateIf, ValidateNested } from 'class-validator';
-import { CreateHouseholdDto, HouseholdReachProperty, type HouseholdReach } from './create-household.dto';
+import { IsEnum, IsObject, IsOptional, ValidateIf, ValidateNested } from 'class-validator';
+import {
+  CreateHouseholdDto,
+  HouseholdNameProperty,
+  HouseholdReachProperty,
+  type HouseholdReach,
+} from './create-household.dto';
 
 /**
  * A household's own settings (#166), as its owners and admins change them.
@@ -52,15 +57,14 @@ export class UpdateHouseholdSettingsDto {
  *
  * `name` can't be cleared, so it is redeclared with `ValidateIf` rather than
  * `PartialType`'s `IsOptional`: `null` answers 400 instead of reaching the
- * non-nullable column as a 500 (#788). `description` and `image` keep `null`,
- * which clears them.
+ * non-nullable column as a 500 (#788). The shared `HouseholdNameProperty`
+ * keeps the create's trim and its refusal of a blank name (#884).
+ * `description` and `image` keep `null`, which clears them.
  */
 export class UpdateHouseholdDto extends PartialType(
   OmitType(CreateHouseholdDto, ['clientRequestId', 'name', 'reach'] as const),
 ) {
-  @ApiPropertyOptional()
-  @ValidateIf((_, value) => value !== undefined)
-  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @HouseholdNameProperty({ optional: true })
   name?: string;
 
   @HouseholdReachProperty()

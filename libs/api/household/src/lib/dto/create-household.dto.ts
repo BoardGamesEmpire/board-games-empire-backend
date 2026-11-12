@@ -1,9 +1,10 @@
 import { Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ClientRequestIdProperty, ReachProperty } from '@bge/shared';
+import { applyDecorators } from '@nestjs/common';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, ValidateIf } from 'class-validator';
 
 const HOUSEHOLD_REACHES = [Reach.Private, Reach.Friends] as const;
 export type HouseholdReach = (typeof HOUSEHOLD_REACHES)[number];
@@ -27,15 +28,30 @@ export function HouseholdReachProperty(defaultReach?: HouseholdReach): PropertyD
   });
 }
 
+/**
+ * A household's name: trimmed, and refused when that leaves it empty, so no
+ * household is stored without a name (#884).
+ *
+ * Shared with `UpdateHouseholdDto`, which passes `optional`. That DTO can't
+ * inherit `name` through `PartialType`, whose `IsOptional` lets `null` through
+ * to the non-nullable column (#788). So it declares `name` again, and
+ * this keeps the trim and the empty-name check on both DTOs.
+ */
+export function HouseholdNameProperty({ optional = false }: { optional?: boolean } = {}): PropertyDecorator {
+  const description = 'Trimmed. Refused when empty.';
+
+  return applyDecorators(
+    ...(optional
+      ? [ApiPropertyOptional({ description }), ValidateIf((_, value) => value !== undefined)]
+      : [ApiProperty({ description })]),
+    Transform(({ value }) => (typeof value === 'string' ? value.trim() : value)),
+    IsString({ message: i18nValidationMessage('validation.isString') }),
+    IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') }),
+  );
+}
+
 export class CreateHouseholdDto {
-  /**
-   * Trimmed, and refused when that leaves it empty, so no household is stored
-   * without a name (#884). `UpdateHouseholdDto` inherits both rules.
-   */
-  @ApiProperty({ description: 'Trimmed. Refused when empty.' })
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  @IsString({ message: i18nValidationMessage('validation.isString') })
-  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
+  @HouseholdNameProperty()
   name!: string;
 
   @HouseholdReachProperty(Reach.Private)
