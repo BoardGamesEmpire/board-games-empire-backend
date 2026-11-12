@@ -298,9 +298,9 @@ describe('consent decisions under concurrency (#360)', () => {
       const refusal = activation.status === 409 ? activation : denial;
 
       if (activation.status === 409) {
-        expect(refusal.body.code).toBe('PluginUpdateBlockedByDenialError');
+        expect(refusal.body.code).toBe('PLUGIN_UPDATE_BLOCKED_BY_DENIAL');
       } else {
-        expect(['PluginGrantRequiredDenialError', 'PluginGrantPluginChangedError']).toContain(refusal.body.code);
+        expect(['PLUGIN_GRANT_REQUIRED_DENIAL', 'PLUGIN_GRANT_PLUGIN_CHANGED']).toContain(refusal.body.code);
       }
 
       if (!activated) {

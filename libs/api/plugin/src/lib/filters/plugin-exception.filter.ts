@@ -1,6 +1,14 @@
 import { AuditContextService } from '@bge/actor-context';
 import { alreadyTellsHouseholdsApart } from '@bge/household';
-import { I18nMessage, I18nPath, I18nTranslations, t, translateException } from '@bge/i18n';
+import {
+  CodedHttpException,
+  I18nMessage,
+  I18nPath,
+  I18nTranslations,
+  t,
+  toErrorCode,
+  translateException,
+} from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import {
   PluginConfigSchemaUnusableError,
@@ -77,11 +85,10 @@ import {
   type PluginArtifactLinkRefusal,
 } from '@bge/plugin-artifacts';
 import type { PluginArchiveRule } from '@boardgamesempire/plugin-manifest';
-import { ArgumentsHost, Catch, HttpException, Logger } from '@nestjs/common';
+import { ArgumentsHost, Catch, Logger } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { Http } from '@status/codes';
 import { I18nService } from 'nestjs-i18n';
-import { STATUS_CODES } from 'node:http';
 import { PluginArtifactSourceError } from '../plugin-artifact-source.error';
 import { PluginArtifactUploadInvalidError } from '../upload/plugin-artifact-upload-invalid.error';
 
@@ -724,10 +731,12 @@ export const PLUGIN_EXCEPTION_FILTER_CATCHES: readonly ErrorCtor<Error>[] = [...
  * transport-agnostic on purpose — this filter is the single place the
  * status-code mapping lives.
  *
- * Response bodies are structured (`{ …fields, statusCode, message, error,
- * code }`): `code` is the domain error's `name` — a hand-pinned string
- * literal on every runtime error class, so it survives minification and
- * class renames — letting clients dispatch without parsing copy.
+ * Response bodies are the error envelope (`{ statusCode, error, message,
+ * code, …fields }`, #1260). `code` is derived from the domain error's `name`
+ * (`PluginGrantScopeIdError` → `PLUGIN_GRANT_SCOPE_ID`); the name is a
+ * hand-pinned string literal on every runtime error class, so the code
+ * survives minification and class renames, letting clients dispatch without
+ * parsing copy.
  * Prompt-bearing errors (Critical confirmation, static analysis, denial
  * blocks) spread their own machine-readable fields into the body so the
  * confirmation prompt is rendered FROM the error, never recomputed.
@@ -737,7 +746,7 @@ export const PLUGIN_EXCEPTION_FILTER_CATCHES: readonly ErrorCtor<Error>[] = [...
  *
  * Because this is a controller-scoped filter it runs *instead of* the global
  * `I18nExceptionFilter` (Nest picks the most specific matching filter), so it
- * resolves the marker itself via {@link translateException}.
+ * renders the marker itself via {@link translateException}.
  */
 @Catch(...renderers.keys())
 export class PluginExceptionFilter extends BaseExceptionFilter {
@@ -772,21 +781,11 @@ export class PluginExceptionFilter extends BaseExceptionFilter {
       this.logger.error(`${shown.name}: ${shown.message}${fields ? ` ${JSON.stringify(fields)}` : ''}`, shown.stack);
     }
 
-    // Envelope keys last: a renderer field can never clobber the dispatch
-    // contract (`code`) or the marker (`message`) — if a future field
-    // collides, the envelope wins and the body stays translatable.
-    const body = {
-      ...fields,
-      statusCode: status,
-      message,
-      error: STATUS_CODES[status] ?? shown.name,
-      code: shown.name,
-    };
+    // Thrown as any coded refusal is, so the code and the marker win over a
+    // renderer field of their name and the body stays translatable (#1260).
+    const refusal = new CodedHttpException(status, toErrorCode(shown.name), message, { fields, cause: exception });
 
-    super.catch(
-      translateException(new HttpException(body, status, { cause: exception }), this.i18n, this.auditContext),
-      host,
-    );
+    super.catch(translateException(refusal, this.i18n, this.auditContext), host);
   }
 
   /**

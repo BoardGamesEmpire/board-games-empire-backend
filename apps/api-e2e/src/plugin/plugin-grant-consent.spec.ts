@@ -151,7 +151,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
 
       // The client renders the disable/uninstall levers FROM this body
       // (client repo #237) — code and fields are contract, not decoration.
-      expect(response.body.code).toBe('PluginGrantRequiredDenialError');
+      expect(response.body.code).toBe('PLUGIN_GRANT_REQUIRED_DENIAL');
       expect(response.body.slug).toBe(plugin.slug);
       expect(response.body.permissionSlug).toBe(`plugin|${plugin.slug}|manage:digest`);
       expect(response.body.message).toMatch(/disable or uninstall/i);
@@ -207,7 +207,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
         .send({ stagingId: INVENTORY_STAGING_ID })
         .expect(409);
 
-      expect(refusal.body.code).toBe('PluginUpdateBlockedByDenialError');
+      expect(refusal.body.code).toBe('PLUGIN_UPDATE_BLOCKED_BY_DENIAL');
       expect(refusal.body.deniedRequiredSlugs).toEqual(['read:safe_http_policy']);
 
       // The installed version keeps serving under its approved state — the
@@ -296,7 +296,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
         granted('read:platform_game'),
       ).expect(403);
 
-      expect(response.body.code).toBe('PluginGrantExclusionError');
+      expect(response.body.code).toBe('PLUGIN_GRANT_EXCLUSION');
       expect(response.body.permissionSlug).toBe('read:platform_game');
     });
   });
@@ -309,7 +309,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       const plugin = await arrangePlugin(DEFAULT_CHECKS, { uninstalledAt: new Date('2026-08-10T00:00:00Z') });
 
       const server = await decideServer(admin, plugin.slug, granted('read:safe_http_policy')).expect(410);
-      expect(server.body.code).toBe('PluginGrantPluginTombstonedError');
+      expect(server.body.code).toBe('PLUGIN_GRANT_PLUGIN_TOMBSTONED');
       await decideHousehold(owner, fixture.household.id, plugin.slug, granted('read:game:public')).expect(410);
       await decideUser(owner, plugin.slug, granted('read:game_collection:public')).expect(410);
     });
@@ -326,16 +326,16 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       const plugin = await arrangePlugin();
 
       const missing = await decideServer(admin, 'ghost-plugin', granted('read:safe_http_policy')).expect(404);
-      expect(missing.body.code).toBe('PluginGrantPluginNotFoundError');
+      expect(missing.body.code).toBe('PLUGIN_GRANT_PLUGIN_NOT_FOUND');
       expect(missing.body.slug).toBe('ghost-plugin');
 
       const unrequested = await decideServer(admin, plugin.slug, granted('read:game')).expect(422);
-      expect(unrequested.body.code).toBe('PluginGrantUnknownPermissionError');
+      expect(unrequested.body.code).toBe('PLUGIN_GRANT_UNKNOWN_PERMISSION');
 
       // A household-consented check decided at server scope: the manifest
       // owns the scope, and the decision must address it there.
       const mismatched = await decideServer(admin, plugin.slug, granted('read:game:public')).expect(422);
-      expect(mismatched.body.code).toBe('PluginGrantConsentScopeMismatchError');
+      expect(mismatched.body.code).toBe('PLUGIN_GRANT_CONSENT_SCOPE_MISMATCH');
     });
   });
 
@@ -529,7 +529,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       });
 
       const missing = await readUserConsent(user, 'ghost-plugin').expect(404);
-      expect(missing.body.code).toBe('PluginConsentPresentationNotFoundError');
+      expect(missing.body.code).toBe('PLUGIN_CONSENT_PRESENTATION_NOT_FOUND');
       expect(missing.body.slug).toBe('ghost-plugin');
 
       const tombstoned = await arrangePlugin(DEFAULT_CHECKS, {
@@ -537,7 +537,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
         uninstalledAt: new Date('2026-08-10T00:00:00Z'),
       });
       const gone = await readUserConsent(user, tombstoned.slug).expect(410);
-      expect(gone.body.code).toBe('PluginConsentPresentationTombstonedError');
+      expect(gone.body.code).toBe('PLUGIN_CONSENT_PRESENTATION_TOMBSTONED');
     });
   });
 });

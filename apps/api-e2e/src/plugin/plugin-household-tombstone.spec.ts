@@ -109,8 +109,8 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
   }[] = [
     {
       name: 'enable',
-      code: 'PluginUnitHouseholdNotFoundError',
-      hiddenCode: 'PluginUnitAuthorityError',
+      code: 'PLUGIN_UNIT_HOUSEHOLD_NOT_FOUND',
+      hiddenCode: 'PLUGIN_UNIT_AUTHORITY',
       send: ({ householdId, plugin }, caller) =>
         request(baseUrl)
           .post(`/api/households/${householdId}/plugins/${plugin.slug}/enable`)
@@ -121,8 +121,8 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
     },
     {
       name: 'consent decision',
-      code: 'PluginGrantHouseholdNotFoundError',
-      hiddenCode: 'PluginGrantAuthorityError',
+      code: 'PLUGIN_GRANT_HOUSEHOLD_NOT_FOUND',
+      hiddenCode: 'PLUGIN_GRANT_AUTHORITY',
       send: ({ householdId, plugin }, caller) =>
         request(baseUrl)
           .post(`/api/households/${householdId}/plugins/${plugin.slug}/grants`)

@@ -171,7 +171,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
       const plugin = await arrangePlugin();
 
       const response = await disableHousehold(owner, household.id, plugin.slug).expect(404);
-      expect(response.body.code).toBe('PluginUnitNotEnrolledError');
+      expect(response.body.code).toBe('PLUGIN_UNIT_NOT_ENROLLED');
       expect(response.body.scopeType).toBe('Household');
     });
 
@@ -197,13 +197,13 @@ describe('plugin unit enablement + feature state (#323)', () => {
       const plugin = await arrangePlugin({ scope: 'server', permissions: { checks: [MANAGE_DIGEST_CHECK] } });
 
       const response = await enableHousehold(owner, household.id, plugin.slug).expect(422);
-      expect(response.body.code).toBe('PluginUnitScopeError');
+      expect(response.body.code).toBe('PLUGIN_UNIT_SCOPE');
 
       // The read refuses identically: a served-false body here would
       // present impossible unit state as a real degraded unit, and the
       // "enable it" lever the client offers from it would 422.
       const read = await readHouseholdFeatures(owner, household.id, plugin.slug).expect(422);
-      expect(read.body.code).toBe('PluginUnitScopeError');
+      expect(read.body.code).toBe('PLUGIN_UNIT_SCOPE');
     });
 
     /**
@@ -235,11 +235,11 @@ describe('plugin unit enablement + feature state (#323)', () => {
       expect(row).toMatchObject({ enabled: false, dormantReason: PluginUnitDormantReason.ScopeOrphaned });
 
       const enabled = await enableHousehold(owner, household.id, plugin.slug).expect(422);
-      expect(enabled.body.code).toBe('PluginUnitScopeError');
+      expect(enabled.body.code).toBe('PLUGIN_UNIT_SCOPE');
       const patched = await patchHouseholdConfig(owner, household.id, plugin.slug, {
         webhookUrl: 'https://example.test/hook',
       }).expect(422);
-      expect(patched.body.code).toBe('PluginUnitScopeError');
+      expect(patched.body.code).toBe('PLUGIN_UNIT_SCOPE');
     });
 
     it('410s a tombstone and 404s an unknown slug', async () => {
@@ -248,10 +248,10 @@ describe('plugin unit enablement + feature state (#323)', () => {
       const plugin = await arrangePlugin({}, { uninstalledAt: new Date(), enabled: false });
 
       const gone = await enableHousehold(owner, household.id, plugin.slug).expect(410);
-      expect(gone.body.code).toBe('PluginUnitPluginTombstonedError');
+      expect(gone.body.code).toBe('PLUGIN_UNIT_PLUGIN_TOMBSTONED');
 
       const missing = await enableHousehold(owner, household.id, 'no-such-plugin').expect(404);
-      expect(missing.body.code).toBe('PluginUnitPluginNotFoundError');
+      expect(missing.body.code).toBe('PLUGIN_UNIT_PLUGIN_NOT_FOUND');
     });
   });
 
@@ -294,7 +294,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
       const plugin = await arrangePlugin(requiringConfig);
 
       const refused = await enableHousehold(owner, household.id, plugin.slug).expect(409);
-      expect(refused.body.code).toBe('PluginUnitConfigRequiredError');
+      expect(refused.body.code).toBe('PLUGIN_UNIT_CONFIG_REQUIRED');
       expect(refused.body.issues).toEqual([]);
       expect(await unitRow(household.id, plugin.id)).toBeNull();
 
@@ -313,7 +313,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
         config: { webhookUrl: 42 },
       }).expect(422);
 
-      expect(response.body.code).toBe('PluginConfigValidationError');
+      expect(response.body.code).toBe('PLUGIN_CONFIG_VALIDATION');
       expect(response.body.issues).toEqual([expect.objectContaining({ path: '/webhookUrl', keyword: 'type' })]);
       expect(await unitRow(household.id, plugin.id)).toBeNull();
     });
@@ -329,7 +329,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
       });
 
       const refused = await enableHousehold(owner, household.id, plugin.slug).expect(409);
-      expect(refused.body.code).toBe('PluginUnitConfigRequiredError');
+      expect(refused.body.code).toBe('PLUGIN_UNIT_CONFIG_REQUIRED');
       expect(refused.body.issues).toEqual([expect.objectContaining({ keyword: 'required' })]);
       expect((await unitRow(household.id, plugin.id))?.enabled).toBe(false);
     });
@@ -404,7 +404,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
       const plugin = await arrangePlugin();
 
       const missing = await enableUser(user, plugin.slug).expect(404);
-      expect(missing.body.code).toBe('PluginUnitNotEnrolledError');
+      expect(missing.body.code).toBe('PLUGIN_UNIT_NOT_ENROLLED');
       expect(missing.body.scopeType).toBe('User');
 
       await decideUser(user, plugin.slug, {
@@ -520,7 +520,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
 
       await db.client.plugin.update({ where: { id: plugin.id }, data: { uninstalledAt: new Date() } });
       const gone = await readHouseholdFeatures(owner, household.id, plugin.slug).expect(410);
-      expect(gone.body.code).toBe('PluginFeatureStateTombstonedError');
+      expect(gone.body.code).toBe('PLUGIN_FEATURE_STATE_TOMBSTONED');
     });
   });
 });

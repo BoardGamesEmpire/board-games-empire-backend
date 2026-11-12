@@ -1,4 +1,5 @@
 import { deadlock, uniqueViolation } from '@bge/database/testing';
+import { CodedHttpException, t } from '@bge/i18n';
 import type { CallHandler, ExecutionContext } from '@nestjs/common';
 import { Http } from '@status/codes';
 import { lastValueFrom, of, throwError } from 'rxjs';
@@ -12,15 +13,19 @@ describe('TransactionDeadlockInterceptor', () => {
   const intercepted = (error: unknown): Promise<unknown> =>
     lastValueFrom(interceptor.intercept(context, handlerThrowing(error)));
 
-  it('renders a deadlock as a typed, retryable 409 instead of a bare 500', async () => {
+  it('renders a deadlock as a coded, retryable 409 instead of a bare 500 (#1260)', async () => {
     const victim = deadlock();
     const failure = await intercepted(victim).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(TransactionDeadlockError);
+    expect(failure).toBeInstanceOf(CodedHttpException);
+    expect((failure as TransactionDeadlockError).name).toBe('TransactionDeadlockError');
     expect((failure as TransactionDeadlockError).getStatus()).toBe(Http.Conflict);
-    expect((failure as TransactionDeadlockError).getResponse()).toMatchObject({
+    expect((failure as TransactionDeadlockError).getResponse()).toEqual({
       statusCode: Http.Conflict,
-      code: 'TransactionDeadlockError',
+      error: 'Conflict',
+      message: t('errors.database.deadlock'),
+      code: 'TRANSACTION_DEADLOCK',
       retryable: true,
     });
   });

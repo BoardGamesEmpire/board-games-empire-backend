@@ -119,7 +119,7 @@ describe('plugin lifecycle (server-level)', () => {
       const admin = await actors.admin();
 
       const response = await post(admin, `/absent-${randomUUID().slice(0, 8)}/enable`).expect(404);
-      expect(response.body.code).toBe('PluginLifecycleNotFoundError');
+      expect(response.body.code).toBe('PLUGIN_LIFECYCLE_NOT_FOUND');
     });
   });
 
@@ -144,7 +144,7 @@ describe('plugin lifecycle (server-level)', () => {
 
       const response = await patchConfig(admin, plugin.slug, { config: { webhookUrl: 42 } }).expect(422);
 
-      expect(response.body.code).toBe('PluginConfigValidationError');
+      expect(response.body.code).toBe('PLUGIN_CONFIG_VALIDATION');
       expect(response.body.slug).toBe(plugin.slug);
       expect(response.body.issues).toEqual(
         expect.arrayContaining([expect.objectContaining({ path: '/webhookUrl', keyword: 'type' })]),
@@ -271,7 +271,7 @@ describe('plugin lifecycle (server-level)', () => {
       await post(admin, `/${plugin.slug}/uninstall`).expect(200);
       const response = await post(admin, `/${plugin.slug}/uninstall`).expect(410);
 
-      expect(response.body.code).toBe('PluginLifecycleTombstonedError');
+      expect(response.body.code).toBe('PLUGIN_LIFECYCLE_TOMBSTONED');
       expect(response.body.slug).toBe(plugin.slug);
     });
 

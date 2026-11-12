@@ -1,41 +1,35 @@
 import { isDeadlockError } from '@bge/database';
-import { t } from '@bge/i18n';
+import { CodedHttpException, t, toErrorCode } from '@bge/i18n';
 import type { CallHandler, ExecutionContext, NestInterceptor } from '@nestjs/common';
-import { HttpException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Http } from '@status/codes';
-import { STATUS_CODES } from 'node:http';
 import { catchError, type Observable, throwError } from 'rxjs';
+
+/** Pinned rather than read from the class, so the code survives a rename or minification. */
+const DEADLOCK_NAME = 'TransactionDeadlockError';
 
 /**
  * A deadlock that survived whatever retry its call site had, rendered as the
- * client's answer rather than as a bare 500 (#398, `D-398-2`).
+ * client's answer rather than as a bare 500 (#398).
  *
  * 409 because the state is curable and the cure is the caller's: nothing about
  * the request was wrong, a concurrent writer and this one wanted the same rows
  * in an order Postgres broke by aborting one of them. `retryable: true` says so
- * without the client having to parse copy, and the `code` is the class name, the
- * same dispatch contract every plugin refusal carries.
+ * without the client having to parse copy. The code, `TRANSACTION_DEADLOCK`, is
+ * derived from the class name with `toErrorCode`, as every plugin refusal's
+ * code is (#1260).
  *
  * NOT 503: the service is available and the next attempt is likely to succeed,
  * and a 503 invites clients to back off from the whole API over one row.
  */
-export class TransactionDeadlockError extends HttpException {
-  override readonly name = 'TransactionDeadlockError';
+export class TransactionDeadlockError extends CodedHttpException {
+  override readonly name = DEADLOCK_NAME;
 
   constructor(cause: unknown) {
-    super(
-      {
-        statusCode: Http.Conflict,
-        error: STATUS_CODES[Http.Conflict],
-        // Deferred marker: the global I18nExceptionFilter translates this in
-        // place at the edge, leaving the machine-readable fields intact.
-        message: t('errors.database.deadlock'),
-        code: 'TransactionDeadlockError',
-        retryable: true,
-      },
-      Http.Conflict,
-      { cause },
-    );
+    super(Http.Conflict, toErrorCode(DEADLOCK_NAME), t('errors.database.deadlock'), {
+      fields: { retryable: true },
+      cause,
+    });
   }
 }
 

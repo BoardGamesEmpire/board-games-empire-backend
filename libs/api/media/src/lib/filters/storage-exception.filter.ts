@@ -1,15 +1,15 @@
 import { AuditContextService } from '@bge/actor-context';
-import { I18nTranslations, t, translateException } from '@bge/i18n';
+import { I18nMessage, I18nTranslations, t, translateException } from '@bge/i18n';
 import {
   DriverNotRegisteredError,
   InsufficientStorageError,
   StorageMisconfiguredError,
   StorageUnavailableError,
 } from '@boardgamesempire/storage-contract';
-import { ArgumentsHost, Catch, HttpException, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { ArgumentsHost, Catch, HttpException, Logger } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
+import { Http } from '@status/codes';
 import { I18nService } from 'nestjs-i18n';
-import { InsufficientStorageException } from '../exceptions/insufficient-storage.exception';
 
 /** Seconds advertised in `Retry-After` for retryable storage outages. */
 const STORAGE_RETRY_AFTER_SECONDS = 30;
@@ -34,8 +34,9 @@ type MappableStorageError =
  * error message (which can name internal drivers/keys) is never surfaced; it is
  * kept only as the exception `cause` for server logs. Because this is a
  * controller-scoped filter it runs *instead of* the global `I18nExceptionFilter`
- * (Nest picks the most specific matching filter), so it resolves the marker
- * itself via {@link translateException}.
+ * (Nest picks the most specific matching filter), so it renders the marker
+ * itself, into the error envelope, via {@link translateException} (#1260, #325).
+ * The body carries no `code`: an outage names no specific refusal.
  */
 @Catch(StorageUnavailableError, InsufficientStorageError, StorageMisconfiguredError, DriverNotRegisteredError)
 export class StorageExceptionFilter extends BaseExceptionFilter {
@@ -49,26 +50,32 @@ export class StorageExceptionFilter extends BaseExceptionFilter {
   }
 
   override catch(exception: MappableStorageError, host: ArgumentsHost): void {
-    super.catch(translateException(this.toHttpException(exception, host), this.i18n, this.auditContext), host);
+    const { status, message } = this.toRefusal(exception, host);
+    const refusal = new HttpException(message, status, { cause: exception });
+
+    super.catch(translateException(refusal, this.i18n, this.auditContext), host);
   }
 
-  private toHttpException(exception: MappableStorageError, host: ArgumentsHost): HttpException {
+  private toRefusal(
+    exception: MappableStorageError,
+    host: ArgumentsHost,
+  ): { readonly status: number; readonly message: I18nMessage } {
     if (exception instanceof InsufficientStorageError) {
       // Generic localized copy — never the driver's raw message (may leak keys).
-      return new InsufficientStorageException(t('errors.storage.insufficient'), exception);
+      return { status: Http.InsufficientStorage, message: t('errors.storage.insufficient') };
     }
 
     if (exception instanceof StorageUnavailableError) {
       if (exception.retryable) {
         this.setRetryAfter(host);
       }
-      return new ServiceUnavailableException(t('errors.storage.unavailable'), { cause: exception });
+      return { status: Http.ServiceUnavailable, message: t('errors.storage.unavailable') };
     }
 
     // StorageMisconfiguredError | DriverNotRegisteredError: an operator must act
     // (missing/expired backend, unregistered driver slug, #100). 503, logged loud.
     this.logger.error(`Storage misconfiguration (${exception.code}): ${exception.message}`, exception.stack);
-    return new ServiceUnavailableException(t('errors.storage.unavailable'), { cause: exception });
+    return { status: Http.ServiceUnavailable, message: t('errors.storage.unavailable') };
   }
 
   private setRetryAfter(host: ArgumentsHost): void {

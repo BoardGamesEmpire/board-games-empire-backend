@@ -156,7 +156,7 @@ describe('plugin install ingress (#1094)', () => {
 
     const refused = await upload(admin, artifact, 'f'.repeat(64)).expect(422);
 
-    expect(refused.body.code).toBe('PluginArtifactChecksumMismatchError');
+    expect(refused.body.code).toBe('PLUGIN_ARTIFACT_CHECKSUM_MISMATCH');
     expect(await exists(join(pluginsRoot(), artifact.slug))).toBe(false);
     expect(await db.client.pluginArtifact.count({ where: { slug: artifact.slug } })).toBe(0);
     expect(await incoming()).toEqual([]);
@@ -174,7 +174,7 @@ describe('plugin install ingress (#1094)', () => {
 
     const challenged = await install(admin, { sha256: artifact.sha256 }).expect(409);
 
-    expect(challenged.body.code).toBe('PluginInstallStaticAnalysisError');
+    expect(challenged.body.code).toBe('PLUGIN_INSTALL_STATIC_ANALYSIS');
     // The challenge keeps the artifact waiting, so the server admin can answer it.
     await readBack(admin, artifact.sha256).expect(200);
 
@@ -195,7 +195,7 @@ describe('plugin install ingress (#1094)', () => {
       .send({ url: 'http://127.0.0.1:9/plugin.tgz', sha256: 'a'.repeat(64) })
       .expect(422);
 
-    expect(refused.body.code).toBe('PluginArtifactLinkRefusedError');
+    expect(refused.body.code).toBe('PLUGIN_ARTIFACT_LINK_REFUSED');
     expect(refused.body.reason).toBe('blocked-by-policy');
   });
 
@@ -221,6 +221,6 @@ describe('plugin install ingress (#1094)', () => {
 
     const refused = await install(admin, { sha256: artifact.sha256 }).expect(404);
 
-    expect(refused.body.code).toBe('PluginArtifactNotFoundError');
+    expect(refused.body.code).toBe('PLUGIN_ARTIFACT_NOT_FOUND');
   });
 });
