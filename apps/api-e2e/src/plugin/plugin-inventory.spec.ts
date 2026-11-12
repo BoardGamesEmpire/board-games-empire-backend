@@ -324,10 +324,10 @@ describe('installed-plugin inventory (#354)', () => {
       // its service draws for an unknown slug.
       const unknown = await answers(admin, missing);
       expect(unknown).toEqual({
-        'GET /plugins/:slug': [404, 'PluginInventoryNotFoundError'],
-        'GET /plugins/:slug/consent': [404, 'PluginConsentPresentationNotFoundError'],
-        'GET /plugins/:slug/update/pending': [404, 'PluginUpdatePluginNotFoundError'],
-        'GET /plugins/:slug/features': [404, 'PluginFeatureStateNotFoundError'],
+        'GET /plugins/:slug': [404, 'PLUGIN_INVENTORY_NOT_FOUND'],
+        'GET /plugins/:slug/consent': [404, 'PLUGIN_CONSENT_PRESENTATION_NOT_FOUND'],
+        'GET /plugins/:slug/update/pending': [404, 'PLUGIN_UPDATE_PLUGIN_NOT_FOUND'],
+        'GET /plugins/:slug/features': [404, 'PLUGIN_FEATURE_STATE_NOT_FOUND'],
       });
 
       // The controls: the key reads its own plugin, and an unpinned key from
@@ -385,7 +385,7 @@ describe('installed-plugin inventory (#354)', () => {
       const plugin = await arrangePlugin();
 
       const missing = await readOne(admin, `absent-${randomUUID().slice(0, 8)}`).expect(404);
-      expect(missing.body.code).toBe('PluginInventoryNotFoundError');
+      expect(missing.body.code).toBe('PLUGIN_INVENTORY_NOT_FOUND');
 
       await readOne(user, plugin.slug).expect(403);
     });
@@ -395,7 +395,7 @@ describe('installed-plugin inventory (#354)', () => {
       const plugin = await arrangePlugin({ uninstalledAt: new Date() });
 
       const gone = await readOne(admin, plugin.slug).expect(410);
-      expect(gone.body.code).toBe('PluginInventoryTombstonedError');
+      expect(gone.body.code).toBe('PLUGIN_INVENTORY_TOMBSTONED');
       expect(gone.body.uninstalledAt).toBeDefined();
 
       // The list's opt-in cannot reach this route: it binds no query DTO, so
@@ -411,7 +411,7 @@ describe('installed-plugin inventory (#354)', () => {
       await db.client.plugin.update({ where: { id: plugin.id }, data: { manifestJson: { nonsense: true } } });
 
       const response = await readOne(admin, plugin.slug).expect(500);
-      expect(response.body.code).toBe('PluginInventoryManifestError');
+      expect(response.body.code).toBe('PLUGIN_INVENTORY_MANIFEST');
     });
   });
 

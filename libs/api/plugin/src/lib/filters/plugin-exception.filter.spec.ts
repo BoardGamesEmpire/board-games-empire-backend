@@ -1,4 +1,5 @@
 import { Action, PluginGrantScope, ResourceType } from '@bge/database';
+import { toErrorCode } from '@bge/i18n';
 import * as pluginRuntime from '@bge/plugin';
 import {
   type PluginConfigIssue,
@@ -136,6 +137,21 @@ describe('PluginExceptionFilter', () => {
   const rendered = (): HttpException => superCatch.mock.calls[0][0] as HttpException;
   const body = (): Record<string, unknown> => rendered().getResponse() as Record<string, unknown>;
 
+  describe('the error envelope (#1260)', () => {
+    it('derives the code from the error class name', () => {
+      filter.catch(new PluginGrantScopeIdError(PluginGrantScope.Server, 'scopeId must be absent'), host);
+
+      expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
+      expect(body()).toEqual({
+        statusCode: 422,
+        error: 'Unprocessable Entity',
+        message: 't:errors.plugin.grant_scope_id',
+        code: 'PLUGIN_GRANT_SCOPE_ID',
+        scopeType: PluginGrantScope.Server,
+      });
+    });
+  });
+
   describe('403 — authority and categorical exclusion', () => {
     it.each([
       [new PluginInstallAuthorityError('user-1'), 'install_authority'],
@@ -146,7 +162,7 @@ describe('PluginExceptionFilter', () => {
 
       expect(rendered().getStatus()).toBe(Http.Forbidden);
       expect(body()['message']).toBe(`t:errors.plugin.${key}`);
-      expect(body()['code']).toBe(exception.name);
+      expect(body()['code']).toBe(toErrorCode(exception.name));
       expect((rendered() as unknown as { cause?: unknown }).cause).toBe(exception);
     });
 
@@ -226,14 +242,14 @@ describe('PluginExceptionFilter', () => {
 
       expect(rendered().getStatus()).toBe(Http.Conflict);
       expect(body()['message']).toBe(`t:errors.plugin.${key}`);
-      expect(body()['code']).toBe(exception.name);
+      expect(body()['code']).toBe(toErrorCode(exception.name));
     });
 
     it('renders a lost reinstall race as 409 with its own copy and the slug, not the install-conflict copy (#1094)', () => {
       filter.catch(new PluginReinstallConflictError('sample'), host);
 
       expect(rendered().getStatus()).toBe(Http.Conflict);
-      expect(body()['code']).toBe('PluginReinstallConflictError');
+      expect(body()['code']).toBe('PLUGIN_REINSTALL_CONFLICT');
       expect(body()['message']).toBe('t:errors.plugin.reinstall_conflict');
       expect(body()['slug']).toBe('sample');
     });
@@ -242,7 +258,7 @@ describe('PluginExceptionFilter', () => {
       filter.catch(new PluginUpdateStagingReplacedError('sample', 'staging-a'), host);
 
       expect(rendered().getStatus()).toBe(Http.Conflict);
-      expect(body()['code']).toBe('PluginUpdateStagingReplacedError');
+      expect(body()['code']).toBe('PLUGIN_UPDATE_STAGING_REPLACED');
       expect(body()['slug']).toBe('sample');
       expect(body()['stagingId']).toBe('staging-a');
     });
@@ -297,7 +313,7 @@ describe('PluginExceptionFilter', () => {
       expect(body()['message']).toBe('t:errors.plugin.grant_required_denial');
       expect(body()['slug']).toBe('sample');
       expect(body()['permissionSlug']).toBe('plugin|sample|manage:digest');
-      expect(body()['code']).toBe('PluginGrantRequiredDenialError');
+      expect(body()['code']).toBe('PLUGIN_GRANT_REQUIRED_DENIAL');
     });
 
     it('renders the blocking denials on PluginUpdateBlockedByDenialError', () => {
@@ -373,7 +389,7 @@ describe('PluginExceptionFilter', () => {
 
       expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
       expect(body()['message']).toBe(`t:errors.plugin.${key}`);
-      expect(body()['code']).toBe(exception.name);
+      expect(body()['code']).toBe(toErrorCode(exception.name));
     });
   });
 
@@ -388,7 +404,7 @@ describe('PluginExceptionFilter', () => {
 
       expect(rendered().getStatus()).toBe(Http.Forbidden);
       expect(body()['message']).toBe('t:errors.plugin.unit_authority');
-      expect(body()['code']).toBe('PluginUnitAuthorityError');
+      expect(body()['code']).toBe('PLUGIN_UNIT_AUTHORITY');
     });
 
     it.each([
@@ -400,7 +416,7 @@ describe('PluginExceptionFilter', () => {
       expect(rendered().getStatus()).toBe(Http.NotFound);
       expect(body()['message']).toBe(`t:errors.plugin.${key}`);
       expect(body()['slug']).toBe('sample');
-      expect(body()['code']).toBe(exception.name);
+      expect(body()['code']).toBe(toErrorCode(exception.name));
     });
 
     it.each([
@@ -417,7 +433,7 @@ describe('PluginExceptionFilter', () => {
         // after it.
         expect(body()['message']).toBe('t:errors.household.not_found');
         expect(body()['householdId']).toBe('hh_1');
-        expect(body()['code']).toBe(exception.name);
+        expect(body()['code']).toBe(toErrorCode(exception.name));
       },
     );
 
@@ -432,12 +448,12 @@ describe('PluginExceptionFilter', () => {
       {
         exception: new PluginUnitHouseholdNotFoundError('hh_1'),
         key: 'unit_authority',
-        code: 'PluginUnitAuthorityError',
+        code: 'PLUGIN_UNIT_AUTHORITY',
       },
       {
         exception: new PluginGrantHouseholdNotFoundError('hh_1'),
         key: 'grant_authority',
-        code: 'PluginGrantAuthorityError',
+        code: 'PLUGIN_GRANT_AUTHORITY',
       },
     ];
 
@@ -609,7 +625,7 @@ describe('PluginExceptionFilter', () => {
       filter.catch(exception, host);
 
       expect(rendered().getStatus()).toBe(Http.InternalServerError);
-      expect(body()['code']).toBe(exception.name);
+      expect(body()['code']).toBe(toErrorCode(exception.name));
       expect(body()['message']).toBe(`t:errors.plugin.${key}`);
       expect(body()['slug']).toBe('sample');
       expect(Logger.prototype.error).toHaveBeenCalledWith(expect.stringContaining(exception.name), expect.any(String));
@@ -651,7 +667,7 @@ describe('PluginExceptionFilter', () => {
       expect(body()['issues']).toEqual([SCHEMA_ISSUE]);
       // The runtime pins `name` as a literal instance field, so the subclass
       // inherits the ancestor's wire code — the dispatch contract stays stable.
-      expect(body()['code']).toBe('PluginUpdateManifestError');
+      expect(body()['code']).toBe('PLUGIN_UPDATE_MANIFEST');
     });
   });
 
@@ -672,7 +688,7 @@ describe('PluginExceptionFilter', () => {
       filter.catch(new PluginArtifactChecksumMismatchError('a'.repeat(64), 'b'.repeat(64)), host);
 
       expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
-      expect(body()['code']).toBe('PluginArtifactChecksumMismatchError');
+      expect(body()['code']).toBe('PLUGIN_ARTIFACT_CHECKSUM_MISMATCH');
       expect(body()['message']).toBe('t:errors.plugin.artifact_checksum_mismatch');
       expect(body()['expectedSha256']).toBe('a'.repeat(64));
       expect(body()['actualSha256']).toBe('b'.repeat(64));
@@ -689,7 +705,7 @@ describe('PluginExceptionFilter', () => {
       filter.catch(new PluginArtifactTooLargeError(104857600), host);
 
       expect(rendered().getStatus()).toBe(Http.PayloadTooLarge);
-      expect(body()['code']).toBe('PluginArtifactTooLargeError');
+      expect(body()['code']).toBe('PLUGIN_ARTIFACT_TOO_LARGE');
       expect(body()['message']).toBe('t:errors.plugin.artifact_too_large');
       expect(body()['limitBytes']).toBe(104857600);
     });
@@ -703,7 +719,7 @@ describe('PluginExceptionFilter', () => {
       filter.catch(new PluginArtifactLinkRefusedError(reason), host);
 
       expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
-      expect(body()['code']).toBe('PluginArtifactLinkRefusedError');
+      expect(body()['code']).toBe('PLUGIN_ARTIFACT_LINK_REFUSED');
       expect(body()['message']).toBe(`t:errors.plugin.${key}`);
       expect(body()['reason']).toBe(reason);
     });
@@ -716,7 +732,7 @@ describe('PluginExceptionFilter', () => {
       filter.catch(new PluginArtifactDownloadFailedError(reason, upstreamStatus), host);
 
       expect(rendered().getStatus()).toBe(Http.BadGateway);
-      expect(body()['code']).toBe('PluginArtifactDownloadFailedError');
+      expect(body()['code']).toBe('PLUGIN_ARTIFACT_DOWNLOAD_FAILED');
       expect(body()['message']).toBe(`t:errors.plugin.${key}`);
       expect(body()['reason']).toBe(reason);
       expect(body()['upstreamStatus']).toBe(upstreamStatus);
@@ -736,7 +752,7 @@ describe('PluginExceptionFilter', () => {
       filter.catch(new PluginArtifactNotFoundError('c'.repeat(64)), host);
 
       expect(rendered().getStatus()).toBe(Http.NotFound);
-      expect(body()['code']).toBe('PluginArtifactNotFoundError');
+      expect(body()['code']).toBe('PLUGIN_ARTIFACT_NOT_FOUND');
       expect(body()['message']).toBe('t:errors.plugin.artifact_not_found');
       expect(body()['sha256']).toBe('c'.repeat(64));
     });
@@ -748,7 +764,7 @@ describe('PluginExceptionFilter', () => {
       filter.catch(new PluginArtifactSourceError(reason), host);
 
       expect(rendered().getStatus()).toBe(Http.BadRequest);
-      expect(body()['code']).toBe('PluginArtifactSourceError');
+      expect(body()['code']).toBe('PLUGIN_ARTIFACT_SOURCE');
       expect(body()['message']).toBe(`t:errors.plugin.${key}`);
       expect(body()['reason']).toBe(reason);
     });
@@ -757,7 +773,7 @@ describe('PluginExceptionFilter', () => {
       filter.catch(new PluginArtifactUploadInvalidError({ cause: new Error('Unexpected field - other') }), host);
 
       expect(rendered().getStatus()).toBe(Http.BadRequest);
-      expect(body()['code']).toBe('PluginArtifactUploadInvalidError');
+      expect(body()['code']).toBe('PLUGIN_ARTIFACT_UPLOAD_INVALID');
       expect(body()['message']).toBe('t:errors.plugin.artifact_upload_invalid');
       expect(JSON.stringify(body())).not.toContain('Unexpected field');
     });
@@ -766,7 +782,7 @@ describe('PluginExceptionFilter', () => {
       filter.catch(new PluginArchiveRefusedError('unsafe-path', '../x'), host);
 
       expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
-      expect(body()['code']).toBe('PluginArchiveRefusedError');
+      expect(body()['code']).toBe('PLUGIN_ARCHIVE_REFUSED');
       expect(body()['message']).toBe('t:errors.plugin.artifact_archive_unsafe_path');
       expect(body()['fields']).toBeUndefined();
       expect(body()['rule']).toBe('unsafe-path');

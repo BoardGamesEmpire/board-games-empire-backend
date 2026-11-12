@@ -137,6 +137,8 @@ describe('SystemSettingsService', () => {
         await expect(service.updateSystemSettings('settings-1', update as never)).rejects.toMatchObject({
           status: HttpStatus.BAD_REQUEST,
           response: {
+            statusCode: 400,
+            error: 'Bad Request',
             code: 'SMTP_PASSWORD_REQUIRED',
             message: expect.objectContaining({ key: 'errors.system_settings.smtp_password_required' }),
           },
@@ -249,6 +251,8 @@ describe('SystemSettingsService', () => {
       await expect(service.sendTestMail('user-1')).rejects.toMatchObject({
         status: HttpStatus.CONFLICT,
         response: {
+          statusCode: 409,
+          error: 'Conflict',
           code: 'MAIL_NOT_CONFIGURED',
           message: expect.objectContaining({ key: 'errors.system_settings.mail_not_configured' }),
         },
@@ -263,6 +267,8 @@ describe('SystemSettingsService', () => {
       await expect(service.sendTestMail('user-1')).rejects.toMatchObject({
         status: HttpStatus.SERVICE_UNAVAILABLE,
         response: {
+          statusCode: 503,
+          error: 'Service Unavailable',
           code: 'MAIL_QUEUE_UNAVAILABLE',
           message: expect.objectContaining({ key: 'errors.system_settings.mail_queue_unavailable' }),
         },

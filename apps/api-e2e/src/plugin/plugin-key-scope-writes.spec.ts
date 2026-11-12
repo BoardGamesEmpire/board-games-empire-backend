@@ -121,13 +121,13 @@ describe('server plugin writes through a key scoped to one plugin (#978)', () =>
     // its service draws for an unknown slug.
     const unknown = await answers(admin, missing);
     expect(unknown).toEqual({
-      'POST /plugins/:slug/grants': [404, 'PluginGrantPluginNotFoundError'],
-      'POST /plugins/:slug/enable': [404, 'PluginLifecycleNotFoundError'],
-      'POST /plugins/:slug/disable': [404, 'PluginLifecycleNotFoundError'],
-      'PATCH /plugins/:slug/config': [404, 'PluginLifecycleNotFoundError'],
-      'POST /plugins/:slug/uninstall': [404, 'PluginLifecycleNotFoundError'],
-      'POST /plugins/:slug/update/approve': [404, 'PluginUpdatePluginNotFoundError'],
-      'POST /plugins/:slug/update/reject': [404, 'PluginUpdatePluginNotFoundError'],
+      'POST /plugins/:slug/grants': [404, 'PLUGIN_GRANT_PLUGIN_NOT_FOUND'],
+      'POST /plugins/:slug/enable': [404, 'PLUGIN_LIFECYCLE_NOT_FOUND'],
+      'POST /plugins/:slug/disable': [404, 'PLUGIN_LIFECYCLE_NOT_FOUND'],
+      'PATCH /plugins/:slug/config': [404, 'PLUGIN_LIFECYCLE_NOT_FOUND'],
+      'POST /plugins/:slug/uninstall': [404, 'PLUGIN_LIFECYCLE_NOT_FOUND'],
+      'POST /plugins/:slug/update/approve': [404, 'PLUGIN_UPDATE_PLUGIN_NOT_FOUND'],
+      'POST /plugins/:slug/update/reject': [404, 'PLUGIN_UPDATE_PLUGIN_NOT_FOUND'],
     });
 
     const others = { missing, live: live.slug, gone: gone.slug, staged: staged.slug };

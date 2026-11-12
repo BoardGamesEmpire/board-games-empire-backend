@@ -75,12 +75,18 @@ describe('API key requests', () => {
       expect(response.body).toMatchObject({ message: 'Invalid API key' });
     });
 
-    // The body better-auth's guard sent, so a client matching on it still matches.
+    // The code and message better-auth's guard sent, so a client matching on
+    // them still matches, inside the api's error envelope (#1260).
     it('still refuses a request with no credential at all with a 401', async () => {
       const response = await request(baseUrl).get(UNREAD_PATH);
 
       expect(response.status).toBe(401);
-      expect(response.body).toEqual({ code: 'UNAUTHORIZED', message: 'Unauthorized' });
+      expect(response.body).toEqual({
+        statusCode: 401,
+        error: 'Unauthorized',
+        code: 'UNAUTHORIZED',
+        message: 'Unauthorized',
+      });
     });
 
     // better-auth's own default was 10 requests a day per key, and the 11th

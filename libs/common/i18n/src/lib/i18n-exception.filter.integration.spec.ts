@@ -1,6 +1,15 @@
+/* eslint-disable bge/no-uncoded-exception-body -- these cases hand the renderer a coded body no producer may build, to pin that it completes any body into the envelope (#1260) */
 import { AuditContextService } from '@bge/actor-context';
 import { t } from '@bge/i18n-core';
-import { Controller, Get, type INestApplication, NotFoundException, Param } from '@nestjs/common';
+import {
+  ConflictException,
+  Controller,
+  Get,
+  type INestApplication,
+  NotFoundException,
+  Param,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { I18nService } from 'nestjs-i18n';
@@ -22,6 +31,22 @@ class TestController {
   @Get('plain')
   plain(): never {
     throw new NotFoundException('plain english message');
+  }
+
+  @Get('coded')
+  coded(): never {
+    throw new ConflictException({ code: 'CATALOG_ENTRY_CHANGED', message: 'plain english message' });
+  }
+
+  // What Terminus throws when a readiness check fails.
+  @Get('health')
+  health(): never {
+    throw new ServiceUnavailableException({
+      status: 'error',
+      info: {},
+      error: { database: { status: 'down', message: 'connection refused' } },
+      details: { database: { status: 'down', message: 'connection refused' } },
+    });
   }
 }
 
@@ -75,5 +100,31 @@ describe('I18nExceptionFilter (integration)', () => {
       error: 'Not Found',
     });
     expect(translate).not.toHaveBeenCalled();
+  });
+
+  it('sends a coded body that carries only code and message as the full envelope (#1260)', async () => {
+    const res = await fetch(`${await app.getUrl()}/languages/coded`);
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({
+      statusCode: 409,
+      error: 'Conflict',
+      message: 'plain english message',
+      code: 'CATALOG_ENTRY_CHANGED',
+    });
+  });
+
+  it('sends a failed health check in the envelope, its failures still named in `details` (#1260)', async () => {
+    const res = await fetch(`${await app.getUrl()}/languages/health`);
+
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({
+      statusCode: 503,
+      error: 'Service Unavailable',
+      message: 'Service Unavailable',
+      status: 'error',
+      info: {},
+      details: { database: { status: 'down', message: 'connection refused' } },
+    });
   });
 });

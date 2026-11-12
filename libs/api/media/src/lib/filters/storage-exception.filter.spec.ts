@@ -50,6 +50,16 @@ describe('StorageExceptionFilter', () => {
     expect(setHeader).not.toHaveBeenCalled();
   });
 
+  it('answers in the error envelope with no code, since a storage outage names no specific refusal (#1260, #325)', () => {
+    filter.catch(new InsufficientStorageError('bucket users/42 is full'), host);
+
+    expect(rendered().getResponse()).toEqual({
+      statusCode: 507,
+      error: 'Insufficient Storage',
+      message: 't:errors.storage.insufficient',
+    });
+  });
+
   it('maps a retryable StorageUnavailableError to 503 + Retry-After', () => {
     filter.catch(new StorageUnavailableError('io', { retryable: true }), host);
 

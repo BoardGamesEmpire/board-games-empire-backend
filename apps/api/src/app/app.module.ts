@@ -249,7 +249,8 @@ import { createThrottlers } from './lib/throttlers';
   controllers: [],
   providers: [
     // Global edge filter: translates exceptions carrying a `t()` key against
-    // the request locale (#143). Non-i18n exceptions fall through unchanged.
+    // the request locale (#143), and sends every HttpException in the error
+    // envelope, `{ statusCode, error, message, ...fields }` (#1260).
     { provide: APP_FILTER, useClass: I18nExceptionFilter },
 
     // Validation errors (#142). `I18nValidationException` extends

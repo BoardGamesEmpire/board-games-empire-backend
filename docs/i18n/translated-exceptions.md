@@ -26,14 +26,85 @@ throw new NotFoundException(t('errors.language.not_found', { id }));
 Do **not** inject `I18nService` into services and translate there. The only
 component that touches translation is the filter.
 
+## The error envelope (#1260)
+
+Every HTTP error the api answers leaves in one shape, apart from the two kinds
+of body listed below:
+
+```jsonc
+{ "statusCode": 409, "error": "Conflict", "message": "<translated>", "code": "CATALOG_ENTRY_CHANGED" }
+```
+
+- `statusCode` is the response status.
+- `error` is that status's standard reason phrase (`STATUS_CODES[status]`, or
+  `"Error"` for a status Node names none for). It is never a custom label.
+- `message` is plain-language copy: one string, or a list of strings for a
+  validation 400.
+- `code` is present exactly when the error names one specific refusal. It is
+  SCREAMING_SNAKE (`CATALOG_ENTRY_CHANGED`, `QUOTA_EXCEEDED`), so a client can
+  branch on it, or announce its own copy for it, without parsing the message.
+  There is no generic per-status code: a plain 404 or an unknown 500 carries
+  none.
+- Any other field (a quota's `limit`, a permission catalog refusal's `problems`) sits
+  beside these. No field can override `statusCode`, `error` or `message`.
+
+`errorEnvelope(status, message, fields?)` in `@bge/i18n` builds it. Every
+producer goes through it: the global filter and the controller-scoped plugin,
+storage and upload filters (via `translateException`), the WebSocket payloads
+(via `renderErrorBody`), the Host check that answers before Nest sees a request,
+and `/api/auth`'s own answers. A failed health check is an envelope too:
+Terminus's `error` map gives way to the reason phrase, and `details` still names
+every check that failed.
+
+Two kinds of body are not yet the envelope:
+
+- **Bodies that better-auth writes itself**, our own `APIError` throws in the
+  auth gates among them, keep its `{ code, message }` shape.
+- **Errors no `HttpException` carries**: an unexpected 500 and a request body
+  the parser refuses (a 413 over the limit) still leave in Nest's own
+  `{ statusCode, message }` until #527 adds a last-resort filter.
+
+### Throwing a coded refusal
+
+A refusal that names a code is thrown as a `CodedHttpException`:
+
+```ts
+import { CodedHttpException, t } from '@bge/i18n';
+import { Http } from '@status/codes';
+
+throw new CodedHttpException(Http.Conflict, 'CATALOG_ENTRY_CHANGED', t('errors.permission_catalog.entry_changed'));
+
+// Machine-readable detail goes in `fields`, server-side context in `cause`.
+throw new CodedHttpException(
+  Http.UnprocessableEntity,
+  'CATALOG_ENTRY_REFUSED',
+  t('errors.permission_catalog.entry_refused'),
+  {
+    fields: { problems },
+  },
+);
+```
+
+Its body is already the envelope, with the marker left unrendered until the
+edge. Its code wins over a field named `code`, and `ErrorCode`
+(`Uppercase<string>`) refuses a lowercase code at compile time. The lint rule
+`bge/no-uncoded-exception-body` refuses a `{ code }` body thrown through any
+other exception class (`RpcException` aside, whose code is the gRPC status).
+
+A family of refusal classes derives its codes from the class name with
+`toErrorCode`: `PluginGrantScopeIdError` → `PLUGIN_GRANT_SCOPE_ID`, and the
+deadlock's `TransactionDeadlockError` → `TRANSACTION_DEADLOCK`. The name is a
+pinned string, never read from the class, so a rename or minification cannot
+change the code.
+
 ## How it resolves
 
 `t()` returns an `I18nMessage { key, args }`. Nest stores it as the exception's
 response body, and `I18nExceptionFilter` (registered globally via `APP_FILTER`
-in `apps/api`) recovers it and renders the normal Nest error shape:
+in `apps/api`) recovers it and renders the error envelope:
 
 ```jsonc
-{ "statusCode": 404, "message": "<translated>", "error": "Not Found" }
+{ "statusCode": 404, "error": "Not Found", "message": "<translated>" }
 ```
 
 Locale comes from `AuditContextService.getLocale()` — the value the entry seam
@@ -42,8 +113,9 @@ throttling) are translated too. `I18nContext.current()` is intentionally not
 used: it is unset for exceptions thrown before nestjs-i18n's interceptor. If no
 locale is resolved, it degrades to `FALLBACK_LOCALE` (`en`).
 
-Exceptions **without** a `t()` payload pass straight through to Nest's default
-handling — nothing about existing error responses changes.
+An exception **without** a `t()` payload gets the envelope too: a string body
+(Nest's own `Cannot GET /x`) becomes the `message`, and an object body keeps its
+fields and gains `statusCode` and `error` (#1260).
 
 ### Refusals thrown before the locale exists
 
@@ -70,10 +142,11 @@ The global `I18nExceptionFilter` only runs when no more-specific filter handles
 the exception first. A **controller-scoped** filter (`@UseFilters(...)`) that
 maps a lower-layer error and renders the response itself (via `super.catch`)
 therefore runs _instead of_ the global filter — Nest invokes only the most
-specific match. Such a filter must resolve markers itself: build the
-marker-carrying Nest exception, then hand it to the exported
-`translateException(exception, i18n, auditContext)` helper (the same core the
-global filter uses) before `super.catch`. Inject `I18nService` and
+specific match. Such a filter must render markers itself: map the error to a
+status and a marker, build an `HttpException` from them (a
+`CodedHttpException` when it names a code), and hand
+`translateException(exception, i18n, auditContext)`'s result, the same one the
+global filter sends, to `super.catch`. Inject `I18nService` and
 `AuditContextService` for it — and make sure the controller's **module** can
 resolve them. A filter bound by class (`@UseFilters(MyFilter)`) has its
 constructor dependencies resolved from the host module's injector, so a missing
@@ -82,11 +155,10 @@ one fails at app **bootstrap**, not per-request. `I18nModule` (nestjs-i18n) is
 global, so the module must import it explicitly.
 
 ```ts
-// media StorageExceptionFilter — controller-scoped, so it translates itself
-return super.catch(
-  translateException(new ServiceUnavailableException(t('errors.storage.unavailable')), this.i18n, this.auditContext),
-  host,
-);
+// media StorageExceptionFilter — controller-scoped, so it renders itself
+const refusal = new HttpException(t('errors.storage.unavailable'), Http.ServiceUnavailable, { cause: exception });
+
+super.catch(translateException(refusal, this.i18n, this.auditContext), host);
 ```
 
 `libs/api/media` does this for its storage/multer filters. Keep such filters
@@ -97,39 +169,28 @@ on it, silently bypassing translation.
 ### Structured bodies (a marker beside machine-readable fields)
 
 Most exceptions carry the `t()` marker _as the whole body_. A few carry
-machine-readable fields the client reads programmatically **alongside** the
-human message — e.g. `QuotaExceededException` returns `resource`, `scope`,
-`limit`, `currentUsage`, `attemptedAmount`, and a custom `error` label next to
-its `message`. For these, put the marker only on the `message` field:
+machine-readable fields the client reads programmatically **beside** the human
+message: `QuotaExceededException` returns `resource`, `scope`, `limit`,
+`currentUsage` and `attemptedAmount` next to its `message` and its code. Build
+these as a `CodedHttpException` with `fields`:
 
 ```ts
-// libs/common/quota QuotaExceededException — structured body, translatable message
-super(
-  {
-    statusCode: Http.PaymentRequired,
-    error: 'Quota Exceeded',
-    message: t('errors.quota.exceeded', { resource, scope }),
-    resource,
-    scope,
-    limit: limit.toString() /* …currentUsage, attemptedAmount */,
-  },
-  Http.PaymentRequired,
-);
+// libs/common/quota QuotaExceededException
+super(Http.PaymentRequired, 'QUOTA_EXCEEDED', t('errors.quota.exceeded', { resource, scope }), {
+  fields: { resource, scope, limit: limit.toString() /* …currentUsage, attemptedAmount */ },
+});
 ```
 
-`translateException` detects a body whose `message` is a marker and translates
-**just that field in place**, preserving every sibling field, the custom `error`
-label, the status, and the `cause`. (A whole-body marker, by contrast, is
-re-issued into Nest's default `{ statusCode, message, error }` shape.) The
-`error` field is not a `message`, so the #145 guardrail leaves it alone — it's a
-machine-readable label, not localized copy.
+`renderErrorBody` renders **just the `message`** in the request locale and
+keeps every other field, the status and the `cause`. Its `error` is the
+status's reason phrase, `"Payment Required"`, like every other error's (#1260).
 
 ### Copy that cannot render
 
 A catalog entry whose template string-format rejects makes the translation
-throw. `translateException` logs it and sends the marker's key in its place,
-so the response keeps its status, and a structured body keeps its other fields
-and its `error` label. A throw would escape the filter: over HTTP the client
+throw. `renderErrorBody` logs it and sends the marker's key in its place, so
+the response is still a full envelope with its status, and a structured body
+keeps its other fields and its code. A throw would escape the filter: over HTTP the client
 would get Express's own 500, and a WebSocket frame no answer. The args stay off
 the wire, since some carry request input. Every edge that renders a marker
 answers this way, as `WsTranslator` does for the copy a gateway sends itself.
@@ -149,13 +210,15 @@ message. The marker still serializes as its brand, key and args alone: its
 `message` lives on the prototype, which `JSON.stringify` and the response
 cache's serializer skip.
 
+A `CodedHttpException` names its marker the same way, although its body's
+`message` is the marker rather than the body itself.
+
 Two cases still get the class phrase, or no log line at all:
 
-- **A structured body** such as `QuotaExceededException`'s. Nest reads only a
-  string `message`, and its `message` is a marker, so `.message` is the class
-  phrase (`"Quota Exceeded Exception"`). The two such exceptions,
-  `QuotaExceededException` and `TransactionDeadlockError`, are thrown only over
-  HTTP, where the filter renders them.
+- **An object body built by hand** whose `message` is a marker, such as
+  `new BadRequestException({ message: t('…') })`. Nest reads only a string
+  `message`, so `.message` is the class phrase (`"Bad Request Exception"`).
+  Throw a whole-body marker or a `CodedHttpException` instead.
 - **A gRPC server** logs no `HttpException`: Nest's default RPC filter answers
   "Internal server error" and skips logging it (#574).
 
@@ -163,8 +226,11 @@ Two cases still get the class phrase, or no log line at all:
 
 No app-wide filter runs on a gateway message, so `I18nExceptionFilter` never
 sees one. The gateways' own `WsErrorFilter` renders a thrown marker instead,
-through the same `translateException`, and sends it in the WS error envelope. A
-structured body keeps its own `error` label and extra fields, as over HTTP.
+through the same `renderErrorBody` behind `translateException`, and sends it in
+the WS error envelope:
+the HTTP envelope plus the frame's `pattern` and `correlationId`. A structured
+body keeps its extra fields, its code among them, under the status's reason
+phrase, as over HTTP.
 
 - **The locale** is resolved once per connection, at the handshake: the user's
   stored preference, then the handshake's `Accept-Language`, then `en`. It is
@@ -181,10 +247,10 @@ structured body keeps its own `error` label and extra fields, as over HTTP.
   (#527). A frame whose session has ended is refused with catalog copy,
   `errors.auth.session_invalid` (#511).
 - **Over HTTP, a request with no credential** is refused by `ActorAuthGuard`
-  (#529). It sends the body better-auth's guard sent, `code: 'UNAUTHORIZED'`
-  included, and renders its `message` from `errors.auth.unauthenticated`, whose
-  English is still "Unauthorized". It has no WebSocket counterpart: a socket
-  without a credential is refused at the handshake.
+  (#529). It keeps the code better-auth's guard sent, `UNAUTHORIZED`, in the
+  error envelope, and renders its `message` from `errors.auth.unauthenticated`,
+  whose English is still "Unauthorized". It has no WebSocket counterpart: a
+  socket without a credential is refused at the handshake.
 
 ## Adding a new message
 

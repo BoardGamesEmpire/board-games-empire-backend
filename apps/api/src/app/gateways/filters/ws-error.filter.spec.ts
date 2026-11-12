@@ -1,3 +1,4 @@
+/* eslint-disable bge/no-uncoded-exception-body -- these cases hand the renderer a coded body no producer may build, to pin that it completes any body into the envelope (#1260) */
 import type { AuditContextService } from '@bge/actor-context';
 import { SearchStartDto } from '@bge/game-search';
 import { FALLBACK_LOCALE, I18N_CATALOG_DIR, i18nValidationMessage, t, type I18nTranslations } from '@bge/i18n';
@@ -91,13 +92,14 @@ describe('WsErrorFilter', () => {
       });
     });
 
-    it("keeps a structured body's own error label and fields, as the HTTP body does", async () => {
+    it("keeps a structured body's fields and names its status's reason phrase, as the HTTP body does (#1260)", async () => {
       const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
       const exceeded = new HttpException(
         {
           statusCode: 402,
           error: 'Quota Exceeded',
           message: t('errors.quota.exceeded', { resource: 'storage_bytes', scope: 'User' }),
+          code: 'QUOTA_EXCEEDED',
           resource: 'storage_bytes',
           scope: 'User',
           limit: 5,
@@ -109,8 +111,9 @@ describe('WsErrorFilter', () => {
 
       expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
         statusCode: 402,
-        error: 'Quota Exceeded',
+        error: 'Payment Required',
         message: 'Quota for "storage_bytes" exceeded at User scope',
+        code: 'QUOTA_EXCEEDED',
         resource: 'storage_bytes',
         scope: 'User',
         limit: 5,
@@ -161,7 +164,7 @@ describe('WsErrorFilter', () => {
       });
     });
 
-    it("sends the key of a marker that is the body's message, and none of its args, beside the body's own label and fields, when its copy cannot be translated", async () => {
+    it("sends the key of a marker that is the body's message, and none of its args, beside the body's fields, when its copy cannot be translated", async () => {
       jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
       failTranslation();
       const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
@@ -179,7 +182,7 @@ describe('WsErrorFilter', () => {
 
       expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
         statusCode: 402,
-        error: 'Quota Exceeded',
+        error: 'Payment Required',
         message: 'errors.quota.exceeded',
         resource: 'storage_bytes',
         pattern: 'search:start',
@@ -187,14 +190,18 @@ describe('WsErrorFilter', () => {
       });
     });
 
-    it("sends an exception's own message when its copy cannot be translated and it carries no marker, and logs why", async () => {
+    // An exception's own message can name a marker's key and args, and some
+    // args carry request input, so it never stands in for the copy (#1260).
+    it("sends the status's reason phrase, never the exception's own message, when its copy cannot be translated, and logs why", async () => {
       const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
       const malformed = new Error('cannot switch from implicit to explicit numbering');
       failTranslation(malformed);
       const payload = { correlationId: 'corr-1', query: 42 };
       const { client, host } = hostFor('search:start', payload);
+      const failure = await failureOf(new I18nValidationPipe(), MarkedDto, payload);
+      failure.message = 'errors.game.not_found {"id":"request-input"}';
 
-      await filter.catch(await failureOf(new I18nValidationPipe(), MarkedDto, payload), host);
+      await filter.catch(failure, host);
 
       expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
         statusCode: 400,

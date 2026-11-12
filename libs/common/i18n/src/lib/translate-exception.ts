@@ -2,7 +2,7 @@ import { AuditContextService } from '@bge/actor-context';
 import { isI18nMessage, type I18nMessage, type I18nTranslations } from '@bge/i18n-core';
 import { HttpException, Logger } from '@nestjs/common';
 import { I18nService } from 'nestjs-i18n';
-import { STATUS_CODES } from 'node:http';
+import { errorEnvelope, reasonPhrase, type ErrorEnvelope } from './error-envelope';
 import { FALLBACK_LOCALE } from './locale.constants';
 
 const logger = new Logger('translateException');
@@ -21,64 +21,115 @@ export function resolveEdgeLocale(auditContext: AuditContextService): string {
 }
 
 /**
- * The single place the error path consults `I18nService`. Resolves a deferred
- * {@link t} marker carried by `exception`, in one of two shapes:
+ * The single place the error path consults `I18nService`. Every exception
+ * leaves as the error envelope (#1260), `{ statusCode, error, message,
+ * ...fields }`, whatever body it was thrown with:
  *
- * 1. **Whole-body marker** (the common case) — the response body *is* the marker
- *    (`throw new NotFoundException(t('errors.…', { … }))`). Returns a fresh
- *    standard `HttpException` whose body is that marker translated against the
- *    request locale (`{ statusCode, message, error }` — Nest's default shape).
- * 2. **Structured body with a marker `message`** — the body is an object that
- *    carries machine-readable fields (e.g. `QuotaExceededException`'s
- *    `resource`/`scope`/`limit`) *beside* a translatable `message` marker.
- *    Translates just the `message` field in place, preserving every other field
- *    and the custom `error` label.
+ * - a whole-body marker (`throw new NotFoundException(t('errors.…', { … }))`)
+ *   becomes the message, rendered in the request locale;
+ * - a structured body (a coded refusal's `code`, a quota's `limit`) keeps every
+ *   field, and its `message` marker is rendered in place;
+ * - a plain string body (Nest's own `Cannot GET /x`, a throttler's text) is the
+ *   message as it was.
  *
- * In both cases the original status and `cause` are preserved, and a catalog
- * entry that cannot render is sent as its key rather than thrown. Any other
- * exception is returned untouched (referentially, so callers can `super.catch`
- * it byte-for-byte as before).
+ * `error` is always the status's reason phrase, so a custom label never reaches
+ * a client. The original status and `cause` are preserved, and a catalog entry
+ * that cannot render is sent as its key rather than thrown. See
+ * {@link renderErrorBody} for how each body is read.
  *
  * Shared by every edge component that renders exceptions itself: the global
  * {@link I18nExceptionFilter}; the media `StorageExceptionFilter` /
  * `MulterExceptionFilter` and the plugin `PluginExceptionFilter`, which are
  * controller-scoped and therefore run *instead of* the global filter (Nest picks
  * the most specific matching filter), so they must resolve markers themselves
- * rather than delegate; and the WebSocket gateways' `WsErrorFilter`, since no
- * global filter runs on a gateway message (#180).
+ * rather than delegate. The WebSocket gateways' `WsErrorFilter`, which no
+ * global filter backs either (#180), sends the envelope as a frame rather than
+ * an exception, so it calls {@link renderErrorBody} directly.
  */
 export function translateException(
   exception: HttpException,
   i18n: I18nService<I18nTranslations>,
   auditContext: AuditContextService,
 ): HttpException {
-  const body = exception.getResponse();
   const status = exception.getStatus();
+  // Carry the original `cause` across the re-issue so server-side context is not
+  // stripped (e.g. StorageExceptionFilter attaches the raw storage error as
+  // `cause` for logs). `{ cause: undefined }` is a no-op in Nest's `initCause`.
+  return new HttpException(renderErrorBody(status, exception.getResponse(), i18n, auditContext), status, {
+    cause: exception.cause,
+  });
+}
 
-  // (1) Whole body is a marker → replace it with Nest's default error shape.
+/**
+ * Reads any `HttpException` body into the error envelope (#1260, #325):
+ *
+ * - a string body is the message;
+ * - a marker body is rendered in the request locale;
+ * - an object body's `message` is rendered if it is a marker and kept if it is a
+ *   string; a list (a validation 400) is read item by item the same way. No
+ *   message at all gives the status's reason phrase, and so does one that is
+ *   none of these, which is logged. Every other key, apart from the
+ *   envelope's own, becomes a field.
+ *
+ * For {@link translateException}, and for an edge component that answers with
+ * the envelope itself rather than through an exception (the WebSocket filter).
+ */
+export function renderErrorBody(
+  status: number,
+  body: unknown,
+  i18n: I18nService<I18nTranslations>,
+  auditContext: AuditContextService,
+): ErrorEnvelope {
+  if (typeof body === 'string') {
+    return errorEnvelope(status, body);
+  }
+
   if (isI18nMessage(body)) {
-    const message = render(body, i18n, auditContext);
-    // Carry the original `cause` across the re-issue so server-side context is not
-    // stripped (e.g. StorageExceptionFilter attaches the raw storage error as
-    // `cause` for logs). `{ cause: undefined }` is a no-op in Nest's `initCause`,
-    // so markers thrown without a cause still render byte-identically.
-    return new HttpException({ statusCode: status, message, error: STATUS_CODES[status] ?? exception.name }, status, {
-      cause: exception.cause,
-    });
+    return errorEnvelope(status, renderMarker(body, i18n, auditContext));
   }
 
-  // (2) Structured body whose `message` field is a marker → translate that field
-  // in place, keeping every sibling field (resource/scope/limit/…, the custom
-  // `error` label) and the status/cause intact.
   if (body !== null && typeof body === 'object') {
-    const marker = (body as { message?: unknown }).message;
-    if (isI18nMessage(marker)) {
-      const message = render(marker, i18n, auditContext);
-      return new HttpException({ ...body, message }, status, { cause: exception.cause });
-    }
+    const { message, ...fields } = body as Record<string, unknown>;
+    return errorEnvelope(status, renderMessage(status, message, i18n, auditContext), fields);
   }
 
-  return exception;
+  return errorEnvelope(status, reasonPhrase(status));
+}
+
+function renderMessage(
+  status: number,
+  message: unknown,
+  i18n: I18nService<I18nTranslations>,
+  auditContext: AuditContextService,
+): string | string[] {
+  if (isLine(message)) {
+    return renderLine(message, i18n, auditContext);
+  }
+
+  if (Array.isArray(message) && message.every(isLine)) {
+    return message.map((line) => renderLine(line, i18n, auditContext));
+  }
+
+  // A message no client can read (a number, a nested object) is dropped
+  // rather than sent, and said so, so the lost detail is never silent.
+  if (message !== undefined) {
+    logger.warn(`A ${status} body carried a message no client can read; sent its reason phrase`);
+  }
+
+  return reasonPhrase(status);
+}
+
+/** One line of a message: copy as it is, or a marker to render. */
+function isLine(value: unknown): value is string | I18nMessage {
+  return typeof value === 'string' || isI18nMessage(value);
+}
+
+function renderLine(
+  line: string | I18nMessage,
+  i18n: I18nService<I18nTranslations>,
+  auditContext: AuditContextService,
+): string {
+  return typeof line === 'string' ? line : renderMarker(line, i18n, auditContext);
 }
 
 /**
@@ -90,7 +141,11 @@ export function translateException(
  * some carry request input. `WsTranslator` answers the same failure the same
  * way.
  */
-function render(marker: I18nMessage, i18n: I18nService<I18nTranslations>, auditContext: AuditContextService): string {
+export function renderMarker(
+  marker: I18nMessage,
+  i18n: I18nService<I18nTranslations>,
+  auditContext: AuditContextService,
+): string {
   const lang = resolveEdgeLocale(auditContext);
   try {
     return i18n.translate(marker.key, { lang, args: marker.args });

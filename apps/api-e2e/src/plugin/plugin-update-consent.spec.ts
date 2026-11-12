@@ -379,7 +379,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
       const challenge = await approve(admin, plugin.slug).expect(409);
 
-      expect(challenge.body.code).toBe('PluginUpdateCriticalConfirmationError');
+      expect(challenge.body.code).toBe('PLUGIN_UPDATE_CRITICAL_CONFIRMATION');
       expect(challenge.body.slug).toBe(plugin.slug);
       expect(challenge.body.expectedSlugs).toEqual(['manage:safe_http_policy']);
       expect(challenge.body.receivedSlugs).toEqual([]);
@@ -406,7 +406,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
       const response = await approve(admin, plugin.slug).expect(409);
 
-      expect(response.body.code).toBe('PluginUpdateBlockedByDenialError');
+      expect(response.body.code).toBe('PLUGIN_UPDATE_BLOCKED_BY_DENIAL');
       expect(response.body.deniedRequiredSlugs).toEqual(['read:safe_http_policy']);
 
       const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
@@ -455,7 +455,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
       await request(baseUrl).post(`${PLUGINS_PATH}/${plugin.slug}/uninstall`).set(admin.headers).send({}).expect(200);
 
       const response = await approve(admin, plugin.slug).expect(410);
-      expect(response.body.code).toBe('PluginUpdateTombstonedError');
+      expect(response.body.code).toBe('PLUGIN_UPDATE_TOMBSTONED');
       expect(response.body.slug).toBe(plugin.slug);
     });
 
@@ -465,7 +465,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
       await reject(admin, plugin.slug).expect(200);
 
       const response = await approve(admin, plugin.slug).expect(409);
-      expect(response.body.code).toBe('PluginUpdateNoPendingError');
+      expect(response.body.code).toBe('PLUGIN_UPDATE_NO_PENDING');
     });
 
     it('answers a malformed staged checksum with its own code and copy, and activates nothing (#1094)', async () => {
@@ -487,7 +487,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
         const response = await approve(admin, plugin.slug).expect(500);
 
-        expect(response.body.code).toBe('PluginDirectoryLayoutError');
+        expect(response.body.code).toBe('PLUGIN_DIRECTORY_LAYOUT');
         expect(response.body.slug).toBe(plugin.slug);
         expect(response.body.message).toContain(`The files of plugin '${plugin.slug}' on the server`);
         // The reason goes to the operator's log, never into the body.
@@ -552,7 +552,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
       const response = await approve(admin, plugin.slug, { stagingId: STAGING_ID }).expect(409);
 
-      expect(response.body.code).toBe('PluginUpdateStagingReplacedError');
+      expect(response.body.code).toBe('PLUGIN_UPDATE_STAGING_REPLACED');
       expect(response.body.slug).toBe(plugin.slug);
       const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
       expect(row.version).toBe('1.2.0');
@@ -567,7 +567,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
       const response = await reject(admin, plugin.slug, 'e2e-staging-0').expect(409);
 
-      expect(response.body.code).toBe('PluginUpdateStagingReplacedError');
+      expect(response.body.code).toBe('PLUGIN_UPDATE_STAGING_REPLACED');
       const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
       expect(row.pendingStagingId).toBe(STAGING_ID);
     });
@@ -779,7 +779,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
       const admin = await actors.admin();
 
       const absent = await readPending(admin, `absent-${randomUUID().slice(0, 8)}`).expect(404);
-      expect(absent.body.code).toBe('PluginUpdatePluginNotFoundError');
+      expect(absent.body.code).toBe('PLUGIN_UPDATE_PLUGIN_NOT_FOUND');
 
       const { plugin: tombstoned } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK]);
       await request(baseUrl)
@@ -788,7 +788,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
         .send({})
         .expect(200);
       const gone = await readPending(admin, tombstoned.slug).expect(410);
-      expect(gone.body.code).toBe('PluginUpdateTombstonedError');
+      expect(gone.body.code).toBe('PLUGIN_UPDATE_TOMBSTONED');
     });
 
     it('answers 409 once the staged update is resolved', async () => {
@@ -799,7 +799,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
       await reject(admin, plugin.slug).expect(200);
 
       const response = await readPending(admin, plugin.slug).expect(409);
-      expect(response.body.code).toBe('PluginUpdateNoPendingError');
+      expect(response.body.code).toBe('PLUGIN_UPDATE_NO_PENDING');
     });
   });
 });

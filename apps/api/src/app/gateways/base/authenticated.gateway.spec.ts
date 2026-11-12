@@ -1,5 +1,5 @@
 import { AuthService } from '@bge/auth';
-import { t, type I18nTranslations, type LocaleResolutionService } from '@bge/i18n';
+import { CodedHttpException, t, type I18nTranslations, type LocaleResolutionService } from '@bge/i18n';
 import { Logger, ServiceUnavailableException } from '@nestjs/common';
 import type { I18nService } from 'nestjs-i18n';
 import type { Namespace, Socket } from 'socket.io';
@@ -269,12 +269,11 @@ describe('AuthenticatedGateway', () => {
         'a session store that cannot be read',
         connection({ acceptLanguage: 'fr' }),
         {
-          getSessionFromHeaders: jest.fn().mockRejectedValue(
-            new ServiceUnavailableException({
-              code: 'SESSION_UNAVAILABLE',
-              message: t('errors.auth.session_unavailable'),
-            }),
-          ),
+          getSessionFromHeaders: jest
+            .fn()
+            .mockRejectedValue(
+              new CodedHttpException(503, 'SESSION_UNAVAILABLE', t('errors.auth.session_unavailable')),
+            ),
         } as unknown as AuthService,
         503,
         'errors.auth.session_unavailable',
@@ -299,12 +298,9 @@ describe('AuthenticatedGateway', () => {
     it("carries a structured exception's code beside its rendered message, as over HTTP (#640)", async () => {
       const { namespace, middleware } = fakeNamespace();
       const authService = {
-        getSessionFromHeaders: jest.fn().mockRejectedValue(
-          new ServiceUnavailableException({
-            code: 'SESSION_UNAVAILABLE',
-            message: t('errors.auth.session_unavailable'),
-          }),
-        ),
+        getSessionFromHeaders: jest
+          .fn()
+          .mockRejectedValue(new CodedHttpException(503, 'SESSION_UNAVAILABLE', t('errors.auth.session_unavailable'))),
       } as unknown as AuthService;
 
       new TestGateway(authService, frameScope, translator).afterInit(namespace);

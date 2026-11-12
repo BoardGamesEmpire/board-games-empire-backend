@@ -17,11 +17,20 @@ export {
   type I18nValidationPath,
 } from '@bge/i18n-core';
 export { ClsLocaleResolver } from './lib/cls-locale.resolver';
+export { CodedHttpException, type CodedHttpExceptionOptions } from './lib/coded-http.exception';
+export {
+  ENVELOPE_FIELDS,
+  errorEnvelope,
+  reasonPhrase,
+  toErrorCode,
+  type ErrorCode,
+  type ErrorEnvelope,
+} from './lib/error-envelope';
 export { I18nExceptionFilter } from './lib/i18n-exception.filter';
 export { I18nResponseInterceptor } from './lib/i18n-response.interceptor';
 export { I18nConfigModule } from './lib/i18n.module';
 export { LocaleResolutionService, type LocaleResolutionInput } from './lib/locale-resolution.service';
 export { FALLBACK_LOCALE } from './lib/locale.constants';
 export { SupportedLocalesService } from './lib/supported-locales.service';
-export { translateException } from './lib/translate-exception';
+export { renderErrorBody, translateException } from './lib/translate-exception';
 export { translateValidationErrors } from './lib/translate-validation-errors';

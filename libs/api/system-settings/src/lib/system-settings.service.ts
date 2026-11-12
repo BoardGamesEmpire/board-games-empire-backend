@@ -1,15 +1,10 @@
 import { DatabaseService, isPrismaDependentRecordNotFoundError, Prisma } from '@bge/database';
-import { t } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import { isMailConfigured, MAIL_READINESS_SELECT, MailFailureCode } from '@bge/mail';
 import { MailDispatcherService, MailQueueUnavailableError } from '@bge/queue-mail';
 import { EncryptionService } from '@bge/services';
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Http } from '@status/codes';
 import { UpdateSystemSettingsDto } from './dto/update-system-settings.dto';
 import { SYSTEM_SETTINGS_ROW_SELECT, toView, type SystemSettingsView } from './read-shapes';
 
@@ -122,10 +117,11 @@ export class SystemSettingsService {
       (smtpSecurity !== undefined && smtpSecurity !== stored.smtpSecurity);
 
     if (serverChanged && host !== null) {
-      throw new BadRequestException({
-        code: 'SMTP_PASSWORD_REQUIRED',
-        message: t('errors.system_settings.smtp_password_required'),
-      });
+      throw new CodedHttpException(
+        Http.BadRequest,
+        'SMTP_PASSWORD_REQUIRED',
+        t('errors.system_settings.smtp_password_required'),
+      );
     }
   }
 
@@ -144,20 +140,22 @@ export class SystemSettingsService {
     });
 
     if (!isMailConfigured(row)) {
-      throw new ConflictException({
-        code: MailFailureCode.NotConfigured,
-        message: t('errors.system_settings.mail_not_configured'),
-      });
+      throw new CodedHttpException(
+        Http.Conflict,
+        MailFailureCode.NotConfigured,
+        t('errors.system_settings.mail_not_configured'),
+      );
     }
 
     try {
       await this.mailDispatcher.enqueue(recipientUserId, { kind: 'test' });
     } catch (error) {
       if (error instanceof MailQueueUnavailableError) {
-        throw new ServiceUnavailableException({
-          code: 'MAIL_QUEUE_UNAVAILABLE',
-          message: t('errors.system_settings.mail_queue_unavailable'),
-        });
+        throw new CodedHttpException(
+          Http.ServiceUnavailable,
+          'MAIL_QUEUE_UNAVAILABLE',
+          t('errors.system_settings.mail_queue_unavailable'),
+        );
       }
 
       throw error;

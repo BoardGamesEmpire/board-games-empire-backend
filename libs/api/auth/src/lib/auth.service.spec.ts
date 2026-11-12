@@ -1,6 +1,5 @@
 import type { AuditContextService } from '@bge/actor-context';
-import { translateException, type I18nTranslations } from '@bge/i18n';
-import { ServiceUnavailableException } from '@nestjs/common';
+import { CodedHttpException, translateException, type I18nTranslations } from '@bge/i18n';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { betterAuth } from 'better-auth';
 import { memoryAdapter } from 'better-auth/adapters/memory';
@@ -81,12 +80,16 @@ describe('AuthService', () => {
         .getSessionFromHeaders({ cookie: `${name}=${encodeURIComponent(`the-token.${signature}`)}` })
         .catch((error: unknown) => error);
 
-      expect(failure).toBeInstanceOf(ServiceUnavailableException);
+      expect(failure).toBeInstanceOf(CodedHttpException);
+      expect((failure as CodedHttpException).getStatus()).toBe(503);
+      expect((failure as CodedHttpException).code).toBe('SESSION_UNAVAILABLE');
       // What a client receives over HTTP: the edge renders the message and
-      // keeps the code beside it.
+      // keeps the code beside it, in the error envelope (#1260).
       const i18n = { translate: (key: string) => `rendered:${key}` } as unknown as I18nService<I18nTranslations>;
       const auditContext = { getLocale: () => 'en' } as unknown as AuditContextService;
-      expect(translateException(failure as ServiceUnavailableException, i18n, auditContext).getResponse()).toEqual({
+      expect(translateException(failure as CodedHttpException, i18n, auditContext).getResponse()).toEqual({
+        statusCode: 503,
+        error: 'Service Unavailable',
         code: 'SESSION_UNAVAILABLE',
         message: 'rendered:errors.auth.session_unavailable',
       });

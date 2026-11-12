@@ -223,9 +223,57 @@ const noNestedCeiling = {
   },
 };
 
+// #1260: a refusal that names a code is thrown as `CodedHttpException`, whose
+// body is already the error envelope. A `{ code }` body handed to any other
+// exception class leaves its `statusCode` and `error` to whichever filter
+// renders it, and the WebSocket handshake reads the body as thrown. A gRPC
+// status names its code for the transport, not the client, so `RpcException`
+// is exempt. A subclass's `super({ code })` is read as a `new` of the class it
+// extends. Not caught: a body built in a variable, or a namespaced callee or
+// superclass.
+const EXCEPTIONS_THAT_MAY_NAME_A_CODE = new Set(['CodedHttpException', 'RpcException']);
+
+const noUncodedExceptionBody = {
+  meta: {
+    type: 'problem',
+    docs: { description: 'Throw a refusal that names a code through CodedHttpException (#1260).' },
+    schema: [],
+    messages: {
+      uncoded:
+        'A coded refusal goes through CodedHttpException from @bge/i18n, so its body always carries statusCode and error (#1260).',
+    },
+  },
+  create(context) {
+    const check = (node, exceptionClass) => {
+      if (exceptionClass?.type !== 'Identifier' || !exceptionClass.name.endsWith('Exception')) return;
+      if (EXCEPTIONS_THAT_MAY_NAME_A_CODE.has(exceptionClass.name)) return;
+
+      const [body] = node.arguments;
+      if (body?.type !== 'ObjectExpression') return;
+
+      if (body.properties.some((property) => property.type === 'Property' && propertyKeyName(property) === 'code')) {
+        context.report({ node, messageId: 'uncoded' });
+      }
+    };
+
+    return {
+      NewExpression(node) {
+        check(node, node.callee);
+      },
+      'CallExpression[callee.type="Super"]'(node) {
+        let ancestor = node.parent;
+        while (ancestor && ancestor.type !== 'ClassDeclaration' && ancestor.type !== 'ClassExpression') {
+          ancestor = ancestor.parent;
+        }
+        check(node, ancestor?.superClass);
+      },
+    };
+  },
+};
+
 export const bgePlugin = {
   meta: { name: 'bge' },
-  rules: { 'no-nested-ceiling': noNestedCeiling },
+  rules: { 'no-nested-ceiling': noNestedCeiling, 'no-uncoded-exception-body': noUncodedExceptionBody },
 };
 
 // #145: CI guardrail against NEW hardcoded user-facing strings in libs already
@@ -242,7 +290,9 @@ export const bgePlugin = {
 // `ignores`, with the reason beside it. `raw=/^['"]/` restricts to STRING
 // literals (a numeric status code as an exception arg is not flagged);
 // namespaced callees (`ns.FooException`) are a known gap — call sites here
-// import exceptions directly.
+// import exceptions directly. `CodedHttpException` is exempt from the two
+// exception selectors: its message is typed as a `t()` marker, so `tsc` already
+// refuses literal copy there, and the one string it takes is its code (#1260).
 //
 // The last entry is not about a literal. An `each: true` validator's default
 // reads "each value in tags must be a string", and a custom message drops that
@@ -250,12 +300,12 @@ export const bgePlugin = {
 // catches a base key there: the copy still reads plausibly.
 export const i18nHardcodedStringSelectors = [
   {
-    selector: 'NewExpression[callee.name=/Exception$/] > Literal[raw=/^[\'"]/]',
+    selector: 'NewExpression[callee.name=/Exception$/][callee.name!="CodedHttpException"] > Literal[raw=/^[\'"]/]',
     message:
       "Hardcoded user-facing string in an exception. Use a catalog key: throw new NotFoundException(t('errors.…', { … })). (#144/#145)",
   },
   {
-    selector: 'NewExpression[callee.name=/Exception$/] > TemplateLiteral',
+    selector: 'NewExpression[callee.name=/Exception$/][callee.name!="CodedHttpException"] > TemplateLiteral',
     message:
       "Hardcoded user-facing template string in an exception. Move the copy to a catalog key and interpolate via t('errors.…', { … }). (#144/#145)",
   },
@@ -323,6 +373,7 @@ export default [
     plugins: { bge: bgePlugin },
     rules: {
       'bge/no-nested-ceiling': 'error',
+      'bge/no-uncoded-exception-body': 'error',
     },
   },
 ];
