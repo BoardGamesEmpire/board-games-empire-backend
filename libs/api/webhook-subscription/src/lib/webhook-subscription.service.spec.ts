@@ -1,4 +1,11 @@
-import { Action, Prisma, ResourceType, WebhookSubscriptionEventType, WebhookSubscriptionStatus } from '@bge/database';
+import {
+  Action,
+  Prisma,
+  QuotaScope,
+  ResourceType,
+  WebhookSubscriptionEventType,
+  WebhookSubscriptionStatus,
+} from '@bge/database';
 import { t } from '@bge/i18n';
 import {
   AbilityFactory,
@@ -8,6 +15,7 @@ import {
   type ApikeyWithScopes,
   type AppAbility,
 } from '@bge/permissions';
+import { QuotaExceededException, QuotaService, type QuotaCheckResult, type QuotaSoftOverageEvent } from '@bge/quota';
 import { EncryptionService } from '@bge/services';
 import {
   createMockAbilityService,
@@ -33,6 +41,16 @@ import { WEBHOOK_SECRET_REDACTED, WebhookSubscriptionService } from './webhook-s
 type WebhookWithEvents = Prisma.WebhookSubscriptionGetPayload<{ include: { eventTypes: true } }>;
 
 const ACTING_USER_ID = 'user-1';
+
+const UNCONSTRAINED: QuotaCheckResult = {
+  allowed: true,
+  scope: null,
+  currentUsage: null,
+  limit: null,
+  softOverage: false,
+  constraints: [],
+  softOverages: [],
+};
 
 function makeEventType(overrides: Partial<WebhookSubscriptionEventType> = {}): WebhookSubscriptionEventType {
   return {
@@ -74,6 +92,7 @@ describe('WebhookSubscriptionService', () => {
   let encryption: jest.Mocked<Pick<EncryptionService, 'encrypt' | 'decrypt'>>;
   let ability: MockAbilityService;
   let permissions: jest.Mocked<Pick<PermissionsService, 'loadApiKeyScopeGraphs'>>;
+  let quotas: jest.Mocked<Pick<QuotaService, 'consume' | 'emitSoftOverages'>>;
   let compose: jest.SpyInstance;
 
   const allowAll = createPrismaAbility([{ action: Action.manage, subject: 'all' }]) as AppAbility;
@@ -107,6 +126,7 @@ describe('WebhookSubscriptionService', () => {
     ability.getActingUserId.mockReturnValue(ACTING_USER_ID);
     primeAbilities(allowAll);
     permissions = { loadApiKeyScopeGraphs: jest.fn().mockResolvedValue(new Map()) };
+    quotas = { consume: jest.fn().mockResolvedValue(UNCONSTRAINED), emitSoftOverages: jest.fn() };
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
       providers: [
@@ -119,6 +139,7 @@ describe('WebhookSubscriptionService', () => {
         { provide: EncryptionService, useValue: encryption },
         { provide: AbilityService, useValue: ability },
         { provide: PermissionsService, useValue: permissions },
+        { provide: QuotaService, useValue: quotas },
         AbilityFactory,
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('development-secret') } },
       ],
@@ -367,6 +388,90 @@ describe('WebhookSubscriptionService', () => {
 
         expect(db.$queryRaw).not.toHaveBeenCalled();
         expect(db.webhookSubscription.create).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe("the creator's webhook subscription quota (#1253)", () => {
+      const overage: QuotaSoftOverageEvent = {
+        scope: QuotaScope.User,
+        scopeId: ACTING_USER_ID,
+        resource: 'webhook_subscription_count',
+        currentUsage: '3',
+        attemptedAmount: '1',
+        limit: '3',
+      };
+
+      it("takes one webhook subscription from the creator's quota, in the create's transaction", async () => {
+        db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
+
+        await service.create(baseDto());
+
+        expect(quotas.consume).toHaveBeenCalledWith('webhook_subscription_count', 1n, { userId: ACTING_USER_ID }, db);
+        expect(quotas.consume.mock.invocationCallOrder[0]).toBeLessThan(
+          db.webhookSubscription.create.mock.invocationCallOrder[0] as number,
+        );
+      });
+
+      it('refuses with 402 past a hard quota, and writes nothing', async () => {
+        quotas.consume.mockResolvedValue({
+          ...UNCONSTRAINED,
+          allowed: false,
+          scope: QuotaScope.User,
+          currentUsage: 1n,
+          limit: 1n,
+        });
+
+        const error = await service.create(baseDto()).then(
+          () => undefined,
+          (reason: unknown) => reason,
+        );
+
+        expect(error).toBeInstanceOf(QuotaExceededException);
+        expect((error as QuotaExceededException).getStatus()).toBe(402);
+        expect((error as QuotaExceededException).getResponse()).toMatchObject({
+          resource: 'webhook_subscription_count',
+          scope: QuotaScope.User,
+          limit: '1',
+          currentUsage: '1',
+          attemptedAmount: '1',
+        });
+        expect(db.webhookSubscription.create).not.toHaveBeenCalled();
+        expect(quotas.emitSoftOverages).not.toHaveBeenCalled();
+      });
+
+      it('warns of a soft quota only after the transaction commits', async () => {
+        quotas.consume.mockResolvedValue({ ...UNCONSTRAINED, softOverages: [overage] });
+        db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
+        let warnedInside: boolean | undefined;
+        db.$transaction.mockImplementation((async (work: (tx: MockDatabaseService) => Promise<unknown>) => {
+          const result = await work(db);
+          warnedInside = quotas.emitSoftOverages.mock.calls.length > 0;
+
+          return result;
+        }) as never);
+
+        await service.create(baseDto());
+
+        expect(warnedInside).toBe(false);
+        expect(quotas.emitSoftOverages).toHaveBeenCalledWith([overage]);
+      });
+
+      it('warns of nothing when the insert fails', async () => {
+        quotas.consume.mockResolvedValue({ ...UNCONSTRAINED, softOverages: [overage] });
+        db.webhookSubscription.create.mockRejectedValue(new Error('insert failed'));
+
+        await expect(service.create(baseDto())).rejects.toThrow('insert failed');
+
+        expect(quotas.emitSoftOverages).not.toHaveBeenCalled();
+      });
+
+      it('takes nothing from the quota for a create the household lock refuses', async () => {
+        db.household.count.mockResolvedValue(1);
+        db.$queryRaw.mockResolvedValue([] as never);
+
+        await expect(service.create(baseDto({ householdId: 'hh-1' }))).rejects.toThrow(ForbiddenException);
+
+        expect(quotas.consume).not.toHaveBeenCalled();
       });
     });
   });
