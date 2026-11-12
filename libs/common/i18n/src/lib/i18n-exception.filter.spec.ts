@@ -1,5 +1,5 @@
 import { t } from '@bge/i18n-core';
-import { ArgumentsHost, HttpException, NotFoundException } from '@nestjs/common';
+import { ArgumentsHost, ConflictException, HttpException, NotFoundException } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { I18nExceptionFilter } from './i18n-exception.filter';
 
@@ -56,13 +56,18 @@ describe('I18nExceptionFilter', () => {
     expect(translate).toHaveBeenCalledWith('errors.language.not_found', expect.objectContaining({ lang: 'en' }));
   });
 
-  it('delegates a non-i18n HttpException to the base filter unchanged', () => {
-    const exception = new NotFoundException('plain english message');
-
-    filter.catch(exception, httpHost);
+  it('hands a non-i18n HttpException to the base filter as the envelope, untranslated (#1260)', () => {
+    filter.catch(new ConflictException({ code: 'CATALOG_ENTRY_CHANGED', message: 'plain english message' }), httpHost);
 
     expect(translate).not.toHaveBeenCalled();
-    expect(superCatch).toHaveBeenCalledWith(exception, httpHost);
+    const [rebuilt] = superCatch.mock.calls[0] as [HttpException, ArgumentsHost];
+    expect(rebuilt.getStatus()).toBe(409);
+    expect(rebuilt.getResponse()).toEqual({
+      statusCode: 409,
+      error: 'Conflict',
+      message: 'plain english message',
+      code: 'CATALOG_ENTRY_CHANGED',
+    });
   });
 
   it('delegates non-HTTP transports to the base filter (WS is handled elsewhere)', () => {

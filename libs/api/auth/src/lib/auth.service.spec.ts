@@ -83,10 +83,12 @@ describe('AuthService', () => {
 
       expect(failure).toBeInstanceOf(ServiceUnavailableException);
       // What a client receives over HTTP: the edge renders the message and
-      // keeps the code beside it.
+      // keeps the code beside it, in the error envelope (#1260).
       const i18n = { translate: (key: string) => `rendered:${key}` } as unknown as I18nService<I18nTranslations>;
       const auditContext = { getLocale: () => 'en' } as unknown as AuditContextService;
       expect(translateException(failure as ServiceUnavailableException, i18n, auditContext).getResponse()).toEqual({
+        statusCode: 503,
+        error: 'Service Unavailable',
         code: 'SESSION_UNAVAILABLE',
         message: 'rendered:errors.auth.session_unavailable',
       });

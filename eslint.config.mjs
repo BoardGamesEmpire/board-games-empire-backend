@@ -242,7 +242,9 @@ export const bgePlugin = {
 // `ignores`, with the reason beside it. `raw=/^['"]/` restricts to STRING
 // literals (a numeric status code as an exception arg is not flagged);
 // namespaced callees (`ns.FooException`) are a known gap — call sites here
-// import exceptions directly.
+// import exceptions directly. `CodedHttpException` is exempt from the two
+// exception selectors: its message is typed as a `t()` marker, so `tsc` already
+// refuses literal copy there, and the one string it takes is its code (#1260).
 //
 // The last entry is not about a literal. An `each: true` validator's default
 // reads "each value in tags must be a string", and a custom message drops that
@@ -250,12 +252,12 @@ export const bgePlugin = {
 // catches a base key there: the copy still reads plausibly.
 export const i18nHardcodedStringSelectors = [
   {
-    selector: 'NewExpression[callee.name=/Exception$/] > Literal[raw=/^[\'"]/]',
+    selector: 'NewExpression[callee.name=/Exception$/][callee.name!="CodedHttpException"] > Literal[raw=/^[\'"]/]',
     message:
       "Hardcoded user-facing string in an exception. Use a catalog key: throw new NotFoundException(t('errors.…', { … })). (#144/#145)",
   },
   {
-    selector: 'NewExpression[callee.name=/Exception$/] > TemplateLiteral',
+    selector: 'NewExpression[callee.name=/Exception$/][callee.name!="CodedHttpException"] > TemplateLiteral',
     message:
       "Hardcoded user-facing template string in an exception. Move the copy to a catalog key and interpolate via t('errors.…', { … }). (#144/#145)",
   },

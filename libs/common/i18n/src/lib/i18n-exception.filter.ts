@@ -10,7 +10,7 @@ import { translateException } from './translate-exception';
  * standard Nest exceptions carrying a {@link t} key (e.g.
  * `throw new NotFoundException(t('errors.language.not_found', { id }))`); this
  * filter translates the key/args against the request's locale and renders the
- * normal Nest error body (`{ statusCode, message, error }`).
+ * error envelope (`{ statusCode, error, message, ...fields }`, #1260).
  *
  * Scope is deliberately narrow:
  * - `@Catch(HttpException)` — plain (non-HTTP) errors keep Nest's default 500
@@ -23,9 +23,10 @@ import { translateException } from './translate-exception';
  *   `host.getType() !== 'http'` guard below is thus belt-and-suspenders —
  *   reachable only for an `rpc` host, which this app has no inbound transport
  *   for.
- * - Any `HttpException` WITHOUT a `t()` payload is passed straight to
- *   `super.catch`, so every existing exception renders byte-identically to
- *   before this filter existed.
+ * - Every `HttpException` leaves as the envelope, with or without a `t()`
+ *   payload: a body without `error` or `statusCode` (a string body, a coded
+ *   refusal's `{ code, message }`) gains them, and a custom `error` label gives
+ *   way to the status's reason phrase (#1260).
  *
  * Locale comes from `AuditContextService.getLocale()` (the CLS value the entry
  * seam resolves before guards run) rather than `I18nContext.current()`, which
@@ -50,9 +51,7 @@ export class I18nExceptionFilter extends BaseExceptionFilter {
     }
 
     // Resolve any deferred `t()` marker against the request locale and re-issue
-    // the standard `{ statusCode, message, error }` body. `translateException`
-    // returns the exception untouched when it carries no marker, so plain
-    // exceptions render byte-identically to before this filter existed.
+    // the body as the error envelope (#1260).
     super.catch(translateException(exception, this.i18n, this.auditContext), host);
   }
 }

@@ -91,13 +91,14 @@ describe('WsErrorFilter', () => {
       });
     });
 
-    it("keeps a structured body's own error label and fields, as the HTTP body does", async () => {
+    it("keeps a structured body's fields and names its status's reason phrase, as the HTTP body does (#1260)", async () => {
       const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
       const exceeded = new HttpException(
         {
           statusCode: 402,
           error: 'Quota Exceeded',
           message: t('errors.quota.exceeded', { resource: 'storage_bytes', scope: 'User' }),
+          code: 'QUOTA_EXCEEDED',
           resource: 'storage_bytes',
           scope: 'User',
           limit: 5,
@@ -109,8 +110,9 @@ describe('WsErrorFilter', () => {
 
       expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
         statusCode: 402,
-        error: 'Quota Exceeded',
+        error: 'Payment Required',
         message: 'Quota for "storage_bytes" exceeded at User scope',
+        code: 'QUOTA_EXCEEDED',
         resource: 'storage_bytes',
         scope: 'User',
         limit: 5,
@@ -161,7 +163,7 @@ describe('WsErrorFilter', () => {
       });
     });
 
-    it("sends the key of a marker that is the body's message, and none of its args, beside the body's own label and fields, when its copy cannot be translated", async () => {
+    it("sends the key of a marker that is the body's message, and none of its args, beside the body's fields, when its copy cannot be translated", async () => {
       jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
       failTranslation();
       const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
@@ -179,7 +181,7 @@ describe('WsErrorFilter', () => {
 
       expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
         statusCode: 402,
-        error: 'Quota Exceeded',
+        error: 'Payment Required',
         message: 'errors.quota.exceeded',
         resource: 'storage_bytes',
         pattern: 'search:start',
