@@ -401,14 +401,29 @@ describe('WebhookSubscriptionService', () => {
         limit: '3',
       };
 
+      // The advisory lock `consume` takes holds only for the life of the
+      // transaction it is handed. Handed the root client, it would serialize
+      // nothing, and two concurrent creates could both take the last place. The
+      // transaction gets its own client here, so a test that passed `db` to both
+      // can't mistake one for the other.
       it("takes one webhook subscription from the creator's quota, in the create's transaction", async () => {
-        db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
+        const tx = {
+          ...db,
+          webhookSubscription: {
+            ...db.webhookSubscription,
+            create: jest.fn().mockResolvedValue(makeWebhookSub()),
+          },
+        } as unknown as MockDatabaseService;
+        db.$transaction.mockImplementation(((work: (client: MockDatabaseService) => Promise<unknown>) =>
+          work(tx)) as never);
 
         await service.create(baseDto());
 
-        expect(quotas.consume).toHaveBeenCalledWith('webhook_subscription_count', 1n, { userId: ACTING_USER_ID }, db);
+        expect(quotas.consume).toHaveBeenCalledWith('webhook_subscription_count', 1n, { userId: ACTING_USER_ID }, tx);
+        expect(tx.webhookSubscription.create).toHaveBeenCalledTimes(1);
+        expect(db.webhookSubscription.create).not.toHaveBeenCalled();
         expect(quotas.consume.mock.invocationCallOrder[0]).toBeLessThan(
-          db.webhookSubscription.create.mock.invocationCallOrder[0] as number,
+          tx.webhookSubscription.create.mock.invocationCallOrder[0] as number,
         );
       });
 

@@ -18,8 +18,8 @@ const RECEIVER_URL = 'https://receiver.e2e.invalid/bge';
  * are not deleted. Past a hard quota the create answers 402. No row means no
  * quota.
  *
- * Each test caps its own user with an instance row. A type-level default
- * would cap every other suite's subscribers as well.
+ * Each test gives its own user a quota of their own. A default quota would
+ * limit every other suite's subscribers as well.
  */
 describe('webhook subscription quota (#1253)', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -52,7 +52,7 @@ describe('webhook subscription quota (#1253)', () => {
     subscriptionEnvelope(await createSubscription(actor, householdId).expect(201), `POST ${SUBSCRIPTIONS_PATH}`).id;
 
   /** A hard quota of `limit` live webhook subscriptions for one user. */
-  const cap = (userId: string, limit: number) =>
+  const setQuota = (userId: string, limit: number) =>
     db.client.quota.create({
       data: { scope: QuotaScope.User, scopeId: userId, resource: RESOURCE, limit: BigInt(limit) },
     });
@@ -72,7 +72,7 @@ describe('webhook subscription quota (#1253)', () => {
 
   it('refuses a user past their quota with 402, naming it, and leaves the first subscription alone', async () => {
     const { owner, householdId } = await ownedHousehold();
-    await cap(owner.user.id, 1);
+    await setQuota(owner.user.id, 1);
 
     const first = await subscribe(owner, householdId);
     const refused = await createSubscription(owner, householdId).expect(402);
@@ -89,15 +89,17 @@ describe('webhook subscription quota (#1253)', () => {
 
   it('frees a place when a subscription is deleted', async () => {
     const { owner, householdId } = await ownedHousehold();
-    await cap(owner.user.id, 1);
+    await setQuota(owner.user.id, 1);
 
     const first = await subscribe(owner, householdId);
+    // Full before the delete, so the 201 after it is the place the delete freed.
+    await createSubscription(owner, householdId).expect(402);
     await request(baseUrl).delete(`${SUBSCRIPTIONS_PATH}/${first}`).set(owner.headers).expect(200);
 
     await subscribe(owner, householdId);
   });
 
-  it('caps nobody without a row', async () => {
+  it('limits nobody without a quota', async () => {
     const { owner, householdId } = await ownedHousehold();
 
     for (let made = 0; made < 3; made++) {

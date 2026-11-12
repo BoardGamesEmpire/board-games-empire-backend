@@ -21,6 +21,10 @@ export class WebhookSubscriptionController {
 
   @ApiOperation({ summary: 'Create a webhook subscription' })
   @ApiResponse({ status: Http.Created, description: 'Subscription created' })
+  @ApiResponse({
+    status: Http.PaymentRequired,
+    description: 'You have as many webhook subscriptions as your quota allows (#1253)',
+  })
   @ApiResponse({ status: Http.Forbidden, description: 'No read access to the requested events' })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.WebhookSubscription))
   @Post()
