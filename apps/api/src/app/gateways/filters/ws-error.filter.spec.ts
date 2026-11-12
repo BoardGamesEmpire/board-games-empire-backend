@@ -1,3 +1,4 @@
+/* eslint-disable bge/no-uncoded-exception-body -- these cases hand the renderer a coded body no producer may build, to pin that it completes any body into the envelope (#1260) */
 import type { AuditContextService } from '@bge/actor-context';
 import { SearchStartDto } from '@bge/game-search';
 import { FALLBACK_LOCALE, I18N_CATALOG_DIR, i18nValidationMessage, t, type I18nTranslations } from '@bge/i18n';
