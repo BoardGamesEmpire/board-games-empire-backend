@@ -112,9 +112,19 @@ describe('EventAttendeeService', () => {
    * the status it replaces (#802). Every other raw query resolves no rows, as
    * the mock's default does.
    */
-  const lockedStatus = (status: EventParticipationStatus) =>
+  const lockedStatus = (status: EventParticipationStatus, removedAt: Date | null = null) =>
+    lockedAttendee({ status, removedAt });
+
+  /**
+   * The attendee row a write reads under its lock (#802, #1064), or none when
+   * `row` is null. Every other raw query resolves no rows.
+   */
+  const lockedAttendee = (row: object | null) =>
     db.$queryRaw.mockImplementation(((query: unknown) =>
-      Promise.resolve(/FROM event_attendees/.test(rawQueryText(query)) ? [{ status }] : [])) as never);
+      Promise.resolve(/FROM event_attendees/.test(rawQueryText(query)) && row ? [row] : [])) as never);
+
+  const recordNotFound = () =>
+    new Prisma.PrismaClientKnownRequestError('No record was found', { code: 'P2025', clientVersion: 'test' });
 
   afterEach(() => jest.clearAllMocks());
 
@@ -228,6 +238,48 @@ describe('EventAttendeeService', () => {
         db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
         db.eventAttendee.update.mockResolvedValue({ id: 'att-1' } as EventAttendee);
         db.eventAttendee.findUniqueOrThrow.mockResolvedValue(attendeeRow({ removedAt }));
+        lockedAttendee({ removedAt: null });
+      });
+
+      it('reads the row again under its lock, before the gated write (#1064)', async () => {
+        await service.removeAttendee('event-1', 'att-1');
+
+        const [[attendeeLock]] = db.$queryRaw.mock.calls;
+        expect(rawQueryText(attendeeLock)).toMatch(
+          /^SELECT removed_at AS "removedAt" FROM event_attendees WHERE id = \? AND event_id = \? FOR NO KEY UPDATE$/,
+        );
+        expect((attendeeLock as unknown as Prisma.Sql).values).toEqual(['att-1', 'event-1']);
+        expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+          db.eventAttendee.update.mock.invocationCallOrder[0],
+        );
+      });
+
+      // Another removal committed between the first read and the lock: the
+      // attendee is gone, so the answer is 404, not the refusal (403) the
+      // update matching nothing would read as.
+      it('answers 404 when the attendee is removed by the time the lock is held (#1064)', async () => {
+        lockedAttendee({ removedAt: new Date() });
+        db.eventAttendee.update.mockRejectedValue(recordNotFound());
+
+        await expect(service.removeAttendee('event-1', 'att-1')).rejects.toThrow(NotFoundException);
+        expect(db.eventAttendee.update).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
+
+      it('answers 404 when the row is gone by the time the lock is held (#1064)', async () => {
+        lockedAttendee(null);
+        db.eventAttendee.update.mockRejectedValue(recordNotFound());
+
+        await expect(service.removeAttendee('event-1', 'att-1')).rejects.toThrow(NotFoundException);
+        expect(db.eventAttendee.update).not.toHaveBeenCalled();
+      });
+
+      // The row is there and not removed under the lock, so a write that
+      // matches nothing is the delete conditions refusing it.
+      it('still answers 403 when the delete conditions refuse the write after the locked read (#1064)', async () => {
+        db.eventAttendee.update.mockRejectedValue(recordNotFound());
+
+        await expect(service.removeAttendee('event-1', 'att-1')).rejects.toThrow(ForbiddenException);
       });
 
       // The row stays, so the nominations and votes it made keep their
@@ -479,7 +531,7 @@ describe('EventAttendeeService', () => {
 
       const [[attendeeLock]] = db.$queryRaw.mock.calls;
       expect(rawQueryText(attendeeLock)).toMatch(
-        /^SELECT status FROM event_attendees WHERE id = \? FOR NO KEY UPDATE$/,
+        /^SELECT status, removed_at AS "removedAt" FROM event_attendees WHERE id = \? FOR NO KEY UPDATE$/,
       );
       expect((attendeeLock as unknown as Prisma.Sql).values).toEqual(['att-1']);
       expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
@@ -488,6 +540,33 @@ describe('EventAttendeeService', () => {
 
       const [, emitted] = emitter.emit.mock.calls[0];
       expect(emitted.before.status).toBe(EventParticipationStatus.NotAttending);
+    });
+
+    // The attendee's removal committed between the first read and the lock:
+    // they are gone, so the answer is 404, not the refusal (403) the update
+    // matching nothing would read as.
+    it('updateStatus answers 404 when the attendee is removed by the time the lock is held (#1064)', async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+      lockedStatus(EventParticipationStatus.Invited, new Date());
+      db.eventAttendee.update.mockRejectedValue(recordNotFound());
+
+      await expect(
+        service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.Attending }),
+      ).rejects.toThrow(NotFoundException);
+      expect(db.eventAttendee.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('updateStatus still answers 403 when the update conditions refuse the write after the locked read (#1064)', async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+      lockedStatus(EventParticipationStatus.Invited);
+      db.eventAttendee.update.mockRejectedValue(recordNotFound());
+
+      await expect(
+        service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.Attending }),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('updateStatus carries who acted on the RSVP (#802)', async () => {
@@ -518,6 +597,7 @@ describe('EventAttendeeService', () => {
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
       db.eventAttendee.update.mockResolvedValue({ id: 'att-1' } as EventAttendee);
       db.eventAttendee.findUniqueOrThrow.mockResolvedValue(attendeeRow({ removedAt: new Date() }));
+      lockedAttendee({ removedAt: null });
 
       await service.removeAttendee('event-1', 'att-1');
 
@@ -1108,6 +1188,7 @@ describe('EventAttendeeService', () => {
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
       db.eventAttendee.update.mockResolvedValue({ id: 'att-1' } as EventAttendee);
       db.eventAttendee.findUniqueOrThrow.mockResolvedValue(attendeeRow({ removedAt: new Date() }));
+      lockedAttendee({ removedAt: null });
       withGames('att-1', ['gl-1']);
 
       const removed = await service.removeAttendee('event-1', 'att-1');
@@ -1143,6 +1224,7 @@ describe('EventAttendeeService', () => {
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
       db.eventAttendee.update.mockResolvedValue(attendeeRow());
       db.eventAttendee.findUniqueOrThrow.mockResolvedValue(attendeeRow({ removedAt: new Date() }));
+      lockedAttendee({ removedAt: null });
       forAttendees.mockRejectedValueOnce(noRow);
       await expect(service.removeAttendee('event-1', 'att-1')).rejects.toBe(noRow);
 

@@ -61,6 +61,12 @@ describe('status changes racing on one date or nomination (#621)', () => {
     lockedBy: /FROM event_attendees WHERE id = \$1 FOR NO KEY UPDATE/,
   };
 
+  /** The attendee's row, which a removal locks to read it again (#1064). */
+  const REMOVED_ATTENDEE_ROW = {
+    sql: ATTENDEE_ROW.sql,
+    lockedBy: /FROM event_attendees WHERE id = \$1 AND event_id = \$2 FOR NO KEY UPDATE/,
+  };
+
   let db: TestDatabase;
   let actors: Actors;
 
@@ -188,6 +194,12 @@ describe('status changes racing on one date or nomination (#621)', () => {
     const removeDate = (actor: AuthenticatedActor, eventId: string, occurrenceId: string) =>
       request(baseUrl).delete(`${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}`).set(actor.headers);
 
+    const editDate = (actor: AuthenticatedActor, eventId: string, occurrenceId: string) =>
+      request(baseUrl)
+        .patch(`${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}`)
+        .set(actor.headers)
+        .send({ label: 'Edited' });
+
     /** A Poll event with one Proposed date. */
     const arrange = async () => {
       const host = await actors.user();
@@ -233,6 +245,32 @@ describe('status changes racing on one date or nomination (#621)', () => {
 
       expect(statuses).toEqual([200, 404]);
       expect(await db.client.eventOccurrence.count({ where: { id: occurrenceId } })).toBe(0);
+    });
+
+    it('answers an edit queued behind the removal 404 (#1064)', async () => {
+      const { host, eventId, occurrenceId } = await arrange();
+
+      const statuses = await race(
+        EVENT_ROW,
+        eventId,
+        () => removeDate(host, eventId, occurrenceId),
+        () => editDate(host, eventId, occurrenceId),
+      );
+
+      expect(statuses).toEqual([200, 404]);
+      expect(await db.client.eventOccurrence.count({ where: { id: occurrenceId } })).toBe(0);
+    });
+
+    it('still answers an edit from outside the grant 403, and leaves the date (#1064)', async () => {
+      const { eventId, occurrenceId } = await arrange();
+      const outsider = await actors.user();
+
+      await editDate(outsider, eventId, occurrenceId).expect(403);
+      const date = await db.client.eventOccurrence.findUniqueOrThrow({
+        where: { id: occurrenceId },
+        select: { label: true },
+      });
+      expect(date.label).not.toBe('Edited');
     });
   });
 
@@ -339,6 +377,69 @@ describe('status changes racing on one date or nomination (#621)', () => {
       expect(rsvpChanged(unread)).toEqual([
         expect.objectContaining({ payload: expect.objectContaining({ status: EventParticipationStatus.Attending }) }),
       ]);
+    });
+  });
+
+  // A write that loses a race to the attendee's removal finds them gone, as
+  // one arriving after it would, and answers 404 rather than 403 (#1064).
+  describe("an attendee's removal and a write queued behind it (#1064)", () => {
+    const removeAttendee = (actor: AuthenticatedActor, eventId: string, attendeeId: string) =>
+      request(baseUrl).delete(`${EVENTS_PATH}/${eventId}/attendees/${attendeeId}`).set(actor.headers);
+
+    const setStatus = (actor: AuthenticatedActor, eventId: string, attendeeId: string, status: string) =>
+      request(baseUrl)
+        .patch(`${EVENTS_PATH}/${eventId}/attendees/${attendeeId}/status`)
+        .set(actor.headers)
+        .send({ status });
+
+    /** An event with one invitee, and the invitee's attendee row. */
+    const arrange = async () => {
+      const host = await actors.user();
+      const invitee = await actors.user();
+      const eventId = await createdEventId(host, { inviteUserIds: [invitee.user.id] });
+      const { id: attendeeId } = await db.client.eventAttendee.findUniqueOrThrow({
+        where: { eventId_userId: { eventId, userId: invitee.user.id } },
+        select: { id: true },
+      });
+
+      return { host, invitee, eventId, attendeeId };
+    };
+
+    it('answers a removal queued behind another removal 404', async () => {
+      const { host, eventId, attendeeId } = await arrange();
+
+      const statuses = await race(
+        REMOVED_ATTENDEE_ROW,
+        attendeeId,
+        () => removeAttendee(host, eventId, attendeeId),
+        () => removeAttendee(host, eventId, attendeeId),
+      );
+
+      expect(statuses).toEqual([200, 404]);
+      const row = await db.client.eventAttendee.findUniqueOrThrow({
+        where: { id: attendeeId },
+        select: { removedAt: true },
+      });
+      expect(row.removedAt).not.toBeNull();
+    });
+
+    it("answers an RSVP queued behind the attendee's removal 404, and leaves their status", async () => {
+      const { host, invitee, eventId, attendeeId } = await arrange();
+
+      const statuses = await race(
+        REMOVED_ATTENDEE_ROW,
+        attendeeId,
+        () => removeAttendee(host, eventId, attendeeId),
+        () => setStatus(invitee, eventId, attendeeId, EventParticipationStatus.Attending),
+      );
+
+      expect(statuses).toEqual([200, 404]);
+      const row = await db.client.eventAttendee.findUniqueOrThrow({
+        where: { id: attendeeId },
+        select: { status: true, removedAt: true },
+      });
+      expect(row.status).toBe(EventParticipationStatus.Invited);
+      expect(row.removedAt).not.toBeNull();
     });
   });
 });

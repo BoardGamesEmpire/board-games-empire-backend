@@ -277,8 +277,18 @@ export class EventOccurrenceService {
 
     try {
       const { written: updated, removedGames } = await this.db.$transaction((tx) =>
-        writeEventDates(tx, eventId, initiatedAt, () =>
-          tx.eventOccurrence.update({
+        writeEventDates(tx, eventId, initiatedAt, async () => {
+          // Read again under the event's lock, which a removal also holds. An
+          // edit that lost a race to the date's removal answers 404, as one
+          // arriving second would. A removal can't be undone, so a failed
+          // update after this read is the grant refusing the edit (#1064).
+          const present = await tx.eventOccurrence.findUnique({
+            where: { id: occurrenceId, eventId },
+            select: { id: true },
+          });
+          assert(present, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
+
+          return tx.eventOccurrence.update({
             where: {
               id: occurrenceId,
               // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
@@ -292,8 +302,8 @@ export class EventOccurrenceService {
               sortOrder: dto.sortOrder,
             },
             include: { policy: true },
-          }),
-        ),
+          });
+        }),
       );
 
       const changedKeys = (['label', 'startDate', 'endDate', 'location', 'sortOrder'] as const).filter(
