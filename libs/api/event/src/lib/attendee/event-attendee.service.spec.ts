@@ -10,6 +10,7 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
+import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
@@ -24,7 +25,7 @@ import {
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ATTENDEE_USER_AND_ROLE_INCLUDE } from '../constants/attendee-user-and-role.constant';
 import {
@@ -44,6 +45,7 @@ import {
   GameAddedToListEvent,
   GameRemovedFromListEvent,
 } from './events/attendee.events';
+import { OfferRefusal } from './offer-outcome';
 
 const COND = { id: 'sentinel-condition' };
 
@@ -1153,6 +1155,481 @@ describe('EventAttendeeService', () => {
       db.gameExpansion.findMany.mockRejectedValueOnce(unique);
       await expect(service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' })).rejects.toBe(unique);
       expect(emitter.emit).toHaveBeenCalledWith(GameAddedToListEvent.eventName, expect.anything());
+    });
+  });
+  // #1188: each id is judged as the single add judges one, a bad id loses
+  // nothing else, and the answer says what happened to each.
+  describe('offerGames (#1188)', () => {
+    const removedAt = new Date('2026-10-15T12:00:00Z');
+
+    /** A collection entry as the batch reads it: its owner, tombstone and game. */
+    const owned = (id: string, gameId: string, overrides: { userId?: string; deletedAt?: Date | null } = {}) => ({
+      id,
+      userId: 'user-1',
+      deletedAt: null,
+      platformGame: { gameId },
+      ...overrides,
+    });
+
+    /** An entry the attendee already offers, as the batch reads it: in the offered shape, with its key and tombstone. */
+    const listed = (collectionId: string, gameListId: string, entryRemovedAt: Date | null = null) => ({
+      ...makeOfferedGameEntry(gameListId),
+      collectionId,
+      removedAt: entryRemovedAt,
+    });
+
+    /**
+     * The database the batch reads: `collections` by id, the attendee's
+     * `entries` by collection id, and the expansion `links`, each read
+     * filtered by its where as Postgres would. Creates and revives answer
+     * an offered entry named after the collection entry.
+     */
+    const arrange = ({
+      collections = [],
+      entries = [],
+      links = [],
+    }: {
+      collections?: ReturnType<typeof owned>[];
+      entries?: ReturnType<typeof listed>[];
+      links?: { baseGameId: string; expansionGameId: string }[];
+    }) => {
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: 'hh-1' } as Event);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+      db.gameCollection.findMany.mockImplementation((async (args: { where: { id: { in: string[] } } }) =>
+        collections.filter(({ id }) => args.where.id.in.includes(id))) as never);
+      db.eventAttendeeGameList.findMany.mockImplementation((async (args: {
+        where: { collectionId: { in: string[] } };
+      }) => entries.filter(({ collectionId }) => args.where.collectionId.in.includes(collectionId))) as never);
+      db.gameExpansion.findMany.mockImplementation((async (args: {
+        where: { baseGameId?: { in: string[] }; expansionGameId: { in: string[] } };
+      }) =>
+        args.where.baseGameId
+          ? links.filter(
+              ({ baseGameId, expansionGameId }) =>
+                args.where.baseGameId?.in.includes(baseGameId) &&
+                args.where.expansionGameId.in.includes(expansionGameId),
+            )
+          : []) as never);
+      db.eventAttendeeGameList.create.mockImplementation((async (args: {
+        data: { collection: { connect: { id: string } } };
+      }) => makeOfferedGameEntry(`gl-${args.data.collection.connect.id}`)) as never);
+      db.eventAttendeeGameList.update.mockImplementation((async (args: { where: { id: string } }) =>
+        makeOfferedGameEntry(args.where.id)) as never);
+    };
+
+    const outcomes = (results: { collectionId: string; outcome: string; reason?: string }[]) =>
+      results.map(({ collectionId, outcome, reason }) => [collectionId, reason ?? outcome]);
+
+    it('judges every id with two reads, not one per id', async () => {
+      arrange({
+        collections: [owned('col-base', 'game-base'), owned('col-exp', 'game-exp'), owned('col-other', 'game-other')],
+        links: [{ baseGameId: 'game-base', expansionGameId: 'game-exp' }],
+      });
+
+      await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-base', expansionCollectionIds: ['col-exp'] }, { collectionId: 'col-other' }],
+      });
+
+      expect(db.gameCollection.findMany).toHaveBeenCalledTimes(1);
+      expect(db.gameCollection.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: { in: ['col-base', 'col-exp', 'col-other'] } } }),
+      );
+      expect(db.gameCollection.findUnique).not.toHaveBeenCalled();
+      expect(db.eventAttendeeGameList.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { attendeeId: 'att-1', collectionId: { in: ['col-base', 'col-exp', 'col-other'] } },
+        }),
+      );
+      const linkReads = db.gameExpansion.findMany.mock.calls.filter(([args]) => 'baseGameId' in (args?.where ?? {}));
+      expect(linkReads).toEqual([
+        [
+          {
+            where: { baseGameId: { in: ['game-base'] }, expansionGameId: { in: ['game-exp'] } },
+            select: { baseGameId: true, expansionGameId: true },
+          },
+        ],
+      ]);
+    });
+
+    it('adds new entries and revives taken-back ones, one GameAddedToListEvent each', async () => {
+      arrange({
+        collections: [owned('col-new', 'game-1'), owned('col-old', 'game-2')],
+        entries: [listed('col-old', 'gl-old', removedAt)],
+      });
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-new' }, { collectionId: 'col-old' }],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-new', 'added'],
+        ['col-old', 'added'],
+      ]);
+      expect(db.eventAttendeeGameList.create).toHaveBeenCalledWith({
+        data: { attendee: { connect: { id: 'att-1' } }, collection: { connect: { id: 'col-new' } } },
+        select: OFFERED_GAME_SELECT,
+      });
+      expect(db.eventAttendeeGameList.update).toHaveBeenCalledWith({
+        where: { id: 'gl-old', removedAt: { not: null } },
+        data: { removedAt: null },
+        select: OFFERED_GAME_SELECT,
+      });
+
+      const emitted = emitter.emit.mock.calls.filter(([name]) => name === GameAddedToListEvent.eventName);
+      expect(emitted.map(([, event]) => [event.action, event.before, event.after])).toEqual([
+        ['create', null, { id: 'gl-col-new', attendeeId: 'att-1', collectionId: 'col-new', removedAt: null }],
+        [
+          'update',
+          { id: 'gl-old', attendeeId: 'att-1', collectionId: 'col-old', removedAt },
+          { id: 'gl-old', attendeeId: 'att-1', collectionId: 'col-old', removedAt: null },
+        ],
+      ]);
+      expect(results.map((result) => (result.outcome === 'refused' ? null : result.entry.id))).toEqual([
+        'gl-col-new',
+        'gl-old',
+      ]);
+      expect(results[0]).toEqual(
+        expect.objectContaining({ entry: expect.objectContaining({ supplies: { nominations: 0, lineup: 0 } }) }),
+      );
+    });
+
+    // An entry already offered isn't a failure, and was added by
+    // someone before: nothing is written and nothing is emitted.
+    it('answers an entry already offered as alreadyOffered, with its entry, and emits nothing (#1188)', async () => {
+      arrange({
+        collections: [owned('col-on', 'game-1'), owned('col-raced', 'game-2')],
+        entries: [listed('col-on', 'gl-on')],
+      });
+      // A concurrent add wins the (attendee, collection) key between the read
+      // and the write.
+      db.eventAttendeeGameList.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: 'test' }),
+      );
+      db.eventAttendeeGameList.findFirst.mockResolvedValue(makeOfferedGameEntry('gl-raced') as never);
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-on' }, { collectionId: 'col-raced' }],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-on', 'alreadyOffered'],
+        ['col-raced', 'alreadyOffered'],
+      ]);
+      expect(results.map((result) => (result.outcome === 'refused' ? null : result.entry.id))).toEqual([
+        'gl-on',
+        'gl-raced',
+      ]);
+      expect(results[0]).not.toHaveProperty('entry.removedAt');
+      expect(results[0]).not.toHaveProperty('entry.collectionId');
+      expect(db.eventAttendeeGameList.findFirst).toHaveBeenCalledWith({
+        where: { attendeeId: 'att-1', collectionId: 'col-raced', removedAt: null },
+        select: OFFERED_GAME_SELECT,
+      });
+      expect(emitter.emit).not.toHaveBeenCalledWith(GameAddedToListEvent.eventName, expect.anything());
+    });
+
+    // A bad id loses nothing else: an entry deleted between the check and
+    // its write fails the write's connect, and is refused as missing rather
+    // than failing the request after the others were written.
+    it('refuses an entry that vanishes before its write as notFound, and still adds the rest (#1188)', async () => {
+      arrange({ collections: [owned('col-gone', 'game-1'), owned('col-ok', 'game-2')] });
+      db.eventAttendeeGameList.create.mockImplementation((async (args: {
+        data: { collection: { connect: { id: string } } };
+      }) => {
+        if (args.data.collection.connect.id === 'col-gone') {
+          throw new Prisma.PrismaClientKnownRequestError('No record was found for a connect.', {
+            code: 'P2025',
+            clientVersion: 'test',
+          });
+        }
+
+        return makeOfferedGameEntry(`gl-${args.data.collection.connect.id}`);
+      }) as never);
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-gone' }, { collectionId: 'col-ok' }],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-gone', OfferRefusal.NotFound],
+        ['col-ok', 'added'],
+      ]);
+      expect(results[0]).toEqual(
+        expect.objectContaining({
+          message: t('errors.attendee.game_collection_entry_not_found', { collectionId: 'col-gone' }),
+        }),
+      );
+      expect(emitter.emit.mock.calls.filter(([name]) => name === GameAddedToListEvent.eventName)).toHaveLength(1);
+    });
+
+    // A game's entry can vanish between the judgement and its write: deleting
+    // the game cascades to its collection entries, and an expansion's entry,
+    // another game's, survives. The game is then refused, so the expansions
+    // asked for with it are too, as at judging; one already offered stays so.
+    it('refuses the expansions of a game whose entry vanishes before its write as baseRefused (#1188)', async () => {
+      arrange({
+        collections: [
+          owned('col-base', 'game-base'),
+          owned('col-exp', 'game-exp'),
+          owned('col-on', 'game-on'),
+          owned('col-other', 'game-other'),
+        ],
+        entries: [listed('col-on', 'gl-on')],
+        links: [
+          { baseGameId: 'game-base', expansionGameId: 'game-exp' },
+          { baseGameId: 'game-base', expansionGameId: 'game-on' },
+        ],
+      });
+      db.eventAttendeeGameList.create.mockImplementation((async (args: {
+        data: { collection: { connect: { id: string } } };
+      }) => {
+        if (args.data.collection.connect.id === 'col-base') {
+          throw new Prisma.PrismaClientKnownRequestError('No record was found for a connect.', {
+            code: 'P2025',
+            clientVersion: 'test',
+          });
+        }
+
+        return makeOfferedGameEntry(`gl-${args.data.collection.connect.id}`);
+      }) as never);
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [
+          { collectionId: 'col-base', expansionCollectionIds: ['col-exp', 'col-on'] },
+          { collectionId: 'col-other' },
+        ],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-base', OfferRefusal.NotFound],
+        ['col-exp', OfferRefusal.BaseRefused],
+        ['col-on', 'alreadyOffered'],
+        ['col-other', 'added'],
+      ]);
+      expect(results[1]).toEqual(expect.objectContaining({ message: t('errors.attendee.base_refused') }));
+      expect(db.eventAttendeeGameList.create).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ collection: { connect: { id: 'col-exp' } } }) }),
+      );
+    });
+
+    // A refused game's expansions answer baseRefused whenever the game is
+    // refused, so an expansion with a reason of its own answers the same
+    // whether its game failed at judging or at its write.
+    it('refuses as baseRefused an expansion with a reason of its own when its game is refused at its write (#1188)', async () => {
+      arrange({
+        collections: [owned('col-base', 'game-base'), owned('col-loose', 'game-loose')],
+        links: [],
+      });
+      db.eventAttendeeGameList.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('No record was found for a connect.', {
+          code: 'P2025',
+          clientVersion: 'test',
+        }),
+      );
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-base', expansionCollectionIds: ['col-loose'] }],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-base', OfferRefusal.NotFound],
+        ['col-loose', OfferRefusal.BaseRefused],
+      ]);
+    });
+
+    it('refuses each bad id with its reason and a translated message, and still adds the rest', async () => {
+      arrange({
+        collections: [
+          owned('col-stranger', 'game-1', { userId: 'user-9' }),
+          owned('col-gone', 'game-2', { deletedAt: removedAt }),
+          owned('col-ok', 'game-3'),
+        ],
+      });
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [
+          { collectionId: 'col-missing' },
+          { collectionId: 'col-stranger' },
+          { collectionId: 'col-gone' },
+          { collectionId: 'col-ok' },
+        ],
+      });
+
+      expect(results.slice(0, 3)).toEqual([
+        {
+          collectionId: 'col-missing',
+          outcome: 'refused',
+          reason: OfferRefusal.NotFound,
+          message: t('errors.attendee.game_collection_entry_not_found', { collectionId: 'col-missing' }),
+        },
+        {
+          collectionId: 'col-stranger',
+          outcome: 'refused',
+          reason: OfferRefusal.NotInAttendeesCollection,
+          message: t('errors.attendee.game_from_other_collection'),
+        },
+        {
+          collectionId: 'col-gone',
+          outcome: 'refused',
+          reason: OfferRefusal.RemovedFromCollection,
+          message: t('errors.attendee.game_removed_from_collection'),
+        },
+      ]);
+      expect(outcomes(results)[3]).toEqual(['col-ok', 'added']);
+      expect(db.eventAttendeeGameList.create).toHaveBeenCalledTimes(1);
+    });
+
+    // The link's direction says which game is the base, as base games are
+    // read on a row (#1069).
+    it("refuses an expansion not linked to its item's game, or linked the other way round", async () => {
+      arrange({
+        collections: [
+          owned('col-base', 'game-base'),
+          owned('col-exp', 'game-exp'),
+          owned('col-unlinked', 'game-x'),
+          owned('col-reverse', 'game-rev'),
+        ],
+        links: [
+          { baseGameId: 'game-base', expansionGameId: 'game-exp' },
+          { baseGameId: 'game-rev', expansionGameId: 'game-base' },
+        ],
+      });
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-base', expansionCollectionIds: ['col-unlinked', 'col-exp', 'col-reverse'] }],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-base', 'added'],
+        ['col-unlinked', OfferRefusal.NotAnExpansionOfBase],
+        ['col-exp', 'added'],
+        ['col-reverse', OfferRefusal.NotAnExpansionOfBase],
+      ]);
+      expect(results[1]).toEqual(expect.objectContaining({ message: t('errors.attendee.not_an_expansion_of_base') }));
+    });
+
+    it('refuses the expansions of a refused game as baseRefused, and lets those of an already-offered game through', async () => {
+      arrange({
+        collections: [
+          owned('col-stranger', 'game-1', { userId: 'user-9' }),
+          owned('col-e1', 'game-e1'),
+          owned('col-on', 'game-2'),
+          owned('col-e2', 'game-e2'),
+        ],
+        entries: [listed('col-on', 'gl-on')],
+        links: [
+          { baseGameId: 'game-1', expansionGameId: 'game-e1' },
+          { baseGameId: 'game-2', expansionGameId: 'game-e2' },
+        ],
+      });
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [
+          { collectionId: 'col-stranger', expansionCollectionIds: ['col-e1'] },
+          { collectionId: 'col-on', expansionCollectionIds: ['col-e2'] },
+        ],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-stranger', OfferRefusal.NotInAttendeesCollection],
+        ['col-e1', OfferRefusal.BaseRefused],
+        ['col-on', 'alreadyOffered'],
+        ['col-e2', 'added'],
+      ]);
+      expect(results[1]).toEqual(expect.objectContaining({ message: t('errors.attendee.base_refused') }));
+    });
+
+    // Nothing is written for an entry already offered, so nothing about it is
+    // judged: one removed from its collection since stays offered until it's
+    // taken back, and answering it refused would say it isn't.
+    it('answers an entry still offered as alreadyOffered though removed from its collection, and lets its expansions through (#1188)', async () => {
+      arrange({
+        collections: [owned('col-on', 'game-1', { deletedAt: removedAt }), owned('col-exp', 'game-exp')],
+        entries: [listed('col-on', 'gl-on')],
+        links: [{ baseGameId: 'game-1', expansionGameId: 'game-exp' }],
+      });
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-on', expansionCollectionIds: ['col-exp'] }],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-on', 'alreadyOffered'],
+        ['col-exp', 'added'],
+      ]);
+      expect(db.eventAttendeeGameList.create).toHaveBeenCalledTimes(1);
+    });
+
+    // The batch refuses this id as notFound; the single add answered 500.
+    it("answers the single add's create that finds no collection entry to connect with 404, as the batch does (#1188)", async () => {
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+      db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-1', deletedAt: null } as GameCollection);
+      db.eventAttendeeGameList.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('No record was found for a connect.', {
+          code: 'P2025',
+          clientVersion: 'test',
+        }),
+      );
+
+      await expect(service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' })).rejects.toThrow(
+        new NotFoundException(t('errors.attendee.game_collection_entry_not_found', { collectionId: 'col-1' })),
+      );
+    });
+
+    it("checks create on the attendee's offered games once, as the single add does (#1188)", async () => {
+      arrange({ collections: [owned('col-1', 'game-1'), owned('col-2', 'game-2')] });
+
+      await service.offerGames('event-1', 'att-1', { items: [{ collectionId: 'col-1' }, { collectionId: 'col-2' }] });
+
+      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledTimes(1);
+      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(
+        Action.create,
+        ResourceType.EventAttendeeGameList,
+        {
+          attendeeId: 'att-1',
+          attendee: { id: 'att-1', userId: 'user-1', eventId: 'event-1', event: { householdId: 'hh-1' } },
+        },
+      );
+    });
+
+    it('refuses before reading or writing when the instance check denies', async () => {
+      arrange({ collections: [owned('col-1', 'game-1')] });
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+
+      await expect(service.offerGames('event-1', 'att-1', { items: [{ collectionId: 'col-1' }] })).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(db.gameCollection.findMany).not.toHaveBeenCalled();
+      expect(db.eventAttendeeGameList.create).not.toHaveBeenCalled();
+    });
+
+    // The single add maps the shared judgement to the answers it always gave.
+    it("keeps the single add's answers unchanged", async () => {
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+
+      db.gameCollection.findUnique.mockResolvedValue(null);
+      await expect(service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' })).rejects.toThrow(
+        NotFoundException,
+      );
+      db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-9', deletedAt: null } as GameCollection);
+      await expect(service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' })).rejects.toThrow(
+        ForbiddenException,
+      );
+      db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-1', deletedAt: removedAt } as GameCollection);
+      await expect(service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' })).rejects.toThrow(
+        BadRequestException,
+      );
+      db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-1', deletedAt: null } as GameCollection);
+      db.eventAttendeeGameList.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: 'test' }),
+      );
+      await expect(service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' })).rejects.toThrow(
+        ConflictException,
+      );
     });
   });
 });

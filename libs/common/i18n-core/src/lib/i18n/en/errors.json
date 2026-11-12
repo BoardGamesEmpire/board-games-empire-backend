@@ -80,7 +80,9 @@
     "game_still_supplied": "This game can't come off the attendee's offered games while it supplies the event: {nominations} nomination(s) awaiting an outcome and {scheduled} game(s) in the lineup.",
     "forbidden_remove_game": "You don't have permission to remove this game.",
     "game_from_other_collection": "Cannot add a game from another user's collection.",
-    "game_removed_from_collection": "Cannot add a game that has been removed from the collection."
+    "game_removed_from_collection": "Cannot add a game that has been removed from the collection.",
+    "not_an_expansion_of_base": "This game isn't an expansion of the game it was offered with.",
+    "base_refused": "This expansion wasn't offered because the game it goes with couldn't be."
   },
   "nomination": {
     "not_found": "Nomination {nominationId} not found for event {eventId}",

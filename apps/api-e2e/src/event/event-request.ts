@@ -32,6 +32,10 @@ export const offeredGamesPath = (eventId: string) => `${EVENTS_PATH}/${eventId}/
 export const attendeeGamesPath = (eventId: string, attendeeId: string) =>
   `${attendeesPath(eventId)}/${attendeeId}/games`;
 
+/** `/api/events/:eventId/attendees/:attendeeId/games/batch`: where several games are offered at once (#1188). */
+export const offerGamesPath = (eventId: string, attendeeId: string) =>
+  `${attendeeGamesPath(eventId, attendeeId)}/batch`;
+
 export interface EventClient {
   /**
    * `POST /api/events` as `actor`, under a fresh title, with `body` merged

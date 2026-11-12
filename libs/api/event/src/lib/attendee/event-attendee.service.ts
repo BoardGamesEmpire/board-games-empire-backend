@@ -4,6 +4,7 @@ import {
   EventAttendee,
   EventAttendeeGameList,
   EventParticipationStatus,
+  GameCollection,
   isPrismaDependentRecordNotFoundError,
   isPrismaUniqueConstraintError,
   Prisma,
@@ -17,6 +18,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -39,6 +41,7 @@ import {
 } from './attendance';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { AddGameToListDto } from './dto/add-game-to-list.dto';
+import { OfferGamesDto, type OfferGameItemDto } from './dto/offer-games.dto';
 import { UpdateAttendeeStatusDto } from './dto/update-attendee-status.dto';
 import {
   AttendeeAddedEvent,
@@ -48,6 +51,7 @@ import {
   GameRemovedFromListEvent,
 } from './events/attendee.events';
 import { assertInvitable } from './invitable';
+import { OfferRefusal, offerRefusalMessage, type OfferResult } from './offer-outcome';
 
 /** An attendee row with their user and role. */
 type AttendeeRow = Prisma.EventAttendeeGetPayload<{ include: typeof ATTENDEE_USER_AND_ROLE_INCLUDE }>;
@@ -487,34 +491,16 @@ export class EventAttendeeService {
    */
   async addGameToList(eventId: string, attendeeId: string, dto: AddGameToListDto): Promise<OfferedGame> {
     const initiatedAt = new Date();
-    const event = await requireEvent(this.db, eventId);
-    const attendee = await this.assertAttendeeExists(eventId, attendeeId);
+    const attendee = await this.requireOfferTarget(eventId, attendeeId);
 
-    // The route's policy check judges a create by type alone, and `manage`
-    // implies `create`: a participant passes it for their own list, a manager
-    // for any list in the event. Bind it to the entry about to be written,
-    // carrying the attendee's user and event so either grant can match.
-    this.abilityService.assertCurrentActorCan(Action.create, ResourceType.EventAttendeeGameList, {
-      attendeeId,
-      attendee: { id: attendeeId, userId: attendee.userId, eventId, event: { householdId: event.householdId } },
+    const collection = await this.db.gameCollection.findUnique({
+      where: { id: dto.collectionId },
+      select: { userId: true, deletedAt: true },
     });
+    const refusal = judgeCollectionEntry(attendee, collection);
 
-    if (attendee.userId) {
-      const collection = await this.db.gameCollection.findUnique({
-        where: { id: dto.collectionId },
-        select: { userId: true, deletedAt: true },
-      });
-
-      assert(
-        collection,
-        new NotFoundException(t('errors.attendee.game_collection_entry_not_found', { collectionId: dto.collectionId })),
-      );
-      assert(
-        collection.userId === attendee.userId,
-        new ForbiddenException(t('errors.attendee.game_from_other_collection')),
-      );
-      // A tombstoned entry is a game the attendee no longer owns.
-      assert(!collection.deletedAt, new BadRequestException(t('errors.attendee.game_removed_from_collection')));
+    if (refusal) {
+      throw offerRefusalException(refusal, dto.collectionId);
     }
 
     // A game taken off the list keeps its row, and the (attendee, game) key
@@ -527,36 +513,16 @@ export class EventAttendeeService {
     let entry: OfferedGameEntry;
 
     try {
-      entry = removed
-        ? await this.db.eventAttendeeGameList.update({
-            // Matches nothing once a concurrent add has revived it, which
-            // answers as the duplicate it then is.
-            where: { id: removed.id, removedAt: { not: null } },
-            data: { removedAt: null },
-            select: OFFERED_GAME_SELECT,
-          })
-        : await this.db.eventAttendeeGameList.create({
-            data: {
-              attendee: { connect: { id: attendeeId } },
-              collection: { connect: { id: dto.collectionId } },
-            },
-            select: OFFERED_GAME_SELECT,
-          });
-
-      this.eventEmitter.emit(
-        GameAddedToListEvent.eventName,
-        new GameAddedToListEvent(
-          removed ?? null,
-          // The shape carries neither column, and both are known: the entry
-          // offers the named collection entry, and is on the list.
-          { id: entry.id, attendeeId: entry.attendeeId, collectionId: dto.collectionId, removedAt: null },
-          eventId,
-          initiatedAt,
-        ),
-      );
+      entry = await this.writeOffer(eventId, attendeeId, dto.collectionId, removed, initiatedAt);
     } catch (error) {
       if (isPrismaUniqueConstraintError(error) || (removed && isPrismaDependentRecordNotFoundError(error))) {
         throw new ConflictException(t('errors.attendee.game_already_in_list'));
+      }
+
+      // No row to connect on a create: the collection entry was deleted since
+      // the check, as the batch reads it (#1188).
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw offerRefusalException(OfferRefusal.NotFound, dto.collectionId);
       }
 
       this.logger.error(`Error adding game to list for attendee ${attendeeId}`, error);
@@ -567,6 +533,132 @@ export class EventAttendeeService {
     // read's, never a duplicate offer (#1187).
     const [offered] = await this.offeredGames.enrich([entry], initiatedAt);
     return offered;
+  }
+
+  /**
+   * Offers several of the attendee's collection entries at once, each a game
+   * with a choice of its expansions, answering what happened to each, in
+   * request order, each expansion right after its game (#1188).
+   *
+   * - Each id is judged as the single add judges one. A bad id is refused
+   *   with a stable reason and a translated message, and loses nothing else.
+   * - An expansion must also expand its item's game: a `GameExpansion` link
+   *   from that game to its own, the direction base games are read in. The
+   *   expansions of a refused game are refused as `baseRefused`; those of a
+   *   game already offered go ahead.
+   * - An entry already offered is `alreadyOffered`, with its entry, and
+   *   emits nothing, before any judgement: nothing is written for it, so
+   *   nothing is refused. That holds for one removed from its collection
+   *   since, which stays offered until taken back. One taken back earlier
+   *   comes back with its id.
+   * - The create check runs once, as the single add's, before anything is
+   *   read. Every id is judged from three reads, whatever the batch's size.
+   * - Each accepted id is its own statement. A write that fails on what
+   *   changed since the judgement answers for that id alone (`offerOne`).
+   *   Any other database failure fails the request, keeping the entries
+   *   written before it; sending the batch again answers those
+   *   `alreadyOffered` and offers the rest. Each added entry emits its own
+   *   `GameAddedToListEvent`, as the single add does.
+   *
+   * Like the single add, it checks no collection's owner for an attendee
+   * added by name (#1210).
+   */
+  async offerGames(eventId: string, attendeeId: string, dto: OfferGamesDto): Promise<OfferResult[]> {
+    const initiatedAt = new Date();
+    const attendee = await this.requireOfferTarget(eventId, attendeeId);
+    const named = dto.items.flatMap((item) => [item.collectionId, ...(item.expansionCollectionIds ?? [])]);
+
+    const [collections, listed] = await Promise.all([
+      this.db.gameCollection.findMany({
+        where: { id: { in: named } },
+        select: { id: true, userId: true, deletedAt: true, platformGame: { select: { gameId: true } } },
+      }),
+      this.db.eventAttendeeGameList.findMany({
+        where: { attendeeId, collectionId: { in: named } },
+        select: { ...OFFERED_GAME_SELECT, collectionId: true, removedAt: true },
+      }),
+    ]);
+    const collectionById = new Map(collections.map((collection) => [collection.id, collection]));
+    const listedByCollection = new Map(listed.map((entry) => [entry.collectionId, entry]));
+    const links = await this.expansionLinks(dto.items, collectionById);
+
+    // An entry already offered goes ahead unjudged: `offerOne` answers it
+    // `alreadyOffered` and writes nothing.
+    const offered = (collectionId: string) => listedByCollection.get(collectionId)?.removedAt === null;
+
+    const judged: { collectionId: string; baseId?: string; refusal: OfferRefusal | null }[] = [];
+    for (const item of dto.items) {
+      const game = collectionById.get(item.collectionId);
+      const gameRefusal = offered(item.collectionId) ? null : judgeCollectionEntry(attendee, game);
+      judged.push({ collectionId: item.collectionId, refusal: gameRefusal });
+
+      for (const expansionId of item.expansionCollectionIds ?? []) {
+        const expansion = collectionById.get(expansionId);
+        const refusal = offered(expansionId)
+          ? null
+          : gameRefusal === null
+            ? (judgeCollectionEntry(attendee, expansion) ??
+              (game && expansion && links.has(linkKey(game.platformGame.gameId, expansion.platformGame.gameId))
+                ? null
+                : OfferRefusal.NotAnExpansionOfBase))
+            : OfferRefusal.BaseRefused;
+        judged.push({ collectionId: expansionId, baseId: item.collectionId, refusal });
+      }
+    }
+
+    // One at a time, in request order, each its own statement. A game whose
+    // write is refused (its entry deleted since the judgement, as deleting
+    // the game does) refuses the expansions still to write with it, as a
+    // game refused at judging does, over any reason of their own; one
+    // already offered stays so.
+    const refusedAtWrite = new Set<string>();
+    const settled: (
+      | { collectionId: string; refusal: OfferRefusal }
+      | { collectionId: string; outcome: 'added' | 'alreadyOffered'; entry: OfferedGameEntry }
+    )[] = [];
+    for (const { collectionId, baseId, refusal } of judged) {
+      const settledRefusal =
+        baseId !== undefined && refusedAtWrite.has(baseId) && !offered(collectionId)
+          ? OfferRefusal.BaseRefused
+          : refusal;
+
+      if (settledRefusal !== null) {
+        settled.push({ collectionId, refusal: settledRefusal });
+        continue;
+      }
+
+      const result = await this.offerOne(
+        eventId,
+        attendeeId,
+        collectionId,
+        listedByCollection.get(collectionId),
+        initiatedAt,
+      );
+
+      if ('refusal' in result) {
+        refusedAtWrite.add(collectionId);
+      }
+
+      settled.push({ collectionId, ...result });
+    }
+
+    // `enrich` keeps the order it's given, so the entries come back in turn.
+    const enriched = await this.offeredGames.enrich(
+      settled.flatMap((result) => ('entry' in result ? [result.entry] : [])),
+      initiatedAt,
+    );
+    let next = 0;
+
+    return settled.map((result): OfferResult =>
+      'entry' in result
+        ? { collectionId: result.collectionId, outcome: result.outcome, entry: enriched[next++] }
+        : {
+            collectionId: result.collectionId,
+            outcome: 'refused',
+            reason: result.refusal,
+            message: offerRefusalMessage(result.refusal, result.collectionId),
+          },
+    );
   }
 
   /**
@@ -673,6 +765,164 @@ export class EventAttendeeService {
   }
 
   /**
+   * The event and attendee an offer writes to, once the caller may offer
+   * games for that attendee. The route's policy check judges a create by
+   * type alone, and `manage` implies `create`: a participant passes it for
+   * their own offered games, a manager for any attendee's in the event. Bind
+   * it to the attendee about to offer, carrying their user and event so
+   * either grant can match.
+   */
+  private async requireOfferTarget(eventId: string, attendeeId: string): Promise<Pick<EventAttendee, 'id' | 'userId'>> {
+    const event = await requireEvent(this.db, eventId);
+    const attendee = await this.assertAttendeeExists(eventId, attendeeId);
+
+    this.abilityService.assertCurrentActorCan(Action.create, ResourceType.EventAttendeeGameList, {
+      attendeeId,
+      attendee: { id: attendeeId, userId: attendee.userId, eventId, event: { householdId: event.householdId } },
+    });
+
+    return attendee;
+  }
+
+  /**
+   * Offers `collectionId` for the attendee: a new entry, or the entry
+   * `removed` names, taken back earlier and revived with its id (#551). Emits
+   * the `GameAddedToListEvent`. A concurrent add surfaces as Prisma's own
+   * error: a unique-key clash on a create, or no row matched on a revive.
+   */
+  private async writeOffer(
+    eventId: string,
+    attendeeId: string,
+    collectionId: string,
+    removed: Pick<EventAttendeeGameList, 'id' | 'attendeeId' | 'collectionId' | 'removedAt'> | null,
+    initiatedAt: Date,
+  ): Promise<OfferedGameEntry> {
+    const entry = removed
+      ? await this.db.eventAttendeeGameList.update({
+          // Matches nothing once a concurrent add has revived it, which
+          // answers as the duplicate it then is.
+          where: { id: removed.id, removedAt: { not: null } },
+          data: { removedAt: null },
+          select: OFFERED_GAME_SELECT,
+        })
+      : await this.db.eventAttendeeGameList.create({
+          data: {
+            attendee: { connect: { id: attendeeId } },
+            collection: { connect: { id: collectionId } },
+          },
+          select: OFFERED_GAME_SELECT,
+        });
+
+    this.eventEmitter.emit(
+      GameAddedToListEvent.eventName,
+      new GameAddedToListEvent(
+        removed ?? null,
+        // The shape carries neither column, and both are known: the entry
+        // offers the named collection entry, and is offered now.
+        { id: entry.id, attendeeId: entry.attendeeId, collectionId, removedAt: null },
+        eventId,
+        initiatedAt,
+      ),
+    );
+
+    return entry;
+  }
+
+  /**
+   * One accepted id of a batch offer (#1188): `alreadyOffered` when it's
+   * offered already, else written. A bad id loses nothing else, so a write
+   * that fails on what changed since the judgement answers for this id alone:
+   *
+   * - one that loses a concurrent add's race reads the winner's entry and
+   *   answers `alreadyOffered` with it;
+   * - one whose collection entry was deleted since is refused `notFound`.
+   *   Its owner's account, or its platform game, takes it with them. The
+   *   attendee's row can't be what's missing: it goes only with its event's,
+   *   and no route deletes an event's row.
+   *
+   * Any other failure is the database's, and fails the request.
+   */
+  private async offerOne(
+    eventId: string,
+    attendeeId: string,
+    collectionId: string,
+    listed: (OfferedGameEntry & Pick<EventAttendeeGameList, 'collectionId' | 'removedAt'>) | undefined,
+    initiatedAt: Date,
+  ): Promise<{ outcome: 'added' | 'alreadyOffered'; entry: OfferedGameEntry } | { refusal: OfferRefusal }> {
+    if (listed && listed.removedAt === null) {
+      const { id, attendeeId: listedBy, createdAt, collection } = listed;
+
+      return { outcome: 'alreadyOffered', entry: { id, attendeeId: listedBy, createdAt, collection } };
+    }
+
+    const removed = listed
+      ? { id: listed.id, attendeeId: listed.attendeeId, collectionId, removedAt: listed.removedAt }
+      : null;
+
+    try {
+      return {
+        outcome: 'added',
+        entry: await this.writeOffer(eventId, attendeeId, collectionId, removed, initiatedAt),
+      };
+    } catch (error) {
+      // A unique-key clash on a create, or no row matched on a revive, is a
+      // concurrent add. No row to connect on a create is a deleted entry.
+      if (isPrismaUniqueConstraintError(error) || isPrismaDependentRecordNotFoundError(error)) {
+        const entry = await this.db.eventAttendeeGameList.findFirst({
+          where: { attendeeId, collectionId, removedAt: null },
+          select: OFFERED_GAME_SELECT,
+        });
+
+        if (entry) {
+          return { outcome: 'alreadyOffered', entry };
+        }
+
+        if (isPrismaDependentRecordNotFoundError(error)) {
+          return { refusal: OfferRefusal.NotFound };
+        }
+      }
+
+      this.logger.error(`Error offering collection entry ${collectionId} for attendee ${attendeeId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * The expansion links among a batch's (item game, expansion game) pairs,
+   * as {@link linkKey}s, read once (#1188). The link's direction says which
+   * game is the base: only a link from the item's game to the expansion's
+   * counts.
+   */
+  private async expansionLinks(
+    items: readonly OfferGameItemDto[],
+    collectionById: ReadonlyMap<string, { platformGame: { gameId: string } }>,
+  ): Promise<ReadonlySet<string>> {
+    const pairs = items.flatMap((item) => {
+      const game = collectionById.get(item.collectionId)?.platformGame.gameId;
+
+      return (item.expansionCollectionIds ?? []).flatMap((expansionId) => {
+        const expansion = collectionById.get(expansionId)?.platformGame.gameId;
+
+        return game && expansion ? [{ game, expansion }] : [];
+      });
+    });
+
+    if (pairs.length === 0) {
+      return new Set();
+    }
+
+    const links = await this.db.gameExpansion.findMany({
+      where: {
+        baseGameId: { in: [...new Set(pairs.map(({ game }) => game))] },
+        expansionGameId: { in: [...new Set(pairs.map(({ expansion }) => expansion))] },
+      },
+      select: { baseGameId: true, expansionGameId: true },
+    });
+
+    return new Set(links.map(({ baseGameId, expansionGameId }) => linkKey(baseGameId, expansionGameId)));
+  }
+
+  /**
    * Each attendee with the games they offer, read under the offered-games
    * read ceiling after the attendees themselves (#404, #1187). A write calls it after its
    * transaction commits, so the games are the ones offered now.
@@ -713,5 +963,48 @@ export class EventAttendeeService {
     }
 
     return attendee;
+  }
+}
+
+/** A base game and one of its expansions, as one key. */
+const linkKey = (baseGameId: string, expansionGameId: string) => `${baseGameId} ${expansionGameId}`;
+
+/**
+ * The single add's checks on a collection entry, which the batch offer
+ * shares (#1188): it exists, it's the attendee's own, and it isn't removed
+ * from their collection, a game they no longer own. An attendee added by
+ * name has no collection to check the entry against, so only its existence
+ * is checked (#1210).
+ */
+function judgeCollectionEntry(
+  attendee: Pick<EventAttendee, 'userId'>,
+  collection: Pick<GameCollection, 'userId' | 'deletedAt'> | null | undefined,
+): OfferRefusal | null {
+  if (!collection) {
+    return OfferRefusal.NotFound;
+  }
+
+  if (!attendee.userId) {
+    return null;
+  }
+
+  if (collection.userId !== attendee.userId) {
+    return OfferRefusal.NotInAttendeesCollection;
+  }
+
+  return collection.deletedAt ? OfferRefusal.RemovedFromCollection : null;
+}
+
+/** The single add's answer to a refusal: the status it always gave. */
+function offerRefusalException(reason: OfferRefusal, collectionId: string): HttpException {
+  const message = offerRefusalMessage(reason, collectionId);
+
+  switch (reason) {
+    case OfferRefusal.NotFound:
+      return new NotFoundException(message);
+    case OfferRefusal.NotInAttendeesCollection:
+      return new ForbiddenException(message);
+    default:
+      return new BadRequestException(message);
   }
 }
