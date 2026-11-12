@@ -32,7 +32,7 @@ ARG CLIENT_WEB_PLATFORM=linux/amd64
 
 # Node 24, the major CI runs (.github/actions/setup-workspace). Renovate moves
 # the digest (#599); a new major changes CI and this line together.
-FROM node:26-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS node
+FROM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS node
 
 # Every workspace's package.json at its own path, with the lockfile. Both
 # installs need all of them, and copying nothing else into their stages keeps
