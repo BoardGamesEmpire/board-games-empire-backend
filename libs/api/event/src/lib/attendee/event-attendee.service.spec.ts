@@ -1362,6 +1362,56 @@ describe('EventAttendeeService', () => {
       expect(emitter.emit.mock.calls.filter(([name]) => name === GameAddedToListEvent.eventName)).toHaveLength(1);
     });
 
+    // A game's entry can vanish between the judgement and its write: deleting
+    // the game cascades to its collection entries, and an expansion's entry,
+    // another game's, survives. The game is then refused, so the expansions
+    // asked for with it are too, as at judging; one already offered stays so.
+    it('refuses the expansions of a game whose entry vanishes before its write as baseRefused (#1188)', async () => {
+      arrange({
+        collections: [
+          owned('col-base', 'game-base'),
+          owned('col-exp', 'game-exp'),
+          owned('col-on', 'game-on'),
+          owned('col-other', 'game-other'),
+        ],
+        entries: [listed('col-on', 'gl-on')],
+        links: [
+          { baseGameId: 'game-base', expansionGameId: 'game-exp' },
+          { baseGameId: 'game-base', expansionGameId: 'game-on' },
+        ],
+      });
+      db.eventAttendeeGameList.create.mockImplementation((async (args: {
+        data: { collection: { connect: { id: string } } };
+      }) => {
+        if (args.data.collection.connect.id === 'col-base') {
+          throw new Prisma.PrismaClientKnownRequestError('No record was found for a connect.', {
+            code: 'P2025',
+            clientVersion: 'test',
+          });
+        }
+
+        return makeOfferedGameEntry(`gl-${args.data.collection.connect.id}`);
+      }) as never);
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [
+          { collectionId: 'col-base', expansionCollectionIds: ['col-exp', 'col-on'] },
+          { collectionId: 'col-other' },
+        ],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-base', OfferRefusal.NotFound],
+        ['col-exp', OfferRefusal.BaseRefused],
+        ['col-on', 'alreadyOffered'],
+        ['col-other', 'added'],
+      ]);
+      expect(results[1]).toEqual(expect.objectContaining({ message: t('errors.attendee.base_refused') }));
+      expect(db.eventAttendeeGameList.create).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ collection: { connect: { id: 'col-exp' } } }) }),
+      );
+    });
+
     it('refuses each bad id with its reason and a translated message, and still adds the rest', async () => {
       arrange({
         collections: [

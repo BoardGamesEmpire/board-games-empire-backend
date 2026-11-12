@@ -3,7 +3,15 @@ import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated } from '@bge/shared';
 import { Body, Controller, Delete, Get, HttpCode, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiSecurity,
+  ApiTags,
+  type SchemaObject,
+} from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
@@ -17,28 +25,38 @@ import { OFFER_REFUSALS } from './offer-outcome';
 /**
  * The batch offer's answer (#1188). `reason` and `outcome` are enums here, not
  * only prose, so a client generated from the document can branch on them.
- * The entry is the offered-game shape, which has no model of its own yet.
+ * Each outcome is its own variant, as `OfferResult` is, so what it always
+ * carries is required. The entry is the offered-game shape, which has no
+ * model of its own yet.
  */
-const OFFER_RESULTS_SCHEMA = {
+const OFFER_RESULTS_SCHEMA: SchemaObject = {
   type: 'object',
   required: ['results'],
   properties: {
     results: {
       type: 'array',
       items: {
-        type: 'object',
-        required: ['collectionId', 'outcome'],
-        properties: {
-          collectionId: { type: 'string' },
-          outcome: { type: 'string', enum: ['added', 'alreadyOffered', 'refused'] },
-          entry: {
+        oneOf: [
+          {
             type: 'object',
-            additionalProperties: true,
-            description: 'The offered game, for `added` and `alreadyOffered`',
+            required: ['collectionId', 'outcome', 'entry'],
+            properties: {
+              collectionId: { type: 'string' },
+              outcome: { type: 'string', enum: ['added', 'alreadyOffered'] },
+              entry: { type: 'object', additionalProperties: true, description: 'The offered game' },
+            },
           },
-          reason: { type: 'string', enum: [...OFFER_REFUSALS], description: 'Why it was refused, for `refused`' },
-          message: { type: 'string', description: "The refusal, in the caller's language, for `refused`" },
-        },
+          {
+            type: 'object',
+            required: ['collectionId', 'outcome', 'reason', 'message'],
+            properties: {
+              collectionId: { type: 'string' },
+              outcome: { type: 'string', enum: ['refused'] },
+              reason: { type: 'string', enum: [...OFFER_REFUSALS], description: 'Why it was refused' },
+              message: { type: 'string', description: "The refusal, in the caller's language" },
+            },
+          },
+        ],
       },
     },
   },

@@ -234,14 +234,17 @@ describe('EventAttendeeController', () => {
     });
 
     // A client generated from the OpenAPI document branches on `reason`, so
-    // the document carries it as an enum, not only as prose (#1188).
-    it('documents each result, its outcome and its refusal reason as enums', () => {
+    // the document carries it as an enum, not only as prose. Each outcome is
+    // its own variant, so what an outcome always carries is required (#1188).
+    it('documents each outcome as its own variant, with its outcome and refusal reason as enums', () => {
       const responses = Reflect.getMetadata(DECORATORS.API_RESPONSE, EventAttendeeController.prototype.offerGames);
-      const result = responses['200'].schema.properties.results.items;
+      const [offered, refused] = responses['200'].schema.properties.results.items.oneOf;
 
-      expect(result.required).toEqual(['collectionId', 'outcome']);
-      expect(result.properties.outcome.enum).toEqual(['added', 'alreadyOffered', 'refused']);
-      expect(result.properties.reason.enum).toEqual(OFFER_REFUSALS);
+      expect(offered.required).toEqual(['collectionId', 'outcome', 'entry']);
+      expect(offered.properties.outcome.enum).toEqual(['added', 'alreadyOffered']);
+      expect(refused.required).toEqual(['collectionId', 'outcome', 'reason', 'message']);
+      expect(refused.properties.outcome.enum).toEqual(['refused']);
+      expect(refused.properties.reason.enum).toEqual(OFFER_REFUSALS);
       expect(OFFER_REFUSALS).toEqual([
         'notFound',
         'notInAttendeesCollection',

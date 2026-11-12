@@ -586,7 +586,7 @@ export class EventAttendeeService {
     // `alreadyOffered` and writes nothing.
     const offered = (collectionId: string) => listedByCollection.get(collectionId)?.removedAt === null;
 
-    const judged: { collectionId: string; refusal: OfferRefusal | null }[] = [];
+    const judged: { collectionId: string; baseId?: string; refusal: OfferRefusal | null }[] = [];
     for (const item of dto.items) {
       const game = collectionById.get(item.collectionId);
       const gameRefusal = offered(item.collectionId) ? null : judgeCollectionEntry(attendee, game);
@@ -602,30 +602,44 @@ export class EventAttendeeService {
                 ? null
                 : OfferRefusal.NotAnExpansionOfBase))
             : OfferRefusal.BaseRefused;
-        judged.push({ collectionId: expansionId, refusal });
+        judged.push({ collectionId: expansionId, baseId: item.collectionId, refusal });
       }
     }
 
-    // One at a time, in request order, each its own statement.
+    // One at a time, in request order, each its own statement. A game whose
+    // write is refused (its entry deleted since the judgement, as deleting
+    // the game does) refuses the expansions still to write with it, as a
+    // game refused at judging does; one already offered stays so.
+    const refusedAtWrite = new Set<string>();
     const settled: (
       | { collectionId: string; refusal: OfferRefusal }
       | { collectionId: string; outcome: 'added' | 'alreadyOffered'; entry: OfferedGameEntry }
     )[] = [];
-    for (const { collectionId, refusal } of judged) {
-      settled.push(
-        refusal === null
-          ? {
-              collectionId,
-              ...(await this.offerOne(
-                eventId,
-                attendeeId,
-                collectionId,
-                listedByCollection.get(collectionId),
-                initiatedAt,
-              )),
-            }
-          : { collectionId, refusal },
+    for (const { collectionId, baseId, refusal } of judged) {
+      const settledRefusal =
+        refusal ??
+        (baseId !== undefined && refusedAtWrite.has(baseId) && !offered(collectionId)
+          ? OfferRefusal.BaseRefused
+          : null);
+
+      if (settledRefusal !== null) {
+        settled.push({ collectionId, refusal: settledRefusal });
+        continue;
+      }
+
+      const result = await this.offerOne(
+        eventId,
+        attendeeId,
+        collectionId,
+        listedByCollection.get(collectionId),
+        initiatedAt,
       );
+
+      if ('refusal' in result) {
+        refusedAtWrite.add(collectionId);
+      }
+
+      settled.push({ collectionId, ...result });
     }
 
     // `enrich` keeps the order it's given, so the entries come back in turn.
