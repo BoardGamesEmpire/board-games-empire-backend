@@ -13,10 +13,10 @@ const SUBSCRIPTIONS_PATH = '/api/webhooks/subscriptions';
 const RECEIVER_URL = 'https://receiver.e2e.invalid/bge';
 
 /**
- * How many live webhook subscriptions a user may have (#1253): a quota
- * resource counting, at `User` scope, the subscriptions a user created that
- * are not deleted. Past a hard quota the create answers 402. No row means no
- * quota.
+ * How many webhook subscriptions a user may have on (#1253): a quota resource
+ * counting, at `User` scope, the subscriptions a user created that are neither
+ * deleted nor off. Past a hard quota a create, or a reactivation of one that
+ * is off, answers 402. No row means no quota.
  *
  * Each test gives its own user a quota of their own. A default quota would
  * limit every other suite's subscribers as well.
@@ -97,6 +97,40 @@ describe('webhook subscription quota (#1253)', () => {
     await request(baseUrl).delete(`${SUBSCRIPTIONS_PATH}/${first}`).set(owner.headers).expect(200);
 
     await subscribe(owner, householdId);
+  });
+
+  it('frees a place when a subscription is disabled, and refuses to turn it back on once the place is taken', async () => {
+    const { owner, householdId } = await ownedHousehold();
+    await setQuota(owner.user.id, 1);
+
+    const first = await subscribe(owner, householdId);
+    await createSubscription(owner, householdId).expect(402);
+    await request(baseUrl).post(`${SUBSCRIPTIONS_PATH}/${first}/disable`).set(owner.headers).expect(201);
+
+    const second = await subscribe(owner, householdId);
+    const refused = await request(baseUrl)
+      .post(`${SUBSCRIPTIONS_PATH}/${first}/reactivate`)
+      .set(owner.headers)
+      .expect(402);
+
+    expect(refused.body).toMatchObject({ resource: RESOURCE, limit: '1', currentUsage: '1', attemptedAmount: '1' });
+    expect(await liveOf(owner)).toEqual(
+      expect.arrayContaining([
+        { id: first, status: WebhookSubscriptionStatus.Disabled },
+        { id: second, status: WebhookSubscriptionStatus.Active },
+      ]),
+    );
+  });
+
+  it('turns a disabled subscription back on while its place is free', async () => {
+    const { owner, householdId } = await ownedHousehold();
+    await setQuota(owner.user.id, 1);
+
+    const first = await subscribe(owner, householdId);
+    await request(baseUrl).post(`${SUBSCRIPTIONS_PATH}/${first}/disable`).set(owner.headers).expect(201);
+    await request(baseUrl).post(`${SUBSCRIPTIONS_PATH}/${first}/reactivate`).set(owner.headers).expect(201);
+
+    expect(await liveOf(owner)).toEqual([{ id: first, status: WebhookSubscriptionStatus.Active }]);
   });
 
   it('limits nobody without a quota', async () => {

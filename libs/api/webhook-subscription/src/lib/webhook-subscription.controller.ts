@@ -23,7 +23,7 @@ export class WebhookSubscriptionController {
   @ApiResponse({ status: Http.Created, description: 'Subscription created' })
   @ApiResponse({
     status: Http.PaymentRequired,
-    description: 'You have as many webhook subscriptions as your quota allows (#1253)',
+    description: 'You have as many webhook subscriptions on as your quota allows (#1253)',
   })
   @ApiResponse({ status: Http.Forbidden, description: 'No read access to the requested events' })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.WebhookSubscription))
@@ -84,6 +84,10 @@ export class WebhookSubscriptionController {
   @ApiOperation({ summary: 'Re-activate a disabled or failed subscription' })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Subscription re-activated' })
+  @ApiResponse({
+    status: Http.PaymentRequired,
+    description: 'You have as many webhook subscriptions on as your quota allows (#1253)',
+  })
   @ApiResponse({ status: Http.Forbidden, description: 'Not permitted to update this subscription' })
   @ApiResponse({
     status: Http.Conflict,
