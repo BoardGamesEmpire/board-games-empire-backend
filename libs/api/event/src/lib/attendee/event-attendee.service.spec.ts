@@ -1412,6 +1412,31 @@ describe('EventAttendeeService', () => {
       );
     });
 
+    // A refused game's expansions answer baseRefused whenever the game is
+    // refused, so an expansion with a reason of its own answers the same
+    // whether its game failed at judging or at its write.
+    it('refuses as baseRefused an expansion with a reason of its own when its game is refused at its write (#1188)', async () => {
+      arrange({
+        collections: [owned('col-base', 'game-base'), owned('col-loose', 'game-loose')],
+        links: [],
+      });
+      db.eventAttendeeGameList.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('No record was found for a connect.', {
+          code: 'P2025',
+          clientVersion: 'test',
+        }),
+      );
+
+      const results = await service.offerGames('event-1', 'att-1', {
+        items: [{ collectionId: 'col-base', expansionCollectionIds: ['col-loose'] }],
+      });
+
+      expect(outcomes(results)).toEqual([
+        ['col-base', OfferRefusal.NotFound],
+        ['col-loose', OfferRefusal.BaseRefused],
+      ]);
+    });
+
     it('refuses each bad id with its reason and a translated message, and still adds the rest', async () => {
       arrange({
         collections: [

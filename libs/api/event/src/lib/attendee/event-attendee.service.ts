@@ -609,7 +609,8 @@ export class EventAttendeeService {
     // One at a time, in request order, each its own statement. A game whose
     // write is refused (its entry deleted since the judgement, as deleting
     // the game does) refuses the expansions still to write with it, as a
-    // game refused at judging does; one already offered stays so.
+    // game refused at judging does, over any reason of their own; one
+    // already offered stays so.
     const refusedAtWrite = new Set<string>();
     const settled: (
       | { collectionId: string; refusal: OfferRefusal }
@@ -617,10 +618,9 @@ export class EventAttendeeService {
     )[] = [];
     for (const { collectionId, baseId, refusal } of judged) {
       const settledRefusal =
-        refusal ??
-        (baseId !== undefined && refusedAtWrite.has(baseId) && !offered(collectionId)
+        baseId !== undefined && refusedAtWrite.has(baseId) && !offered(collectionId)
           ? OfferRefusal.BaseRefused
-          : null);
+          : refusal;
 
       if (settledRefusal !== null) {
         settled.push({ collectionId, refusal: settledRefusal });
