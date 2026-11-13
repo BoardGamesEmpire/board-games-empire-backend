@@ -28,6 +28,7 @@ const CAPABILITIES: ByProtoName<DataGatewayCapability> = {
   [proto.Capability.CAPABILITY_LIST_PLATFORMS]: DataGatewayCapability.ListPlatforms,
   [proto.Capability.CAPABILITY_LIST_CATEGORIES]: DataGatewayCapability.ListCategories,
   [proto.Capability.CAPABILITY_LIST_MECHANICS]: DataGatewayCapability.ListMechanics,
+  [proto.Capability.CAPABILITY_FETCH_GAMES]: DataGatewayCapability.FetchGames,
 };
 
 const PLATFORM_TYPES: ByProtoName<PlatformType> = {

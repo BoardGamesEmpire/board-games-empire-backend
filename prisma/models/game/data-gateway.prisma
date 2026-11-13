@@ -43,6 +43,9 @@ model DataGateway {
   // The upstream it declared at its last interview; null when it declared
   // none or one the server doesn't know (#925).
   upstream                    Upstream?               @map("upstream")
+  // The most external IDs one FetchGames call takes, as declared at its last
+  // interview. Null unless it declares FetchGames (#925).
+  fetchGamesMaxIds            Int?                    @map("fetch_games_max_ids")
 
   // Capabilities an admin switched off. The server doesn't route them, even
   // while the DataGateway declares them, and no interview writes this list.
@@ -85,6 +88,7 @@ enum DataGatewayCapability {
   ListPlatforms
   ListCategories
   ListMechanics
+  FetchGames
 
   @@map("data_gateway_capabilities")
 }

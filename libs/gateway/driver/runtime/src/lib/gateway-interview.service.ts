@@ -7,7 +7,7 @@ import {
   type Prisma,
 } from '@bge/database';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
-import type { GatewayPingResponse } from '@boardgamesempire/proto-gateway';
+import { Capability, type GatewayPingResponse } from '@boardgamesempire/proto-gateway';
 import { status } from '@grpc/grpc-js';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -16,7 +16,7 @@ import type { Observable } from 'rxjs';
 import { GatewayInterviewError } from './errors/gateway-interview.error';
 import { GatewayCapabilitiesChangedEvent } from './events/gateway-registry.events';
 import { firstAnswer } from './utils/first-answer';
-import { toInterviewAnswers } from './utils/interview-answers';
+import { toInterviewAnswers, usableFetchGamesMaxIds } from './utils/interview-answers';
 import { VocabularySectionQueue } from './vocabulary-section.queue';
 
 /** How old a DataGateway's answers may grow before it's interviewed again. */
@@ -357,6 +357,15 @@ export class GatewayInterviewService {
       describeFailure,
     );
     const answers = toInterviewAnswers(description, ping);
+
+    if (
+      description.capabilities?.includes(Capability.CAPABILITY_FETCH_GAMES) &&
+      usableFetchGamesMaxIds(description.fetchGamesMaxIds) === undefined
+    ) {
+      this.logger.warn(
+        `DataGateway ${gatewayId} declares FetchGames without a batch limit of at least 1; FetchGames isn't stored`,
+      );
+    }
 
     const interviewedAt = new Date();
     await this.store(gatewayId, row, initiatedAt, interviewedAt, signal, {

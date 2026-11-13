@@ -56,6 +56,11 @@ export class DataGatewayController implements proto.GatewayServiceController, On
     return this.relay(this.driver.fetchGame(request));
   }
 
+  fetchGames(request: proto.FetchGamesRequest): Observable<proto.FetchGamesResponse> {
+    this.logger.log(`FetchGames request received for ${request.externalIds.length} external IDs`);
+    return this.relay(this.driver.fetchGames(request));
+  }
+
   fetchExpansions(request: proto.FetchExpansionsRequest): Observable<proto.GatewaySearchResult> {
     this.logger.log(`FetchExpansions request received for baseExternalId: '${request.baseExternalId}'`);
     return this.relay(this.driver.fetchExpansions(request));

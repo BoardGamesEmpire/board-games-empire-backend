@@ -30,6 +30,7 @@ export interface InterviewAnswers {
   contentFormat: ContentFormat | null;
   gatewayVersion: string | null;
   upstream: Upstream | null;
+  fetchGamesMaxIds: number | null;
 }
 
 const isStored = <T>(value: T | undefined): value is T => value !== undefined;
@@ -54,6 +55,15 @@ function translateInEnumOrder<T extends string>(
 }
 
 /**
+ * The FetchGames batch limit a DataGateway declared, when it is one a call can
+ * be sized by: an integer of at least 1. Without one the interview doesn't
+ * store FetchGames, and nothing routes to it (#925).
+ */
+export function usableFetchGamesMaxIds(limit: number | undefined): number | undefined {
+  return limit !== undefined && Number.isInteger(limit) && limit >= 1 ? limit : undefined;
+}
+
+/**
  * A DataGateway's answers in the server's terms. Over gRPC an unset field
  * arrives missing, and it's stored unset, as null or an empty list, rather
  * than guessed. A value with no stored equivalent is left out (see
@@ -61,9 +71,19 @@ function translateInEnumOrder<T extends string>(
  */
 export function toInterviewAnswers(description: DescribeResponse, ping: GatewayPingResponse): InterviewAnswers {
   const formats = description.languageCodeFormats;
+  const declared = translateInEnumOrder(description.capabilities, toStoredCapability, DataGatewayCapability);
+
+  // A limit without FetchGames means nothing (#925).
+  const fetchGamesMaxIds = declared.includes(DataGatewayCapability.FetchGames)
+    ? (usableFetchGamesMaxIds(description.fetchGamesMaxIds) ?? null)
+    : null;
+  const capabilities =
+    fetchGamesMaxIds === null
+      ? declared.filter((capability) => capability !== DataGatewayCapability.FetchGames)
+      : declared;
 
   return {
-    capabilities: translateInEnumOrder(description.capabilities, toStoredCapability, DataGatewayCapability),
+    capabilities,
     coveragePlatformTypes: translateInEnumOrder(
       description.coverage?.platformTypes,
       toStoredPlatformType,
@@ -82,5 +102,6 @@ export function toInterviewAnswers(description: DescribeResponse, ping: GatewayP
     gatewayVersion: ping.gatewayVersion?.trim() || null,
     // One this server doesn't know, from a newer DataGateway, is none (#925).
     upstream: toStoredUpstream(description.upstream) ?? null,
+    fetchGamesMaxIds,
   };
 }

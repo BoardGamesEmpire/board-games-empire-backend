@@ -31,9 +31,18 @@ import type { GatewayConfigEvent } from './interfaces';
 import { FakeDataGatewayTable } from './testing/fake-data-gateway-table';
 import { VocabularySectionQueue } from './vocabulary-section.queue';
 
-const { Search, Fetch, FetchExpansions, ListLanguages, ListPlatforms, ListCategories, ListMechanics } =
+const { Search, Fetch, FetchExpansions, ListLanguages, ListPlatforms, ListCategories, ListMechanics, FetchGames } =
   DataGatewayCapability;
-const EVERY_CAPABILITY = [Search, Fetch, FetchExpansions, ListLanguages, ListPlatforms, ListCategories, ListMechanics];
+const EVERY_CAPABILITY = [
+  Search,
+  Fetch,
+  FetchExpansions,
+  ListLanguages,
+  ListPlatforms,
+  ListCategories,
+  ListMechanics,
+  FetchGames,
+];
 const { Tabletop } = PlatformType;
 
 /** What a board-game DataGateway covers. */

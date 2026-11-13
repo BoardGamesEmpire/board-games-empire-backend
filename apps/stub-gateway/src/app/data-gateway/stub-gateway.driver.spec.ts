@@ -54,6 +54,7 @@ describe('StubGatewayDriver', () => {
           proto.Capability.CAPABILITY_LIST_PLATFORMS,
           proto.Capability.CAPABILITY_LIST_CATEGORIES,
           proto.Capability.CAPABILITY_LIST_MECHANICS,
+          proto.Capability.CAPABILITY_FETCH_GAMES,
         ],
         coverage: {
           platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
@@ -73,6 +74,7 @@ describe('StubGatewayDriver', () => {
         contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
         // It draws from no real upstream (#925).
         upstream: proto.Upstream.UPSTREAM_UNSPECIFIED,
+        fetchGamesMaxIds: 50,
       } satisfies proto.DescribeResponse);
     });
 
@@ -266,6 +268,46 @@ describe('StubGatewayDriver', () => {
         correlationId: 'fetch-2',
         status: proto.ResultStatus.RESULT_STATUS_ERROR,
         message: "No game found for externalId 'stub-0'",
+      });
+    });
+  });
+
+  describe('fetchGames', () => {
+    it('answers each external id once, a known one with its game and an unknown one with an ERROR (#925)', async () => {
+      await expect(
+        collect(
+          driver.fetchGames({
+            correlationId: 'fetch-games-1',
+            externalIds: [STUB_BASE_GAME.externalId, 'stub-0', STUB_EXPANSION.externalId, STUB_BASE_GAME.externalId],
+          }),
+        ),
+      ).resolves.toEqual([
+        {
+          correlationId: 'fetch-games-1',
+          externalId: STUB_BASE_GAME.externalId,
+          status: proto.ResultStatus.RESULT_STATUS_RESULT,
+          game: STUB_BASE_GAME,
+        },
+        {
+          correlationId: 'fetch-games-1',
+          externalId: 'stub-0',
+          status: proto.ResultStatus.RESULT_STATUS_ERROR,
+          message: "No game found for externalId 'stub-0'",
+        },
+        {
+          correlationId: 'fetch-games-1',
+          externalId: STUB_EXPANSION.externalId,
+          status: proto.ResultStatus.RESULT_STATUS_RESULT,
+          game: STUB_EXPANSION,
+        },
+      ]);
+    });
+
+    it('refuses more than 50 external ids with INVALID_ARGUMENT (#925)', async () => {
+      const externalIds = Array.from({ length: 51 }, (_, index) => `stub-${index}`);
+
+      await expect(collect(driver.fetchGames({ correlationId: 'fetch-games-2', externalIds }))).rejects.toMatchObject({
+        code: 3,
       });
     });
   });

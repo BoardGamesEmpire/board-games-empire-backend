@@ -216,6 +216,15 @@ export class IgdbDriver implements DataGatewayDriver {
       );
   }
 
+  /**
+   * Not served yet: FetchGames needs a batch limit sized to the upstream's
+   * budget, which #928 sets. Describe doesn't declare it, so the server never
+   * calls it (#925).
+   */
+  fetchGames(_request: proto.FetchGamesRequest): Observable<proto.FetchGamesResponse> {
+    return unsupportedOperation('FetchGames');
+  }
+
   fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {
     // Deferred, so a malformed external ID, which fetchGameRequest refuses when
     // it's built, lands in catchError as an ERROR frame (#1067).

@@ -290,6 +290,73 @@ export function runDataGatewayDriverContract(description: string, setup: Setup, 
           );
 
           expect(response.game).toBeUndefined();
+          // A throttled answer isn't a not-found: it says nothing about the game (#925).
+          expect(response.status).not.toBe(proto.ResultStatus.RESULT_STATUS_RATE_LIMITED);
+        },
+      );
+    });
+
+    describe('when it declares fetch games', () => {
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_FETCH_GAMES,
+        'describe declares a batch limit of at least one',
+        async () => {
+          const response = await firstValueFrom(ctx.driver.describe({ correlationId: 'contract-fetch-games-limit' }));
+
+          expect(response.fetchGamesMaxIds).toBeGreaterThanOrEqual(1);
+        },
+      );
+
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_FETCH_GAMES,
+        'fetchGames answers each distinct id once, a known one with its game and an unknown one as not found',
+        async () => {
+          const answers = await lastValueFrom(
+            ctx.driver
+              .fetchGames({
+                correlationId: 'contract-fetch-games',
+                externalIds: [ctx.knownExternalId, ctx.unknownExternalId, ctx.knownExternalId],
+              })
+              .pipe(toArray()),
+          );
+
+          expect(answers).toHaveLength(2);
+          const known = answers.find((answer) => answer.externalId === ctx.knownExternalId);
+          const unknown = answers.find((answer) => answer.externalId === ctx.unknownExternalId);
+          expect(known?.game?.externalId).toBe(ctx.knownExternalId);
+          expect(unknown).toBeDefined();
+          expect(unknown?.game).toBeUndefined();
+          expect(unknown?.status).not.toBe(proto.ResultStatus.RESULT_STATUS_RATE_LIMITED);
+        },
+      );
+
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_FETCH_GAMES,
+        'fetchGames with no ids completes with none',
+        async () => {
+          const answers = await lastValueFrom(
+            ctx.driver.fetchGames({ correlationId: 'contract-fetch-games-none', externalIds: [] }).pipe(toArray()),
+          );
+
+          expect(answers).toEqual([]);
+        },
+      );
+
+      // Truncating would leave ids unanswered with nothing to say so (#925).
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_FETCH_GAMES,
+        'fetchGames refuses more distinct ids than its batch limit with INVALID_ARGUMENT',
+        async () => {
+          const { fetchGamesMaxIds = 0 } = await firstValueFrom(
+            ctx.driver.describe({ correlationId: 'contract-fetch-games-over' }),
+          );
+          const externalIds = Array.from({ length: fetchGamesMaxIds + 1 }, (_, index) => `contract-${index}`);
+
+          const error = await lastValueFrom(
+            ctx.driver.fetchGames({ correlationId: 'contract-fetch-games-over', externalIds }).pipe(toArray()),
+          ).catch((err: unknown) => err);
+
+          expect(error).toMatchObject({ code: 3 });
         },
       );
     });

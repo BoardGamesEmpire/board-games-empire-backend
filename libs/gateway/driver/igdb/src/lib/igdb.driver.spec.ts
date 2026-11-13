@@ -252,6 +252,17 @@ describe('IgdbDriver', () => {
     });
   });
 
+  // Not served until #928 sizes its batch limit; describe doesn't declare it,
+  // so the server never asks (#925).
+  describe('fetchGames', () => {
+    it('answers UNIMPLEMENTED without asking IGDB', async () => {
+      await expect(
+        firstValueFrom(driver.fetchGames({ correlationId: 'corr-fetch-games', externalIds: ['14593'] })),
+      ).rejects.toMatchObject({ code: 12, message: 'FetchGames is not served by this DataGateway' });
+      expect(igdbService.call).not.toHaveBeenCalled();
+    });
+  });
+
   describe('check', () => {
     it('returns SERVING status', async () => {
       const request: proto.HealthCheckRequest = { service: 'GatewayService' };

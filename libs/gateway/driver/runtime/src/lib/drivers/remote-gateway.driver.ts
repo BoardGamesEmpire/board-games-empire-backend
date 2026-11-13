@@ -5,6 +5,8 @@ import type {
   FetchExpansionsRequest,
   FetchGameRequest,
   FetchGameResponse,
+  FetchGamesRequest,
+  FetchGamesResponse,
   GatewayPingRequest,
   GatewayPingResponse,
   GatewaySearchRequest,
@@ -67,6 +69,10 @@ export class RemoteGatewayDriver implements DataGatewayDriver {
 
   fetchGame(request: FetchGameRequest): Observable<FetchGameResponse> {
     return this.client.fetchGame(request);
+  }
+
+  fetchGames(request: FetchGamesRequest): Observable<FetchGamesResponse> {
+    return this.client.fetchGames(request);
   }
 
   fetchExpansions(request: FetchExpansionsRequest): Observable<GatewaySearchResult> {

@@ -10,6 +10,7 @@ const CALLS = [
   'describe',
   'searchGames',
   'fetchGame',
+  'fetchGames',
   'fetchExpansions',
   'listLanguages',
   'listPlatforms',

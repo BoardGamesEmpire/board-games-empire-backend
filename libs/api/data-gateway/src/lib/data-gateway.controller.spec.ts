@@ -438,6 +438,7 @@ function makeGateway(overrides: Partial<DataGatewayWithSections> = {}): DataGate
     contentFormat: null,
     gatewayVersion: null,
     upstream: null,
+    fetchGamesMaxIds: null,
     disabledCapabilities: [],
     firstInterviewedAt: null,
     lastInterviewedAt: null,

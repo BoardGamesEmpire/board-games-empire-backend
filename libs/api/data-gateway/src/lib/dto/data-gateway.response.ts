@@ -188,6 +188,13 @@ export class DataGatewayResponseDto implements DataGatewayView {
   upstream!: Upstream | null;
 
   @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'The most external IDs one FetchGames call takes; null unless it declares FetchGames (#925)',
+  })
+  fetchGamesMaxIds!: number | null;
+
+  @ApiProperty({
     enum: DataGatewayCapability,
     enumName: 'DataGatewayCapability',
     isArray: true,

@@ -175,6 +175,16 @@ describe('BoardGameGeekDriver', () => {
     });
   });
 
+  // Not served until #928 sizes its batch limit; describe doesn't declare it,
+  // so the server never asks (#925).
+  describe('fetchGames', () => {
+    it('answers UNIMPLEMENTED', async () => {
+      await expect(
+        firstValueFrom(driver.fetchGames({ correlationId: 'corr-fetch-games', externalIds: ['126163'] })),
+      ).rejects.toMatchObject({ code: 12, message: 'FetchGames is not served by this DataGateway' });
+    });
+  });
+
   describe('check', () => {
     it('returns SERVING status', async () => {
       const request: proto.HealthCheckRequest = { service: 'GatewayService' };

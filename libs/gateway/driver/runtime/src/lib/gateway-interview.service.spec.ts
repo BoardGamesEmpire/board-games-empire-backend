@@ -14,6 +14,7 @@ import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contrac
 import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { status } from '@grpc/grpc-js';
+import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test } from '@nestjs/testing';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -225,6 +226,48 @@ describe('GatewayInterviewService', () => {
       );
 
       expect(table.row(GW)?.upstream).toBeNull();
+    });
+
+    it('stores FetchGames with the batch limit it declares (#925)', async () => {
+      table.seed({ id: GW });
+
+      await service.interview(
+        GW,
+        dataGateway({
+          description: {
+            ...STUB_DESCRIPTION,
+            capabilities: [proto.Capability.CAPABILITY_FETCH, proto.Capability.CAPABILITY_FETCH_GAMES],
+            fetchGamesMaxIds: 250,
+          },
+        }),
+      );
+
+      expect(table.row(GW)).toMatchObject({
+        capabilities: [DataGatewayCapability.Fetch, DataGatewayCapability.FetchGames],
+        fetchGamesMaxIds: 250,
+      });
+    });
+
+    // Nothing could size a FetchGames call to it, so it isn't routed one (#925).
+    it('drops a FetchGames declared without a batch limit, and says so', async () => {
+      table.seed({ id: GW, fetchGamesMaxIds: 50 });
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      await service.interview(
+        GW,
+        dataGateway({
+          description: {
+            ...STUB_DESCRIPTION,
+            capabilities: [proto.Capability.CAPABILITY_FETCH, proto.Capability.CAPABILITY_FETCH_GAMES],
+          },
+        }),
+      );
+
+      expect(table.row(GW)).toMatchObject({ capabilities: [DataGatewayCapability.Fetch], fetchGamesMaxIds: null });
+      expect(warn).toHaveBeenCalledWith(
+        `DataGateway ${GW} declares FetchGames without a batch limit of at least 1; FetchGames isn't stored`,
+      );
+      warn.mockRestore();
     });
 
     it('keeps the DataGateway’s order for the request language formats it prefers, and the server’s order for every other list', async () => {
