@@ -72,7 +72,7 @@ export class UnknownErrorFilter extends I18nExceptionFilter {
     if (isHttpError(exception)) {
       const status = exception.statusCode;
 
-      if (status === Http.PayloadTooLarge) {
+      if (status === Http.PayloadTooLarge && exception.expose) {
         return new CodedHttpException(status, 'REQUEST_TOO_LARGE', t('errors.request.too_large'), {
           cause: exception,
         });

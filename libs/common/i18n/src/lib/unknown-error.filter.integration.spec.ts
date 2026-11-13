@@ -206,8 +206,9 @@ describe('UnknownErrorFilter (integration, #527)', () => {
       expect(warned).toHaveBeenCalledWith(expect.stringContaining('unsupported charset'));
     });
 
-    it('answers a 4xx the thrower marked unexposed as a 500, and logs it', async () => {
-      const res = await fetch(await url('/http-error/415/false'));
+    // A 413 is no exception: only an exposed one is the coded REQUEST_TOO_LARGE (#527).
+    it.each(['415', '413'])('answers a %s the thrower marked unexposed as a 500, and logs it', async (status) => {
+      const res = await fetch(await url(`/http-error/${status}/false`));
 
       expect(res.status).toBe(500);
       await expect(res.json()).resolves.toEqual({
