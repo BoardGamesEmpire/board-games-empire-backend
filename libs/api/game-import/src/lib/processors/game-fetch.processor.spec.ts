@@ -2,6 +2,7 @@ import { DatabaseService, DataGatewayCapability, InitiatorType, JobStatus, Resou
 import { GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
 import { wrapJobData, type JobActorMeta } from '@bge/queue-actor-context';
 import { WebhookEventType } from '@bge/webhooks';
+import { DataGatewayThrottledError } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -93,9 +94,55 @@ describe('GameFetchProcessor', () => {
       expect(db.job.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'job-1', status: JobStatus.Pending } }),
       );
-      expect(fetchGame).toHaveBeenCalledWith({ correlationId: 'corr-1', externalId: 'ext-1', locale: 'en' });
+      expect(fetchGame).toHaveBeenCalledWith(
+        expect.objectContaining({ correlationId: 'corr-1', externalId: 'ext-1', locale: 'en' }),
+      );
       expect(gatewayRegistry.reportSuccess).toHaveBeenCalledWith('bgg');
       expect(result).toBe(game);
+    });
+
+    // Every import is background, even one a user started: the queue's
+    // priority, not the traffic class, puts user-started imports first (#925).
+    it('sends every fetch as background, even one a user started', async () => {
+      fetchGame.mockReturnValue(of({ game: { title: 'Catan' } as proto.GameData }));
+
+      await processor.process(makeJob());
+
+      expect(fetchGame).toHaveBeenCalledWith(
+        expect.objectContaining({ trafficClass: proto.TrafficClass.TRAFFIC_CLASS_BACKGROUND }),
+      );
+    });
+
+    // A throttled answer carries no game, so it once read as "not found" and
+    // reported success. A throttled DataGateway is healthy: the job fails as
+    // throttled, for BullMQ to retry, and nothing is reported (#925).
+    it('a throttled answer fails the job as throttled and reports nothing', async () => {
+      fetchGame.mockReturnValue(
+        of({ correlationId: 'corr-1', status: proto.ResultStatus.RESULT_STATUS_RATE_LIMITED, retryAfterMs: 10_000 }),
+      );
+
+      const failure = await processor.process(makeJob()).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(DataGatewayThrottledError);
+      expect((failure as DataGatewayThrottledError).retryAfterMs).toBe(10_000);
+      expect(gatewayRegistry.reportSuccess).not.toHaveBeenCalled();
+      expect(gatewayRegistry.reportFailure).not.toHaveBeenCalled();
+    });
+
+    // With a game it was found, whatever the status says (#925).
+    it('keeps a game sent with RATE_LIMITED, and reports success', async () => {
+      const game = { title: 'Catan', externalId: 'ext-1' } as proto.GameData;
+      fetchGame.mockReturnValue(
+        of({
+          correlationId: 'corr-1',
+          status: proto.ResultStatus.RESULT_STATUS_RATE_LIMITED,
+          retryAfterMs: 10_000,
+          game,
+        }),
+      );
+
+      await expect(processor.process(makeJob())).resolves.toBe(game);
+      expect(gatewayRegistry.reportSuccess).toHaveBeenCalledWith('bgg');
     });
 
     it('emits an ImportJobStartedEvent exactly on the Pending → Running transition', async () => {

@@ -3,6 +3,7 @@ import { GatewayRegistryService } from '@bge/gateway-registry';
 import { ActorAwareWorkerHost } from '@bge/queue-actor-context';
 import { guardWorkerEvent } from '@bge/utils';
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
+import { DataGatewayThrottledError, throttledError } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { OnWorkerEvent, Processor } from '@nestjs/bullmq';
 import { Logger, NotFoundException } from '@nestjs/common';
@@ -100,7 +101,24 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
     const driver = await this.gatewayRegistry.resolve(gatewayId, DataGatewayCapability.Fetch);
 
     try {
-      const response = await firstValueFrom(driver.fetchGame({ correlationId, externalId, locale }));
+      const response = await firstValueFrom(
+        driver.fetchGame({
+          correlationId,
+          externalId,
+          locale,
+          // Every import is background, even one a user started: the queue's
+          // priority, not the traffic class, puts user-started imports first
+          // (#925, #928).
+          trafficClass: proto.TrafficClass.TRAFFIC_CLASS_BACKGROUND,
+        }),
+      );
+
+      // Checked before the not-found case: a throttled answer carries no game
+      // either, and must never read as "not found" (#925).
+      const throttled = throttledError(response);
+      if (throttled) {
+        throw throttled;
+      }
 
       if (!response.game) {
         throw new NotFoundException(
@@ -113,6 +131,15 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
       this.logger.log(`${job.name} jobId=${jobId} externalId=${externalId} — fetch complete`);
       return response.game;
     } catch (err) {
+      // A throttled DataGateway is healthy: it paced its upstream. Nothing is
+      // reported, so it never counts toward auto-disable, and the job fails
+      // for BullMQ's retry to try again later, until #928 delays the job by
+      // the wait the DataGateway asked for instead (#925).
+      if (err instanceof DataGatewayThrottledError) {
+        this.logger.warn(`${job.name} jobId=${jobId} externalId=${externalId} — ${err.message}`);
+        throw err;
+      }
+
       // A clean "no game found" (the NotFoundException thrown above) means the
       // gateway answered correctly — the external id simply doesn't exist there.
       // That is a HEALTHY interaction, not a gateway failure: counting it toward
