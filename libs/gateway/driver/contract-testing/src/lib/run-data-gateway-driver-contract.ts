@@ -311,14 +311,24 @@ export function runDataGatewayDriverContract(description: string, setup: Setup, 
         proto.Capability.CAPABILITY_FETCH_GAMES,
         'fetchGames answers each distinct id once, a known one with its game and an unknown one as not found',
         async () => {
-          const answers = await lastValueFrom(
-            ctx.driver
-              .fetchGames({
-                correlationId: 'contract-fetch-games',
-                externalIds: [ctx.knownExternalId, ctx.unknownExternalId, ctx.knownExternalId],
-              })
-              .pipe(toArray()),
+          const { fetchGamesMaxIds = 0 } = await firstValueFrom(
+            ctx.driver.describe({ correlationId: 'contract-fetch-games' }),
           );
+          const fetchGames = (externalIds: string[]) =>
+            lastValueFrom(
+              ctx.driver.fetchGames({ correlationId: 'contract-fetch-games', externalIds }).pipe(toArray()),
+            );
+
+          // A batch limit of one is valid, and a call naming two distinct IDs
+          // would be refused, so such a driver is asked for each on its own.
+          // The known ID still repeats, so each call tests deduplication (#925).
+          const answers =
+            fetchGamesMaxIds >= 2
+              ? await fetchGames([ctx.knownExternalId, ctx.unknownExternalId, ctx.knownExternalId])
+              : [
+                  ...(await fetchGames([ctx.knownExternalId, ctx.knownExternalId])),
+                  ...(await fetchGames([ctx.unknownExternalId])),
+                ];
 
           expect(answers).toHaveLength(2);
           const known = answers.find((answer) => answer.externalId === ctx.knownExternalId);

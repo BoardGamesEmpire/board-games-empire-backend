@@ -109,6 +109,21 @@ runDataGatewayDriverContract('InMemoryGatewayDriver declaring only fetch', () =>
   searchQuery: 'catan',
 }));
 
+// A batch limit of one is a valid declaration, so the suite must never send
+// such a driver two distinct IDs in one FetchGames call (#925).
+runDataGatewayDriverContract('InMemoryGatewayDriver fetching one game per FetchGames call', () => ({
+  driver: new InMemoryGatewayDriver({
+    games: [knownGame],
+    capabilities: [proto.Capability.CAPABILITY_FETCH, proto.Capability.CAPABILITY_FETCH_GAMES],
+    fetchGamesMaxIds: 1,
+  }),
+  capabilities: [proto.Capability.CAPABILITY_FETCH, proto.Capability.CAPABILITY_FETCH_GAMES],
+  filterableAxes: [],
+  knownExternalId: 'bgg-13',
+  unknownExternalId: 'no-such-id',
+  searchQuery: 'catan',
+}));
+
 describe('InMemoryGatewayDriver search filter', () => {
   const searchResults = [catan, seafarers, catanUniverse, unclassified];
 
