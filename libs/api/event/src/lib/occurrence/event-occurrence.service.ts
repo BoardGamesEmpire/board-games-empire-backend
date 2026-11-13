@@ -22,7 +22,7 @@ import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
 import { assertEventNotCancelled } from '../lifecycle/event-lifecycle.helpers';
-import { pickSnapshot } from '../utils/pick-snapshot.util';
+import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
 import { AVAILABILITY_VOTE_SLUG, countsAsVoter, voterGrantSelect } from '../vote/vote-grant';
 import { OccurrenceEvents } from './constants';
 import { AddOccurrenceDto } from './dto/add-occurrence.dto';
@@ -306,17 +306,15 @@ export class EventOccurrenceService {
         }),
       );
 
-      const changedKeys = (['label', 'startDate', 'endDate', 'location', 'sortOrder'] as const).filter(
-        (key) => dto[key] !== undefined,
-      );
-      this.eventEmitter.emit(
-        OccurrenceUpdatedEvent.eventName,
-        new OccurrenceUpdatedEvent(
-          pickSnapshot(existing, changedKeys),
-          pickSnapshot(updated, changedKeys),
-          initiatedAt,
-        ),
-      );
+      // Only the columns whose values changed are audited; a patch that
+      // re-sends stored values emits nothing (#728).
+      const changed = changedKeys(existing, updated, ['label', 'startDate', 'endDate', 'location', 'sortOrder']);
+      if (changed.length > 0) {
+        this.eventEmitter.emit(
+          OccurrenceUpdatedEvent.eventName,
+          new OccurrenceUpdatedEvent(pickSnapshot(existing, changed), pickSnapshot(updated, changed), initiatedAt),
+        );
+      }
       emitRemovedGames(this.eventEmitter, eventId, removedGames, initiatedAt);
 
       const removedIds = new Set(removedGames.map((game) => game.id));

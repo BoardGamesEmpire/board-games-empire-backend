@@ -819,6 +819,26 @@ describe('EventService', () => {
       expect(sent?.data.changedFields).toEqual(['title']);
     });
 
+    it('writes no audit event when the patch re-sends stored values (#728)', async () => {
+      row = makeEvent({ id: 'event-1', title: 'Same', location: 'Hall' });
+      tx.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'Same', location: 'Hall' })));
+
+      await service.updateEvent('event-1', { title: 'Same', location: 'Hall' } as never);
+
+      expect(emitter.emit).not.toHaveBeenCalledWith(EventUpdatedEvent.eventName, expect.anything());
+    });
+
+    it('audits only the changed column when one of two sent changed (#728)', async () => {
+      row = makeEvent({ id: 'event-1', title: 'Old', location: 'Hall' });
+      tx.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'New', location: 'Hall' })));
+
+      await service.updateEvent('event-1', { title: 'New', location: 'Hall' } as never);
+
+      const [, emitted] = emitter.emit.mock.calls.find(([name]) => name === EventUpdatedEvent.eventName) ?? [];
+      expect(Object.keys(emitted.before)).toEqual(['id', 'title']);
+      expect(Object.keys(emitted.after)).toEqual(['id', 'title']);
+    });
+
     it('updateEvent sends no webhook when the patch changes no value', async () => {
       // A form that re-sends what it loaded would otherwise post "updated" to
       // every subscriber for a change that never happened.

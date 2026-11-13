@@ -627,6 +627,34 @@ describe('EventOccurrenceService', () => {
       expect(emitted.after).toEqual({ id: 'occ-1', label: 'New' });
     });
 
+    it('writes no audit event when the patch re-sends stored values (#728)', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue(
+        makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', label: 'Same', location: 'Hall' }),
+      );
+      db.eventOccurrence.update.mockResolvedValue(
+        makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', label: 'Same', location: 'Hall' }),
+      );
+
+      await service.updateOccurrence('event-1', 'occ-1', { label: 'Same', location: 'Hall' });
+
+      expect(emitter.emit).not.toHaveBeenCalledWith(OccurrenceUpdatedEvent.eventName, expect.anything());
+    });
+
+    it('audits only the changed column when one of two sent changed (#728)', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue(
+        makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', label: 'Old', location: 'Hall' }),
+      );
+      db.eventOccurrence.update.mockResolvedValue(
+        makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', label: 'New', location: 'Hall' }),
+      );
+
+      await service.updateOccurrence('event-1', 'occ-1', { label: 'New', location: 'Hall' });
+
+      const [, emitted] = emitter.emit.mock.calls.find(([name]) => name === OccurrenceUpdatedEvent.eventName) ?? [];
+      expect(Object.keys(emitted.before)).toEqual(['id', 'label']);
+      expect(Object.keys(emitted.after)).toEqual(['id', 'label']);
+    });
+
     it('answers 404 when the date is gone by the time the lock is held (#1064)', async () => {
       // The first read finds the date; the one under the event's lock finds
       // it removed, and the update would match nothing, which alone reads as

@@ -27,7 +27,6 @@ import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
-import { isDeepStrictEqual } from 'node:util';
 import { assertInvitable } from './attendee/invitable';
 import { browseEventScope } from './browse-event-scope';
 import { ATTENDEE_ORDER } from './constants/attendee-order.constant';
@@ -54,7 +53,7 @@ import {
 } from './utils/event-attendance.util';
 import { EVENT_STATUS_DATE_SELECT, withEventStatus, type EventWithStatus } from './utils/event-status.util';
 import { lockLiveEvent } from './utils/lock-live-event.util';
-import { pickSnapshot } from './utils/pick-snapshot.util';
+import { changedKeys, pickSnapshot } from './utils/pick-snapshot.util';
 import { pageUpcomingEvents } from './utils/upcoming-events.util';
 
 @Injectable()
@@ -685,32 +684,27 @@ export class EventService {
         return { existing, updated, policy };
       });
 
-      const changedKeys = Object.keys(dto) as (keyof Event)[];
-      // The audit row records the columns the patch named, before and after,
-      // even a value re-sent unchanged, as every update in this lib does
-      // (`pickSnapshot`).
-      if (changedKeys.length > 0) {
+      // The audit row records only the columns whose values changed, before
+      // and after, and a patch that re-sends stored values changes none, so it
+      // emits no event and no webhook (#728).
+      const changed = changedKeys(existing, updated, Object.keys(dto) as (keyof Event)[]);
+      if (changed.length > 0) {
         this.eventEmitter.emit(
           EventUpdatedEvent.eventName,
-          new EventUpdatedEvent(pickSnapshot(existing, changedKeys), pickSnapshot(updated, changedKeys), initiatedAt),
+          new EventUpdatedEvent(pickSnapshot(existing, changed), pickSnapshot(updated, changed), initiatedAt),
         );
 
-        // The columns whose values changed, not every key the patch sent, so
-        // a form that re-sends what it loaded tells no subscriber anything.
         // Their names, never their values: a receiver reads the values with
         // its own credentials. No occurrenceId, since nothing here names one
         // update stably (#127), so each emit is its own delivery.
-        const changedFields = changedKeys.filter((key) => !isDeepStrictEqual(existing[key], updated[key]));
-        if (changedFields.length > 0) {
-          this.eventEmitter.emit(
-            WebhookEventType.EventUpdated,
-            webhookEnvelope({
-              subjectId: updated.id,
-              householdId: updated.householdId,
-              data: { ...eventWebhookIds(updated), changedFields },
-            }),
-          );
-        }
+        this.eventEmitter.emit(
+          WebhookEventType.EventUpdated,
+          webhookEnvelope({
+            subjectId: updated.id,
+            householdId: updated.householdId,
+            data: { ...eventWebhookIds(updated), changedFields: changed },
+          }),
+        );
       }
 
       // The update read back every date, with no ceiling.
