@@ -8,7 +8,7 @@ import {
 import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
 import { eventWebhookIds } from '../event.service';
@@ -35,9 +35,9 @@ export class EventPolicyService {
    *
    * The write takes the event's lock first, which date writes take too, so the
    * stored policy and the dates' overrides it is judged against can't change
-   * before it lands, and a deleted event answers 404. The grant is checked
-   * against the event's policy next, before the patch is judged, and is the
-   * ceiling on the write too. The patch is judged as the policy it leaves: the
+   * before it lands, and a deleted event answers 404. The policy is read next
+   * under the grant's ceiling, so the grant is checked before the patch is
+   * judged, and it is the ceiling on the write too. The patch is judged as the policy it leaves: the
    * stored row with the patch over it, and that folded under each date's
    * overrides, since a date that sets only a threshold type relies on the
    * event's value.
@@ -58,20 +58,19 @@ export class EventPolicyService {
       const { event, existing, updated, policy } = await this.db.$transaction(async (tx) => {
         const event = await lockLiveEvent(tx, eventId);
 
-        // The route's guard passes anyone holding the grant on any event. The
-        // grant is checked against this event's policy before anything else
-        // is read, so a caller it doesn't reach gets 403, never a 400 that
-        // tells them what the stored policy holds (#796). The write repeats it.
+        // The route's guard passes anyone holding the grant on any event, so
+        // the policy is read under this event's update ceiling before anything
+        // else is read. A caller it doesn't reach finds no row and gets 403,
+        // never a 400 that tells them what the stored policy holds (#796).
+        // Every event is created with its policy row, which goes only with the
+        // event, so no row means no grant. The write repeats the ceiling.
+        //
+        // The row is whole, whatever the caller may read: the patch is judged
+        // against it, and the audit records what it replaced.
         // eslint-disable-next-line no-restricted-syntax -- the event's one policy row, not a collection read
         const updateCeiling = this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.update);
-        const entitled = (await tx.eventPolicy.count({ where: { eventId, AND: updateCeiling } })) > 0;
-        assert(entitled, new ForbiddenException(t('common.forbidden.update')));
-
-        // The whole row, whatever the caller may read: the patch is judged
-        // against it, and the audit records what it replaced. Every event is
-        // created with its policy row, which goes only with the event.
-        const existing = await tx.eventPolicy.findUnique({ where: { eventId } });
-        assert(existing, new NotFoundException(t('errors.event.not_found', { id: eventId })));
+        const existing = await tx.eventPolicy.findUnique({ where: { eventId, AND: updateCeiling } });
+        assert(existing, new ForbiddenException(t('common.forbidden.update')));
 
         const datePolicies = await tx.eventOccurrencePolicy.findMany({ where: { occurrence: { eventId } } });
 

@@ -112,4 +112,42 @@ describe('assertValidVotingPolicy', () => {
   it('accepts a SimpleMajority threshold with no value, which needs none (#796)', () => {
     expect(() => assertValidVotingPolicy(votingPolicy())).not.toThrow();
   });
+
+  // No vote reaches more than all of the votes or all of the voters, so a
+  // percentage above 100 would turn down every nomination without saying why.
+  it('refuses a Supermajority threshold above 100 percent, and accepts 100 (#796)', () => {
+    const supermajority = (voteThresholdValue: number) =>
+      votingPolicy({ voteThresholdType: VoteThresholdType.Supermajority, voteThresholdValue });
+
+    expect(refusalOf(() => assertValidVotingPolicy(supermajority(101)))).toMatchObject({
+      status: 400,
+      response: { code: 'EVENT_POLICY_INVALID', message: t('errors.event_policy.threshold_percent_too_high') },
+    });
+    expect(() => assertValidVotingPolicy(supermajority(100))).not.toThrow();
+  });
+
+  it('refuses a PercentOfAttendees quorum above 100 percent, and accepts 100 (#796)', () => {
+    const percentQuorum = (voteQuorumValue: number) =>
+      votingPolicy({ voteQuorumType: VoteQuorumType.PercentOfAttendees, voteQuorumValue });
+
+    expect(refusalOf(() => assertValidVotingPolicy(percentQuorum(101)))).toMatchObject({
+      status: 400,
+      response: { code: 'EVENT_POLICY_INVALID', message: t('errors.event_policy.quorum_percent_too_high') },
+    });
+    expect(() => assertValidVotingPolicy(percentQuorum(100))).not.toThrow();
+  });
+
+  // A count isn't a percentage, so it has no ceiling of 100.
+  it('accepts a FixedCount threshold and quorum above 100 (#796)', () => {
+    expect(() =>
+      assertValidVotingPolicy(
+        votingPolicy({
+          voteThresholdType: VoteThresholdType.FixedCount,
+          voteThresholdValue: 150,
+          voteQuorumType: VoteQuorumType.FixedCount,
+          voteQuorumValue: 150,
+        }),
+      ),
+    ).not.toThrow();
+  });
 });

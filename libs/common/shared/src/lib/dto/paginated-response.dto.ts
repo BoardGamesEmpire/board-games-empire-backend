@@ -154,10 +154,10 @@ const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slic
 
 /**
  * A schema name unique within the OpenAPI document. Class names are NOT unique
- * in this repo — `SearchQueryDto` and `UpdateEventOccurrenceDto` each exist
- * twice in different libs — and two schemas sharing a name means one silently
- * overwrites the other in `components.schemas`. The suffix is inert for every
- * model whose name is unclaimed, which is all of them today.
+ * in this repo — `SearchQueryDto` exists twice in different libs — and two
+ * schemas sharing a name means one silently overwrites the other in
+ * `components.schemas`. The suffix is inert for every model whose name is
+ * unclaimed, which is all of them today.
  */
 function claimSchemaName(candidate: string): string {
   if (!claimedSchemaNames.has(candidate)) {

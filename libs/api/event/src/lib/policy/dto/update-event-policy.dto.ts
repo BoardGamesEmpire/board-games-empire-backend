@@ -95,7 +95,7 @@ export class UpdateEventPolicyDto {
     nullable: true,
     description:
       'Required for Supermajority (e.g. 66) and FixedCount (e.g. 3), sent or already stored, by the event and by ' +
-      'every date whose own threshold type relies on it.',
+      'every date whose own threshold type relies on it. A Supermajority percentage is at most 100.',
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
@@ -111,7 +111,7 @@ export class UpdateEventPolicyDto {
     nullable: true,
     description:
       'Required for PercentOfAttendees and FixedCount quorum types, sent or already stored, by the event and by ' +
-      'every date whose own quorum type relies on it.',
+      'every date whose own quorum type relies on it. A PercentOfAttendees percentage is at most 100.',
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })

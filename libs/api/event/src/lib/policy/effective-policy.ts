@@ -58,12 +58,17 @@ const QUORUM_TYPES_WITH_VALUE: readonly VoteQuorumType[] = [
   VoteQuorumType.FixedCount,
 ];
 
+/** The largest percentage a Supermajority threshold or PercentOfAttendees quorum can ask for. */
+const MAX_PERCENT = 100;
+
 /**
  * Refuses a voting policy a resolve could not apply: a Supermajority or
  * FixedCount threshold, or a PercentOfAttendees or FixedCount quorum, with no
- * number to count against. Judge the policy a write leaves, the stored policy
- * merged with the patch and folded under each date's overrides, not the patch
- * alone (#796).
+ * number to count against, or a percentage above 100, which no vote can reach.
+ * Judge the policy a write leaves, the stored policy merged with the patch and
+ * folded under each date's overrides, not the patch alone (#796). A fold can
+ * turn an event's fixed count into a date's percentage, so the cap is checked
+ * on the folded policy, not on the field.
  */
 export function assertValidVotingPolicy(
   policy: Pick<EffectivePolicy, 'voteThresholdType' | 'voteThresholdValue' | 'voteQuorumType' | 'voteQuorumValue'>,
@@ -76,11 +81,35 @@ export function assertValidVotingPolicy(
     );
   }
 
+  if (
+    policy.voteThresholdType === VoteThresholdType.Supermajority &&
+    policy.voteThresholdValue !== null &&
+    policy.voteThresholdValue > MAX_PERCENT
+  ) {
+    throw new CodedHttpException(
+      Http.BadRequest,
+      'EVENT_POLICY_INVALID',
+      t('errors.event_policy.threshold_percent_too_high'),
+    );
+  }
+
   if (QUORUM_TYPES_WITH_VALUE.includes(policy.voteQuorumType) && policy.voteQuorumValue === null) {
     throw new CodedHttpException(
       Http.BadRequest,
       'EVENT_POLICY_INVALID',
       t('errors.event_policy.quorum_value_required'),
+    );
+  }
+
+  if (
+    policy.voteQuorumType === VoteQuorumType.PercentOfAttendees &&
+    policy.voteQuorumValue !== null &&
+    policy.voteQuorumValue > MAX_PERCENT
+  ) {
+    throw new CodedHttpException(
+      Http.BadRequest,
+      'EVENT_POLICY_INVALID',
+      t('errors.event_policy.quorum_percent_too_high'),
     );
   }
 }

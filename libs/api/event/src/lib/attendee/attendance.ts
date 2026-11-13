@@ -1,16 +1,11 @@
-import {
-  EventParticipationStatus,
-  NominationStatus,
-  OccurrenceStatus,
-  Prisma,
-  type EventAttendee,
-} from '@bge/database';
+import { EventParticipationStatus, NominationStatus, Prisma, type EventAttendee } from '@bge/database';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   GameRemovedFromEventEvent,
   NominationPausedEvent,
   NominationResumedEvent,
 } from '../nomination/events/nomination.events';
+import { LIVE_DATE_STATUSES } from '../occurrence/live-dates.util';
 
 /**
  * Whether an attendee is out of the event: removed by a host, or not
@@ -49,7 +44,7 @@ export const ACTIVE_NOMINATION_STATUSES: NominationStatus[] = [...PAUSABLE_STATU
  */
 export function lineupStillAhead(now: Date): Prisma.EventGameWhereInput {
   const dateAhead = {
-    status: { in: [OccurrenceStatus.Proposed, OccurrenceStatus.Confirmed] },
+    status: { in: [...LIVE_DATE_STATUSES] },
     OR: [{ startDate: null }, { startDate: { gt: now } }],
   } satisfies Prisma.EventOccurrenceWhereInput;
 

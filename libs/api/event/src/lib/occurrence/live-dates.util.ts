@@ -2,7 +2,9 @@ import { OccurrenceStatus, type Prisma } from '@bge/database';
 
 /**
  * The statuses of a date still in play: proposed or confirmed. A declined or
- * cancelled date is not live (#796).
+ * cancelled date is not live (#796). `lineupStillAhead` reads the same list,
+ * so the switch to Fixed and a lineup's supplier rules agree on which dates
+ * are in play.
  */
 export const LIVE_DATE_STATUSES = [OccurrenceStatus.Proposed, OccurrenceStatus.Confirmed] as const;
 

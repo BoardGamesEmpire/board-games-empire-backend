@@ -20,7 +20,7 @@ import {
   type MockDatabaseService,
 } from '@bge/testing';
 import { WebhookEventType } from '@bge/webhooks';
-import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { UpdateEventPolicyDto } from './dto/update-event-policy.dto';
 import { EventPolicyService } from './event-policy.service';
@@ -28,6 +28,10 @@ import { EventPolicyUpdatedEvent } from './events/event-policy.events';
 
 /** A ceiling of its own for each type and action, so a test can tell which one a query was given. */
 const ceiling = (resourceType: string, action: string) => [{ ceiling: `${action}:${resourceType}` }];
+
+/** Whether a policy read carries the update ceiling: the read under the lock, as opposed to the read back. */
+const underUpdateCeiling = (args: { where: { AND?: unknown } }) =>
+  JSON.stringify(args.where.AND) === JSON.stringify(ceiling(ResourceType.EventPolicy, Action.update));
 
 const dependentRecordNotFound = () =>
   new Prisma.PrismaClientKnownRequestError('No record was found for an update.', {
@@ -90,12 +94,10 @@ describe('EventPolicyService', () => {
 
     tx.$queryRaw.mockResolvedValue([]);
     tx.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1' }));
-    // The caller's update ceiling reaches the event's policy.
-    tx.eventPolicy.count.mockResolvedValue(1);
 
-    // The read under the lock carries no ceiling; the read back carries the read ceiling.
+    // The read under the lock carries the update ceiling; the read back carries the read ceiling.
     tx.eventPolicy.findUnique.mockImplementation(((args: { where: { AND?: unknown } }) =>
-      Promise.resolve(args.where.AND === undefined ? stored : readable)) as never);
+      Promise.resolve(underUpdateCeiling(args) ? stored : readable)) as never);
     tx.eventOccurrencePolicy.findMany.mockImplementation((() => Promise.resolve(datePolicies)) as never);
     tx.eventPolicy.update.mockImplementation(((args: { data: Partial<EventPolicy> }) =>
       Promise.resolve({ ...(stored as EventPolicy), ...args.data })) as never);
@@ -105,9 +107,10 @@ describe('EventPolicyService', () => {
 
   // The lock is the one a date write and an event write take, so the policy
   // and the dates' overrides it is checked against can't change before the
-  // write lands, and a deleted event answers 404. The grant is checked next,
-  // before anything that could refuse with a 400 is read (#796).
-  it('locks the event, then checks the grant, before reading the policy (#796)', async () => {
+  // write lands, and a deleted event answers 404. The policy is read next,
+  // under the grant's ceiling, before anything that could refuse with a 400
+  // is read (#796).
+  it('locks the event, then reads the policy under the update ceiling, before the date policies (#796)', async () => {
     const order: string[] = [];
     const record =
       <T>(label: string, answer: () => T) =>
@@ -117,9 +120,8 @@ describe('EventPolicyService', () => {
       };
 
     tx.$queryRaw.mockImplementation(record('lock', () => []) as never);
-    tx.eventPolicy.count.mockImplementation(record('authorize', () => 1) as never);
     tx.eventPolicy.findUnique.mockImplementation(((args: { where: { AND?: unknown } }) =>
-      args.where.AND === undefined
+      underUpdateCeiling(args)
         ? record('read policy', () => stored)()
         : record('read back', () => readable)()) as never);
     tx.eventOccurrencePolicy.findMany.mockImplementation(record('read date policies', () => datePolicies) as never);
@@ -130,8 +132,10 @@ describe('EventPolicyService', () => {
     expect(rawQueryText(tx.$queryRaw.mock.calls[0][0])).toMatch(
       /^SELECT id FROM events WHERE id = \? FOR NO KEY UPDATE$/,
     );
-    expect(order).toEqual(['lock', 'authorize', 'read policy', 'read date policies', 'update', 'read back']);
-    expect(tx.eventPolicy.findUnique).toHaveBeenNthCalledWith(1, { where: { eventId: 'event-1' } });
+    expect(order).toEqual(['lock', 'read policy', 'read date policies', 'update', 'read back']);
+    expect(tx.eventPolicy.findUnique).toHaveBeenNthCalledWith(1, {
+      where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.update) },
+    });
     expect(tx.eventOccurrencePolicy.findMany).toHaveBeenCalledWith({ where: { occurrence: { eventId: 'event-1' } } });
   });
 
@@ -175,35 +179,45 @@ describe('EventPolicyService', () => {
 
       expect(tx.eventPolicy.update).not.toHaveBeenCalled();
     });
-  });
 
-  // Every event is created with its policy row, which goes only with the
-  // event, so a missing row answers as a missing event does.
-  it('answers 404 when the event has no policy row, and writes nothing (#796)', async () => {
-    stored = null;
+    // 150 is a fine count for the event's FixedCount, but the date reads it as
+    // its Supermajority percentage, which no vote can reach.
+    it("refuses an event value that a date's percentage threshold would read as above 100 (#796)", async () => {
+      datePolicies = [
+        {
+          occurrenceId: 'occ-1',
+          voteThresholdType: VoteThresholdType.Supermajority,
+          voteThresholdValue: null,
+        } as EventOccurrencePolicy,
+      ];
 
-    await expect(update({ allowSpectators: false })).rejects.toThrow(
-      new NotFoundException(t('errors.event.not_found', { id: 'event-1' })),
-    );
-    expect(tx.eventPolicy.update).not.toHaveBeenCalled();
+      await expect(
+        update({ voteThresholdType: VoteThresholdType.FixedCount, voteThresholdValue: 150 }),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { code: 'EVENT_POLICY_INVALID', message: t('errors.event_policy.threshold_percent_too_high') },
+      });
+
+      expect(tx.eventPolicy.update).not.toHaveBeenCalled();
+    });
   });
 
   // The route's guard passes anyone holding update:event_policy on any event.
-  // The grant is checked against this event's row before the patch is judged,
-  // so a caller it doesn't reach gets 403, never a 400 that tells them what
-  // this event's policy holds (#796).
+  // The policy is read under this event's update ceiling before the patch is
+  // judged, so a caller it doesn't reach finds no row and gets 403, never a
+  // 400 that tells them what this event's policy holds (#796).
   it('answers 403 to a caller outside the update ceiling before judging the patch (#796)', async () => {
-    tx.eventPolicy.count.mockResolvedValue(0);
+    stored = null;
 
     // Invalid against the stored policy, which holds no threshold value.
     await expect(update({ voteThresholdType: VoteThresholdType.Supermajority })).rejects.toThrow(
       new ForbiddenException(t('common.forbidden.update')),
     );
 
-    expect(tx.eventPolicy.count).toHaveBeenCalledWith({
+    expect(tx.eventPolicy.findUnique).toHaveBeenCalledTimes(1);
+    expect(tx.eventPolicy.findUnique).toHaveBeenCalledWith({
       where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.update) },
     });
-    expect(tx.eventPolicy.findUnique).not.toHaveBeenCalled();
     expect(tx.eventOccurrencePolicy.findMany).not.toHaveBeenCalled();
     expect(tx.eventPolicy.update).not.toHaveBeenCalled();
     expect(emitter.emit).not.toHaveBeenCalled();
