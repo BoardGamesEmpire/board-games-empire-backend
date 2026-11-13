@@ -744,14 +744,30 @@ describe('EventService', () => {
       );
     });
 
-    it('skips the update event when only relation-managed fields were patched', async () => {
-      tx.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1' })));
+    // The answer used to carry the policy row whole (`include.policy`), which a
+    // writer who may update the event but not read its policy would then see.
+    it('reads the policy it answers with under the policy read ceiling (#796)', async () => {
+      const policy = makeEventPolicy('event-1');
+      tx.eventPolicy.findUnique.mockResolvedValue(policy);
 
-      // occurrences/policy/inviteUserIds change no Event columns — an
-      // empty-diff "update" audit row would be noise.
-      await service.updateEvent('event-1', { occurrences: [] } as never);
+      const updated = await service.updateEvent('event-1', { title: 'New' } as never);
 
-      expect(emitter.emit).not.toHaveBeenCalled();
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.EventPolicy, Action.read);
+      expect(tx.eventPolicy.findUnique).toHaveBeenCalledWith({ where: { eventId: 'event-1', AND: [COND] } });
+      expect(tx.event.update.mock.calls[0][0].include).not.toHaveProperty('policy');
+      expect(tx.event.update.mock.invocationCallOrder[0]).toBeLessThan(
+        tx.eventPolicy.findUnique.mock.invocationCallOrder[0],
+      );
+      expect(updated.policy).toEqual(policy);
+    });
+
+    it('answers a null policy when the ceiling hides it, and the write still lands (#796)', async () => {
+      tx.eventPolicy.findUnique.mockResolvedValue(null);
+
+      const updated = await service.updateEvent('event-1', { title: 'New' } as never);
+
+      expect(tx.event.update).toHaveBeenCalled();
+      expect(updated.policy).toBeNull();
     });
 
     it('updateEvent emits an EventUpdatedEvent carrying the changed subset', async () => {

@@ -12,9 +12,21 @@ import { CreateEventDto, EventReachProperty, type EventReach } from './create-ev
  * would strand a retried create into a second event, and one that copied
  * another of the creator's keys would trip the unique (#534). Omitted the same
  * way, so a PATCH carrying it answers 400 too.
+ *
+ * `policy`, `occurrences` and `inviteUserIds` each have a route of their own
+ * (#796): the policy under its own grant, dates under the occurrence routes
+ * and their lock, invites under the invite routes. Honouring them here would
+ * be a second, weaker way to do each, so a PATCH carrying one answers 400.
  */
 export class UpdateEventDto extends PartialType(
-  OmitType(CreateEventDto, ['householdId', 'reach', 'clientRequestId'] as const),
+  OmitType(CreateEventDto, [
+    'householdId',
+    'reach',
+    'clientRequestId',
+    'policy',
+    'occurrences',
+    'inviteUserIds',
+  ] as const),
 ) {
   @EventReachProperty()
   reach?: EventReach;

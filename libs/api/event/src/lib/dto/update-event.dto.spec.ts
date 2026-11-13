@@ -48,6 +48,16 @@ describe('UpdateEventDto', () => {
     ]);
   });
 
+  // Each has a route of its own: dates under /events/:id/occurrences, invites
+  // under /events/:id/invites, the policy under /events/:id/policy (#796).
+  it.each([
+    ['policy', { gameAdditionMode: 'Direct' }],
+    ['occurrences', [{ label: 'Sat' }]],
+    ['inviteUserIds', ['u-1']],
+  ])('rejects %s, which has its own route (#796)', async (field, value) => {
+    await expect(propertiesWithErrors({ [field]: value })).resolves.toEqual([field]);
+  });
+
   it('leaves clientRequestId out of the published update schema', () => {
     // What the generated client is built from. A field the server refuses must
     // not appear in the schema it publishes for the request.
@@ -55,5 +65,8 @@ describe('UpdateEventDto', () => {
 
     expect(published).toEqual(expect.arrayContaining([':title', ':reach']));
     expect(published).not.toContain(':clientRequestId');
+    expect(published).not.toContain(':policy');
+    expect(published).not.toContain(':occurrences');
+    expect(published).not.toContain(':inviteUserIds');
   });
 });

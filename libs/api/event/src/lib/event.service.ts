@@ -654,11 +654,8 @@ export class EventService {
     const initiatedAt = new Date();
     assert(Object.keys(dto).length > 0, new BadRequestException(t('common.at_least_one_field')));
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { occurrences: _occurrences, policy: _policy, inviteUserIds: _inviteUserIds, ...fields } = dto;
-
     try {
-      const { existing, updated } = await this.db.$transaction(async (tx) => {
+      const { existing, updated, policy } = await this.db.$transaction(async (tx) => {
         // The before-snapshot is the row read under the lock, so it is the
         // state the write replaces, even when another write to the event went
         // first (#731).
@@ -671,22 +668,27 @@ export class EventService {
             // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
             AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update),
           },
-          data: fields,
-          include: {
-            occurrences: { orderBy: OCCURRENCE_ORDER },
-            policy: true,
+          data: dto,
+          include: { occurrences: { orderBy: OCCURRENCE_ORDER } },
+        });
+
+        // Read under the policy ceiling, as GET /events/:id does (#796). A
+        // writer who may update the event but not read its policy gets a null.
+        const policy = await tx.eventPolicy.findUnique({
+          where: {
+            eventId: id,
+            // eslint-disable-next-line no-restricted-syntax -- the event's one policy row, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.read),
           },
         });
 
-        return { existing, updated };
+        return { existing, updated, policy };
       });
 
-      const changedKeys = Object.keys(fields) as (keyof Event)[];
+      const changedKeys = Object.keys(dto) as (keyof Event)[];
       // The audit row records the columns the patch named, before and after,
       // even a value re-sent unchanged, as every update in this lib does
-      // (`pickSnapshot`). A PATCH touching only relation-managed inputs
-      // (occurrences / policy / inviteUserIds) names no Event column, so it
-      // writes none.
+      // (`pickSnapshot`).
       if (changedKeys.length > 0) {
         this.eventEmitter.emit(
           EventUpdatedEvent.eventName,
@@ -712,7 +714,7 @@ export class EventService {
       }
 
       // The update read back every date, with no ceiling.
-      return withEventStatus(updated, updated.occurrences, initiatedAt);
+      return withEventStatus({ ...updated, policy }, updated.occurrences, initiatedAt);
     } catch (error) {
       this.logger.error(`Error updating event with ID ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
