@@ -61,6 +61,10 @@
     "cancelled": "This event is cancelled. Reopen it first.",
     "not_archivable": "Only a cancelled event, or one whose dates have all passed, can be archived."
   },
+  "event_policy": {
+    "threshold_value_required": "A Supermajority or FixedCount vote threshold needs a value, and this change would leave the event, or one of its dates, without one. Set a threshold value or choose another threshold type.",
+    "quorum_value_required": "A PercentOfAttendees or FixedCount quorum needs a value, and this change would leave the event, or one of its dates, without one. Set a quorum value or choose another quorum type."
+  },
   "occurrence": {
     "not_found": "Occurrence {occurrenceId} not found for event {eventId}",
     "confirmed_remove": "This date is confirmed. Cancel it first, then remove it.",

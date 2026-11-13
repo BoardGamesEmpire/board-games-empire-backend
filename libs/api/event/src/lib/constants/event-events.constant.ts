@@ -6,4 +6,5 @@ export enum EventEvents {
   EventReopened = 'event.event.reopened',
   EventArchived = 'event.event.archived',
   EventUnarchived = 'event.event.unarchived',
+  EventPolicyUpdated = 'event.policy.updated',
 }
