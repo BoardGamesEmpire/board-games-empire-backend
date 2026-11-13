@@ -23,6 +23,9 @@ export interface InMemoryGatewayFixtures {
    */
   filterableAxes?: proto.SearchFilterAxis[];
 
+  /** The upstream describe declares, none unless set (#925). */
+  upstream?: proto.Upstream;
+
   /** fetchGame resolves against these by `externalId`. */
   games?: proto.GameData[];
 
@@ -184,7 +187,10 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
     return this.failed() ?? of<proto.HealthCheckResponse>({ status: proto.HealthCheckResponse_ServingStatus.SERVING });
   }
 
-  /** Declares its fixtures' capabilities, coverage and filterable axes, BCP 47 language codes and plain text. */
+  /**
+   * Declares its fixtures' capabilities, coverage, filterable axes and
+   * upstream, BCP 47 language codes and plain text.
+   */
   describe(request: proto.DescribeRequest): Observable<proto.DescribeResponse> {
     return (
       this.failed<proto.DescribeResponse>() ??
@@ -199,6 +205,7 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
           passthroughSearchLanguage: false,
         },
         contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
+        upstream: this.fixtures.upstream ?? proto.Upstream.UPSTREAM_UNSPECIFIED,
       })
     );
   }

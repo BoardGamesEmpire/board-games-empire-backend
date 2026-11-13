@@ -40,6 +40,9 @@ model DataGateway {
   // The version it reported on Ping at its last interview. A different one
   // reported since brings the next interview forward.
   gatewayVersion              String?                 @map("gateway_version")
+  // The upstream it declared at its last interview; null when it declared
+  // none or one the server doesn't know (#925).
+  upstream                    Upstream?               @map("upstream")
 
   // Capabilities an admin switched off. The server doesn't route them, even
   // while the DataGateway declares them, and no interview writes this list.
@@ -84,6 +87,16 @@ enum DataGatewayCapability {
   ListMechanics
 
   @@map("data_gateway_capabilities")
+}
+
+// A service a DataGateway draws its data from. Mirrors proto Upstream
+// (bge.gateway.v1); the list grows with releases (#925).
+enum Upstream {
+  BoardGameGeek
+  IGDB
+  Steam
+
+  @@map("upstreams")
 }
 
 // A search filter a DataGateway's search can narrow by. Mirrors proto

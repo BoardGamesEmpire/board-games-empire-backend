@@ -1151,6 +1151,7 @@ function makeResultFrame(overrides: Partial<SearchGameResult> = {}): SearchGameR
       availablePlatforms: [],
       availableReleases: [],
       baseGameExternalIds: [],
+      crossReferences: [],
     } as GameSearchData,
     inSystem: false,
     ...overrides,

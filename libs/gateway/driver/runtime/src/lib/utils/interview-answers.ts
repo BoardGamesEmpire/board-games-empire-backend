@@ -5,6 +5,7 @@ import {
   LanguageCodeFormat,
   PlatformType,
   SearchFilterAxis,
+  Upstream,
 } from '@bge/database';
 import type { DescribeResponse, GatewayPingResponse } from '@boardgamesempire/proto-gateway';
 import {
@@ -14,6 +15,7 @@ import {
   toStoredLanguageCodeFormat,
   toStoredPlatformType,
   toStoredSearchFilterAxis,
+  toStoredUpstream,
 } from './stored-enums';
 
 /** What an interview stores on the DataGateway's row, from its Ping and its Describe. */
@@ -27,6 +29,7 @@ export interface InterviewAnswers {
   passthroughSearchLanguage: boolean | null;
   contentFormat: ContentFormat | null;
   gatewayVersion: string | null;
+  upstream: Upstream | null;
 }
 
 const isStored = <T>(value: T | undefined): value is T => value !== undefined;
@@ -77,5 +80,7 @@ export function toInterviewAnswers(description: DescribeResponse, ping: GatewayP
     passthroughSearchLanguage: formats ? formats.passthroughSearchLanguage === true : null,
     contentFormat: toStoredContentFormat(description.contentFormat) ?? null,
     gatewayVersion: ping.gatewayVersion?.trim() || null,
+    // One this server doesn't know, from a newer DataGateway, is none (#925).
+    upstream: toStoredUpstream(description.upstream) ?? null,
   };
 }

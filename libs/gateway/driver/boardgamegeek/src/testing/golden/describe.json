@@ -29,5 +29,6 @@
     "responseFormat": "LANGUAGE_CODE_FORMAT_NAME",
     "passthroughSearchLanguage": false
   },
-  "contentFormat": "CONTENT_FORMAT_PLAIN_TEXT"
+  "contentFormat": "CONTENT_FORMAT_PLAIN_TEXT",
+  "upstream": "UPSTREAM_BOARDGAMEGEEK"
 }

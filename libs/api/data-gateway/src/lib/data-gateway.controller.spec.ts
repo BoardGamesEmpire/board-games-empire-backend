@@ -437,6 +437,7 @@ function makeGateway(overrides: Partial<DataGatewayWithSections> = {}): DataGate
     passthroughSearchLanguage: null,
     contentFormat: null,
     gatewayVersion: null,
+    upstream: null,
     disabledCapabilities: [],
     firstInterviewedAt: null,
     lastInterviewedAt: null,

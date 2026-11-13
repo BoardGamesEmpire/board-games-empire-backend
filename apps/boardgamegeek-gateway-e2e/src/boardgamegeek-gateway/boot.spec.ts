@@ -53,6 +53,7 @@ describe('the BoardGameGeek gateway over gRPC', () => {
         passthroughSearchLanguage: false,
       },
       contentFormat: 'CONTENT_FORMAT_PLAIN_TEXT',
+      upstream: 'UPSTREAM_BOARDGAMEGEEK',
     });
 
     // Coverage's lists are sets: their order follows the thing types it asks for, and means nothing.

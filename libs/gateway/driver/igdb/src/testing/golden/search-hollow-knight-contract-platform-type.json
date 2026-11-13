@@ -945,7 +945,8 @@
           ]
         }
       ],
-      "baseGameExternalIds": []
+      "baseGameExternalIds": [],
+      "crossReferences": []
     }
   },
   {
@@ -1747,7 +1748,8 @@
           ]
         }
       ],
-      "baseGameExternalIds": []
+      "baseGameExternalIds": [],
+      "crossReferences": []
     }
   },
   {
@@ -1792,7 +1794,8 @@
           ]
         }
       ],
-      "baseGameExternalIds": []
+      "baseGameExternalIds": [],
+      "crossReferences": []
     }
   },
   {

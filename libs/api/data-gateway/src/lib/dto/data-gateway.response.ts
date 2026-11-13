@@ -8,6 +8,7 @@ import {
   LanguageCodeFormat,
   PlatformType,
   SearchFilterAxis,
+  Upstream,
 } from '@bge/database';
 import { ApiProperty } from '@nestjs/swagger';
 import type {
@@ -177,6 +178,14 @@ export class DataGatewayResponseDto implements DataGatewayView {
 
   @ApiProperty({ type: String, nullable: true, description: 'The version it reported at its last interview' })
   gatewayVersion!: string | null;
+
+  @ApiProperty({
+    enum: Upstream,
+    enumName: 'Upstream',
+    nullable: true,
+    description: "The upstream it declared at its last interview; null for none, or one the server doesn't know (#925)",
+  })
+  upstream!: Upstream | null;
 
   @ApiProperty({
     enum: DataGatewayCapability,

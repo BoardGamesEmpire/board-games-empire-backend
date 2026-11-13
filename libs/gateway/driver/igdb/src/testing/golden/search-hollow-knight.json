@@ -945,7 +945,8 @@
           ]
         }
       ],
-      "baseGameExternalIds": []
+      "baseGameExternalIds": [],
+      "crossReferences": []
     }
   },
   {
@@ -992,7 +993,8 @@
       ],
       "baseGameExternalIds": [
         "14593"
-      ]
+      ],
+      "crossReferences": []
     }
   },
   {
@@ -1036,7 +1038,8 @@
           ]
         }
       ],
-      "baseGameExternalIds": []
+      "baseGameExternalIds": [],
+      "crossReferences": []
     }
   },
   {
@@ -1838,7 +1841,8 @@
           ]
         }
       ],
-      "baseGameExternalIds": []
+      "baseGameExternalIds": [],
+      "crossReferences": []
     }
   },
   {
@@ -1878,7 +1882,8 @@
       ],
       "baseGameExternalIds": [
         "14593"
-      ]
+      ],
+      "crossReferences": []
     }
   },
   {

@@ -508,6 +508,7 @@ export function toGameSearchData(game: IgdbGame): proto.GameSearchData {
     availablePlatforms: (game.platforms ?? []).map(toPlatformData),
     availableReleases,
     baseGameExternalIds: toBaseGameExternalIds(game),
+    crossReferences: [],
   };
 }
 
@@ -563,6 +564,7 @@ export function toGameData(game: IgdbGame, locale?: string): proto.GameData {
     artists: [],
     averageRating: game.total_rating,
     baseGameExternalIds: toBaseGameExternalIds(game),
+    crossReferences: [],
 
     categories,
     contentType: toContentType(game.game_type),

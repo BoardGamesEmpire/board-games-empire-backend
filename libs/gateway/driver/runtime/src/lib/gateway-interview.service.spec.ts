@@ -8,6 +8,7 @@ import {
   LanguageCodeFormat,
   PlatformType,
   ResourceType,
+  Upstream,
 } from '@bge/database';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
@@ -49,6 +50,7 @@ const STUB_DESCRIPTION: proto.DescribeResponse = {
     passthroughSearchLanguage: false,
   },
   contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
+  upstream: proto.Upstream.UPSTREAM_UNSPECIFIED,
 };
 
 interface Answers {
@@ -199,6 +201,30 @@ describe('GatewayInterviewService', () => {
       );
 
       expect(table.row(GW)).toMatchObject({ capabilities: [DataGatewayCapability.Fetch], contentFormat: null });
+    });
+
+    it('stores the upstream the DataGateway declares (#925)', async () => {
+      table.seed({ id: GW });
+
+      await service.interview(
+        GW,
+        dataGateway({ description: { ...STUB_DESCRIPTION, upstream: proto.Upstream.UPSTREAM_BOARDGAMEGEEK } }),
+      );
+
+      expect(table.row(GW)?.upstream).toBe(Upstream.BoardGameGeek);
+    });
+
+    // gRPC hands over an upstream the server's proto doesn't know as a bare
+    // number, from a DataGateway newer than the server (#925).
+    it('stores no upstream when it declares one the server doesn’t know', async () => {
+      table.seed({ id: GW, upstream: Upstream.Steam });
+
+      await service.interview(
+        GW,
+        dataGateway({ description: { ...STUB_DESCRIPTION, upstream: 7 as unknown as proto.Upstream } }),
+      );
+
+      expect(table.row(GW)?.upstream).toBeNull();
     });
 
     it('keeps the DataGateway’s order for the request language formats it prefers, and the server’s order for every other list', async () => {

@@ -67,6 +67,7 @@ function toSearchData(game: proto.GameData): proto.GameSearchData {
     minPlaytime: game.minPlaytime,
     maxPlaytime: game.maxPlaytime,
     baseGameExternalIds: game.baseGameExternalIds,
+    crossReferences: game.crossReferences,
     summary: game.description,
     availablePlatforms: game.platforms,
     availableReleases: game.releases,
@@ -124,6 +125,8 @@ export class StubGatewayDriver implements DataGatewayDriver {
         passthroughSearchLanguage: false,
       },
       contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
+      // It draws from no real upstream (#925).
+      upstream: proto.Upstream.UPSTREAM_UNSPECIFIED,
     });
   }
 

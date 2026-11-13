@@ -7,6 +7,7 @@ import {
   toStoredContentType,
   toStoredPlatformType,
   toStoredSearchFilterAxis,
+  toStoredUpstream,
 } from './stored-enums';
 
 describe('stored enums', () => {
@@ -74,5 +75,25 @@ describe('stored enums', () => {
     expect(toStoredSearchFilterAxis(proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PLAY_TIME)).toBe('PlayTime');
     expect(SearchFilterAxis.PlayerCount).toBe('PlayerCount');
     expect(SearchFilterAxis.PlayTime).toBe('PlayTime');
+  });
+
+  // Named by value, as above: before the stored enum exists, both sides of a
+  // comparison with it would be undefined (#925).
+  it.each([
+    [proto.Upstream.UPSTREAM_BOARDGAMEGEEK, 'BoardGameGeek'],
+    [proto.Upstream.UPSTREAM_IGDB, 'IGDB'],
+    [proto.Upstream.UPSTREAM_STEAM, 'Steam'],
+  ])('stores the upstream %s as %s (#925)', (sent, stored) => {
+    expect(toStoredUpstream(sent)).toBe(stored);
+  });
+
+  // A newer DataGateway may name an upstream this server's proto predates;
+  // gRPC hands it over as a bare number, and it's stored as none (#925).
+  it.each([
+    ['unspecified', proto.Upstream.UPSTREAM_UNSPECIFIED],
+    ['absent', undefined],
+    ['unknown to this server', 7],
+  ])('stores no upstream for one that is %s', (_label, sent) => {
+    expect(toStoredUpstream(sent)).toBeUndefined();
   });
 });

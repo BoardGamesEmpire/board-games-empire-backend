@@ -75,6 +75,10 @@ message DescribeResponse {
 
   // The form its free text arrives in, such as a game's description.
   ContentFormat content_format = 6;
+
+  // The upstream it draws its data from. Unspecified when it has none of
+  // those listed, such as a DataGateway over a private collection (#925).
+  Upstream upstream = 7;
 }
 
 // An operation a DataGateway can serve, named by the RPC it answers.

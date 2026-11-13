@@ -44,6 +44,30 @@ enum TrafficClass {
   TRAFFIC_CLASS_BACKGROUND = 2;
 }
 
+// A service a DataGateway draws its data from, such as BoardGameGeek. The
+// list is closed and grows with releases; a reader that meets a value it
+// doesn't know treats it as none (#925).
+enum Upstream {
+  UPSTREAM_UNSPECIFIED = 0;
+  UPSTREAM_BOARDGAMEGEEK = 1;
+  UPSTREAM_IGDB = 2;
+  UPSTREAM_STEAM = 3;
+}
+
+// An item's id at another upstream, as a DataGateway reports it, such as IGDB
+// naming a game's Steam app. An import links to a game the server already has
+// only when a cross-reference matches (#925).
+message CrossReference {
+  // The upstream the id belongs to. UNSPECIFIED, or one the reader doesn't
+  // know, makes the cross-reference meaningless.
+  Upstream upstream = 1;
+
+  // The item's id at that upstream, exactly as the upstream writes it, such
+  // as a Steam app id. It isn't an external ID: that is the id at the
+  // DataGateway itself.
+  string id = 2;
+}
+
 // Broad classification of a platform — used by clients to render
 // platform-type icons and by the import wizard to group options.
 enum PlatformType {
@@ -347,6 +371,10 @@ message GameSearchData {
   // is then its whole play time (#869).
   optional int32 min_playtime = 14;
   optional int32 max_playtime = 15;
+
+  // The game's ids at other upstreams, so a search can tell a game is
+  // already in the game catalog from another DataGateway (#925).
+  repeated CrossReference cross_references = 16;
 }
 
 message GameData {
@@ -393,4 +421,8 @@ message GameData {
   repeated string metadata_values = 31;
 
   repeated DlcData dlc = 32;
+
+  // The game's ids at other upstreams. An import links to a game the server
+  // already has only when one of these matches (#925).
+  repeated CrossReference cross_references = 33;
 }

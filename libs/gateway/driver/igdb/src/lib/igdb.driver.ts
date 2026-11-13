@@ -133,6 +133,8 @@ export class IgdbDriver implements DataGatewayDriver {
 
       /** IGDB's summaries, sent as descriptions too, are plain text. */
       contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
+
+      upstream: proto.Upstream.UPSTREAM_IGDB,
     });
   }
 

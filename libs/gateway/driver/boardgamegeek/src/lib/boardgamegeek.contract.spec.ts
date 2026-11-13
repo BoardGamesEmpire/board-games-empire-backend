@@ -43,6 +43,7 @@ runDataGatewayDriverContract('BoardGameGeekDriver', () => ({
     proto.SearchFilterAxis.SEARCH_FILTER_AXIS_CONTENT_TYPE,
     proto.SearchFilterAxis.SEARCH_FILTER_AXIS_PUBLISH_YEAR,
   ],
+  upstream: proto.Upstream.UPSTREAM_BOARDGAMEGEEK,
   knownExternalId: '126163',
   unknownExternalId: '999999999',
   searchQuery: "Tzolk'in",

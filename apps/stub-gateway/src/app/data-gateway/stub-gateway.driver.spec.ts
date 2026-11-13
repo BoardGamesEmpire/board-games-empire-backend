@@ -71,6 +71,8 @@ describe('StubGatewayDriver', () => {
           passthroughSearchLanguage: false,
         },
         contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
+        // It draws from no real upstream (#925).
+        upstream: proto.Upstream.UPSTREAM_UNSPECIFIED,
       } satisfies proto.DescribeResponse);
     });
 

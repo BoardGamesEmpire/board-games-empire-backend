@@ -18,8 +18,16 @@ const {
   CONTENT_TYPE_UNSPECIFIED: UNSPECIFIED,
 } = proto.ContentType;
 
-const knownGame = { externalId: 'bgg-13', name: 'Catan' } as unknown as proto.GameData;
-const searchHit = { externalId: 'bgg-13', name: 'Catan' } as unknown as proto.GameSearchData;
+const knownGame = {
+  externalId: 'bgg-13',
+  name: 'Catan',
+  crossReferences: [{ upstream: proto.Upstream.UPSTREAM_STEAM, id: '544730' }],
+} as unknown as proto.GameData;
+const searchHit = {
+  externalId: 'bgg-13',
+  name: 'Catan',
+  crossReferences: [{ upstream: proto.Upstream.UPSTREAM_STEAM, id: '544730' }],
+} as unknown as proto.GameSearchData;
 
 /** A search result of `contentType`, on platforms of `platformTypes`. */
 const hit = (
@@ -37,6 +45,7 @@ const hit = (
   })),
   availableReleases: [],
   baseGameExternalIds: [],
+  crossReferences: [],
 });
 
 const catan = hit('catan', BASE_GAME, [TABLETOP]);
@@ -55,6 +64,7 @@ runDataGatewayDriverContract('InMemoryGatewayDriver', () => ({
     mechanics: [{ externalId: '2082', name: 'Worker Placement' }],
     coverage: { platformTypes: [TABLETOP], contentTypes: [BASE_GAME, EXPANSION] },
     filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS, PUBLISH_YEAR_AXIS, PLAYER_COUNT_AXIS, PLAY_TIME_AXIS],
+    upstream: proto.Upstream.UPSTREAM_BOARDGAMEGEEK,
   }),
   capabilities: [
     proto.Capability.CAPABILITY_SEARCH,
@@ -66,6 +76,7 @@ runDataGatewayDriverContract('InMemoryGatewayDriver', () => ({
     proto.Capability.CAPABILITY_LIST_MECHANICS,
   ],
   filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS, PUBLISH_YEAR_AXIS, PLAYER_COUNT_AXIS, PLAY_TIME_AXIS],
+  upstream: proto.Upstream.UPSTREAM_BOARDGAMEGEEK,
   knownExternalId: 'bgg-13',
   unknownExternalId: 'no-such-id',
   searchQuery: 'catan',
@@ -232,6 +243,22 @@ describe('InMemoryGatewayDriver search filter', () => {
     await expect(firstValueFrom(driver.describe({}))).resolves.toMatchObject({
       coverage,
       filterableAxes: [CONTENT_TYPE_AXIS],
+    });
+  });
+});
+
+describe('InMemoryGatewayDriver upstream', () => {
+  it('declares the upstream it is given (#925)', async () => {
+    const driver = new InMemoryGatewayDriver({ upstream: proto.Upstream.UPSTREAM_STEAM });
+
+    await expect(firstValueFrom(driver.describe({}))).resolves.toMatchObject({
+      upstream: proto.Upstream.UPSTREAM_STEAM,
+    });
+  });
+
+  it('declares no upstream unless given one (#925)', async () => {
+    await expect(firstValueFrom(new InMemoryGatewayDriver().describe({}))).resolves.toMatchObject({
+      upstream: proto.Upstream.UPSTREAM_UNSPECIFIED,
     });
   });
 });

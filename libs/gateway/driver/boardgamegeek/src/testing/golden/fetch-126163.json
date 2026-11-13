@@ -216,6 +216,7 @@
     "minAge": 13,
     "complexityWeight": 3663,
     "baseGameExternalIds": [],
+    "crossReferences": [],
     "platforms": [
       {
         "externalId": "bgg-tabletop",

@@ -164,6 +164,8 @@ export class BoardGameGeekDriver implements DataGatewayDriver {
 
       /** BGG's descriptions carry no markup. */
       contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
+
+      upstream: proto.Upstream.UPSTREAM_BOARDGAMEGEEK,
     } satisfies proto.DescribeResponse);
   }
 

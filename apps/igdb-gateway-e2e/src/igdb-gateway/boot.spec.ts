@@ -81,6 +81,7 @@ describe('the IGDB gateway over gRPC', () => {
         passthroughSearchLanguage: false,
       },
       contentFormat: 'CONTENT_FORMAT_PLAIN_TEXT',
+      upstream: 'UPSTREAM_IGDB',
     });
 
     // Coverage's lists are sets: their order is the game mapper's, and means nothing.
