@@ -576,6 +576,39 @@ describe('EventOccurrenceService', () => {
       );
     });
 
+    // A PATCH that switches the event to Fixed holds the same lock, so a mode
+    // read before the lock can be stale by the time the lock is granted.
+    it('reads the scheduling mode under the event lock, so a concurrent switch to Fixed is seen (#796)', async () => {
+      const order: string[] = [];
+      db.$queryRaw.mockImplementation(((query: unknown) => {
+        order.push(/FOR NO KEY UPDATE$/.test(rawQueryText(query)) ? 'lock' : 'other-raw');
+        return Promise.resolve(isCancelRead(query) ? [{ cancelledAt: null }] : []);
+      }) as never);
+      // The read before the lock finds MultiDay; the one under it finds the
+      // switch that committed meanwhile.
+      db.event.findUnique
+        .mockImplementationOnce((() => {
+          order.push('mode-before-lock');
+          return Promise.resolve({ id: 'event-1', householdId: null });
+        }) as never)
+        .mockImplementationOnce((() => {
+          order.push('mode-under-lock');
+          return Promise.resolve({ schedulingMode: EventSchedulingMode.Fixed });
+        }) as never);
+      db.eventOccurrence.count.mockResolvedValue(1);
+
+      const rejection: unknown = await service.addOccurrence('event-1', { label: 'Day 2' }).catch((e: unknown) => e);
+
+      expect(order.filter((label) => label !== 'other-raw')).toEqual(['mode-before-lock', 'lock', 'mode-under-lock']);
+      expect(db.event.findUnique).toHaveBeenLastCalledWith({
+        where: { id: 'event-1', deletedAt: null },
+        select: { schedulingMode: true },
+      });
+      expect(rejection).toBeInstanceOf(BadRequestException);
+      expect((rejection as BadRequestException).getResponse()).toEqual(t('errors.occurrence.fixed_mode_single'));
+      expect(db.eventOccurrence.create).not.toHaveBeenCalled();
+    });
+
     it('refuses a new date on a cancelled event with 400, writing nothing (#795)', async () => {
       db.event.findUnique.mockResolvedValue({ id: 'event-1', schedulingMode: EventSchedulingMode.MultiDay } as never);
       eventIsCancelled();

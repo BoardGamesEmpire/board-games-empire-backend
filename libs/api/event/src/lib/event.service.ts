@@ -14,7 +14,7 @@ import {
   SystemRole,
 } from '@bge/database';
 import { lockExistingHousehold } from '@bge/household';
-import { t } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import {
   AbilityService,
   PermissionsService,
@@ -26,6 +26,7 @@ import { type DefaultPaginationQueryDto, type PaginatedRows } from '@bge/shared'
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Http } from '@status/codes';
 import assert from 'node:assert';
 import { assertInvitable } from './attendee/invitable';
 import { browseEventScope } from './browse-event-scope';
@@ -42,6 +43,7 @@ import type { CreateEventDto } from './dto/create-event.dto';
 import type { ListEventsQueryDto } from './dto/list-events.query.dto';
 import type { UpdateEventDto } from './dto/update-event.dto';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
+import { countLiveDates } from './occurrence/live-dates.util';
 import {
   EVENT_ATTENDANCE_SELECT,
   readEventAttendance,
@@ -659,6 +661,21 @@ export class EventService {
         // state the write replaces, even when another write to the event went
         // first (#731).
         const existing = await lockLiveEvent(tx, id);
+
+        // Fixed holds one date. The count is read under the same lock a new
+        // date takes, so a date added beside this switch is counted or waits
+        // for it (#796). Existing dates keep their status.
+        if (
+          dto.schedulingMode === EventSchedulingMode.Fixed &&
+          existing.schedulingMode !== EventSchedulingMode.Fixed &&
+          (await countLiveDates(tx, id)) > 1
+        ) {
+          throw new CodedHttpException(
+            Http.BadRequest,
+            'EVENT_FIXED_MODE_TOO_MANY_DATES',
+            t('errors.event.fixed_mode_live_dates'),
+          );
+        }
 
         const updated = await tx.event.update({
           where: {

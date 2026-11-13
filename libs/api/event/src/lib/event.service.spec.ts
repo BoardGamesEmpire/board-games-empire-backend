@@ -863,6 +863,62 @@ describe('EventService', () => {
       expect(updated.status).toBe(EventStatus.Scheduled);
     });
 
+    describe('a switch to Fixed (#796)', () => {
+      it('refuses a switch to Fixed while two dates are live (#796)', async () => {
+        row = makeEvent({ id: 'event-1', schedulingMode: EventSchedulingMode.MultiDay });
+        tx.eventOccurrence.count.mockResolvedValue(2);
+
+        await expect(
+          service.updateEvent('event-1', { schedulingMode: EventSchedulingMode.Fixed } as never),
+        ).rejects.toMatchObject({
+          response: { code: 'EVENT_FIXED_MODE_TOO_MANY_DATES' },
+          status: 400,
+        });
+
+        expect(tx.eventOccurrence.count).toHaveBeenCalledWith({
+          where: { eventId: 'event-1', status: { in: [OccurrenceStatus.Proposed, OccurrenceStatus.Confirmed] } },
+        });
+        expect(tx.event.update).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
+
+      it('allows a switch to Fixed with one live date and any number of cancelled ones (#796)', async () => {
+        row = makeEvent({ id: 'event-1', schedulingMode: EventSchedulingMode.MultiDay });
+        tx.eventOccurrence.count.mockResolvedValue(1);
+
+        await service.updateEvent('event-1', { schedulingMode: EventSchedulingMode.Fixed } as never);
+
+        expect(tx.event.update).toHaveBeenCalled();
+      });
+
+      it('counts the dates under the lock, before the update (#796)', async () => {
+        row = makeEvent({ id: 'event-1', schedulingMode: EventSchedulingMode.Poll });
+        tx.eventOccurrence.count.mockResolvedValue(1);
+
+        await service.updateEvent('event-1', { schedulingMode: EventSchedulingMode.Fixed } as never);
+
+        expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+          tx.eventOccurrence.count.mock.invocationCallOrder[0],
+        );
+        expect(tx.eventOccurrence.count.mock.invocationCallOrder[0]).toBeLessThan(
+          tx.event.update.mock.invocationCallOrder[0],
+        );
+      });
+
+      it.each([
+        ['the mode is unchanged', EventSchedulingMode.Fixed, { schedulingMode: EventSchedulingMode.Fixed }],
+        ['the switch is to another mode', EventSchedulingMode.Fixed, { schedulingMode: EventSchedulingMode.Poll }],
+        ['the patch leaves the mode alone', EventSchedulingMode.MultiDay, { title: 'New' }],
+      ])('does not count dates when %s', async (_name, stored, patch) => {
+        row = makeEvent({ id: 'event-1', schedulingMode: stored });
+
+        await service.updateEvent('event-1', patch as never);
+
+        expect(tx.eventOccurrence.count).not.toHaveBeenCalled();
+        expect(tx.event.update).toHaveBeenCalled();
+      });
+    });
+
     it('rejects an empty update patch', async () => {
       await expect(service.updateEvent('event-1', {} as never)).rejects.toThrow(BadRequestException);
       expect(db.$transaction).not.toHaveBeenCalled();

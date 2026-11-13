@@ -183,7 +183,7 @@ export class EventOccurrenceService {
     const initiatedAt = new Date();
     const event = await this.db.event.findUnique({
       where: { id: eventId, deletedAt: null },
-      select: { id: true, schedulingMode: true, householdId: true },
+      select: { id: true, householdId: true },
     });
 
     assert(event, new NotFoundException(t('errors.event.not_found', { id: eventId })));
@@ -196,25 +196,35 @@ export class EventOccurrenceService {
       event: { householdId: event.householdId },
     });
 
-    if (event.schedulingMode === EventSchedulingMode.Fixed) {
-      const existingCount = await this.db.eventOccurrence.count({
-        where: { eventId },
-      });
-
-      if (existingCount >= 1) {
-        throw new BadRequestException(t('errors.occurrence.fixed_mode_single'));
-      }
-    }
-
-    const status =
-      dto.status ??
-      (event.schedulingMode === EventSchedulingMode.Poll ? OccurrenceStatus.Proposed : OccurrenceStatus.Confirmed);
-
     const { written: occurrence, removedGames } = await this.db.$transaction((tx) =>
       writeEventDates(tx, eventId, initiatedAt, async () => {
         // A cancelled event takes no new date (#795). Read under the date
         // write's lock, which a cancel also takes.
         await assertEventNotCancelled(tx, eventId);
+
+        // The mode read before the lock is only good for the 404 and the
+        // permission check. A PATCH that switches the event to Fixed holds
+        // the same lock, so the mode is read again here, or a date could be
+        // added to an event that just became Fixed with one date already (#796).
+        const locked = await tx.event.findUnique({
+          where: { id: eventId, deletedAt: null },
+          select: { schedulingMode: true },
+        });
+        assert(locked, new NotFoundException(t('errors.event.not_found', { id: eventId })));
+
+        if (locked.schedulingMode === EventSchedulingMode.Fixed) {
+          // Every date counts here, declined and cancelled ones too. Counting
+          // only live dates is #966's change.
+          const existingCount = await tx.eventOccurrence.count({ where: { eventId } });
+
+          if (existingCount >= 1) {
+            throw new BadRequestException(t('errors.occurrence.fixed_mode_single'));
+          }
+        }
+
+        const status =
+          dto.status ??
+          (locked.schedulingMode === EventSchedulingMode.Poll ? OccurrenceStatus.Proposed : OccurrenceStatus.Confirmed);
 
         return tx.eventOccurrence.create({
           data: {
