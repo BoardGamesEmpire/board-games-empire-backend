@@ -33,6 +33,10 @@ import type { GatewayInboundEvent } from './types.js';
  *    never a thrown/errored Observable. Consumers rely on this to distinguish
  *    healthy not-found interactions from transport failures (auto-disable
  *    tracking exempts the former).
+ *  - A throttled call, one whose upstream budget is spent, answers
+ *    `RESULT_STATUS_RATE_LIMITED` with `retry_after_ms` and no game, in-band
+ *    on a stream frame or a response, never as an errored Observable.
+ *    Consumers never count it toward auto-disable (#925).
  *  - `dispose()` releases transport resources and must be safe to call on an
  *    already-disposed driver.
  *

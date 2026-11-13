@@ -120,8 +120,10 @@ export class GatewayGameSearchService {
   }
 
   /**
-   * Fetch full GameData for a single game from a specific gateway.
-   * Used by the import worker — bypasses the search cache.
+   * Fetch full GameData for a single game from a specific gateway, for a user
+   * waiting on screen, so it goes as live traffic. Imports never come through
+   * here: the gateway worker calls the DataGateway itself, as background
+   * (#925). Bypasses the search cache.
    */
   fetchGame(request: proto.CoordinatorFetchGameRequest): Observable<proto.CoordinatorFetchGameResponse> {
     return defer(() => from(this.registry.resolve(request.gatewayId, DataGatewayCapability.Fetch))).pipe(
@@ -133,6 +135,9 @@ export class GatewayGameSearchService {
           correlationId: request.correlationId,
           externalId: request.externalId,
           locale: request.locale,
+          // A user is waiting on screen for this fetch; every import goes
+          // through the gateway worker as background instead (#925).
+          trafficClass: proto.TrafficClass.TRAFFIC_CLASS_LIVE,
         }),
       ),
       tap((response) => {
@@ -386,15 +391,15 @@ export class GatewayGameSearchService {
       case proto.ResultStatus.RESULT_STATUS_RATE_LIMITED: {
         this.logger.warn(
           `Gateway ${gatewayId} is rate limited: ${result.message ?? 'No additional info'}, retry after ${
-            result.retryAfter ?? 'unknown'
-          } seconds`,
+            result.retryAfterMs ?? 'unknown'
+          } ms`,
         );
 
         return of<proto.SearchGameResult>({
           ...base,
           status: proto.ResultStatus.RESULT_STATUS_RATE_LIMITED,
           message: result.message,
-          retryAfter: result.retryAfter,
+          retryAfterMs: result.retryAfterMs,
         });
       }
 
@@ -468,7 +473,13 @@ export class GatewayGameSearchService {
     correlationId: string,
     locale?: string,
   ): Observable<proto.SearchGameResult> {
-    const gatewayRequest: proto.FetchExpansionsRequest = { correlationId, baseExternalId, locale };
+    // A user is waiting on screen for the list (#925).
+    const gatewayRequest: proto.FetchExpansionsRequest = {
+      correlationId,
+      baseExternalId,
+      locale,
+      trafficClass: proto.TrafficClass.TRAFFIC_CLASS_LIVE,
+    };
     const cacheKey = this.buildExpansionsCacheKey(gatewayId, gatewayRequest);
 
     return from(this.registry.resolveWithContentFormat(gatewayId, DataGatewayCapability.FetchExpansions)).pipe(
@@ -648,6 +659,8 @@ export class GatewayGameSearchService {
       limit: request.limit,
       offset: request.offset,
       locale: request.locale,
+      // A user is waiting on screen for a search (#925).
+      trafficClass: proto.TrafficClass.TRAFFIC_CLASS_LIVE,
       ...(sentFilter && { filter: sentFilter }),
     };
   }

@@ -21,6 +21,7 @@ import {
 } from '@bge/game-search';
 import { t } from '@bge/i18n';
 import { CheckPolicies } from '@bge/permissions';
+import { retryAfterSeconds } from '@boardgamesempire/gateway-driver-contract';
 import { ResultStatus } from '@boardgamesempire/proto-gateway';
 import { BadRequestException, ConflictException, Logger, UsePipes } from '@nestjs/common';
 import {
@@ -38,6 +39,9 @@ import type { Server, Socket } from 'socket.io';
 import { AuthenticatedGateway } from '../base/authenticated.gateway';
 import { WsFrameScope } from '../base/ws-frame-scope';
 import { WsTranslator } from '../base/ws-translator';
+
+/** What a rate-limited client is told to wait when the DataGateway gave no usable time. */
+const DEFAULT_RETRY_AFTER_SECONDS = 60;
 
 @WebSocketGateway({
   namespace: 'games/search',
@@ -280,7 +284,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
               this.emit<WsRateLimitedPayload>(client, dto.correlationId, SearchEvents.SearchRateLimited, {
                 correlationId: dto.correlationId,
                 source,
-                retryAfter: result.retryAfter ?? 60,
+                retryAfter: retryAfterSeconds(result.retryAfterMs) ?? DEFAULT_RETRY_AFTER_SECONDS,
                 message: result.message ?? this.translator.forClient(client, t('errors.game_search.rate_limited')),
               });
               break;

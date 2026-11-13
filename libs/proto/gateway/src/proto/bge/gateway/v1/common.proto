@@ -32,6 +32,18 @@ enum ResultStatus {
   RESULT_STATUS_UNFILTERABLE = 6;
 }
 
+// Whether a call to a DataGateway is live or background, so that it can keep
+// part of its upstream's budget for live calls (#925). Live is a call a user
+// is waiting on screen for, such as a search or the coordinator's one-game
+// fetch. Background is everything that runs as a job: every import, a sync's
+// backfill, and re-imports. A request that leaves it unset or UNSPECIFIED is
+// live. A DataGateway may ignore it.
+enum TrafficClass {
+  TRAFFIC_CLASS_UNSPECIFIED = 0;
+  TRAFFIC_CLASS_LIVE = 1;
+  TRAFFIC_CLASS_BACKGROUND = 2;
+}
+
 // Broad classification of a platform — used by clients to render
 // platform-type icons and by the import wizard to group options.
 enum PlatformType {

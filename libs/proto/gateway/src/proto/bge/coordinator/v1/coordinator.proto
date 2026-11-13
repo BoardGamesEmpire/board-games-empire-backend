@@ -29,8 +29,9 @@ service CoordinatorService {
   // gateways have emitted SOURCE_DONE or ERROR.
   rpc SearchGames(SearchGamesRequest) returns (stream SearchGameResult);
 
-  // Fetch full GameData for a single game from a specific gateway.
-  // Used by the import worker and game detail page.
+  // Fetch full GameData for a single game from a specific gateway, for a
+  // user waiting on screen, as live traffic. Imports never come through
+  // here: the gateway worker calls the DataGateway itself (#925).
   rpc FetchGame(CoordinatorFetchGameRequest) returns (CoordinatorFetchGameResponse);
 
   // Asks one DataGateway for a base game's expansions, by its external ID.
@@ -120,7 +121,10 @@ message SearchGameResult {
 
   // Populated on ERROR / RATE_LIMITED
   optional string message = 7;
-  optional int32 retry_after = 8;
+
+  // Set with RATE_LIMITED: the DataGateway may be asked again after this many
+  // milliseconds (#925).
+  optional int32 retry_after_ms = 8;
 }
 
 message CoordinatorFetchGameRequest {
@@ -136,6 +140,10 @@ message CoordinatorFetchGameResponse {
   bge.gateway.v1.ResultStatus status = 3;
   optional bge.gateway.v1.GameData game = 4;
   optional string message = 5;
+
+  // Set with RATE_LIMITED: the DataGateway may be asked again after this many
+  // milliseconds (#925).
+  optional int32 retry_after_ms = 6;
 }
 
 message CoordinatorFetchExpansionsRequest {
