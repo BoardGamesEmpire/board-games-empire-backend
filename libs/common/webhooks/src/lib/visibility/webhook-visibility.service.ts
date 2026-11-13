@@ -66,6 +66,20 @@ export class WebhookVisibilityService {
       (id, abilities, options) =>
         this.exists(this.db.event.count({ where: this.scope(ResourceType.Event, id, abilities, true, options) })),
     ],
+    // An event policy has no `deletedAt`; it lives and dies with its event, so
+    // a deleted event's policy is refused through the event (#796).
+    [
+      ResourceType.EventPolicy,
+      (id, abilities, options) =>
+        this.exists(
+          this.db.eventPolicy.count({
+            where: {
+              ...this.scope(ResourceType.EventPolicy, id, abilities, false, options),
+              event: { is: { deletedAt: null } },
+            },
+          }),
+        ),
+    ],
     [
       ResourceType.Game,
       (id, abilities, options) =>

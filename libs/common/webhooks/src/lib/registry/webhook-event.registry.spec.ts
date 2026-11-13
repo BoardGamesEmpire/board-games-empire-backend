@@ -106,6 +106,7 @@ describe('WebhookEventRegistry', () => {
         WebhookEventType.EventUpdated,
         WebhookEventType.EventCancelled,
         WebhookEventType.EventReopened,
+        WebhookEventType.EventPolicyUpdated,
         WebhookEventType.GameImported,
         WebhookEventType.ImportJobStarted,
         WebhookEventType.ImportJobFailed,
@@ -113,5 +114,15 @@ describe('WebhookEventRegistry', () => {
         WebhookEventType.HouseholdOwnershipTransferred,
       ].sort(),
     );
+  });
+
+  // The subject is the policy row, not the event: who may read the policy
+  // is who may hear that it changed (#796).
+  it('describes event.policy.updated.v1 as read on the event policy', () => {
+    expect(WebhookEventType.EventPolicyUpdated).toBe('event.policy.updated.v1');
+    expect(registry.require(WebhookEventType.EventPolicyUpdated)).toMatchObject({
+      subject: ResourceType.EventPolicy,
+      requiredAction: Action.read,
+    });
   });
 });

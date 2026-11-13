@@ -13,11 +13,12 @@ import { Action, ResourceType } from '@bge/database';
  * must stay in lockstep: adding an entry here without an emit site (or vice
  * versa) is a no-op, not a silent partial feature.
  *
- * v1 ships the Event domain, the household ownership transfer and the
- * game-import lifecycle. The Event and household events fire in apps/api; the
- * import events fire in the worker processes (GameImported / ImportJobFailed /
- * ImportBatchCompleted in apps/worker; ImportJobStarted and fetch-side
- * failures in apps/gateway-worker). All three run the dispatcher.
+ * v1 ships the Event domain (including the event policy's change), the
+ * household ownership transfer and the game-import lifecycle. The Event and
+ * household events fire in apps/api; the import events fire in the worker
+ * processes (GameImported / ImportJobFailed / ImportBatchCompleted in
+ * apps/worker; ImportJobStarted and fetch-side failures in
+ * apps/gateway-worker). All three run the dispatcher.
  * `game.game.updated.v1` remains absent until enrichment adopts the
  * `WebhookEmittableEvent` envelope.
  */
@@ -29,6 +30,8 @@ export const WebhookEventType = {
   EventCancelled: 'event.event.cancelled.v1',
   /** The host reopened a cancelled event (#795). */
   EventReopened: 'event.event.reopened.v1',
+  /** The event's policy changed; the names of what changed, never the values (#796). */
+  EventPolicyUpdated: 'event.policy.updated.v1',
   /** A game (base or expansion) was persisted by an import job. */
   GameImported: 'game.game.imported.v1',
   /** An import job began fetching from its gateway. */
@@ -94,6 +97,8 @@ export const WEBHOOK_EVENT_DESCRIPTORS: Record<WebhookEventType, WebhookEventMet
   [WebhookEventType.EventDeleted]: { subject: ResourceType.Event, requiredAction: Action.read, subjectDeleted: true },
   [WebhookEventType.EventCancelled]: { subject: ResourceType.Event, requiredAction: Action.read },
   [WebhookEventType.EventReopened]: { subject: ResourceType.Event, requiredAction: Action.read },
+  // The policy row is the subject, so the audience is who can read the policy.
+  [WebhookEventType.EventPolicyUpdated]: { subject: ResourceType.EventPolicy, requiredAction: Action.read },
   [WebhookEventType.GameImported]: { subject: ResourceType.Game, requiredAction: Action.read },
   [WebhookEventType.ImportJobStarted]: { subject: ResourceType.Job, requiredAction: Action.read },
   [WebhookEventType.ImportJobFailed]: { subject: ResourceType.Job, requiredAction: Action.read },

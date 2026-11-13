@@ -19,6 +19,7 @@ import {
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
+import { WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { UpdateEventPolicyDto } from './dto/update-event-policy.dto';
@@ -223,8 +224,9 @@ describe('EventPolicyService', () => {
   it('emits one EventPolicyUpdatedEvent carrying only the changed columns', async () => {
     await update({ gameAdditionMode: GameAdditionMode.RequiresVote, allowSpectators: true });
 
-    expect(emitter.emit).toHaveBeenCalledTimes(1);
-    const [name, emitted] = emitter.emit.mock.calls[0];
+    const domainEmits = emitter.emit.mock.calls.filter(([name]) => name === EventPolicyUpdatedEvent.eventName);
+    expect(domainEmits).toHaveLength(1);
+    const [name, emitted] = domainEmits[0];
     expect(name).toBe(EventPolicyUpdatedEvent.eventName);
     expect(emitted).toBeInstanceOf(EventPolicyUpdatedEvent);
     expect(emitted.action).toBe('update');
@@ -233,6 +235,26 @@ describe('EventPolicyService', () => {
     expect(emitted.eventId).toBe('event-1');
     expect(emitted.before).toEqual({ id: 'policy-1', gameAdditionMode: GameAdditionMode.Direct });
     expect(emitted.after).toEqual({ id: 'policy-1', gameAdditionMode: GameAdditionMode.RequiresVote });
+  });
+
+  // Names only: `data` is copied verbatim to a URL the subscriber controls (#796).
+  it('sends event.policy.updated.v1 with the changed field names and no values (#796)', async () => {
+    tx.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', householdId: 'hh-1' }));
+
+    await update({ gameAdditionMode: GameAdditionMode.RequiresVote, allowSpectators: true });
+
+    expect(emitter.emit).toHaveBeenCalledWith(WebhookEventType.EventPolicyUpdated, {
+      subjectId: 'policy-1',
+      householdId: 'hh-1',
+      data: { eventId: 'event-1', householdId: 'hh-1', policyId: 'policy-1', changedFields: ['gameAdditionMode'] },
+    });
+    expect(JSON.stringify(emitter.emit.mock.calls.at(-1))).not.toContain(GameAdditionMode.RequiresVote);
+  });
+
+  it('sends no webhook when nothing changed', async () => {
+    await update({ gameAdditionMode: GameAdditionMode.Direct, allowSpectators: true });
+
+    expect(emitter.emit).not.toHaveBeenCalledWith(WebhookEventType.EventPolicyUpdated, expect.anything());
   });
 
   // A form that re-sends what it loaded changes nothing, so it writes no

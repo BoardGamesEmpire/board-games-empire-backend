@@ -7,9 +7,11 @@ import {
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
+import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
+import { eventWebhookIds } from '../event.service';
 import { lockLiveEvent } from '../utils/lock-live-event.util';
 import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
 import type { UpdateEventPolicyDto } from './dto/update-event-policy.dto';
@@ -52,8 +54,8 @@ export class EventPolicyService {
     assert(Object.keys(dto).length > 0, new BadRequestException(t('common.at_least_one_field')));
 
     try {
-      const { existing, updated, policy } = await this.db.$transaction(async (tx) => {
-        await lockLiveEvent(tx, eventId);
+      const { event, existing, updated, policy } = await this.db.$transaction(async (tx) => {
+        const event = await lockLiveEvent(tx, eventId);
 
         // The whole row, whatever the caller may read: the patch is judged
         // against it, and the audit records what it replaced. Every event is
@@ -86,7 +88,7 @@ export class EventPolicyService {
           },
         });
 
-        return { existing, updated, policy };
+        return { event, existing, updated, policy };
       });
 
       const changed = changedKeys(existing, updated, Object.keys(dto) as (keyof EventPolicy)[]);
@@ -99,6 +101,18 @@ export class EventPolicyService {
             eventId,
             initiatedAt,
           ),
+        );
+
+        // Their names, never their values: `data` is copied verbatim to a URL
+        // the subscriber controls, and a receiver reads the values with its
+        // own credentials. No occurrenceId, as for `updateEvent` (#796).
+        this.eventEmitter.emit(
+          WebhookEventType.EventPolicyUpdated,
+          webhookEnvelope({
+            subjectId: updated.id,
+            householdId: event.householdId,
+            data: { ...eventWebhookIds(event), policyId: updated.id, changedFields: changed },
+          }),
         );
       }
 

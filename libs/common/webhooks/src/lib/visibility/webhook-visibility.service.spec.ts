@@ -63,6 +63,22 @@ describe('WebhookVisibilityService', () => {
     });
   });
 
+  // An event policy has no deletedAt of its own, so a deleted event's policy
+  // is refused through its event (#796).
+  it('checks an event policy by its row and refuses one whose event is deleted', async () => {
+    db.eventPolicy.count.mockResolvedValue(1);
+
+    await expect(service.isVisibleTo(ResourceType.EventPolicy, 'policy-1', [ability])).resolves.toBe(true);
+    expect(db.eventPolicy.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: 'policy-1',
+        AND: [expect.anything()],
+        event: { is: { deletedAt: null } },
+      }),
+    });
+    expect(db.eventPolicy.count.mock.calls[0][0]?.where).not.toHaveProperty('deletedAt');
+  });
+
   describe('the action it checks', () => {
     // Read and update reach different rows, so the clause in the count names
     // which action was checked.
