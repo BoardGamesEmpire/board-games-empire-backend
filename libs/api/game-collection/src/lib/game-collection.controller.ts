@@ -52,7 +52,7 @@ export class GameCollectionController {
   @ApiOperation({ summary: 'Get a single collection entry' })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, type: GameCollectionResponseDto })
-  @ApiResponse({ status: Http.NotFound, description: 'Collection entry not found' })
+  @ApiResponse({ status: Http.NotFound, description: 'Collection entry not found (code COLLECTION_ENTRY_NOT_FOUND)' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.GameCollection))
   @Get(':id')
   getCollectionEntry(@Param('id') id: string) {
@@ -82,7 +82,7 @@ export class GameCollectionController {
   @ApiResponse({ status: Http.Ok, type: GameCollectionMessageResponseDto })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: 'Collection entry not found' })
+  @ApiResponse({ status: Http.NotFound, description: 'Collection entry not found (code COLLECTION_ENTRY_NOT_FOUND)' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameCollection))
   @Patch(':id')
   updateCollectionEntry(@Param('id') id: string, @Body() updateGameCollectionDto: UpdateGameCollectionDto) {
@@ -101,7 +101,7 @@ export class GameCollectionController {
   @ApiResponse({ status: Http.Ok, type: GameCollectionMessageResponseDto })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: 'Collection entry not found' })
+  @ApiResponse({ status: Http.NotFound, description: 'Collection entry not found (code COLLECTION_ENTRY_NOT_FOUND)' })
   @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.GameCollection))
   @Delete(':id')
   removeFromCollection(@Param('id') id: string, @Query() query: RemoveGameCollectionQueryDto) {

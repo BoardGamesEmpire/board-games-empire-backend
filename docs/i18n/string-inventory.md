@@ -347,12 +347,24 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
     fallbacks for a source result that carries no message; a driver's own `result.message` passes
     through. `external_failed` replaced the raw gRPC error the coordinator stream used to forward (#519).
 
-  Four strings stay English on purpose, as the same refusals are over HTTP:
-  - `WsErrorFilter`'s "Unauthorized" and "Insufficient permissions" for `AuthGuard`'s two `WsException`s,
-    and its "Internal server error" for anything unexpected;
-  - the handshake's "Internal server error" for a failed session lookup.
+  The framework's own copy is catalog copy too, on both transports together (#527); see the next entry.
 
-  #527 tracks translating them on both transports together.
+- **Framework-written copy** — **DONE (#527)**. Copy that Nest, the throttler or body-parser wrote,
+  which never passed through a catalog, now renders from the `errors.request.*` keys in the request's
+  or connection's locale:
+  - an unexpected error's 500, over HTTP (`UnknownErrorFilter`), on a WebSocket frame (`WsErrorFilter`)
+    and at the handshake (`authenticated.gateway.ts`), was "Internal server error":
+    `errors.request.failed`;
+  - the throttler's 429, over HTTP and WebSocket (`RateLimitGuard`), was "ThrottlerException: Too Many
+    Requests": `errors.request.rate_limited`;
+  - body-parser's 413 for a body over the limit, and its text for any other request it can't read:
+    `errors.request.too_large` and `errors.request.unreadable`;
+  - Nest's `Cannot GET /x` for a request no route matches: `errors.request.route_not_found`.
+
+  `AuthGuard`'s "Unauthorized" and "Insufficient permissions" are gone: the api runs `ActorAuthGuard`
+  instead (#529), and a `WsException` gets the generic 500. One framework string is still English: a
+  malformed JSON body's 400 carries the parser's text, because Nest makes it a `BadRequestException`
+  before any filter sees it (#1261).
 
 ---
 

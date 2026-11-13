@@ -6,6 +6,10 @@ import {
   Controller,
   Get,
   type INestApplication,
+  type MiddlewareConsumer,
+  Module,
+  type NestMiddleware,
+  type NestModule,
   NotFoundException,
   Param,
   ServiceUnavailableException,
@@ -13,6 +17,7 @@ import {
 import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { I18nService } from 'nestjs-i18n';
+import { CodedHttpException } from './coded-http.exception';
 import { I18nExceptionFilter } from './i18n-exception.filter';
 import { LocaleResolutionService } from './locale-resolution.service';
 
@@ -51,6 +56,28 @@ class TestController {
   }
 }
 
+// Mounted as the api mounts its own middleware, `forRoutes('*')`, Express runs
+// it outside any route, so a request it refuses has no `req.route`: the same
+// signal Nest's not-found answer gives. It refuses one path only, as
+// HttpActorMiddleware refuses some requests (#634).
+class MissingMiddleware implements NestMiddleware {
+  use(req: { readonly originalUrl: string }, _res: unknown, next: (error?: unknown) => void): void {
+    if (!req.originalUrl.startsWith('/missing')) {
+      next();
+      return;
+    }
+
+    next(new CodedHttpException(404, 'ENTRY_NOT_FOUND', t('errors.language.not_found', { id: '7' })));
+  }
+}
+
+@Module({})
+class MissingModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(MissingMiddleware).forRoutes('*');
+  }
+}
+
 describe('I18nExceptionFilter (integration)', () => {
   let app: INestApplication;
   const translate = jest.fn();
@@ -58,6 +85,7 @@ describe('I18nExceptionFilter (integration)', () => {
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
+      imports: [MissingModule],
       controllers: [TestController],
       providers: [
         { provide: I18nService, useValue: { translate } },
@@ -113,6 +141,61 @@ describe('I18nExceptionFilter (integration)', () => {
       error: 'Conflict',
       message: 'plain english message',
       code: 'CATALOG_ENTRY_CHANGED',
+    });
+  });
+
+  describe('a 404', () => {
+    beforeEach(() => translate.mockImplementation((key: string) => `t:${key}`));
+
+    // Nest's own 404 says `Cannot GET /x`, the same shape as a missing row's,
+    // so a client could read a moved route as "already removed" (#634).
+    it.each([
+      ['GET', '/nope'],
+      ['DELETE', '/languages/translated/42/entries'],
+      ['DELETE', '/languages/translated/'],
+    ])(
+      'for %s %s, which no route matches, carries ROUTE_NOT_FOUND and catalog copy (#634, #527)',
+      async (method, path) => {
+        const res = await fetch(`${await app.getUrl()}${path}`, { method });
+        const text = await res.text();
+
+        expect(res.status).toBe(404);
+        expect(JSON.parse(text)).toEqual({
+          statusCode: 404,
+          error: 'Not Found',
+          code: 'ROUTE_NOT_FOUND',
+          message: 't:errors.request.route_not_found',
+        });
+        expect(text).not.toContain(path);
+      },
+    );
+
+    it('thrown by a matched route carries no ROUTE_NOT_FOUND, however it was thrown (#634)', async () => {
+      const marked = await fetch(`${await app.getUrl()}/languages/translated/42`);
+      const plain = await fetch(`${await app.getUrl()}/languages/plain`);
+
+      await expect(marked.json()).resolves.toEqual({
+        statusCode: 404,
+        error: 'Not Found',
+        message: 't:errors.language.not_found',
+      });
+      await expect(plain.json()).resolves.toEqual({
+        statusCode: 404,
+        error: 'Not Found',
+        message: 'plain english message',
+      });
+    });
+
+    it('thrown before routing with its own code keeps that code (#634)', async () => {
+      const res = await fetch(`${await app.getUrl()}/missing/7`);
+
+      expect(res.status).toBe(404);
+      await expect(res.json()).resolves.toEqual({
+        statusCode: 404,
+        error: 'Not Found',
+        code: 'ENTRY_NOT_FOUND',
+        message: 't:errors.language.not_found',
+      });
     });
   });
 

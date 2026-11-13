@@ -6,10 +6,11 @@ import {
   readBaseGameLinks,
   ResourceType,
 } from '@bge/database';
-import { t } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Http } from '@status/codes';
 import {
   changedSince,
   COLLECTION_INCLUDE,
@@ -24,6 +25,21 @@ import {
   RemoveGameCollectionQueryDto,
   UpdateGameCollectionDto,
 } from './dto';
+
+/**
+ * The refusal for a collection entry the actor can't see: missing, already
+ * removed, or outside their scope, which the 404 never tells apart. Its code
+ * says the 404 is about this row, so a client may read it as "already removed"
+ * and complete a queued removal, where a 404 without it (a route that moved,
+ * an id that matched no route) may not (#634).
+ */
+function collectionEntryNotFound(id: string): CodedHttpException {
+  return new CodedHttpException(
+    Http.NotFound,
+    'COLLECTION_ENTRY_NOT_FOUND',
+    t('errors.game_collection.not_found', { id }),
+  );
+}
 
 /**
  * Each method that returns collection rows is annotated with the DTO the
@@ -142,7 +158,7 @@ export class GameCollectionService {
     });
 
     if (!collection) {
-      throw new NotFoundException(t('errors.game_collection.not_found', { id }));
+      throw collectionEntryNotFound(id);
     }
 
     return this.rowWithBaseGames(collection);
@@ -217,7 +233,7 @@ export class GameCollectionService {
       });
 
       if (!existing) {
-        throw new NotFoundException(t('errors.game_collection.not_found', { id }));
+        throw collectionEntryNotFound(id);
       }
 
       await this.assertReleaseBelongsTo(data.releaseId, existing.platformGameId);
@@ -328,7 +344,7 @@ export class GameCollectionService {
    */
   private mapMissingToNotFound(error: unknown, id: string) {
     if (isPrismaDependentRecordNotFoundError(error)) {
-      return new NotFoundException(t('errors.game_collection.not_found', { id }));
+      return collectionEntryNotFound(id);
     }
 
     this.logger.error(`Error mutating collection entry with id ${id}`, error);

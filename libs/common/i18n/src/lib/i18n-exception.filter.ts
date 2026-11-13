@@ -1,13 +1,17 @@
 import { AuditContextService } from '@bge/actor-context';
-import type { I18nTranslations } from '@bge/i18n-core';
+import { t, type I18nTranslations } from '@bge/i18n-core';
 import { ArgumentsHost, Catch, HttpException } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
+import { Http } from '@status/codes';
 import { I18nService } from 'nestjs-i18n';
+import { CodedHttpException } from './coded-http.exception';
 import { LocaleResolutionService } from './locale-resolution.service';
 import { translateException, type EdgeLocaleSource } from './translate-exception';
 
 /** What the filter reads from the request. */
 interface EdgeRequest {
+  /** Set by Express exactly when a route matched. */
+  readonly route?: unknown;
   readonly headers?: { readonly 'accept-language'?: string };
 }
 
@@ -34,6 +38,13 @@ interface EdgeRequest {
  *   payload: a body without `error` or `statusCode` (a string body, a coded
  *   refusal's `{ code, message }`) gains them, and a custom `error` label gives
  *   way to the status's reason phrase (#1260).
+ * - A 404 for a request no route matched carries `ROUTE_NOT_FOUND` and catalog
+ *   copy in place of Nest's `Cannot GET /x` (#634, #527). Nest's own 404 is
+ *   otherwise the same shape as a missing row's, so a client could read a moved
+ *   or mistyped route as "already removed". The signal is Express's
+ *   `req.route`, set exactly when a route matched. A 404 that already carries a
+ *   code keeps it: one thrown before routing, by a middleware, lacks a route
+ *   too, and its code is the one the client branches on.
  *
  * Locale comes from `AuditContextService.getLocale()` (the CLS value the entry
  * seam resolves before guards run) rather than `I18nContext.current()`, which
@@ -71,7 +82,10 @@ export class I18nExceptionFilter extends BaseExceptionFilter {
    */
   protected render(exception: HttpException, host: ArgumentsHost): void {
     const request = host.switchToHttp().getRequest<EdgeRequest>();
-    super.catch(translateException(exception, this.i18n, this.requestLocale(request)), host);
+    super.catch(
+      translateException(routeNotFound(exception, request) ?? exception, this.i18n, this.requestLocale(request)),
+      host,
+    );
   }
 
   /** Nest's own handling, untranslated: the way out for a host that isn't HTTP. */
@@ -96,4 +110,19 @@ function clsLocale(auditContext: AuditContextService): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** The coded 404 for a request no route matched, or `undefined` for any other exception (#634). */
+function routeNotFound(exception: HttpException, request: EdgeRequest): CodedHttpException | undefined {
+  if (exception.getStatus() !== Http.NotFound || request.route !== undefined || hasCode(exception.getResponse())) {
+    return undefined;
+  }
+
+  return new CodedHttpException(Http.NotFound, 'ROUTE_NOT_FOUND', t('errors.request.route_not_found'), {
+    cause: exception,
+  });
+}
+
+function hasCode(body: unknown): boolean {
+  return body !== null && typeof body === 'object' && 'code' in body;
 }
