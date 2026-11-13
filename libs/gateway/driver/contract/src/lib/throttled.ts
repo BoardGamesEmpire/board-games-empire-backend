@@ -30,7 +30,7 @@ export class DataGatewayThrottledError extends Error {
 
   constructor(retryAfterMs: number | undefined) {
     const seconds = retryAfterSeconds(retryAfterMs);
-    const when = seconds === undefined ? 'later' : `in ${seconds} seconds`;
+    const when = seconds === undefined ? 'later' : `in ${seconds} ${seconds === 1 ? 'second' : 'seconds'}`;
     super(`The DataGateway is busy and asked to be tried again ${when}.`);
     this.name = 'DataGatewayThrottledError';
     this.retryAfterMs = usableRetryAfterMs(retryAfterMs);

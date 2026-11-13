@@ -23,6 +23,12 @@ describe('throttledError', () => {
     );
   });
 
+  it.each([1_000, 400])('says "1 second", not "1 seconds", for a wait of %i ms', (retryAfterMs) => {
+    expect(throttledError({ status: RATE_LIMITED, retryAfterMs })?.message).toBe(
+      'The DataGateway is busy and asked to be tried again in 1 second.',
+    );
+  });
+
   it.each([
     ['absent', undefined],
     ['zero', 0],
