@@ -4,19 +4,14 @@ import {
   EventGame,
   EventGameVote,
   EventOccurrence,
-  EventOccurrencePolicy,
   EventParticipationStatus,
-  EventPolicy,
   GameAdditionMode,
-  InterestedWeight,
   isPrismaDependentRecordNotFoundError,
   NominationStatus,
   Prisma,
   ResourceType,
   ScheduledGameRole,
   VoteEligibility,
-  VoteQuorumType,
-  VoteThresholdType,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
@@ -38,6 +33,7 @@ import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary
 import { CastVoteDto } from '../dto/cast-vote.dto';
 import { assertEventExists, requireEvent, resolveActingAttendeeId } from '../event-access.helpers';
 import { ResolutionResult, VotingPolicy } from '../interfaces/vote.interface';
+import { foldPolicy, type EffectivePolicy } from '../policy/effective-policy';
 import { GAME_VOTE_SLUG, voterGrantSelect } from '../vote/vote-grant';
 import { AttendeeStub, VoteResolver } from '../vote/vote-resolver';
 import { DirectAddGameDto } from './dto/direct-add-game.dto';
@@ -875,7 +871,7 @@ export class EventGameNominationService {
         })
       : null;
 
-    return effectivePolicy(eventPolicy, occPolicy);
+    return foldPolicy(eventPolicy, occPolicy);
   }
 
   /**
@@ -900,7 +896,7 @@ export class EventGameNominationService {
 
     return nominations.map((nomination) => {
       const occPolicy = nomination.occurrenceId === null ? null : (occPolicyById.get(nomination.occurrenceId) ?? null);
-      return markVotes(nomination, effectivePolicy(eventPolicy, occPolicy).voteEligibility);
+      return markVotes(nomination, foldPolicy(eventPolicy, occPolicy).voteEligibility);
     });
   }
 
@@ -933,8 +929,6 @@ export class EventGameNominationService {
   }
 }
 
-type EffectivePolicy = VotingPolicy & { gameAdditionMode: GameAdditionMode; votingWindowHours: number | null };
-
 /** A nomination's game added to the lineup, with the clock its domain event carries. */
 interface LineupAddition {
   eventGame: EventGame;
@@ -949,35 +943,6 @@ function markVotes({ votes, ...nomination }: NominationRow, voteEligibility: Vot
       ...vote,
       eligible: VoteResolver.isEligibleVoter(attendee, voteEligibility),
     })),
-  };
-}
-
-/** The policy a nomination is held to: its date's, where the date sets a field, else the event's. */
-function effectivePolicy(eventPolicy: EventPolicy | null, occPolicy: EventOccurrencePolicy | null): EffectivePolicy {
-  const base = {
-    gameAdditionMode: eventPolicy?.gameAdditionMode ?? GameAdditionMode.Direct,
-    voteThresholdType: eventPolicy?.voteThresholdType ?? VoteThresholdType.SimpleMajority,
-    voteThresholdValue: eventPolicy?.voteThresholdValue ?? null,
-    voteQuorumType: eventPolicy?.voteQuorumType ?? VoteQuorumType.None,
-    voteQuorumValue: eventPolicy?.voteQuorumValue ?? null,
-    voteEligibility: eventPolicy?.voteEligibility ?? VoteEligibility.ConfirmedOnly,
-    interestedWeight: eventPolicy?.interestedWeight ?? InterestedWeight.AsAbstain,
-    votingWindowHours: eventPolicy?.votingWindowHours ?? null,
-  };
-
-  if (!occPolicy) {
-    return base;
-  }
-
-  return {
-    gameAdditionMode: occPolicy.gameAdditionMode ?? base.gameAdditionMode,
-    voteThresholdType: occPolicy.voteThresholdType ?? base.voteThresholdType,
-    voteThresholdValue: occPolicy.voteThresholdValue ?? base.voteThresholdValue,
-    voteQuorumType: occPolicy.voteQuorumType ?? base.voteQuorumType,
-    voteQuorumValue: occPolicy.voteQuorumValue ?? base.voteQuorumValue,
-    voteEligibility: occPolicy.voteEligibility ?? base.voteEligibility,
-    interestedWeight: occPolicy.interestedWeight ?? base.interestedWeight,
-    votingWindowHours: occPolicy.votingWindowHours ?? base.votingWindowHours,
   };
 }
 

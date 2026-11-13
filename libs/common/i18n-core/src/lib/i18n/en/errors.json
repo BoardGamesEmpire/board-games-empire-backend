@@ -53,12 +53,19 @@
     "not_found": "Event with ID {id} not found",
     "not_attendee": "You are not an attendee of this event.",
     "fixed_mode_single": "Fixed scheduling mode allows at most one occurrence.",
+    "fixed_mode_live_dates": "This event has more than one date still proposed or confirmed. Decline, cancel or remove dates until one is left, then switch to Fixed.",
     "invitee_friends_only": "This server only allows you to place your friends on an event",
     "invitee_friends_of_friends_only": "This server only allows you to place your friends and friends of friends on an event",
     "invitee_refused": "You cannot place this user on an event",
     "archived": "This event is archived. Unarchive it first.",
     "cancelled": "This event is cancelled. Reopen it first.",
     "not_archivable": "Only a cancelled event, or one whose dates have all passed, can be archived."
+  },
+  "event_policy": {
+    "threshold_value_required": "A vote threshold of a set percentage or a fixed number of votes needs that percentage or number, and this change would leave the event, or one of its dates, without it. Enter the percentage or number, or choose another vote threshold.",
+    "quorum_value_required": "A quorum of a set percentage or a fixed number of eligible voters needs that percentage or number, and this change would leave the event, or one of its dates, without it. Enter the percentage or number, or choose another quorum.",
+    "threshold_percent_too_high": "A vote threshold can't be more than 100 percent of the votes, and this change would leave the event, or one of its dates, asking for more. Enter a percentage from 1 to 100.",
+    "quorum_percent_too_high": "A quorum can't be more than 100 percent of the eligible voters, and this change would leave the event, or one of its dates, asking for more. Enter a percentage from 1 to 100."
   },
   "occurrence": {
     "not_found": "Occurrence {occurrenceId} not found for event {eventId}",

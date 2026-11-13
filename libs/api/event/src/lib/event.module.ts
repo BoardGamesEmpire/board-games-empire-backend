@@ -16,6 +16,8 @@ import { EventOccurrenceController } from './occurrence/event-occurrence.control
 import { EventOccurrenceService } from './occurrence/event-occurrence.service';
 import { OfferedGameController } from './offered-game/offered-game.controller';
 import { OfferedGameService } from './offered-game/offered-game.service';
+import { EventPolicyController } from './policy/event-policy.controller';
+import { EventPolicyService } from './policy/event-policy.service';
 
 @Module({
   imports: [DatabaseModule, PermissionsModule, NotificationsServiceModule],
@@ -27,6 +29,7 @@ import { OfferedGameService } from './offered-game/offered-game.service';
     EventGameNominationController,
     EventOccurrenceController,
     OfferedGameController,
+    EventPolicyController,
   ],
   providers: [
     EventService,
@@ -36,6 +39,7 @@ import { OfferedGameService } from './offered-game/offered-game.service';
     EventOccurrenceService,
     EventNotificationListener,
     OfferedGameService,
+    EventPolicyService,
   ],
   exports: [EventService, EventAttendeeService, EventGameNominationService, EventOccurrenceService],
 })

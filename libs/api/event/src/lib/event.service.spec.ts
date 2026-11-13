@@ -659,6 +659,8 @@ describe('EventService', () => {
       row = makeEvent({ id: 'event-1' });
       tx.$queryRaw.mockResolvedValue([]);
       tx.event.findUnique.mockImplementation((() => Promise.resolve(row)) as never);
+      // The caller's update ceiling reaches the event.
+      tx.event.count.mockResolvedValue(1);
       tx.event.update.mockImplementation(((args: { data: Partial<Event> }) =>
         Promise.resolve(withDates({ ...(row as Event), ...args.data }))) as never);
     });
@@ -744,14 +746,30 @@ describe('EventService', () => {
       );
     });
 
-    it('skips the update event when only relation-managed fields were patched', async () => {
-      tx.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1' })));
+    // The answer used to carry the policy row whole (`include.policy`), which a
+    // writer who may update the event but not read its policy would then see.
+    it('reads the policy it answers with under the policy read ceiling (#796)', async () => {
+      const policy = makeEventPolicy('event-1');
+      tx.eventPolicy.findUnique.mockResolvedValue(policy);
 
-      // occurrences/policy/inviteUserIds change no Event columns — an
-      // empty-diff "update" audit row would be noise.
-      await service.updateEvent('event-1', { occurrences: [] } as never);
+      const updated = await service.updateEvent('event-1', { title: 'New' } as never);
 
-      expect(emitter.emit).not.toHaveBeenCalled();
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.EventPolicy, Action.read);
+      expect(tx.eventPolicy.findUnique).toHaveBeenCalledWith({ where: { eventId: 'event-1', AND: [COND] } });
+      expect(tx.event.update.mock.calls[0][0].include).not.toHaveProperty('policy');
+      expect(tx.event.update.mock.invocationCallOrder[0]).toBeLessThan(
+        tx.eventPolicy.findUnique.mock.invocationCallOrder[0],
+      );
+      expect(updated.policy).toEqual(policy);
+    });
+
+    it('answers a null policy when the ceiling hides it, and the write still lands (#796)', async () => {
+      tx.eventPolicy.findUnique.mockResolvedValue(null);
+
+      const updated = await service.updateEvent('event-1', { title: 'New' } as never);
+
+      expect(tx.event.update).toHaveBeenCalled();
+      expect(updated.policy).toBeNull();
     });
 
     it('updateEvent emits an EventUpdatedEvent carrying the changed subset', async () => {
@@ -803,6 +821,26 @@ describe('EventService', () => {
       expect(sent?.data.changedFields).toEqual(['title']);
     });
 
+    it('writes no audit event when the patch re-sends stored values (#728)', async () => {
+      row = makeEvent({ id: 'event-1', title: 'Same', location: 'Hall' });
+      tx.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'Same', location: 'Hall' })));
+
+      await service.updateEvent('event-1', { title: 'Same', location: 'Hall' } as never);
+
+      expect(emitter.emit).not.toHaveBeenCalledWith(EventUpdatedEvent.eventName, expect.anything());
+    });
+
+    it('audits only the changed column when one of two sent changed (#728)', async () => {
+      row = makeEvent({ id: 'event-1', title: 'Old', location: 'Hall' });
+      tx.event.update.mockResolvedValue(withDates(makeEvent({ id: 'event-1', title: 'New', location: 'Hall' })));
+
+      await service.updateEvent('event-1', { title: 'New', location: 'Hall' } as never);
+
+      const [, emitted] = emitter.emit.mock.calls.find(([name]) => name === EventUpdatedEvent.eventName) ?? [];
+      expect(Object.keys(emitted.before)).toEqual(['id', 'title']);
+      expect(Object.keys(emitted.after)).toEqual(['id', 'title']);
+    });
+
     it('updateEvent sends no webhook when the patch changes no value', async () => {
       // A form that re-sends what it loaded would otherwise post "updated" to
       // every subscriber for a change that never happened.
@@ -825,6 +863,82 @@ describe('EventService', () => {
       expect(tx.eventOccurrence.findMany).not.toHaveBeenCalled();
       expect(db.eventOccurrence.findMany).not.toHaveBeenCalled();
       expect(updated.status).toBe(EventStatus.Scheduled);
+    });
+
+    describe('a switch to Fixed (#796)', () => {
+      it('refuses a switch to Fixed while two dates are live (#796)', async () => {
+        row = makeEvent({ id: 'event-1', schedulingMode: EventSchedulingMode.MultiDay });
+        tx.eventOccurrence.count.mockResolvedValue(2);
+
+        await expect(
+          service.updateEvent('event-1', { schedulingMode: EventSchedulingMode.Fixed } as never),
+        ).rejects.toMatchObject({
+          response: { code: 'EVENT_FIXED_MODE_TOO_MANY_DATES' },
+          status: 400,
+        });
+
+        expect(tx.eventOccurrence.count).toHaveBeenCalledWith({
+          where: { eventId: 'event-1', status: { in: [OccurrenceStatus.Proposed, OccurrenceStatus.Confirmed] } },
+        });
+        expect(tx.event.update).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
+
+      it('allows a switch to Fixed with one live date and any number of cancelled ones (#796)', async () => {
+        row = makeEvent({ id: 'event-1', schedulingMode: EventSchedulingMode.MultiDay });
+        tx.eventOccurrence.count.mockResolvedValue(1);
+
+        await service.updateEvent('event-1', { schedulingMode: EventSchedulingMode.Fixed } as never);
+
+        expect(tx.event.update).toHaveBeenCalled();
+      });
+
+      it('counts the dates under the lock, after the grant is checked and before the update (#796)', async () => {
+        row = makeEvent({ id: 'event-1', schedulingMode: EventSchedulingMode.Poll });
+        tx.eventOccurrence.count.mockResolvedValue(1);
+
+        await service.updateEvent('event-1', { schedulingMode: EventSchedulingMode.Fixed } as never);
+
+        expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.event.count.mock.invocationCallOrder[0]);
+        expect(tx.event.count.mock.invocationCallOrder[0]).toBeLessThan(
+          tx.eventOccurrence.count.mock.invocationCallOrder[0],
+        );
+        expect(tx.eventOccurrence.count.mock.invocationCallOrder[0]).toBeLessThan(
+          tx.event.update.mock.invocationCallOrder[0],
+        );
+      });
+
+      // The route's guard passes anyone holding update:event on any event. The
+      // grant is checked against this event's row before the dates are
+      // counted, so a caller it doesn't reach gets 403, never a 400 that tells
+      // them how many live dates this event has (#796).
+      it('answers 403 to a caller outside the update ceiling before counting the dates (#796)', async () => {
+        row = makeEvent({ id: 'event-1', schedulingMode: EventSchedulingMode.MultiDay });
+        tx.event.count.mockResolvedValue(0);
+        tx.eventOccurrence.count.mockResolvedValue(2);
+
+        await expect(
+          service.updateEvent('event-1', { schedulingMode: EventSchedulingMode.Fixed } as never),
+        ).rejects.toThrow(new ForbiddenException(t('common.forbidden.update')));
+
+        expect(tx.event.count).toHaveBeenCalledWith({ where: { id: 'event-1', AND: [COND] } });
+        expect(tx.eventOccurrence.count).not.toHaveBeenCalled();
+        expect(tx.event.update).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        ['the mode is unchanged', EventSchedulingMode.Fixed, { schedulingMode: EventSchedulingMode.Fixed }],
+        ['the switch is to another mode', EventSchedulingMode.Fixed, { schedulingMode: EventSchedulingMode.Poll }],
+        ['the patch leaves the mode alone', EventSchedulingMode.MultiDay, { title: 'New' }],
+      ])('does not count dates when %s', async (_name, stored, patch) => {
+        row = makeEvent({ id: 'event-1', schedulingMode: stored });
+
+        await service.updateEvent('event-1', patch as never);
+
+        expect(tx.eventOccurrence.count).not.toHaveBeenCalled();
+        expect(tx.event.update).toHaveBeenCalled();
+      });
     });
 
     it('rejects an empty update patch', async () => {

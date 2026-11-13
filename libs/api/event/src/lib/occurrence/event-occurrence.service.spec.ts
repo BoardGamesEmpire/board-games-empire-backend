@@ -576,6 +576,39 @@ describe('EventOccurrenceService', () => {
       );
     });
 
+    // A PATCH that switches the event to Fixed holds the same lock, so a mode
+    // read before the lock can be stale by the time the lock is granted.
+    it('reads the scheduling mode under the event lock, so a concurrent switch to Fixed is seen (#796)', async () => {
+      const order: string[] = [];
+      db.$queryRaw.mockImplementation(((query: unknown) => {
+        order.push(/FOR NO KEY UPDATE$/.test(rawQueryText(query)) ? 'lock' : 'other-raw');
+        return Promise.resolve(isCancelRead(query) ? [{ cancelledAt: null }] : []);
+      }) as never);
+      // The read before the lock finds MultiDay; the one under it finds the
+      // switch that committed meanwhile.
+      db.event.findUnique
+        .mockImplementationOnce((() => {
+          order.push('mode-before-lock');
+          return Promise.resolve({ id: 'event-1', householdId: null });
+        }) as never)
+        .mockImplementationOnce((() => {
+          order.push('mode-under-lock');
+          return Promise.resolve({ schedulingMode: EventSchedulingMode.Fixed });
+        }) as never);
+      db.eventOccurrence.count.mockResolvedValue(1);
+
+      const rejection: unknown = await service.addOccurrence('event-1', { label: 'Day 2' }).catch((e: unknown) => e);
+
+      expect(order.filter((label) => label !== 'other-raw')).toEqual(['mode-before-lock', 'lock', 'mode-under-lock']);
+      expect(db.event.findUnique).toHaveBeenLastCalledWith({
+        where: { id: 'event-1', deletedAt: null },
+        select: { schedulingMode: true },
+      });
+      expect(rejection).toBeInstanceOf(BadRequestException);
+      expect((rejection as BadRequestException).getResponse()).toEqual(t('errors.occurrence.fixed_mode_single'));
+      expect(db.eventOccurrence.create).not.toHaveBeenCalled();
+    });
+
     it('refuses a new date on a cancelled event with 400, writing nothing (#795)', async () => {
       db.event.findUnique.mockResolvedValue({ id: 'event-1', schedulingMode: EventSchedulingMode.MultiDay } as never);
       eventIsCancelled();
@@ -627,6 +660,68 @@ describe('EventOccurrenceService', () => {
       expect(emitted.after).toEqual({ id: 'occ-1', label: 'New' });
     });
 
+    it('writes no audit event when the patch re-sends stored values (#728)', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue(
+        makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', label: 'Same', location: 'Hall' }),
+      );
+      db.eventOccurrence.update.mockResolvedValue(
+        makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', label: 'Same', location: 'Hall' }),
+      );
+
+      await service.updateOccurrence('event-1', 'occ-1', { label: 'Same', location: 'Hall' });
+
+      expect(emitter.emit).not.toHaveBeenCalledWith(OccurrenceUpdatedEvent.eventName, expect.anything());
+    });
+
+    it('audits only the changed column when one of two sent changed (#728)', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue(
+        makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', label: 'Old', location: 'Hall' }),
+      );
+      db.eventOccurrence.update.mockResolvedValue(
+        makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', label: 'New', location: 'Hall' }),
+      );
+
+      await service.updateOccurrence('event-1', 'occ-1', { label: 'New', location: 'Hall' });
+
+      const [, emitted] = emitter.emit.mock.calls.find(([name]) => name === OccurrenceUpdatedEvent.eventName) ?? [];
+      expect(Object.keys(emitted.before)).toEqual(['id', 'label']);
+      expect(Object.keys(emitted.after)).toEqual(['id', 'label']);
+    });
+
+    // Whether anything changed is judged against the row read under the
+    // event's lock, the state the write replaces. The read before the lock
+    // can be stale: another write to the date may land between the two (#728).
+    describe('a write that landed between the read before the lock and the one under it (#728)', () => {
+      const beforeLockThenLocked = (beforeLock: string, locked: string) =>
+        db.eventOccurrence.findUnique
+          .mockResolvedValueOnce(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', location: beforeLock }))
+          .mockResolvedValueOnce(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', location: locked }));
+
+      it('audits a change from the locked value, though the read before the lock matched the patch (#728)', async () => {
+        beforeLockThenLocked('Hall', 'Garden');
+        db.eventOccurrence.update.mockResolvedValue(
+          makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', location: 'Hall' }),
+        );
+
+        await service.updateOccurrence('event-1', 'occ-1', { location: 'Hall' });
+
+        const [, emitted] = emitter.emit.mock.calls.find(([name]) => name === OccurrenceUpdatedEvent.eventName) ?? [];
+        expect(emitted?.before).toEqual({ id: 'occ-1', location: 'Garden' });
+        expect(emitted?.after).toEqual({ id: 'occ-1', location: 'Hall' });
+      });
+
+      it('audits nothing when the locked row already holds the patch, though the read before the lock did not (#728)', async () => {
+        beforeLockThenLocked('Hall', 'Garden');
+        db.eventOccurrence.update.mockResolvedValue(
+          makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', location: 'Garden' }),
+        );
+
+        await service.updateOccurrence('event-1', 'occ-1', { location: 'Garden' });
+
+        expect(emitter.emit).not.toHaveBeenCalledWith(OccurrenceUpdatedEvent.eventName, expect.anything());
+      });
+    });
+
     it('answers 404 when the date is gone by the time the lock is held (#1064)', async () => {
       // The first read finds the date; the one under the event's lock finds
       // it removed, and the update would match nothing, which alone reads as
@@ -638,10 +733,12 @@ describe('EventOccurrenceService', () => {
 
       await expect(service.updateOccurrence('event-1', 'occ-1', { label: 'x' })).rejects.toThrow(NotFoundException);
 
-      expect(db.eventOccurrence.findUnique).toHaveBeenLastCalledWith({
-        where: { id: 'occ-1', eventId: 'event-1' },
-        select: { id: true },
-      });
+      // The read under the lock is the whole row, the state the audit is
+      // judged against (#728); the one before it needs only the id.
+      expect(db.eventOccurrence.findUnique.mock.calls).toEqual([
+        [{ where: { id: 'occ-1', eventId: 'event-1' }, select: { id: true } }],
+        [{ where: { id: 'occ-1', eventId: 'event-1' } }],
+      ]);
       expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
         db.eventOccurrence.findUnique.mock.invocationCallOrder[1],
       );

@@ -22,7 +22,7 @@ import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
 import { assertEventNotCancelled } from '../lifecycle/event-lifecycle.helpers';
-import { pickSnapshot } from '../utils/pick-snapshot.util';
+import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
 import { AVAILABILITY_VOTE_SLUG, countsAsVoter, voterGrantSelect } from '../vote/vote-grant';
 import { OccurrenceEvents } from './constants';
 import { AddOccurrenceDto } from './dto/add-occurrence.dto';
@@ -183,7 +183,7 @@ export class EventOccurrenceService {
     const initiatedAt = new Date();
     const event = await this.db.event.findUnique({
       where: { id: eventId, deletedAt: null },
-      select: { id: true, schedulingMode: true, householdId: true },
+      select: { id: true, householdId: true },
     });
 
     assert(event, new NotFoundException(t('errors.event.not_found', { id: eventId })));
@@ -196,25 +196,35 @@ export class EventOccurrenceService {
       event: { householdId: event.householdId },
     });
 
-    if (event.schedulingMode === EventSchedulingMode.Fixed) {
-      const existingCount = await this.db.eventOccurrence.count({
-        where: { eventId },
-      });
-
-      if (existingCount >= 1) {
-        throw new BadRequestException(t('errors.occurrence.fixed_mode_single'));
-      }
-    }
-
-    const status =
-      dto.status ??
-      (event.schedulingMode === EventSchedulingMode.Poll ? OccurrenceStatus.Proposed : OccurrenceStatus.Confirmed);
-
     const { written: occurrence, removedGames } = await this.db.$transaction((tx) =>
       writeEventDates(tx, eventId, initiatedAt, async () => {
         // A cancelled event takes no new date (#795). Read under the date
         // write's lock, which a cancel also takes.
         await assertEventNotCancelled(tx, eventId);
+
+        // The mode read before the lock is only good for the 404 and the
+        // permission check. A PATCH that switches the event to Fixed holds
+        // the same lock, so the mode is read again here, or a date could be
+        // added to an event that just became Fixed with one date already (#796).
+        const locked = await tx.event.findUnique({
+          where: { id: eventId, deletedAt: null },
+          select: { schedulingMode: true },
+        });
+        assert(locked, new NotFoundException(t('errors.event.not_found', { id: eventId })));
+
+        if (locked.schedulingMode === EventSchedulingMode.Fixed) {
+          // Every date counts here, declined and cancelled ones too. Counting
+          // only live dates is #966's change.
+          const existingCount = await tx.eventOccurrence.count({ where: { eventId } });
+
+          if (existingCount >= 1) {
+            throw new BadRequestException(t('errors.occurrence.fixed_mode_single'));
+          }
+        }
+
+        const status =
+          dto.status ??
+          (locked.schedulingMode === EventSchedulingMode.Poll ? OccurrenceStatus.Proposed : OccurrenceStatus.Confirmed);
 
         return tx.eventOccurrence.create({
           data: {
@@ -264,31 +274,38 @@ export class EventOccurrenceService {
     const initiatedAt = new Date();
     assert(Object.keys(dto).length > 0, new BadRequestException(t('common.at_least_one_field')));
 
-    // Full row (not just the id) so the update event can carry a before snapshot.
-    const existing = await this.db.eventOccurrence.findUnique({
+    // Only the id: this read answers 404 and names the date whose votes and
+    // games are read next. What the write replaces is read under the lock.
+    const found = await this.db.eventOccurrence.findUnique({
       where: { id: occurrenceId, eventId },
+      select: { id: true },
     });
 
-    assert(existing, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
+    assert(found, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
 
     // Read before the write, so a failed read leaves the occurrence as it was.
     // The write can take games off the lineup, and the answer leaves those out.
-    const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
+    const [{ availabilityVotes, games }] = await this.withVotesAndGames([found]);
 
     try {
-      const { written: updated, removedGames } = await this.db.$transaction((tx) =>
+      const {
+        written: { existing, updated },
+        removedGames,
+      } = await this.db.$transaction((tx) =>
         writeEventDates(tx, eventId, initiatedAt, async () => {
           // Read again under the event's lock, which a removal also holds. An
           // edit that lost a race to the date's removal answers 404, as one
           // arriving second would. A removal can't be undone, so a failed
           // update after this read is the grant refusing the edit (#1064).
-          const present = await tx.eventOccurrence.findUnique({
+          // The whole row, since it is the state the write replaces, and the
+          // audit is judged against it, even when another write to the date
+          // went first (#728).
+          const existing = await tx.eventOccurrence.findUnique({
             where: { id: occurrenceId, eventId },
-            select: { id: true },
           });
-          assert(present, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
+          assert(existing, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
 
-          return tx.eventOccurrence.update({
+          const updated = await tx.eventOccurrence.update({
             where: {
               id: occurrenceId,
               // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
@@ -303,20 +320,20 @@ export class EventOccurrenceService {
             },
             include: { policy: true },
           });
+
+          return { existing, updated };
         }),
       );
 
-      const changedKeys = (['label', 'startDate', 'endDate', 'location', 'sortOrder'] as const).filter(
-        (key) => dto[key] !== undefined,
-      );
-      this.eventEmitter.emit(
-        OccurrenceUpdatedEvent.eventName,
-        new OccurrenceUpdatedEvent(
-          pickSnapshot(existing, changedKeys),
-          pickSnapshot(updated, changedKeys),
-          initiatedAt,
-        ),
-      );
+      // Only the columns whose values changed are audited; a patch that
+      // re-sends stored values emits nothing (#728).
+      const changed = changedKeys(existing, updated, ['label', 'startDate', 'endDate', 'location', 'sortOrder']);
+      if (changed.length > 0) {
+        this.eventEmitter.emit(
+          OccurrenceUpdatedEvent.eventName,
+          new OccurrenceUpdatedEvent(pickSnapshot(existing, changed), pickSnapshot(updated, changed), initiatedAt),
+        );
+      }
       emitRemovedGames(this.eventEmitter, eventId, removedGames, initiatedAt);
 
       const removedIds = new Set(removedGames.map((game) => game.id));

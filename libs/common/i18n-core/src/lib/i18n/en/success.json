@@ -37,6 +37,9 @@
     "archived": "Event archived",
     "unarchived": "Event unarchived"
   },
+  "event_policy": {
+    "updated": "Event policy updated"
+  },
   "occurrence": {
     "added": "Occurrence added",
     "updated": "Occurrence updated",

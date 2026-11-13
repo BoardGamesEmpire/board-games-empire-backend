@@ -14,7 +14,7 @@ import {
   SystemRole,
 } from '@bge/database';
 import { lockExistingHousehold } from '@bge/household';
-import { t } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import {
   AbilityService,
   PermissionsService,
@@ -26,8 +26,8 @@ import { type DefaultPaginationQueryDto, type PaginatedRows } from '@bge/shared'
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Http } from '@status/codes';
 import assert from 'node:assert';
-import { isDeepStrictEqual } from 'node:util';
 import { assertInvitable } from './attendee/invitable';
 import { browseEventScope } from './browse-event-scope';
 import { ATTENDEE_ORDER } from './constants/attendee-order.constant';
@@ -43,6 +43,7 @@ import type { CreateEventDto } from './dto/create-event.dto';
 import type { ListEventsQueryDto } from './dto/list-events.query.dto';
 import type { UpdateEventDto } from './dto/update-event.dto';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
+import { countLiveDates } from './occurrence/live-dates.util';
 import {
   EVENT_ATTENDANCE_SELECT,
   readEventAttendance,
@@ -54,7 +55,7 @@ import {
 } from './utils/event-attendance.util';
 import { EVENT_STATUS_DATE_SELECT, withEventStatus, type EventWithStatus } from './utils/event-status.util';
 import { lockLiveEvent } from './utils/lock-live-event.util';
-import { pickSnapshot } from './utils/pick-snapshot.util';
+import { changedKeys, pickSnapshot } from './utils/pick-snapshot.util';
 import { pageUpcomingEvents } from './utils/upcoming-events.util';
 
 @Injectable()
@@ -654,65 +655,81 @@ export class EventService {
     const initiatedAt = new Date();
     assert(Object.keys(dto).length > 0, new BadRequestException(t('common.at_least_one_field')));
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { occurrences: _occurrences, policy: _policy, inviteUserIds: _inviteUserIds, ...fields } = dto;
-
     try {
-      const { existing, updated } = await this.db.$transaction(async (tx) => {
+      const { existing, updated, policy } = await this.db.$transaction(async (tx) => {
         // The before-snapshot is the row read under the lock, so it is the
         // state the write replaces, even when another write to the event went
         // first (#731).
         const existing = await lockLiveEvent(tx, id);
 
+        // The route's guard passes anyone holding the grant on any event. The
+        // grant is checked against this row before the patch is judged, so a
+        // caller it doesn't reach gets 403, never a 400 that tells them how
+        // many live dates the event has (#796). The write repeats it.
+        // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+        const updateCeiling = this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update);
+        const entitled = (await tx.event.count({ where: { id, AND: updateCeiling } })) > 0;
+        assert(entitled, new ForbiddenException(t('common.forbidden.update')));
+
+        // Fixed holds one date. The count is read under the same lock a new
+        // date takes, so a date added beside this switch is counted or waits
+        // for it (#796). Existing dates keep their status.
+        if (
+          dto.schedulingMode === EventSchedulingMode.Fixed &&
+          existing.schedulingMode !== EventSchedulingMode.Fixed &&
+          (await countLiveDates(tx, id)) > 1
+        ) {
+          throw new CodedHttpException(
+            Http.BadRequest,
+            'EVENT_FIXED_MODE_TOO_MANY_DATES',
+            t('errors.event.fixed_mode_live_dates'),
+          );
+        }
+
         const updated = await tx.event.update({
+          where: { id, deletedAt: null, AND: updateCeiling },
+          data: dto,
+          include: { occurrences: { orderBy: OCCURRENCE_ORDER } },
+        });
+
+        // Read under the policy ceiling, as GET /events/:id does (#796). A
+        // writer who may update the event but not read its policy gets a null.
+        const policy = await tx.eventPolicy.findUnique({
           where: {
-            id,
-            deletedAt: null,
-            // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-            AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update),
-          },
-          data: fields,
-          include: {
-            occurrences: { orderBy: OCCURRENCE_ORDER },
-            policy: true,
+            eventId: id,
+            // eslint-disable-next-line no-restricted-syntax -- the event's one policy row, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.read),
           },
         });
 
-        return { existing, updated };
+        return { existing, updated, policy };
       });
 
-      const changedKeys = Object.keys(fields) as (keyof Event)[];
-      // The audit row records the columns the patch named, before and after,
-      // even a value re-sent unchanged, as every update in this lib does
-      // (`pickSnapshot`). A PATCH touching only relation-managed inputs
-      // (occurrences / policy / inviteUserIds) names no Event column, so it
-      // writes none.
-      if (changedKeys.length > 0) {
+      // The audit row records only the columns whose values changed, before
+      // and after, and a patch that re-sends stored values changes none, so it
+      // emits no event and no webhook (#728).
+      const changed = changedKeys(existing, updated, Object.keys(dto) as (keyof Event)[]);
+      if (changed.length > 0) {
         this.eventEmitter.emit(
           EventUpdatedEvent.eventName,
-          new EventUpdatedEvent(pickSnapshot(existing, changedKeys), pickSnapshot(updated, changedKeys), initiatedAt),
+          new EventUpdatedEvent(pickSnapshot(existing, changed), pickSnapshot(updated, changed), initiatedAt),
         );
 
-        // The columns whose values changed, not every key the patch sent, so
-        // a form that re-sends what it loaded tells no subscriber anything.
         // Their names, never their values: a receiver reads the values with
         // its own credentials. No occurrenceId, since nothing here names one
         // update stably (#127), so each emit is its own delivery.
-        const changedFields = changedKeys.filter((key) => !isDeepStrictEqual(existing[key], updated[key]));
-        if (changedFields.length > 0) {
-          this.eventEmitter.emit(
-            WebhookEventType.EventUpdated,
-            webhookEnvelope({
-              subjectId: updated.id,
-              householdId: updated.householdId,
-              data: { ...eventWebhookIds(updated), changedFields },
-            }),
-          );
-        }
+        this.eventEmitter.emit(
+          WebhookEventType.EventUpdated,
+          webhookEnvelope({
+            subjectId: updated.id,
+            householdId: updated.householdId,
+            data: { ...eventWebhookIds(updated), changedFields: changed },
+          }),
+        );
       }
 
       // The update read back every date, with no ceiling.
-      return withEventStatus(updated, updated.occurrences, initiatedAt);
+      return withEventStatus({ ...updated, policy }, updated.occurrences, initiatedAt);
     } catch (error) {
       this.logger.error(`Error updating event with ID ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
