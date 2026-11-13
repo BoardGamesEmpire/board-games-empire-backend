@@ -22,6 +22,9 @@ export const BROWSE_PATH = `${EVENTS_PATH}/browse`;
 /** `GET /api/households/:householdId/events`: a household's upcoming events (#506). */
 export const householdEventsPath = (householdId: string) => `/api/households/${householdId}/events`;
 
+/** `/api/events/:eventId/policy`: where an event's policy changes, under a grant of its own (#796). */
+export const eventPolicyPath = (eventId: string) => `${EVENTS_PATH}/${eventId}/policy`;
+
 /** `/api/events/:eventId/attendees`: the route an event's attendees are listed and added on. */
 export const attendeesPath = (eventId: string) => `${EVENTS_PATH}/${eventId}/attendees`;
 

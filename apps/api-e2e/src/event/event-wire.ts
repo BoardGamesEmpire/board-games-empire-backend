@@ -297,6 +297,25 @@ export function eventDetailEnvelope(response: HttpResponseLike, request: Request
     : fail("its 'event' carried no 'attendance' object or null", request, response);
 }
 
+/**
+ * `PATCH /api/events/:eventId/policy`: `{ message, policy }` (#796). `policy`
+ * is the row read back under the caller's own read of it, so it is `null` for
+ * a caller who may change the policy but not read it. A missing key, or a
+ * `policy` with no id, means the envelope changed, not that the read was
+ * refused.
+ */
+export function eventPolicyEnvelope(response: HttpResponseLike, request: RequestDescription): Wire<EventPolicy> | null {
+  const policy = isRecord(response.body) ? response.body['policy'] : undefined;
+  if (policy === null) {
+    return null;
+  }
+
+  return (
+    withId<Wire<EventPolicy>>(policy) ??
+    fail("it carried no 'policy' object with a string id, and no null 'policy'", request, response)
+  );
+}
+
 /** What a row must be for {@link withId}. */
 const ROW_WITH_ID = 'an object with a string id';
 
