@@ -133,6 +133,8 @@ export class IgdbDriver implements DataGatewayDriver {
 
       /** IGDB's summaries, sent as descriptions too, are plain text. */
       contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
+
+      upstream: proto.Upstream.UPSTREAM_IGDB,
     });
   }
 
@@ -212,6 +214,15 @@ export class IgdbDriver implements DataGatewayDriver {
           ];
         }),
       );
+  }
+
+  /**
+   * Not served yet: FetchGames needs a batch limit sized to the upstream's
+   * budget, which #928 sets. Describe doesn't declare it, so the server never
+   * calls it (#925).
+   */
+  fetchGames(_request: proto.FetchGamesRequest): Observable<proto.FetchGamesResponse> {
+    return unsupportedOperation('FetchGames');
   }
 
   fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {

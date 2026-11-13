@@ -17,6 +17,16 @@ service GatewayService {
   rpc Describe(DescribeRequest) returns (DescribeResponse);
   rpc SearchGames(GatewaySearchRequest) returns (stream GatewaySearchResult);
   rpc FetchGame(FetchGameRequest) returns (FetchGameResponse);
+
+  // Several games in one call (#925). Each distinct external ID answers at
+  // most once, in any order, and every one answers unless the stream errors.
+  // Each answer reads as FetchGameResponse does: a throttled one means try
+  // that ID again after retry_after_ms. A failure that isn't an answer about
+  // one game, as when the upstream can't be reached, errors the stream: the
+  // answers already sent stand, and an ID with none is asked for again. More
+  // distinct IDs than fetch_games_max_ids is refused with INVALID_ARGUMENT,
+  // never truncated.
+  rpc FetchGames(FetchGamesRequest) returns (stream FetchGamesResponse);
   rpc FetchExpansions(FetchExpansionsRequest) returns (stream GatewaySearchResult);
   rpc ListLanguages(ListLanguagesRequest) returns (ListLanguagesResponse);
   rpc ListPlatforms(ListPlatformsRequest) returns (ListPlatformsResponse);
@@ -75,6 +85,15 @@ message DescribeResponse {
 
   // The form its free text arrives in, such as a game's description.
   ContentFormat content_format = 6;
+
+  // The upstream it draws its data from. Unspecified when it has none of
+  // those listed, such as a DataGateway over a private collection (#925).
+  Upstream upstream = 7;
+
+  // The most distinct external IDs one FetchGames call takes. Required with
+  // CAPABILITY_FETCH_GAMES: the server drops that capability when it's
+  // missing or below 1, since it can't size a call safely (#925).
+  optional int32 fetch_games_max_ids = 8;
 }
 
 // An operation a DataGateway can serve, named by the RPC it answers.
@@ -101,6 +120,9 @@ enum Capability {
 
   // ListMechanics.
   CAPABILITY_LIST_MECHANICS = 7;
+
+  // FetchGames. Declared with DescribeResponse.fetch_games_max_ids.
+  CAPABILITY_FETCH_GAMES = 8;
 }
 
 // The kinds of game a DataGateway can return: every combination of a
@@ -242,6 +264,9 @@ message GatewaySearchRequest {
   // them. It may name values outside the DataGateway's coverage, which match
   // nothing it has.
   optional SearchFilter filter = 6;
+
+  // Whether a user is waiting on this search. Unset means live (#925).
+  optional TrafficClass traffic_class = 7;
 }
 
 message GatewaySearchResult {
@@ -249,24 +274,69 @@ message GatewaySearchResult {
   ResultStatus status = 2;
   optional GameSearchData game = 3;
   optional string message = 4;
-  optional int32 retry_after = 5;
+
+  // Set with RESULT_STATUS_RATE_LIMITED: the DataGateway's upstream budget is
+  // spent, and the call may be tried again after this many milliseconds. A
+  // throttled answer is never a failure (#925).
+  optional int32 retry_after_ms = 5;
 }
 
 message FetchGameRequest {
   string correlation_id = 1;
   string external_id = 2;
   optional string locale = 3;
+
+  // Whether a user is waiting on this fetch. Unset means live (#925).
+  optional TrafficClass traffic_class = 4;
 }
 
+// With a game, it was found. RESULT_STATUS_RATE_LIMITED with no game means
+// the DataGateway is throttled (#925). Any other status with no game is
+// read as not found for now, though a DataGateway may also answer a failed
+// upstream call that way. #970 tells the two apart.
 message FetchGameResponse {
   string correlation_id = 1;
   ResultStatus status = 2;
   optional GameData game = 3;
   optional string message = 4;
+
+  // Set with RESULT_STATUS_RATE_LIMITED: the DataGateway's upstream budget is
+  // spent, and the call may be tried again after this many milliseconds. A
+  // throttled answer is never a failure (#925).
+  optional int32 retry_after_ms = 5;
+}
+
+message FetchGamesRequest {
+  string correlation_id = 1;
+
+  // The games to fetch. A repeated ID answers once.
+  repeated string external_ids = 2;
+  optional string locale = 3;
+
+  // Whether a user is waiting on this fetch. Unset means live (#925).
+  optional TrafficClass traffic_class = 4;
+}
+
+// One game's answer to FetchGames, read as FetchGameResponse is (#925).
+message FetchGamesResponse {
+  string correlation_id = 1;
+
+  // Which of the request's external IDs this answers.
+  string external_id = 2;
+  ResultStatus status = 3;
+  optional GameData game = 4;
+  optional string message = 5;
+
+  // Set with RESULT_STATUS_RATE_LIMITED: the DataGateway's upstream budget is
+  // spent, and this ID may be asked for again after this many milliseconds.
+  optional int32 retry_after_ms = 6;
 }
 
 message FetchExpansionsRequest {
   string correlation_id = 1;
   string base_external_id = 2;
   optional string locale = 3;
+
+  // Whether a user is waiting on this fetch. Unset means live (#925).
+  optional TrafficClass traffic_class = 4;
 }

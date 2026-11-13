@@ -18,8 +18,16 @@ const {
   CONTENT_TYPE_UNSPECIFIED: UNSPECIFIED,
 } = proto.ContentType;
 
-const knownGame = { externalId: 'bgg-13', name: 'Catan' } as unknown as proto.GameData;
-const searchHit = { externalId: 'bgg-13', name: 'Catan' } as unknown as proto.GameSearchData;
+const knownGame = {
+  externalId: 'bgg-13',
+  name: 'Catan',
+  crossReferences: [{ upstream: proto.Upstream.UPSTREAM_STEAM, id: '544730' }],
+} as unknown as proto.GameData;
+const searchHit = {
+  externalId: 'bgg-13',
+  name: 'Catan',
+  crossReferences: [{ upstream: proto.Upstream.UPSTREAM_STEAM, id: '544730' }],
+} as unknown as proto.GameSearchData;
 
 /** A search result of `contentType`, on platforms of `platformTypes`. */
 const hit = (
@@ -37,6 +45,7 @@ const hit = (
   })),
   availableReleases: [],
   baseGameExternalIds: [],
+  crossReferences: [],
 });
 
 const catan = hit('catan', BASE_GAME, [TABLETOP]);
@@ -55,6 +64,7 @@ runDataGatewayDriverContract('InMemoryGatewayDriver', () => ({
     mechanics: [{ externalId: '2082', name: 'Worker Placement' }],
     coverage: { platformTypes: [TABLETOP], contentTypes: [BASE_GAME, EXPANSION] },
     filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS, PUBLISH_YEAR_AXIS, PLAYER_COUNT_AXIS, PLAY_TIME_AXIS],
+    upstream: proto.Upstream.UPSTREAM_BOARDGAMEGEEK,
   }),
   capabilities: [
     proto.Capability.CAPABILITY_SEARCH,
@@ -64,8 +74,10 @@ runDataGatewayDriverContract('InMemoryGatewayDriver', () => ({
     proto.Capability.CAPABILITY_LIST_PLATFORMS,
     proto.Capability.CAPABILITY_LIST_CATEGORIES,
     proto.Capability.CAPABILITY_LIST_MECHANICS,
+    proto.Capability.CAPABILITY_FETCH_GAMES,
   ],
   filterableAxes: [PLATFORM_TYPE_AXIS, CONTENT_TYPE_AXIS, PUBLISH_YEAR_AXIS, PLAYER_COUNT_AXIS, PLAY_TIME_AXIS],
+  upstream: proto.Upstream.UPSTREAM_BOARDGAMEGEEK,
   knownExternalId: 'bgg-13',
   unknownExternalId: 'no-such-id',
   searchQuery: 'catan',
@@ -91,6 +103,21 @@ runDataGatewayDriverContract('InMemoryGatewayDriver narrowing by an axis it cove
 runDataGatewayDriverContract('InMemoryGatewayDriver declaring only fetch', () => ({
   driver: new InMemoryGatewayDriver({ games: [knownGame], capabilities: [proto.Capability.CAPABILITY_FETCH] }),
   capabilities: [proto.Capability.CAPABILITY_FETCH],
+  filterableAxes: [],
+  knownExternalId: 'bgg-13',
+  unknownExternalId: 'no-such-id',
+  searchQuery: 'catan',
+}));
+
+// A batch limit of one is a valid declaration, so the suite must never send
+// such a driver two distinct IDs in one FetchGames call (#925).
+runDataGatewayDriverContract('InMemoryGatewayDriver fetching one game per FetchGames call', () => ({
+  driver: new InMemoryGatewayDriver({
+    games: [knownGame],
+    capabilities: [proto.Capability.CAPABILITY_FETCH, proto.Capability.CAPABILITY_FETCH_GAMES],
+    fetchGamesMaxIds: 1,
+  }),
+  capabilities: [proto.Capability.CAPABILITY_FETCH, proto.Capability.CAPABILITY_FETCH_GAMES],
   filterableAxes: [],
   knownExternalId: 'bgg-13',
   unknownExternalId: 'no-such-id',
@@ -232,6 +259,95 @@ describe('InMemoryGatewayDriver search filter', () => {
     await expect(firstValueFrom(driver.describe({}))).resolves.toMatchObject({
       coverage,
       filterableAxes: [CONTENT_TYPE_AXIS],
+    });
+  });
+});
+
+// A throttled DataGateway answers in-band, never as an errored stream (#925).
+describe('InMemoryGatewayDriver throttling', () => {
+  const driver = () => new InMemoryGatewayDriver({ games: [knownGame], throttledExternalIds: { slow: 5_000 } });
+
+  it('answers a throttled id RATE_LIMITED with its wait and no game on fetchGame', async () => {
+    await expect(firstValueFrom(driver().fetchGame({ correlationId: 'c', externalId: 'slow' }))).resolves.toEqual({
+      correlationId: 'c',
+      status: proto.ResultStatus.RESULT_STATUS_RATE_LIMITED,
+      retryAfterMs: 5_000,
+    });
+  });
+
+  it('answers a throttled id RATE_LIMITED with its wait on fetchGames', async () => {
+    const answers = await lastValueFrom(
+      driver()
+        .fetchGames({ correlationId: 'c', externalIds: ['bgg-13', 'slow'] })
+        .pipe(toArray()),
+    );
+
+    expect(answers).toEqual([
+      expect.objectContaining({ externalId: 'bgg-13', status: proto.ResultStatus.RESULT_STATUS_RESULT }),
+      {
+        correlationId: 'c',
+        externalId: 'slow',
+        status: proto.ResultStatus.RESULT_STATUS_RATE_LIMITED,
+        retryAfterMs: 5_000,
+      },
+    ]);
+  });
+
+  // A throttled search ends as any search does, so a consumer sees SOURCE_DONE (#925).
+  it('answers a throttled search with RATE_LIMITED and its wait, then SOURCE_DONE', async () => {
+    const throttled = new InMemoryGatewayDriver({ searchResults: [searchHit], throttledStreamRetryAfterMs: 5_000 });
+
+    await expect(
+      lastValueFrom(throttled.searchGames({ correlationId: 'c', query: 'catan' }).pipe(toArray())),
+    ).resolves.toEqual([
+      { correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_RATE_LIMITED, retryAfterMs: 5_000 },
+      { correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE },
+    ]);
+  });
+
+  it('answers a throttled expansion list with RATE_LIMITED and its wait alone', async () => {
+    const throttled = new InMemoryGatewayDriver({
+      expansionsByBaseExternalId: { 'bgg-13': [searchHit] },
+      throttledStreamRetryAfterMs: 5_000,
+    });
+
+    await expect(
+      lastValueFrom(throttled.fetchExpansions({ correlationId: 'c', baseExternalId: 'bgg-13' }).pipe(toArray())),
+    ).resolves.toEqual([
+      { correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_RATE_LIMITED, retryAfterMs: 5_000 },
+    ]);
+  });
+
+  it('declares FetchGames with a batch limit of 50 unless given one', async () => {
+    await expect(firstValueFrom(new InMemoryGatewayDriver().describe({}))).resolves.toMatchObject({
+      fetchGamesMaxIds: 50,
+    });
+    await expect(
+      firstValueFrom(new InMemoryGatewayDriver({ fetchGamesMaxIds: 2 }).describe({})),
+    ).resolves.toMatchObject({ fetchGamesMaxIds: 2 });
+  });
+
+  it('declares no batch limit when it doesn’t declare FetchGames', async () => {
+    const described = await firstValueFrom(
+      new InMemoryGatewayDriver({ capabilities: [proto.Capability.CAPABILITY_FETCH] }).describe({}),
+    );
+
+    expect(described.fetchGamesMaxIds).toBeUndefined();
+  });
+});
+
+describe('InMemoryGatewayDriver upstream', () => {
+  it('declares the upstream it is given (#925)', async () => {
+    const driver = new InMemoryGatewayDriver({ upstream: proto.Upstream.UPSTREAM_STEAM });
+
+    await expect(firstValueFrom(driver.describe({}))).resolves.toMatchObject({
+      upstream: proto.Upstream.UPSTREAM_STEAM,
+    });
+  });
+
+  it('declares no upstream unless given one (#925)', async () => {
+    await expect(firstValueFrom(new InMemoryGatewayDriver().describe({}))).resolves.toMatchObject({
+      upstream: proto.Upstream.UPSTREAM_UNSPECIFIED,
     });
   });
 });

@@ -87,6 +87,7 @@ export interface GatewayDescribeReply {
     readonly passthroughSearchLanguage: boolean;
   } | null;
   readonly contentFormat: string;
+  readonly upstream: string;
 }
 
 export interface GatewayLanguage {

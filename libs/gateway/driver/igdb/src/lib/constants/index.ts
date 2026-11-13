@@ -106,3 +106,11 @@ export enum OrganizationRating {
   ACB_R18 = 38,
   ACB_RC = 39,
 }
+
+/**
+ * IGDB's id for Steam among its `external_game_sources`, which replace the
+ * deprecated external game `category`. The id is IGDB's data, not ours: a
+ * spec pins it, so a change there fails loudly rather than dropping every
+ * Steam cross-reference (#926).
+ */
+export const IGDB_STEAM_EXTERNAL_GAME_SOURCE = 1;

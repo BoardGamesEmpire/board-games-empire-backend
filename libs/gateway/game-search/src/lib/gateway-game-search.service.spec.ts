@@ -35,6 +35,7 @@ const searchHit = (externalId: string, title: string): proto.GameSearchData => (
   availablePlatforms: [],
   availableReleases: [],
   baseGameExternalIds: [],
+  crossReferences: [],
 });
 
 const catan = searchHit('13', 'Catan');
@@ -281,6 +282,19 @@ describe('GatewayGameSearchService', () => {
       );
     });
 
+    // A user is waiting on screen for a search (#925).
+    it('asks each DataGateway as live traffic', async () => {
+      const bgg = new InMemoryGatewayDriver({ searchResults: [catan] });
+      registry.register('bgg', bgg);
+      const searched = jest.spyOn(bgg, 'searchGames');
+
+      await collect(service.searchGames(searchRequest()));
+
+      expect(searched).toHaveBeenCalledWith(
+        expect.objectContaining({ trafficClass: proto.TrafficClass.TRAFFIC_CLASS_LIVE }),
+      );
+    });
+
     it('searches only the valid ids of a targeted request, never a blank one', async () => {
       registry
         .register('bgg', new InMemoryGatewayDriver({ searchResults: [catan] }))
@@ -401,7 +415,7 @@ describe('GatewayGameSearchService', () => {
         scriptedDriver({
           searchGames: [
             { correlationId: 'corr-1', status: RESULT },
-            { correlationId: 'corr-1', status: RATE_LIMITED, message: 'slow down', retryAfter: 30 },
+            { correlationId: 'corr-1', status: RATE_LIMITED, message: 'slow down', retryAfterMs: 30_000 },
             { correlationId: 'corr-1', status: UNAVAILABLE, message: 'down for maintenance' },
             { correlationId: 'corr-1', status: ERROR, message: 'bad query' },
           ],
@@ -416,7 +430,7 @@ describe('GatewayGameSearchService', () => {
           gatewayId: 'bgg',
           status: RATE_LIMITED,
           message: 'slow down',
-          retryAfter: 30,
+          retryAfterMs: 30_000,
         },
         {
           correlationId: 'corr-1',
@@ -929,7 +943,7 @@ describe('GatewayGameSearchService', () => {
         scriptedDriver({
           searchGames: [
             { correlationId: 'corr-1', status: RESULT, game: catan },
-            { correlationId: 'corr-1', status: RATE_LIMITED, message: 'slow down', retryAfter: 30 },
+            { correlationId: 'corr-1', status: RATE_LIMITED, message: 'slow down', retryAfterMs: 30_000 },
             { correlationId: 'corr-1', status: SOURCE_DONE },
           ],
         }),
@@ -1152,6 +1166,37 @@ describe('GatewayGameSearchService', () => {
       expect(response).toEqual(expect.objectContaining({ status: ERROR, message: 'upstream exploded' }));
     });
 
+    // A user is waiting on screen for the coordinator's one-game fetch (#925).
+    it('asks the DataGateway as live traffic', async () => {
+      const bgg = new InMemoryGatewayDriver({ games: [catanData] });
+      registry.register('bgg', bgg);
+      const fetched = jest.spyOn(bgg, 'fetchGame');
+
+      await lastValueFrom(service.fetchGame(fetchRequest('bgg', '13')));
+
+      expect(fetched).toHaveBeenCalledWith(
+        expect.objectContaining({ trafficClass: proto.TrafficClass.TRAFFIC_CLASS_LIVE }),
+      );
+    });
+
+    it('relays a throttled answer with the milliseconds to wait', async () => {
+      registry.register(
+        'bgg',
+        Object.assign(new InMemoryGatewayDriver(), {
+          fetchGame: () => from([{ correlationId: 'corr-2', status: RATE_LIMITED, retryAfterMs: 30_000 }]),
+        }),
+      );
+
+      const response = await lastValueFrom(service.fetchGame(fetchRequest('bgg', '13')));
+
+      expect(response).toEqual({
+        correlationId: 'corr-2',
+        gatewayId: 'bgg',
+        status: RATE_LIMITED,
+        retryAfterMs: 30_000,
+      });
+    });
+
     it('resolves the gateway on every subscription, so a retry reaches a reconnected driver', async () => {
       const fetch$ = service.fetchGame(fetchRequest('bgg', '13'));
       await lastValueFrom(fetch$);
@@ -1198,6 +1243,19 @@ describe('GatewayGameSearchService', () => {
       ]);
     });
 
+    // A user is waiting on screen for the expansion list (#925).
+    it('asks the DataGateway as live traffic', async () => {
+      const bgg = new InMemoryGatewayDriver({ expansionsByBaseExternalId: { '13': [seafarers] } });
+      registry.register('bgg', bgg);
+      const fetched = jest.spyOn(bgg, 'fetchExpansions');
+
+      await collect(service.fetchExpansions(expansionsRequest));
+
+      expect(fetched).toHaveBeenCalledWith(
+        expect.objectContaining({ trafficClass: proto.TrafficClass.TRAFFIC_CLASS_LIVE }),
+      );
+    });
+
     it('reports a DataGateway it cannot reach as UNAVAILABLE rather than as having no expansions', async () => {
       const frames = await collect(service.fetchExpansions(expansionsRequest));
 
@@ -1233,7 +1291,9 @@ describe('GatewayGameSearchService', () => {
       registry.register(
         'bgg',
         scriptedDriver({
-          fetchExpansions: [{ correlationId: 'corr-3', status: RATE_LIMITED, message: 'slow down', retryAfter: 30 }],
+          fetchExpansions: [
+            { correlationId: 'corr-3', status: RATE_LIMITED, message: 'slow down', retryAfterMs: 30_000 },
+          ],
         }),
       );
 
@@ -1245,7 +1305,7 @@ describe('GatewayGameSearchService', () => {
           gatewayId: 'bgg',
           status: RATE_LIMITED,
           message: 'slow down',
-          retryAfter: 30,
+          retryAfterMs: 30_000,
         },
       ]);
     });
@@ -1349,7 +1409,7 @@ describe('GatewayGameSearchService', () => {
         scriptedDriver({
           fetchExpansions: [
             { correlationId: 'corr-3', status: RESULT, game: seafarers },
-            { correlationId: 'corr-3', status: RATE_LIMITED, message: 'slow down', retryAfter: 30 },
+            { correlationId: 'corr-3', status: RATE_LIMITED, message: 'slow down', retryAfterMs: 30_000 },
             { correlationId: 'corr-3', status: SOURCE_DONE },
           ],
         }),

@@ -1,4 +1,9 @@
-import type { DataGatewayDriver, DriverLogger, UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
+import {
+  unsupportedOperation,
+  type DataGatewayDriver,
+  type DriverLogger,
+  type UpstreamFetch,
+} from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { randomUUID } from 'node:crypto';
 import { defer, EMPTY, from, Observable, of, throwError } from 'rxjs';
@@ -164,6 +169,8 @@ export class BoardGameGeekDriver implements DataGatewayDriver {
 
       /** BGG's descriptions carry no markup. */
       contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
+
+      upstream: proto.Upstream.UPSTREAM_BOARDGAMEGEEK,
     } satisfies proto.DescribeResponse);
   }
 
@@ -330,6 +337,15 @@ export class BoardGameGeekDriver implements DataGatewayDriver {
 
       return searchItemToGameSearchData(item);
     }
+  }
+
+  /**
+   * Not served yet: FetchGames needs a batch limit sized to the upstream's
+   * budget, which #928 sets. Describe doesn't declare it, so the server never
+   * calls it (#925).
+   */
+  fetchGames(_request: proto.FetchGamesRequest): Observable<proto.FetchGamesResponse> {
+    return unsupportedOperation('FetchGames');
   }
 
   fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {

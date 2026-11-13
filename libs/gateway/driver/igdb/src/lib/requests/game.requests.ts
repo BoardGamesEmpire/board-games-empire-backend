@@ -13,6 +13,9 @@ const GAMES_ENDPOINT = '/games';
 export const GAME_SEARCH_FIELDS = [
   'cover.url',
   'expansions',
+  // A game's ids at other services; its Steam app becomes a cross-reference (#926).
+  'external_games.external_game_source',
+  'external_games.uid',
   'first_release_date',
   'game_status',
   'game_type',

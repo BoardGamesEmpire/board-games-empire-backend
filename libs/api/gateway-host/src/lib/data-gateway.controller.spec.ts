@@ -28,6 +28,14 @@ const RPCS: ReadonlyArray<[Rpc, object, object[]]> = [
   ],
   ['fetchGame', { correlationId: 'c', externalId: '13' }, [{ correlationId: 'c', status: 'RESULT_STATUS_ERROR' }]],
   [
+    'fetchGames',
+    { correlationId: 'c', externalIds: ['13', '822'] },
+    [
+      { correlationId: 'c', externalId: '13', status: proto.ResultStatus.RESULT_STATUS_RESULT },
+      { correlationId: 'c', externalId: '822', status: proto.ResultStatus.RESULT_STATUS_RATE_LIMITED },
+    ],
+  ],
+  [
     'fetchExpansions',
     { correlationId: 'c', baseExternalId: '13' },
     [
@@ -61,6 +69,7 @@ describe('DataGatewayController', () => {
       describe: jest.fn(),
       searchGames: jest.fn(),
       fetchGame: jest.fn(),
+      fetchGames: jest.fn(),
       fetchExpansions: jest.fn(),
       listLanguages: jest.fn(),
       listPlatforms: jest.fn(),

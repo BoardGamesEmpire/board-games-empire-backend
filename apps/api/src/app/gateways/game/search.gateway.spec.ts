@@ -638,7 +638,14 @@ describe('GameSearchGateway', () => {
         });
       });
 
-      it('emits search:rate_limited with retryAfter for RESULT_STATUS_RATE_LIMITED', async () => {
+      // The DataGateway's wait arrives in milliseconds; the client is told
+      // whole seconds, rounded up so it never asks again too soon (#925).
+      it.each([
+        [30_000, 30],
+        [1_500, 2],
+        [0, 60],
+        [-5, 60],
+      ])('emits search:rate_limited, a wait of %i ms telling the client %i seconds', async (retryAfterMs, seconds) => {
         const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(
           of(
@@ -646,7 +653,7 @@ describe('GameSearchGateway', () => {
               correlationId: 'corr-1',
               gatewayId: 'bgg-gw-1',
               status: ResultStatus.RESULT_STATUS_RATE_LIMITED,
-              retryAfter: 30,
+              retryAfterMs,
               message: 'Too many requests',
             } satisfies SearchGameResult,
             makeSourceDone(),
@@ -658,7 +665,7 @@ describe('GameSearchGateway', () => {
         assertEmitted<WsRateLimitedPayload>(room('corr-1'), SearchEvents.SearchRateLimited, {
           correlationId: 'corr-1',
           source: 'bgg-gw-1',
-          retryAfter: 30,
+          retryAfter: seconds,
         });
       });
 
@@ -1144,6 +1151,7 @@ function makeResultFrame(overrides: Partial<SearchGameResult> = {}): SearchGameR
       availablePlatforms: [],
       availableReleases: [],
       baseGameExternalIds: [],
+      crossReferences: [],
     } as GameSearchData,
     inSystem: false,
     ...overrides,

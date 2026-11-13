@@ -836,6 +836,10 @@ _Avoid_: external ID for the server's own id
 An item's id at another upstream, as one DataGateway reports it, such as IGDB naming a game's Steam app. An import links to a game the server already has only when a cross-reference matches; a game that merely looks the same is left for a game merge.
 _Avoid_: alias, store identifier, external ID (that is the id at the DataGateway itself)
 
+**Traffic class**:
+Whether a call to a DataGateway is live, a call a user is waiting on screen for, such as a search, or background, work that runs as a job, such as every import and a sync's backfill. A DataGateway keeps part of its upstream's budget for live calls.
+_Avoid_: priority (that is the job queue's order)
+
 **Interview**:
 The server asking a DataGateway to describe itself: its capabilities, formats and the vocabularies it can list. Its sections load after it. It recurs over the DataGateway's life.
 _Avoid_: handshake, registration, discovery, sync, language sync

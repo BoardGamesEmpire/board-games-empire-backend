@@ -313,6 +313,8 @@ export function searchItemToGameSearchData(item: BggSearchItem, thing?: BggThing
     sourceUrl: toSourceUrl({ id: item.id, type: item.type }),
     availablePlatforms: [TABLETOP_PLATFORM],
     availableReleases: [],
+    // BGG names no game's id at another upstream (#925).
+    crossReferences: [],
   } satisfies Omit<proto.GameSearchData, 'baseGameExternalIds'>;
 
   if (!thing) {
@@ -353,6 +355,8 @@ export function thingToGameSearchData(thing: BggThing): proto.GameSearchData {
     summary: decodeDescription(thing.description),
     availablePlatforms: [TABLETOP_PLATFORM],
     availableReleases: [toSyntheticTabletopRelease(thing)],
+    // BGG names no game's id at another upstream (#925).
+    crossReferences: [],
   } satisfies proto.GameSearchData;
 }
 
@@ -410,6 +414,8 @@ export function thingToGameData(thing: BggThing, locale?: string): proto.GameDat
     complexityWeight,
 
     baseGameExternalIds: toBaseGameExternalIds(thing),
+    // BGG names no game's id at another upstream (#925).
+    crossReferences: [],
 
     platforms: [TABLETOP_PLATFORM],
     releases: toReleases(thing),

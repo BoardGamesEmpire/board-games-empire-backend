@@ -1,6 +1,14 @@
 import * as proto from '@boardgamesempire/proto-gateway';
 import { DateTime } from 'luxon';
-import { AgeRatingOrganization, GameStatus, GameType, OrganizationRating, PlatformType, Region } from '../constants';
+import {
+  AgeRatingOrganization,
+  GameStatus,
+  GameType,
+  IGDB_STEAM_EXTERNAL_GAME_SOURCE,
+  OrganizationRating,
+  PlatformType,
+  Region,
+} from '../constants';
 import type {
   IgdbAgeRating,
   IgdbGame,
@@ -471,6 +479,21 @@ function toBaseGameExternalIds(game: IgdbGame): string[] {
   return typeof ref === 'number' ? [String(ref)] : [];
 }
 
+/**
+ * The game's Steam apps as cross-references, each once, in IGDB's order. An
+ * entry at another service is left out until that service is an upstream, and
+ * one with no uid can never match, so it's left out too. A uid is trimmed and
+ * otherwise kept exactly as IGDB gives it (#926).
+ */
+function toCrossReferences(game: IgdbGame): proto.CrossReference[] {
+  const steamApps = (game.external_games ?? [])
+    .filter((entry) => entry.external_game_source === IGDB_STEAM_EXTERNAL_GAME_SOURCE)
+    .map((entry) => entry.uid?.trim() ?? '')
+    .filter((uid) => uid !== '');
+
+  return [...new Set(steamApps)].map((id) => ({ upstream: proto.Upstream.UPSTREAM_STEAM, id }));
+}
+
 /** The year of a Unix-seconds date, in UTC, as IGDB's search narrowing reads it (#719). */
 function toYearPublished(unixSeconds: number | undefined): number | undefined {
   return unixSeconds !== undefined ? new Date(unixSeconds * 1000).getUTCFullYear() : undefined;
@@ -508,6 +531,7 @@ export function toGameSearchData(game: IgdbGame): proto.GameSearchData {
     availablePlatforms: (game.platforms ?? []).map(toPlatformData),
     availableReleases,
     baseGameExternalIds: toBaseGameExternalIds(game),
+    crossReferences: toCrossReferences(game),
   };
 }
 
@@ -563,6 +587,7 @@ export function toGameData(game: IgdbGame, locale?: string): proto.GameData {
     artists: [],
     averageRating: game.total_rating,
     baseGameExternalIds: toBaseGameExternalIds(game),
+    crossReferences: toCrossReferences(game),
 
     categories,
     contentType: toContentType(game.game_type),

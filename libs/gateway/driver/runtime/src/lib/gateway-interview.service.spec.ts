@@ -8,11 +8,13 @@ import {
   LanguageCodeFormat,
   PlatformType,
   ResourceType,
+  Upstream,
 } from '@bge/database';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { status } from '@grpc/grpc-js';
+import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test } from '@nestjs/testing';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -49,6 +51,7 @@ const STUB_DESCRIPTION: proto.DescribeResponse = {
     passthroughSearchLanguage: false,
   },
   contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
+  upstream: proto.Upstream.UPSTREAM_UNSPECIFIED,
 };
 
 interface Answers {
@@ -199,6 +202,72 @@ describe('GatewayInterviewService', () => {
       );
 
       expect(table.row(GW)).toMatchObject({ capabilities: [DataGatewayCapability.Fetch], contentFormat: null });
+    });
+
+    it('stores the upstream the DataGateway declares (#925)', async () => {
+      table.seed({ id: GW });
+
+      await service.interview(
+        GW,
+        dataGateway({ description: { ...STUB_DESCRIPTION, upstream: proto.Upstream.UPSTREAM_BOARDGAMEGEEK } }),
+      );
+
+      expect(table.row(GW)?.upstream).toBe(Upstream.BoardGameGeek);
+    });
+
+    // gRPC hands over an upstream the server's proto doesn't know as a bare
+    // number, from a DataGateway newer than the server (#925).
+    it('stores no upstream when it declares one the server doesn’t know', async () => {
+      table.seed({ id: GW, upstream: Upstream.Steam });
+
+      await service.interview(
+        GW,
+        dataGateway({ description: { ...STUB_DESCRIPTION, upstream: 7 as unknown as proto.Upstream } }),
+      );
+
+      expect(table.row(GW)?.upstream).toBeNull();
+    });
+
+    it('stores FetchGames with the batch limit it declares (#925)', async () => {
+      table.seed({ id: GW });
+
+      await service.interview(
+        GW,
+        dataGateway({
+          description: {
+            ...STUB_DESCRIPTION,
+            capabilities: [proto.Capability.CAPABILITY_FETCH, proto.Capability.CAPABILITY_FETCH_GAMES],
+            fetchGamesMaxIds: 250,
+          },
+        }),
+      );
+
+      expect(table.row(GW)).toMatchObject({
+        capabilities: [DataGatewayCapability.Fetch, DataGatewayCapability.FetchGames],
+        fetchGamesMaxIds: 250,
+      });
+    });
+
+    // Nothing could size a FetchGames call to it, so it isn't routed one (#925).
+    it('drops a FetchGames declared without a batch limit, and says so', async () => {
+      table.seed({ id: GW, fetchGamesMaxIds: 50 });
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      await service.interview(
+        GW,
+        dataGateway({
+          description: {
+            ...STUB_DESCRIPTION,
+            capabilities: [proto.Capability.CAPABILITY_FETCH, proto.Capability.CAPABILITY_FETCH_GAMES],
+          },
+        }),
+      );
+
+      expect(table.row(GW)).toMatchObject({ capabilities: [DataGatewayCapability.Fetch], fetchGamesMaxIds: null });
+      expect(warn).toHaveBeenCalledWith(
+        `DataGateway ${GW} declares FetchGames without a batch limit of at least 1; FetchGames isn't stored`,
+      );
+      warn.mockRestore();
     });
 
     it('keeps the DataGateway’s order for the request language formats it prefers, and the server’s order for every other list', async () => {

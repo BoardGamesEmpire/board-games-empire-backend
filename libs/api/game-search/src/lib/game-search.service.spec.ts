@@ -397,6 +397,7 @@ describe('GameSearchService', () => {
         availablePlatforms: [],
         availableReleases: [],
         baseGameExternalIds: [],
+        crossReferences: [],
       },
       inSystem: false,
     });
@@ -687,6 +688,7 @@ describe('GameSearchService', () => {
         availablePlatforms: [],
         availableReleases: [],
         baseGameExternalIds: [],
+        crossReferences: [],
         ...game,
       },
     });
@@ -728,6 +730,7 @@ describe('GameSearchService', () => {
             availablePlatforms: [],
             availableReleases: [],
             baseGameExternalIds: [],
+            crossReferences: [],
             summary: '**Trade** and build',
           },
         },

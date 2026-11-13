@@ -43,5 +43,6 @@
     "responseFormat": "LANGUAGE_CODE_FORMAT_IETF_BCP_47",
     "passthroughSearchLanguage": false
   },
-  "contentFormat": "CONTENT_FORMAT_PLAIN_TEXT"
+  "contentFormat": "CONTENT_FORMAT_PLAIN_TEXT",
+  "upstream": "UPSTREAM_IGDB"
 }

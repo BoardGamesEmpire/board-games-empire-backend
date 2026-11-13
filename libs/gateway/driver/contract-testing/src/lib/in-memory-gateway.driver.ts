@@ -1,4 +1,4 @@
-import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
+import { fetchEachGame, type DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { concat, from, Observable, of, throwError } from 'rxjs';
 import { OPERATIONS } from './operations.js';
@@ -23,8 +23,30 @@ export interface InMemoryGatewayFixtures {
    */
   filterableAxes?: proto.SearchFilterAxis[];
 
+  /** The upstream describe declares, none unless set (#925). */
+  upstream?: proto.Upstream;
+
   /** fetchGame resolves against these by `externalId`. */
   games?: proto.GameData[];
+
+  /**
+   * External IDs fetchGame and fetchGames answer throttled, each with the
+   * milliseconds to wait: RATE_LIMITED and no game (#925).
+   */
+  throttledExternalIds?: Record<string, number>;
+
+  /**
+   * When set, searchGames and fetchExpansions answer throttled, with this
+   * many milliseconds to wait: one RATE_LIMITED frame instead of results,
+   * and a search still ends with SOURCE_DONE (#925).
+   */
+  throttledStreamRetryAfterMs?: number;
+
+  /**
+   * The most distinct external IDs fetchGames takes, 50 unless set. describe
+   * declares it while it declares FetchGames (#925).
+   */
+  fetchGamesMaxIds?: number;
 
   /**
    * searchGames streams these (as RESULT frames) for ANY query, then
@@ -51,6 +73,9 @@ export interface InMemoryGatewayFixtures {
 
 /** gRPC's status code for an operation a DataGateway doesn't implement. */
 const UNIMPLEMENTED = 12;
+
+/** The batch limit an in-memory driver declares unless its fixtures set one. */
+const DEFAULT_FETCH_GAMES_MAX_IDS = 50;
 
 /**
  * Whether a list in a search's filter lets a game through: it names nothing,
@@ -184,7 +209,11 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
     return this.failed() ?? of<proto.HealthCheckResponse>({ status: proto.HealthCheckResponse_ServingStatus.SERVING });
   }
 
-  /** Declares its fixtures' capabilities, coverage and filterable axes, BCP 47 language codes and plain text. */
+  /**
+   * Declares its fixtures' capabilities, coverage, filterable axes and
+   * upstream, BCP 47 language codes and plain text, and its batch limit
+   * while it declares FetchGames.
+   */
   describe(request: proto.DescribeRequest): Observable<proto.DescribeResponse> {
     return (
       this.failed<proto.DescribeResponse>() ??
@@ -199,6 +228,10 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
           passthroughSearchLanguage: false,
         },
         contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
+        upstream: this.fixtures.upstream ?? proto.Upstream.UPSTREAM_UNSPECIFIED,
+        ...(this.capabilities.includes(proto.Capability.CAPABILITY_FETCH_GAMES) && {
+          fetchGamesMaxIds: this.fetchGamesMaxIds,
+        }),
       })
     );
   }
@@ -209,13 +242,16 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
       return refused;
     }
 
-    const results = (this.fixtures.searchResults ?? [])
-      .filter((game) => this.matchesFilter(game, request.filter))
-      .map((game): proto.GatewaySearchResult => ({
-        correlationId: request.correlationId,
-        status: proto.ResultStatus.RESULT_STATUS_RESULT,
-        game,
-      }));
+    const throttled = this.throttledFrame(request);
+    const results = throttled
+      ? [throttled]
+      : (this.fixtures.searchResults ?? [])
+          .filter((game) => this.matchesFilter(game, request.filter))
+          .map((game): proto.GatewaySearchResult => ({
+            correlationId: request.correlationId,
+            status: proto.ResultStatus.RESULT_STATUS_RESULT,
+            game,
+          }));
 
     return concat(
       from(results),
@@ -227,9 +263,35 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
   }
 
   fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {
-    const refused = this.refused<proto.FetchGameResponse>(proto.Capability.CAPABILITY_FETCH);
-    if (refused) {
-      return refused;
+    return this.refused<proto.FetchGameResponse>(proto.Capability.CAPABILITY_FETCH) ?? this.lookUp(request);
+  }
+
+  /** Each distinct id one at a time, as a DataGateway whose upstream has no batch call serves it (#925). */
+  fetchGames(request: proto.FetchGamesRequest): Observable<proto.FetchGamesResponse> {
+    return (
+      this.refused<proto.FetchGamesResponse>(proto.Capability.CAPABILITY_FETCH_GAMES) ??
+      fetchEachGame(request, (one) => this.lookUp(one), this.fetchGamesMaxIds)
+    );
+  }
+
+  /** The RATE_LIMITED frame a throttled search or expansion list answers with, when its fixtures throttle them (#925). */
+  private throttledFrame(request: { correlationId: string }): proto.GatewaySearchResult | undefined {
+    const retryAfterMs = this.fixtures.throttledStreamRetryAfterMs;
+
+    return retryAfterMs === undefined
+      ? undefined
+      : { correlationId: request.correlationId, status: proto.ResultStatus.RESULT_STATUS_RATE_LIMITED, retryAfterMs };
+  }
+
+  /** One game from the fixtures, as fetchGame answers it and fetchGames answers each id. */
+  private lookUp(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {
+    const retryAfterMs = this.fixtures.throttledExternalIds?.[request.externalId];
+    if (retryAfterMs !== undefined) {
+      return of<proto.FetchGameResponse>({
+        correlationId: request.correlationId,
+        status: proto.ResultStatus.RESULT_STATUS_RATE_LIMITED,
+        retryAfterMs,
+      });
     }
 
     const game = this.fixtures.games?.find((candidate) => candidate.externalId === request.externalId);
@@ -255,6 +317,11 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
     const refused = this.refused<proto.GatewaySearchResult>(proto.Capability.CAPABILITY_FETCH_EXPANSIONS);
     if (refused) {
       return refused;
+    }
+
+    const throttled = this.throttledFrame(request);
+    if (throttled) {
+      return of(throttled);
     }
 
     const expansions = this.fixtures.expansionsByBaseExternalId?.[request.baseExternalId] ?? [];
@@ -315,6 +382,10 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
 
   private get capabilities(): readonly proto.Capability[] {
     return this.fixtures.capabilities ?? OPERATIONS;
+  }
+
+  private get fetchGamesMaxIds(): number {
+    return this.fixtures.fetchGamesMaxIds ?? DEFAULT_FETCH_GAMES_MAX_IDS;
   }
 
   private get filterableAxes(): readonly proto.SearchFilterAxis[] {

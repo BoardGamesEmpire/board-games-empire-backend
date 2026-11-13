@@ -19,6 +19,12 @@ export interface DataGatewayDriverContractContext {
    */
   filterableAxes: proto.SearchFilterAxis[];
 
+  /**
+   * The upstream the driver draws from. Its `describe` must declare exactly
+   * this, and unset means it declares none (#925).
+   */
+  upstream?: proto.Upstream;
+
   /** An externalId the driver can resolve via fetchGame. */
   knownExternalId: string;
 
@@ -72,6 +78,13 @@ const CONTENT_FORMATS: readonly proto.ContentFormat[] = [
   proto.ContentFormat.CONTENT_FORMAT_HTML,
   proto.ContentFormat.CONTENT_FORMAT_BBCODE,
   proto.ContentFormat.CONTENT_FORMAT_MARKDOWN,
+];
+
+/** Every upstream a cross-reference can name. */
+const KNOWN_UPSTREAMS: readonly proto.Upstream[] = [
+  proto.Upstream.UPSTREAM_BOARDGAMEGEEK,
+  proto.Upstream.UPSTREAM_IGDB,
+  proto.Upstream.UPSTREAM_STEAM,
 ];
 
 type Setup = () => DataGatewayDriverContractContext | Promise<DataGatewayDriverContractContext>;
@@ -158,6 +171,15 @@ export function runDataGatewayDriverContract(description: string, setup: Setup, 
       expect(new Set(response.filterableAxes)).toEqual(new Set(ctx.filterableAxes));
     });
 
+    it('describe declares exactly the upstream the run names', async () => {
+      const response = await firstValueFrom(ctx.driver.describe({ correlationId: 'contract-upstream' }));
+
+      // Over gRPC an unset enum arrives missing, so it compares as unspecified (#925).
+      expect(response.upstream ?? proto.Upstream.UPSTREAM_UNSPECIFIED).toBe(
+        ctx.upstream ?? proto.Upstream.UPSTREAM_UNSPECIFIED,
+      );
+    });
+
     it('describe declares its content format as plain text, HTML, BBCode or Markdown', async () => {
       const response = await firstValueFrom(ctx.driver.describe({ correlationId: 'contract-content-format' }));
 
@@ -178,6 +200,25 @@ export function runDataGatewayDriverContract(description: string, setup: Setup, 
             true,
           );
           expect(frames[frames.length - 1]?.status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
+        },
+      );
+
+      // Search results carry cross-references too, so "already in the game
+      // catalog" can match on a search (#925).
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_SEARCH,
+        'every cross-reference on a search result names an upstream and a non-empty id',
+        async () => {
+          const frames = await lastValueFrom(
+            ctx.driver
+              .searchGames({ correlationId: 'contract-search-cross-references', query: ctx.searchQuery })
+              .pipe(toArray()),
+          );
+
+          for (const crossReference of frames.flatMap((frame) => frame.game?.crossReferences ?? [])) {
+            expect(KNOWN_UPSTREAMS).toContain(crossReference.upstream);
+            expect(crossReference.id.trim()).not.toBe('');
+          }
         },
       );
 
@@ -220,6 +261,23 @@ export function runDataGatewayDriverContract(description: string, setup: Setup, 
         },
       );
 
+      // A cross-reference with no upstream, or no id, can never match, and
+      // an import that trusted one would link nothing (#925).
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_FETCH,
+        'every cross-reference names an upstream and a non-empty id',
+        async () => {
+          const response = await firstValueFrom(
+            ctx.driver.fetchGame({ correlationId: 'contract-cross-references', externalId: ctx.knownExternalId }),
+          );
+
+          for (const crossReference of response.game?.crossReferences ?? []) {
+            expect(KNOWN_UPSTREAMS).toContain(crossReference.upstream);
+            expect(crossReference.id.trim()).not.toBe('');
+          }
+        },
+      );
+
       itWhenDeclared(
         proto.Capability.CAPABILITY_FETCH,
         'fetchGame answers a clean not-found as a response, never an errored stream',
@@ -232,6 +290,83 @@ export function runDataGatewayDriverContract(description: string, setup: Setup, 
           );
 
           expect(response.game).toBeUndefined();
+          // A throttled answer isn't a not-found: it says nothing about the game (#925).
+          expect(response.status).not.toBe(proto.ResultStatus.RESULT_STATUS_RATE_LIMITED);
+        },
+      );
+    });
+
+    describe('when it declares fetch games', () => {
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_FETCH_GAMES,
+        'describe declares a batch limit of at least one',
+        async () => {
+          const response = await firstValueFrom(ctx.driver.describe({ correlationId: 'contract-fetch-games-limit' }));
+
+          expect(response.fetchGamesMaxIds).toBeGreaterThanOrEqual(1);
+        },
+      );
+
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_FETCH_GAMES,
+        'fetchGames answers each distinct id once, a known one with its game and an unknown one as not found',
+        async () => {
+          const { fetchGamesMaxIds = 0 } = await firstValueFrom(
+            ctx.driver.describe({ correlationId: 'contract-fetch-games' }),
+          );
+          const fetchGames = (externalIds: string[]) =>
+            lastValueFrom(
+              ctx.driver.fetchGames({ correlationId: 'contract-fetch-games', externalIds }).pipe(toArray()),
+            );
+
+          // A batch limit of one is valid, and a call naming two distinct IDs
+          // would be refused, so such a driver is asked for each on its own.
+          // The known ID still repeats, so each call tests deduplication (#925).
+          const answers =
+            fetchGamesMaxIds >= 2
+              ? await fetchGames([ctx.knownExternalId, ctx.unknownExternalId, ctx.knownExternalId])
+              : [
+                  ...(await fetchGames([ctx.knownExternalId, ctx.knownExternalId])),
+                  ...(await fetchGames([ctx.unknownExternalId])),
+                ];
+
+          expect(answers).toHaveLength(2);
+          const known = answers.find((answer) => answer.externalId === ctx.knownExternalId);
+          const unknown = answers.find((answer) => answer.externalId === ctx.unknownExternalId);
+          expect(known?.game?.externalId).toBe(ctx.knownExternalId);
+          expect(unknown).toBeDefined();
+          expect(unknown?.game).toBeUndefined();
+          expect(unknown?.status).not.toBe(proto.ResultStatus.RESULT_STATUS_RATE_LIMITED);
+        },
+      );
+
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_FETCH_GAMES,
+        'fetchGames with no ids completes with none',
+        async () => {
+          const answers = await lastValueFrom(
+            ctx.driver.fetchGames({ correlationId: 'contract-fetch-games-none', externalIds: [] }).pipe(toArray()),
+          );
+
+          expect(answers).toEqual([]);
+        },
+      );
+
+      // Truncating would leave ids unanswered with nothing to say so (#925).
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_FETCH_GAMES,
+        'fetchGames refuses more distinct ids than its batch limit with INVALID_ARGUMENT',
+        async () => {
+          const { fetchGamesMaxIds = 0 } = await firstValueFrom(
+            ctx.driver.describe({ correlationId: 'contract-fetch-games-over' }),
+          );
+          const externalIds = Array.from({ length: fetchGamesMaxIds + 1 }, (_, index) => `contract-${index}`);
+
+          const error = await lastValueFrom(
+            ctx.driver.fetchGames({ correlationId: 'contract-fetch-games-over', externalIds }).pipe(toArray()),
+          ).catch((err: unknown) => err);
+
+          expect(error).toMatchObject({ code: 3 });
         },
       );
     });

@@ -9,7 +9,7 @@
       "yearPublished": 2016,
       "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co2lgo.jpg",
       "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-blood-and-wine",
-      "averageRating": 94.20229475577315,
+      "averageRating": 94.20235656675894,
       "summary": "Blood and Wine is the second major expansion to The Witcher 3: Wild Hunt.\n\nThe players will accompany Geralt of Rivia to the region of Toussaint, one of the few places in the Witcher universe which has remained largely untouched by the war. The calm, laid-back atmosphere holds a dark and bloody secret that only the White Wolf can uncover; the expansion features new items for players to collect on their adventure and introduces previously unknown characters.",
       "availablePlatforms": [
         {
@@ -719,6 +719,12 @@
       ],
       "baseGameExternalIds": [
         "1942"
+      ],
+      "crossReferences": [
+        {
+          "upstream": "UPSTREAM_STEAM",
+          "id": "378648"
+        }
       ]
     }
   },
@@ -1231,6 +1237,12 @@
       ],
       "baseGameExternalIds": [
         "1942"
+      ],
+      "crossReferences": [
+        {
+          "upstream": "UPSTREAM_STEAM",
+          "id": "5006530"
+        }
       ]
     }
   },
@@ -1954,6 +1966,12 @@
       ],
       "baseGameExternalIds": [
         "1942"
+      ],
+      "crossReferences": [
+        {
+          "upstream": "UPSTREAM_STEAM",
+          "id": "378649"
+        }
       ]
     }
   },

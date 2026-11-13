@@ -5,6 +5,7 @@ import {
   LanguageCodeFormat,
   PlatformType,
   SearchFilterAxis,
+  Upstream,
 } from '@bge/database';
 import * as proto from '@boardgamesempire/proto-gateway';
 
@@ -27,6 +28,7 @@ const CAPABILITIES: ByProtoName<DataGatewayCapability> = {
   [proto.Capability.CAPABILITY_LIST_PLATFORMS]: DataGatewayCapability.ListPlatforms,
   [proto.Capability.CAPABILITY_LIST_CATEGORIES]: DataGatewayCapability.ListCategories,
   [proto.Capability.CAPABILITY_LIST_MECHANICS]: DataGatewayCapability.ListMechanics,
+  [proto.Capability.CAPABILITY_FETCH_GAMES]: DataGatewayCapability.FetchGames,
 };
 
 const PLATFORM_TYPES: ByProtoName<PlatformType> = {
@@ -76,6 +78,12 @@ const CONTENT_FORMATS: ByProtoName<ContentFormat> = {
   [proto.ContentFormat.CONTENT_FORMAT_MARKDOWN]: ContentFormat.Markdown,
 };
 
+const UPSTREAMS: ByProtoName<Upstream> = {
+  [proto.Upstream.UPSTREAM_BOARDGAMEGEEK]: Upstream.BoardGameGeek,
+  [proto.Upstream.UPSTREAM_IGDB]: Upstream.IGDB,
+  [proto.Upstream.UPSTREAM_STEAM]: Upstream.Steam,
+};
+
 // Own keys only, so a value that happens to name an Object.prototype member
 // finds nothing.
 const lookup = <T>(byName: ByProtoName<T>, value: unknown): T | undefined =>
@@ -94,6 +102,8 @@ export const toStoredLanguageCodeFormat = (value: unknown): LanguageCodeFormat |
   lookup(LANGUAGE_CODE_FORMATS, value);
 
 export const toStoredContentFormat = (value: unknown): ContentFormat | undefined => lookup(CONTENT_FORMATS, value);
+
+export const toStoredUpstream = (value: unknown): Upstream | undefined => lookup(UPSTREAMS, value);
 
 /*
  * The other way: the proto value a stored one is sent as, for a search the

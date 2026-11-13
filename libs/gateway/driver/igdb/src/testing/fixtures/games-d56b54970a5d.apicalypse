@@ -1,1 +1,0 @@
-fields cover.url,expansions,first_release_date,game_status,game_type,id,language_supports.language.*,name,parent_game,platforms.abbreviation,platforms.name,platforms.platform_type,standalone_expansions,summary,total_rating,url,version_parent;search "The Witcher 3";limit 5;where version_parent = null & game_type != 14 & game_type = (2);

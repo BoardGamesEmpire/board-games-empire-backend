@@ -71,6 +71,7 @@ export const STUB_BASE_GAME: proto.GameData = {
   metadataKeys: [],
   metadataValues: [],
   dlc: [],
+  crossReferences: [],
 };
 
 export const STUB_EXPANSION: proto.GameData = {
@@ -98,6 +99,7 @@ export const STUB_EXPANSION: proto.GameData = {
   metadataKeys: [],
   metadataValues: [],
   dlc: [],
+  crossReferences: [],
 };
 
 /** Every game, in the order a search returns them. */

@@ -1,10 +1,13 @@
 import { BGE_VERSION } from '@bge/version';
-import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
+import { fetchEachGame, type DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import { from, of, type Observable } from 'rxjs';
 import { STUB_CATEGORIES, STUB_GAMES, STUB_LANGUAGES, STUB_MECHANICS, STUB_PLATFORMS } from '../fixtures/catalog';
+
+/** The most external IDs one FetchGames call takes (#925). */
+const STUB_FETCH_GAMES_MAX_IDS = 50;
 
 /**
  * Whether a publish year falls in a range, both bounds inclusive. A range
@@ -67,6 +70,7 @@ function toSearchData(game: proto.GameData): proto.GameSearchData {
     minPlaytime: game.minPlaytime,
     maxPlaytime: game.maxPlaytime,
     baseGameExternalIds: game.baseGameExternalIds,
+    crossReferences: game.crossReferences,
     summary: game.description,
     availablePlatforms: game.platforms,
     availableReleases: game.releases,
@@ -108,6 +112,7 @@ export class StubGatewayDriver implements DataGatewayDriver {
         proto.Capability.CAPABILITY_LIST_PLATFORMS,
         proto.Capability.CAPABILITY_LIST_CATEGORIES,
         proto.Capability.CAPABILITY_LIST_MECHANICS,
+        proto.Capability.CAPABILITY_FETCH_GAMES,
       ],
       coverage: {
         platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
@@ -124,6 +129,9 @@ export class StubGatewayDriver implements DataGatewayDriver {
         passthroughSearchLanguage: false,
       },
       contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
+      // It draws from no real upstream (#925).
+      upstream: proto.Upstream.UPSTREAM_UNSPECIFIED,
+      fetchGamesMaxIds: STUB_FETCH_GAMES_MAX_IDS,
     });
   }
 
@@ -174,6 +182,11 @@ export class StubGatewayDriver implements DataGatewayDriver {
     const page = matches.slice(offset, request.limit === undefined ? undefined : offset + request.limit);
 
     return this.stream(request.correlationId, page);
+  }
+
+  /** Each of its fixtures one at a time (#925). */
+  fetchGames(request: proto.FetchGamesRequest): Observable<proto.FetchGamesResponse> {
+    return fetchEachGame(request, (one) => this.fetchGame(one), STUB_FETCH_GAMES_MAX_IDS);
   }
 
   fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {
