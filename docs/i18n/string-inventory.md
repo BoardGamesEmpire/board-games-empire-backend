@@ -224,7 +224,7 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
       pair was added by #408). They became `errors.api_key.invalid` (beside the existing
       `not_found_or_revoked`) and `errors.auth.impersonated_session`, which the WS refusal reuses
       (#180). The middleware throws before `LocaleResolutionMiddleware` runs, so both render in the
-      fallback locale (see [translated-exceptions.md](./translated-exceptions.md)). The 17 gRPC frames
+      request's `Accept-Language` locale (#508, see [translated-exceptions.md](./translated-exceptions.md)). The 17 gRPC frames
       stay English (§5), and the guardrail exempts those two files by name. Specs assert the markers via
       `getResponse()`. The gRPC spec's English assertions are unchanged.
 - [x] `libs/api/audit-log` — **DONE**. A DTO-only lib: it had no exception strings, so the exception
