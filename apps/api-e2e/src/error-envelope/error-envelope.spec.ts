@@ -8,8 +8,14 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
 /**
  * One error envelope from every producer (#1260): the global filter's markers,
  * validation, coded throws, a pipe, the Host check that answers before Nest
- * sees the request, and `/api/auth`'s own answers. Each case is a producer, so
- * a new one that skips the envelope shows up here as one failing case.
+ * sees the request, `/api/auth`'s own answers, and what the framework writes
+ * itself: an unmatched route's 404 and body-parser's 413 (#527, #634). Each
+ * case is a producer, so a new one that skips the envelope shows up here as
+ * one failing case.
+ *
+ * The throttler's 429 is pinned where a tier is tripped on purpose,
+ * `feedback/feedback-throttle.spec.ts`: tripping one here would spend a
+ * budget other specs share.
  */
 describe('every HTTP error leaves in one envelope (#1260)', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -56,6 +62,39 @@ describe('every HTTP error leaves in one envelope (#1260)', () => {
       .send({ reason: 'A reason the edit never reaches' });
 
     expectErrorEnvelope(response, { status: 404, code: 'CATALOG_ENTRY_NOT_FOUND' });
+  });
+
+  it('a coded 404 for a collection entry the user cannot see (#634)', async () => {
+    const user = await actors.user();
+
+    const response = await request(baseUrl)
+      .delete('/api/game-collections/clmissingentry000000000000')
+      .set(user.headers);
+
+    expectErrorEnvelope(response, { status: 404, code: 'COLLECTION_ENTRY_NOT_FOUND' });
+  });
+
+  // An id holding a `/` matches no route, so a client must not read this 404
+  // as a statement about the row (#634).
+  it('a coded 404 for a request no route matches, in place of Nest\'s "Cannot DELETE …" (#634, #527)', async () => {
+    const user = await actors.user();
+
+    const response = await request(baseUrl).delete('/api/game-collections/abc123/entries').set(user.headers);
+
+    expectErrorEnvelope(response, { status: 404, code: 'ROUTE_NOT_FOUND' });
+    expect(JSON.stringify(response.body)).not.toContain('/api/game-collections');
+  });
+
+  it('a coded 413 for a body over the limit, which body-parser refuses before any route runs (#527)', async () => {
+    const user = await actors.user();
+
+    const response = await request(baseUrl)
+      .post('/api/languages')
+      .set(user.headers)
+      .set('content-type', 'application/json')
+      .send(JSON.stringify({ name: 'x'.repeat(300 * 1024) }));
+
+    expectErrorEnvelope(response, { status: 413, code: 'REQUEST_TOO_LARGE' });
   });
 
   it('the Host check, which answers before Nest sees the request', async () => {

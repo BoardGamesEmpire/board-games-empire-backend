@@ -64,6 +64,19 @@ export class LocaleResolutionService {
     return resolveCatalogLocale(ranges, this.supportedLocales.getSupportedTags(), FALLBACK_LOCALE);
   }
 
+  /**
+   * The catalog locale an `Accept-Language` header alone resolves to, with no
+   * database read: for a request refused before its actor was known, such as
+   * a body the parser rejects ahead of the locale middleware (#527).
+   */
+  resolveAcceptLanguage(acceptLanguage: string | null | undefined): string {
+    return resolveCatalogLocale(
+      parseAcceptLanguage(acceptLanguage),
+      this.supportedLocales.getSupportedTags(),
+      FALLBACK_LOCALE,
+    );
+  }
+
   private async preferredTag(userId: string): Promise<string | null> {
     const cached = this.preferenceCache.get(userId);
     if (cached && cached.expiresAt > Date.now()) {

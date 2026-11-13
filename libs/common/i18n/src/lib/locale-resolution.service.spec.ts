@@ -99,6 +99,27 @@ describe('LocaleResolutionService', () => {
     });
   });
 
+  // For a request refused before its actor was known (#527).
+  describe('resolveAcceptLanguage', () => {
+    it('resolves the header to its best supported catalog', () => {
+      expect(build(null).resolveAcceptLanguage('fr, de-AT;q=0.8')).toBe('de');
+    });
+
+    it('falls back when no range is supported, or there is no header', () => {
+      const service = build(null);
+
+      expect(service.resolveAcceptLanguage('pt-BR')).toBe('en');
+      expect(service.resolveAcceptLanguage(undefined)).toBe('en');
+    });
+
+    it('reads no stored preference', () => {
+      const db = buildDb({ tag: 'de' });
+      new LocaleResolutionService(db, supportedLocales).resolveAcceptLanguage('en');
+
+      expect(db.userPreferences.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
   describe('preference cache', () => {
     let nowSpy: jest.SpyInstance;
     let now: number;

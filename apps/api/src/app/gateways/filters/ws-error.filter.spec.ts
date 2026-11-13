@@ -1,7 +1,14 @@
 /* eslint-disable bge/no-uncoded-exception-body -- these cases hand the renderer a coded body no producer may build, to pin that it completes any body into the envelope (#1260) */
 import type { AuditContextService } from '@bge/actor-context';
 import { SearchStartDto } from '@bge/game-search';
-import { FALLBACK_LOCALE, I18N_CATALOG_DIR, i18nValidationMessage, t, type I18nTranslations } from '@bge/i18n';
+import {
+  CodedHttpException,
+  FALLBACK_LOCALE,
+  I18N_CATALOG_DIR,
+  i18nValidationMessage,
+  t,
+  type I18nTranslations,
+} from '@bge/i18n';
 import { WsErrorEvents } from '@bge/shared';
 import {
   ArgumentsHost,
@@ -264,15 +271,32 @@ describe('WsErrorFilter', () => {
   it('keeps the status of any HTTP exception, including one whose body is a plain string', async () => {
     const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
 
-    await filter.catch(new HttpException('ThrottlerException: Too Many Requests', 429), host);
+    await filter.catch(new HttpException('Text a library wrote', 503), host);
+
+    expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
+      statusCode: 503,
+      error: 'Service Unavailable',
+      message: 'Text a library wrote',
+      pattern: 'search:start',
+      correlationId: 'corr-1',
+    });
+  });
+
+  // What `WsThrottlerGuard` throws for a frame over its limit.
+  it("answers a rate limit's coded 429 with the catalog's copy and its code, and keeps the socket open (#527)", async () => {
+    const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
+
+    await filter.catch(new CodedHttpException(429, 'RATE_LIMITED', t('errors.request.rate_limited')), host);
 
     expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
       statusCode: 429,
       error: 'Too Many Requests',
-      message: 'ThrottlerException: Too Many Requests',
+      message: 'Too many requests in a short time. Wait a moment, then try again',
+      code: 'RATE_LIMITED',
       pattern: 'search:start',
       correlationId: 'corr-1',
     });
+    expect(client.disconnect).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -329,7 +353,7 @@ describe('WsErrorFilter', () => {
       ['a WsException', new WsException('meaningful only to its thrower')],
       // better-auth's AuthGuard throws this one. No gateway runs that guard.
       ['a WsException naming a refusal', new WsException('UNAUTHORIZED')],
-    ])('answers %s with a generic 500, and logs it', async (_, exception) => {
+    ])('answers %s with a generic 500 in catalog copy, and logs it (#527)', async (_, exception) => {
       const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
       const { client, host } = hostFor('search:start', { correlationId: 'corr-1', query: 'Gloomhaven' });
 
@@ -339,12 +363,24 @@ describe('WsErrorFilter', () => {
       expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
         statusCode: 500,
         error: 'Internal Server Error',
-        message: 'Internal server error',
+        message:
+          "Something went wrong on the server, so your request wasn't completed. Try again, and if it keeps happening, tell the server's admin",
         pattern: 'search:start',
         correlationId: 'corr-1',
       });
       expect(client.disconnect).not.toHaveBeenCalled();
       expect(logged).toHaveBeenCalledWith(expect.stringContaining('search:start'), exception);
+    });
+
+    it("renders the 500's copy in the frame's locale (#527)", async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      locale = 'fr';
+      const translate = jest.spyOn(i18n, 'translate');
+      const { host } = hostFor('search:start', { correlationId: 'corr-1' });
+
+      await filter.catch(new Error('x'), host);
+
+      expect(translate).toHaveBeenCalledWith('errors.request.failed', expect.objectContaining({ lang: 'fr' }));
     });
   });
 });

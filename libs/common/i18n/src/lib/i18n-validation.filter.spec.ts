@@ -6,6 +6,7 @@ import { Test } from '@nestjs/testing';
 import { ArrayNotEmpty, ArrayUnique, IsEnum, IsIn, IsOptional, IsString } from 'class-validator';
 import { I18nModule, I18nValidationExceptionFilter, I18nValidationPipe } from 'nestjs-i18n';
 import { I18nExceptionFilter } from './i18n-exception.filter';
+import { LocaleResolutionService } from './locale-resolution.service';
 import { FALLBACK_LOCALE } from './locale.constants';
 
 /**
@@ -105,6 +106,7 @@ describe('I18nValidationExceptionFilter + I18nExceptionFilter (real catalog)', (
         { provide: AuditContextService, useValue: { getLocale: () => FALLBACK_LOCALE } },
         // Same order as apps/api: catch-all first, validation last (so Nest's
         // reversed global-filter order checks validation first).
+        { provide: LocaleResolutionService, useValue: { resolveAcceptLanguage: () => FALLBACK_LOCALE } },
         { provide: APP_FILTER, useClass: I18nExceptionFilter },
         { provide: APP_FILTER, useValue: new I18nValidationExceptionFilter({ detailedErrors: false }) },
       ],

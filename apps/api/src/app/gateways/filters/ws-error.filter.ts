@@ -1,5 +1,12 @@
 import { AuditContextService } from '@bge/actor-context';
-import { type I18nTranslations, reasonPhrase, renderErrorBody, translateValidationErrors } from '@bge/i18n';
+import {
+  type I18nTranslations,
+  reasonPhrase,
+  renderErrorBody,
+  renderMarker,
+  t,
+  translateValidationErrors,
+} from '@bge/i18n';
 import { WsErrorEvents, type WsErrorPayload } from '@bge/shared';
 import { ArgumentsHost, Catch, HttpException, Logger, WsExceptionFilter } from '@nestjs/common';
 import { Http } from '@status/codes';
@@ -19,9 +26,9 @@ import { refuseSocket, wsErrorPayload, wsExceptionPayload, type WsFrame } from '
  * every frame with a 500. A single filter has no order to get wrong.
  *
  * It is also where a frame's copy is translated (#180), as the global filters
- * do over HTTP: validation messages and `t()` markers, in the locale the
- * frame's CLS scope carries. Its own fixed copy, the 500's, stays English, as
- * Nest's own 500 does over HTTP.
+ * do over HTTP: validation messages, `t()` markers and its own 500's copy,
+ * the catalog copy the HTTP 500 carries (#527), in the locale the frame's CLS
+ * scope carries.
  *
  * No app-wide filter runs on a gateway message (Nest builds the WS exception
  * context without the application's global enhancers), so it is bound on
@@ -58,7 +65,8 @@ export class WsErrorFilter implements WsExceptionFilter {
     // Anything else is unexpected, a WsException included: its text was
     // written for whoever threw it, not for the client.
     this.logger.error(`Unhandled exception on ${frame.pattern}: socketId=${client.id}`, exception);
-    client.emit(WsErrorEvents.Exception, wsErrorPayload(Http.InternalServerError, 'Internal server error', frame));
+    const failed = renderMarker(t('errors.request.failed'), this.i18n, this.auditContext);
+    client.emit(WsErrorEvents.Exception, wsErrorPayload(Http.InternalServerError, failed, frame));
   }
 
   /**

@@ -1,11 +1,12 @@
 import { actorUserId, getActorSnapshotFromCls } from '@bge/actor-context';
 import { type ExecutionContext, Injectable } from '@nestjs/common';
-import { ThrottlerGuard, type ThrottlerRequest } from '@nestjs/throttler';
+import type { ThrottlerGuard, ThrottlerRequest } from '@nestjs/throttler';
 import type { Socket } from 'socket.io';
+import { RateLimitGuard } from '../../lib/rate-limit.guard';
 
 /**
  * Rate-limits a socket's frames by the app's throttler tiers, counted per
- * gateway handler and per user (#510). The app-wide `ThrottlerGuard` never
+ * gateway handler and per user (#510). The app-wide `RateLimitGuard` never
  * runs on a gateway message, so until this guard a client could send frames
  * as fast as it liked.
  *
@@ -22,11 +23,12 @@ import type { Socket } from 'socket.io';
  * - The headers. A frame's response is its payload, which has no headers to
  *   set.
  *
- * A refusal is a `ThrottlerException`, which `WsErrorFilter` answers as a 429
- * on `exception` and leaves the socket open.
+ * A refusal is `RateLimitGuard`'s coded 429, the one HTTP answers with, which
+ * `WsErrorFilter` sends on `exception` in the frame's locale, leaving the
+ * socket open (#527).
  */
 @Injectable()
-export class WsThrottlerGuard extends ThrottlerGuard {
+export class WsThrottlerGuard extends RateLimitGuard {
   protected override async handleRequest(requestProps: ThrottlerRequest): Promise<boolean> {
     const tracker = frameTracker(requestProps.context.switchToWs().getClient<Socket>());
 

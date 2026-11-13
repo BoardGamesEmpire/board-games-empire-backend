@@ -1,7 +1,8 @@
 import { type Actor, getActorSnapshotFromCls } from '@bge/actor-context';
+import { CodedHttpException } from '@bge/i18n';
 import type { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ThrottlerException, ThrottlerStorageService } from '@nestjs/throttler';
+import { ThrottlerStorageService } from '@nestjs/throttler';
 import type { Socket } from 'socket.io';
 import { createThrottlers } from '../../lib/throttlers';
 import { WsThrottlerGuard } from './ws-throttler.guard';
@@ -78,20 +79,21 @@ describe('WsThrottlerGuard', () => {
     }
   };
 
-  it('refuses the frame over the limit with a 429, and sets no headers on the payload', async () => {
+  it('refuses the frame over the limit with a coded 429, as HTTP does, and sets no headers on the payload (#527)', async () => {
     const socket = socketNamed('socket-1');
     await sendAllowed(LIMIT, () => frame(socket, user('user-a')));
 
     // Setting headers would have called `header()` on the payload, and thrown a TypeError instead.
     const refusal = await guard.canActivate(frame(socket, user('user-a'))).catch((error) => error);
 
-    expect(refusal).toBeInstanceOf(ThrottlerException);
+    expect(refusal).toBeInstanceOf(CodedHttpException);
     expect(refusal.getStatus()).toBe(429);
+    expect(refusal.code).toBe('RATE_LIMITED');
   });
 
   it("counts each user's frames apart, though every socket looks the same to the IP tier", async () => {
     await sendAllowed(LIMIT, () => frame(socketNamed('socket-1'), user('user-a')));
-    await expect(guard.canActivate(frame(socketNamed('socket-1'), user('user-a')))).rejects.toThrow(ThrottlerException);
+    await expect(guard.canActivate(frame(socketNamed('socket-1'), user('user-a')))).rejects.toThrow(CodedHttpException);
 
     await expect(guard.canActivate(frame(socketNamed('socket-2'), user('user-b')))).resolves.toBe(true);
   });
@@ -99,7 +101,7 @@ describe('WsThrottlerGuard', () => {
   it("counts a user's frames across all of their sockets, so reconnecting starts no new count", async () => {
     await sendAllowed(LIMIT, () => frame(socketNamed('socket-1'), user('user-a')));
 
-    await expect(guard.canActivate(frame(socketNamed('socket-2'), user('user-a')))).rejects.toThrow(ThrottlerException);
+    await expect(guard.canActivate(frame(socketNamed('socket-2'), user('user-a')))).rejects.toThrow(CodedHttpException);
   });
 
   it('counts each handler apart', async () => {
@@ -111,7 +113,7 @@ describe('WsThrottlerGuard', () => {
 
   it('counts a frame outside any actor scope against its own socket, never one bucket for all of them', async () => {
     await sendAllowed(LIMIT, () => frame(socketNamed('socket-1'), undefined));
-    await expect(guard.canActivate(frame(socketNamed('socket-1'), undefined))).rejects.toThrow(ThrottlerException);
+    await expect(guard.canActivate(frame(socketNamed('socket-1'), undefined))).rejects.toThrow(CodedHttpException);
 
     await expect(guard.canActivate(frame(socketNamed('socket-2'), undefined))).resolves.toBe(true);
   });
@@ -130,6 +132,6 @@ describe('WsThrottlerGuard', () => {
 
     // Any other user agent is still counted.
     await sendAllowed(LIMIT, () => frame(browser, user('user-b')), ignoring);
-    await expect(ignoring.canActivate(frame(browser, user('user-b')))).rejects.toThrow(ThrottlerException);
+    await expect(ignoring.canActivate(frame(browser, user('user-b')))).rejects.toThrow(CodedHttpException);
   });
 });

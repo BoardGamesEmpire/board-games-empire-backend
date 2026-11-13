@@ -154,7 +154,8 @@ export class HttpActorMiddleware implements NestMiddleware {
       // an internal tracker number, so the marker carries no args. This
       // middleware runs BEFORE LocaleResolutionMiddleware (see
       // AppModule.configure), so no request locale exists yet: this refusal and
-      // the API-key ones above render in the fallback locale.
+      // the API-key ones above render in the locale the request's
+      // Accept-Language resolves to, which the global filter reads (#508).
       this.logger.warn(`Refusing impersonated session (#408): target=${user?.id} impersonatedBy=${impersonatorId}`);
       throw new ForbiddenException(t('errors.auth.impersonated_session'));
     }

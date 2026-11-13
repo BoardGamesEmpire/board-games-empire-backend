@@ -59,6 +59,10 @@ const OUTAGE_TOKEN = 'token-outage';
  */
 const FRAME_LIMIT = 3;
 
+/** The catalog's copy for a 500, which both a frame's and a handshake's carry (#527). */
+const FAILED =
+  "Something went wrong on the server, so your request wasn't completed. Try again, and if it keeps happening, tell the server's admin";
+
 /** The app's own throttler tiers, at {@link FRAME_LIMIT}. */
 const THROTTLE_CONFIG: Record<string, number> = {
   'throttle.ttlMs': 60_000,
@@ -614,7 +618,7 @@ describe('AuthenticatedGateway (over a real socket)', () => {
       expect(await refused).toEqual({
         statusCode: 500,
         error: 'Internal Server Error',
-        message: 'Internal server error',
+        message: FAILED,
         pattern: SearchEvents.SearchStart,
         correlationId: frame.correlationId,
       });
@@ -733,6 +737,8 @@ describe('AuthenticatedGateway (over a real socket)', () => {
       expect(refusal).toMatchObject({
         statusCode: 429,
         error: 'Too Many Requests',
+        code: 'RATE_LIMITED',
+        message: 'Too many requests in a short time. Wait a moment, then try again',
         pattern: SearchEvents.SearchStart,
         correlationId: frame.correlationId,
       });
@@ -778,8 +784,8 @@ describe('AuthenticatedGateway (over a real socket)', () => {
         socket.once('connect', () => reject(new Error('The connection was accepted')));
       });
 
-      expect(error.message).toBe('Internal server error');
-      expect(error.data).toEqual({ statusCode: 500, error: 'Internal Server Error', message: 'Internal server error' });
+      expect(error.message).toBe(FAILED);
+      expect(error.data).toEqual({ statusCode: 500, error: 'Internal Server Error', message: FAILED });
       expect(socket.active).toBe(false);
     });
   });

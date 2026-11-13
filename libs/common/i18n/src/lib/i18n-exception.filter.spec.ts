@@ -8,14 +8,28 @@ describe('I18nExceptionFilter', () => {
   let filter: I18nExceptionFilter;
   let translate: jest.Mock;
   let getLocale: jest.Mock;
+  let resolveAcceptLanguage: jest.Mock;
   let superCatch: jest.SpyInstance;
 
-  const httpHost = { getType: () => 'http' } as unknown as ArgumentsHost;
+  // A request a route matched, as every request a handler throws from is.
+  const httpHost = {
+    getType: () => 'http',
+    switchToHttp: () => ({
+      getRequest: () => ({ route: { path: '/languages/:id' }, headers: { 'accept-language': 'de' } }),
+    }),
+  } as unknown as ArgumentsHost;
 
   beforeEach(() => {
     translate = jest.fn().mockReturnValue('translated message');
     getLocale = jest.fn().mockReturnValue('en');
-    filter = new I18nExceptionFilter({ translate } as never, { getLocale } as never);
+    resolveAcceptLanguage = jest.fn().mockReturnValue('de');
+    filter = new I18nExceptionFilter(
+      { translate } as never,
+      { getLocale } as never,
+      {
+        resolveAcceptLanguage,
+      } as never,
+    );
     // super.catch renders via the HTTP adapter (absent in a unit test); stub it
     // and assert on what the filter hands off instead.
     superCatch = jest.spyOn(BaseExceptionFilter.prototype, 'catch').mockImplementation(() => undefined);
@@ -27,6 +41,8 @@ describe('I18nExceptionFilter', () => {
     filter.catch(new NotFoundException(t('errors.language.not_found', { id: '42' })), httpHost);
 
     expect(translate).toHaveBeenCalledWith('errors.language.not_found', { lang: 'en', args: { id: '42' } });
+    // The CLS locale wins: the header is read only when CLS holds none.
+    expect(resolveAcceptLanguage).not.toHaveBeenCalled();
     expect(superCatch).toHaveBeenCalledTimes(1);
 
     const [rebuilt] = superCatch.mock.calls[0] as [HttpException, ArgumentsHost];
@@ -39,22 +55,25 @@ describe('I18nExceptionFilter', () => {
     });
   });
 
-  it('falls back to the default locale when none is resolved', () => {
+  // An error raised before the locale middleware ran, such as body-parser's,
+  // has no CLS locale yet (#527).
+  it("renders in the request's Accept-Language locale when CLS holds none (#527)", () => {
     getLocale.mockReturnValue(null);
 
     filter.catch(new NotFoundException(t('errors.language.not_found', { id: '1' })), httpHost);
 
-    expect(translate).toHaveBeenCalledWith('errors.language.not_found', { lang: 'en', args: { id: '1' } });
+    expect(resolveAcceptLanguage).toHaveBeenCalledWith('de');
+    expect(translate).toHaveBeenCalledWith('errors.language.not_found', { lang: 'de', args: { id: '1' } });
   });
 
-  it('degrades to the default locale when the CLS read throws', () => {
+  it("renders in the request's Accept-Language locale when the CLS read throws (#527)", () => {
     getLocale.mockImplementation(() => {
       throw new Error('no active CLS scope');
     });
 
     filter.catch(new NotFoundException(t('errors.language.not_found', { id: '1' })), httpHost);
 
-    expect(translate).toHaveBeenCalledWith('errors.language.not_found', expect.objectContaining({ lang: 'en' }));
+    expect(translate).toHaveBeenCalledWith('errors.language.not_found', expect.objectContaining({ lang: 'de' }));
   });
 
   it('hands a non-i18n HttpException to the base filter as the envelope, untranslated (#1260)', () => {

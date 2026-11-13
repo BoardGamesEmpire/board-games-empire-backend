@@ -12,7 +12,7 @@ const tooLarge = {
   statusCode: 413,
   error: 'Payload Too Large',
   code: 'REQUEST_TOO_LARGE',
-  message: 'errors.auth.request_too_large',
+  message: 'errors.request.too_large',
 };
 
 interface Answer {

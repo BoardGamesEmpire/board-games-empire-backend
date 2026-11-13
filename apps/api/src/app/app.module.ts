@@ -20,7 +20,13 @@ import { GameSearchModule } from '@bge/game-search';
 import { GatewayConfigEventsModule } from '@bge/gateway-registry';
 import { HealthModule } from '@bge/health';
 import { HouseholdModule } from '@bge/household';
-import { FALLBACK_LOCALE, I18nConfigModule, I18nExceptionFilter, I18nResponseInterceptor } from '@bge/i18n';
+import {
+  FALLBACK_LOCALE,
+  I18nConfigModule,
+  I18nExceptionFilter,
+  I18nResponseInterceptor,
+  UnknownErrorFilter,
+} from '@bge/i18n';
 import { LanguageModule } from '@bge/language';
 import { MediaModule } from '@bge/media';
 import { MetricsModule } from '@bge/metrics';
@@ -48,7 +54,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import type { RedisClient } from 'bullmq';
 import type { Request } from 'express';
 import { ClsMiddleware, ClsModule } from 'nestjs-cls';
@@ -62,6 +68,7 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
 import { TransactionDeadlockInterceptor } from './interceptors/transaction-deadlock.interceptor';
 import { UserAwareCacheInterceptor } from './interceptors/user-aware-cache.interceptor';
 import { baseLogger } from './lib/logger';
+import { RateLimitGuard } from './lib/rate-limit.guard';
 import { RedisThrottlerStorage } from './lib/redis-throttler.storage';
 import { createThrottlers } from './lib/throttlers';
 
@@ -248,19 +255,27 @@ import { createThrottlers } from './lib/throttlers';
   ],
   controllers: [],
   providers: [
+    // Nest evaluates global (APP_FILTER) filters in REVERSE registration
+    // order and takes the first match, so the narrowest filter is declared
+    // last. Do not reorder these three providers (locked by integration tests).
+
+    // Last resort: answers everything that isn't an HttpException (a bug's
+    // Error, body-parser's 413) in the error envelope with catalog copy, where
+    // Nest would answer in English with no `error` field (#527). Declared
+    // FIRST so it is tried LAST.
+    { provide: APP_FILTER, useClass: UnknownErrorFilter },
+
     // Global edge filter: translates exceptions carrying a `t()` key against
     // the request locale (#143), and sends every HttpException in the error
     // envelope, `{ statusCode, error, message, ...fields }` (#1260).
     { provide: APP_FILTER, useClass: I18nExceptionFilter },
 
     // Validation errors (#142). `I18nValidationException` extends
-    // `HttpException`, so the catch-all filter above matches it too — this
-    // filter must win. Nest evaluates global (APP_FILTER) filters in REVERSE
-    // registration order, so declaring it AFTER I18nExceptionFilter makes it the
-    // first match for validation errors while the catch-all handles the rest.
+    // `HttpException`, so the HttpException filter above matches it too — this
+    // filter must win, so it is declared AFTER I18nExceptionFilter and is the
+    // first match for validation errors while that filter handles the rest.
     // `detailedErrors: false` reproduces the pre-i18n body exactly:
     // `{ statusCode, message: string[], error: 'Bad Request' }`.
-    // Do not reorder these two providers (locked by an integration test).
     { provide: APP_FILTER, useValue: new I18nValidationExceptionFilter({ detailedErrors: false }) },
 
     // Global edge interceptor: the success-path counterpart to
@@ -285,9 +300,10 @@ import { createThrottlers } from './lib/throttlers';
     },
 
     // Global guards
+    // The throttler tiers, refusing with a coded 429 in catalog copy (#527).
     {
       provide: APP_GUARD,
-      useClass: ThrottlerGuard,
+      useClass: RateLimitGuard,
     },
     // Authenticates from the actor HttpActorMiddleware resolved, so an API
     // key passes as a session does (#529). better-auth's own AuthGuard is

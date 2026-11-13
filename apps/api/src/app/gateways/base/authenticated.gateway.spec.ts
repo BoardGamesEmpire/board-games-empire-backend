@@ -96,15 +96,17 @@ describe('AuthenticatedGateway', () => {
     const { namespace, middleware } = fakeNamespace();
 
     new TestGateway(authService, frameScope, translator).afterInit(namespace);
-    const refusal = await handshake(middleware, connection());
+    const refusal = await handshake(middleware, connection({ acceptLanguage: 'fr' }));
 
     // The client reads the message and `data` on `connect_error`; neither
-    // names the cause. Like Nest's own 500 over HTTP, it is not translated.
+    // names the cause. Like the HTTP 500's, its copy comes from the catalog,
+    // in the handshake's locale (#527).
     expect(refusal).toBeInstanceOf(WsConnectionRefusal);
     expect(refusal).toMatchObject({
-      message: 'Internal server error',
-      data: { statusCode: 500, error: 'Internal Server Error', message: 'Internal server error' },
+      message: 'fr:errors.request.failed',
+      data: { statusCode: 500, error: 'Internal Server Error', message: 'fr:errors.request.failed' },
     });
+    expect(resolve).toHaveBeenCalledWith(expect.objectContaining({ acceptLanguage: 'fr' }));
     expect(logged).toHaveBeenCalledWith(expect.stringContaining('socket-1'), outage);
   });
 

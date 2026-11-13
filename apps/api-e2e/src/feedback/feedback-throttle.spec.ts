@@ -1,6 +1,7 @@
 import { FEEDBACK_QUEUE_NAME } from '@bge/queue-feedback';
 import { createActors, type Actors } from '@bge/testing-e2e';
 import { requireBaseUrl } from '../support/e2e-env';
+import { expectErrorEnvelope } from '../support/error-envelope';
 import { isolateQueue } from '../support/queue-isolation';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { createFeedbackClient, freshFeedbackKey, reportPayload } from './feedback-request';
@@ -109,10 +110,9 @@ describe('feedback submission throttling (#251)', () => {
 
     const overLimit = await post(actor, payload);
 
-    // 429, and specifically not 500. Asserted on the status rather than the body:
-    // `I18nValidationExceptionFilter` runs with `detailedErrors: false`, so the
-    // message shape is presentation this spec should not couple to.
-    expect(overLimit.status).toBe(429);
+    // 429, and specifically not 500, in the error envelope with the code a
+    // client branches on rather than the throttler's own English text (#527).
+    expectErrorEnvelope(overLimit, { status: 429, code: 'RATE_LIMITED' });
 
     // And the budget was spent on requests that wrote nothing. One row for 30
     // accepted submissions is the replay short-circuit working exactly as #251

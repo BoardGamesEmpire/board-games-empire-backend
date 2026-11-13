@@ -47,6 +47,13 @@ const entry = (overrides: Partial<GameCollection> = {}): GameCollection =>
 const entryOn = (gameId: string, overrides: Partial<GameCollection> = {}): GameCollection =>
   ({ ...entry(overrides), platformGame: { id: `pg-${gameId}`, game: { id: gameId } } }) as GameCollection;
 
+/** The refusal for a collection entry the actor can't see, whatever the reason (#634). */
+const ENTRY_NOT_FOUND = {
+  status: 404,
+  code: 'COLLECTION_ENTRY_NOT_FOUND',
+  response: { statusCode: 404, error: 'Not Found', code: 'COLLECTION_ENTRY_NOT_FOUND' },
+};
+
 describe('GameCollectionService', () => {
   let service: GameCollectionService;
   let db: MockDatabaseService;
@@ -346,10 +353,10 @@ describe('GameCollectionService', () => {
       );
     });
 
-    it('404s when the entry is not visible to the actor', async () => {
+    it('404s when the entry is not visible to the actor, naming the collection entry (#634)', async () => {
       db.gameCollection.findUnique.mockResolvedValue(null);
 
-      await expect(service.getById('gc-404')).rejects.toThrow(NotFoundException);
+      await expect(service.getById('gc-404')).rejects.toMatchObject(ENTRY_NOT_FOUND);
     });
   });
 
@@ -425,10 +432,10 @@ describe('GameCollectionService', () => {
       expect(db.gameCollection.findUnique).not.toHaveBeenCalled();
     });
 
-    it('404s when the entry does not exist (or is not the actor’s)', async () => {
+    it('404s when the entry does not exist (or is not the actor’s), naming the collection entry (#634)', async () => {
       db.gameCollection.update.mockRejectedValue(dependentRecordNotFound());
 
-      await expect(service.update('gc-404', { quantity: 2 })).rejects.toThrow(NotFoundException);
+      await expect(service.update('gc-404', { quantity: 2 })).rejects.toMatchObject(ENTRY_NOT_FOUND);
     });
 
     it('passes explicit nulls through to clear nullable fields', async () => {
@@ -463,7 +470,7 @@ describe('GameCollectionService', () => {
     it('404s a release patch on a row outside the actor’s scope', async () => {
       db.gameCollection.findUnique.mockResolvedValue(null);
 
-      await expect(service.update('gc-1', { releaseId: 'r-1' })).rejects.toThrow(NotFoundException);
+      await expect(service.update('gc-1', { releaseId: 'r-1' })).rejects.toMatchObject(ENTRY_NOT_FOUND);
       expect(db.gameCollection.update).not.toHaveBeenCalled();
     });
 
@@ -505,10 +512,12 @@ describe('GameCollectionService', () => {
       );
     });
 
-    it('404s missing, already-removed, and foreign rows alike', async () => {
+    // A client reads this 404 as "already removed" and completes its queued
+    // removal, so it must be told apart from a route that moved (#634).
+    it('404s missing, already-removed, and foreign rows alike, naming the collection entry (#634)', async () => {
       db.gameCollection.update.mockRejectedValue(dependentRecordNotFound());
 
-      await expect(service.remove('gc-404', {})).rejects.toThrow(NotFoundException);
+      await expect(service.remove('gc-404', {})).rejects.toMatchObject(ENTRY_NOT_FOUND);
     });
 
     it('uses delete conditions for the write', async () => {

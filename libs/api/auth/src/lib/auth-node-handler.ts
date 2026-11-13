@@ -61,7 +61,7 @@ export function createAuthNodeHandler(
   options: AuthNodeHandlerOptions,
 ): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
   const logger = new Logger('AuthNodeHandler');
-  const tooLarge = () => coded(413, REQUEST_TOO_LARGE, options.render('errors.auth.request_too_large'));
+  const tooLarge = () => coded(413, REQUEST_TOO_LARGE, options.render('errors.request.too_large'));
 
   const refuse = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     // A cut-off read leaves the request paused, which would stall the client.

@@ -1,4 +1,4 @@
-import { AuditContextService } from '@bge/actor-context';
+import type { AuditContextService } from '@bge/actor-context';
 import { isI18nMessage, type I18nMessage, type I18nTranslations } from '@bge/i18n-core';
 import { HttpException, Logger } from '@nestjs/common';
 import { I18nService } from 'nestjs-i18n';
@@ -8,13 +8,20 @@ import { FALLBACK_LOCALE } from './locale.constants';
 const logger = new Logger('translateException');
 
 /**
+ * Where an edge component reads the request locale: `AuditContextService`
+ * itself, or a filter's own source that falls back on the request's
+ * `Accept-Language` when CLS holds no locale yet (#527).
+ */
+export type EdgeLocaleSource = Pick<AuditContextService, 'getLocale'>;
+
+/**
  * Resolves the request locale from CLS for edge translation, degrading to
  * {@link FALLBACK_LOCALE} when no CLS scope is active (a wiring bug, not a normal
  * request) rather than failing the response — matching the entry-seam contract.
  */
-export function resolveEdgeLocale(auditContext: AuditContextService): string {
+export function resolveEdgeLocale(locale: EdgeLocaleSource): string {
   try {
-    return auditContext.getLocale() ?? FALLBACK_LOCALE;
+    return locale.getLocale() ?? FALLBACK_LOCALE;
   } catch {
     return FALLBACK_LOCALE;
   }
@@ -29,7 +36,7 @@ export function resolveEdgeLocale(auditContext: AuditContextService): string {
  *   becomes the message, rendered in the request locale;
  * - a structured body (a coded refusal's `code`, a quota's `limit`) keeps every
  *   field, and its `message` marker is rendered in place;
- * - a plain string body (Nest's own `Cannot GET /x`, a throttler's text) is the
+ * - a plain string body (`new BadRequestException('…')` from a library) is the
  *   message as it was.
  *
  * `error` is always the status's reason phrase, so a custom label never reaches
@@ -49,13 +56,13 @@ export function resolveEdgeLocale(auditContext: AuditContextService): string {
 export function translateException(
   exception: HttpException,
   i18n: I18nService<I18nTranslations>,
-  auditContext: AuditContextService,
+  locale: EdgeLocaleSource,
 ): HttpException {
   const status = exception.getStatus();
   // Carry the original `cause` across the re-issue so server-side context is not
   // stripped (e.g. StorageExceptionFilter attaches the raw storage error as
   // `cause` for logs). `{ cause: undefined }` is a no-op in Nest's `initCause`.
-  return new HttpException(renderErrorBody(status, exception.getResponse(), i18n, auditContext), status, {
+  return new HttpException(renderErrorBody(status, exception.getResponse(), i18n, locale), status, {
     cause: exception.cause,
   });
 }
@@ -78,19 +85,19 @@ export function renderErrorBody(
   status: number,
   body: unknown,
   i18n: I18nService<I18nTranslations>,
-  auditContext: AuditContextService,
+  locale: EdgeLocaleSource,
 ): ErrorEnvelope {
   if (typeof body === 'string') {
     return errorEnvelope(status, body);
   }
 
   if (isI18nMessage(body)) {
-    return errorEnvelope(status, renderMarker(body, i18n, auditContext));
+    return errorEnvelope(status, renderMarker(body, i18n, locale));
   }
 
   if (body !== null && typeof body === 'object') {
     const { message, ...fields } = body as Record<string, unknown>;
-    return errorEnvelope(status, renderMessage(status, message, i18n, auditContext), fields);
+    return errorEnvelope(status, renderMessage(status, message, i18n, locale), fields);
   }
 
   return errorEnvelope(status, reasonPhrase(status));
@@ -100,14 +107,14 @@ function renderMessage(
   status: number,
   message: unknown,
   i18n: I18nService<I18nTranslations>,
-  auditContext: AuditContextService,
+  locale: EdgeLocaleSource,
 ): string | string[] {
   if (isLine(message)) {
-    return renderLine(message, i18n, auditContext);
+    return renderLine(message, i18n, locale);
   }
 
   if (Array.isArray(message) && message.every(isLine)) {
-    return message.map((line) => renderLine(line, i18n, auditContext));
+    return message.map((line) => renderLine(line, i18n, locale));
   }
 
   // A message no client can read (a number, a nested object) is dropped
@@ -124,12 +131,8 @@ function isLine(value: unknown): value is string | I18nMessage {
   return typeof value === 'string' || isI18nMessage(value);
 }
 
-function renderLine(
-  line: string | I18nMessage,
-  i18n: I18nService<I18nTranslations>,
-  auditContext: AuditContextService,
-): string {
-  return typeof line === 'string' ? line : renderMarker(line, i18n, auditContext);
+function renderLine(line: string | I18nMessage, i18n: I18nService<I18nTranslations>, locale: EdgeLocaleSource): string {
+  return typeof line === 'string' ? line : renderMarker(line, i18n, locale);
 }
 
 /**
@@ -144,9 +147,9 @@ function renderLine(
 export function renderMarker(
   marker: I18nMessage,
   i18n: I18nService<I18nTranslations>,
-  auditContext: AuditContextService,
+  locale: EdgeLocaleSource,
 ): string {
-  const lang = resolveEdgeLocale(auditContext);
+  const lang = resolveEdgeLocale(locale);
   try {
     return i18n.translate(marker.key, { lang, args: marker.args });
   } catch (error) {
