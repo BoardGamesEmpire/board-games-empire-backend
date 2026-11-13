@@ -43,7 +43,9 @@ model WebhookSubscription {
 
   status WebhookSubscriptionStatus @default(Active)
 
-  createdBy   User   @relation("WebhookSubscriptionsCreated", fields: [createdById], references: [id])
+  // A subscription runs only on its creator's authority (#723), so it goes
+  // with them (#1054).
+  createdBy   User   @relation("WebhookSubscriptionsCreated", fields: [createdById], references: [id], onDelete: Cascade)
   createdById String @map("created_by_id")
 
   // The API key that made the webhook subscription, or null when its

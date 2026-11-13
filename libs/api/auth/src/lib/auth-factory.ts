@@ -49,6 +49,7 @@ import { providerPictureOnly } from './provider-picture';
 import { createProviderUserInfo } from './provider-user-info';
 import { createSettingGates, settingGateDeps } from './setting-gates';
 import { createSignOutHook } from './sign-out-hook';
+import { createUserRemovalGate, userRemovalGateDeps } from './user-removal-gate';
 import { createUsernameVariants } from './username-variant';
 
 interface UserCreatedHookDeps {
@@ -171,6 +172,7 @@ export function authFactory(
   const gateDeps = settingGateDeps(prisma, i18n);
   const settingGates = createSettingGates(gateDeps);
   const banFlagGate = createBanFlagGate(gateDeps.render);
+  const userRemovalGate = createUserRemovalGate(userRemovalGateDeps(prisma, gateDeps.render));
   const signOutHook = createSignOutHook({ render: gateDeps.render });
   const idTokenGate = createIdTokenGate(gateDeps.render);
   const providerLinkFreshness = createProviderLinkFreshness({ render: gateDeps.render });
@@ -377,11 +379,19 @@ export function authFactory(
             return settingGates.beforeUserUpdate(data, context);
           },
         },
-        // TODO: clean up API keys on user delete. The upstream better-auth
-        // apikey schema dropped the Apikey -> User FK (and its onDelete:
-        // Cascade) in favour of an unconstrained `referenceId`, so deleting a
-        // user no longer removes their keys. Add a `delete.before`/`after` hook
-        // here that runs `prisma.apikey.deleteMany({ where: { referenceId: user.id } })`.
+        // For a user with no sign-in methods; the account hook below
+        // refuses first for everyone else (#1054).
+        delete: {
+          before: (user, context) => userRemovalGate.beforeUserDelete(user, context),
+        },
+      },
+      // remove-user deletes a user's sign-in methods (better-auth's account
+      // rows) before the user row, with no transaction, so a refusal comes
+      // before the first one goes (#1054).
+      account: {
+        delete: {
+          before: (account, context) => userRemovalGate.beforeAccountDelete(account, context),
+        },
       },
       // A reset token lives as long as the mail settings say (#654). The
       // prefix match needs plain identifiers, so `verification.storeIdentifier`

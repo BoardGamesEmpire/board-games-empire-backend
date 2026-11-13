@@ -28,6 +28,8 @@ model User {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   accounts                   Account[]
+  // Not in `npm run auth:generate`'s output; see Apikey.user (#1054).
+  apiKeys                    Apikey[]
   deviceCodes                DeviceCode[]
   passkeys                   Passkey[]
   sessions                   Session[]
