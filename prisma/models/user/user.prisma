@@ -2,7 +2,10 @@ model User {
   id String @id @default(cuid(2))
 
   banExpires DateTime? @map("ban_expires") @db.Timestamptz(3)
-  banned     Boolean?  @default(false)
+  // NOT NULL, so every reader agrees that a user is banned or isn't (#893).
+  // `npm run auth:generate` prints `Boolean?` here, because the admin plugin
+  // marks the field optional: keep this line when copying its output.
+  banned     Boolean   @default(false)
   banReason  String?   @map("ban_reason")
 
   username String

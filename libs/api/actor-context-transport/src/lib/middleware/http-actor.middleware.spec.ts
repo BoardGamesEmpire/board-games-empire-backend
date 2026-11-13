@@ -22,7 +22,7 @@ type AuthMock = jest.Mocked<
 >;
 
 /** A key's owner as `findUserById` returns one; unbanned unless the test says otherwise. */
-const owner = (ban: { banned?: boolean | null; banExpires?: Date | null } = {}): AuthUser =>
+const owner = (ban: { banned?: boolean; banExpires?: Date | null } = {}): AuthUser =>
   ({ id: 'user-9', banned: false, banExpires: null, ...ban }) as unknown as AuthUser;
 
 const buildAuthMock = (): AuthMock =>
@@ -285,7 +285,6 @@ describe('HttpActorMiddleware', () => {
 
       it.each<[string, AuthUser]>([
         ['whose ban expired yesterday', owner({ banned: true, banExpires: new Date(Date.now() - DAY_MS) })],
-        ['whose ban flag is unset', owner({ banned: null })],
       ])('admits the key of an owner %s', async (_, unbanned) => {
         authMock.findUserById.mockResolvedValue(unbanned);
 

@@ -184,7 +184,7 @@ export class PermissionsService {
 
   /** Not banned, or banned with an expiry already past. */
   private static notBannedNow(): Prisma.UserWhereInput {
-    return { OR: [{ banned: null }, { banned: false }, { banExpires: { lte: new Date() } }] };
+    return { OR: [{ banned: false }, { banExpires: { lte: new Date() } }] };
   }
 
   /**
