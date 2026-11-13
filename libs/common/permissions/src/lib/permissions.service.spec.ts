@@ -173,10 +173,11 @@ describe('PermissionsService', () => {
         const tx = { user: { findUnique: jest.fn().mockResolvedValue(null) } };
         await expect(service.loadUserRoleGraphWithin(tx as never, 'user-1')).resolves.toBeNull();
 
-        // Not banned, or banned with an expiry already past.
+        // Not banned, or banned with an expiry already past. The flag is never
+        // NULL (#893), so no arm reads it as a state of its own.
         expect(tx.user.findUnique).toHaveBeenCalledWith(
           expect.objectContaining({
-            where: { id: 'user-1', AND: { OR: [{ banned: null }, { banned: false }, { banExpires: { lte: now } }] } },
+            where: { id: 'user-1', AND: { OR: [{ banned: false }, { banExpires: { lte: now } }] } },
           }),
         );
       } finally {

@@ -1,7 +1,7 @@
 model GameList {
   id String @id @default(cuid(2))
 
-  list   List   @relation(fields: [listId], references: [id])
+  list   List   @relation(fields: [listId], references: [id], onDelete: Cascade)
   listId String @map("list_id")
 
   platformGame   PlatformGame @relation(fields: [platformGameId], references: [id])

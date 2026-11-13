@@ -8,10 +8,12 @@ model Apikey {
 
   configId String @default("default") @map("config_id")
 
-  // user or organization id
-  // NOTE: upstream better-auth dropped the User relation + onDelete: Cascade
-  // here. There is no DB-enforced cleanup, so keys must be removed in app code
-  // on user delete (see databaseHooks TODO in auth-factory.ts).
+  // The key's user. Upstream better-auth dropped this foreign key because a
+  // key may belong to an organization, but this server gives keys only to
+  // users, so the key goes with its user (#1054). `npm run auth:generate`
+  // prints `referenceId` with no relation: keep this line, and `apiKeys` on
+  // User, when copying its output.
+  user      User   @relation(fields: [referenceId], references: [id], onDelete: Cascade)
   referenceId String @map("reference_id")
 
   refillInterval Int?      @map("refill_interval")
