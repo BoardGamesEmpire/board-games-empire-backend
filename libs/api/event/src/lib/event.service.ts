@@ -662,6 +662,15 @@ export class EventService {
         // first (#731).
         const existing = await lockLiveEvent(tx, id);
 
+        // The route's guard passes anyone holding the grant on any event. The
+        // grant is checked against this row before the patch is judged, so a
+        // caller it doesn't reach gets 403, never a 400 that tells them how
+        // many live dates the event has (#796). The write repeats it.
+        // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+        const updateCeiling = this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update);
+        const entitled = (await tx.event.count({ where: { id, AND: updateCeiling } })) > 0;
+        assert(entitled, new ForbiddenException(t('common.forbidden.update')));
+
         // Fixed holds one date. The count is read under the same lock a new
         // date takes, so a date added beside this switch is counted or waits
         // for it (#796). Existing dates keep their status.
@@ -678,12 +687,7 @@ export class EventService {
         }
 
         const updated = await tx.event.update({
-          where: {
-            id,
-            deletedAt: null,
-            // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-            AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update),
-          },
+          where: { id, deletedAt: null, AND: updateCeiling },
           data: dto,
           include: { occurrences: { orderBy: OCCURRENCE_ORDER } },
         });

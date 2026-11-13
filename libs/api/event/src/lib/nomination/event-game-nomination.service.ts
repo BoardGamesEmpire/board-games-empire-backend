@@ -33,7 +33,7 @@ import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary
 import { CastVoteDto } from '../dto/cast-vote.dto';
 import { assertEventExists, requireEvent, resolveActingAttendeeId } from '../event-access.helpers';
 import { ResolutionResult, VotingPolicy } from '../interfaces/vote.interface';
-import { foldPolicy, type EffectivePolicy } from '../policy/policy-rules';
+import { foldPolicy, type EffectivePolicy } from '../policy/effective-policy';
 import { GAME_VOTE_SLUG, voterGrantSelect } from '../vote/vote-grant';
 import { AttendeeStub, VoteResolver } from '../vote/vote-resolver';
 import { DirectAddGameDto } from './dto/direct-add-game.dto';

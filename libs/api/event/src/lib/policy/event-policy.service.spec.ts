@@ -90,6 +90,8 @@ describe('EventPolicyService', () => {
 
     tx.$queryRaw.mockResolvedValue([]);
     tx.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1' }));
+    // The caller's update ceiling reaches the event's policy.
+    tx.eventPolicy.count.mockResolvedValue(1);
 
     // The read under the lock carries no ceiling; the read back carries the read ceiling.
     tx.eventPolicy.findUnique.mockImplementation(((args: { where: { AND?: unknown } }) =>
@@ -103,8 +105,9 @@ describe('EventPolicyService', () => {
 
   // The lock is the one a date write and an event write take, so the policy
   // and the dates' overrides it is checked against can't change before the
-  // write lands, and a deleted event answers 404 (#796).
-  it('locks the event before reading the policy (#796)', async () => {
+  // write lands, and a deleted event answers 404. The grant is checked next,
+  // before anything that could refuse with a 400 is read (#796).
+  it('locks the event, then checks the grant, before reading the policy (#796)', async () => {
     const order: string[] = [];
     const record =
       <T>(label: string, answer: () => T) =>
@@ -114,6 +117,7 @@ describe('EventPolicyService', () => {
       };
 
     tx.$queryRaw.mockImplementation(record('lock', () => []) as never);
+    tx.eventPolicy.count.mockImplementation(record('authorize', () => 1) as never);
     tx.eventPolicy.findUnique.mockImplementation(((args: { where: { AND?: unknown } }) =>
       args.where.AND === undefined
         ? record('read policy', () => stored)()
@@ -126,14 +130,14 @@ describe('EventPolicyService', () => {
     expect(rawQueryText(tx.$queryRaw.mock.calls[0][0])).toMatch(
       /^SELECT id FROM events WHERE id = \? FOR NO KEY UPDATE$/,
     );
-    expect(order).toEqual(['lock', 'read policy', 'read date policies', 'update', 'read back']);
+    expect(order).toEqual(['lock', 'authorize', 'read policy', 'read date policies', 'update', 'read back']);
     expect(tx.eventPolicy.findUnique).toHaveBeenNthCalledWith(1, { where: { eventId: 'event-1' } });
     expect(tx.eventOccurrencePolicy.findMany).toHaveBeenCalledWith({ where: { occurrence: { eventId: 'event-1' } } });
   });
 
   // The patch is judged merged over what is stored: a value already stored
   // satisfies a type that needs one, and a value neither holds doesn't (#796).
-  describe('the voting rules the patch leaves', () => {
+  describe('the voting policy the patch leaves', () => {
     it('refuses a threshold type that needs a value the patch and the stored policy both lack (#796)', async () => {
       await expect(update({ voteThresholdType: VoteThresholdType.Supermajority })).rejects.toMatchObject({
         status: 400,
@@ -175,7 +179,7 @@ describe('EventPolicyService', () => {
 
   // Every event is created with its policy row, which goes only with the
   // event, so a missing row answers as a missing event does.
-  it('answers 404 when the event has no policy row, and writes nothing', async () => {
+  it('answers 404 when the event has no policy row, and writes nothing (#796)', async () => {
     stored = null;
 
     await expect(update({ allowSpectators: false })).rejects.toThrow(
@@ -184,8 +188,30 @@ describe('EventPolicyService', () => {
     expect(tx.eventPolicy.update).not.toHaveBeenCalled();
   });
 
+  // The route's guard passes anyone holding update:event_policy on any event.
+  // The grant is checked against this event's row before the patch is judged,
+  // so a caller it doesn't reach gets 403, never a 400 that tells them what
+  // this event's policy holds (#796).
+  it('answers 403 to a caller outside the update ceiling before judging the patch (#796)', async () => {
+    tx.eventPolicy.count.mockResolvedValue(0);
+
+    // Invalid against the stored policy, which holds no threshold value.
+    await expect(update({ voteThresholdType: VoteThresholdType.Supermajority })).rejects.toThrow(
+      new ForbiddenException(t('common.forbidden.update')),
+    );
+
+    expect(tx.eventPolicy.count).toHaveBeenCalledWith({
+      where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.update) },
+    });
+    expect(tx.eventPolicy.findUnique).not.toHaveBeenCalled();
+    expect(tx.eventOccurrencePolicy.findMany).not.toHaveBeenCalled();
+    expect(tx.eventPolicy.update).not.toHaveBeenCalled();
+    expect(emitter.emit).not.toHaveBeenCalled();
+  });
+
   // The route's guard passes on a type-level check; the row's own grant, the
-  // event role's or the household's, is enforced in the write (#796).
+  // event role's or the household's, is checked under the lock and enforced
+  // again in the write (#796).
   it('updates under the update:event_policy ceiling and answers 403 when the row is outside it', async () => {
     const dto = { allowSpectators: false };
 
@@ -206,7 +232,7 @@ describe('EventPolicyService', () => {
 
   // A writer who may change the policy but not read it, such as an API key
   // granted update:event_policy alone, still writes, and is answered null.
-  it('answers with the policy read under the read ceiling, null when the caller cannot read it', async () => {
+  it('answers with the policy read under the read ceiling, null when the caller cannot read it (#796)', async () => {
     readable = makeEventPolicy('event-1', { id: 'policy-1', allowSpectators: false });
 
     await expect(update({ allowSpectators: false })).resolves.toEqual(readable);
@@ -221,7 +247,7 @@ describe('EventPolicyService', () => {
     expect(tx.eventPolicy.update).toHaveBeenCalledTimes(2);
   });
 
-  it('emits one EventPolicyUpdatedEvent carrying only the changed columns', async () => {
+  it('emits one EventPolicyUpdatedEvent carrying only the changed columns (#728)', async () => {
     await update({ gameAdditionMode: GameAdditionMode.RequiresVote, allowSpectators: true });
 
     const domainEmits = emitter.emit.mock.calls.filter(([name]) => name === EventPolicyUpdatedEvent.eventName);
@@ -251,22 +277,16 @@ describe('EventPolicyService', () => {
     expect(JSON.stringify(emitter.emit.mock.calls.at(-1))).not.toContain(GameAdditionMode.RequiresVote);
   });
 
-  it('sends no webhook when nothing changed', async () => {
-    await update({ gameAdditionMode: GameAdditionMode.Direct, allowSpectators: true });
-
-    expect(emitter.emit).not.toHaveBeenCalledWith(WebhookEventType.EventPolicyUpdated, expect.anything());
-  });
-
   // A form that re-sends what it loaded changes nothing, so it writes no
-  // audit row (#728).
-  it('emits nothing when the patch changes no value', async () => {
+  // audit row and sends no webhook (#728).
+  it('emits nothing, neither the audit event nor the webhook, when the patch changes no value (#728)', async () => {
     await update({ gameAdditionMode: GameAdditionMode.Direct, allowSpectators: true });
 
     expect(tx.eventPolicy.update).toHaveBeenCalled();
     expect(emitter.emit).not.toHaveBeenCalled();
   });
 
-  it('answers 400 for an empty body', async () => {
+  it('answers 400 for an empty body (#796)', async () => {
     await expect(update({})).rejects.toThrow(new BadRequestException(t('common.at_least_one_field')));
     expect(db.$transaction).not.toHaveBeenCalled();
   });

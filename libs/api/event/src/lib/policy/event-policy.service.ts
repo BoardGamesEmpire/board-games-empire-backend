@@ -15,8 +15,8 @@ import { eventWebhookIds } from '../event.service';
 import { lockLiveEvent } from '../utils/lock-live-event.util';
 import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
 import type { UpdateEventPolicyDto } from './dto/update-event-policy.dto';
+import { assertValidVotingPolicy, foldPolicy } from './effective-policy';
 import { EventPolicyUpdatedEvent } from './events/event-policy.events';
-import { assertValidVotingRules, foldPolicy } from './policy-rules';
 
 @Injectable()
 export class EventPolicyService {
@@ -31,15 +31,16 @@ export class EventPolicyService {
   /**
    * Changes an event's policy under its own grant (#796): `update:event_policy`
    * for the event's hosts, or its household variant for the household's owners
-   * and admins, both enforced as the ceiling on the write. An organizer may
-   * edit the event but not its policy.
+   * and admins. An organizer may edit the event but not its policy.
    *
    * The write takes the event's lock first, which date writes take too, so the
    * stored policy and the dates' overrides it is judged against can't change
-   * before it lands, and a deleted event answers 404. It is judged as the
-   * policy it leaves: the stored row with the patch over it, and that folded
-   * under each date's overrides, since a date that sets only a threshold type
-   * relies on the event's value.
+   * before it lands, and a deleted event answers 404. The grant is checked
+   * against the event's policy next, before the patch is judged, and is the
+   * ceiling on the write too. The patch is judged as the policy it leaves: the
+   * stored row with the patch over it, and that folded under each date's
+   * overrides, since a date that sets only a threshold type relies on the
+   * event's value.
    *
    * Work in flight is left as it is. An open nomination finishes the process it
    * started in, a resolve uses the policy in force when it runs, and a voting
@@ -57,6 +58,15 @@ export class EventPolicyService {
       const { event, existing, updated, policy } = await this.db.$transaction(async (tx) => {
         const event = await lockLiveEvent(tx, eventId);
 
+        // The route's guard passes anyone holding the grant on any event. The
+        // grant is checked against this event's policy before anything else
+        // is read, so a caller it doesn't reach gets 403, never a 400 that
+        // tells them what the stored policy holds (#796). The write repeats it.
+        // eslint-disable-next-line no-restricted-syntax -- the event's one policy row, not a collection read
+        const updateCeiling = this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.update);
+        const entitled = (await tx.eventPolicy.count({ where: { eventId, AND: updateCeiling } })) > 0;
+        assert(entitled, new ForbiddenException(t('common.forbidden.update')));
+
         // The whole row, whatever the caller may read: the patch is judged
         // against it, and the audit records what it replaced. Every event is
         // created with its policy row, which goes only with the event.
@@ -66,19 +76,12 @@ export class EventPolicyService {
         const datePolicies = await tx.eventOccurrencePolicy.findMany({ where: { occurrence: { eventId } } });
 
         const merged = { ...existing, ...dto };
-        assertValidVotingRules(merged);
+        assertValidVotingPolicy(merged);
         for (const datePolicy of datePolicies) {
-          assertValidVotingRules(foldPolicy(merged, datePolicy));
+          assertValidVotingPolicy(foldPolicy(merged, datePolicy));
         }
 
-        const updated = await tx.eventPolicy.update({
-          where: {
-            eventId,
-            // eslint-disable-next-line no-restricted-syntax -- the event's one policy row, not a collection read
-            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.update),
-          },
-          data: dto,
-        });
+        const updated = await tx.eventPolicy.update({ where: { eventId, AND: updateCeiling }, data: dto });
 
         const policy = await tx.eventPolicy.findUnique({
           where: {

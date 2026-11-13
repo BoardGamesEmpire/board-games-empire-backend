@@ -659,6 +659,8 @@ describe('EventService', () => {
       row = makeEvent({ id: 'event-1' });
       tx.$queryRaw.mockResolvedValue([]);
       tx.event.findUnique.mockImplementation((() => Promise.resolve(row)) as never);
+      // The caller's update ceiling reaches the event.
+      tx.event.count.mockResolvedValue(1);
       tx.event.update.mockImplementation(((args: { data: Partial<Event> }) =>
         Promise.resolve(withDates({ ...(row as Event), ...args.data }))) as never);
     });
@@ -891,18 +893,38 @@ describe('EventService', () => {
         expect(tx.event.update).toHaveBeenCalled();
       });
 
-      it('counts the dates under the lock, before the update (#796)', async () => {
+      it('counts the dates under the lock, after the grant is checked and before the update (#796)', async () => {
         row = makeEvent({ id: 'event-1', schedulingMode: EventSchedulingMode.Poll });
         tx.eventOccurrence.count.mockResolvedValue(1);
 
         await service.updateEvent('event-1', { schedulingMode: EventSchedulingMode.Fixed } as never);
 
-        expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.event.count.mock.invocationCallOrder[0]);
+        expect(tx.event.count.mock.invocationCallOrder[0]).toBeLessThan(
           tx.eventOccurrence.count.mock.invocationCallOrder[0],
         );
         expect(tx.eventOccurrence.count.mock.invocationCallOrder[0]).toBeLessThan(
           tx.event.update.mock.invocationCallOrder[0],
         );
+      });
+
+      // The route's guard passes anyone holding update:event on any event. The
+      // grant is checked against this event's row before the dates are
+      // counted, so a caller it doesn't reach gets 403, never a 400 that tells
+      // them how many live dates this event has (#796).
+      it('answers 403 to a caller outside the update ceiling before counting the dates (#796)', async () => {
+        row = makeEvent({ id: 'event-1', schedulingMode: EventSchedulingMode.MultiDay });
+        tx.event.count.mockResolvedValue(0);
+        tx.eventOccurrence.count.mockResolvedValue(2);
+
+        await expect(
+          service.updateEvent('event-1', { schedulingMode: EventSchedulingMode.Fixed } as never),
+        ).rejects.toThrow(new ForbiddenException(t('common.forbidden.update')));
+
+        expect(tx.event.count).toHaveBeenCalledWith({ where: { id: 'event-1', AND: [COND] } });
+        expect(tx.eventOccurrence.count).not.toHaveBeenCalled();
+        expect(tx.event.update).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
       });
 
       it.each([

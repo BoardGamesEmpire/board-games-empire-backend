@@ -274,31 +274,38 @@ export class EventOccurrenceService {
     const initiatedAt = new Date();
     assert(Object.keys(dto).length > 0, new BadRequestException(t('common.at_least_one_field')));
 
-    // Full row (not just the id) so the update event can carry a before snapshot.
-    const existing = await this.db.eventOccurrence.findUnique({
+    // Only the id: this read answers 404 and names the date whose votes and
+    // games are read next. What the write replaces is read under the lock.
+    const found = await this.db.eventOccurrence.findUnique({
       where: { id: occurrenceId, eventId },
+      select: { id: true },
     });
 
-    assert(existing, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
+    assert(found, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
 
     // Read before the write, so a failed read leaves the occurrence as it was.
     // The write can take games off the lineup, and the answer leaves those out.
-    const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
+    const [{ availabilityVotes, games }] = await this.withVotesAndGames([found]);
 
     try {
-      const { written: updated, removedGames } = await this.db.$transaction((tx) =>
+      const {
+        written: { existing, updated },
+        removedGames,
+      } = await this.db.$transaction((tx) =>
         writeEventDates(tx, eventId, initiatedAt, async () => {
           // Read again under the event's lock, which a removal also holds. An
           // edit that lost a race to the date's removal answers 404, as one
           // arriving second would. A removal can't be undone, so a failed
           // update after this read is the grant refusing the edit (#1064).
-          const present = await tx.eventOccurrence.findUnique({
+          // The whole row, since it is the state the write replaces, and the
+          // audit is judged against it, even when another write to the date
+          // went first (#728).
+          const existing = await tx.eventOccurrence.findUnique({
             where: { id: occurrenceId, eventId },
-            select: { id: true },
           });
-          assert(present, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
+          assert(existing, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
 
-          return tx.eventOccurrence.update({
+          const updated = await tx.eventOccurrence.update({
             where: {
               id: occurrenceId,
               // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
@@ -313,6 +320,8 @@ export class EventOccurrenceService {
             },
             include: { policy: true },
           });
+
+          return { existing, updated };
         }),
       );
 

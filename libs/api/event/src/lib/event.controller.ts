@@ -122,6 +122,13 @@ export class EventController {
   @ApiOperation({ summary: 'Update an event' })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Event updated successfully' })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description:
+      'Invalid patch, or one carrying `policy`, `occurrences` or `inviteUserIds`, which change on routes of their ' +
+      'own; or a switch to Fixed while more than one date is proposed or confirmed ' +
+      '(code EVENT_FIXED_MODE_TOO_MANY_DATES)',
+  })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: 'Event not found' })

@@ -8,7 +8,7 @@ import {
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { makeEventPolicy } from '@bge/testing';
-import { assertValidVotingRules, foldPolicy } from './policy-rules';
+import { assertValidVotingPolicy, foldPolicy } from './effective-policy';
 
 /** The error `run` throws, or a failure when it throws none. */
 function refusalOf(run: () => void): unknown {
@@ -18,11 +18,11 @@ function refusalOf(run: () => void): unknown {
     return error;
   }
 
-  throw new Error('expected a refusal, but the voting rules were accepted');
+  throw new Error('expected a refusal, but the voting policy was accepted');
 }
 
 describe('foldPolicy', () => {
-  it("serves the schema's defaults when neither the event nor the date has a policy row", () => {
+  it("serves the schema's defaults when neither the event nor the date has a policy row (#796)", () => {
     expect(foldPolicy(null, null)).toEqual({
       gameAdditionMode: GameAdditionMode.Direct,
       voteThresholdType: VoteThresholdType.SimpleMajority,
@@ -35,7 +35,7 @@ describe('foldPolicy', () => {
     });
   });
 
-  it("serves the event's policy when the date has no row of its own", () => {
+  it("serves the event's policy when the date has no row of its own (#796)", () => {
     const eventPolicy = makeEventPolicy('event-1', {
       gameAdditionMode: GameAdditionMode.RequiresVote,
       voteThresholdType: VoteThresholdType.Supermajority,
@@ -53,8 +53,8 @@ describe('foldPolicy', () => {
     );
   });
 
-  // A date's null means "the event's rule", so only the fields it sets win.
-  it("takes the date's value for a field it sets and the event's for a field it leaves null", () => {
+  // A date's null means "the event's value", so only the fields it sets win.
+  it("takes the date's value for a field it sets and the event's for a field it leaves null (#796)", () => {
     const eventPolicy = makeEventPolicy('event-1', {
       voteEligibility: VoteEligibility.ConfirmedOnly,
       voteThresholdType: VoteThresholdType.Supermajority,
@@ -77,8 +77,8 @@ describe('foldPolicy', () => {
   });
 });
 
-describe('assertValidVotingRules', () => {
-  const rules = (overrides: Partial<Parameters<typeof assertValidVotingRules>[0]> = {}) => ({
+describe('assertValidVotingPolicy', () => {
+  const votingPolicy = (overrides: Partial<Parameters<typeof assertValidVotingPolicy>[0]> = {}) => ({
     voteThresholdType: VoteThresholdType.SimpleMajority,
     voteThresholdValue: null,
     voteQuorumType: VoteQuorumType.None,
@@ -86,31 +86,13 @@ describe('assertValidVotingRules', () => {
     ...overrides,
   });
 
-  // A Supermajority with no percentage has no line a vote can pass (#796).
-  it('refuses a Supermajority threshold with no value', () => {
-    expect(
-      refusalOf(() => assertValidVotingRules(rules({ voteThresholdType: VoteThresholdType.Supermajority }))),
-    ).toMatchObject({
-      status: 400,
-      response: { code: 'EVENT_POLICY_INVALID', message: t('errors.event_policy.threshold_value_required') },
-    });
-  });
-
-  it('refuses a PercentOfAttendees quorum with no value', () => {
-    expect(
-      refusalOf(() => assertValidVotingRules(rules({ voteQuorumType: VoteQuorumType.PercentOfAttendees }))),
-    ).toMatchObject({
-      status: 400,
-      response: { code: 'EVENT_POLICY_INVALID', message: t('errors.event_policy.quorum_value_required') },
-    });
-  });
-
-  // Each type in a list needs its own case: dropping one from the list in
-  // `policy-rules.ts` would otherwise pass every test (#796).
+  // A threshold or quorum counted against a number has no line a vote can
+  // pass without one. Each type in a list needs its own case: dropping one
+  // from the list in `effective-policy.ts` would otherwise pass every test.
   it.each([VoteThresholdType.Supermajority, VoteThresholdType.FixedCount])(
-    'refuses a %s threshold with no value',
+    'refuses a %s threshold with no value (#796)',
     (voteThresholdType) => {
-      expect(refusalOf(() => assertValidVotingRules(rules({ voteThresholdType })))).toMatchObject({
+      expect(refusalOf(() => assertValidVotingPolicy(votingPolicy({ voteThresholdType })))).toMatchObject({
         status: 400,
         response: { code: 'EVENT_POLICY_INVALID', message: t('errors.event_policy.threshold_value_required') },
       });
@@ -118,16 +100,16 @@ describe('assertValidVotingRules', () => {
   );
 
   it.each([VoteQuorumType.PercentOfAttendees, VoteQuorumType.FixedCount])(
-    'refuses a %s quorum with no value',
+    'refuses a %s quorum with no value (#796)',
     (voteQuorumType) => {
-      expect(refusalOf(() => assertValidVotingRules(rules({ voteQuorumType })))).toMatchObject({
+      expect(refusalOf(() => assertValidVotingPolicy(votingPolicy({ voteQuorumType })))).toMatchObject({
         status: 400,
         response: { code: 'EVENT_POLICY_INVALID', message: t('errors.event_policy.quorum_value_required') },
       });
     },
   );
 
-  it('accepts a SimpleMajority threshold with no value, which needs none', () => {
-    expect(() => assertValidVotingRules(rules())).not.toThrow();
+  it('accepts a SimpleMajority threshold with no value, which needs none (#796)', () => {
+    expect(() => assertValidVotingPolicy(votingPolicy())).not.toThrow();
   });
 });

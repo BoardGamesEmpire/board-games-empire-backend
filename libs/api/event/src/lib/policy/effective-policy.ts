@@ -13,7 +13,11 @@ import type { VotingPolicy } from '../interfaces/vote.interface';
 
 export type EffectivePolicy = VotingPolicy & { gameAdditionMode: GameAdditionMode; votingWindowHours: number | null };
 
-/** The policy a nomination is held to: its date's, where the date sets a field, else the event's. */
+/**
+ * A date's effective policy: the date's value for each field it sets, else the
+ * event's, else the schema's default. A nomination is held to it, and a policy
+ * write is judged by it for each date the event has (#796).
+ */
 export function foldPolicy(eventPolicy: EventPolicy | null, occPolicy: EventOccurrencePolicy | null): EffectivePolicy {
   const base = {
     gameAdditionMode: eventPolicy?.gameAdditionMode ?? GameAdditionMode.Direct,
@@ -55,16 +59,16 @@ const QUORUM_TYPES_WITH_VALUE: readonly VoteQuorumType[] = [
 ];
 
 /**
- * Refuses voting rules a resolve could not apply: a Supermajority or
+ * Refuses a voting policy a resolve could not apply: a Supermajority or
  * FixedCount threshold, or a PercentOfAttendees or FixedCount quorum, with no
  * number to count against. Judge the policy a write leaves, the stored policy
  * merged with the patch and folded under each date's overrides, not the patch
  * alone (#796).
  */
-export function assertValidVotingRules(
-  rules: Pick<EffectivePolicy, 'voteThresholdType' | 'voteThresholdValue' | 'voteQuorumType' | 'voteQuorumValue'>,
+export function assertValidVotingPolicy(
+  policy: Pick<EffectivePolicy, 'voteThresholdType' | 'voteThresholdValue' | 'voteQuorumType' | 'voteQuorumValue'>,
 ): void {
-  if (THRESHOLD_TYPES_WITH_VALUE.includes(rules.voteThresholdType) && rules.voteThresholdValue === null) {
+  if (THRESHOLD_TYPES_WITH_VALUE.includes(policy.voteThresholdType) && policy.voteThresholdValue === null) {
     throw new CodedHttpException(
       Http.BadRequest,
       'EVENT_POLICY_INVALID',
@@ -72,7 +76,7 @@ export function assertValidVotingRules(
     );
   }
 
-  if (QUORUM_TYPES_WITH_VALUE.includes(rules.voteQuorumType) && rules.voteQuorumValue === null) {
+  if (QUORUM_TYPES_WITH_VALUE.includes(policy.voteQuorumType) && policy.voteQuorumValue === null) {
     throw new CodedHttpException(
       Http.BadRequest,
       'EVENT_POLICY_INVALID',
