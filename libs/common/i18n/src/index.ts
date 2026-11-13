@@ -32,5 +32,6 @@ export { I18nConfigModule } from './lib/i18n.module';
 export { LocaleResolutionService, type LocaleResolutionInput } from './lib/locale-resolution.service';
 export { FALLBACK_LOCALE } from './lib/locale.constants';
 export { SupportedLocalesService } from './lib/supported-locales.service';
-export { renderErrorBody, translateException } from './lib/translate-exception';
+export { renderErrorBody, renderMarker, translateException } from './lib/translate-exception';
 export { translateValidationErrors } from './lib/translate-validation-errors';
+export { UnknownErrorFilter } from './lib/unknown-error.filter';

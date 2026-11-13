@@ -76,7 +76,7 @@ export function createAuthRequestHandler(
 ): AuthRequestHandler {
   const logger = new Logger('AuthRequestHandler');
   const unavailable = () => coded(503, AUTH_UNAVAILABLE, deps.render('errors.auth.unavailable'));
-  const failed = (headers?: Headers) => coded(500, AUTH_FAILED, deps.render('errors.auth.failed'), headers);
+  const failed = (headers?: Headers) => coded(500, AUTH_FAILED, deps.render('errors.request.failed'), headers);
 
   return async (request) => {
     const record: StorageFailureRecord = { failed: false };

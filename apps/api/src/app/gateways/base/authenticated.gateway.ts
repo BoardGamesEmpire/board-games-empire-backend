@@ -179,8 +179,9 @@ export abstract class AuthenticatedGateway implements OnGatewayInit, OnGatewayCo
    * structured exception's other fields, its stable `code` among them, go
    * with it, as they do over HTTP.
    * Anything else means the session could not be checked at all: it is
-   * logged, and the client is refused with a 500 that says nothing about why.
-   * Like Nest's own 500 over HTTP, that one stays English.
+   * logged, and the client is refused with a 500 that says nothing about why,
+   * in the catalog copy the HTTP 500 carries, rendered in the handshake's
+   * locale (#527).
    */
   private async refusalFor(client: Socket, error: unknown): Promise<WsConnectionRefusal> {
     if (error instanceof HandshakeRefusal) {
@@ -202,7 +203,12 @@ export abstract class AuthenticatedGateway implements OnGatewayInit, OnGatewayCo
     }
 
     this.logger.error(`WS connection failed: socketId=${client.id}`, error);
-    return new WsConnectionRefusal(Http.InternalServerError, 'Internal server error');
+    const locale = await this.translator.localeOf(client);
+
+    return new WsConnectionRefusal(
+      Http.InternalServerError,
+      this.translator.translate(locale, t('errors.request.failed')),
+    );
   }
 }
 

@@ -213,7 +213,7 @@ describe('createAuthRequestHandler', () => {
       statusCode: 500,
       error: 'Internal Server Error',
       code: 'AUTH_FAILED',
-      message: 'errors.auth.failed',
+      message: 'errors.request.failed',
     };
 
     const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>

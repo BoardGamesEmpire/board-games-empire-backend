@@ -16,6 +16,7 @@ import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { I18nModule } from 'nestjs-i18n';
 import { I18nExceptionFilter } from './i18n-exception.filter';
+import { LocaleResolutionService } from './locale-resolution.service';
 import { FALLBACK_LOCALE } from './locale.constants';
 
 /**
@@ -78,6 +79,7 @@ describe('I18nExceptionFilter (real catalog)', () => {
       controllers: [TestController],
       providers: [
         { provide: AuditContextService, useValue: { getLocale } },
+        { provide: LocaleResolutionService, useValue: { resolveAcceptLanguage: () => FALLBACK_LOCALE } },
         { provide: APP_FILTER, useClass: I18nExceptionFilter },
       ],
     }).compile();

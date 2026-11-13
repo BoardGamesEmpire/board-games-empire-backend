@@ -14,6 +14,7 @@ import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { I18nService } from 'nestjs-i18n';
 import { I18nExceptionFilter } from './i18n-exception.filter';
+import { LocaleResolutionService } from './locale-resolution.service';
 
 /**
  * Boots a real (minimal) Nest HTTP app so the filter is exercised end-to-end:
@@ -61,6 +62,7 @@ describe('I18nExceptionFilter (integration)', () => {
       providers: [
         { provide: I18nService, useValue: { translate } },
         { provide: AuditContextService, useValue: { getLocale } },
+        { provide: LocaleResolutionService, useValue: { resolveAcceptLanguage: () => 'en' } },
         { provide: APP_FILTER, useClass: I18nExceptionFilter },
       ],
     }).compile();

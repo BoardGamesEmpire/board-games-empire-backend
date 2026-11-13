@@ -209,16 +209,12 @@ describe('translateException', () => {
   });
 
   it('gives a string body the envelope (#1260)', () => {
-    const out = translateException(
-      new HttpException('ThrottlerException: Too Many Requests', 429),
-      i18n as never,
-      auditContext,
-    );
+    const out = translateException(new HttpException('Text a library wrote', 503), i18n as never, auditContext);
 
     expect(out.getResponse()).toEqual({
-      statusCode: 429,
-      error: 'Too Many Requests',
-      message: 'ThrottlerException: Too Many Requests',
+      statusCode: 503,
+      error: 'Service Unavailable',
+      message: 'Text a library wrote',
     });
   });
 
