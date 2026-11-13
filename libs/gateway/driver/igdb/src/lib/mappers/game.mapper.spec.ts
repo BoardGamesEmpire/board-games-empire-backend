@@ -1,5 +1,5 @@
 import * as proto from '@boardgamesempire/proto-gateway';
-import { GameType, PlatformType, Region } from '../constants';
+import { GameType, IGDB_STEAM_EXTERNAL_GAME_SOURCE, PlatformType, Region } from '../constants';
 import type { IgdbGame } from '../types';
 import { toGameData, toGameSearchData, toSearchNarrowing, utcYearStart } from './game.mapper';
 
@@ -267,6 +267,76 @@ describe('game.mapper', () => {
       expect(utcYearStart(50)).toBe(-60589296000);
       expect(utcYearStart(2000)).toBe(946684800);
       expect(utcYearStart(-500)).toBe(-77945673600);
+    });
+  });
+
+  // IGDB names a game's Steam app among its external games. Search and fetch
+  // both send it, so "already in the game catalog" can match a game imported
+  // from a Steam DataGateway (#926).
+  describe('cross-references (#926)', () => {
+    const STEAM = proto.Upstream.UPSTREAM_STEAM;
+
+    const withExternalGames = (external_games: IgdbGame['external_games']): IgdbGame => ({
+      id: 14593,
+      name: 'Hollow Knight',
+      external_games,
+    });
+
+    // `category` is deprecated, and the `external_game_source` id is IGDB's
+    // data, not ours, so a change on IGDB's side shows up here rather than as
+    // silently missing cross-references.
+    it('knows Steam as IGDB’s external_game_source 1', () => {
+      expect(IGDB_STEAM_EXTERNAL_GAME_SOURCE).toBe(1);
+    });
+
+    it('sends a Steam app as a Steam cross-reference, on fetch and on search', () => {
+      const game = withExternalGames([{ id: 9, uid: '367520', external_game_source: 1 }]);
+
+      expect(toGameData(game).crossReferences).toEqual([{ upstream: STEAM, id: '367520' }]);
+      expect(toGameSearchData(game).crossReferences).toEqual([{ upstream: STEAM, id: '367520' }]);
+    });
+
+    it('leaves out an external game from any other external_game_source, or none', () => {
+      const game = withExternalGames([
+        { id: 9, uid: '367520', external_game_source: 5 },
+        { id: 10, uid: '367521' },
+      ]);
+
+      expect(toGameData(game).crossReferences).toEqual([]);
+    });
+
+    it.each([
+      ['empty', ''],
+      ['blank', '   '],
+      ['missing', undefined],
+    ])('leaves out a Steam app whose uid is %s', (_label, uid) => {
+      const game = withExternalGames([{ id: 9, uid, external_game_source: 1 }]);
+
+      expect(toGameData(game).crossReferences).toEqual([]);
+    });
+
+    it('trims a Steam uid and keeps it otherwise exactly as given', () => {
+      const game = withExternalGames([{ id: 9, uid: ' 0367520 ', external_game_source: 1 }]);
+
+      expect(toGameData(game).crossReferences).toEqual([{ upstream: STEAM, id: '0367520' }]);
+    });
+
+    it('sends a Steam app named twice once, and two Steam apps in IGDB’s order', () => {
+      const game = withExternalGames([
+        { id: 9, uid: '367520', external_game_source: 1 },
+        { id: 10, uid: '367520', external_game_source: 1 },
+        { id: 11, uid: '1030300', external_game_source: 1 },
+      ]);
+
+      expect(toGameData(game).crossReferences).toEqual([
+        { upstream: STEAM, id: '367520' },
+        { upstream: STEAM, id: '1030300' },
+      ]);
+    });
+
+    it('sends none for a game with no external games', () => {
+      expect(toGameData(withExternalGames(undefined)).crossReferences).toEqual([]);
+      expect(toGameSearchData(withExternalGames(undefined)).crossReferences).toEqual([]);
     });
   });
 });

@@ -9,7 +9,7 @@
       "yearPublished": 2017,
       "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/cobfzp.jpg",
       "sourceUrl": "https://www.igdb.com/games/hollow-knight",
-      "averageRating": 91.52377623821606,
+      "averageRating": 91.52329563027182,
       "summary": "A 2D metroidvania with an emphasis on close combat and exploration in which the player enters the once-prosperous now-bleak insect kingdom of Hallownest, travels through its various districts, meets friendly inhabitants, fights hostile ones and uncovers the kingdom's history while improving their combat abilities and movement arsenal by fighting bosses and accessing out-of-the-way areas.",
       "availablePlatforms": [
         {
@@ -946,7 +946,12 @@
         }
       ],
       "baseGameExternalIds": [],
-      "crossReferences": []
+      "crossReferences": [
+        {
+          "upstream": "UPSTREAM_STEAM",
+          "id": "367520"
+        }
+      ]
     }
   },
   {
@@ -959,7 +964,7 @@
       "yearPublished": 2025,
       "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/cobebu.jpg",
       "sourceUrl": "https://www.igdb.com/games/hollow-knight-silksong",
-      "averageRating": 90.98680928292235,
+      "averageRating": 90.98626753911503,
       "summary": "Hollow Knight: Silksong is the epic sequel to Hollow Knight, the epic action-adventure of bugs and heroes. As the lethal hunter Hornet, journey to all-new lands, discover new powers, battle vast hordes of bugs and beasts and uncover ancient secrets tied to your nature and your past.",
       "availablePlatforms": [
         {
@@ -1749,7 +1754,12 @@
         }
       ],
       "baseGameExternalIds": [],
-      "crossReferences": []
+      "crossReferences": [
+        {
+          "upstream": "UPSTREAM_STEAM",
+          "id": "1030300"
+        }
+      ]
     }
   },
   {

@@ -219,6 +219,20 @@ export type IgdbGameType = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 
  */
 export type IgdbGameStatus = 0 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | number;
 
+/**
+ * A game's entry at another service, a store such as Steam or a site, as
+ * IGDB lists it. `external_game_source` names the service (see
+ * IGDB_STEAM_EXTERNAL_GAME_SOURCE); it replaces the deprecated `category`
+ * (#926).
+ */
+export interface IgdbExternalGame {
+  id: number;
+
+  /** The game's id at that service, such as a Steam app id. */
+  uid?: string;
+  external_game_source?: number;
+}
+
 export interface IgdbGame {
   id: number;
   name: string;
@@ -235,6 +249,7 @@ export interface IgdbGame {
   collections?: IgdbNamedEntity[];
   cover?: IgdbCover;
   expansions?: number[];
+  external_games?: IgdbExternalGame[];
   franchises?: IgdbNamedEntity[];
   genres?: IgdbNamedEntity[];
   involved_companies?: IgdbInvolvedCompany[];

@@ -72,6 +72,12 @@ describe('GameRequests', () => {
       expect(client.fields).toHaveBeenCalledWith(expect.arrayContaining([...GAME_SEARCH_FIELDS]));
     });
 
+    it('asks for each game’s external games, so a search sends its Steam app (#926)', () => {
+      expect(GAME_SEARCH_FIELDS).toEqual(
+        expect.arrayContaining(['external_games.uid', 'external_games.external_game_source']),
+      );
+    });
+
     it('resolves with the data array from the response', async () => {
       const games: IgdbGame[] = [{ id: 1, name: 'Hades' }];
       const client = buildMockClient(games);
@@ -182,6 +188,12 @@ describe('GameRequests', () => {
       const client = buildMockClient();
       await fetchGameRequest('1942')(client, signal);
       expect(client.fields).toHaveBeenCalledWith(expect.arrayContaining([...GAME_FETCH_FIELDS]));
+    });
+
+    it('asks for each game’s external games, so a fetch sends its Steam app (#926)', () => {
+      expect(GAME_FETCH_FIELDS).toEqual(
+        expect.arrayContaining(['external_games.uid', 'external_games.external_game_source']),
+      );
     });
 
     it('includes involved_companies fields for publisher/developer mapping', async () => {

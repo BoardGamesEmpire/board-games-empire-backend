@@ -44,6 +44,275 @@
     "correlationId": "golden",
     "status": "RESULT_STATUS_RESULT",
     "game": {
+      "externalId": "106817",
+      "title": "Hollow Knight: The Grimm Troupe",
+      "contentType": "CONTENT_TYPE_UNSPECIFIED",
+      "yearPublished": 2017,
+      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co310v.jpg",
+      "sourceUrl": "https://www.igdb.com/games/hollow-knight-the-grimm-troupe",
+      "averageRating": 86.99805397399788,
+      "summary": "The Grimm Troupe is the second of the four free content pack for Hollow Knight, following Hidden Dreams on the 13th June, 2017. It was released on the 26th October, 2017. It will be followed by Gods & Glory on the 26th August, 2018.",
+      "availablePlatforms": [
+        {
+          "externalId": "3",
+          "name": "Linux",
+          "abbreviation": "Linux",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "6",
+          "name": "PC (Microsoft Windows)",
+          "abbreviation": "PC",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "14",
+          "name": "Mac",
+          "abbreviation": "Mac",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "130",
+          "name": "Nintendo Switch",
+          "abbreviation": "Switch",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        }
+      ],
+      "availableReleases": [
+        {
+          "externalId": "3",
+          "platform": {
+            "externalId": "3",
+            "name": "Linux",
+            "abbreviation": "Linux",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2017-10-26",
+          "releaseYear": 2017,
+          "localizations": [],
+          "languages": []
+        },
+        {
+          "externalId": "6",
+          "platform": {
+            "externalId": "6",
+            "name": "PC (Microsoft Windows)",
+            "abbreviation": "PC",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2017-10-26",
+          "releaseYear": 2017,
+          "localizations": [],
+          "languages": []
+        },
+        {
+          "externalId": "14",
+          "platform": {
+            "externalId": "14",
+            "name": "Mac",
+            "abbreviation": "Mac",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2017-10-26",
+          "releaseYear": 2017,
+          "localizations": [],
+          "languages": []
+        },
+        {
+          "externalId": "130",
+          "platform": {
+            "externalId": "130",
+            "name": "Nintendo Switch",
+            "abbreviation": "Switch",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2017-10-26",
+          "releaseYear": 2017,
+          "localizations": [],
+          "languages": []
+        }
+      ],
+      "baseGameExternalIds": [
+        "14593"
+      ],
+      "crossReferences": []
+    }
+  },
+  {
+    "correlationId": "golden",
+    "status": "RESULT_STATUS_RESULT",
+    "game": {
+      "externalId": "106818",
+      "title": "Hollow Knight: Hidden Dreams",
+      "contentType": "CONTENT_TYPE_UNSPECIFIED",
+      "yearPublished": 2017,
+      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co310u.jpg",
+      "sourceUrl": "https://www.igdb.com/games/hollow-knight-hidden-dreams",
+      "averageRating": 81.5790890179494,
+      "summary": "Hidden Dreams is the first of four free content packs for Hollow Knight.",
+      "availablePlatforms": [
+        {
+          "externalId": "3",
+          "name": "Linux",
+          "abbreviation": "Linux",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "6",
+          "name": "PC (Microsoft Windows)",
+          "abbreviation": "PC",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "14",
+          "name": "Mac",
+          "abbreviation": "Mac",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "130",
+          "name": "Nintendo Switch",
+          "abbreviation": "Switch",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        }
+      ],
+      "availableReleases": [
+        {
+          "externalId": "3",
+          "platform": {
+            "externalId": "3",
+            "name": "Linux",
+            "abbreviation": "Linux",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2017-08-03",
+          "releaseYear": 2017,
+          "localizations": [],
+          "languages": []
+        },
+        {
+          "externalId": "6",
+          "platform": {
+            "externalId": "6",
+            "name": "PC (Microsoft Windows)",
+            "abbreviation": "PC",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2017-08-03",
+          "releaseYear": 2017,
+          "localizations": [],
+          "languages": []
+        },
+        {
+          "externalId": "14",
+          "platform": {
+            "externalId": "14",
+            "name": "Mac",
+            "abbreviation": "Mac",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2017-08-03",
+          "releaseYear": 2017,
+          "localizations": [],
+          "languages": []
+        },
+        {
+          "externalId": "130",
+          "platform": {
+            "externalId": "130",
+            "name": "Nintendo Switch",
+            "abbreviation": "Switch",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2017-08-03",
+          "releaseYear": 2017,
+          "localizations": [],
+          "languages": []
+        }
+      ],
+      "baseGameExternalIds": [
+        "14593"
+      ],
+      "crossReferences": []
+    }
+  },
+  {
+    "correlationId": "golden",
+    "status": "RESULT_STATUS_RESULT",
+    "game": {
+      "externalId": "365702",
+      "title": "Hollow Knight",
+      "contentType": "CONTENT_TYPE_MOD",
+      "yearPublished": 2023,
+      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/cocpbl.jpg",
+      "sourceUrl": "https://www.igdb.com/games/hollow-knight--1",
+      "summary": "Unofficial port of the hit game Hollow Knight for PlayStation Vita.",
+      "availablePlatforms": [
+        {
+          "externalId": "46",
+          "name": "PlayStation Vita",
+          "abbreviation": "Vita",
+          "platformType": "PLATFORM_TYPE_PORTABLE"
+        }
+      ],
+      "availableReleases": [
+        {
+          "externalId": "46",
+          "platform": {
+            "externalId": "46",
+            "name": "PlayStation Vita",
+            "abbreviation": "Vita",
+            "platformType": "PLATFORM_TYPE_PORTABLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2023-11-13",
+          "releaseYear": 2023,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            }
+          ]
+        }
+      ],
+      "baseGameExternalIds": [
+        "14593"
+      ],
+      "crossReferences": []
+    }
+  },
+  {
+    "correlationId": "golden",
+    "status": "RESULT_STATUS_RESULT",
+    "game": {
+      "externalId": "375989",
+      "title": "Hollow Knight: The Glimmering Realm",
+      "contentType": "CONTENT_TYPE_MOD",
+      "sourceUrl": "https://www.igdb.com/games/hollow-knight-the-glimmering-realm",
+      "summary": "A mod for the game Hollow Knight that adds a game mode with a whole new world to explore - the Glimmering Realm!\n\nChanges the layout, items and lore of Hallownest into a whole new realm\nNo map included, draw your own or venture forth without guidance\nAdds a new game mode, all old save files will remain unchanged",
+      "availablePlatforms": [],
+      "availableReleases": [],
+      "baseGameExternalIds": [
+        "14593"
+      ],
+      "crossReferences": []
+    }
+  },
+  {
+    "correlationId": "golden",
+    "status": "RESULT_STATUS_RESULT",
+    "game": {
       "externalId": "341654",
       "title": "Hollow Knight Randomizer",
       "contentType": "CONTENT_TYPE_MOD",
@@ -71,6 +340,332 @@
           "status": "RELEASE_STATUS_RELEASED",
           "releaseDate": "2022-01-08",
           "releaseYear": 2022,
+          "localizations": [],
+          "languages": []
+        }
+      ],
+      "baseGameExternalIds": [
+        "14593"
+      ],
+      "crossReferences": []
+    }
+  },
+  {
+    "correlationId": "golden",
+    "status": "RESULT_STATUS_RESULT",
+    "game": {
+      "externalId": "136396",
+      "title": "Hollow Knight: Lifeblood",
+      "contentType": "CONTENT_TYPE_UNSPECIFIED",
+      "yearPublished": 2018,
+      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co3i7x.jpg",
+      "sourceUrl": "https://www.igdb.com/games/hollow-knight-lifeblood",
+      "averageRating": 70.81334874110301,
+      "summary": "Lifeblood is a DLC for Hollow Knight and is the third out of the four free contents that were released. This DLC was announced on the 23rd of March 2018 and was released on the 20th of April, 2018.\n\nLifeblood Overview\nLifeblood mainly focused on enhancing certain aspects of the game such as:\n\nAn optimizable theme, allowing players to change the background of the title screen.\nVisual Changes to the game such as using charms, locations, and new animations.\nBuffs and Nerfs to Combat, Enemies, and Bosses such as:\nAdded two new attacks to the Traitor Lord.\nHivelings appearance is larger and has increased health.\nA stagger can be performed on The Collector\nHive Guardians deals two masks of damage to The Knight.\nUpon Death, a Volatile Mosskin quickly explodes.\nA Husk Hive grew in size, is faster, and summons Hivelings in a shorter period of time.\nA Desolate Dive can no longer be used on a Flukemarm.\nThe Knight must wear the Grimmchild charm to gain access into facing Nightmare King Grimm.\nStagger Animation of the False Knight is faster.\nThe spore cloud released by a Fungified Husk is bigger.\nAdded dialogue to NPCs\nAdded and optimized sound effects in the game.\nChanges made to some Charms:\nThe damage dealt by the Flukenest has been reduced and costs 3 notches.\nWeaverlings from the Weaversong deals more damage, has a new animation and can inflict stagger on bosses.\nJoni's Blessing has decreased its value of providing 50% +1 HP to 40% +1 HP.\nFury of the Fallen now has a red smoke when it is used instead of a red aura.\nOther than the changes done and added, Lifeblood also introduces a boss and a new mapping tool listed below:",
+      "availablePlatforms": [
+        {
+          "externalId": "3",
+          "name": "Linux",
+          "abbreviation": "Linux",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "6",
+          "name": "PC (Microsoft Windows)",
+          "abbreviation": "PC",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "14",
+          "name": "Mac",
+          "abbreviation": "Mac",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "130",
+          "name": "Nintendo Switch",
+          "abbreviation": "Switch",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        }
+      ],
+      "availableReleases": [
+        {
+          "externalId": "3",
+          "platform": {
+            "externalId": "3",
+            "name": "Linux",
+            "abbreviation": "Linux",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2018-04-20",
+          "releaseYear": 2018,
+          "localizations": [],
+          "languages": []
+        },
+        {
+          "externalId": "6",
+          "platform": {
+            "externalId": "6",
+            "name": "PC (Microsoft Windows)",
+            "abbreviation": "PC",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2018-04-20",
+          "releaseYear": 2018,
+          "localizations": [],
+          "languages": []
+        },
+        {
+          "externalId": "14",
+          "platform": {
+            "externalId": "14",
+            "name": "Mac",
+            "abbreviation": "Mac",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2018-04-20",
+          "releaseYear": 2018,
+          "localizations": [],
+          "languages": []
+        },
+        {
+          "externalId": "130",
+          "platform": {
+            "externalId": "130",
+            "name": "Nintendo Switch",
+            "abbreviation": "Switch",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2018-04-20",
+          "releaseYear": 2018,
+          "localizations": [],
+          "languages": []
+        }
+      ],
+      "baseGameExternalIds": [
+        "14593"
+      ],
+      "crossReferences": []
+    }
+  },
+  {
+    "correlationId": "golden",
+    "status": "RESULT_STATUS_RESULT",
+    "game": {
+      "externalId": "105420",
+      "title": "Hollow Knight: Godmaster",
+      "contentType": "CONTENT_TYPE_UNSPECIFIED",
+      "yearPublished": 2018,
+      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co4hc2.jpg",
+      "sourceUrl": "https://www.igdb.com/games/hollow-knight-godmaster",
+      "averageRating": 89.96032617912053,
+      "summary": "Godmaster was the fourth and final free content pack for Hollow Knight.",
+      "availablePlatforms": [
+        {
+          "externalId": "48",
+          "name": "PlayStation 4",
+          "abbreviation": "PS4",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        {
+          "externalId": "3",
+          "name": "Linux",
+          "abbreviation": "Linux",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "6",
+          "name": "PC (Microsoft Windows)",
+          "abbreviation": "PC",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "14",
+          "name": "Mac",
+          "abbreviation": "Mac",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "49",
+          "name": "Xbox One",
+          "abbreviation": "XONE",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        {
+          "externalId": "130",
+          "name": "Nintendo Switch",
+          "abbreviation": "Switch",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        }
+      ],
+      "availableReleases": [
+        {
+          "externalId": "48",
+          "platform": {
+            "externalId": "48",
+            "name": "PlayStation 4",
+            "abbreviation": "PS4",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2018-08-23",
+          "releaseYear": 2018,
+          "localizations": [],
+          "languages": []
+        },
+        {
+          "externalId": "3",
+          "platform": {
+            "externalId": "3",
+            "name": "Linux",
+            "abbreviation": "Linux",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2018-08-23",
+          "releaseYear": 2018,
+          "localizations": [],
+          "languages": []
+        },
+        {
+          "externalId": "6",
+          "platform": {
+            "externalId": "6",
+            "name": "PC (Microsoft Windows)",
+            "abbreviation": "PC",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2018-08-23",
+          "releaseYear": 2018,
+          "localizations": [],
+          "languages": []
+        },
+        {
+          "externalId": "14",
+          "platform": {
+            "externalId": "14",
+            "name": "Mac",
+            "abbreviation": "Mac",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2018-08-23",
+          "releaseYear": 2018,
+          "localizations": [],
+          "languages": []
+        },
+        {
+          "externalId": "49",
+          "platform": {
+            "externalId": "49",
+            "name": "Xbox One",
+            "abbreviation": "XONE",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2018-08-23",
+          "releaseYear": 2018,
+          "localizations": [],
+          "languages": []
+        },
+        {
+          "externalId": "130",
+          "platform": {
+            "externalId": "130",
+            "name": "Nintendo Switch",
+            "abbreviation": "Switch",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2018-08-23",
+          "releaseYear": 2018,
+          "localizations": [],
+          "languages": []
+        }
+      ],
+      "baseGameExternalIds": [
+        "14593"
+      ],
+      "crossReferences": []
+    }
+  },
+  {
+    "correlationId": "golden",
+    "status": "RESULT_STATUS_RESULT",
+    "game": {
+      "externalId": "255660",
+      "title": "Hollow Knight: Pale Court",
+      "contentType": "CONTENT_TYPE_MOD",
+      "yearPublished": 2023,
+      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co6pmn.jpg",
+      "sourceUrl": "https://www.igdb.com/games/hollow-knight-pale-court",
+      "summary": "The unofficial expansion mod is finally here!\nChallenge Hallownest's mightiest champions in grand combat!\nOvercome your opponents with powerful new charms!\nDiscover new secrets and stories!\nAll with an incredible new soundtrack!",
+      "availablePlatforms": [
+        {
+          "externalId": "6",
+          "name": "PC (Microsoft Windows)",
+          "abbreviation": "PC",
+          "platformType": "PLATFORM_TYPE_PC"
+        }
+      ],
+      "availableReleases": [
+        {
+          "externalId": "6",
+          "platform": {
+            "externalId": "6",
+            "name": "PC (Microsoft Windows)",
+            "abbreviation": "PC",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2023-07-01",
+          "releaseYear": 2023,
+          "localizations": [],
+          "languages": []
+        }
+      ],
+      "baseGameExternalIds": [
+        "14593"
+      ],
+      "crossReferences": []
+    }
+  },
+  {
+    "correlationId": "golden",
+    "status": "RESULT_STATUS_RESULT",
+    "game": {
+      "externalId": "341658",
+      "title": "Hollow Knight Gun Mod",
+      "contentType": "CONTENT_TYPE_MOD",
+      "yearPublished": 2020,
+      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co9q8o.jpg",
+      "sourceUrl": "https://www.igdb.com/games/hollow-knight-gun-mod",
+      "summary": "A Hollow Knight mod that gives the Knight the ability to wield a modern day assault rifle. Why did I make this? I wish I knew too.\n\nWhile this mod is not to be taken seriously, It still aims to make a semi-serious fun ranged weapon mod to capitalize on Hollow Knight's movement system.",
+      "availablePlatforms": [
+        {
+          "externalId": "6",
+          "name": "PC (Microsoft Windows)",
+          "abbreviation": "PC",
+          "platformType": "PLATFORM_TYPE_PC"
+        }
+      ],
+      "availableReleases": [
+        {
+          "externalId": "6",
+          "platform": {
+            "externalId": "6",
+            "name": "PC (Microsoft Windows)",
+            "abbreviation": "PC",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2020-10-03",
+          "releaseYear": 2020,
           "localizations": [],
           "languages": []
         }
@@ -335,601 +930,6 @@
               "iso6393": "jpn",
               "iso6391": "ja",
               "name": "Japanese"
-            }
-          ]
-        }
-      ],
-      "baseGameExternalIds": [
-        "14593"
-      ],
-      "crossReferences": []
-    }
-  },
-  {
-    "correlationId": "golden",
-    "status": "RESULT_STATUS_RESULT",
-    "game": {
-      "externalId": "106818",
-      "title": "Hollow Knight: Hidden Dreams",
-      "contentType": "CONTENT_TYPE_UNSPECIFIED",
-      "yearPublished": 2017,
-      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co310u.jpg",
-      "sourceUrl": "https://www.igdb.com/games/hollow-knight-hidden-dreams",
-      "averageRating": 81.5790890179494,
-      "summary": "Hidden Dreams is the first of four free content packs for Hollow Knight.",
-      "availablePlatforms": [
-        {
-          "externalId": "3",
-          "name": "Linux",
-          "abbreviation": "Linux",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "6",
-          "name": "PC (Microsoft Windows)",
-          "abbreviation": "PC",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "14",
-          "name": "Mac",
-          "abbreviation": "Mac",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "130",
-          "name": "Nintendo Switch",
-          "abbreviation": "Switch",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        }
-      ],
-      "availableReleases": [
-        {
-          "externalId": "3",
-          "platform": {
-            "externalId": "3",
-            "name": "Linux",
-            "abbreviation": "Linux",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2017-08-03",
-          "releaseYear": 2017,
-          "localizations": [],
-          "languages": []
-        },
-        {
-          "externalId": "6",
-          "platform": {
-            "externalId": "6",
-            "name": "PC (Microsoft Windows)",
-            "abbreviation": "PC",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2017-08-03",
-          "releaseYear": 2017,
-          "localizations": [],
-          "languages": []
-        },
-        {
-          "externalId": "14",
-          "platform": {
-            "externalId": "14",
-            "name": "Mac",
-            "abbreviation": "Mac",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2017-08-03",
-          "releaseYear": 2017,
-          "localizations": [],
-          "languages": []
-        },
-        {
-          "externalId": "130",
-          "platform": {
-            "externalId": "130",
-            "name": "Nintendo Switch",
-            "abbreviation": "Switch",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2017-08-03",
-          "releaseYear": 2017,
-          "localizations": [],
-          "languages": []
-        }
-      ],
-      "baseGameExternalIds": [
-        "14593"
-      ],
-      "crossReferences": []
-    }
-  },
-  {
-    "correlationId": "golden",
-    "status": "RESULT_STATUS_RESULT",
-    "game": {
-      "externalId": "255660",
-      "title": "Hollow Knight: Pale Court",
-      "contentType": "CONTENT_TYPE_MOD",
-      "yearPublished": 2023,
-      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co6pmn.jpg",
-      "sourceUrl": "https://www.igdb.com/games/hollow-knight-pale-court",
-      "summary": "The unofficial expansion mod is finally here!\nChallenge Hallownest's mightiest champions in grand combat!\nOvercome your opponents with powerful new charms!\nDiscover new secrets and stories!\nAll with an incredible new soundtrack!",
-      "availablePlatforms": [
-        {
-          "externalId": "6",
-          "name": "PC (Microsoft Windows)",
-          "abbreviation": "PC",
-          "platformType": "PLATFORM_TYPE_PC"
-        }
-      ],
-      "availableReleases": [
-        {
-          "externalId": "6",
-          "platform": {
-            "externalId": "6",
-            "name": "PC (Microsoft Windows)",
-            "abbreviation": "PC",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2023-07-01",
-          "releaseYear": 2023,
-          "localizations": [],
-          "languages": []
-        }
-      ],
-      "baseGameExternalIds": [
-        "14593"
-      ],
-      "crossReferences": []
-    }
-  },
-  {
-    "correlationId": "golden",
-    "status": "RESULT_STATUS_RESULT",
-    "game": {
-      "externalId": "106817",
-      "title": "Hollow Knight: The Grimm Troupe",
-      "contentType": "CONTENT_TYPE_UNSPECIFIED",
-      "yearPublished": 2017,
-      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co310v.jpg",
-      "sourceUrl": "https://www.igdb.com/games/hollow-knight-the-grimm-troupe",
-      "averageRating": 86.99805397399788,
-      "summary": "The Grimm Troupe is the second of the four free content pack for Hollow Knight, following Hidden Dreams on the 13th June, 2017. It was released on the 26th October, 2017. It will be followed by Gods & Glory on the 26th August, 2018.",
-      "availablePlatforms": [
-        {
-          "externalId": "3",
-          "name": "Linux",
-          "abbreviation": "Linux",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "6",
-          "name": "PC (Microsoft Windows)",
-          "abbreviation": "PC",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "14",
-          "name": "Mac",
-          "abbreviation": "Mac",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "130",
-          "name": "Nintendo Switch",
-          "abbreviation": "Switch",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        }
-      ],
-      "availableReleases": [
-        {
-          "externalId": "3",
-          "platform": {
-            "externalId": "3",
-            "name": "Linux",
-            "abbreviation": "Linux",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2017-10-26",
-          "releaseYear": 2017,
-          "localizations": [],
-          "languages": []
-        },
-        {
-          "externalId": "6",
-          "platform": {
-            "externalId": "6",
-            "name": "PC (Microsoft Windows)",
-            "abbreviation": "PC",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2017-10-26",
-          "releaseYear": 2017,
-          "localizations": [],
-          "languages": []
-        },
-        {
-          "externalId": "14",
-          "platform": {
-            "externalId": "14",
-            "name": "Mac",
-            "abbreviation": "Mac",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2017-10-26",
-          "releaseYear": 2017,
-          "localizations": [],
-          "languages": []
-        },
-        {
-          "externalId": "130",
-          "platform": {
-            "externalId": "130",
-            "name": "Nintendo Switch",
-            "abbreviation": "Switch",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2017-10-26",
-          "releaseYear": 2017,
-          "localizations": [],
-          "languages": []
-        }
-      ],
-      "baseGameExternalIds": [
-        "14593"
-      ],
-      "crossReferences": []
-    }
-  },
-  {
-    "correlationId": "golden",
-    "status": "RESULT_STATUS_RESULT",
-    "game": {
-      "externalId": "136396",
-      "title": "Hollow Knight: Lifeblood",
-      "contentType": "CONTENT_TYPE_UNSPECIFIED",
-      "yearPublished": 2018,
-      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co3i7x.jpg",
-      "sourceUrl": "https://www.igdb.com/games/hollow-knight-lifeblood",
-      "averageRating": 70.81334874110301,
-      "summary": "Lifeblood is a DLC for Hollow Knight and is the third out of the four free contents that were released. This DLC was announced on the 23rd of March 2018 and was released on the 20th of April, 2018.\n\nLifeblood Overview\nLifeblood mainly focused on enhancing certain aspects of the game such as:\n\nAn optimizable theme, allowing players to change the background of the title screen.\nVisual Changes to the game such as using charms, locations, and new animations.\nBuffs and Nerfs to Combat, Enemies, and Bosses such as:\nAdded two new attacks to the Traitor Lord.\nHivelings appearance is larger and has increased health.\nA stagger can be performed on The Collector\nHive Guardians deals two masks of damage to The Knight.\nUpon Death, a Volatile Mosskin quickly explodes.\nA Husk Hive grew in size, is faster, and summons Hivelings in a shorter period of time.\nA Desolate Dive can no longer be used on a Flukemarm.\nThe Knight must wear the Grimmchild charm to gain access into facing Nightmare King Grimm.\nStagger Animation of the False Knight is faster.\nThe spore cloud released by a Fungified Husk is bigger.\nAdded dialogue to NPCs\nAdded and optimized sound effects in the game.\nChanges made to some Charms:\nThe damage dealt by the Flukenest has been reduced and costs 3 notches.\nWeaverlings from the Weaversong deals more damage, has a new animation and can inflict stagger on bosses.\nJoni's Blessing has decreased its value of providing 50% +1 HP to 40% +1 HP.\nFury of the Fallen now has a red smoke when it is used instead of a red aura.\nOther than the changes done and added, Lifeblood also introduces a boss and a new mapping tool listed below:",
-      "availablePlatforms": [
-        {
-          "externalId": "3",
-          "name": "Linux",
-          "abbreviation": "Linux",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "6",
-          "name": "PC (Microsoft Windows)",
-          "abbreviation": "PC",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "14",
-          "name": "Mac",
-          "abbreviation": "Mac",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "130",
-          "name": "Nintendo Switch",
-          "abbreviation": "Switch",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        }
-      ],
-      "availableReleases": [
-        {
-          "externalId": "3",
-          "platform": {
-            "externalId": "3",
-            "name": "Linux",
-            "abbreviation": "Linux",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2018-04-20",
-          "releaseYear": 2018,
-          "localizations": [],
-          "languages": []
-        },
-        {
-          "externalId": "6",
-          "platform": {
-            "externalId": "6",
-            "name": "PC (Microsoft Windows)",
-            "abbreviation": "PC",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2018-04-20",
-          "releaseYear": 2018,
-          "localizations": [],
-          "languages": []
-        },
-        {
-          "externalId": "14",
-          "platform": {
-            "externalId": "14",
-            "name": "Mac",
-            "abbreviation": "Mac",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2018-04-20",
-          "releaseYear": 2018,
-          "localizations": [],
-          "languages": []
-        },
-        {
-          "externalId": "130",
-          "platform": {
-            "externalId": "130",
-            "name": "Nintendo Switch",
-            "abbreviation": "Switch",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2018-04-20",
-          "releaseYear": 2018,
-          "localizations": [],
-          "languages": []
-        }
-      ],
-      "baseGameExternalIds": [
-        "14593"
-      ],
-      "crossReferences": []
-    }
-  },
-  {
-    "correlationId": "golden",
-    "status": "RESULT_STATUS_RESULT",
-    "game": {
-      "externalId": "341658",
-      "title": "Hollow Knight Gun Mod",
-      "contentType": "CONTENT_TYPE_MOD",
-      "yearPublished": 2020,
-      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co9q8o.jpg",
-      "sourceUrl": "https://www.igdb.com/games/hollow-knight-gun-mod",
-      "summary": "A Hollow Knight mod that gives the Knight the ability to wield a modern day assault rifle. Why did I make this? I wish I knew too.\n\nWhile this mod is not to be taken seriously, It still aims to make a semi-serious fun ranged weapon mod to capitalize on Hollow Knight's movement system.",
-      "availablePlatforms": [
-        {
-          "externalId": "6",
-          "name": "PC (Microsoft Windows)",
-          "abbreviation": "PC",
-          "platformType": "PLATFORM_TYPE_PC"
-        }
-      ],
-      "availableReleases": [
-        {
-          "externalId": "6",
-          "platform": {
-            "externalId": "6",
-            "name": "PC (Microsoft Windows)",
-            "abbreviation": "PC",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2020-10-03",
-          "releaseYear": 2020,
-          "localizations": [],
-          "languages": []
-        }
-      ],
-      "baseGameExternalIds": [
-        "14593"
-      ],
-      "crossReferences": []
-    }
-  },
-  {
-    "correlationId": "golden",
-    "status": "RESULT_STATUS_RESULT",
-    "game": {
-      "externalId": "375989",
-      "title": "Hollow Knight: The Glimmering Realm",
-      "contentType": "CONTENT_TYPE_MOD",
-      "sourceUrl": "https://www.igdb.com/games/hollow-knight-the-glimmering-realm",
-      "summary": "A mod for the game Hollow Knight that adds a game mode with a whole new world to explore - the Glimmering Realm!\n\nChanges the layout, items and lore of Hallownest into a whole new realm\nNo map included, draw your own or venture forth without guidance\nAdds a new game mode, all old save files will remain unchanged",
-      "availablePlatforms": [],
-      "availableReleases": [],
-      "baseGameExternalIds": [
-        "14593"
-      ],
-      "crossReferences": []
-    }
-  },
-  {
-    "correlationId": "golden",
-    "status": "RESULT_STATUS_RESULT",
-    "game": {
-      "externalId": "105420",
-      "title": "Hollow Knight: Godmaster",
-      "contentType": "CONTENT_TYPE_UNSPECIFIED",
-      "yearPublished": 2018,
-      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co4hc2.jpg",
-      "sourceUrl": "https://www.igdb.com/games/hollow-knight-godmaster",
-      "averageRating": 89.96032617912053,
-      "summary": "Godmaster was the fourth and final free content pack for Hollow Knight.",
-      "availablePlatforms": [
-        {
-          "externalId": "48",
-          "name": "PlayStation 4",
-          "abbreviation": "PS4",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        },
-        {
-          "externalId": "3",
-          "name": "Linux",
-          "abbreviation": "Linux",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "6",
-          "name": "PC (Microsoft Windows)",
-          "abbreviation": "PC",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "14",
-          "name": "Mac",
-          "abbreviation": "Mac",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "49",
-          "name": "Xbox One",
-          "abbreviation": "XONE",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        },
-        {
-          "externalId": "130",
-          "name": "Nintendo Switch",
-          "abbreviation": "Switch",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        }
-      ],
-      "availableReleases": [
-        {
-          "externalId": "48",
-          "platform": {
-            "externalId": "48",
-            "name": "PlayStation 4",
-            "abbreviation": "PS4",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2018-08-23",
-          "releaseYear": 2018,
-          "localizations": [],
-          "languages": []
-        },
-        {
-          "externalId": "3",
-          "platform": {
-            "externalId": "3",
-            "name": "Linux",
-            "abbreviation": "Linux",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2018-08-23",
-          "releaseYear": 2018,
-          "localizations": [],
-          "languages": []
-        },
-        {
-          "externalId": "6",
-          "platform": {
-            "externalId": "6",
-            "name": "PC (Microsoft Windows)",
-            "abbreviation": "PC",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2018-08-23",
-          "releaseYear": 2018,
-          "localizations": [],
-          "languages": []
-        },
-        {
-          "externalId": "14",
-          "platform": {
-            "externalId": "14",
-            "name": "Mac",
-            "abbreviation": "Mac",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2018-08-23",
-          "releaseYear": 2018,
-          "localizations": [],
-          "languages": []
-        },
-        {
-          "externalId": "49",
-          "platform": {
-            "externalId": "49",
-            "name": "Xbox One",
-            "abbreviation": "XONE",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2018-08-23",
-          "releaseYear": 2018,
-          "localizations": [],
-          "languages": []
-        },
-        {
-          "externalId": "130",
-          "platform": {
-            "externalId": "130",
-            "name": "Nintendo Switch",
-            "abbreviation": "Switch",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2018-08-23",
-          "releaseYear": 2018,
-          "localizations": [],
-          "languages": []
-        }
-      ],
-      "baseGameExternalIds": [
-        "14593"
-      ],
-      "crossReferences": []
-    }
-  },
-  {
-    "correlationId": "golden",
-    "status": "RESULT_STATUS_RESULT",
-    "game": {
-      "externalId": "365702",
-      "title": "Hollow Knight",
-      "contentType": "CONTENT_TYPE_MOD",
-      "yearPublished": 2023,
-      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/cocpbl.jpg",
-      "sourceUrl": "https://www.igdb.com/games/hollow-knight--1",
-      "summary": "Unofficial port of the hit game Hollow Knight for PlayStation Vita.",
-      "availablePlatforms": [
-        {
-          "externalId": "46",
-          "name": "PlayStation Vita",
-          "abbreviation": "Vita",
-          "platformType": "PLATFORM_TYPE_PORTABLE"
-        }
-      ],
-      "availableReleases": [
-        {
-          "externalId": "46",
-          "platform": {
-            "externalId": "46",
-            "name": "PlayStation Vita",
-            "abbreviation": "Vita",
-            "platformType": "PLATFORM_TYPE_PORTABLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2023-11-13",
-          "releaseYear": 2023,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
             }
           ]
         }

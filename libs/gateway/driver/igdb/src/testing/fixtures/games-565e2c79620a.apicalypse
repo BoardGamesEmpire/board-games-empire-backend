@@ -1,1 +1,0 @@
-fields cover.url,expansions,first_release_date,game_status,game_type,id,language_supports.language.*,name,parent_game,platforms.abbreviation,platforms.name,platforms.platform_type,standalone_expansions,summary,total_rating,url,version_parent;limit 50;where (parent_game = '14593' | version_parent = '14593');

@@ -44,14 +44,1343 @@
     "correlationId": "golden",
     "status": "RESULT_STATUS_RESULT",
     "game": {
-      "externalId": "170450",
-      "title": "The Witcher 3: Wild Hunt - New Quest 'Fool's Gold'",
+      "externalId": "230102",
+      "title": "The Witcher 3: Wild Hunt - Free Next-Gen Update",
+      "contentType": "CONTENT_TYPE_UNSPECIFIED",
+      "yearPublished": 2022,
+      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co5y83.jpg",
+      "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-free-next-gen-update",
+      "averageRating": 87.69503546099291,
+      "summary": "The Witcher 3: Wild Hunt – Free Next-Gen Update was released on December 14, 2022, for PlayStation 5, Xbox Series X|S, and PC. This update introduced graphical enhancements such as ray tracing, improved textures, and faster loading times, along with quality-of-life features like a new camera angle, revised UI, and integrated mods. It also added new content inspired by the Netflix series, including armor sets and a themed quest.",
+      "availablePlatforms": [
+        {
+          "externalId": "169",
+          "name": "Xbox Series X|S",
+          "abbreviation": "Series X|S",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        {
+          "externalId": "6",
+          "name": "PC (Microsoft Windows)",
+          "abbreviation": "PC",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "167",
+          "name": "PlayStation 5",
+          "abbreviation": "PS5",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        }
+      ],
+      "availableReleases": [
+        {
+          "externalId": "169",
+          "platform": {
+            "externalId": "169",
+            "name": "Xbox Series X|S",
+            "abbreviation": "Series X|S",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2022-12-14",
+          "releaseYear": 2022,
+          "localizations": [],
+          "languages": []
+        },
+        {
+          "externalId": "6",
+          "platform": {
+            "externalId": "6",
+            "name": "PC (Microsoft Windows)",
+            "abbreviation": "PC",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2022-12-14",
+          "releaseYear": 2022,
+          "localizations": [],
+          "languages": []
+        },
+        {
+          "externalId": "167",
+          "platform": {
+            "externalId": "167",
+            "name": "PlayStation 5",
+            "abbreviation": "PS5",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2022-12-14",
+          "releaseYear": 2022,
+          "localizations": [],
+          "languages": []
+        }
+      ],
+      "baseGameExternalIds": [
+        "1942"
+      ],
+      "crossReferences": []
+    }
+  },
+  {
+    "correlationId": "golden",
+    "status": "RESULT_STATUS_RESULT",
+    "game": {
+      "externalId": "403150",
+      "title": "The Witcher 3: Wild Hunt - Songs of the Past",
+      "contentType": "CONTENT_TYPE_EXPANSION",
+      "yearPublished": 2027,
+      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/coc4hk.jpg",
+      "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-songs-of-the-past",
+      "summary": "Songs of the Past is a brand-new full-fledged expansion to The Witcher 3: Wild Hunt, one of the most acclaimed role-playing games of all time.\n\nCreated in partnership with Fool’s Theory, a team comprising veteran The Witcher 3 developers, players can once again take on the role of Geralt of Rivia and embark on a brand-new adventure before heading out on the Path as Ciri in the upcoming The Witcher 4.",
+      "availablePlatforms": [
+        {
+          "externalId": "169",
+          "name": "Xbox Series X|S",
+          "abbreviation": "Series X|S",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        {
+          "externalId": "508",
+          "name": "Nintendo Switch 2",
+          "abbreviation": "Switch 2",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        {
+          "externalId": "6",
+          "name": "PC (Microsoft Windows)",
+          "abbreviation": "PC",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "167",
+          "name": "PlayStation 5",
+          "abbreviation": "PS5",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        }
+      ],
+      "availableReleases": [
+        {
+          "externalId": "169",
+          "platform": {
+            "externalId": "169",
+            "name": "Xbox Series X|S",
+            "abbreviation": "Series X|S",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_UNSPECIFIED",
+          "releaseDate": "2027-12-31",
+          "releaseYear": 2027,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
+            },
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
+            },
+            {
+              "ietfTag": "tr",
+              "iso6393": "tur",
+              "iso6391": "tr",
+              "name": "Turkish"
+            },
+            {
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
+            },
+            {
+              "ietfTag": "uk",
+              "iso6393": "ukr",
+              "iso6391": "uk",
+              "name": "Ukrainian"
+            },
+            {
+              "ietfTag": "ru",
+              "iso6393": "rus",
+              "iso6391": "ru",
+              "name": "Russian"
+            }
+          ]
+        },
+        {
+          "externalId": "508",
+          "platform": {
+            "externalId": "508",
+            "name": "Nintendo Switch 2",
+            "abbreviation": "Switch 2",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_UNSPECIFIED",
+          "releaseDate": "2027-12-31",
+          "releaseYear": 2027,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
+            },
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
+            },
+            {
+              "ietfTag": "tr",
+              "iso6393": "tur",
+              "iso6391": "tr",
+              "name": "Turkish"
+            },
+            {
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
+            },
+            {
+              "ietfTag": "uk",
+              "iso6393": "ukr",
+              "iso6391": "uk",
+              "name": "Ukrainian"
+            },
+            {
+              "ietfTag": "ru",
+              "iso6393": "rus",
+              "iso6391": "ru",
+              "name": "Russian"
+            }
+          ]
+        },
+        {
+          "externalId": "6",
+          "platform": {
+            "externalId": "6",
+            "name": "PC (Microsoft Windows)",
+            "abbreviation": "PC",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_UNSPECIFIED",
+          "releaseDate": "2027-12-31",
+          "releaseYear": 2027,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
+            },
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
+            },
+            {
+              "ietfTag": "tr",
+              "iso6393": "tur",
+              "iso6391": "tr",
+              "name": "Turkish"
+            },
+            {
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
+            },
+            {
+              "ietfTag": "uk",
+              "iso6393": "ukr",
+              "iso6391": "uk",
+              "name": "Ukrainian"
+            },
+            {
+              "ietfTag": "ru",
+              "iso6393": "rus",
+              "iso6391": "ru",
+              "name": "Russian"
+            }
+          ]
+        },
+        {
+          "externalId": "167",
+          "platform": {
+            "externalId": "167",
+            "name": "PlayStation 5",
+            "abbreviation": "PS5",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_UNSPECIFIED",
+          "releaseDate": "2027-12-31",
+          "releaseYear": 2027,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
+            },
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
+            },
+            {
+              "ietfTag": "tr",
+              "iso6393": "tur",
+              "iso6391": "tr",
+              "name": "Turkish"
+            },
+            {
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
+            },
+            {
+              "ietfTag": "uk",
+              "iso6393": "ukr",
+              "iso6391": "uk",
+              "name": "Ukrainian"
+            },
+            {
+              "ietfTag": "ru",
+              "iso6393": "rus",
+              "iso6391": "ru",
+              "name": "Russian"
+            }
+          ]
+        }
+      ],
+      "baseGameExternalIds": [
+        "1942"
+      ],
+      "crossReferences": [
+        {
+          "upstream": "UPSTREAM_STEAM",
+          "id": "5006530"
+        }
+      ]
+    }
+  },
+  {
+    "correlationId": "golden",
+    "status": "RESULT_STATUS_RESULT",
+    "game": {
+      "externalId": "13166",
+      "title": "The Witcher 3: Wild Hunt - Blood and Wine",
+      "contentType": "CONTENT_TYPE_EXPANSION",
+      "yearPublished": 2016,
+      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co2lgo.jpg",
+      "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-blood-and-wine",
+      "averageRating": 94.20235656675894,
+      "summary": "Blood and Wine is the second major expansion to The Witcher 3: Wild Hunt.\n\nThe players will accompany Geralt of Rivia to the region of Toussaint, one of the few places in the Witcher universe which has remained largely untouched by the war. The calm, laid-back atmosphere holds a dark and bloody secret that only the White Wolf can uncover; the expansion features new items for players to collect on their adventure and introduces previously unknown characters.",
+      "availablePlatforms": [
+        {
+          "externalId": "169",
+          "name": "Xbox Series X|S",
+          "abbreviation": "Series X|S",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        {
+          "externalId": "48",
+          "name": "PlayStation 4",
+          "abbreviation": "PS4",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        {
+          "externalId": "6",
+          "name": "PC (Microsoft Windows)",
+          "abbreviation": "PC",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "167",
+          "name": "PlayStation 5",
+          "abbreviation": "PS5",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        {
+          "externalId": "49",
+          "name": "Xbox One",
+          "abbreviation": "XONE",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        {
+          "externalId": "130",
+          "name": "Nintendo Switch",
+          "abbreviation": "Switch",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        }
+      ],
+      "availableReleases": [
+        {
+          "externalId": "169",
+          "platform": {
+            "externalId": "169",
+            "name": "Xbox Series X|S",
+            "abbreviation": "Series X|S",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2016-05-30",
+          "releaseYear": 2016,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
+            },
+            {
+              "ietfTag": "ru",
+              "iso6393": "rus",
+              "iso6391": "ru",
+              "name": "Russian"
+            },
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
+            },
+            {
+              "ietfTag": "tr",
+              "iso6393": "tur",
+              "iso6391": "tr",
+              "name": "Turkish"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
+            },
+            {
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
+            }
+          ]
+        },
+        {
+          "externalId": "48",
+          "platform": {
+            "externalId": "48",
+            "name": "PlayStation 4",
+            "abbreviation": "PS4",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2016-05-30",
+          "releaseYear": 2016,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
+            },
+            {
+              "ietfTag": "ru",
+              "iso6393": "rus",
+              "iso6391": "ru",
+              "name": "Russian"
+            },
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
+            },
+            {
+              "ietfTag": "tr",
+              "iso6393": "tur",
+              "iso6391": "tr",
+              "name": "Turkish"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
+            },
+            {
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
+            }
+          ]
+        },
+        {
+          "externalId": "6",
+          "platform": {
+            "externalId": "6",
+            "name": "PC (Microsoft Windows)",
+            "abbreviation": "PC",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2016-05-30",
+          "releaseYear": 2016,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
+            },
+            {
+              "ietfTag": "ru",
+              "iso6393": "rus",
+              "iso6391": "ru",
+              "name": "Russian"
+            },
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
+            },
+            {
+              "ietfTag": "tr",
+              "iso6393": "tur",
+              "iso6391": "tr",
+              "name": "Turkish"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
+            },
+            {
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
+            }
+          ]
+        },
+        {
+          "externalId": "167",
+          "platform": {
+            "externalId": "167",
+            "name": "PlayStation 5",
+            "abbreviation": "PS5",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2016-05-30",
+          "releaseYear": 2016,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
+            },
+            {
+              "ietfTag": "ru",
+              "iso6393": "rus",
+              "iso6391": "ru",
+              "name": "Russian"
+            },
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
+            },
+            {
+              "ietfTag": "tr",
+              "iso6393": "tur",
+              "iso6391": "tr",
+              "name": "Turkish"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
+            },
+            {
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
+            }
+          ]
+        },
+        {
+          "externalId": "49",
+          "platform": {
+            "externalId": "49",
+            "name": "Xbox One",
+            "abbreviation": "XONE",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2016-05-30",
+          "releaseYear": 2016,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
+            },
+            {
+              "ietfTag": "ru",
+              "iso6393": "rus",
+              "iso6391": "ru",
+              "name": "Russian"
+            },
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
+            },
+            {
+              "ietfTag": "tr",
+              "iso6393": "tur",
+              "iso6391": "tr",
+              "name": "Turkish"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
+            },
+            {
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
+            }
+          ]
+        },
+        {
+          "externalId": "130",
+          "platform": {
+            "externalId": "130",
+            "name": "Nintendo Switch",
+            "abbreviation": "Switch",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2016-05-30",
+          "releaseYear": 2016,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
+            },
+            {
+              "ietfTag": "ru",
+              "iso6393": "rus",
+              "iso6391": "ru",
+              "name": "Russian"
+            },
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
+            },
+            {
+              "ietfTag": "tr",
+              "iso6393": "tur",
+              "iso6391": "tr",
+              "name": "Turkish"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
+            },
+            {
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
+            }
+          ]
+        }
+      ],
+      "baseGameExternalIds": [
+        "1942"
+      ],
+      "crossReferences": [
+        {
+          "upstream": "UPSTREAM_STEAM",
+          "id": "378648"
+        }
+      ]
+    }
+  },
+  {
+    "correlationId": "golden",
+    "status": "RESULT_STATUS_RESULT",
+    "game": {
+      "externalId": "157580",
+      "title": "The Witcher 3: Wild Hunt - New Quest 'Contract: Skellige's Most Wanted'",
       "contentType": "CONTENT_TYPE_DLC",
       "yearPublished": 2015,
-      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co5mwa.jpg",
-      "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-new-quest-fools-gold",
-      "averageRating": 87.41189831934716,
-      "summary": "The Witcher 3: Wild Hunt – New Quest 'Fool's Gold' is a free DLC quest released by CD Projekt Red on June 3, 2015. In this humorous side quest, Geralt teams up with a character named Hystian to investigate a seemingly cursed village inhabited by pigs.",
+      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co5mw9.jpg",
+      "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-new-quest-contract-skelliges-most-wanted",
+      "averageRating": 72.17303822937626,
+      "summary": "The Witcher 3: Wild Hunt – New Quest 'Contract: Skellige's Most Wanted' is a free DLC quest released in June 2015. It adds a new Witcher contract set on the Skellige Isles, where Geralt is hired to track down a dangerous creature responsible for attacking travelers.",
       "availablePlatforms": [
         {
           "externalId": "48",
@@ -82,21 +1411,45 @@
             "platformType": "PLATFORM_TYPE_CONSOLE"
           },
           "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2015-06-09",
+          "releaseDate": "2015-06-23",
           "releaseYear": 2015,
           "localizations": [],
           "languages": [
             {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
             },
             {
               "ietfTag": "ru",
               "iso6393": "rus",
               "iso6391": "ru",
               "name": "Russian"
+            },
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
             },
             {
               "ietfTag": "zh-Hans",
@@ -111,10 +1464,10 @@
               "name": "Turkish"
             },
             {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
             },
             {
               "ietfTag": "de",
@@ -123,10 +1476,10 @@
               "name": "German"
             },
             {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
             },
             {
               "ietfTag": "ja",
@@ -135,22 +1488,10 @@
               "name": "Japanese"
             },
             {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
             },
             {
               "ietfTag": "cs",
@@ -159,28 +1500,16 @@
               "name": "Czech"
             },
             {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
               "ietfTag": "hu",
               "iso6393": "hun",
               "iso6391": "hu",
               "name": "Hungarian"
             },
             {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
             }
           ]
         },
@@ -193,21 +1522,45 @@
             "platformType": "PLATFORM_TYPE_PC"
           },
           "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2015-06-09",
+          "releaseDate": "2015-06-23",
           "releaseYear": 2015,
           "localizations": [],
           "languages": [
             {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
             },
             {
               "ietfTag": "ru",
               "iso6393": "rus",
               "iso6391": "ru",
               "name": "Russian"
+            },
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
             },
             {
               "ietfTag": "zh-Hans",
@@ -222,10 +1575,10 @@
               "name": "Turkish"
             },
             {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
             },
             {
               "ietfTag": "de",
@@ -234,10 +1587,10 @@
               "name": "German"
             },
             {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
             },
             {
               "ietfTag": "ja",
@@ -246,22 +1599,10 @@
               "name": "Japanese"
             },
             {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
             },
             {
               "ietfTag": "cs",
@@ -270,28 +1611,16 @@
               "name": "Czech"
             },
             {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
               "ietfTag": "hu",
               "iso6393": "hun",
               "iso6391": "hu",
               "name": "Hungarian"
             },
             {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
             }
           ]
         },
@@ -304,21 +1633,45 @@
             "platformType": "PLATFORM_TYPE_CONSOLE"
           },
           "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2015-06-09",
+          "releaseDate": "2015-06-23",
           "releaseYear": 2015,
           "localizations": [],
           "languages": [
             {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
             },
             {
               "ietfTag": "ru",
               "iso6393": "rus",
               "iso6391": "ru",
               "name": "Russian"
+            },
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
             },
             {
               "ietfTag": "zh-Hans",
@@ -333,10 +1686,10 @@
               "name": "Turkish"
             },
             {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
             },
             {
               "ietfTag": "de",
@@ -345,10 +1698,10 @@
               "name": "German"
             },
             {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
             },
             {
               "ietfTag": "ja",
@@ -357,22 +1710,10 @@
               "name": "Japanese"
             },
             {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
             },
             {
               "ietfTag": "cs",
@@ -381,28 +1722,16 @@
               "name": "Czech"
             },
             {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
               "ietfTag": "hu",
               "iso6393": "hun",
               "iso6391": "hu",
               "name": "Hungarian"
             },
             {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
             }
           ]
         }
@@ -410,7 +1739,12 @@
       "baseGameExternalIds": [
         "1942"
       ],
-      "crossReferences": []
+      "crossReferences": [
+        {
+          "upstream": "UPSTREAM_STEAM",
+          "id": "378642"
+        }
+      ]
     }
   },
   {
@@ -767,6 +2101,519 @@
               "iso6393": "hun",
               "iso6391": "hu",
               "name": "Hungarian"
+            }
+          ]
+        }
+      ],
+      "baseGameExternalIds": [
+        "1942"
+      ],
+      "crossReferences": [
+        {
+          "upstream": "UPSTREAM_STEAM",
+          "id": "292030,378649,378648"
+        }
+      ]
+    }
+  },
+  {
+    "correlationId": "golden",
+    "status": "RESULT_STATUS_RESULT",
+    "game": {
+      "externalId": "170451",
+      "title": "The Witcher 3: Wild Hunt - New Quest 'Contract: Missing Miners'",
+      "contentType": "CONTENT_TYPE_DLC",
+      "yearPublished": 2015,
+      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co5mwb.jpg",
+      "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-new-quest-contract-missing-miners",
+      "averageRating": 68.50553505535055,
+      "summary": "The Witcher 3: Wild Hunt – New Quest 'Contract: Missing Miners' is a free DLC quest released by CD Projekt Red in May 2015. In this contract, Geralt investigates the disappearance of miners near the village of Blandare in Skellige.",
+      "availablePlatforms": [
+        {
+          "externalId": "48",
+          "name": "PlayStation 4",
+          "abbreviation": "PS4",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        {
+          "externalId": "6",
+          "name": "PC (Microsoft Windows)",
+          "abbreviation": "PC",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "49",
+          "name": "Xbox One",
+          "abbreviation": "XONE",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        }
+      ],
+      "availableReleases": [
+        {
+          "externalId": "48",
+          "platform": {
+            "externalId": "48",
+            "name": "PlayStation 4",
+            "abbreviation": "PS4",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2015-05-26",
+          "releaseYear": 2015,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
+            },
+            {
+              "ietfTag": "ru",
+              "iso6393": "rus",
+              "iso6391": "ru",
+              "name": "Russian"
+            },
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
+            },
+            {
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
+            },
+            {
+              "ietfTag": "tr",
+              "iso6393": "tur",
+              "iso6391": "tr",
+              "name": "Turkish"
+            }
+          ]
+        },
+        {
+          "externalId": "6",
+          "platform": {
+            "externalId": "6",
+            "name": "PC (Microsoft Windows)",
+            "abbreviation": "PC",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2015-05-26",
+          "releaseYear": 2015,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
+            },
+            {
+              "ietfTag": "ru",
+              "iso6393": "rus",
+              "iso6391": "ru",
+              "name": "Russian"
+            },
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
+            },
+            {
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
+            },
+            {
+              "ietfTag": "tr",
+              "iso6393": "tur",
+              "iso6391": "tr",
+              "name": "Turkish"
+            }
+          ]
+        },
+        {
+          "externalId": "49",
+          "platform": {
+            "externalId": "49",
+            "name": "Xbox One",
+            "abbreviation": "XONE",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2015-05-26",
+          "releaseYear": 2015,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
+            },
+            {
+              "ietfTag": "ru",
+              "iso6393": "rus",
+              "iso6391": "ru",
+              "name": "Russian"
+            },
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
+            },
+            {
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
+            },
+            {
+              "ietfTag": "tr",
+              "iso6393": "tur",
+              "iso6391": "tr",
+              "name": "Turkish"
+            }
+          ]
+        }
+      ],
+      "baseGameExternalIds": [
+        "1942"
+      ],
+      "crossReferences": [
+        {
+          "upstream": "UPSTREAM_STEAM",
+          "id": "370003"
+        }
+      ]
+    }
+  },
+  {
+    "correlationId": "golden",
+    "status": "RESULT_STATUS_RESULT",
+    "game": {
+      "externalId": "415005",
+      "title": "The Witcher 3: Wild Hunt Remastered",
+      "contentType": "CONTENT_TYPE_UNSPECIFIED",
+      "yearPublished": 2026,
+      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/cocrjd.jpg",
+      "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-remastered",
+      "averageRating": 97.92420462980115,
+      "summary": "The Witcher 3: Wild Hunt — Remastered modernizes the acclaimed role-playing game with a range of upgrades and enhancements. Become monster slayer for hire Geralt of Rivia and journey across a dark fantasy open world in an epic quest to find your adopted daughter Ciri.\n\nThe Remastered update is free for players who own The Witcher 3 and includes both Hearts of Stone and Blood and Wine expansions.",
+      "availablePlatforms": [
+        {
+          "externalId": "169",
+          "name": "Xbox Series X|S",
+          "abbreviation": "Series X|S",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        {
+          "externalId": "508",
+          "name": "Nintendo Switch 2",
+          "abbreviation": "Switch 2",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        {
+          "externalId": "6",
+          "name": "PC (Microsoft Windows)",
+          "abbreviation": "PC",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "167",
+          "name": "PlayStation 5",
+          "abbreviation": "PS5",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        }
+      ],
+      "availableReleases": [
+        {
+          "externalId": "169",
+          "platform": {
+            "externalId": "169",
+            "name": "Xbox Series X|S",
+            "abbreviation": "Series X|S",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2026-09-29",
+          "releaseYear": 2026,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            }
+          ]
+        },
+        {
+          "externalId": "508",
+          "platform": {
+            "externalId": "508",
+            "name": "Nintendo Switch 2",
+            "abbreviation": "Switch 2",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2026-09-29",
+          "releaseYear": 2026,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            }
+          ]
+        },
+        {
+          "externalId": "6",
+          "platform": {
+            "externalId": "6",
+            "name": "PC (Microsoft Windows)",
+            "abbreviation": "PC",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2026-09-29",
+          "releaseYear": 2026,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            }
+          ]
+        },
+        {
+          "externalId": "167",
+          "platform": {
+            "externalId": "167",
+            "name": "PlayStation 5",
+            "abbreviation": "PS5",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2026-09-29",
+          "releaseYear": 2026,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
             }
           ]
         }
@@ -1147,151 +2994,26 @@
       "baseGameExternalIds": [
         "1942"
       ],
-      "crossReferences": []
+      "crossReferences": [
+        {
+          "upstream": "UPSTREAM_STEAM",
+          "id": "378645"
+        }
+      ]
     }
   },
   {
     "correlationId": "golden",
     "status": "RESULT_STATUS_RESULT",
     "game": {
-      "externalId": "415005",
-      "title": "The Witcher 3: Wild Hunt Remastered",
-      "contentType": "CONTENT_TYPE_REMASTER",
-      "yearPublished": 2026,
-      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/cocrjd.jpg",
-      "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-remastered",
-      "averageRating": 97.93354056325221,
-      "summary": "The Witcher 3: Wild Hunt — Remastered modernizes the acclaimed role-playing game with a range of upgrades and enhancements. Become monster slayer for hire Geralt of Rivia and journey across a dark fantasy open world in an epic quest to find your adopted daughter Ciri.\n\nThe Remastered update is free for players who own The Witcher 3 and includes both Hearts of Stone and Blood and Wine expansions.",
-      "availablePlatforms": [
-        {
-          "externalId": "169",
-          "name": "Xbox Series X|S",
-          "abbreviation": "Series X|S",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        },
-        {
-          "externalId": "508",
-          "name": "Nintendo Switch 2",
-          "abbreviation": "Switch 2",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        },
-        {
-          "externalId": "6",
-          "name": "PC (Microsoft Windows)",
-          "abbreviation": "PC",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "167",
-          "name": "PlayStation 5",
-          "abbreviation": "PS5",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        }
-      ],
-      "availableReleases": [
-        {
-          "externalId": "169",
-          "platform": {
-            "externalId": "169",
-            "name": "Xbox Series X|S",
-            "abbreviation": "Series X|S",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2026-09-29",
-          "releaseYear": 2026,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            }
-          ]
-        },
-        {
-          "externalId": "508",
-          "platform": {
-            "externalId": "508",
-            "name": "Nintendo Switch 2",
-            "abbreviation": "Switch 2",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2026-09-29",
-          "releaseYear": 2026,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            }
-          ]
-        },
-        {
-          "externalId": "6",
-          "platform": {
-            "externalId": "6",
-            "name": "PC (Microsoft Windows)",
-            "abbreviation": "PC",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2026-09-29",
-          "releaseYear": 2026,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            }
-          ]
-        },
-        {
-          "externalId": "167",
-          "platform": {
-            "externalId": "167",
-            "name": "PlayStation 5",
-            "abbreviation": "PS5",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2026-09-29",
-          "releaseYear": 2026,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            }
-          ]
-        }
-      ],
-      "baseGameExternalIds": [
-        "1942"
-      ],
-      "crossReferences": []
-    }
-  },
-  {
-    "correlationId": "golden",
-    "status": "RESULT_STATUS_RESULT",
-    "game": {
-      "externalId": "157580",
-      "title": "The Witcher 3: Wild Hunt - New Quest 'Contract: Skellige's Most Wanted'",
-      "contentType": "CONTENT_TYPE_DLC",
-      "yearPublished": 2015,
-      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co5mw9.jpg",
-      "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-new-quest-contract-skelliges-most-wanted",
-      "averageRating": 72.17303822937626,
-      "summary": "The Witcher 3: Wild Hunt – New Quest 'Contract: Skellige's Most Wanted' is a free DLC quest released in June 2015. It adds a new Witcher contract set on the Skellige Isles, where Geralt is hired to track down a dangerous creature responsible for attacking travelers.",
+      "externalId": "22439",
+      "title": "The Witcher 3: Wild Hunt - Game of the Year Edition",
+      "contentType": "CONTENT_TYPE_BUNDLE",
+      "yearPublished": 2016,
+      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co1wz4.jpg",
+      "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-game-of-the-year-edition",
+      "averageRating": 97.64679695604279,
+      "summary": "The Witcher 3: Wild Hunt – Game of the Year Edition is a complete version of the game released in August 2016 for PC, PlayStation 4, and Xbox One. It includes the base game along with all post-launch content, including the two major expansions, Hearts of Stone and Blood and Wine, and all free DLCs.",
       "availablePlatforms": [
         {
           "externalId": "48",
@@ -1322,10 +3044,22 @@
             "platformType": "PLATFORM_TYPE_CONSOLE"
           },
           "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2015-06-23",
-          "releaseYear": 2015,
+          "releaseDate": "2016-08-29",
+          "releaseYear": 2016,
           "localizations": [],
           "languages": [
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
             {
               "ietfTag": "en-US",
               "iso6393": "eng",
@@ -1339,10 +3073,46 @@
               "name": "French"
             },
             {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
               "ietfTag": "ar",
               "iso6393": "ara",
               "iso6391": "ar",
               "name": "Arabic"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
             },
             {
               "ietfTag": "pt-BR",
@@ -1363,64 +3133,28 @@
               "name": "Chinese (Traditional)"
             },
             {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            },
-            {
               "ietfTag": "tr",
               "iso6393": "tur",
               "iso6391": "tr",
               "name": "Turkish"
             },
             {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
+              "ietfTag": "en-GB",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (UK)"
             },
             {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "es-ES",
+              "ietfTag": "es-MX",
               "iso6393": "spa",
               "iso6391": "es",
-              "name": "Spanish (Spain)"
+              "name": "Spanish (Mexico)"
             },
             {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
             }
           ]
         },
@@ -1433,10 +3167,22 @@
             "platformType": "PLATFORM_TYPE_PC"
           },
           "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2015-06-23",
-          "releaseYear": 2015,
+          "releaseDate": "2016-08-29",
+          "releaseYear": 2016,
           "localizations": [],
           "languages": [
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
             {
               "ietfTag": "en-US",
               "iso6393": "eng",
@@ -1450,10 +3196,46 @@
               "name": "French"
             },
             {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
               "ietfTag": "ar",
               "iso6393": "ara",
               "iso6391": "ar",
               "name": "Arabic"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
             },
             {
               "ietfTag": "pt-BR",
@@ -1474,64 +3256,28 @@
               "name": "Chinese (Traditional)"
             },
             {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            },
-            {
               "ietfTag": "tr",
               "iso6393": "tur",
               "iso6391": "tr",
               "name": "Turkish"
             },
             {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
+              "ietfTag": "en-GB",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (UK)"
             },
             {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "es-ES",
+              "ietfTag": "es-MX",
               "iso6393": "spa",
               "iso6391": "es",
-              "name": "Spanish (Spain)"
+              "name": "Spanish (Mexico)"
             },
             {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
             }
           ]
         },
@@ -1544,10 +3290,22 @@
             "platformType": "PLATFORM_TYPE_CONSOLE"
           },
           "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2015-06-23",
-          "releaseYear": 2015,
+          "releaseDate": "2016-08-29",
+          "releaseYear": 2016,
           "localizations": [],
           "languages": [
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
             {
               "ietfTag": "en-US",
               "iso6393": "eng",
@@ -1561,10 +3319,46 @@
               "name": "French"
             },
             {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
               "ietfTag": "ar",
               "iso6393": "ara",
               "iso6391": "ar",
               "name": "Arabic"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
             },
             {
               "ietfTag": "pt-BR",
@@ -1585,6 +3379,102 @@
               "name": "Chinese (Traditional)"
             },
             {
+              "ietfTag": "tr",
+              "iso6393": "tur",
+              "iso6391": "tr",
+              "name": "Turkish"
+            },
+            {
+              "ietfTag": "en-GB",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (UK)"
+            },
+            {
+              "ietfTag": "es-MX",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Mexico)"
+            },
+            {
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
+            }
+          ]
+        }
+      ],
+      "baseGameExternalIds": [
+        "1942"
+      ],
+      "crossReferences": [
+        {
+          "upstream": "UPSTREAM_STEAM",
+          "id": "499450"
+        }
+      ]
+    }
+  },
+  {
+    "correlationId": "golden",
+    "status": "RESULT_STATUS_RESULT",
+    "game": {
+      "externalId": "170450",
+      "title": "The Witcher 3: Wild Hunt - New Quest 'Fool's Gold'",
+      "contentType": "CONTENT_TYPE_DLC",
+      "yearPublished": 2015,
+      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co5mwa.jpg",
+      "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-new-quest-fools-gold",
+      "averageRating": 87.41189831934716,
+      "summary": "The Witcher 3: Wild Hunt – New Quest 'Fool's Gold' is a free DLC quest released by CD Projekt Red on June 3, 2015. In this humorous side quest, Geralt teams up with a character named Hystian to investigate a seemingly cursed village inhabited by pigs.",
+      "availablePlatforms": [
+        {
+          "externalId": "48",
+          "name": "PlayStation 4",
+          "abbreviation": "PS4",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        },
+        {
+          "externalId": "6",
+          "name": "PC (Microsoft Windows)",
+          "abbreviation": "PC",
+          "platformType": "PLATFORM_TYPE_PC"
+        },
+        {
+          "externalId": "49",
+          "name": "Xbox One",
+          "abbreviation": "XONE",
+          "platformType": "PLATFORM_TYPE_CONSOLE"
+        }
+      ],
+      "availableReleases": [
+        {
+          "externalId": "48",
+          "platform": {
+            "externalId": "48",
+            "name": "PlayStation 4",
+            "abbreviation": "PS4",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2015-06-09",
+          "releaseYear": 2015,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
+            },
+            {
+              "ietfTag": "ru",
+              "iso6393": "rus",
+              "iso6391": "ru",
+              "name": "Russian"
+            },
+            {
               "ietfTag": "zh-Hans",
               "iso6393": "zho",
               "iso6391": "zh",
@@ -1597,10 +3487,10 @@
               "name": "Turkish"
             },
             {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
             },
             {
               "ietfTag": "de",
@@ -1609,10 +3499,10 @@
               "name": "German"
             },
             {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
             },
             {
               "ietfTag": "ja",
@@ -1621,10 +3511,22 @@
               "name": "Japanese"
             },
             {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
+            },
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
             },
             {
               "ietfTag": "cs",
@@ -1633,16 +3535,250 @@
               "name": "Czech"
             },
             {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
               "ietfTag": "hu",
               "iso6393": "hun",
               "iso6391": "hu",
               "name": "Hungarian"
             },
             {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            }
+          ]
+        },
+        {
+          "externalId": "6",
+          "platform": {
+            "externalId": "6",
+            "name": "PC (Microsoft Windows)",
+            "abbreviation": "PC",
+            "platformType": "PLATFORM_TYPE_PC"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2015-06-09",
+          "releaseYear": 2015,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
+            },
+            {
+              "ietfTag": "ru",
+              "iso6393": "rus",
+              "iso6391": "ru",
+              "name": "Russian"
+            },
+            {
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
+            },
+            {
+              "ietfTag": "tr",
+              "iso6393": "tur",
+              "iso6391": "tr",
+              "name": "Turkish"
+            },
+            {
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
               "ietfTag": "pl",
               "iso6393": "pol",
               "iso6391": "pl",
               "name": "Polish"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
+            },
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
+            {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
+            }
+          ]
+        },
+        {
+          "externalId": "49",
+          "platform": {
+            "externalId": "49",
+            "name": "Xbox One",
+            "abbreviation": "XONE",
+            "platformType": "PLATFORM_TYPE_CONSOLE"
+          },
+          "status": "RELEASE_STATUS_RELEASED",
+          "releaseDate": "2015-06-09",
+          "releaseYear": 2015,
+          "localizations": [],
+          "languages": [
+            {
+              "ietfTag": "zh-Hant",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Traditional)"
+            },
+            {
+              "ietfTag": "ru",
+              "iso6393": "rus",
+              "iso6391": "ru",
+              "name": "Russian"
+            },
+            {
+              "ietfTag": "zh-Hans",
+              "iso6393": "zho",
+              "iso6391": "zh",
+              "name": "Chinese (Simplified)"
+            },
+            {
+              "ietfTag": "tr",
+              "iso6393": "tur",
+              "iso6391": "tr",
+              "name": "Turkish"
+            },
+            {
+              "ietfTag": "en-US",
+              "iso6393": "eng",
+              "iso6391": "en",
+              "name": "English (US)"
+            },
+            {
+              "ietfTag": "de",
+              "iso6393": "deu",
+              "iso6391": "de",
+              "name": "German"
+            },
+            {
+              "ietfTag": "ar",
+              "iso6393": "ara",
+              "iso6391": "ar",
+              "name": "Arabic"
+            },
+            {
+              "ietfTag": "ja",
+              "iso6393": "jpn",
+              "iso6391": "ja",
+              "name": "Japanese"
+            },
+            {
+              "ietfTag": "pl",
+              "iso6393": "pol",
+              "iso6391": "pl",
+              "name": "Polish"
+            },
+            {
+              "ietfTag": "pt-BR",
+              "iso6393": "por",
+              "iso6391": "pt",
+              "name": "Portuguese (Brazil)"
+            },
+            {
+              "ietfTag": "fr",
+              "iso6393": "fra",
+              "iso6391": "fr",
+              "name": "French"
+            },
+            {
+              "ietfTag": "cs",
+              "iso6393": "ces",
+              "iso6391": "cs",
+              "name": "Czech"
+            },
+            {
+              "ietfTag": "it",
+              "iso6393": "ita",
+              "iso6391": "it",
+              "name": "Italian"
+            },
+            {
+              "ietfTag": "es-ES",
+              "iso6393": "spa",
+              "iso6391": "es",
+              "name": "Spanish (Spain)"
+            },
+            {
+              "ietfTag": "hu",
+              "iso6393": "hun",
+              "iso6391": "hu",
+              "name": "Hungarian"
+            },
+            {
+              "ietfTag": "ko",
+              "iso6393": "kor",
+              "iso6391": "ko",
+              "name": "Korean"
             }
           ]
         }
@@ -1650,7 +3786,12 @@
       "baseGameExternalIds": [
         "1942"
       ],
-      "crossReferences": []
+      "crossReferences": [
+        {
+          "upstream": "UPSTREAM_STEAM",
+          "id": "376390"
+        }
+      ]
     }
   },
   {
@@ -2023,380 +4164,12 @@
       "baseGameExternalIds": [
         "1942"
       ],
-      "crossReferences": []
-    }
-  },
-  {
-    "correlationId": "golden",
-    "status": "RESULT_STATUS_RESULT",
-    "game": {
-      "externalId": "170451",
-      "title": "The Witcher 3: Wild Hunt - New Quest 'Contract: Missing Miners'",
-      "contentType": "CONTENT_TYPE_DLC",
-      "yearPublished": 2015,
-      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co5mwb.jpg",
-      "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-new-quest-contract-missing-miners",
-      "averageRating": 68.50553505535055,
-      "summary": "The Witcher 3: Wild Hunt – New Quest 'Contract: Missing Miners' is a free DLC quest released by CD Projekt Red in May 2015. In this contract, Geralt investigates the disappearance of miners near the village of Blandare in Skellige.",
-      "availablePlatforms": [
+      "crossReferences": [
         {
-          "externalId": "48",
-          "name": "PlayStation 4",
-          "abbreviation": "PS4",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        },
-        {
-          "externalId": "6",
-          "name": "PC (Microsoft Windows)",
-          "abbreviation": "PC",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "49",
-          "name": "Xbox One",
-          "abbreviation": "XONE",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
+          "upstream": "UPSTREAM_STEAM",
+          "id": "378640"
         }
-      ],
-      "availableReleases": [
-        {
-          "externalId": "48",
-          "platform": {
-            "externalId": "48",
-            "name": "PlayStation 4",
-            "abbreviation": "PS4",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2015-05-26",
-          "releaseYear": 2015,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
-            },
-            {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "ru",
-              "iso6393": "rus",
-              "iso6391": "ru",
-              "name": "Russian"
-            },
-            {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
-            },
-            {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            },
-            {
-              "ietfTag": "tr",
-              "iso6393": "tur",
-              "iso6391": "tr",
-              "name": "Turkish"
-            }
-          ]
-        },
-        {
-          "externalId": "6",
-          "platform": {
-            "externalId": "6",
-            "name": "PC (Microsoft Windows)",
-            "abbreviation": "PC",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2015-05-26",
-          "releaseYear": 2015,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
-            },
-            {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "ru",
-              "iso6393": "rus",
-              "iso6391": "ru",
-              "name": "Russian"
-            },
-            {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
-            },
-            {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            },
-            {
-              "ietfTag": "tr",
-              "iso6393": "tur",
-              "iso6391": "tr",
-              "name": "Turkish"
-            }
-          ]
-        },
-        {
-          "externalId": "49",
-          "platform": {
-            "externalId": "49",
-            "name": "Xbox One",
-            "abbreviation": "XONE",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2015-05-26",
-          "releaseYear": 2015,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
-            },
-            {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "ru",
-              "iso6393": "rus",
-              "iso6391": "ru",
-              "name": "Russian"
-            },
-            {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
-            },
-            {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            },
-            {
-              "ietfTag": "tr",
-              "iso6393": "tur",
-              "iso6391": "tr",
-              "name": "Turkish"
-            }
-          ]
-        }
-      ],
-      "baseGameExternalIds": [
-        "1942"
-      ],
-      "crossReferences": []
+      ]
     }
   },
   {
@@ -3120,1735 +4893,12 @@
       "baseGameExternalIds": [
         "1942"
       ],
-      "crossReferences": []
-    }
-  },
-  {
-    "correlationId": "golden",
-    "status": "RESULT_STATUS_RESULT",
-    "game": {
-      "externalId": "230102",
-      "title": "The Witcher 3: Wild Hunt - Free Next-Gen Update",
-      "contentType": "CONTENT_TYPE_UNSPECIFIED",
-      "yearPublished": 2022,
-      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co5y83.jpg",
-      "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-free-next-gen-update",
-      "averageRating": 87.69503546099291,
-      "summary": "The Witcher 3: Wild Hunt – Free Next-Gen Update was released on December 14, 2022, for PlayStation 5, Xbox Series X|S, and PC. This update introduced graphical enhancements such as ray tracing, improved textures, and faster loading times, along with quality-of-life features like a new camera angle, revised UI, and integrated mods. It also added new content inspired by the Netflix series, including armor sets and a themed quest.",
-      "availablePlatforms": [
+      "crossReferences": [
         {
-          "externalId": "169",
-          "name": "Xbox Series X|S",
-          "abbreviation": "Series X|S",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        },
-        {
-          "externalId": "6",
-          "name": "PC (Microsoft Windows)",
-          "abbreviation": "PC",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "167",
-          "name": "PlayStation 5",
-          "abbreviation": "PS5",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
+          "upstream": "UPSTREAM_STEAM",
+          "id": "378649"
         }
-      ],
-      "availableReleases": [
-        {
-          "externalId": "169",
-          "platform": {
-            "externalId": "169",
-            "name": "Xbox Series X|S",
-            "abbreviation": "Series X|S",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2022-12-14",
-          "releaseYear": 2022,
-          "localizations": [],
-          "languages": []
-        },
-        {
-          "externalId": "6",
-          "platform": {
-            "externalId": "6",
-            "name": "PC (Microsoft Windows)",
-            "abbreviation": "PC",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2022-12-14",
-          "releaseYear": 2022,
-          "localizations": [],
-          "languages": []
-        },
-        {
-          "externalId": "167",
-          "platform": {
-            "externalId": "167",
-            "name": "PlayStation 5",
-            "abbreviation": "PS5",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2022-12-14",
-          "releaseYear": 2022,
-          "localizations": [],
-          "languages": []
-        }
-      ],
-      "baseGameExternalIds": [
-        "1942"
-      ],
-      "crossReferences": []
-    }
-  },
-  {
-    "correlationId": "golden",
-    "status": "RESULT_STATUS_RESULT",
-    "game": {
-      "externalId": "22439",
-      "title": "The Witcher 3: Wild Hunt - Game of the Year Edition",
-      "contentType": "CONTENT_TYPE_BUNDLE",
-      "yearPublished": 2016,
-      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co1wz4.jpg",
-      "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-game-of-the-year-edition",
-      "averageRating": 97.64679695604279,
-      "summary": "The Witcher 3: Wild Hunt – Game of the Year Edition is a complete version of the game released in August 2016 for PC, PlayStation 4, and Xbox One. It includes the base game along with all post-launch content, including the two major expansions, Hearts of Stone and Blood and Wine, and all free DLCs.",
-      "availablePlatforms": [
-        {
-          "externalId": "48",
-          "name": "PlayStation 4",
-          "abbreviation": "PS4",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        },
-        {
-          "externalId": "6",
-          "name": "PC (Microsoft Windows)",
-          "abbreviation": "PC",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "49",
-          "name": "Xbox One",
-          "abbreviation": "XONE",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        }
-      ],
-      "availableReleases": [
-        {
-          "externalId": "48",
-          "platform": {
-            "externalId": "48",
-            "name": "PlayStation 4",
-            "abbreviation": "PS4",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2016-08-29",
-          "releaseYear": 2016,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
-            },
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
-            },
-            {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "ru",
-              "iso6393": "rus",
-              "iso6391": "ru",
-              "name": "Russian"
-            },
-            {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
-            },
-            {
-              "ietfTag": "tr",
-              "iso6393": "tur",
-              "iso6391": "tr",
-              "name": "Turkish"
-            },
-            {
-              "ietfTag": "en-GB",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (UK)"
-            },
-            {
-              "ietfTag": "es-MX",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Mexico)"
-            },
-            {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            }
-          ]
-        },
-        {
-          "externalId": "6",
-          "platform": {
-            "externalId": "6",
-            "name": "PC (Microsoft Windows)",
-            "abbreviation": "PC",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2016-08-29",
-          "releaseYear": 2016,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
-            },
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
-            },
-            {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "ru",
-              "iso6393": "rus",
-              "iso6391": "ru",
-              "name": "Russian"
-            },
-            {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
-            },
-            {
-              "ietfTag": "tr",
-              "iso6393": "tur",
-              "iso6391": "tr",
-              "name": "Turkish"
-            },
-            {
-              "ietfTag": "en-GB",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (UK)"
-            },
-            {
-              "ietfTag": "es-MX",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Mexico)"
-            },
-            {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            }
-          ]
-        },
-        {
-          "externalId": "49",
-          "platform": {
-            "externalId": "49",
-            "name": "Xbox One",
-            "abbreviation": "XONE",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2016-08-29",
-          "releaseYear": 2016,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
-            },
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
-            },
-            {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "ru",
-              "iso6393": "rus",
-              "iso6391": "ru",
-              "name": "Russian"
-            },
-            {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
-            },
-            {
-              "ietfTag": "tr",
-              "iso6393": "tur",
-              "iso6391": "tr",
-              "name": "Turkish"
-            },
-            {
-              "ietfTag": "en-GB",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (UK)"
-            },
-            {
-              "ietfTag": "es-MX",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Mexico)"
-            },
-            {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            }
-          ]
-        }
-      ],
-      "baseGameExternalIds": [
-        "1942"
-      ],
-      "crossReferences": []
-    }
-  },
-  {
-    "correlationId": "golden",
-    "status": "RESULT_STATUS_RESULT",
-    "game": {
-      "externalId": "403150",
-      "title": "The Witcher 3: Wild Hunt - Songs of the Past",
-      "contentType": "CONTENT_TYPE_EXPANSION",
-      "yearPublished": 2027,
-      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/coc4hk.jpg",
-      "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-songs-of-the-past",
-      "summary": "Songs of the Past is a brand-new full-fledged expansion to The Witcher 3: Wild Hunt, one of the most acclaimed role-playing games of all time.\n\nCreated in partnership with Fool’s Theory, a team comprising veteran The Witcher 3 developers, players can once again take on the role of Geralt of Rivia and embark on a brand-new adventure before heading out on the Path as Ciri in the upcoming The Witcher 4.",
-      "availablePlatforms": [
-        {
-          "externalId": "169",
-          "name": "Xbox Series X|S",
-          "abbreviation": "Series X|S",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        },
-        {
-          "externalId": "508",
-          "name": "Nintendo Switch 2",
-          "abbreviation": "Switch 2",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        },
-        {
-          "externalId": "6",
-          "name": "PC (Microsoft Windows)",
-          "abbreviation": "PC",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "167",
-          "name": "PlayStation 5",
-          "abbreviation": "PS5",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        }
-      ],
-      "availableReleases": [
-        {
-          "externalId": "169",
-          "platform": {
-            "externalId": "169",
-            "name": "Xbox Series X|S",
-            "abbreviation": "Series X|S",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_UNSPECIFIED",
-          "releaseDate": "2027-12-31",
-          "releaseYear": 2027,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
-            },
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
-            },
-            {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
-            },
-            {
-              "ietfTag": "tr",
-              "iso6393": "tur",
-              "iso6391": "tr",
-              "name": "Turkish"
-            },
-            {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            },
-            {
-              "ietfTag": "uk",
-              "iso6393": "ukr",
-              "iso6391": "uk",
-              "name": "Ukrainian"
-            },
-            {
-              "ietfTag": "ru",
-              "iso6393": "rus",
-              "iso6391": "ru",
-              "name": "Russian"
-            }
-          ]
-        },
-        {
-          "externalId": "508",
-          "platform": {
-            "externalId": "508",
-            "name": "Nintendo Switch 2",
-            "abbreviation": "Switch 2",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_UNSPECIFIED",
-          "releaseDate": "2027-12-31",
-          "releaseYear": 2027,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
-            },
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
-            },
-            {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
-            },
-            {
-              "ietfTag": "tr",
-              "iso6393": "tur",
-              "iso6391": "tr",
-              "name": "Turkish"
-            },
-            {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            },
-            {
-              "ietfTag": "uk",
-              "iso6393": "ukr",
-              "iso6391": "uk",
-              "name": "Ukrainian"
-            },
-            {
-              "ietfTag": "ru",
-              "iso6393": "rus",
-              "iso6391": "ru",
-              "name": "Russian"
-            }
-          ]
-        },
-        {
-          "externalId": "6",
-          "platform": {
-            "externalId": "6",
-            "name": "PC (Microsoft Windows)",
-            "abbreviation": "PC",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_UNSPECIFIED",
-          "releaseDate": "2027-12-31",
-          "releaseYear": 2027,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
-            },
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
-            },
-            {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
-            },
-            {
-              "ietfTag": "tr",
-              "iso6393": "tur",
-              "iso6391": "tr",
-              "name": "Turkish"
-            },
-            {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            },
-            {
-              "ietfTag": "uk",
-              "iso6393": "ukr",
-              "iso6391": "uk",
-              "name": "Ukrainian"
-            },
-            {
-              "ietfTag": "ru",
-              "iso6393": "rus",
-              "iso6391": "ru",
-              "name": "Russian"
-            }
-          ]
-        },
-        {
-          "externalId": "167",
-          "platform": {
-            "externalId": "167",
-            "name": "PlayStation 5",
-            "abbreviation": "PS5",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_UNSPECIFIED",
-          "releaseDate": "2027-12-31",
-          "releaseYear": 2027,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
-            },
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
-            },
-            {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
-            },
-            {
-              "ietfTag": "tr",
-              "iso6393": "tur",
-              "iso6391": "tr",
-              "name": "Turkish"
-            },
-            {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            },
-            {
-              "ietfTag": "uk",
-              "iso6393": "ukr",
-              "iso6391": "uk",
-              "name": "Ukrainian"
-            },
-            {
-              "ietfTag": "ru",
-              "iso6393": "rus",
-              "iso6391": "ru",
-              "name": "Russian"
-            }
-          ]
-        }
-      ],
-      "baseGameExternalIds": [
-        "1942"
-      ],
-      "crossReferences": []
-    }
-  },
-  {
-    "correlationId": "golden",
-    "status": "RESULT_STATUS_RESULT",
-    "game": {
-      "externalId": "13166",
-      "title": "The Witcher 3: Wild Hunt - Blood and Wine",
-      "contentType": "CONTENT_TYPE_EXPANSION",
-      "yearPublished": 2016,
-      "thumbnailUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co2lgo.jpg",
-      "sourceUrl": "https://www.igdb.com/games/the-witcher-3-wild-hunt-blood-and-wine",
-      "averageRating": 94.20229475577315,
-      "summary": "Blood and Wine is the second major expansion to The Witcher 3: Wild Hunt.\n\nThe players will accompany Geralt of Rivia to the region of Toussaint, one of the few places in the Witcher universe which has remained largely untouched by the war. The calm, laid-back atmosphere holds a dark and bloody secret that only the White Wolf can uncover; the expansion features new items for players to collect on their adventure and introduces previously unknown characters.",
-      "availablePlatforms": [
-        {
-          "externalId": "169",
-          "name": "Xbox Series X|S",
-          "abbreviation": "Series X|S",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        },
-        {
-          "externalId": "48",
-          "name": "PlayStation 4",
-          "abbreviation": "PS4",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        },
-        {
-          "externalId": "6",
-          "name": "PC (Microsoft Windows)",
-          "abbreviation": "PC",
-          "platformType": "PLATFORM_TYPE_PC"
-        },
-        {
-          "externalId": "167",
-          "name": "PlayStation 5",
-          "abbreviation": "PS5",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        },
-        {
-          "externalId": "49",
-          "name": "Xbox One",
-          "abbreviation": "XONE",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        },
-        {
-          "externalId": "130",
-          "name": "Nintendo Switch",
-          "abbreviation": "Switch",
-          "platformType": "PLATFORM_TYPE_CONSOLE"
-        }
-      ],
-      "availableReleases": [
-        {
-          "externalId": "169",
-          "platform": {
-            "externalId": "169",
-            "name": "Xbox Series X|S",
-            "abbreviation": "Series X|S",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2016-05-30",
-          "releaseYear": 2016,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
-            },
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
-            },
-            {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "ru",
-              "iso6393": "rus",
-              "iso6391": "ru",
-              "name": "Russian"
-            },
-            {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
-            },
-            {
-              "ietfTag": "tr",
-              "iso6393": "tur",
-              "iso6391": "tr",
-              "name": "Turkish"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            }
-          ]
-        },
-        {
-          "externalId": "48",
-          "platform": {
-            "externalId": "48",
-            "name": "PlayStation 4",
-            "abbreviation": "PS4",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2016-05-30",
-          "releaseYear": 2016,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
-            },
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
-            },
-            {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "ru",
-              "iso6393": "rus",
-              "iso6391": "ru",
-              "name": "Russian"
-            },
-            {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
-            },
-            {
-              "ietfTag": "tr",
-              "iso6393": "tur",
-              "iso6391": "tr",
-              "name": "Turkish"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            }
-          ]
-        },
-        {
-          "externalId": "6",
-          "platform": {
-            "externalId": "6",
-            "name": "PC (Microsoft Windows)",
-            "abbreviation": "PC",
-            "platformType": "PLATFORM_TYPE_PC"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2016-05-30",
-          "releaseYear": 2016,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
-            },
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
-            },
-            {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "ru",
-              "iso6393": "rus",
-              "iso6391": "ru",
-              "name": "Russian"
-            },
-            {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
-            },
-            {
-              "ietfTag": "tr",
-              "iso6393": "tur",
-              "iso6391": "tr",
-              "name": "Turkish"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            }
-          ]
-        },
-        {
-          "externalId": "167",
-          "platform": {
-            "externalId": "167",
-            "name": "PlayStation 5",
-            "abbreviation": "PS5",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2016-05-30",
-          "releaseYear": 2016,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
-            },
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
-            },
-            {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "ru",
-              "iso6393": "rus",
-              "iso6391": "ru",
-              "name": "Russian"
-            },
-            {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
-            },
-            {
-              "ietfTag": "tr",
-              "iso6393": "tur",
-              "iso6391": "tr",
-              "name": "Turkish"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            }
-          ]
-        },
-        {
-          "externalId": "49",
-          "platform": {
-            "externalId": "49",
-            "name": "Xbox One",
-            "abbreviation": "XONE",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2016-05-30",
-          "releaseYear": 2016,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
-            },
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
-            },
-            {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "ru",
-              "iso6393": "rus",
-              "iso6391": "ru",
-              "name": "Russian"
-            },
-            {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
-            },
-            {
-              "ietfTag": "tr",
-              "iso6393": "tur",
-              "iso6391": "tr",
-              "name": "Turkish"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            }
-          ]
-        },
-        {
-          "externalId": "130",
-          "platform": {
-            "externalId": "130",
-            "name": "Nintendo Switch",
-            "abbreviation": "Switch",
-            "platformType": "PLATFORM_TYPE_CONSOLE"
-          },
-          "status": "RELEASE_STATUS_RELEASED",
-          "releaseDate": "2016-05-30",
-          "releaseYear": 2016,
-          "localizations": [],
-          "languages": [
-            {
-              "ietfTag": "en-US",
-              "iso6393": "eng",
-              "iso6391": "en",
-              "name": "English (US)"
-            },
-            {
-              "ietfTag": "fr",
-              "iso6393": "fra",
-              "iso6391": "fr",
-              "name": "French"
-            },
-            {
-              "ietfTag": "it",
-              "iso6393": "ita",
-              "iso6391": "it",
-              "name": "Italian"
-            },
-            {
-              "ietfTag": "de",
-              "iso6393": "deu",
-              "iso6391": "de",
-              "name": "German"
-            },
-            {
-              "ietfTag": "es-ES",
-              "iso6393": "spa",
-              "iso6391": "es",
-              "name": "Spanish (Spain)"
-            },
-            {
-              "ietfTag": "ar",
-              "iso6393": "ara",
-              "iso6391": "ar",
-              "name": "Arabic"
-            },
-            {
-              "ietfTag": "hu",
-              "iso6393": "hun",
-              "iso6391": "hu",
-              "name": "Hungarian"
-            },
-            {
-              "ietfTag": "cs",
-              "iso6393": "ces",
-              "iso6391": "cs",
-              "name": "Czech"
-            },
-            {
-              "ietfTag": "ja",
-              "iso6393": "jpn",
-              "iso6391": "ja",
-              "name": "Japanese"
-            },
-            {
-              "ietfTag": "pl",
-              "iso6393": "pol",
-              "iso6391": "pl",
-              "name": "Polish"
-            },
-            {
-              "ietfTag": "ru",
-              "iso6393": "rus",
-              "iso6391": "ru",
-              "name": "Russian"
-            },
-            {
-              "ietfTag": "zh-Hant",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Traditional)"
-            },
-            {
-              "ietfTag": "tr",
-              "iso6393": "tur",
-              "iso6391": "tr",
-              "name": "Turkish"
-            },
-            {
-              "ietfTag": "ko",
-              "iso6393": "kor",
-              "iso6391": "ko",
-              "name": "Korean"
-            },
-            {
-              "ietfTag": "pt-BR",
-              "iso6393": "por",
-              "iso6391": "pt",
-              "name": "Portuguese (Brazil)"
-            },
-            {
-              "ietfTag": "zh-Hans",
-              "iso6393": "zho",
-              "iso6391": "zh",
-              "name": "Chinese (Simplified)"
-            }
-          ]
-        }
-      ],
-      "baseGameExternalIds": [
-        "1942"
-      ],
-      "crossReferences": []
+      ]
     }
   },
   {

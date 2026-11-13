@@ -5,6 +5,23 @@
       "id": 121128,
       "url": "//images.igdb.com/igdb/image/upload/t_thumb/co2lgo.jpg"
     },
+    "external_games": [
+      {
+        "id": 2084572,
+        "uid": "C1FJDP6X42GD",
+        "external_game_source": 11
+      },
+      {
+        "id": 2022277,
+        "uid": "378648",
+        "external_game_source": 1
+      },
+      {
+        "id": 78479,
+        "uid": "1441620909",
+        "external_game_source": 5
+      }
+    ],
     "first_release_date": 1464566400,
     "name": "The Witcher 3: Wild Hunt - Blood and Wine",
     "parent_game": 1942,
@@ -47,7 +64,7 @@
       }
     ],
     "summary": "Blood and Wine is the second major expansion to The Witcher 3: Wild Hunt.\n\nThe players will accompany Geralt of Rivia to the region of Toussaint, one of the few places in the Witcher universe which has remained largely untouched by the war. The calm, laid-back atmosphere holds a dark and bloody secret that only the White Wolf can uncover; the expansion features new items for players to collect on their adventure and introduces previously unknown characters.",
-    "total_rating": 94.20229475577315,
+    "total_rating": 94.20235656675894,
     "url": "https://www.igdb.com/games/the-witcher-3-wild-hunt-blood-and-wine",
     "language_supports": [
       {
@@ -539,6 +556,18 @@
       "id": 565688,
       "url": "//images.igdb.com/igdb/image/upload/t_thumb/coc4hk.jpg"
     },
+    "external_games": [
+      {
+        "id": 3235819,
+        "uid": "1179418179",
+        "external_game_source": 5
+      },
+      {
+        "id": 3209237,
+        "uid": "5006530",
+        "external_game_source": 1
+      }
+    ],
     "first_release_date": 1830211200,
     "name": "The Witcher 3: Wild Hunt - Songs of the Past",
     "parent_game": 1942,
@@ -1084,6 +1113,28 @@
       "id": 84518,
       "url": "//images.igdb.com/igdb/image/upload/t_thumb/co1t7q.jpg"
     },
+    "external_games": [
+      {
+        "id": 2002095,
+        "uid": "B08W5BCRJK",
+        "external_game_source": 20
+      },
+      {
+        "id": 2084552,
+        "uid": "BRHTR6ZW2QT2",
+        "external_game_source": 11
+      },
+      {
+        "id": 78483,
+        "uid": "1441355562",
+        "external_game_source": 5
+      },
+      {
+        "id": 2022249,
+        "uid": "378649",
+        "external_game_source": 1
+      }
+    ],
     "first_release_date": 1444608000,
     "name": "The Witcher 3: Wild Hunt - Hearts of Stone",
     "parent_game": 1942,

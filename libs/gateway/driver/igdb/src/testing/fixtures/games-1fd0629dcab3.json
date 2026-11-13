@@ -44,6 +44,123 @@
       "id": 533941,
       "url": "//images.igdb.com/igdb/image/upload/t_thumb/cobfzp.jpg"
     },
+    "external_games": [
+      {
+        "id": 1929161,
+        "uid": "B07QHXM3JY",
+        "external_game_source": 20
+      },
+      {
+        "id": 1935013,
+        "uid": "B07XSRXRQT",
+        "external_game_source": 20
+      },
+      {
+        "id": 189954,
+        "uid": "UCtSeOW9EdOW6AlhlcWpYqag",
+        "external_game_source": 10
+      },
+      {
+        "id": 1936716,
+        "uid": "B07PZ28QKL",
+        "external_game_source": 20
+      },
+      {
+        "id": 1937988,
+        "uid": "B07KJ3NJ52",
+        "external_game_source": 20
+      },
+      {
+        "id": 1933135,
+        "uid": "B07QBLYTYX",
+        "external_game_source": 20
+      },
+      {
+        "id": 1931326,
+        "uid": "B07G7NLNRC",
+        "external_game_source": 20
+      },
+      {
+        "id": 1928647,
+        "uid": "B07FCVQFHV",
+        "external_game_source": 20
+      },
+      {
+        "id": 1931500,
+        "uid": "B07SG7MQZF",
+        "external_game_source": 20
+      },
+      {
+        "id": 1865827,
+        "uid": "B07P6QCPS8",
+        "external_game_source": 20
+      },
+      {
+        "id": 112739,
+        "uid": "48412",
+        "external_game_source": 3
+      },
+      {
+        "id": 1931250,
+        "uid": "B07XSRNZJ8",
+        "external_game_source": 20
+      },
+      {
+        "id": 3217532,
+        "uid": "B07NMJK3GG",
+        "external_game_source": 20
+      },
+      {
+        "id": 3133114,
+        "uid": "9MW9469V91LM",
+        "external_game_source": 54
+      },
+      {
+        "id": 281231,
+        "uid": "490147",
+        "external_game_source": 14
+      },
+      {
+        "id": 2083282,
+        "uid": "9MW9469V91LM",
+        "external_game_source": 11
+      },
+      {
+        "id": 2159792,
+        "uid": "9PKM22F7C9K5",
+        "external_game_source": 11
+      },
+      {
+        "id": 8579,
+        "uid": "367520",
+        "external_game_source": 1
+      },
+      {
+        "id": 2924282,
+        "uid": "amzn1.adg.product.7e589b03-c4d6-43f3-9224-9bdf10f6989f",
+        "external_game_source": 23
+      },
+      {
+        "id": 77292,
+        "uid": "1308320804",
+        "external_game_source": 5
+      },
+      {
+        "id": 3001946,
+        "uid": "amzn1.adg.product.a1584183-9c48-4a33-aa64-89aec9293992",
+        "external_game_source": 23
+      },
+      {
+        "id": 3202837,
+        "uid": "amzn1.adg.product.a1584183-9c48-4a33-aa64-89aec9293992",
+        "external_game_source": 22
+      },
+      {
+        "id": 2175741,
+        "uid": "232654",
+        "external_game_source": 36
+      }
+    ],
     "first_release_date": 1487894400,
     "genres": [
       {
@@ -262,8 +379,8 @@
         "name": "Fantasy"
       }
     ],
-    "total_rating": 91.52377623821606,
-    "total_rating_count": 2279,
+    "total_rating": 91.52329563027182,
+    "total_rating_count": 2285,
     "url": "https://www.igdb.com/games/hollow-knight",
     "language_supports": [
       {
