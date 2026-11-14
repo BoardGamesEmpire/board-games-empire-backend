@@ -17,3 +17,4 @@ export * from './server-admin';
 export * from './share-conditions';
 export * from './share-snapshot';
 export * from './share-subject';
+export * from './wishlist';

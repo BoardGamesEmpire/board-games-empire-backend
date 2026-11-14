@@ -1,5 +1,5 @@
 import type { GameCollection, GameRelease, PlatformGame } from '@bge/database';
-import { Action, GameMedium, GameRemovalReason, Prisma, Reach, ResourceType } from '@bge/database';
+import { Action, GameMedium, GameRemovalReason, ListKind, Prisma, Reach, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
@@ -57,13 +57,17 @@ const ENTRY_NOT_FOUND = {
 describe('GameCollectionService', () => {
   let service: GameCollectionService;
   let db: MockDatabaseService;
-  let abilityService: jest.Mocked<Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId'>>;
+  let abilityService: jest.Mocked<
+    Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId' | 'getCurrentAccess'>
+  >;
   let compose: jest.SpyInstance;
 
   beforeEach(async () => {
     abilityService = {
       getCurrentResourceConditions: jest.fn().mockReturnValue([COND]),
       getActingUserId: jest.fn().mockReturnValue(ME),
+      // The actor can read lists, unless a spec says otherwise (#1241).
+      getCurrentAccess: jest.fn().mockReturnValue({ [ResourceType.List]: { [Action.read]: 'some' } }),
     };
 
     const ctx = await createTestingModuleWithDb({
@@ -79,6 +83,9 @@ describe('GameCollectionService', () => {
     db = ctx.db;
     // Each read that returns rows also reads their base-game links (#1070).
     db.gameExpansion.findMany.mockResolvedValue([]);
+    // The actor's wishlist is readable, unless a spec says otherwise (#1241).
+    db.list.findFirst.mockResolvedValue({ id: 'wishlist-1' } as never);
+    db.listEntry.findMany.mockResolvedValue([]);
     service = ctx.module.get(GameCollectionService);
     compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
   });
@@ -340,6 +347,87 @@ describe('GameCollectionService', () => {
 
       await expect(service.listForUser('user-2', paginationQuery({ limit: 20 }))).rejects.toThrow(ForbiddenException);
       expect(db.gameCollection.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * #1241. A row of another user's collection says whether its game is on the
+   * acting user's wishlist, so a client can show "a friend's copy of a game you
+   * want". `listOwn` and the write paths leave the field out.
+   */
+  describe("onWishlist on another user's collection (#1241)", () => {
+    it("says which of another user's entries are on the acting user's wishlist (#1241)", async () => {
+      db.gameCollection.findMany.mockResolvedValue([
+        entryOn('g-1', { id: 'gc-1' }),
+        entryOn('g-2', { id: 'gc-2' }),
+        entryOn('g-3', { id: 'gc-3' }),
+      ]);
+      db.gameCollection.count.mockResolvedValue(3);
+      // g-1 is wishlisted as a game, g-2's platform game directly, g-3 not at all.
+      db.listEntry.findMany.mockResolvedValue([
+        { gameId: 'g-1', platformGameId: null },
+        { gameId: null, platformGameId: 'pg-g-2' },
+      ] as never);
+
+      const page = await service.listForUser('user-2', paginationQuery({ limit: 20 }));
+
+      expect(page.rows.map((row) => row.onWishlist)).toEqual([true, true, false]);
+      expect(compose).toHaveBeenCalledWith(ResourceType.List, Action.read, { userId: ME, kind: ListKind.Wishlist });
+      // The ceiling-composed wishlist read is top-level; the entry read names
+      // the wishlist it found by id.
+      expect(db.list.findFirst).toHaveBeenCalledWith({
+        where: { userId: ME, kind: ListKind.Wishlist, AND: [COND] },
+        select: { id: true },
+      });
+      expect(db.listEntry.findMany).toHaveBeenCalledTimes(1);
+      expect(db.listEntry.findMany.mock.calls[0][0]?.where).toMatchObject({ listId: 'wishlist-1' });
+    });
+
+    it('answers null, not false, for an actor who cannot read a wishlist (#1241)', async () => {
+      db.gameCollection.findMany.mockResolvedValue([entryOn('g-1')]);
+      db.gameCollection.count.mockResolvedValue(1);
+
+      // No acting user: a plugin, system or external actor.
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
+      const noUser = await service.listForUser('user-2', paginationQuery({ limit: 20 }));
+      expect(noUser.rows.map((row) => row.onWishlist)).toEqual([null]);
+
+      // A user, but with no list read: an anonymous user, or a key without a list grant.
+      abilityService.getActingUserId.mockReturnValue(ME);
+      abilityService.getCurrentAccess.mockReturnValue({ [ResourceType.List]: { [Action.read]: 'none' } } as never);
+      const noListRead = await service.listForUser('user-2', paginationQuery({ limit: 20 }));
+      expect(noListRead.rows.map((row) => row.onWishlist)).toEqual([null]);
+
+      expect(db.list.findFirst).not.toHaveBeenCalled();
+      expect(db.listEntry.findMany).not.toHaveBeenCalled();
+    });
+
+    // List read access that doesn't reach the wishlist: a key whose list grant
+    // is pinned to one custom list, or a user with no wishlist row. The access
+    // check passes, the wishlist read finds nothing, and "not yours to know"
+    // must not read as "not on your wishlist" (#1241).
+    it('answers null, not false, when list read access does not reach the wishlist (#1241)', async () => {
+      db.gameCollection.findMany.mockResolvedValue([entryOn('g-1', { id: 'gc-1' }), entryOn('g-2', { id: 'gc-2' })]);
+      db.gameCollection.count.mockResolvedValue(2);
+      db.list.findFirst.mockResolvedValue(null);
+
+      const page = await service.listForUser('user-2', paginationQuery({ limit: 20 }));
+
+      expect(page.rows.map((row) => row.onWishlist)).toEqual([null, null]);
+      expect(db.list.findFirst).toHaveBeenCalledTimes(1);
+      expect(db.listEntry.findMany).not.toHaveBeenCalled();
+    });
+
+    it("leaves the field off the acting user's own collection (#1241)", async () => {
+      db.gameCollection.findMany.mockResolvedValue([entryOn('g-1')]);
+      db.gameCollection.count.mockResolvedValue(1);
+
+      const page = await service.listOwn(paginationQuery({ limit: 20 }));
+
+      expect(page.rows[0]).not.toHaveProperty('onWishlist');
+      expect(db.listEntry.findMany).not.toHaveBeenCalled();
     });
   });
 

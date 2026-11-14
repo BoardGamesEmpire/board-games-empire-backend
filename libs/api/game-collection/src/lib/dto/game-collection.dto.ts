@@ -219,6 +219,17 @@ export class GameCollectionDto implements Pick<
 
   @ApiPropertyOptional({ type: CollectionReleaseSummaryDto, nullable: true })
   release!: CollectionReleaseSummaryDto | null;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    nullable: true,
+    description:
+      'Sent on `GET /users/:userId/game-collections` only: whether this game is on your wishlist. A wishlisted ' +
+      'game matches every platform game of it; a wishlisted platform game matches only itself. Null, never false, ' +
+      'when you have no wishlist you can read: as an anonymous user, a plugin, or an API key whose list grant ' +
+      'does not reach your wishlist.',
+  })
+  onWishlist?: boolean | null;
 }
 
 export class GameCollectionResponseDto {

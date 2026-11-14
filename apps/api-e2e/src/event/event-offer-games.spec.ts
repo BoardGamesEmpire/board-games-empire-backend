@@ -87,7 +87,14 @@ describe('POST /api/events/:eventId/attendees/:attendeeId/games/batch (#1188)', 
     // Each answer's entry is the offered-game shape: none of the owner's row (#1185).
     for (const result of results) {
       const entry = result.outcome === 'refused' ? undefined : result.entry;
-      expect(Object.keys(entry ?? {}).sort()).toEqual(['attendeeId', 'collection', 'createdAt', 'id', 'supplies']);
+      expect(Object.keys(entry ?? {}).sort()).toEqual([
+        'attendeeId',
+        'collection',
+        'createdAt',
+        'id',
+        'onWishlist',
+        'supplies',
+      ]);
       expect(Object.keys(entry?.collection ?? {}).sort()).toEqual(['id', 'medium', 'platformGame']);
     }
     const listed = listOfferedGamesEnvelope(

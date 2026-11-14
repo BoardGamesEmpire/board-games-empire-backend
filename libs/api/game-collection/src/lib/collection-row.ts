@@ -99,6 +99,12 @@ type IncludedPlatformGame = GameCollectionWithRelations['platformGame'];
  * `baseGames`, read after it by a link read of its own (#1070).
  */
 export type GameCollectionRow = Omit<GameCollectionWithRelations, 'platformGame'> & {
+  /**
+   * Whether the entry's game is on the acting user's wishlist (#1241). Set on
+   * the rows `GET /users/:userId/game-collections` serves only; `null` for an
+   * actor with no wishlist they can read.
+   */
+  onWishlist?: boolean | null;
   platformGame: Omit<IncludedPlatformGame, 'game'> & {
     game: IncludedPlatformGame['game'] & { baseGames: ExpansionLink[] };
   };

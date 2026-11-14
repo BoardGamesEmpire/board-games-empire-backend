@@ -208,6 +208,8 @@ export interface OfferedGameWire {
     };
   };
   readonly supplies: { readonly nominations: number | null; readonly lineup: number | null };
+  /** Whether the game is on the acting user's wishlist; null for an actor with no wishlist they can read (#1241). */
+  readonly onWishlist: boolean | null;
 }
 
 /** A row of `GET /api/events/:eventId/offered-games`: the offered game and its attendee, or null (#1187). */
