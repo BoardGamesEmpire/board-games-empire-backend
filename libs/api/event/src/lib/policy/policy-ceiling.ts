@@ -19,9 +19,9 @@ import {
  * which is #1026.
  *
  * Exposed for a read that runs in a batch, which takes a query and not a
- * result: `getEventById`'s REPEATABLE READ batch, the create replay's, and the
- * occurrence page's. Every other read goes through `readEventPolicyView` or
- * `canReadEventPolicy`.
+ * result: `getEventById`'s REPEATABLE READ batch, the create replay's, the
+ * occurrence page's and the single date's. Every other read goes through
+ * `readEventPolicyView` or `canReadEventPolicy`.
  */
 export function eventPolicyReadArgs(abilityService: AbilityService, eventId: string) {
   return {

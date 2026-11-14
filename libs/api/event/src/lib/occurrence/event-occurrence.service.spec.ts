@@ -251,6 +251,20 @@ describe('EventOccurrenceService', () => {
       db.eventOccurrence.findUnique.mockResolvedValue(null);
       await expect(service.getOccurrence('event-1', 'occ-1')).rejects.toThrow(NotFoundException);
     });
+
+    // The date and the policy ceiling that gates its policy are read from one
+    // snapshot, as the page is (#1211).
+    it("reads the date and the policy's ceiling in one REPEATABLE READ transaction", async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventOccurrence.findUnique.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
+
+      await service.getOccurrence('event-1', 'occ-1');
+
+      const { operations, options } = batchTransactionCall(db);
+      expect(operations).toHaveLength(2);
+      expect(db.eventPolicy.count).toHaveBeenCalledWith({ where: { eventId: 'event-1', AND: [COND] } });
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
   });
 
   /**

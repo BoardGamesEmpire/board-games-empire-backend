@@ -118,22 +118,29 @@ export class EventOccurrenceService {
   async getOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
     await assertEventExists(this.db, eventId);
 
-    const occurrence = await this.db.eventOccurrence.findUnique({
-      where: {
-        id: occurrenceId,
-        eventId,
-        // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.read),
-      },
-      include: { policy: { include: POLICY_VIEW_INCLUDE } },
-    });
+    // The policy's ceiling is read in the same snapshot as the date it gates,
+    // as the page's is.
+    const [occurrence, policiesReadable] = await this.db.$transaction(
+      [
+        this.db.eventOccurrence.findUnique({
+          where: {
+            id: occurrenceId,
+            eventId,
+            // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.read),
+          },
+          include: { policy: { include: POLICY_VIEW_INCLUDE } },
+        }),
+
+        this.db.eventPolicy.count({ where: eventPolicyReadArgs(this.abilityService, eventId).where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
 
     assert(occurrence, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
 
-    const canReadPolicy = await canReadEventPolicy(this.db, this.abilityService, eventId);
-
     const [detail] = await this.withVotesAndGames([
-      { ...occurrence, policy: serveOccurrencePolicy(occurrence.policy, canReadPolicy) },
+      { ...occurrence, policy: serveOccurrencePolicy(occurrence.policy, policiesReadable > 0) },
     ]);
     return detail;
   }
