@@ -1,5 +1,5 @@
 // What a list entry names. Exactly one of `game` and `platformGame` is set
-// (`list_entries_one_target`), so "Catan, on any platform" and "Catan on Steam"
+// (`list_entries_one_target`), so "Catan, on any platform" and "Catan on PC"
 // are both expressible. A release needs a platform game
 // (`list_entries_release_needs_platform_game`). Both CHECK constraints are
 // hand-written in the migration, because Prisma cannot model them (#1241).

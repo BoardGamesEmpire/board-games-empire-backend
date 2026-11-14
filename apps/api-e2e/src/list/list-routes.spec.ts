@@ -346,8 +346,8 @@ describe('list routes (#1241)', () => {
 
   // A game can leave the list owner's reach after it was added, when its
   // creator makes it Private. This pins today's behaviour, the one collection
-  // rows share, pending a design issue on what a list should do with a game
-  // its creator later withdrew; it may change then.
+  // rows share, pending the design in #1287 of what a list should do with a
+  // game its creator later withdrew; it may change then.
   it("still embeds another user's game on a list after its creator made it Private, as collection rows do (#1241)", async () => {
     const owner = await actors.user();
     const creator = await actors.user();

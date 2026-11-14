@@ -130,7 +130,8 @@ export class ListEntryController {
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({
     status: Http.NotFound,
-    description: 'List not found (code LIST_NOT_FOUND), or no such entry on it (code LIST_ENTRY_NOT_FOUND)',
+    description:
+      'List not found (code LIST_NOT_FOUND), no such entry on it (code LIST_ENTRY_NOT_FOUND), or release not found (code GAME_RELEASE_NOT_FOUND)',
   })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.List))
   @Patch(':entryId')
