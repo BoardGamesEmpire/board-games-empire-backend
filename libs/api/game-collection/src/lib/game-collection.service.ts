@@ -2,12 +2,14 @@ import {
   Action,
   DatabaseService,
   isPrismaDependentRecordNotFoundError,
+  ListKind,
   Prisma,
   readBaseGameLinks,
+  readWishlistedPlatformGames,
   ResourceType,
 } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
-import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
+import { AbilityService, resolveActingUserIdOrNull, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Http } from '@status/codes';
@@ -99,6 +101,10 @@ export class GameCollectionService {
    * The scope is the path user's live entries; the viewer's ceiling is what
    * clips them (#514), so the viewer need not be a user at all. The medium
    * filter is caller input and sits beside the composed clause.
+   *
+   * Each row also says whether its game is on the acting user's wishlist
+   * (`onWishlist`, #1241), so a client can show "a friend's copy of a game you
+   * want" without a round trip per page.
    */
   async listForUser(
     targetUserId: string,
@@ -111,7 +117,49 @@ export class GameCollectionService {
       ],
     } satisfies Prisma.GameCollectionWhereInput;
 
-    return this.paginate(where, query);
+    const { rows, total } = await this.paginate(where, query);
+
+    return { rows: await this.rowsWithOnWishlist(rows), total };
+  }
+
+  /**
+   * Each row with `onWishlist` (#1241): one read of the acting user's
+   * wishlist entries for the whole page. A wishlisted game marks every
+   * platform game of it, a wishlisted platform game only itself.
+   *
+   * - `null`, not `false`, when the actor has no wishlist they can read: no
+   *   acting user (plugin, system, external actors), no list read access (an
+   *   anonymous user, an API key without a list grant), or a list read that
+   *   doesn't reach the wishlist (a key whose list grant is pinned to one
+   *   custom list). `false` would claim a wishlist was checked and lacked the
+   *   game.
+   * - The wishlist read is composed under the actor's list ceiling and sits in
+   *   its own top-level query, so a deny-all fails closed and answers `null`.
+   *   The access check up front only saves that query when the answer is
+   *   already known.
+   */
+  private async rowsWithOnWishlist(rows: readonly GameCollectionRow[]): Promise<GameCollectionRow[]> {
+    const userId = resolveActingUserIdOrNull(this.abilityService);
+
+    if (userId === null || !this.canReadLists()) {
+      return rows.map((row) => ({ ...row, onWishlist: null }));
+    }
+
+    const wishlisted = await readWishlistedPlatformGames(
+      this.db,
+      rows.map(({ platformGame }) => ({ id: platformGame.id, gameId: platformGame.game.id })),
+      this.scopeComposer.compose(ResourceType.List, Action.read, { userId, kind: ListKind.Wishlist }),
+    );
+
+    return rows.map((row) => ({
+      ...row,
+      onWishlist: wishlisted === null ? null : wishlisted.has(row.platformGame.id),
+    }));
+  }
+
+  /** Whether the actor can read any list at all (#1241). */
+  private canReadLists(): boolean {
+    return this.abilityService.getCurrentAccess([ResourceType.List])[ResourceType.List]?.[Action.read] !== 'none';
   }
 
   /**

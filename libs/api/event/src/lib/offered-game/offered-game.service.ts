@@ -1,5 +1,13 @@
-import { Action, DatabaseService, Prisma, readBaseGameLinks, ResourceType } from '@bge/database';
-import { AbilityService, ScopeComposer } from '@bge/permissions';
+import {
+  Action,
+  DatabaseService,
+  ListKind,
+  Prisma,
+  readBaseGameLinks,
+  readWishlistedPlatformGames,
+  ResourceType,
+} from '@bge/database';
+import { AbilityService, resolveActingUserIdOrNull, ScopeComposer } from '@bge/permissions';
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { Injectable } from '@nestjs/common';
 import { ACTIVE_NOMINATION_STATUSES, lineupStillAhead } from '../attendee/attendance';
@@ -135,6 +143,8 @@ export class OfferedGameService {
    * - Supplies: the open nominations naming the entry, and its lineup games
    *   still ahead at `now`. Each is `null` for a caller with no read on that
    *   kind of record at all, and not read.
+   * - On wishlist: whether each entry's game is on the acting user's
+   *   wishlist, read once for the batch (#1241).
    */
   async enrich(entries: readonly OfferedGameEntry[], now: Date): Promise<OfferedGame[]> {
     if (entries.length === 0) {
@@ -142,7 +152,7 @@ export class OfferedGameService {
     }
 
     const entryIds = entries.map((entry) => entry.id);
-    const [links, nominations, lineup] = await Promise.all([
+    const [links, nominations, lineup, wishlisted] = await Promise.all([
       readBaseGameLinks(
         this.db,
         [...new Set(entries.map((entry) => entry.collection.platformGame.game.id))],
@@ -150,6 +160,7 @@ export class OfferedGameService {
       ),
       this.tallyNominations(entryIds),
       this.tallyLineup(entryIds, now),
+      this.wishlistedPlatformGames(entries),
     ]);
 
     return entries.map(({ collection: { platformGame, ...collection }, ...entry }) => ({
@@ -165,6 +176,7 @@ export class OfferedGameService {
         nominations: nominations === null ? null : (nominations.get(entry.id) ?? 0),
         lineup: lineup === null ? null : (lineup.get(entry.id) ?? 0),
       },
+      onWishlist: wishlisted === null ? null : wishlisted.has(platformGame.id),
     }));
   }
 
@@ -187,6 +199,33 @@ export class OfferedGameService {
     });
 
     return new Map(attendees.map((attendee) => [attendee.id, attendee]));
+  }
+
+  /**
+   * The platform games among `entries` that are on the acting user's wishlist
+   * (#1241), or null for an actor with no wishlist they can read: no acting
+   * user (plugin, system, external actors), no list read access (an anonymous
+   * user, a key without a list grant), or a list read that doesn't reach the
+   * wishlist (a key whose list grant is pinned to one custom list). Null, not
+   * an empty set, because "not on your wishlist" would claim a wishlist was
+   * checked.
+   *
+   * The wishlist read is composed under the actor's list ceiling in its own
+   * top-level query, so a deny-all fails closed and answers null. The access
+   * check up front only saves that query when the answer is already known.
+   */
+  private async wishlistedPlatformGames(entries: readonly OfferedGameEntry[]): Promise<ReadonlySet<string> | null> {
+    const userId = resolveActingUserIdOrNull(this.abilityService);
+
+    if (userId === null || !this.canRead(ResourceType.List)) {
+      return null;
+    }
+
+    return readWishlistedPlatformGames(
+      this.db,
+      entries.map(({ collection: { platformGame } }) => ({ id: platformGame.id, gameId: platformGame.game.id })),
+      this.scopeComposer.compose(ResourceType.List, Action.read, { userId, kind: ListKind.Wishlist }),
+    );
   }
 
   /** The open nominations naming each entry, or null for a caller who can't read nominations. */

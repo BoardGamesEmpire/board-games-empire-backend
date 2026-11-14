@@ -1,8 +1,9 @@
-import { ContentType, GameMedium, Reach, ResourceType, type Prisma } from '@bge/database';
+import { ContentType, GameMedium, ListKind, Reach, ResourceType, type Prisma } from '@bge/database';
 import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
 import request from 'supertest';
+import { arrangeList, arrangePlatformGame as arrangeSiblingPlatformGame, findWishlist } from '../list/list-fixtures';
 import { mintApiKey, type Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { tabletopPlatform } from '../support/seeded-platforms';
@@ -163,6 +164,115 @@ describe('collection rows (#1070)', () => {
       });
       expect(platformGame).toMatchObject({ minPlayers: null, maxPlayers: null, minPlayTime: null, maxPlayTime: null });
     }
+  });
+
+  /**
+   * `onWishlist` on another user's collection (#1241): whether the row's game is
+   * on the ACTING USER's wishlist. A wishlisted game matches every platform game
+   * of it; a wishlisted platform game matches only itself.
+   */
+  it("marks a friend's copy of a game on the acting user's wishlist, by game or by platform game (#1241)", async () => {
+    const owner = await actors.user();
+    const viewer = await actors.user();
+    const anonymousUser = await actors.anonymous();
+
+    // Wishlisted as a game: every platform game of it matches.
+    const byGame = await arrangeRow(owner.user.id, { reach: Reach.Public });
+    // Wishlisted as a platform game: that one matches, its sibling does not.
+    const byPlatformGame = await arrangeRow(owner.user.id, { reach: Reach.Public });
+    const sibling = await arrangeSiblingPlatformGame(db.client, { gameId: byPlatformGame.gameId });
+    const siblingEntry = await db.client.gameCollection.create({
+      data: {
+        userId: owner.user.id,
+        platformGameId: sibling.platformGameId,
+        medium: GameMedium.Physical,
+        reach: Reach.Public,
+      },
+      select: { id: true },
+    });
+    // On the OWNER's wishlist only, which says nothing about the acting user's.
+    const ownersWish = await arrangeRow(owner.user.id, { reach: Reach.Public });
+    const unwanted = await arrangeRow(owner.user.id, { reach: Reach.Public });
+
+    const byPlatformGameId = (
+      await db.client.gameCollection.findUniqueOrThrow({
+        where: { id: byPlatformGame.entryId },
+        select: { platformGameId: true },
+      })
+    ).platformGameId;
+
+    const viewersWishlist = await findWishlist(db.client, viewer.user.id);
+    const ownersWishlist = await findWishlist(db.client, owner.user.id);
+    await db.client.listEntry.createMany({
+      data: [
+        { listId: viewersWishlist.id, gameId: byGame.gameId, position: 0 },
+        { listId: viewersWishlist.id, platformGameId: byPlatformGameId, position: 1 },
+        { listId: ownersWishlist.id, gameId: ownersWish.gameId, position: 0 },
+      ],
+    });
+
+    const path = `/api/users/${owner.user.id}/game-collections`;
+    const asViewer = listCollectionsEnvelope(
+      await request(baseUrl).get(path).set(viewer.headers).expect(200),
+      'GET /api/users/:userId/game-collections as the wishlist owner',
+    );
+    const flagOf = (envelope: typeof asViewer, entryId: string) =>
+      envelope.collections.find((row) => row.id === entryId)?.onWishlist;
+
+    expect(flagOf(asViewer, byGame.entryId)).toBe(true);
+    expect(flagOf(asViewer, byPlatformGame.entryId)).toBe(true);
+    expect(flagOf(asViewer, siblingEntry.id)).toBe(false);
+    expect(flagOf(asViewer, ownersWish.entryId)).toBe(false);
+    expect(flagOf(asViewer, unwanted.entryId)).toBe(false);
+
+    // An anonymous user holds no list read, so it gets null, never false. The
+    // Public rows reach it, so the null is not an artefact of an empty page.
+    const asAnonymousUser = listCollectionsEnvelope(
+      await request(baseUrl).get(path).set(anonymousUser.headers).expect(200),
+      'GET /api/users/:userId/game-collections as an anonymous user',
+    );
+    expect(asAnonymousUser.collections.map((row) => row.id)).toContain(byGame.entryId);
+    expect(asAnonymousUser.collections.map((row) => row.onWishlist)).toEqual(
+      asAnonymousUser.collections.map(() => null),
+    );
+
+    // The acting user's own collection carries no such field.
+    const own = listCollectionsEnvelope(await listOwn(owner).expect(200), `GET ${COLLECTIONS_PATH} as the owner`);
+    expect(own.collections.every((row) => !('onWishlist' in row))).toBe(true);
+  });
+
+  /**
+   * A key whose list grant is pinned to one custom list holds list read, so the
+   * access check passes, but its ceiling never reaches the owner's wishlist. It
+   * gets null, never false: "not yours to know" must not read as "not on your
+   * wishlist" (#1241). The control is the same owner's key with the list grant
+   * unpinned, which sees the same row as wishlisted.
+   */
+  it('answers null, not false, to a key whose list grant is pinned to a custom list (#1241)', async () => {
+    const owner = await actors.user();
+    const viewer = await actors.user();
+    const wished = await arrangeRow(owner.user.id, { reach: Reach.Public });
+    const viewersWishlist = await findWishlist(db.client, viewer.user.id);
+    await db.client.listEntry.create({ data: { listId: viewersWishlist.id, gameId: wished.gameId, position: 0 } });
+    const custom = await arrangeList(db.client, viewer.user.id, { kind: ListKind.Custom });
+
+    const collectionRead = { slugs: ['read:game_collection'], resourceType: ResourceType.GameCollection };
+    const listRead = { slugs: ['read:list'], resourceType: ResourceType.List };
+    const unpinned = await mintApiKey(baseUrl, db.client, viewer, [collectionRead, listRead]);
+    const pinned = await mintApiKey(baseUrl, db.client, viewer, [
+      collectionRead,
+      { ...listRead, resourceId: custom.id },
+    ]);
+
+    const path = `/api/users/${owner.user.id}/game-collections`;
+    const flagFor = async (key: Caller, who: string) =>
+      listCollectionsEnvelope(
+        await request(baseUrl).get(path).set(key.headers).expect(200),
+        `GET /api/users/:userId/game-collections with ${who}`,
+      ).collections.find((row) => row.id === wished.entryId)?.onWishlist;
+
+    expect(await flagFor(unpinned, 'a key holding read:list')).toBe(true);
+    expect(await flagFor(pinned, 'a key holding read:list pinned to a custom list')).toBeNull();
   });
 
   /**

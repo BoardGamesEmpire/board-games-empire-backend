@@ -1,15 +1,16 @@
-import { Action, EventParticipationStatus, Prisma, ResourceType } from '@bge/database';
+import { Action, EventParticipationStatus, ListKind, Prisma, ResourceType } from '@bge/database';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
   createMockAbilityService,
   createTestingModuleWithDb,
+  MOCK_ACTING_USER_ID,
   paginationQuery,
   unwrapTransaction,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { ACTIVE_NOMINATION_STATUSES, lineupStillAhead } from '../attendee/attendance';
 import { ListOfferedGamesQueryDto } from './dto/list-offered-games.query.dto';
@@ -49,6 +50,9 @@ describe('OfferedGameService (#1185, #1187)', () => {
     db.gameExpansion.findMany.mockResolvedValue([]);
     db.eventGameNomination.findMany.mockResolvedValue([]);
     db.eventGame.findMany.mockResolvedValue([]);
+    // The actor's wishlist is readable, unless a spec says otherwise (#1241).
+    db.list.findFirst.mockResolvedValue({ id: 'wishlist-1' } as never);
+    db.listEntry.findMany.mockResolvedValue([]);
     db.eventAttendeeGameList.findMany.mockResolvedValue([]);
   });
 
@@ -134,6 +138,66 @@ describe('OfferedGameService (#1185, #1187)', () => {
       expect(row.supplies).toEqual({ nominations: null, lineup: 0 });
       expect(db.eventGameNomination.findMany).not.toHaveBeenCalled();
       expect(db.eventGame.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    // A client shows "a game you want" on an offered game from this flag. It is
+    // null, not false, where the actor has no wishlist to read (#1241).
+    it("says which offered games are on the acting user's wishlist, null for an actor who cannot read one (#1241)", async () => {
+      const entries = [
+        makeOfferedGameEntry('a', 'game-1'),
+        makeOfferedGameEntry('b', 'game-2'),
+        makeOfferedGameEntry('c', 'game-3'),
+      ];
+      // game-1 is wishlisted as a game, game-2's platform game directly, game-3 not at all.
+      db.listEntry.findMany.mockResolvedValue([
+        { gameId: 'game-1', platformGameId: null },
+        { gameId: null, platformGameId: 'pg-game-2' },
+      ] as never);
+
+      const enriched = await service.enrich(entries, NOW);
+
+      expect(enriched.map((row) => row.onWishlist)).toEqual([true, true, false]);
+      expect(compose).toHaveBeenCalledWith(ResourceType.List, Action.read, {
+        userId: MOCK_ACTING_USER_ID,
+        kind: ListKind.Wishlist,
+      });
+      // The ceiling-composed wishlist read is top-level; the entry read names
+      // the wishlist it found by id.
+      expect(db.list.findFirst.mock.calls[0][0]?.where).toMatchObject({
+        userId: MOCK_ACTING_USER_ID,
+        kind: ListKind.Wishlist,
+        AND: [COND],
+      });
+      expect(db.listEntry.findMany).toHaveBeenCalledTimes(1);
+      expect(db.listEntry.findMany.mock.calls[0][0]?.where).toMatchObject({ listId: 'wishlist-1' });
+
+      // List read access that doesn't reach the wishlist: a key whose list
+      // grant is pinned to one custom list, or a user with no wishlist row.
+      db.list.findFirst.mockResolvedValueOnce(null);
+      db.listEntry.findMany.mockClear();
+      const unreachable = await service.enrich(entries, NOW);
+      expect(unreachable.map((row) => row.onWishlist)).toEqual([null, null, null]);
+      expect(db.listEntry.findMany).not.toHaveBeenCalled();
+
+      // No list read: an anonymous user, or a key without a list grant.
+      db.list.findFirst.mockClear();
+      abilityService.getCurrentAccess.mockImplementation(((types: readonly string[]) =>
+        Object.fromEntries(
+          types.map((type) => [type, { [Action.read]: type === ResourceType.List ? 'none' : 'some' }]),
+        )) as never);
+      const noListRead = await service.enrich(entries, NOW);
+      expect(noListRead.map((row) => row.onWishlist)).toEqual([null, null, null]);
+
+      // No acting user: a plugin, system or external actor.
+      abilityService.getCurrentAccess.mockReturnValue({});
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException('not user attributable');
+      });
+      const noUser = await service.enrich(entries, NOW);
+      expect(noUser.map((row) => row.onWishlist)).toEqual([null, null, null]);
+
+      expect(db.list.findFirst).not.toHaveBeenCalled();
+      expect(db.listEntry.findMany).not.toHaveBeenCalled();
     });
 
     it('reads nothing for no entries', async () => {

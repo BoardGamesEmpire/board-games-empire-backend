@@ -29,6 +29,12 @@ export type OfferedGame = Omit<OfferedGameEntry, 'collection'> & {
     };
   };
   supplies: OfferedGameSupplies;
+  /**
+   * Whether the game is on the acting user's wishlist (#1241); `null` for an
+   * actor with no wishlist they can read, so "none that you can see" never
+   * reads as "not wanted".
+   */
+  onWishlist: boolean | null;
 };
 
 /** An offered game's attendee as {@link OFFERED_GAME_ATTENDEE_SELECT} reads them. */

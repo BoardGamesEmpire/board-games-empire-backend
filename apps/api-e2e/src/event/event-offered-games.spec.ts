@@ -3,6 +3,7 @@ import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
+import { findWishlist } from '../list/list-fixtures';
 import { mintApiKey, type Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
@@ -270,7 +271,7 @@ describe('GET /api/events/:eventId/offered-games (#1187)', () => {
       data: { rating: 9, comment: note, playCount: 12, quantity: 3 },
     });
 
-    const entryKeys = ['attendeeId', 'collection', 'createdAt', 'id', 'supplies'];
+    const entryKeys = ['attendeeId', 'collection', 'createdAt', 'id', 'onWishlist', 'supplies'];
     const expectOfferedShape = (row: OfferedGameWire, site: string, keys = entryKeys) => {
       expect({ site, keys: Object.keys(row).sort() }).toEqual({ site, keys });
       expect({ site, keys: Object.keys(row.collection).sort() }).toEqual({
@@ -330,6 +331,44 @@ describe('GET /api/events/:eventId/offered-games (#1187)', () => {
     expect(offeredGames[0].attendeeId).toBe(hostAttendeeId);
     expect(offeredGames[0].attendee).toBeNull();
     expect(offeredGames[0].supplies).toEqual({ nominations: null, lineup: null });
+  });
+
+  // #1241: the flag is the ACTING USER's wishlist, not the offerer's, and it is
+  // null (never false) for an actor who can read offered games but no list.
+  it("marks an offered game on the acting user's wishlist in the event's offered games and in the attendee embed (#1241)", async () => {
+    const { host, others, eventId } = await arrangeEvent();
+    const [viewer] = others;
+    const wanted = await offer(eventId, host, { title: 'Wanted' });
+    await offer(eventId, host, { title: 'Unwanted' });
+    // On the offerer's wishlist only, which says nothing about the viewer's.
+    const hostsWish = await offer(eventId, host, { title: 'Hosts wish' });
+    await db.client.listEntry.createMany({
+      data: [
+        { listId: (await findWishlist(db.client, viewer.user.id)).id, gameId: wanted.gameId, position: 0 },
+        { listId: (await findWishlist(db.client, host.user.id)).id, gameId: hostsWish.gameId, position: 0 },
+      ],
+    });
+
+    const flagsByTitle = (games: readonly OfferedGameWire[]) =>
+      Object.fromEntries(games.map((row) => [row.collection.platformGame.game.title, row.onWishlist]));
+
+    const { offeredGames } = await offered(viewer, eventId);
+    expect(flagsByTitle(offeredGames)).toEqual({ Wanted: true, Unwanted: false, 'Hosts wish': false });
+
+    const embedded = listAttendeesEnvelope(
+      await listAttendees(viewer, eventId).expect(200),
+      'GET /api/events/:eventId/attendees as the wishlist owner',
+    ).attendees.flatMap((attendee) => (attendee as unknown as { availableGames: OfferedGameWire[] }).availableGames);
+    expect(flagsByTitle(embedded)).toEqual({ Wanted: true, Unwanted: false, 'Hosts wish': false });
+
+    // A key holding read on offered games alone has no list read: null, not false.
+    const key = await mintApiKey(baseUrl, db.client, host, {
+      slugs: ['read:attendee_game_list'],
+      resourceType: ResourceType.EventAttendeeGameList,
+    });
+    const asKey = await offered(key, eventId);
+    expect(asKey.offeredGames).toHaveLength(3);
+    expect(asKey.offeredGames.map((row) => row.onWishlist)).toEqual([null, null, null]);
   });
 
   it('gives a reader without read on offered games a 403', async () => {

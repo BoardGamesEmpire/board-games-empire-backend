@@ -95,6 +95,8 @@ describe('EventAttendeeService', () => {
     // nominations, unless a test says so (#1187).
     db.eventAttendeeGameList.findMany.mockResolvedValue([]);
     db.gameExpansion.findMany.mockResolvedValue([]);
+    // Each offered game also reads the acting user's wishlist (#1241).
+    db.listEntry.findMany.mockResolvedValue([]);
     db.eventGameNomination.findMany.mockResolvedValue([]);
     // Every user an add names is a person unless a test says otherwise. The
     // invite checks' other reads find no row: the default policy and
