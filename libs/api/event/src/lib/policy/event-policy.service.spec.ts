@@ -777,11 +777,14 @@ describe('EventPolicyService', () => {
     });
 
     // A first write that sets only what the date already took from the event
-    // changes nothing, though it may make the empty row (#728).
-    it("emits nothing for a date's first write that sets nothing of its own (#728)", async () => {
-      await updateDate({ maxAttendees: null, platformsUnrestricted: false, allowedPlatformIds: [] });
+    // changes nothing. It makes no row either: an empty row means what no row
+    // means, and it would land with no audit entry (#728, #796).
+    it("writes and emits nothing for a date's first write that sets nothing of its own (#728, #796)", async () => {
+      await expect(
+        updateDate({ maxAttendees: null, platformsUnrestricted: false, allowedPlatformIds: [] }),
+      ).resolves.toBeNull();
 
-      expect(tx.eventOccurrencePolicy.upsert).toHaveBeenCalled();
+      expect(tx.eventOccurrencePolicy.upsert).not.toHaveBeenCalled();
       expect(tx.occurrencePolicyPlatform.deleteMany).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();
     });

@@ -14,12 +14,14 @@ import {
  * The query for an event's policy under the `read:event_policy` ceiling, with
  * the lists embedded. The ceiling goes in the top-level `where`, the one place a
  * deny-all ceiling is enforced (#559), and this is the one place the policy's
- * read ceiling is written, so the policy every route answers with is cut the
- * same way (#796).
+ * read ceiling is written, so every route that reads the policy through it
+ * cuts it the same way (#796). The event lists still embed it with no ceiling,
+ * which is #1026.
  *
  * Exposed for a read that runs in a batch, which takes a query and not a
- * result: `getEventById`'s REPEATABLE READ batch and the create replay's.
- * Every other read goes through `readEventPolicyView`.
+ * result: `getEventById`'s REPEATABLE READ batch, the create replay's, and the
+ * occurrence page's. Every other read goes through `readEventPolicyView` or
+ * `canReadEventPolicy`.
  */
 export function eventPolicyReadArgs(abilityService: AbilityService, eventId: string) {
   return {

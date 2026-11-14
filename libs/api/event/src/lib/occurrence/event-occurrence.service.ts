@@ -22,7 +22,7 @@ import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
 import { assertEventNotCancelled } from '../lifecycle/event-lifecycle.helpers';
-import { canReadEventPolicy, serveOccurrencePolicy } from '../policy/policy-ceiling';
+import { canReadEventPolicy, eventPolicyReadArgs, serveOccurrencePolicy } from '../policy/policy-ceiling';
 import { POLICY_VIEW_INCLUDE, type OccurrencePolicyView } from '../policy/policy-view';
 import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
 import { AVAILABILITY_VOTE_SLUG, countsAsVoter, voterGrantSelect } from '../vote/vote-grant';
@@ -84,7 +84,8 @@ export class EventOccurrenceService {
 
     const where = this.scopeComposer.compose(ResourceType.EventOccurrence, Action.read, { eventId });
 
-    const [occurrences, total] = await this.db.$transaction(
+    // The policy's ceiling is read in the same snapshot as the page it gates.
+    const [occurrences, total, policiesReadable] = await this.db.$transaction(
       [
         this.db.eventOccurrence.findMany({
           where,
@@ -95,11 +96,13 @@ export class EventOccurrenceService {
         }),
 
         this.db.eventOccurrence.count({ where }),
+
+        this.db.eventPolicy.count({ where: eventPolicyReadArgs(this.abilityService, eventId).where }),
       ],
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    const canReadPolicy = await canReadEventPolicy(this.db, this.abilityService, eventId);
+    const canReadPolicy = policiesReadable > 0;
 
     return {
       rows: await this.withVotesAndGames(
@@ -303,8 +306,10 @@ export class EventOccurrenceService {
 
     // Read before the write, so a failed read leaves the occurrence as it was.
     // The write can take games off the lineup, and the answer leaves those out.
-    const [{ availabilityVotes, games }] = await this.withVotesAndGames([found]);
-    const canReadPolicy = await canReadEventPolicy(this.db, this.abilityService, eventId);
+    const [[{ availabilityVotes, games }], canReadPolicy] = await Promise.all([
+      this.withVotesAndGames([found]),
+      canReadEventPolicy(this.db, this.abilityService, eventId),
+    ]);
 
     try {
       const {
@@ -388,8 +393,10 @@ export class EventOccurrenceService {
     // a lock on the date's row, held in an interactive transaction across both
     // reads and the delete, and this answer is all it would protect: the
     // domain event below carries the date's own columns, not that list (#677).
-    const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
-    const canReadPolicy = await canReadEventPolicy(this.db, this.abilityService, eventId);
+    const [[{ availabilityVotes, games }], canReadPolicy] = await Promise.all([
+      this.withVotesAndGames([existing]),
+      canReadEventPolicy(this.db, this.abilityService, eventId),
+    ]);
 
     try {
       const { written: removed, removedGames } = await this.db.$transaction((tx) =>
@@ -529,8 +536,10 @@ export class EventOccurrenceService {
 
     // Read before the write, which changes neither, so a failed read leaves
     // the occurrence as it was.
-    const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
-    const canReadPolicy = await canReadEventPolicy(this.db, this.abilityService, eventId);
+    const [[{ availabilityVotes, games }], canReadPolicy] = await Promise.all([
+      this.withVotesAndGames([existing]),
+      canReadEventPolicy(this.db, this.abilityService, eventId),
+    ]);
 
     try {
       const { before, updated } = await this.db.$transaction(async (tx) => {

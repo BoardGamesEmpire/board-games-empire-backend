@@ -16,6 +16,7 @@ import { Http } from '@status/codes';
 import assert from 'node:assert';
 import { eventWebhookIds } from '../event.service';
 import { lockLiveEvent } from '../utils/lock-live-event.util';
+import { changedKeys } from '../utils/pick-snapshot.util';
 import type { UpdateEventPolicyDto } from './dto/update-event-policy.dto';
 import type { UpdateOccurrencePolicyDto } from './dto/update-occurrence-policy.dto';
 import { assertValidVotingPolicy, foldPolicy } from './effective-policy';
@@ -219,7 +220,7 @@ export class EventPolicyService {
    * grant, `update:event_policy` or its household variant. An organizer may
    * edit the date but not its policy. `null` hands a field back to the
    * event's, and so does an empty list. The date's row is made on its first
-   * write.
+   * write that changes something; until then the answer is `null`.
    *
    * The write takes the event's lock, as an event policy write and a date
    * write do. The grant is checked right after it, by reading the event's
@@ -280,6 +281,20 @@ export class EventPolicyService {
             categoryIds: dto.allowedCategoryIds,
           });
 
+          // Before the date's first write, a patch that sets nothing of its
+          // own makes no row. An empty row means what no row means, and
+          // nothing changed, so it would land with no audit entry (#796).
+          const changesSomething =
+            Object.keys(lists.after).length > 0 ||
+            changedKeys<OccurrencePolicyColumns>(
+              existing,
+              { ...existing, ...columns },
+              Object.keys(columns) as (keyof OccurrencePolicyColumns)[],
+            ).length > 0;
+          if (!row && !changesSomething) {
+            return { event, eventPolicy, existing, updated: null, columns, lists, policy: null };
+          }
+
           const updated = await tx.eventOccurrencePolicy.upsert({
             where: { occurrenceId },
             create: { occurrenceId, ...columns },
@@ -301,6 +316,10 @@ export class EventPolicyService {
           return { event, eventPolicy, existing, updated, columns, lists, policy };
         },
       );
+
+      if (!updated) {
+        return policy;
+      }
 
       // Before the date's first write there was no row, and every field was
       // the event's; the snapshots name the row that now holds them.

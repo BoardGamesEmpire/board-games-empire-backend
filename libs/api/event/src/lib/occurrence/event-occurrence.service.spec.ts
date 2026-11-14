@@ -212,7 +212,9 @@ describe('EventOccurrenceService', () => {
       );
     });
 
-    it('counts through the same event-scoped where as the rows, in one REPEATABLE READ transaction', async () => {
+    // The policy ceiling's count joins the batch, so the page and the
+    // ceiling that gates its policies are read from one snapshot (#1211).
+    it("counts through the same event-scoped where as the rows, with the policy's ceiling, in one REPEATABLE READ transaction", async () => {
       db.event.count.mockResolvedValue(1);
       db.eventOccurrence.count.mockResolvedValue(7);
 
@@ -222,7 +224,8 @@ describe('EventOccurrenceService', () => {
       expect(page).toEqual({ rows: [], total: 7 });
 
       const { operations, options } = batchTransactionCall(db);
-      expect(operations).toHaveLength(2);
+      expect(operations).toHaveLength(3);
+      expect(db.eventPolicy.count).toHaveBeenCalledWith({ where: { eventId: 'event-1', AND: [COND] } });
       expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     });
   });
