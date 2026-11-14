@@ -4,6 +4,7 @@ import type {
   EventAttendeeGameList,
   EventAttendeeRole,
   EventOccurrence,
+  EventOccurrencePolicy,
   EventPolicy,
 } from '@bge/database';
 import {
@@ -12,6 +13,7 @@ import {
   EventType,
   GameAdditionMode,
   InterestedWeight,
+  OccurrenceOverrideScope,
   OccurrenceStatus,
   Reach,
   VoteEligibility,
@@ -65,6 +67,41 @@ export function makeEventPolicy(eventId: string, overrides: Partial<EventPolicy>
     voteQuorumValue: null,
     voteEligibility: VoteEligibility.ConfirmedOnly,
     interestedWeight: InterestedWeight.AsAbstain,
+    votingWindowHours: null,
+    occurrenceOverrideScope: OccurrenceOverrideScope.Any,
+    createdAt: new Date('2024-01-01T00:00:00Z'),
+    updatedAt: new Date('2024-01-01T00:00:00Z'),
+    ...overrides,
+  };
+}
+
+/** A date's policy row that overrides nothing: every field the event's, and no "no restriction" flag set. */
+export function makeEventOccurrencePolicy(
+  occurrenceId: string,
+  overrides: Partial<EventOccurrencePolicy> = {},
+): EventOccurrencePolicy {
+  const n = sequence();
+  return {
+    id: `occ-policy-${n}`,
+    occurrenceId,
+    restrictToGameCategories: null,
+    platformTypesUnrestricted: false,
+    platformsUnrestricted: false,
+    maxAttendees: null,
+    maxTotalParticipants: null,
+    strictCapacity: null,
+    capacityUnrestricted: false,
+    requireHostApprovalToJoin: null,
+    allowSpectators: null,
+    gameAdditionMode: null,
+    restrictToAttendeePool: null,
+    fillerMaxPlayTime: null,
+    voteThresholdType: null,
+    voteThresholdValue: null,
+    voteQuorumType: null,
+    voteQuorumValue: null,
+    voteEligibility: null,
+    interestedWeight: null,
     votingWindowHours: null,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     updatedAt: new Date('2024-01-01T00:00:00Z'),

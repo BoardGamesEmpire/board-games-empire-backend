@@ -50,4 +50,47 @@ describe('CreateEventDto', () => {
       ]);
     });
   });
+
+  // The lists are optional, and null is refused as a value (#1268).
+  it('accepts the allowed platform lists on a policy, and refuses a type or null that is not one (#1268)', async () => {
+    const policy = (fields: PlainPayload) => ({ title: 'Game night', policy: fields });
+
+    await expect(
+      propertiesWithErrors(policy({ allowedPlatformTypes: ['Tabletop', 'PC'], allowedPlatformIds: ['plat-1'] })),
+    ).resolves.toEqual([]);
+    await expect(propertiesWithErrors(policy({ allowedPlatformTypes: ['Nope'] }))).resolves.toEqual(['policy']);
+    await expect(propertiesWithErrors(policy({ allowedPlatformIds: null }))).resolves.toEqual(['policy']);
+  });
+
+  // The ids reach the existence check whether or not categories are
+  // restricted, so they are checked whenever they are sent: a bare string
+  // would be read as its characters, and anything else would reach the
+  // database (#1268).
+  it.each<[string, unknown]>([
+    ['null', null],
+    ['a bare string', 'cat-1'],
+    ['a list holding a number', [1]],
+  ])('refuses allowed category ids that are %s, whether or not categories are restricted (#1268)', async (_, ids) => {
+    for (const restrictToGameCategories of [undefined, false, true]) {
+      await expect(
+        propertiesWithErrors({ title: 'Game night', policy: { restrictToGameCategories, allowedCategoryIds: ids } }),
+      ).resolves.toEqual(['policy']);
+    }
+  });
+
+  it('accepts allowed category ids with categories left unrestricted, and requires them when restricted (#1268)', async () => {
+    const policy = (fields: PlainPayload) => ({ title: 'Game night', policy: fields });
+
+    await expect(propertiesWithErrors(policy({ allowedCategoryIds: ['cat-1'] }))).resolves.toEqual([]);
+    await expect(propertiesWithErrors(policy({ restrictToGameCategories: true }))).resolves.toEqual(['policy']);
+  });
+
+  // The column can't be null, and a create that leaves it out takes Any (#796).
+  it('accepts an occurrence override scope on a policy, and refuses null or one that does not exist (#796)', async () => {
+    const policy = (occurrenceOverrideScope: unknown) => ({ title: 'Game night', policy: { occurrenceOverrideScope } });
+
+    await expect(propertiesWithErrors(policy('TightenOnly'))).resolves.toEqual([]);
+    await expect(propertiesWithErrors(policy(null))).resolves.toEqual(['policy']);
+    await expect(propertiesWithErrors(policy('Loose'))).resolves.toEqual(['policy']);
+  });
 });

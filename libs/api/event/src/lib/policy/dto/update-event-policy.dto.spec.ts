@@ -27,7 +27,35 @@ describe('UpdateEventPolicyDto', () => {
     await expect(propertiesWithErrors({ gameAdditionMode: 'Nope' })).resolves.toEqual(['gameAdditionMode']);
   });
 
-  it('refuses allowedCategoryIds, which this route does not set yet (#796)', async () => {
-    await expect(propertiesWithErrors({ allowedCategoryIds: [] })).resolves.toEqual(['allowedCategoryIds']);
+  it('accepts the allowed lists, empty ones included (#1268)', async () => {
+    await expect(
+      propertiesWithErrors({
+        allowedPlatformTypes: ['Tabletop'],
+        allowedPlatformIds: ['plat-1'],
+        allowedCategoryIds: [],
+      }),
+    ).resolves.toEqual([]);
+  });
+
+  it('refuses a platform type that does not exist (#1268)', async () => {
+    await expect(propertiesWithErrors({ allowedPlatformTypes: ['Nope'] })).resolves.toEqual(['allowedPlatformTypes']);
+  });
+
+  // The column can't be null: an event always says how far its dates may go (#796).
+  it('accepts each occurrence override scope, and refuses null or one that does not exist (#796)', async () => {
+    for (const occurrenceOverrideScope of ['None', 'TightenOnly', 'Any']) {
+      await expect(propertiesWithErrors({ occurrenceOverrideScope })).resolves.toEqual([]);
+    }
+    await expect(propertiesWithErrors({ occurrenceOverrideScope: null })).resolves.toEqual(['occurrenceOverrideScope']);
+    await expect(propertiesWithErrors({ occurrenceOverrideScope: 'Loose' })).resolves.toEqual([
+      'occurrenceOverrideScope',
+    ]);
+  });
+
+  // The lists are not columns, so there is nothing for null to clear (#1268).
+  it('refuses null for each list (#1268)', async () => {
+    await expect(
+      propertiesWithErrors({ allowedPlatformTypes: null, allowedPlatformIds: null, allowedCategoryIds: null }),
+    ).resolves.toEqual(['allowedCategoryIds', 'allowedPlatformTypes', 'allowedPlatformIds']);
   });
 });

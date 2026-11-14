@@ -19,6 +19,7 @@ import {
   createTestingModuleWithDb,
   makeEventAttendee,
   makeEventOccurrence,
+  makeEventOccurrencePolicy,
   makeVoterRole,
   MOCK_ACTING_USER_ID,
   paginationQuery,
@@ -31,6 +32,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { lineupStillAhead } from '../attendee/attendance';
 import { GameRemovedFromEventEvent } from '../nomination/events/nomination.events';
+import { POLICY_VIEW_INCLUDE } from '../policy/policy-view';
 import { OccurrenceEvents } from './constants';
 import { EventOccurrenceService } from './event-occurrence.service';
 import {
@@ -210,7 +212,9 @@ describe('EventOccurrenceService', () => {
       );
     });
 
-    it('counts through the same event-scoped where as the rows, in one REPEATABLE READ transaction', async () => {
+    // The policy ceiling's count joins the batch, so the page and the
+    // ceiling that gates its policies are read from one snapshot (#1211).
+    it("counts through the same event-scoped where as the rows, with the policy's ceiling, in one REPEATABLE READ transaction", async () => {
       db.event.count.mockResolvedValue(1);
       db.eventOccurrence.count.mockResolvedValue(7);
 
@@ -220,7 +224,8 @@ describe('EventOccurrenceService', () => {
       expect(page).toEqual({ rows: [], total: 7 });
 
       const { operations, options } = batchTransactionCall(db);
-      expect(operations).toHaveLength(2);
+      expect(operations).toHaveLength(3);
+      expect(db.eventPolicy.count).toHaveBeenCalledWith({ where: { eventId: 'event-1', AND: [COND] } });
       expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     });
   });
@@ -245,6 +250,20 @@ describe('EventOccurrenceService', () => {
       db.event.count.mockResolvedValue(1);
       db.eventOccurrence.findUnique.mockResolvedValue(null);
       await expect(service.getOccurrence('event-1', 'occ-1')).rejects.toThrow(NotFoundException);
+    });
+
+    // The date and the policy ceiling that gates its policy are read from one
+    // snapshot, as the page is (#1211).
+    it("reads the date and the policy's ceiling in one REPEATABLE READ transaction", async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventOccurrence.findUnique.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
+
+      await service.getOccurrence('event-1', 'occ-1');
+
+      const { operations, options } = batchTransactionCall(db);
+      expect(operations).toHaveLength(2);
+      expect(db.eventPolicy.count).toHaveBeenCalledWith({ where: { eventId: 'event-1', AND: [COND] } });
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     });
   });
 
@@ -272,10 +291,9 @@ describe('EventOccurrenceService', () => {
       await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
       await service.getOccurrence('event-1', 'occ-1');
 
-      expect(db.eventOccurrence.findMany).toHaveBeenCalledWith(expect.objectContaining({ include: { policy: true } }));
-      expect(db.eventOccurrence.findUnique).toHaveBeenCalledWith(
-        expect.objectContaining({ include: { policy: true } }),
-      );
+      const include = { policy: { include: POLICY_VIEW_INCLUDE } };
+      expect(db.eventOccurrence.findMany).toHaveBeenCalledWith(expect.objectContaining({ include }));
+      expect(db.eventOccurrence.findUnique).toHaveBeenCalledWith(expect.objectContaining({ include }));
     });
 
     it("reads the page's votes as their own read, composed with the vote ceiling, in the order they were cast", async () => {
@@ -433,12 +451,29 @@ describe('EventOccurrenceService', () => {
         Promise.resolve('suppliedBy' in args.where ? [] : [game('g1', 'occ-1')])) as never);
     });
 
-    it.each(writes)('$name embeds the policy alone in its write', async ({ name, op, status }) => {
-      db.eventOccurrence.findUnique.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status }));
+    it.each(answeredThroughReads)(
+      '$name embeds the policy alone in its write (#1211)',
+      async ({ name, op, status }) => {
+        db.eventOccurrence.findUnique.mockResolvedValue(
+          makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status }),
+        );
 
-      await run(name);
+        await run(name);
 
-      expect(db.eventOccurrence[op]).toHaveBeenCalledWith(expect.objectContaining({ include: { policy: true } }));
+        expect(db.eventOccurrence[op]).toHaveBeenCalledWith(
+          expect.objectContaining({ include: { policy: { include: POLICY_VIEW_INCLUDE } } }),
+        );
+      },
+    );
+
+    // A new date has no policy row, so its answer's `policy` is `null` with no read (#1211).
+    it('addOccurrence embeds nothing, and answers with a null policy (#1211)', async () => {
+      const answer = await service.addOccurrence('event-1', { label: 'Day 1' });
+
+      expect(db.eventOccurrence.create).toHaveBeenCalledWith(
+        expect.not.objectContaining({ include: expect.anything() }),
+      );
+      expect(answer.policy).toBeNull();
     });
 
     it.each(answeredThroughReads)(
@@ -497,6 +532,131 @@ describe('EventOccurrenceService', () => {
         expect(emitter.emit).not.toHaveBeenCalled();
       },
     );
+  });
+
+  /**
+   * #1211. A date's own policy is the event's with overrides and has no read
+   * permission of its own, so every route that serves one is under the
+   * `read:event_policy` ceiling: a caller who cannot read the event's policy
+   * gets `null` for it, and a write that lands still answers.
+   */
+  describe("a date's policy on the occurrence routes (#1211)", () => {
+    const joinRows = (policy: object) => ({
+      ...policy,
+      allowedPlatformTypes: [],
+      allowedPlatforms: [{ platformId: 'plat-1' }],
+      allowedCategories: [],
+    });
+    const dayPolicy = makeEventOccurrencePolicy('occ-1', { maxAttendees: 5, platformsUnrestricted: true });
+    const servedPolicy = {
+      ...dayPolicy,
+      allowedPlatformTypes: [],
+      allowedPlatformIds: ['plat-1'],
+      allowedCategoryIds: [],
+    };
+    const row = (status: OccurrenceStatus = OccurrenceStatus.Proposed) =>
+      ({ ...makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status }), policy: joinRows(dayPolicy) }) as never;
+
+    const canReadPolicy = (can: boolean) => {
+      db.eventPolicy.count.mockResolvedValue(can ? 1 : 0);
+    };
+
+    beforeEach(() => {
+      db.event.count.mockResolvedValue(1);
+    });
+
+    it("serves each date's policy only to a reader of the event's policy (#1211)", async () => {
+      db.eventOccurrence.findMany.mockResolvedValue([row()]);
+      db.eventOccurrence.count.mockResolvedValue(1);
+
+      canReadPolicy(true);
+      const served = await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
+      expect(served.rows[0].policy).toEqual(servedPolicy);
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.EventPolicy, Action.read);
+      expect(db.eventPolicy.count).toHaveBeenCalledTimes(1);
+      expect(db.eventPolicy.count).toHaveBeenCalledWith({ where: { eventId: 'event-1', AND: [COND] } });
+
+      canReadPolicy(false);
+      const clipped = await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
+      expect(clipped.rows[0].policy).toBeNull();
+    });
+
+    it("serves a date's policy on getOccurrence only to a reader of the event's policy (#1211)", async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue(row());
+
+      canReadPolicy(true);
+      await expect(service.getOccurrence('event-1', 'occ-1')).resolves.toEqual(
+        expect.objectContaining({ policy: servedPolicy }),
+      );
+
+      canReadPolicy(false);
+      await expect(service.getOccurrence('event-1', 'occ-1')).resolves.toEqual(
+        expect.objectContaining({ policy: null }),
+      );
+    });
+
+    it("serves null for a date with no policy row, to a reader of the event's policy too (#1211)", async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
+      canReadPolicy(true);
+
+      await expect(service.getOccurrence('event-1', 'occ-1')).resolves.toEqual(
+        expect.objectContaining({ policy: null }),
+      );
+    });
+
+    describe.each([
+      ['updateOccurrence', OccurrenceStatus.Proposed, 'update'],
+      ['removeOccurrence', OccurrenceStatus.Proposed, 'delete'],
+      ['confirmOccurrence', OccurrenceStatus.Proposed, 'update'],
+      ['declineOccurrence', OccurrenceStatus.Proposed, 'update'],
+      ['cancelOccurrence', OccurrenceStatus.Confirmed, 'update'],
+    ] as const)('%s', (name, status, op) => {
+      beforeEach(() => {
+        db.eventOccurrence.findUnique.mockResolvedValue(row(status));
+        db.eventOccurrence[op].mockResolvedValue(row(status));
+        db.eventOccurrence.findFirst.mockResolvedValue({ status } as never);
+      });
+
+      const run = () =>
+        name === 'updateOccurrence'
+          ? service.updateOccurrence('event-1', 'occ-1', { label: 'New' })
+          : service[name]('event-1', 'occ-1');
+
+      it("answers with the date's policy for a reader of the event's policy (#1211)", async () => {
+        canReadPolicy(true);
+
+        await expect(run()).resolves.toEqual(expect.objectContaining({ policy: servedPolicy }));
+      });
+
+      // Under the lock, an event made private meanwhile can't be answered
+      // with the date's policy on a ceiling read before it was (#1211).
+      it("reads the ceiling under the event's lock, before it writes (#1211)", async () => {
+        canReadPolicy(true);
+
+        await run();
+
+        expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(db.eventPolicy.count.mock.invocationCallOrder[0]);
+        expect(db.eventPolicy.count.mock.invocationCallOrder[0]).toBeLessThan(
+          db.eventOccurrence[op].mock.invocationCallOrder[0],
+        );
+      });
+
+      it('writes nothing and emits nothing when the ceiling read fails (#1211)', async () => {
+        db.eventPolicy.count.mockRejectedValue(new Error('connection lost'));
+
+        await expect(run()).rejects.toThrow('connection lost');
+
+        expect(db.eventOccurrence[op]).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
+
+      it("answers with a null policy once the write lands, for a caller who cannot read the event's policy (#1211)", async () => {
+        canReadPolicy(false);
+
+        await expect(run()).resolves.toEqual(expect.objectContaining({ policy: null }));
+        expect(db.eventOccurrence[op]).toHaveBeenCalled();
+      });
+    });
   });
 
   describe('addOccurrence', () => {

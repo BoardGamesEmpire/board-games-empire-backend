@@ -22,6 +22,8 @@ import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
 import { assertEventNotCancelled } from '../lifecycle/event-lifecycle.helpers';
+import { canReadEventPolicy, eventPolicyReadArgs, serveOccurrencePolicy } from '../policy/policy-ceiling';
+import { POLICY_VIEW_INCLUDE, type OccurrencePolicyView } from '../policy/policy-view';
 import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
 import { AVAILABILITY_VOTE_SLUG, countsAsVoter, voterGrantSelect } from '../vote/vote-grant';
 import { OccurrenceEvents } from './constants';
@@ -82,40 +84,64 @@ export class EventOccurrenceService {
 
     const where = this.scopeComposer.compose(ResourceType.EventOccurrence, Action.read, { eventId });
 
-    const [occurrences, total] = await this.db.$transaction(
+    // The policy's ceiling is read in the same snapshot as the page it gates.
+    const [occurrences, total, policiesReadable] = await this.db.$transaction(
       [
         this.db.eventOccurrence.findMany({
           where,
-          include: { policy: true },
+          include: { policy: { include: POLICY_VIEW_INCLUDE } },
           orderBy: OCCURRENCE_ORDER,
           skip: pagination.skip,
           take: pagination.pageSize,
         }),
 
         this.db.eventOccurrence.count({ where }),
+
+        this.db.eventPolicy.count({ where: eventPolicyReadArgs(this.abilityService, eventId).where }),
       ],
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    return { rows: await this.withVotesAndGames(occurrences), total };
+    const canReadPolicy = policiesReadable > 0;
+
+    return {
+      rows: await this.withVotesAndGames(
+        occurrences.map((occurrence) => ({
+          ...occurrence,
+          policy: serveOccurrencePolicy(occurrence.policy, canReadPolicy),
+        })),
+      ),
+      total,
+    };
   }
 
   async getOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
     await assertEventExists(this.db, eventId);
 
-    const occurrence = await this.db.eventOccurrence.findUnique({
-      where: {
-        id: occurrenceId,
-        eventId,
-        // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.read),
-      },
-      include: { policy: true },
-    });
+    // The policy's ceiling is read in the same snapshot as the date it gates,
+    // as the page's is.
+    const [occurrence, policiesReadable] = await this.db.$transaction(
+      [
+        this.db.eventOccurrence.findUnique({
+          where: {
+            id: occurrenceId,
+            eventId,
+            // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.read),
+          },
+          include: { policy: { include: POLICY_VIEW_INCLUDE } },
+        }),
+
+        this.db.eventPolicy.count({ where: eventPolicyReadArgs(this.abilityService, eventId).where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
 
     assert(occurrence, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
 
-    const [detail] = await this.withVotesAndGames([occurrence]);
+    const [detail] = await this.withVotesAndGames([
+      { ...occurrence, policy: serveOccurrencePolicy(occurrence.policy, policiesReadable > 0) },
+    ]);
     return detail;
   }
 
@@ -236,7 +262,6 @@ export class EventOccurrenceService {
             status,
             sortOrder: dto.sortOrder ?? 0,
           },
-          include: { policy: true },
         });
       }),
     );
@@ -263,7 +288,10 @@ export class EventOccurrenceService {
     // rather than reading for them. That read would run after the row has
     // committed, and if it failed, a create that happened would be reported
     // as one that didn't, inviting a retry that adds the occurrence twice.
-    return { ...occurrence, availabilityVotes: [], games: [] };
+    //
+    // It has no policy row either, so the policy is `null` without a ceiling
+    // read (#1211).
+    return { ...occurrence, policy: null, availabilityVotes: [], games: [] };
   }
 
   async updateOccurrence(
@@ -289,7 +317,7 @@ export class EventOccurrenceService {
 
     try {
       const {
-        written: { existing, updated },
+        written: { existing, updated, canReadPolicy },
         removedGames,
       } = await this.db.$transaction((tx) =>
         writeEventDates(tx, eventId, initiatedAt, async () => {
@@ -305,6 +333,11 @@ export class EventOccurrenceService {
           });
           assert(existing, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
 
+          // Under the lock, so the answer and the policy it serves come from
+          // the same state: an event made private meanwhile is read as it now
+          // is (#1211).
+          const canReadPolicy = await canReadEventPolicy(tx, this.abilityService, eventId);
+
           const updated = await tx.eventOccurrence.update({
             where: {
               id: occurrenceId,
@@ -318,10 +351,10 @@ export class EventOccurrenceService {
               location: dto.location,
               sortOrder: dto.sortOrder,
             },
-            include: { policy: true },
+            include: { policy: { include: POLICY_VIEW_INCLUDE } },
           });
 
-          return { existing, updated };
+          return { existing, updated, canReadPolicy };
         }),
       );
 
@@ -337,7 +370,12 @@ export class EventOccurrenceService {
       emitRemovedGames(this.eventEmitter, eventId, removedGames, initiatedAt);
 
       const removedIds = new Set(removedGames.map((game) => game.id));
-      return { ...updated, availabilityVotes, games: games.filter((game) => !removedIds.has(game.id)) };
+      return {
+        ...updated,
+        policy: serveOccurrencePolicy(updated.policy, canReadPolicy),
+        availabilityVotes,
+        games: games.filter((game) => !removedIds.has(game.id)),
+      };
     } catch (error) {
       this.logger.error(`Error updating occurrence ${occurrenceId} for event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -367,7 +405,10 @@ export class EventOccurrenceService {
     const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
 
     try {
-      const { written: removed, removedGames } = await this.db.$transaction((tx) =>
+      const {
+        written: { removed, canReadPolicy },
+        removedGames,
+      } = await this.db.$transaction((tx) =>
         writeEventDates(tx, eventId, initiatedAt, async () => {
           // eslint-disable-next-line no-restricted-syntax -- single-row delete by id, not a collection read
           const deleteConditions = this.abilityService.getCurrentResourceConditions(
@@ -402,10 +443,15 @@ export class EventOccurrenceService {
             new BadRequestException(t('errors.occurrence.confirmed_remove')),
           );
 
-          return tx.eventOccurrence.delete({
+          // Under the lock, as updateOccurrence reads it (#1211).
+          const canReadPolicy = await canReadEventPolicy(tx, this.abilityService, eventId);
+
+          const removed = await tx.eventOccurrence.delete({
             where: { id: occurrenceId, AND: deleteConditions },
-            include: { policy: true },
+            include: { policy: { include: POLICY_VIEW_INCLUDE } },
           });
+
+          return { removed, canReadPolicy };
         }),
       );
       // Date first, then its games, so the audit order reads the way it happened.
@@ -425,7 +471,7 @@ export class EventOccurrenceService {
       );
       emitRemovedGames(this.eventEmitter, eventId, removedGames, initiatedAt);
 
-      return { ...removed, availabilityVotes, games };
+      return { ...removed, policy: serveOccurrencePolicy(removed.policy, canReadPolicy), availabilityVotes, games };
     } catch (error) {
       this.logger.error(`Error removing occurrence ${occurrenceId} from event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -507,7 +553,7 @@ export class EventOccurrenceService {
     const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
 
     try {
-      const { before, updated } = await this.db.$transaction(async (tx) => {
+      const { before, updated, canReadPolicy } = await this.db.$transaction(async (tx) => {
         await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${eventId} FOR NO KEY UPDATE`);
 
         if (refuseOnCancelledEvent) {
@@ -516,6 +562,9 @@ export class EventOccurrenceService {
 
         const current = await readStatus(tx);
         assertTransitionAllowed(current, transition);
+
+        // Under the lock, as updateOccurrence reads it (#1211).
+        const canReadPolicy = await canReadEventPolicy(tx, this.abilityService, eventId);
 
         const written = await tx.eventOccurrence.update({
           where: {
@@ -526,10 +575,10 @@ export class EventOccurrenceService {
             AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
           },
           data: { status: newStatus, ...extraData },
-          include: { policy: true },
+          include: { policy: { include: POLICY_VIEW_INCLUDE } },
         });
 
-        return { before: current, updated: written };
+        return { before: current, updated: written, canReadPolicy };
       });
 
       const domainEvent =
@@ -549,7 +598,7 @@ export class EventOccurrenceService {
         ),
       );
 
-      return { ...updated, availabilityVotes, games };
+      return { ...updated, policy: serveOccurrencePolicy(updated.policy, canReadPolicy), availabilityVotes, games };
     } catch (error) {
       this.logger.error(`Error transitioning occurrence ${occurrenceId} to ${newStatus}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -851,10 +900,9 @@ const OCCURRENCE_GAME_ORDER = [
  */
 export type OccurrenceDetail = Prisma.EventOccurrenceGetPayload<{
   include: {
-    policy: true;
     games: { select: typeof OCCURRENCE_GAME_SELECT };
   };
-}> & { availabilityVotes: OccurrenceVote[] };
+}> & { policy: OccurrencePolicyView | null; availabilityVotes: OccurrenceVote[] };
 
 type VotesAndGames = Pick<OccurrenceDetail, 'availabilityVotes' | 'games'>;
 

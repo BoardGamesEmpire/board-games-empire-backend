@@ -1,23 +1,31 @@
 // Event-level policy = defaults. OccurrencePolicy = explicit override for that day.
 // Resolution order: occurrence policy fields ?? event policy fields ?? hardcoded defaults.
+// How far the restrictions (allowed platform types, platforms, categories and
+// capacity) may be overridden is the event policy's occurrenceOverrideScope (#796).
 model EventOccurrencePolicy {
   id           String          @id @default(cuid(2))
   occurrence   EventOccurrence @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
   occurrenceId String          @unique @map("occurrence_id")
 
-  // Game restrictions — null means inherit from event policy
+  // Game restrictions — categories. null = the event's; false = no category
+  // restriction for this occurrence.
   restrictToGameCategories Boolean?                   @map("restrict_to_game_categories")
   allowedCategories        OccurrencePolicyCategory[]
 
-  // Game restrictions — platforms (override event-level when non-empty)
-  // Empty = inherit from event policy. Non-empty = override entirely.
-  allowedPlatformTypes OccurrencePolicyPlatformType[]
-  allowedPlatforms     OccurrencePolicyPlatform[]
+  // Game restrictions — platforms. Empty = the event's. Non-empty = replaces
+  // the event's entirely. Each flag = no restriction of its kind for this
+  // occurrence, whatever the event's (#796).
+  allowedPlatformTypes      OccurrencePolicyPlatformType[]
+  allowedPlatforms          OccurrencePolicyPlatform[]
+  platformTypesUnrestricted Boolean                        @default(false) @map("platform_types_unrestricted")
+  platformsUnrestricted     Boolean                        @default(false) @map("platforms_unrestricted")
 
-  // Capacity — null means inherit
+  // Capacity — null = the event's. The flag = no capacity limit for this
+  // occurrence, whatever the event's (#796).
   maxAttendees         Int?     @map("max_attendees")
   maxTotalParticipants Int?     @map("max_total_participants")
   strictCapacity       Boolean? @map("strict_capacity")
+  capacityUnrestricted Boolean  @default(false) @map("capacity_unrestricted")
 
   // Participation — null means inherit
   requireHostApprovalToJoin Boolean? @map("require_host_approval")

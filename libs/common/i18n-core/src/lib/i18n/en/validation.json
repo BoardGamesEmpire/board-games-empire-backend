@@ -35,6 +35,7 @@
   },
   "each": {
     "isString": "each value in {property} must be a string",
+    "isEnum": "each value in {property} must be one of the following values: {constraints.1}",
     "isIn": "each value in {property} must be one of the following values: {constraints.0}"
   }
 }

@@ -25,6 +25,10 @@ export const householdEventsPath = (householdId: string) => `/api/households/${h
 /** `/api/events/:eventId/policy`: where an event's policy changes, under a grant of its own (#796). */
 export const eventPolicyPath = (eventId: string) => `${EVENTS_PATH}/${eventId}/policy`;
 
+/** `/api/events/:eventId/occurrences/:occurrenceId/policy`: where a date's own policy changes, under the event policy's grant (#796). */
+export const occurrencePolicyPath = (eventId: string, occurrenceId: string) =>
+  `${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}/policy`;
+
 /** `/api/events/:eventId/attendees`: the route an event's attendees are listed and added on. */
 export const attendeesPath = (eventId: string) => `${EVENTS_PATH}/${eventId}/attendees`;
 

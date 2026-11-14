@@ -6,7 +6,9 @@ import {
   EventStatus,
   FriendshipStatus,
   HUMAN_USER_WHERE,
+  OccurrenceOverrideScope,
   OccurrenceStatus,
+  PlatformType,
   Prisma,
   Reach,
   ResourceType,
@@ -22,6 +24,7 @@ import {
   createTestingModuleWithDb,
   makeEvent,
   makeEventOccurrence,
+  makeEventOccurrencePolicy,
   makeEventPolicy,
   MOCK_ACTING_USER_ID,
   rawQueryText,
@@ -39,6 +42,7 @@ import type { CreateEventDto } from './dto/create-event.dto';
 import { ListEventsQueryDto } from './dto/list-events.query.dto';
 import { EventService } from './event.service';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
+import { POLICY_VIEW_INCLUDE } from './policy/policy-view';
 import { EVENT_ATTENDANCE_SELECT } from './utils/event-attendance.util';
 import { EVENT_STATUS_DATE_SELECT } from './utils/event-status.util';
 import { upcomingDateWhere, upcomingEventWhere } from './utils/upcoming-events.util';
@@ -72,6 +76,22 @@ const futureDate = () =>
 const withDates = <T extends Event>(event: T, occurrences: ReturnType<typeof makeEventOccurrence>[] = []) => ({
   ...event,
   occurrences,
+});
+
+/** A policy row as a read with the view's embed returns it: its lists as join rows. */
+const withPolicyJoinRows = <T extends object>(policy: T) => ({
+  ...policy,
+  allowedPlatformTypes: [{ platformType: PlatformType.Tabletop }],
+  allowedPlatforms: [{ platformId: 'plat-2' }, { platformId: 'plat-1' }],
+  allowedCategories: [{ categoryId: 'cat-1' }],
+});
+
+/** The policy as it is served: the row with its lists as plain, sorted lists. */
+const asPolicyView = <T extends object>(policy: T) => ({
+  ...policy,
+  allowedPlatformTypes: [PlatformType.Tabletop],
+  allowedPlatformIds: ['plat-1', 'plat-2'],
+  allowedCategoryIds: ['cat-1'],
 });
 
 describe('EventService', () => {
@@ -481,6 +501,7 @@ describe('EventService', () => {
       db.eventOccurrence.findMany.mockResolvedValue([]);
       db.eventAttendee.findMany.mockResolvedValue([]);
       db.eventPolicy.findUnique.mockResolvedValue(null);
+      db.eventOccurrencePolicy.findMany.mockResolvedValue([]);
     });
 
     // Exact, so an embed put back on the event read fails here.
@@ -519,23 +540,103 @@ describe('EventService', () => {
       await service.getEventById('event-1');
 
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.EventPolicy, Action.read);
-      expect(db.eventPolicy.findUnique).toHaveBeenCalledWith({ where: { eventId: 'event-1', AND: [COND] } });
+      expect(db.eventPolicy.findUnique).toHaveBeenCalledWith({
+        where: { eventId: 'event-1', AND: [COND] },
+        include: POLICY_VIEW_INCLUDE,
+      });
+    });
+
+    it("serves the policy's allowed lists as ids (#1268)", async () => {
+      const policy = makeEventPolicy('event-1');
+      db.eventPolicy.findUnique.mockResolvedValue(withPolicyJoinRows(policy) as never);
+
+      const detail = await service.getEventById('event-1');
+
+      expect(detail.policy).toEqual(asPolicyView(policy));
     });
 
     it('serves each part as its own read returned it, under the keys the embed used', async () => {
       const occurrence = makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' });
       const policy = makeEventPolicy('event-1');
       db.eventOccurrence.findMany.mockResolvedValueOnce([occurrence]);
-      db.eventPolicy.findUnique.mockResolvedValue(policy);
+      db.eventPolicy.findUnique.mockResolvedValue(withPolicyJoinRows(policy) as never);
 
       await expect(service.getEventById('event-1')).resolves.toEqual({
         ...event,
         status: EventStatus.Planning,
         occurrences: [occurrence],
         attendees: [],
-        policy,
+        policy: asPolicyView(policy),
+        occurrencePolicies: [],
         attendance: null,
       });
+    });
+
+    it("serves each date's overrides beside the event's policy (#1211)", async () => {
+      const policy = makeEventPolicy('event-1', { occurrenceOverrideScope: OccurrenceOverrideScope.TightenOnly });
+      const dayOne = makeEventOccurrencePolicy('occ-1', { platformsUnrestricted: true });
+      const dayTwo = makeEventOccurrencePolicy('occ-2', { maxAttendees: 4 });
+      db.eventPolicy.findUnique.mockResolvedValue(withPolicyJoinRows(policy) as never);
+      db.eventOccurrence.findMany.mockResolvedValueOnce([
+        makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }),
+        makeEventOccurrence({ id: 'occ-2', eventId: 'event-1' }),
+      ]);
+      db.eventOccurrencePolicy.findMany.mockResolvedValue([
+        withPolicyJoinRows(dayOne),
+        withPolicyJoinRows(dayTwo),
+      ] as never);
+
+      const detail = await service.getEventById('event-1');
+
+      expect(db.eventOccurrencePolicy.findMany).toHaveBeenCalledWith({
+        where: { occurrence: { eventId: 'event-1' } },
+        include: POLICY_VIEW_INCLUDE,
+        // In the dates' own order, as `occurrences` is.
+        orderBy: [{ occurrence: { sortOrder: 'asc' } }, { occurrence: { id: 'asc' } }],
+      });
+      expect(detail.policy?.occurrenceOverrideScope).toBe(OccurrenceOverrideScope.TightenOnly);
+      expect(detail.occurrencePolicies).toEqual([asPolicyView(dayOne), asPolicyView(dayTwo)]);
+      expect(detail.occurrencePolicies[0].platformsUnrestricted).toBe(true);
+    });
+
+    it("serves no date overrides to a reader who cannot read the event's policy (#1211)", async () => {
+      db.eventPolicy.findUnique.mockResolvedValue(null);
+      db.eventOccurrencePolicy.findMany.mockResolvedValue([
+        withPolicyJoinRows(makeEventOccurrencePolicy('occ-1', { maxAttendees: 4 })),
+      ] as never);
+
+      const detail = await service.getEventById('event-1');
+
+      expect(detail.policy).toBeNull();
+      expect(detail.occurrencePolicies).toEqual([]);
+    });
+
+    it("serves no date overrides for a date the caller isn't served, though they can read the policy (#1211)", async () => {
+      db.eventPolicy.findUnique.mockResolvedValue(withPolicyJoinRows(makeEventPolicy('event-1')) as never);
+      db.eventOccurrence.findMany.mockResolvedValueOnce([]);
+      db.eventOccurrencePolicy.findMany.mockResolvedValue([
+        withPolicyJoinRows(makeEventOccurrencePolicy('occ-1', { maxAttendees: 4 })),
+      ] as never);
+
+      const detail = await service.getEventById('event-1');
+
+      expect(detail.policy).not.toBeNull();
+      expect(detail.occurrencePolicies).toEqual([]);
+    });
+
+    it('a date that overrides one field serves that field alone, the rest null (#1211)', async () => {
+      const policy = makeEventPolicy('event-1');
+      const override = makeEventOccurrencePolicy('occ-1', { maxAttendees: 6 });
+      db.eventOccurrence.findMany.mockResolvedValueOnce([makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' })]);
+      db.eventPolicy.findUnique.mockResolvedValue(withPolicyJoinRows(policy) as never);
+      db.eventOccurrencePolicy.findMany.mockResolvedValue([withPolicyJoinRows(override)] as never);
+
+      const [served] = (await service.getEventById('event-1')).occurrencePolicies;
+
+      expect(served.maxAttendees).toBe(6);
+      expect(served.allowSpectators).toBeNull();
+      expect(served.gameAdditionMode).toBeNull();
+      expect(served.voteThresholdValue).toBeNull();
     });
 
     /**
@@ -587,7 +688,7 @@ describe('EventService', () => {
       expect(db.eventAttendee.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { eventId: 'event-1', removedAt: null, AND: [COND] } }),
       );
-      expect(batchTransactionCall(db).operations).toHaveLength(5);
+      expect(batchTransactionCall(db).operations).toHaveLength(6);
     });
 
     // An actor whose occurrence ceiling clips the dates still gets the
@@ -606,11 +707,11 @@ describe('EventService', () => {
       expect(detail.status).toBe(EventStatus.Scheduled);
     });
 
-    it('takes the six reads from one REPEATABLE READ snapshot', async () => {
+    it('takes the seven reads from one REPEATABLE READ snapshot (#1211)', async () => {
       await service.getEventById('event-1');
 
       const { operations, options } = batchTransactionCall(db);
-      expect(operations).toHaveLength(6);
+      expect(operations).toHaveLength(7);
       expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     });
 
@@ -750,17 +851,20 @@ describe('EventService', () => {
     // writer who may update the event but not read its policy would then see.
     it('reads the policy it answers with under the policy read ceiling (#796)', async () => {
       const policy = makeEventPolicy('event-1');
-      tx.eventPolicy.findUnique.mockResolvedValue(policy);
+      tx.eventPolicy.findUnique.mockResolvedValue(withPolicyJoinRows(policy) as never);
 
       const updated = await service.updateEvent('event-1', { title: 'New' } as never);
 
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.EventPolicy, Action.read);
-      expect(tx.eventPolicy.findUnique).toHaveBeenCalledWith({ where: { eventId: 'event-1', AND: [COND] } });
+      expect(tx.eventPolicy.findUnique).toHaveBeenCalledWith({
+        where: { eventId: 'event-1', AND: [COND] },
+        include: POLICY_VIEW_INCLUDE,
+      });
       expect(tx.event.update.mock.calls[0][0].include).not.toHaveProperty('policy');
       expect(tx.event.update.mock.invocationCallOrder[0]).toBeLessThan(
         tx.eventPolicy.findUnique.mock.invocationCallOrder[0],
       );
-      expect(updated.policy).toEqual(policy);
+      expect(updated.policy).toEqual(asPolicyView(policy));
     });
 
     it('answers a null policy when the ceiling hides it, and the write still lands (#796)', async () => {
@@ -1323,7 +1427,70 @@ describe('EventService', () => {
       expect(written().policy).toEqual({ create: {} });
     });
 
+    // Left out, the scope is the column's default, Any (`event-policy.prisma`):
+    // what a date's policy could do before there was a scope (#796).
+    it('defaults the occurrence override scope to Any (#796)', async () => {
+      await service.createEvent({ title: 'X', policy: { maxAttendees: 6 } } as CreateEventDto);
+      await service.createEvent({
+        title: 'X',
+        policy: { occurrenceOverrideScope: OccurrenceOverrideScope.TightenOnly },
+      } as CreateEventDto);
+
+      expect(written(0)).toHaveProperty('policy.create.occurrenceOverrideScope', undefined);
+      expect(written(1)).toHaveProperty('policy.create.occurrenceOverrideScope', OccurrenceOverrideScope.TightenOnly);
+    });
+
+    it('stores the allowed platform types and platforms it was given (#1268)', async () => {
+      db.platform.count.mockResolvedValue(2 as never);
+
+      await service.createEvent({
+        title: 'X',
+        policy: {
+          allowedPlatformTypes: [PlatformType.Tabletop, PlatformType.PC],
+          allowedPlatformIds: ['plat-1', 'plat-2'],
+        },
+      } as CreateEventDto);
+
+      expect(db.platform.count).toHaveBeenCalledWith({ where: { id: { in: ['plat-1', 'plat-2'] } } });
+      expect(written()).toMatchObject({
+        policy: {
+          create: {
+            allowedPlatformTypes: { create: [{ platformType: 'Tabletop' }, { platformType: 'PC' }] },
+            allowedPlatforms: {
+              create: [{ platform: { connect: { id: 'plat-1' } } }, { platform: { connect: { id: 'plat-2' } } }],
+            },
+          },
+        },
+      });
+    });
+
+    it('serves the policy it created with its lists as ids (#1268)', async () => {
+      const policy = makeEventPolicy('event-1');
+      db.event.create.mockResolvedValue({
+        ...withDates(makeEvent({ id: 'event-1', createdById: MOCK_ACTING_USER_ID })),
+        policy: withPolicyJoinRows(policy),
+      } as never);
+
+      const created = await service.createEvent({ title: 'X' } as CreateEventDto);
+
+      expect(created.policy).toEqual(asPolicyView(policy));
+    });
+
+    it('refuses a platform or category id that matches no row before writing (#1268)', async () => {
+      db.category.count.mockResolvedValue(0 as never);
+
+      await expect(
+        service.createEvent({ title: 'X', policy: { allowedCategoryIds: ['nope'] } } as unknown as CreateEventDto),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { code: 'EVENT_POLICY_UNKNOWN_REFERENCE', message: t('errors.event_policy.unknown_category') },
+      });
+      expect(db.event.create).not.toHaveBeenCalled();
+    });
+
     it("links the policy's allowed categories when it names some", async () => {
+      db.category.count.mockResolvedValue(2 as never);
+
       await service.createEvent({
         title: 'X',
         policy: { restrictToGameCategories: true, allowedCategoryIds: ['cat-1', 'cat-2'] },
@@ -1379,7 +1546,7 @@ describe('EventService', () => {
       abilityService.getActingUserId.mockReturnValue('user-1');
       unwrapTransaction(db);
       db.eventOccurrence.findMany.mockResolvedValue([occurrence]);
-      db.eventPolicy.findUnique.mockResolvedValue(policy);
+      db.eventPolicy.findUnique.mockResolvedValue(withPolicyJoinRows(policy) as never);
       attendeesReadAs([]);
     });
 
@@ -1392,7 +1559,7 @@ describe('EventService', () => {
         status: EventStatus.Completed,
         occurrences: [occurrence],
         attendees: [],
-        policy,
+        policy: asPolicyView(policy),
       });
       expect(abilityService.assertCurrentActorCan).not.toHaveBeenCalled();
       // Only the replay's batch read: the create's interactive transaction never opens.
@@ -1454,7 +1621,10 @@ describe('EventService', () => {
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       });
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.EventPolicy, Action.read);
-      expect(db.eventPolicy.findUnique).toHaveBeenCalledWith({ where: { eventId: 'event-1', AND: [COND] } });
+      expect(db.eventPolicy.findUnique).toHaveBeenCalledWith({
+        where: { eventId: 'event-1', AND: [COND] },
+        include: POLICY_VIEW_INCLUDE,
+      });
       expect(batchTransactionCall(db).options).toEqual({
         isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
       });

@@ -13,6 +13,18 @@ import { SubmitAvailabilityDto } from './dto/submit-availability.dto';
 import { UpdateEventOccurrenceDto } from './dto/update-event-occurrence.dto';
 import { EventOccurrenceService } from './event-occurrence.service';
 
+/**
+ * What an occurrence's `policy` holds, on every route that answers with one
+ * (#796, #1211). A date's policy has no read permission of its own, so it is
+ * served under the event policy's.
+ */
+const OCCURRENCE_POLICY_DESCRIPTION =
+  '`policy` is the date’s own policy, only what the date overrides of the event’s: a field that is `null`, ' +
+  'or a list that is empty, is the event’s, and `platformTypesUnrestricted`, `platformsUnrestricted` and ' +
+  '`capacityUnrestricted` set to `true` mean no restriction of that kind on that date. `policy` is `null` when ' +
+  'the actor doesn’t have permission to read the event’s policy, or when the date has no policy of its own ' +
+  'and takes everything from the event’s (#796, #1211).';
+
 @ApiBearerAuth()
 @ApiSecurity('api_key')
 @ApiTags('event-occurrences')
@@ -30,7 +42,7 @@ export class EventOccurrenceController {
       'In `sortOrder`, then id. **Paginated since #372** — this read used to return every occurrence of ' +
       'the event: `?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying `total`, ' +
       '`totalPages` and `hasMore`. A client that assumed one complete list must now page. See #230; the ' +
-      'row shape is modelled in #402.',
+      `row shape is modelled in #402. ${OCCURRENCE_POLICY_DESCRIPTION}`,
   })
   @ApiPaginatedEnvelope('occurrences')
   @ApiResponse({ status: Http.NotFound, description: 'Event not found' })
@@ -42,7 +54,7 @@ export class EventOccurrenceController {
     );
   }
 
-  @ApiOperation({ summary: 'Get a single occurrence' })
+  @ApiOperation({ summary: 'Get a single occurrence', description: OCCURRENCE_POLICY_DESCRIPTION })
   @ApiParam({ name: 'occurrenceId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Occurrence retrieved' })
   @ApiResponse({ status: Http.NotFound, description: 'Occurrence not found' })
@@ -54,7 +66,12 @@ export class EventOccurrenceController {
     );
   }
 
-  @ApiOperation({ summary: 'Add an occurrence to the event' })
+  @ApiOperation({
+    summary: 'Add an occurrence to the event',
+    description:
+      'A new date has no policy of its own until its policy is first changed, so its `policy` is `null`: it ' +
+      'takes everything from the event’s (#796, #1211).',
+  })
   @ApiResponse({ status: Http.Created, description: 'Occurrence added' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.EventOccurrence))
   @Post()
@@ -65,7 +82,7 @@ export class EventOccurrenceController {
     );
   }
 
-  @ApiOperation({ summary: 'Update an occurrence' })
+  @ApiOperation({ summary: 'Update an occurrence', description: OCCURRENCE_POLICY_DESCRIPTION })
   @ApiParam({ name: 'occurrenceId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Occurrence updated' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence))
@@ -80,7 +97,7 @@ export class EventOccurrenceController {
     );
   }
 
-  @ApiOperation({ summary: 'Remove an occurrence from the event' })
+  @ApiOperation({ summary: 'Remove an occurrence from the event', description: OCCURRENCE_POLICY_DESCRIPTION })
   @ApiParam({ name: 'occurrenceId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Occurrence removed' })
   @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.EventOccurrence))
@@ -92,7 +109,10 @@ export class EventOccurrenceController {
     );
   }
 
-  @ApiOperation({ summary: 'Confirm a proposed occurrence (Poll mode → Confirmed)' })
+  @ApiOperation({
+    summary: 'Confirm a proposed occurrence (Poll mode → Confirmed)',
+    description: OCCURRENCE_POLICY_DESCRIPTION,
+  })
   @ApiParam({ name: 'occurrenceId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Occurrence confirmed' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence))
@@ -103,7 +123,10 @@ export class EventOccurrenceController {
     );
   }
 
-  @ApiOperation({ summary: 'Decline a proposed occurrence (Poll mode → Declined)' })
+  @ApiOperation({
+    summary: 'Decline a proposed occurrence (Poll mode → Declined)',
+    description: OCCURRENCE_POLICY_DESCRIPTION,
+  })
   @ApiParam({ name: 'occurrenceId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Occurrence declined' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence))
@@ -114,7 +137,7 @@ export class EventOccurrenceController {
     );
   }
 
-  @ApiOperation({ summary: 'Cancel a confirmed occurrence' })
+  @ApiOperation({ summary: 'Cancel a confirmed occurrence', description: OCCURRENCE_POLICY_DESCRIPTION })
   @ApiParam({ name: 'occurrenceId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Occurrence cancelled' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence))

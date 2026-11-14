@@ -1,7 +1,15 @@
-import { GameAdditionMode, InterestedWeight, VoteEligibility, VoteQuorumType, VoteThresholdType } from '@bge/database';
+import {
+  GameAdditionMode,
+  InterestedWeight,
+  OccurrenceOverrideScope,
+  PlatformType,
+  VoteEligibility,
+  VoteQuorumType,
+  VoteThresholdType,
+} from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsInt, IsOptional, Min, ValidateIf } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
 
 /**
  * A patch to an event's policy (#796). Each field is optional, so a patch
@@ -16,8 +24,9 @@ import { IsBoolean, IsEnum, IsInt, IsOptional, Min, ValidateIf } from 'class-val
  * a threshold or quorum value from the type sent beside it, and a patch has to
  * be judged with the stored policy, which the service merges it over.
  *
- * The allowed categories aren't set here yet, so a patch carrying
- * `allowedCategoryIds` answers 400.
+ * The allowed lists replace the stored one when sent, `[]` clears it, and one
+ * left out stays (#1268). They are not columns, so `null` is refused for them
+ * as for a column that can't be null.
  */
 export class UpdateEventPolicyDto {
   // --- Invite controls ---
@@ -77,6 +86,44 @@ export class UpdateEventPolicyDto {
   @ValidateIf((_, value) => value !== undefined)
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   restrictToGameCategories?: boolean;
+
+  @ApiPropertyOptional({ type: [String], description: 'Replaces the stored list. Empty means no restriction.' })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsArray({ message: i18nValidationMessage('validation.isArray') })
+  @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
+  allowedCategoryIds?: string[];
+
+  @ApiPropertyOptional({
+    enum: PlatformType,
+    isArray: true,
+    description: 'Replaces the stored list. Empty means no platform type restriction.',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsArray({ message: i18nValidationMessage('validation.isArray') })
+  @IsEnum(PlatformType, { each: true, message: i18nValidationMessage('validation.each.isEnum') })
+  allowedPlatformTypes?: PlatformType[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Replaces the stored list. Empty means no platform restriction. When both lists are set, a game must satisfy both.',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsArray({ message: i18nValidationMessage('validation.isArray') })
+  @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
+  allowedPlatformIds?: string[];
+
+  @ApiPropertyOptional({
+    enum: OccurrenceOverrideScope,
+    description:
+      "How far a date's own policy may override this policy's allowed platform types, platforms and categories, " +
+      'and its capacity: None, TightenOnly (only narrower) or Any (replace them, or remove them for that date). ' +
+      'A change to it, or to one of those restrictions, that would leave a date past it answers 400 ' +
+      '`EVENT_POLICY_OCCURRENCES_EXCEED_SCOPE`.',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsEnum(OccurrenceOverrideScope, { message: i18nValidationMessage('validation.isEnum') })
+  occurrenceOverrideScope?: OccurrenceOverrideScope;
 
   @ApiPropertyOptional({ nullable: true, description: 'Minutes. `null` permits no fillers.' })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
