@@ -35,6 +35,22 @@
     "not_found": "Collection entry with ID {id} not found",
     "release_platform_mismatch": "Release {releaseId} does not belong to platform game {platformGameId}"
   },
+  "list": {
+    "not_found": "List with ID {id} not found",
+    "wishlist_undeletable": "A wishlist can't be deleted. You can rename it or empty it instead.",
+    "name_required": "A list needs a name. Only a wishlist can go without one.",
+    "order_stale": "Your lists have changed since you last loaded them. Reload them and try the new order again.",
+    "order_forbidden": "Reordering your lists needs permission to change every one of them, and this request can change only some.",
+    "limit_reached": "You can have at most {max} lists. Delete one to make room for another.",
+    "entry_not_found": "List entry with ID {id} not found",
+    "entry_one_target": "A list entry names either a game or a platform game. Give exactly one of them.",
+    "entry_exists": "That game or platform game is already on this list.",
+    "priority_wishlist_only": "Only a wishlist's entries can have a priority.",
+    "entry_release_needs_platform_game": "A release can be set only on an entry that names a platform game.",
+    "entry_release_mismatch": "Release {releaseId} is not a release of platform game {platformGameId}.",
+    "full": "A list can hold at most {max} entries. Remove one to make room for another.",
+    "entry_order_stale": "This list's entries have changed since you last loaded them. Reload them and try the new order again."
+  },
   "platform_game": {
     "not_found": "Platform game with ID {id} not found"
   },

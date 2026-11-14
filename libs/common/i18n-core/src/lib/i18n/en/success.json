@@ -9,6 +9,14 @@
     "updated": "Collection entry updated successfully",
     "removed": "Game removed from collection successfully"
   },
+  "list": {
+    "created": "List created successfully",
+    "updated": "List updated successfully",
+    "deleted": "List deleted successfully",
+    "entry_added": "List entry added successfully",
+    "entry_updated": "List entry updated successfully",
+    "entry_removed": "List entry removed successfully"
+  },
   "household": {
     "created": "Household created successfully",
     "updated": "Household with ID {id} updated successfully",

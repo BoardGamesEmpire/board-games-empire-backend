@@ -169,6 +169,9 @@
       "path": "./libs/api/game-collection"
     },
     {
+      "path": "./libs/api/list"
+    },
+    {
       "path": "./libs/api/friendship"
     },
     {
