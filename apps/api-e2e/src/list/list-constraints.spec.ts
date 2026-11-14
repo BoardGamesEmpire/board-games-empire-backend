@@ -3,7 +3,7 @@ import { createActors, type Actors } from '@bge/testing-e2e';
 import { inspect } from 'node:util';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { arrangeGame, arrangeList, arrangePlatformGame } from './list-fixtures';
+import { arrangeGame, arrangeList, arrangePlatformGame, findWishlist } from './list-fixtures';
 
 /**
  * The database half of #1241: what a list and its entries may hold, asserted
@@ -91,7 +91,8 @@ describe('list constraints (#1241)', () => {
   it('refuses a second wishlist for one user, and allows any number of custom lists (#1241)', async () => {
     const ownerId = await arrangeOwner();
 
-    await arrangeList(db.client, ownerId, { kind: ListKind.Wishlist });
+    // Provisioning made this owner's wishlist, the first one (#1241).
+    await findWishlist(db.client, ownerId);
 
     await expect(
       rejection(() => arrangeList(db.client, ownerId, { kind: ListKind.Wishlist }), 'a second wishlist'),
@@ -102,10 +103,10 @@ describe('list constraints (#1241)', () => {
 
     await expect(db.client.list.count({ where: { userId: ownerId, kind: ListKind.Custom } })).resolves.toBe(2);
 
-    // Another user's wishlist is not a second one.
-    await expect(arrangeList(db.client, await arrangeOwner(), { kind: ListKind.Wishlist })).resolves.toMatchObject({
-      kind: ListKind.Wishlist,
-    });
+    // Another user's provisioned wishlist is not a second one.
+    const otherId = await arrangeOwner();
+
+    await expect(findWishlist(db.client, otherId)).resolves.toMatchObject({ userId: otherId });
   });
 
   it('refuses a custom list with no name, and keeps a wishlist with none (#1241)', async () => {
@@ -115,7 +116,8 @@ describe('list constraints (#1241)', () => {
       rejection(() => arrangeList(db.client, ownerId, { name: null }), 'a custom list with no name'),
     ).resolves.toContain('lists_custom_needs_name');
 
-    await expect(arrangeList(db.client, ownerId, { kind: ListKind.Wishlist })).resolves.toMatchObject({ name: null });
+    // The owner's provisioned wishlist is unnamed; a second wishlist can't be arranged.
+    await expect(findWishlist(db.client, ownerId)).resolves.toMatchObject({ kind: ListKind.Wishlist, name: null });
   });
 
   it('refuses the same game or platform game twice in one list, and allows it in another (#1241)', async () => {

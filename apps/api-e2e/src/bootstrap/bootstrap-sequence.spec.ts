@@ -23,6 +23,7 @@ import {
 } from '@bge/bootstrap';
 import {
   CATALOG_MANIFEST,
+  DATA_MIGRATIONS,
   DataMigrationRevisionError,
   MIGRATION_NAMES,
   readAppliedMigrations,
@@ -309,7 +310,13 @@ describe('the boot sequence against Postgres', () => {
           logger: silent,
         });
 
-        expect(summary.dataMigrations).toEqual({ applied: [], unknown: [], cachesFlushed: false });
+        // This registry holds only the rollback entry, so the shipped entries
+        // the harness boot already applied are rows it does not know (#1241).
+        expect(summary.dataMigrations).toEqual({
+          applied: [],
+          unknown: DATA_MIGRATIONS.map((shipped) => shipped.name),
+          cachesFlushed: false,
+        });
         expect(warnings.some((line) => line.includes(name) && /above this build/.test(line))).toBe(true);
         expect(await db.client.dataMigration.findUniqueOrThrow({ where: { name } })).toMatchObject({ revision: 2 });
       } finally {

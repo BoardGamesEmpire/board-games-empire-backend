@@ -9,6 +9,7 @@ import {
 } from '@bge/bootstrap';
 import {
   CATALOG_MANIFEST,
+  DATA_MIGRATIONS,
   MIGRATION_NAMES,
   reconcileCatalog,
   SystemRole,
@@ -71,6 +72,11 @@ const CACHED = [...GRAPHS, ...TOKENS].map(permissionsCacheKey);
 const BYSTANDERS = [apiCacheKey('bge:session:other'), 'bge:user:permissions:no-namespace'];
 /** A data migration this spec registers and applies; its ledger row is removed after each test. */
 const ENTRY = '20260901000000_e2e_flush_probe';
+/**
+ * These boots run a registry of the spec's own entries, so the shipped entries
+ * the harness boot already applied are ledger rows it does not know (#1241).
+ */
+const SHIPPED = DATA_MIGRATIONS.map((shipped) => shipped.name);
 
 describe('the cache flush after a reconcile that wrote rows or a data migration that applied', () => {
   let db: TestDatabase;
@@ -154,7 +160,7 @@ describe('the cache flush after a reconcile that wrote rows or a data migration 
     const summary = await boot([{ name: ENTRY, revision: 1, run: async () => undefined }]);
 
     expect(summary.reconcile).toEqual(expect.objectContaining({ mutations: 0, cachesFlushed: false }));
-    expect(summary.dataMigrations).toEqual({ applied: [ENTRY], unknown: [], cachesFlushed: true });
+    expect(summary.dataMigrations).toEqual({ applied: [ENTRY], unknown: SHIPPED, cachesFlushed: true });
     expect(await present(CACHED)).toEqual([0, 0, 0, 0, 0, 0]);
     expect(await present(BYSTANDERS)).toEqual([1, 1]);
   });
@@ -185,7 +191,7 @@ describe('the cache flush after a reconcile that wrote rows or a data migration 
     const summary = await boot();
 
     expect(summary.reconcile).toEqual(expect.objectContaining({ mutations: 0, cachesFlushed: false }));
-    expect(summary.dataMigrations).toEqual({ applied: [], unknown: [], cachesFlushed: false });
+    expect(summary.dataMigrations).toEqual({ applied: [], unknown: SHIPPED, cachesFlushed: false });
     expect(await present(CACHED)).toEqual([1, 1, 1, 1, 1, 1]);
   });
 });

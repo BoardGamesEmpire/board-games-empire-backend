@@ -1,4 +1,4 @@
-import { DatabaseService, Prisma, PROVISIONED_HUMAN_WHERE, SystemRole, Theme } from '@bge/database';
+import { DatabaseService, ListKind, Prisma, PROVISIONED_HUMAN_WHERE, SystemRole, Theme } from '@bge/database';
 import { PermissionsService } from '@bge/permissions';
 import { ServiceAccountService } from '@bge/services';
 import { Injectable, Logger } from '@nestjs/common';
@@ -114,6 +114,13 @@ export class UserProvisioningService {
         data: { userId: user.id, theme: Theme.System, emailNotifications: {}, pushNotifications: {} },
       });
       await db.userProfile.create({ data: { userId: user.id, displayName, avatarUrl } });
+      // Every registered user has a wishlist (#1241), created with their
+      // preferences and profile so no signup is left without one. No name (a
+      // client shows its own translated "Wishlist") and no reach (it defaults
+      // to private). An anonymous user cannot use a list, so gets none.
+      if (!isAnonymous) {
+        await db.list.create({ data: { userId: user.id, kind: ListKind.Wishlist } });
+      }
       await db.userRole.createMany({ data: elected ? firstHumanAssignments : baseAssignments });
 
       // First-human-ness, deliberately NOT `roleNames.includes(Owner)`. The

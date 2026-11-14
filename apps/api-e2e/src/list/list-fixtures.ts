@@ -17,7 +17,11 @@ export interface ArrangedPlatformGame {
   readonly platformGameId: string;
 }
 
-/** Writes a list straight through the database client, so a spec can set up rows no route may create. */
+/**
+ * Writes a list straight through the database client, so a spec can set up rows no route may create.
+ * A registered user already has a wishlist from provisioning, so arranging a `Wishlist` for one is
+ * refused; use {@link findWishlist} instead.
+ */
 export function arrangeList(prisma: PrismaClient, ownerId: string, options: ArrangeListOptions = {}): Promise<List> {
   const kind = options.kind ?? ListKind.Custom;
   const name = options.name !== undefined ? options.name : kind === ListKind.Custom ? uniqueName('e2e list') : null;
@@ -32,6 +36,16 @@ export function arrangeList(prisma: PrismaClient, ownerId: string, options: Arra
       ...(options.position !== undefined && { position: options.position }),
     },
   });
+}
+
+/**
+ * The wishlist provisioning gave a registered user (#1241). Every actor made
+ * through the normal sign-up path already has one, and a user can hold only one,
+ * so a spec that needs a wishlist reads this rather than arranging another.
+ * Throws if the user has none.
+ */
+export function findWishlist(prisma: PrismaClient, ownerId: string): Promise<List> {
+  return prisma.list.findFirstOrThrow({ where: { userId: ownerId, kind: ListKind.Wishlist } });
 }
 
 /** A game with no platform game. `createdById` is optional on a game. */

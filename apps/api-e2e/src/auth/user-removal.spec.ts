@@ -60,8 +60,10 @@ describe('removing a user', () => {
     const headers = await ownerHeaders();
     const target = await actors.user();
     const userId = target.user.id;
-    // A custom list needs a name (#1241).
+    // Provisioning already gave the user a wishlist (#1241); a custom list
+    // needs a name, so both kinds are there to be removed with them.
     await db.client.list.create({ data: { userId, name: 'Weekend picks' } });
+    expect(await db.client.list.count({ where: { userId } })).toBe(2);
     await mintApiKey(baseUrl, db.client, target);
 
     const response = await postToAuth(baseUrl, REMOVE_USER_PATH).set(headers).send({ userId });
