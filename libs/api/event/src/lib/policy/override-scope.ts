@@ -155,8 +155,8 @@ function onlyNarrows(event: EventRestrictions, occurrence: OccurrenceRestriction
 }
 
 /** An empty platform list is no restriction, so anything narrows it, and an empty date list keeps the event's. */
-function narrowsList<T>(eventList: readonly T[], dateList: readonly T[]): boolean {
-  return eventList.length === 0 || dateList.every((member) => eventList.includes(member));
+function narrowsList<T>(eventList: readonly T[], occurrenceList: readonly T[]): boolean {
+  return eventList.length === 0 || occurrenceList.every((member) => eventList.includes(member));
 }
 
 /**
@@ -177,6 +177,6 @@ function narrowsCategories(event: EventRestrictions, occurrence: OccurrenceRestr
 }
 
 /** A `null` event cap is no limit, so any date cap narrows it, and a `null` date cap keeps the event's. */
-function narrowsCap(eventCap: number | null, dateCap: number | null): boolean {
-  return eventCap === null || dateCap === null || dateCap <= eventCap;
+function narrowsCap(eventCap: number | null, occurrenceCap: number | null): boolean {
+  return eventCap === null || occurrenceCap === null || occurrenceCap <= eventCap;
 }

@@ -1,7 +1,7 @@
 import type { EventOccurrencePolicy, EventPolicy, PlatformType, Prisma } from '@bge/database';
 
 /** A policy's allowed platform types, platforms and categories as plain lists (#1268). */
-interface PolicyListsView {
+export interface PolicyListsView {
   allowedPlatformTypes: PlatformType[];
   allowedPlatformIds: string[];
   allowedCategoryIds: string[];

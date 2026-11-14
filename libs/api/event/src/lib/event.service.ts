@@ -44,9 +44,9 @@ import type { ListEventsQueryDto } from './dto/list-events.query.dto';
 import type { UpdateEventDto } from './dto/update-event.dto';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
 import { countLiveDates } from './occurrence/live-dates.util';
-import { eventPolicyReadArgs, readEventPolicyView } from './policy/policy-ceiling';
+import { eventPolicyReadArgs, readEventPolicyView, toEventPolicyViewOrNull } from './policy/policy-ceiling';
 import { assertPolicyReferencesExist, policyListsCreateData } from './policy/policy-lists';
-import { toEventPolicyView, type EventPolicyView } from './policy/policy-view';
+import type { EventPolicyView } from './policy/policy-view';
 import {
   EVENT_ATTENDANCE_SELECT,
   readEventAttendance,
@@ -353,7 +353,7 @@ export class EventService {
       ...withEventStatus(event, statusDates, now),
       occurrences,
       attendees,
-      policy: policyRow ? toEventPolicyView(policyRow) : null,
+      policy: toEventPolicyViewOrNull(policyRow),
       attendance: ownRow ? toEventAttendance(ownRow) : null,
     };
   }
@@ -498,7 +498,7 @@ export class EventService {
             include: EVENT_CREATE_INCLUDE,
           });
 
-          return { ...row, policy: row.policy ? toEventPolicyView(row.policy) : null };
+          return { ...row, policy: toEventPolicyViewOrNull(row.policy) };
         });
 
         // The create read back every date it made, with no ceiling.
@@ -643,7 +643,7 @@ export class EventService {
     // `row` is gone only if a household delete cascaded to it since; its
     // dates went with it, and the row read above still names the create.
     return withEventStatus(
-      { ...(row ?? event), occurrences, attendees, policy: policyRow ? toEventPolicyView(policyRow) : null },
+      { ...(row ?? event), occurrences, attendees, policy: toEventPolicyViewOrNull(policyRow) },
       statusDates,
       now,
     );

@@ -6,6 +6,7 @@ import {
   Prisma,
   ResourceType,
   VoteThresholdType,
+  type EventOccurrencePolicy,
   type EventPolicy,
 } from '@bge/database';
 import { t } from '@bge/i18n';
@@ -22,11 +23,12 @@ import {
   type MockDatabaseService,
 } from '@bge/testing';
 import { WebhookEventType } from '@bge/webhooks';
-import { BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { UpdateEventPolicyDto } from './dto/update-event-policy.dto';
+import type { UpdateOccurrencePolicyDto } from './dto/update-occurrence-policy.dto';
 import { EventPolicyService } from './event-policy.service';
-import { EventPolicyUpdatedEvent } from './events/event-policy.events';
+import { EventPolicyUpdatedEvent, OccurrencePolicyUpdatedEvent } from './events/event-policy.events';
 import { EVENT_POLICY_VIEW_INCLUDE, OCCURRENCE_POLICY_VIEW_INCLUDE, type OccurrencePolicyView } from './policy-view';
 
 /** A ceiling of its own for each type and action, so a test can tell which one a query was given. */
@@ -535,5 +537,414 @@ describe('EventPolicyService', () => {
   it('answers 400 for an empty body (#796)', async () => {
     await expect(update({})).rejects.toThrow(new BadRequestException(t('common.at_least_one_field')));
     expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  /**
+   * #796. A date's own policy changes under the event policy's grant: it is
+   * the event's policy with overrides. `null` and an empty list hand a field
+   * back to the event's, and the row is made on the date's first write.
+   */
+  describe('updateOccurrencePolicy', () => {
+    /** The date's policy before the write, as it is served; null before its first write. */
+    let dateStored: OccurrencePolicyView | null;
+
+    /** The row the date's upsert returned. */
+    let upserted: EventOccurrencePolicy | undefined;
+
+    /** Whether the caller may read the event's policy, and with it the date's. */
+    let canRead: boolean;
+
+    const updateDate = (dto: UpdateOccurrencePolicyDto, occurrenceId = 'occ-1') =>
+      service.updateOccurrencePolicy('event-1', occurrenceId, dto);
+
+    /** A date's row without its lists, as an upsert returns it. */
+    const rowOf = (view: OccurrencePolicyView) =>
+      Object.fromEntries(
+        Object.entries(view).filter(
+          ([key]) => !['allowedPlatformTypes', 'allowedPlatformIds', 'allowedCategoryIds'].includes(key),
+        ),
+      ) as EventOccurrencePolicy;
+
+    const domainEmit = () =>
+      emitter.emit.mock.calls.find(([name]) => name === OccurrencePolicyUpdatedEvent.eventName)?.[1];
+    const webhookEmit = () =>
+      emitter.emit.mock.calls.find(([name]) => name === WebhookEventType.EventPolicyUpdated)?.[1];
+
+    beforeEach(() => {
+      dateStored = null;
+      upserted = undefined;
+      canRead = true;
+
+      tx.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1' } as never);
+      tx.eventOccurrencePolicy.findUnique.mockImplementation((() =>
+        Promise.resolve(dateStored && withDateJoinRows(dateStored))) as never);
+      tx.eventOccurrencePolicy.upsert.mockImplementation(((args: {
+        create: Partial<EventOccurrencePolicy>;
+        update: Partial<EventOccurrencePolicy>;
+      }) => {
+        upserted = dateStored
+          ? { ...rowOf(dateStored), ...args.update }
+          : { ...makeEventOccurrencePolicy('occ-1', { id: 'occ-policy-1' }), ...args.create };
+
+        return Promise.resolve(upserted);
+      }) as never);
+      tx.eventOccurrencePolicy.findUniqueOrThrow.mockImplementation((() =>
+        Promise.resolve(
+          withDateJoinRows({
+            ...(upserted as EventOccurrencePolicy),
+            allowedPlatformTypes: dateStored?.allowedPlatformTypes ?? [],
+            allowedPlatformIds: dateStored?.allowedPlatformIds ?? [],
+            allowedCategoryIds: dateStored?.allowedCategoryIds ?? [],
+          }),
+        )) as never);
+      tx.eventPolicy.count.mockImplementation((() => Promise.resolve(canRead ? 1 : 0)) as never);
+
+      // Every id sent matches a row, unless a test says otherwise.
+      const countIds = (args: { where: { id: { in: string[] } } }) => Promise.resolve(args.where.id.in.length);
+      tx.platform.count.mockImplementation(countIds as never);
+      tx.category.count.mockImplementation(countIds as never);
+    });
+
+    // The grant is checked right after the lock, before anything that could
+    // answer 404 or 400, so a caller without it can't learn which dates are
+    // the event's or what their policies hold. The date's lists are rewritten
+    // before the read back, so the answer serves them as written (#796).
+    it('locks the event, checks the grant, then the date, and judges the merged date before writing (#796)', async () => {
+      const order: string[] = [];
+      const record =
+        <T>(label: string, answer: () => T) =>
+        () => {
+          order.push(label);
+          return Promise.resolve(answer());
+        };
+
+      tx.$queryRaw.mockImplementation(record('lock', () => []) as never);
+      tx.eventPolicy.findUnique.mockImplementation(
+        record('read policy', () => stored && withJoinRows(stored, lists)) as never,
+      );
+      tx.eventOccurrence.findUnique.mockImplementation(record('find date', () => ({ id: 'occ-1' })) as never);
+      tx.eventOccurrencePolicy.findUnique.mockImplementation(record('read date policy', () => null) as never);
+      tx.platform.count.mockImplementation(record('check references', () => 1) as never);
+      tx.eventOccurrencePolicy.upsert.mockImplementation(
+        record('upsert', () => makeEventOccurrencePolicy('occ-1', { id: 'occ-policy-1' })) as never,
+      );
+      tx.occurrencePolicyPlatform.deleteMany.mockImplementation(record('delete list', () => ({ count: 0 })) as never);
+      tx.occurrencePolicyPlatform.createMany.mockImplementation(record('create list', () => ({ count: 1 })) as never);
+      tx.eventPolicy.count.mockImplementation(record('check read', () => 1) as never);
+      tx.eventOccurrencePolicy.findUniqueOrThrow.mockImplementation(
+        record('read back', () => withDateJoinRows(datePolicy('occ-1', { id: 'occ-policy-1' }))) as never,
+      );
+
+      await updateDate({ gameAdditionMode: GameAdditionMode.HostOnly, allowedPlatformIds: ['plat-1'] });
+
+      expect(rawQueryText(tx.$queryRaw.mock.calls[0][0])).toMatch(
+        /^SELECT id FROM events WHERE id = \? FOR NO KEY UPDATE$/,
+      );
+      expect(order).toEqual([
+        'lock',
+        'read policy',
+        'find date',
+        'read date policy',
+        'check references',
+        'upsert',
+        'delete list',
+        'create list',
+        'check read',
+        'read back',
+      ]);
+      expect(tx.eventPolicy.findUnique).toHaveBeenCalledWith({
+        where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.update) },
+        include: EVENT_POLICY_VIEW_INCLUDE,
+      });
+      expect(tx.eventOccurrencePolicy.findUnique).toHaveBeenCalledWith({
+        where: { occurrenceId: 'occ-1' },
+        include: OCCURRENCE_POLICY_VIEW_INCLUDE,
+      });
+    });
+
+    it("creates the date's policy row on its first write (#796)", async () => {
+      await updateDate({ gameAdditionMode: GameAdditionMode.HostOnly });
+
+      expect(tx.eventOccurrencePolicy.upsert).toHaveBeenCalledWith({
+        where: { occurrenceId: 'occ-1' },
+        create: { occurrenceId: 'occ-1', gameAdditionMode: GameAdditionMode.HostOnly },
+        update: { gameAdditionMode: GameAdditionMode.HostOnly },
+      });
+    });
+
+    it('answers 404 for a date of another event (#796)', async () => {
+      tx.eventOccurrence.findUnique.mockResolvedValue(null as never);
+
+      await expect(updateDate({ gameAdditionMode: GameAdditionMode.HostOnly }, 'occ-9')).rejects.toThrow(
+        new NotFoundException(t('errors.occurrence.not_found', { occurrenceId: 'occ-9', eventId: 'event-1' })),
+      );
+
+      expect(tx.eventOccurrence.findUnique).toHaveBeenCalledWith({
+        where: { id: 'occ-9', eventId: 'event-1' },
+        select: { id: true },
+      });
+      expect(tx.eventOccurrencePolicy.upsert).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // An organizer holds update:event_occurrence but not update:event_policy,
+    // so the event's policy is outside their update ceiling. They are refused
+    // before the date is looked up, so a 404 can't tell them which dates are
+    // the event's (#796).
+    it('refuses an organizer, who may edit the date but not its policy (#796)', async () => {
+      stored = null;
+      tx.eventOccurrence.findUnique.mockResolvedValue(null as never);
+
+      await expect(updateDate({ gameAdditionMode: GameAdditionMode.HostOnly })).rejects.toThrow(
+        new ForbiddenException(t('common.forbidden.update')),
+      );
+
+      expect(tx.eventOccurrence.findUnique).not.toHaveBeenCalled();
+      expect(tx.eventOccurrencePolicy.upsert).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // The date's threshold type is folded over the event's value, which is
+    // null here, so a resolve would have no number to count against (#796).
+    it('refuses a date override whose effective vote threshold needs a value neither sets (#796)', async () => {
+      await expect(updateDate({ voteThresholdType: VoteThresholdType.Supermajority })).rejects.toMatchObject({
+        status: 400,
+        response: { code: 'EVENT_POLICY_INVALID', message: t('errors.event_policy.threshold_value_required') },
+      });
+
+      expect(tx.eventOccurrencePolicy.upsert).not.toHaveBeenCalled();
+    });
+
+    it("accepts a date's threshold type whose value the event's policy holds (#796)", async () => {
+      stored = makeEventPolicy('event-1', { id: 'policy-1', voteThresholdValue: 66 });
+
+      await updateDate({ voteThresholdType: VoteThresholdType.Supermajority });
+
+      expect(tx.eventOccurrencePolicy.upsert).toHaveBeenCalled();
+    });
+
+    it("null clears an override, so the date takes the event's (#796)", async () => {
+      dateStored = datePolicy('occ-1', { id: 'occ-policy-1', maxAttendees: 4 });
+
+      await updateDate({ maxAttendees: null });
+
+      expect(tx.eventOccurrencePolicy.upsert).toHaveBeenCalledWith({
+        where: { occurrenceId: 'occ-1' },
+        create: { occurrenceId: 'occ-1', maxAttendees: null },
+        update: { maxAttendees: null },
+      });
+      expect(domainEmit().before).toEqual({ id: 'occ-policy-1', maxAttendees: 4 });
+      expect(domainEmit().after).toEqual({ id: 'occ-policy-1', maxAttendees: null });
+    });
+
+    // The audit row is filed on the date, and the webhook goes to the readers
+    // of the event's policy, naming the date (#796, #728).
+    it("emits OccurrencePolicyUpdatedEvent and the webhook with the date's id, only when a value changed (#796)", async () => {
+      tx.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', householdId: 'hh-1' }));
+      dateStored = datePolicy('occ-1', { id: 'occ-policy-1' });
+
+      await updateDate({ gameAdditionMode: GameAdditionMode.HostOnly, allowSpectators: null });
+
+      const emitted = domainEmit();
+      expect(emitted).toBeInstanceOf(OccurrencePolicyUpdatedEvent);
+      expect(emitted.action).toBe('update');
+      expect(emitted.subject).toBe(ResourceType.EventOccurrence);
+      expect(emitted.subjectId).toBe('occ-1');
+      expect(emitted.eventId).toBe('event-1');
+      expect(emitted.before).toEqual({ id: 'occ-policy-1', gameAdditionMode: null });
+      expect(emitted.after).toEqual({ id: 'occ-policy-1', gameAdditionMode: GameAdditionMode.HostOnly });
+      expect(webhookEmit()).toEqual({
+        subjectId: 'policy-1',
+        householdId: 'hh-1',
+        data: {
+          eventId: 'event-1',
+          householdId: 'hh-1',
+          policyId: 'policy-1',
+          eventOccurrenceId: 'occ-1',
+          changedFields: ['gameAdditionMode'],
+        },
+      });
+      expect(JSON.stringify(webhookEmit())).not.toContain(GameAdditionMode.HostOnly);
+      expect(emitter.emit).toHaveBeenCalledTimes(2);
+
+      emitter.emit.mockClear();
+      dateStored = datePolicy('occ-1', { id: 'occ-policy-1', gameAdditionMode: GameAdditionMode.HostOnly });
+
+      await updateDate({ gameAdditionMode: GameAdditionMode.HostOnly, allowSpectators: null });
+
+      expect(tx.eventOccurrencePolicy.upsert).toHaveBeenCalledTimes(2);
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // A first write that sets only what the date already took from the event
+    // changes nothing, though it may make the empty row (#728).
+    it("emits nothing for a date's first write that sets nothing of its own (#728)", async () => {
+      await updateDate({ maxAttendees: null, platformsUnrestricted: false, allowedPlatformIds: [] });
+
+      expect(tx.eventOccurrencePolicy.upsert).toHaveBeenCalled();
+      expect(tx.occurrencePolicyPlatform.deleteMany).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    describe("the event's override scope", () => {
+      it("refuses a date's override that goes past the event's TightenOnly scope (#796)", async () => {
+        stored = makeEventPolicy('event-1', {
+          id: 'policy-1',
+          occurrenceOverrideScope: OccurrenceOverrideScope.TightenOnly,
+        });
+        lists = { types: [PlatformType.Tabletop], platformIds: [], categoryIds: [] };
+
+        await expect(updateDate({ allowedPlatformTypes: [PlatformType.Console] })).rejects.toMatchObject({
+          status: 400,
+          response: {
+            code: 'EVENT_OCCURRENCE_OVERRIDE_NOT_ALLOWED',
+            message: t('errors.event_policy.occurrence_override_not_allowed'),
+          },
+        });
+
+        expect(tx.eventOccurrencePolicy.upsert).not.toHaveBeenCalled();
+        expect(tx.occurrencePolicyPlatformType.deleteMany).not.toHaveBeenCalled();
+      });
+
+      it('accepts a "no platform restriction" flag under Any (#796)', async () => {
+        await updateDate({ platformsUnrestricted: true });
+
+        expect(tx.eventOccurrencePolicy.upsert).toHaveBeenCalledWith({
+          where: { occurrenceId: 'occ-1' },
+          create: { occurrenceId: 'occ-1', platformsUnrestricted: true },
+          update: { platformsUnrestricted: true },
+        });
+      });
+
+      // A flag beside a list of its kind can't both hold, so it is invalid
+      // under every scope, None included, and judged on the date the patch
+      // leaves: the list already stored counts (#796).
+      it('refuses a flag beside a list of its kind as invalid, before the scope, on the merged date (#796)', async () => {
+        stored = makeEventPolicy('event-1', { id: 'policy-1', occurrenceOverrideScope: OccurrenceOverrideScope.None });
+
+        await expect(updateDate({ platformsUnrestricted: true, allowedPlatformIds: ['plat-1'] })).rejects.toMatchObject(
+          {
+            status: 400,
+            response: {
+              code: 'EVENT_POLICY_INVALID',
+              message: t('errors.event_policy.platforms_unrestricted_with_list'),
+            },
+          },
+        );
+
+        stored = makeEventPolicy('event-1', { id: 'policy-1' });
+        dateStored = datePolicy('occ-1', { id: 'occ-policy-1', allowedPlatformIds: ['plat-1'] });
+
+        await expect(updateDate({ platformsUnrestricted: true })).rejects.toMatchObject({
+          status: 400,
+          response: {
+            code: 'EVENT_POLICY_INVALID',
+            message: t('errors.event_policy.platforms_unrestricted_with_list'),
+          },
+        });
+
+        expect(tx.eventOccurrencePolicy.upsert).not.toHaveBeenCalled();
+      });
+    });
+
+    /**
+     * #796, #1268. A list sent replaces the date's, an empty one hands the
+     * list back to the event's, and one left out stays.
+     */
+    describe("the date's allowed lists", () => {
+      beforeEach(() => {
+        dateStored = datePolicy('occ-1', {
+          id: 'occ-policy-1',
+          allowedPlatformTypes: [PlatformType.Tabletop],
+          allowedPlatformIds: ['plat-1'],
+        });
+      });
+
+      it("replaces a list sent, keeps one left out, and an empty one takes the event's (#796, #1268)", async () => {
+        await updateDate({ allowedPlatformIds: [], allowedCategoryIds: ['cat-1'] });
+
+        expect(tx.occurrencePolicyPlatform.deleteMany).toHaveBeenCalledWith({
+          where: { occurrencePolicyId: 'occ-policy-1' },
+        });
+        expect(tx.occurrencePolicyPlatform.createMany).toHaveBeenCalledWith({ data: [] });
+        expect(tx.occurrencePolicyCategory.createMany).toHaveBeenCalledWith({
+          data: [{ occurrencePolicyId: 'occ-policy-1', categoryId: 'cat-1' }],
+        });
+        expect(tx.occurrencePolicyPlatformType.deleteMany).not.toHaveBeenCalled();
+
+        expect(domainEmit().before).toEqual({
+          id: 'occ-policy-1',
+          allowedPlatformIds: ['plat-1'],
+          allowedCategoryIds: [],
+        });
+        expect(domainEmit().after).toEqual({
+          id: 'occ-policy-1',
+          allowedPlatformIds: [],
+          allowedCategoryIds: ['cat-1'],
+        });
+        expect(webhookEmit().data.changedFields).toEqual(['allowedPlatformIds', 'allowedCategoryIds']);
+      });
+
+      // The lists aren't columns, and Prisma moves updatedAt only when it
+      // writes one (#1268).
+      it("moves the date policy's updatedAt for a patch that changes only a list (#1268)", async () => {
+        await updateDate({ allowedPlatformIds: ['plat-2'] });
+
+        expect(tx.eventOccurrencePolicy.upsert).toHaveBeenCalledWith({
+          where: { occurrenceId: 'occ-1' },
+          create: { occurrenceId: 'occ-1' },
+          update: { updatedAt: expect.any(Date) },
+        });
+      });
+
+      it('checks the ids it is sent exist before writing (#1268)', async () => {
+        tx.platform.count.mockResolvedValue(0 as never);
+
+        await expect(updateDate({ allowedPlatformIds: ['nope'] })).rejects.toMatchObject({
+          status: 400,
+          response: { code: 'EVENT_POLICY_UNKNOWN_REFERENCE', message: t('errors.event_policy.unknown_platform') },
+        });
+
+        expect(tx.eventOccurrencePolicy.upsert).not.toHaveBeenCalled();
+      });
+
+      // A form that re-sends what it loaded changes nothing, in whatever
+      // order its lists come back (#728, #1268).
+      it('emits nothing for a list re-sent unchanged, in any order, and rewrites nothing (#1268)', async () => {
+        await updateDate({ allowedPlatformIds: ['plat-1', 'plat-1'], allowedPlatformTypes: [PlatformType.Tabletop] });
+
+        expect(tx.occurrencePolicyPlatform.deleteMany).not.toHaveBeenCalled();
+        expect(tx.occurrencePolicyPlatformType.deleteMany).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
+    });
+
+    // A writer who may change the policy but not read it, such as an API key
+    // granted update:event_policy alone, still writes, and is answered null.
+    it("answers with the date's policy read back, null when the caller cannot read the event's policy (#796)", async () => {
+      await expect(updateDate({ maxAttendees: 4 })).resolves.toEqual(
+        datePolicy('occ-1', { id: 'occ-policy-1', maxAttendees: 4 }),
+      );
+      expect(tx.eventPolicy.count).toHaveBeenCalledWith({
+        where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.read) },
+      });
+      expect(tx.eventOccurrencePolicy.findUniqueOrThrow).toHaveBeenCalledWith({
+        where: { id: 'occ-policy-1' },
+        include: OCCURRENCE_POLICY_VIEW_INCLUDE,
+      });
+
+      emitter.emit.mockClear();
+      canRead = false;
+      tx.eventOccurrencePolicy.findUniqueOrThrow.mockClear();
+
+      await expect(updateDate({ maxAttendees: 5 })).resolves.toBeNull();
+      expect(tx.eventOccurrencePolicy.upsert).toHaveBeenCalledTimes(2);
+      expect(tx.eventOccurrencePolicy.findUniqueOrThrow).not.toHaveBeenCalled();
+    });
+
+    it('answers 400 for an empty body (#796)', async () => {
+      await expect(updateDate({})).rejects.toThrow(new BadRequestException(t('common.at_least_one_field')));
+      expect(db.$transaction).not.toHaveBeenCalled();
+    });
   });
 });

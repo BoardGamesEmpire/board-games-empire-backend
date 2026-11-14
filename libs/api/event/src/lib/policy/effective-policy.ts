@@ -16,9 +16,14 @@ export type EffectivePolicy = VotingPolicy & { gameAdditionMode: GameAdditionMod
 /**
  * A date's effective policy: the date's value for each field it sets, else the
  * event's, else the schema's default. A nomination is held to it, and a policy
- * write is judged by it for each date the event has (#796).
+ * write is judged by it for each date the event has (#796). It reads only the
+ * fields it folds, so a date's policy as a write would leave it, before its
+ * row exists, folds too.
  */
-export function foldPolicy(eventPolicy: EventPolicy | null, occPolicy: EventOccurrencePolicy | null): EffectivePolicy {
+export function foldPolicy(
+  eventPolicy: EventPolicy | null,
+  occPolicy: Pick<EventOccurrencePolicy, keyof EffectivePolicy> | null,
+): EffectivePolicy {
   const base = {
     gameAdditionMode: eventPolicy?.gameAdditionMode ?? GameAdditionMode.Direct,
     voteThresholdType: eventPolicy?.voteThresholdType ?? VoteThresholdType.SimpleMajority,

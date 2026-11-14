@@ -1,7 +1,8 @@
 import { MutationEvent } from '@bge/actor-context';
-import { ResourceType, type EventPolicy } from '@bge/database';
+import { ResourceType, type EventOccurrencePolicy, type EventPolicy } from '@bge/database';
 import { EventEvents } from '../../constants/event-events.constant';
-import type { EventPolicyView } from '../policy-view';
+import { OccurrenceEvents } from '../../occurrence/constants';
+import type { EventPolicyView, OccurrencePolicyView } from '../policy-view';
 
 /**
  * Domain mutation events for an event's policy (#796).
@@ -37,5 +38,37 @@ export class EventPolicyUpdatedEvent extends MutationEvent<EventPolicy> {
   ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
+  }
+}
+
+type OccurrencePolicyUpdatedSnapshot = Readonly<Partial<OccurrencePolicyView> & Pick<EventOccurrencePolicy, 'id'>>;
+
+/**
+ * A change to a date's own policy (#796). It is filed on the date, so the
+ * date's audit trail shows it. before/after carry the changed subset only
+ * (plus the policy row's `id`), as every update's audit row does (#728); a
+ * changed allowed list is in it by its list name. Before the date's first
+ * write, every field was the event's: `null`, an empty list, or no flag.
+ */
+export class OccurrencePolicyUpdatedEvent extends MutationEvent<EventOccurrencePolicy> {
+  static readonly eventName = OccurrenceEvents.OccurrencePolicyUpdated;
+
+  declare readonly before: OccurrencePolicyUpdatedSnapshot;
+  declare readonly after: OccurrencePolicyUpdatedSnapshot;
+
+  readonly subject = ResourceType.EventOccurrence;
+  readonly subjectId: string;
+
+  constructor(
+    before: OccurrencePolicyUpdatedSnapshot,
+    after: OccurrencePolicyUpdatedSnapshot,
+    /** The date whose policy changed. */
+    occurrenceId: string,
+    /** The event the date belongs to. Context for listeners, not audited. */
+    public readonly eventId: string,
+    initiatedAt: Date,
+  ) {
+    super(before, after, initiatedAt);
+    this.subjectId = occurrenceId;
   }
 }

@@ -545,8 +545,11 @@ An attendee's answer to an event: attending, maybe, or not attending. Before ans
 _Avoid_: participation status, attendee status; confirmed (to mean attending)
 
 **Event policy**:
-An event's rules: who may invite, how many may come, which games are allowed, how games get chosen and how voting works. An occurrence can override any of them for its day.
+An event's rules: who may invite, how many may come, which games are allowed, how games get chosen and how voting works. An occurrence can override them for its day, as far as the event's occurrence override scope allows for which games are allowed and how many may come.
 _Avoid_: event settings, event rules
+
+**Occurrence override scope**:
+How far an event's occurrences may change its restrictions, meaning which games are allowed and how many may come: not at all, only narrower, or freely, including lifting a restriction for that day.
 
 **Capacity**:
 The most people an event will take, with or without spectators, and whether that limit is strict.

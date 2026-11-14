@@ -1,19 +1,57 @@
 import type { PlatformType, Prisma } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
 import { Http } from '@status/codes';
+import type { PolicyListsView } from './policy-view';
 
-/** The allowed lists on an event's policy (#1268). A list left out is left as it is. */
-export interface EventPolicyLists {
+/**
+ * The allowed lists sent with a policy write, the event's or a date's (#1268).
+ * A list left out is left as it is.
+ */
+export interface PolicyLists {
   allowedPlatformTypes?: PlatformType[];
   allowedPlatformIds?: string[];
   allowedCategoryIds?: string[];
 }
 
+const LIST_KEYS = ['allowedPlatformTypes', 'allowedPlatformIds', 'allowedCategoryIds'] as const;
+
+/** Whether two lists hold the same members, whatever their order. */
+function sameMembers(stored: readonly string[], sent: readonly string[]): boolean {
+  const members = new Set(stored);
+  const sentMembers = new Set(sent);
+
+  return members.size === sentMembers.size && [...sentMembers].every((member) => members.has(member));
+}
+
+/**
+ * The lists sent whose members differ from the stored ones, as they were
+ * (`before`) and as they will be stored (`after`) (#1268). A list equal to the
+ * stored one in any order, or left out, is no change. Both sides are
+ * deduplicated and sorted, as the lists are stored and served, so an audit
+ * row's before and after compare by value. `after` is what the write
+ * replaces, and its keys, in the lists' own order, name what changed.
+ */
+export function changedPolicyLists(
+  stored: PolicyListsView,
+  sent: PolicyLists,
+): { before: PolicyLists; after: PolicyLists } {
+  const changed = LIST_KEYS.filter((key) => {
+    const list = sent[key];
+    return list !== undefined && !sameMembers(stored[key], list);
+  });
+
+  return {
+    before: Object.fromEntries(changed.map((key) => [key, stored[key]])),
+    after: Object.fromEntries(changed.map((key) => [key, [...new Set(sent[key])].sort()])),
+  };
+}
+
 /**
  * Refuses an id that names no platform or category, with a code a client can
  * announce. Without it an unknown id surfaces as a foreign key failure from the
- * write, which answers 500 (#1268). It runs in the write's transaction, so what
- * it found is what the write lands against.
+ * write, which answers 500 (#1268). It runs in the write's transaction, but a
+ * count locks nothing: a platform or category deleted between this check and
+ * the write still fails the write that way.
  */
 export async function assertPolicyReferencesExist(
   tx: Pick<Prisma.TransactionClient, 'platform' | 'category'>,
@@ -43,7 +81,7 @@ export async function assertPolicyReferencesExist(
 
 /** The nested create of the lists given, for a policy being created with them. */
 export function policyListsCreateData(
-  lists: EventPolicyLists,
+  lists: PolicyLists,
 ): Pick<Prisma.EventPolicyCreateWithoutEventInput, 'allowedPlatformTypes' | 'allowedPlatforms' | 'allowedCategories'> {
   return {
     ...(lists.allowedPlatformTypes?.length
@@ -83,7 +121,7 @@ export function policyListsCreateData(
 export async function replaceEventPolicyLists(
   tx: Pick<Prisma.TransactionClient, 'eventPolicyPlatformType' | 'eventPolicyPlatform' | 'eventPolicyCategory'>,
   eventPolicyId: string,
-  lists: EventPolicyLists,
+  lists: PolicyLists,
 ): Promise<void> {
   if (lists.allowedPlatformTypes) {
     await tx.eventPolicyPlatformType.deleteMany({ where: { eventPolicyId } });
@@ -103,6 +141,40 @@ export async function replaceEventPolicyLists(
     await tx.eventPolicyCategory.deleteMany({ where: { eventPolicyId } });
     await tx.eventPolicyCategory.createMany({
       data: [...new Set(lists.allowedCategoryIds)].map((categoryId) => ({ eventPolicyId, categoryId })),
+    });
+  }
+}
+
+/**
+ * {@link replaceEventPolicyLists} for a date's own policy (#796). On a date,
+ * `[]` hands the list back to the event's rather than lifting it.
+ */
+export async function replaceOccurrencePolicyLists(
+  tx: Pick<
+    Prisma.TransactionClient,
+    'occurrencePolicyPlatformType' | 'occurrencePolicyPlatform' | 'occurrencePolicyCategory'
+  >,
+  occurrencePolicyId: string,
+  lists: PolicyLists,
+): Promise<void> {
+  if (lists.allowedPlatformTypes) {
+    await tx.occurrencePolicyPlatformType.deleteMany({ where: { occurrencePolicyId } });
+    await tx.occurrencePolicyPlatformType.createMany({
+      data: [...new Set(lists.allowedPlatformTypes)].map((platformType) => ({ occurrencePolicyId, platformType })),
+    });
+  }
+
+  if (lists.allowedPlatformIds) {
+    await tx.occurrencePolicyPlatform.deleteMany({ where: { occurrencePolicyId } });
+    await tx.occurrencePolicyPlatform.createMany({
+      data: [...new Set(lists.allowedPlatformIds)].map((platformId) => ({ occurrencePolicyId, platformId })),
+    });
+  }
+
+  if (lists.allowedCategoryIds) {
+    await tx.occurrencePolicyCategory.deleteMany({ where: { occurrencePolicyId } });
+    await tx.occurrencePolicyCategory.createMany({
+      data: [...new Set(lists.allowedCategoryIds)].map((categoryId) => ({ occurrencePolicyId, categoryId })),
     });
   }
 }

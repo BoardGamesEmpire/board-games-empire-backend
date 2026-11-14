@@ -40,6 +40,9 @@
   "event_policy": {
     "updated": "Event policy updated"
   },
+  "occurrence_policy": {
+    "updated": "Occurrence policy updated"
+  },
   "occurrence": {
     "added": "Occurrence added",
     "updated": "Occurrence updated",
