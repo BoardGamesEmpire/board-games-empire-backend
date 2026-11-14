@@ -61,8 +61,8 @@ export class EventPolicyController {
     summary: "Change a date's own policy",
     description:
       'Sets what one date overrides of the event’s policy, for that day. Changes only the fields sent. Every ' +
-      'field takes `null`, which hands it back to the event’s; the three “no restriction” flags take `false` ' +
-      'instead, and `null` answers 400. The date’s policy is made on its first change. Needs permission to ' +
+      'column takes `null`, which hands it back to the event’s; a list takes `[]` (the event’s), never `null`; ' +
+      'the three “no restriction” flags take `false`, and `null` on one answers 400. The date’s policy is made on its first change. Needs permission to ' +
       'update the event’s policy, as the event’s policy route does; permission to update the date isn’t ' +
       'enough. Each allowed list (`allowedPlatformTypes`, `allowedPlatformIds`, `allowedCategoryIds`) sent ' +
       'replaces the date’s, `[]` hands it back to the event’s, and one left out stays; an id that names no ' +
@@ -72,7 +72,9 @@ export class EventPolicyController {
       '`EVENT_POLICY_INVALID`. How far the date may change the allowed lists and capacity is the event’s ' +
       '`occurrenceOverrideScope`: under `None` it may change none of them, under `TightenOnly` it may only ' +
       'narrow them, and only under `Any` may it replace them or lift them with `platformTypesUnrestricted`, ' +
-      '`platformsUnrestricted` or `capacityUnrestricted`. A change past the scope answers 400 ' +
+      '`platformsUnrestricted` or `capacityUnrestricted`. `restrictToGameCategories: false` lifts the ' +
+      'event’s category restriction, which `None` and `TightenOnly` refuse while the event restricts ' +
+      'categories. A change past the scope answers 400 ' +
       '`EVENT_OCCURRENCE_OVERRIDE_NOT_ALLOWED`. A flag beside a restriction of its kind on the same date ' +
       'answers 400 `EVENT_POLICY_INVALID` under any scope. Nominations for the date are held to its policy ' +
       'from then on; work in flight is left as it is, as for the event’s policy. `policy` is `null` when the ' +

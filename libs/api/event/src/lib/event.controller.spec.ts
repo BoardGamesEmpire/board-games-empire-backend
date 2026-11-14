@@ -124,7 +124,13 @@ describe('EventController', () => {
 
   describe('getEventById', () => {
     it('delegates to EventService.getEventById and wraps response', async () => {
-      const event = { ...stubListRow({ id: 'ev-42' }), occurrences: [], attendees: [], policy: null };
+      const event = {
+        ...stubListRow({ id: 'ev-42' }),
+        occurrences: [],
+        attendees: [],
+        policy: null,
+        occurrencePolicies: [],
+      };
       service.getEventById.mockResolvedValue(event);
 
       const result = await firstValueFrom(controller.getEventById('ev-42'));

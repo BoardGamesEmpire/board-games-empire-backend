@@ -46,7 +46,12 @@ import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './event
 import { countLiveDates } from './occurrence/live-dates.util';
 import { eventPolicyReadArgs, readEventPolicyView, toEventPolicyViewOrNull } from './policy/policy-ceiling';
 import { assertPolicyReferencesExist, policyListsCreateData } from './policy/policy-lists';
-import type { EventPolicyView } from './policy/policy-view';
+import {
+  OCCURRENCE_POLICY_VIEW_INCLUDE,
+  toOccurrencePolicyView,
+  type EventPolicyView,
+  type OccurrencePolicyView,
+} from './policy/policy-view';
 import {
   EVENT_ATTENDANCE_SELECT,
   readEventAttendance,
@@ -279,16 +284,17 @@ export class EventService {
    * with the email address of each guest who has no account. Clipping them
    * inside the `include` would fail open (#559), so each ceiling sits in its
    * own read's top-level `where`, bound to this event. A caller with no read
-   * on one of them gets `[]` for it, or `null` for the policy.
+   * on one of them gets `[]` for it, or `null` for the policy. The dates' own
+   * policies are read beside the event's, and are served only with it (#1211).
    *
-   * The event's `status` is worked out from a fifth read, of every one of its
+   * The event's `status` is worked out from a sixth read, of every one of its
    * dates, with no ceiling (#795). The status is a fact about the event, so
    * whoever reads the event gets it, whatever their occurrence ceiling; a
    * staff member or friend whose ceiling clips the dates would otherwise see
    * a status the event doesn't have. Only the three columns it needs are
    * read, and every occurrence read grant mirrors an event read grant today.
    *
-   * A sixth read is the acting user's own attendee row, under the attendee
+   * A seventh read is the acting user's own attendee row, under the attendee
    * ceiling (#867). It doesn't search `attendees`, which #404 may cap: a search
    * would then give some attendees `null`. `attendance` is `null` for an acting
    * user who doesn't attend or was removed, or an actor who can't read the row.
@@ -310,38 +316,48 @@ export class EventService {
     const now = new Date();
     const ownAttendeeWhere = this.ownAttendeeWhere(resolveActingUserIdOrNull(this.abilityService));
 
-    const [event, occurrences, attendees, policyRow, statusDates, ownRows] = await this.db.$transaction(
-      [
-        this.db.event.findUnique({
-          where: {
-            id,
-            deletedAt: null,
-            // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
-            AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.read),
-          },
-        }),
+    const [event, occurrences, attendees, policyRow, occurrencePolicyRows, statusDates, ownRows] =
+      await this.db.$transaction(
+        [
+          this.db.event.findUnique({
+            where: {
+              id,
+              deletedAt: null,
+              // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
+              AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.read),
+            },
+          }),
 
-        this.db.eventOccurrence.findMany({
-          where: this.scopeComposer.compose(ResourceType.EventOccurrence, Action.read, { eventId: id }),
-          orderBy: OCCURRENCE_ORDER,
-        }),
+          this.db.eventOccurrence.findMany({
+            where: this.scopeComposer.compose(ResourceType.EventOccurrence, Action.read, { eventId: id }),
+            orderBy: OCCURRENCE_ORDER,
+          }),
 
-        this.db.eventAttendee.findMany({
-          where: this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { eventId: id, ...NOT_REMOVED }),
-          include: ATTENDEE_USER_AND_ROLE_INCLUDE,
-          orderBy: ATTENDEE_ORDER,
-        }),
+          this.db.eventAttendee.findMany({
+            where: this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { eventId: id, ...NOT_REMOVED }),
+            include: ATTENDEE_USER_AND_ROLE_INCLUDE,
+            orderBy: ATTENDEE_ORDER,
+          }),
 
-        this.db.eventPolicy.findUnique(eventPolicyReadArgs(this.abilityService, id)),
+          this.db.eventPolicy.findUnique(eventPolicyReadArgs(this.abilityService, id)),
 
-        this.db.eventOccurrence.findMany({ where: { eventId: id }, select: EVENT_STATUS_DATE_SELECT }),
+          // The dates' own policies carry no ceiling of their own: the event's
+          // policy read above is theirs, and they are dropped when it is hidden,
+          // and for any date the caller isn't served. Read in the dates' order.
+          this.db.eventOccurrencePolicy.findMany({
+            where: { occurrence: { eventId: id } },
+            include: OCCURRENCE_POLICY_VIEW_INCLUDE,
+            orderBy: OCCURRENCE_ORDER.map((order) => ({ occurrence: order })),
+          }),
 
-        ...(ownAttendeeWhere
-          ? [this.db.eventAttendee.findMany({ where: ownAttendeeWhere([id]), select: EVENT_ATTENDANCE_SELECT })]
-          : []),
-      ],
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
-    );
+          this.db.eventOccurrence.findMany({ where: { eventId: id }, select: EVENT_STATUS_DATE_SELECT }),
+
+          ...(ownAttendeeWhere
+            ? [this.db.eventAttendee.findMany({ where: ownAttendeeWhere([id]), select: EVENT_ATTENDANCE_SELECT })]
+            : []),
+        ],
+        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+      );
 
     assert(event, new NotFoundException(t('errors.event.not_found', { id })));
 
@@ -349,11 +365,16 @@ export class EventService {
     // leaves at most one row when one was.
     const ownRow = ownRows?.[0];
 
+    const servedDateIds = new Set(occurrences.map(({ id: dateId }) => dateId));
+
     return {
       ...withEventStatus(event, statusDates, now),
       occurrences,
       attendees,
       policy: toEventPolicyViewOrNull(policyRow),
+      occurrencePolicies: policyRow
+        ? occurrencePolicyRows.filter(({ occurrenceId }) => servedDateIds.has(occurrenceId)).map(toOccurrencePolicyView)
+        : [],
       attendance: ownRow ? toEventAttendance(ownRow) : null,
     };
   }
@@ -824,4 +845,13 @@ export type EventDetail = Prisma.EventGetPayload<{
     occurrences: true;
     attendees: { include: typeof ATTENDEE_USER_AND_ROLE_INCLUDE };
   };
-}> & { policy: EventPolicyView | null; status: EventStatus; attendance: EventAttendance | null };
+}> & {
+  policy: EventPolicyView | null;
+  /**
+   * Each served date that has a policy row, under the event policy's ceiling; a date without one inherits
+   * everything. `[]` when `policy` is `null` (#1211).
+   */
+  occurrencePolicies: OccurrencePolicyView[];
+  status: EventStatus;
+  attendance: EventAttendance | null;
+};

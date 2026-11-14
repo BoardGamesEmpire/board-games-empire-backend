@@ -34,7 +34,9 @@ export class UpdateOccurrencePolicyDto {
 
   @ApiPropertyOptional({
     nullable: true,
-    description: `\`false\` lifts the event's category restriction for this date. ${EVENTS}`,
+    description:
+      "`false` lifts the event's category restriction for this date, which `None` and `TightenOnly` refuse " +
+      `while the event restricts categories. ${EVENTS}`,
   })
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @IsOptional()

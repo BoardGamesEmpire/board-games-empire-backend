@@ -806,6 +806,27 @@ describe('EventPolicyService', () => {
         expect(tx.occurrencePolicyPlatformType.deleteMany).not.toHaveBeenCalled();
       });
 
+      // The order test above records I/O alone, so it can't see the pure checks
+      // swap places. The scope is judged before any id is looked up, so a patch
+      // that is past it never learns whether an id exists (#796).
+      it('refuses a patch past the scope before it looks up an unknown platform id (#796)', async () => {
+        stored = makeEventPolicy('event-1', {
+          id: 'policy-1',
+          occurrenceOverrideScope: OccurrenceOverrideScope.TightenOnly,
+        });
+        lists = { types: [PlatformType.Tabletop], platformIds: [], categoryIds: [] };
+        tx.platform.count.mockResolvedValue(0);
+
+        await expect(
+          updateDate({ allowedPlatformTypes: [PlatformType.Console], allowedPlatformIds: ['no-such-platform'] }),
+        ).rejects.toMatchObject({
+          status: 400,
+          response: { code: 'EVENT_OCCURRENCE_OVERRIDE_NOT_ALLOWED' },
+        });
+
+        expect(tx.platform.count).not.toHaveBeenCalled();
+      });
+
       it('accepts a "no platform restriction" flag under Any (#796)', async () => {
         await updateDate({ platformsUnrestricted: true });
 

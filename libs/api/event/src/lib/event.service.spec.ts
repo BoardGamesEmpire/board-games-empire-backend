@@ -24,6 +24,7 @@ import {
   createTestingModuleWithDb,
   makeEvent,
   makeEventOccurrence,
+  makeEventOccurrencePolicy,
   makeEventPolicy,
   MOCK_ACTING_USER_ID,
   rawQueryText,
@@ -41,7 +42,7 @@ import type { CreateEventDto } from './dto/create-event.dto';
 import { ListEventsQueryDto } from './dto/list-events.query.dto';
 import { EventService } from './event.service';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
-import { EVENT_POLICY_VIEW_INCLUDE } from './policy/policy-view';
+import { EVENT_POLICY_VIEW_INCLUDE, OCCURRENCE_POLICY_VIEW_INCLUDE } from './policy/policy-view';
 import { EVENT_ATTENDANCE_SELECT } from './utils/event-attendance.util';
 import { EVENT_STATUS_DATE_SELECT } from './utils/event-status.util';
 import { upcomingDateWhere, upcomingEventWhere } from './utils/upcoming-events.util';
@@ -500,6 +501,7 @@ describe('EventService', () => {
       db.eventOccurrence.findMany.mockResolvedValue([]);
       db.eventAttendee.findMany.mockResolvedValue([]);
       db.eventPolicy.findUnique.mockResolvedValue(null);
+      db.eventOccurrencePolicy.findMany.mockResolvedValue([]);
     });
 
     // Exact, so an embed put back on the event read fails here.
@@ -565,8 +567,76 @@ describe('EventService', () => {
         occurrences: [occurrence],
         attendees: [],
         policy: asPolicyView(policy),
+        occurrencePolicies: [],
         attendance: null,
       });
+    });
+
+    it("serves each date's overrides beside the event's policy (#1211)", async () => {
+      const policy = makeEventPolicy('event-1', { occurrenceOverrideScope: OccurrenceOverrideScope.TightenOnly });
+      const dayOne = makeEventOccurrencePolicy('occ-1', { platformsUnrestricted: true });
+      const dayTwo = makeEventOccurrencePolicy('occ-2', { maxAttendees: 4 });
+      db.eventPolicy.findUnique.mockResolvedValue(withPolicyJoinRows(policy) as never);
+      db.eventOccurrence.findMany.mockResolvedValueOnce([
+        makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }),
+        makeEventOccurrence({ id: 'occ-2', eventId: 'event-1' }),
+      ]);
+      db.eventOccurrencePolicy.findMany.mockResolvedValue([
+        withPolicyJoinRows(dayOne),
+        withPolicyJoinRows(dayTwo),
+      ] as never);
+
+      const detail = await service.getEventById('event-1');
+
+      expect(db.eventOccurrencePolicy.findMany).toHaveBeenCalledWith({
+        where: { occurrence: { eventId: 'event-1' } },
+        include: OCCURRENCE_POLICY_VIEW_INCLUDE,
+        // In the dates' own order, as `occurrences` is.
+        orderBy: [{ occurrence: { sortOrder: 'asc' } }, { occurrence: { id: 'asc' } }],
+      });
+      expect(detail.policy?.occurrenceOverrideScope).toBe(OccurrenceOverrideScope.TightenOnly);
+      expect(detail.occurrencePolicies).toEqual([asPolicyView(dayOne), asPolicyView(dayTwo)]);
+      expect(detail.occurrencePolicies[0].platformsUnrestricted).toBe(true);
+    });
+
+    it("serves no date overrides to a reader who cannot read the event's policy (#1211)", async () => {
+      db.eventPolicy.findUnique.mockResolvedValue(null);
+      db.eventOccurrencePolicy.findMany.mockResolvedValue([
+        withPolicyJoinRows(makeEventOccurrencePolicy('occ-1', { maxAttendees: 4 })),
+      ] as never);
+
+      const detail = await service.getEventById('event-1');
+
+      expect(detail.policy).toBeNull();
+      expect(detail.occurrencePolicies).toEqual([]);
+    });
+
+    it("serves no date overrides for a date the caller isn't served, though they can read the policy (#1211)", async () => {
+      db.eventPolicy.findUnique.mockResolvedValue(withPolicyJoinRows(makeEventPolicy('event-1')) as never);
+      db.eventOccurrence.findMany.mockResolvedValueOnce([]);
+      db.eventOccurrencePolicy.findMany.mockResolvedValue([
+        withPolicyJoinRows(makeEventOccurrencePolicy('occ-1', { maxAttendees: 4 })),
+      ] as never);
+
+      const detail = await service.getEventById('event-1');
+
+      expect(detail.policy).not.toBeNull();
+      expect(detail.occurrencePolicies).toEqual([]);
+    });
+
+    it('a date that overrides one field serves that field alone, the rest null (#1211)', async () => {
+      const policy = makeEventPolicy('event-1');
+      const override = makeEventOccurrencePolicy('occ-1', { maxAttendees: 6 });
+      db.eventOccurrence.findMany.mockResolvedValueOnce([makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' })]);
+      db.eventPolicy.findUnique.mockResolvedValue(withPolicyJoinRows(policy) as never);
+      db.eventOccurrencePolicy.findMany.mockResolvedValue([withPolicyJoinRows(override)] as never);
+
+      const [served] = (await service.getEventById('event-1')).occurrencePolicies;
+
+      expect(served.maxAttendees).toBe(6);
+      expect(served.allowSpectators).toBeNull();
+      expect(served.gameAdditionMode).toBeNull();
+      expect(served.voteThresholdValue).toBeNull();
     });
 
     /**
@@ -618,7 +688,7 @@ describe('EventService', () => {
       expect(db.eventAttendee.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { eventId: 'event-1', removedAt: null, AND: [COND] } }),
       );
-      expect(batchTransactionCall(db).operations).toHaveLength(5);
+      expect(batchTransactionCall(db).operations).toHaveLength(6);
     });
 
     // An actor whose occurrence ceiling clips the dates still gets the
@@ -637,11 +707,11 @@ describe('EventService', () => {
       expect(detail.status).toBe(EventStatus.Scheduled);
     });
 
-    it('takes the six reads from one REPEATABLE READ snapshot', async () => {
+    it('takes the seven reads from one REPEATABLE READ snapshot', async () => {
       await service.getEventById('event-1');
 
       const { operations, options } = batchTransactionCall(db);
-      expect(operations).toHaveLength(6);
+      expect(operations).toHaveLength(7);
       expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     });
 
