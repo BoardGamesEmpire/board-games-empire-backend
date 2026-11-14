@@ -1,6 +1,7 @@
 import {
   GameAdditionMode,
   InterestedWeight,
+  OccurrenceOverrideScope,
   PlatformType,
   VoteEligibility,
   VoteQuorumType,
@@ -111,6 +112,18 @@ export class UpdateEventPolicyDto {
   @IsArray({ message: i18nValidationMessage('validation.isArray') })
   @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
   allowedPlatformIds?: string[];
+
+  @ApiPropertyOptional({
+    enum: OccurrenceOverrideScope,
+    description:
+      "How far a date's own policy may override this policy's allowed platform types, platforms and categories, " +
+      'and its capacity: None, TightenOnly (only narrower) or Any (replace them, or remove them for that date). ' +
+      'A change to it, or to one of those restrictions, that would leave a date past it answers 400 ' +
+      '`EVENT_POLICY_OCCURRENCES_EXCEED_SCOPE`.',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsEnum(OccurrenceOverrideScope, { message: i18nValidationMessage('validation.isEnum') })
+  occurrenceOverrideScope?: OccurrenceOverrideScope;
 
   @ApiPropertyOptional({ nullable: true, description: 'Minutes. `null` permits no fillers.' })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })

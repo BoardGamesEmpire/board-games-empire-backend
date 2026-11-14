@@ -67,7 +67,12 @@
     "threshold_percent_too_high": "A vote threshold can't be more than 100 percent of the votes, and this change would leave the event, or one of its dates, asking for more. Enter a percentage from 1 to 100.",
     "quorum_percent_too_high": "A quorum can't be more than 100 percent of the eligible voters, and this change would leave the event, or one of its dates, asking for more. Enter a percentage from 1 to 100.",
     "unknown_platform": "One of the platforms you chose doesn't exist. Check the platforms and try again.",
-    "unknown_category": "One of the categories you chose doesn't exist. Check the categories and try again."
+    "unknown_category": "One of the categories you chose doesn't exist. Check the categories and try again.",
+    "occurrence_override_not_allowed": "This event's policy doesn't let a date change which games are allowed or how many may come in this way. Keep the date within the event's restrictions, or change how far the event lets its dates override them.",
+    "occurrences_exceed_scope": "This change would leave {count} of the event's dates changing which games are allowed or how many may come further than the event's policy lets them. Change those dates first, then try again.",
+    "platform_types_unrestricted_with_list": "A date can't both allow only some platform types and allow every platform type. Choose one of the two.",
+    "platforms_unrestricted_with_list": "A date can't both allow only some platforms and allow every platform. Choose one of the two.",
+    "capacity_unrestricted_with_limit": "A date can't both limit how many may come and have no limit. Choose one of the two."
   },
   "occurrence": {
     "not_found": "Occurrence {occurrenceId} not found for event {eventId}",

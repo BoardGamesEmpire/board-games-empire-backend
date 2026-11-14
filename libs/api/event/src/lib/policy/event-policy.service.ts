@@ -5,11 +5,12 @@ import {
   ResourceType,
   type EventPolicy,
 } from '@bge/database';
-import { t } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Http } from '@status/codes';
 import assert from 'node:assert';
 import { eventWebhookIds } from '../event.service';
 import { lockLiveEvent } from '../utils/lock-live-event.util';
@@ -17,9 +18,16 @@ import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
 import type { UpdateEventPolicyDto } from './dto/update-event-policy.dto';
 import { assertValidVotingPolicy, foldPolicy } from './effective-policy';
 import { EventPolicyUpdatedEvent } from './events/event-policy.events';
+import { occurrencesExceedingScope } from './override-scope';
 import { readEventPolicyView } from './policy-ceiling';
 import { assertPolicyReferencesExist, replaceEventPolicyLists, type EventPolicyLists } from './policy-lists';
-import { EVENT_POLICY_VIEW_INCLUDE, toEventPolicyView, type EventPolicyView } from './policy-view';
+import {
+  EVENT_POLICY_VIEW_INCLUDE,
+  OCCURRENCE_POLICY_VIEW_INCLUDE,
+  toEventPolicyView,
+  toOccurrencePolicyView,
+  type EventPolicyView,
+} from './policy-view';
 
 const LIST_KEYS = ['allowedPlatformTypes', 'allowedPlatformIds', 'allowedCategoryIds'] as const;
 
@@ -54,6 +62,12 @@ export class EventPolicyService {
    * stored row with the patch over it, and that folded under each date's
    * overrides, since a date that sets only a threshold type relies on the
    * event's value.
+   *
+   * Each date's own restrictions are judged against the override scope and
+   * the restrictions the patch leaves (#796). A patch that would leave a date
+   * past them, by tightening the scope or narrowing a restriction a
+   * TightenOnly date stays within, answers 400 naming those dates. The host
+   * changes them first; nothing a date sets is cleared on their behalf.
    *
    * Work in flight is left as it is. An open nomination finishes the process it
    * started in, a resolve uses the policy in force when it runs, and a voting
@@ -105,17 +119,46 @@ export class EventPolicyService {
             return sent !== undefined && !sameMembers(existing[key], sent);
           });
 
-          const datePolicies = await tx.eventOccurrencePolicy.findMany({ where: { occurrence: { eventId } } });
+          const datePolicies = (
+            await tx.eventOccurrencePolicy.findMany({
+              where: { occurrence: { eventId } },
+              include: OCCURRENCE_POLICY_VIEW_INCLUDE,
+            })
+          ).map(toOccurrencePolicyView);
 
-          const merged = { ...existing, ...columns };
+          // The policy the patch leaves: the stored row with the patch over
+          // it, and each list sent in place of the stored one.
+          const merged = {
+            ...existing,
+            ...columns,
+            allowedPlatformTypes: allowedPlatformTypes ?? existing.allowedPlatformTypes,
+            allowedPlatformIds: allowedPlatformIds ?? existing.allowedPlatformIds,
+            allowedCategoryIds: allowedCategoryIds ?? existing.allowedCategoryIds,
+          };
           assertValidVotingPolicy(merged);
           for (const datePolicy of datePolicies) {
             assertValidVotingPolicy(foldPolicy(merged, datePolicy));
           }
 
+          // Every date's own restrictions stay within the scope the patch
+          // leaves, measured against the restrictions it leaves (#796). The
+          // dates in the way are named, and the host changes them first.
+          const exceeding = occurrencesExceedingScope(merged, datePolicies, merged.occurrenceOverrideScope);
+          if (exceeding.length > 0) {
+            throw new CodedHttpException(
+              Http.BadRequest,
+              'EVENT_POLICY_OCCURRENCES_EXCEED_SCOPE',
+              t('errors.event_policy.occurrences_exceed_scope', { count: exceeding.length }),
+              { fields: { occurrenceIds: exceeding } },
+            );
+          }
+
           await assertPolicyReferencesExist(tx, { platformIds: allowedPlatformIds, categoryIds: allowedCategoryIds });
 
-          const updated = await tx.eventPolicy.update({ where: { eventId, AND: updateCeiling }, data: columns });
+          // The lists are not columns, and Prisma moves updatedAt only when it
+          // writes a column, so a changed list moves it here (#1268).
+          const data = changedLists.length > 0 ? { ...columns, updatedAt: new Date() } : columns;
+          const updated = await tx.eventPolicy.update({ where: { eventId, AND: updateCeiling }, data });
 
           // Only a list that differs is rewritten, so a re-sent list costs no writes.
           await replaceEventPolicyLists(
@@ -134,14 +177,15 @@ export class EventPolicyService {
       const changed = [...changedColumns, ...changedLists];
       if (changed.length > 0) {
         // The lists are not columns of the row, so their values come from what
-        // was read before and what was written.
+        // was read before and what was written, each deduplicated and sorted
+        // as it is stored and served, so the two sides compare by value.
         const before = {
           ...pickSnapshot(existing, changedColumns),
           ...Object.fromEntries(changedLists.map((key) => [key, existing[key]])),
         };
         const after = {
           ...pickSnapshot(updated, changedColumns),
-          ...Object.fromEntries(changedLists.map((key) => [key, sentLists[key]])),
+          ...Object.fromEntries(changedLists.map((key) => [key, [...new Set(sentLists[key])].sort()])),
         };
 
         this.eventEmitter.emit(

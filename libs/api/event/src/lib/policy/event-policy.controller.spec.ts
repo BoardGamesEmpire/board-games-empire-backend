@@ -25,7 +25,7 @@ describe('EventPolicyController', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  it('delegates the patch and answers with a message and the policy', async () => {
+  it('delegates the patch and answers with a message and the policy (#796)', async () => {
     const policy = {
       ...makeEventPolicy('event-1'),
       allowedPlatformTypes: [],

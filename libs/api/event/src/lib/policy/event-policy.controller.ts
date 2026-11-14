@@ -28,12 +28,22 @@ export class EventPolicyController {
       'threshold, or a PercentOfAttendees or FixedCount quorum, needs its value sent or already stored, and ' +
       'answers 400 `EVENT_POLICY_INVALID` otherwise. A change leaves work in flight as it is: an open nomination ' +
       'finishes the process it started in, a resolve uses the policy in force when it runs, and a voting deadline ' +
-      'already set stays. `policy` is `null` when the caller may change the policy but not read it (#796).',
+      'already set stays. `policy` is `null` when the caller may change the policy but not read it (#796). ' +
+      'Each allowed list (`allowedPlatformTypes`, `allowedPlatformIds`, `allowedCategoryIds`) sent replaces the ' +
+      'stored one, `[]` clears it, and one left out stays; an id that names no platform or category answers 400 ' +
+      '`EVENT_POLICY_UNKNOWN_REFERENCE` (#1268). `occurrenceOverrideScope` says how far a date’s own policy may ' +
+      'override the allowed lists and capacity. A change to it, or to a restriction, that would leave a date ' +
+      'past it answers 400 `EVENT_POLICY_OCCURRENCES_EXCEED_SCOPE`, with those dates’ ids in `occurrenceIds`; ' +
+      'change those dates first (#796).',
   })
   @ApiResponse({ status: Http.Ok, description: 'Event policy updated' })
   @ApiResponse({
     status: Http.BadRequest,
-    description: 'Invalid patch, or a vote threshold or quorum left without a value (code EVENT_POLICY_INVALID)',
+    description:
+      'Invalid patch, or a vote threshold or quorum left without a value (code EVENT_POLICY_INVALID); a platform ' +
+      'or category id that names none (code EVENT_POLICY_UNKNOWN_REFERENCE); or a change that would leave a ' +
+      'date’s own policy past the override scope (code EVENT_POLICY_OCCURRENCES_EXCEED_SCOPE, with ' +
+      '`occurrenceIds`)',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })

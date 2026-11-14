@@ -23,6 +23,10 @@ model EventPolicy {
   // When both are set, a nominated game must satisfy both filters.
   allowedPlatforms EventPolicyPlatform[]
 
+  // How far an occurrence's own policy may override this policy's restrictions:
+  // its allowed platform types, platforms, categories and capacity (#796).
+  occurrenceOverrideScope OccurrenceOverrideScope @default(Any) @map("occurrence_override_scope")
+
   // Participation controls
   requireHostApprovalToJoin Boolean @default(false) @map("require_host_approval")
   allowSpectators           Boolean @default(true) @map("allow_spectators")
@@ -97,4 +101,15 @@ model EventPolicyPlatform {
 
   @@unique([eventPolicyId, platformId])
   @@map("event_policy_platforms")
+}
+
+/// How far an occurrence's policy may override its event's restrictions: the
+/// allowed platform types, platforms and categories, and capacity (#796).
+/// Every other field an occurrence sets overrides the event's freely.
+enum OccurrenceOverrideScope {
+  None // no occurrence may override them
+  TightenOnly // an occurrence may only narrow them
+  Any // an occurrence may replace them, or remove them through its "no restriction" flags
+
+  @@map("occurrence_override_scopes")
 }

@@ -6,6 +6,7 @@ import {
   EventStatus,
   FriendshipStatus,
   HUMAN_USER_WHERE,
+  OccurrenceOverrideScope,
   OccurrenceStatus,
   PlatformType,
   Prisma,
@@ -1354,6 +1355,19 @@ describe('EventService', () => {
       await service.createEvent({ title: 'X' } as CreateEventDto);
 
       expect(written().policy).toEqual({ create: {} });
+    });
+
+    // Left out, the scope is the column's default, Any (`event-policy.prisma`):
+    // what a date's policy could do before there was a scope (#796).
+    it('defaults the occurrence override scope to Any (#796)', async () => {
+      await service.createEvent({ title: 'X', policy: { maxAttendees: 6 } } as CreateEventDto);
+      await service.createEvent({
+        title: 'X',
+        policy: { occurrenceOverrideScope: OccurrenceOverrideScope.TightenOnly },
+      } as CreateEventDto);
+
+      expect(written(0)).toHaveProperty('policy.create.occurrenceOverrideScope', undefined);
+      expect(written(1)).toHaveProperty('policy.create.occurrenceOverrideScope', OccurrenceOverrideScope.TightenOnly);
     });
 
     it('stores the allowed platform types and platforms it was given (#1268)', async () => {

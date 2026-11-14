@@ -1,6 +1,7 @@
 import {
   GameAdditionMode,
   InterestedWeight,
+  OccurrenceOverrideScope,
   PlatformType,
   VoteEligibility,
   VoteQuorumType,
@@ -69,10 +70,12 @@ export class CreateEventPolicyDto {
   @IsOptional()
   restrictToGameCategories?: boolean;
 
-  @ApiPropertyOptional({ type: [String] })
+  // Checked whenever sent, since the ids reach the existence check whatever
+  // restrictToGameCategories says, and required when it is true (#1268).
+  @ApiPropertyOptional({ type: [String], description: 'Required when restrictToGameCategories is true.' })
   @IsArray({ message: i18nValidationMessage('validation.isArray') })
   @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
-  @ValidateIf((o: CreateEventPolicyDto) => o.restrictToGameCategories === true)
+  @ValidateIf((o: CreateEventPolicyDto, value) => value !== undefined || o.restrictToGameCategories === true)
   allowedCategoryIds?: string[];
 
   @ApiPropertyOptional({ enum: PlatformType, isArray: true, description: 'Empty means no platform type restriction.' })
@@ -89,6 +92,18 @@ export class CreateEventPolicyDto {
   @IsArray({ message: i18nValidationMessage('validation.isArray') })
   @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
   allowedPlatformIds?: string[];
+
+  @ApiPropertyOptional({
+    enum: OccurrenceOverrideScope,
+    default: OccurrenceOverrideScope.Any,
+    description:
+      "How far a date's own policy may override this policy's allowed platform types, platforms and categories, " +
+      'and its capacity: None, TightenOnly (only narrower) or Any (replace them, or remove them for that date). ' +
+      "Every other field a date sets overrides the event's freely.",
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsEnum(OccurrenceOverrideScope, { message: i18nValidationMessage('validation.isEnum') })
+  occurrenceOverrideScope?: OccurrenceOverrideScope;
 
   @ApiPropertyOptional()
   @IsInt({ message: i18nValidationMessage('validation.isInt') })

@@ -41,6 +41,17 @@ describe('UpdateEventPolicyDto', () => {
     await expect(propertiesWithErrors({ allowedPlatformTypes: ['Nope'] })).resolves.toEqual(['allowedPlatformTypes']);
   });
 
+  // The column can't be null: an event always says how far its dates may go (#796).
+  it('accepts each occurrence override scope, and refuses null or one that does not exist (#796)', async () => {
+    for (const occurrenceOverrideScope of ['None', 'TightenOnly', 'Any']) {
+      await expect(propertiesWithErrors({ occurrenceOverrideScope })).resolves.toEqual([]);
+    }
+    await expect(propertiesWithErrors({ occurrenceOverrideScope: null })).resolves.toEqual(['occurrenceOverrideScope']);
+    await expect(propertiesWithErrors({ occurrenceOverrideScope: 'Loose' })).resolves.toEqual([
+      'occurrenceOverrideScope',
+    ]);
+  });
+
   // The lists are not columns, so there is nothing for null to clear (#1268).
   it('refuses null for each list (#1268)', async () => {
     await expect(

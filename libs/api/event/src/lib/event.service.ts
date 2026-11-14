@@ -462,6 +462,8 @@ export class EventService {
                       voteEligibility: policy.voteEligibility,
                       interestedWeight: policy.interestedWeight,
                       votingWindowHours: policy.votingWindowHours,
+                      // Left out, the column's default, Any (#796).
+                      occurrenceOverrideScope: policy.occurrenceOverrideScope,
                       ...policyListsCreateData(policy),
                       // always create an event policy -- even an empty one
                     }

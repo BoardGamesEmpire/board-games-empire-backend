@@ -1,11 +1,11 @@
 import {
   Action,
   GameAdditionMode,
+  OccurrenceOverrideScope,
   PlatformType,
   Prisma,
   ResourceType,
   VoteThresholdType,
-  type EventOccurrencePolicy,
   type EventPolicy,
 } from '@bge/database';
 import { t } from '@bge/i18n';
@@ -15,6 +15,7 @@ import {
   createMockDatabaseService,
   createTestingModuleWithDb,
   makeEvent,
+  makeEventOccurrencePolicy,
   makeEventPolicy,
   rawQueryText,
   type MockAbilityService,
@@ -26,7 +27,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { UpdateEventPolicyDto } from './dto/update-event-policy.dto';
 import { EventPolicyService } from './event-policy.service';
 import { EventPolicyUpdatedEvent } from './events/event-policy.events';
-import { EVENT_POLICY_VIEW_INCLUDE } from './policy-view';
+import { EVENT_POLICY_VIEW_INCLUDE, OCCURRENCE_POLICY_VIEW_INCLUDE, type OccurrencePolicyView } from './policy-view';
 
 /** A ceiling of its own for each type and action, so a test can tell which one a query was given. */
 const ceiling = (resourceType: string, action: string) => [{ ceiling: `${action}:${resourceType}` }];
@@ -58,6 +59,28 @@ const asView = (policy: EventPolicy, lists: StoredLists = { types: [], platformI
   allowedCategoryIds: lists.categoryIds,
 });
 
+/** A date's own policy, which overrides only what it is given. */
+const datePolicy = (occurrenceId: string, overrides: Partial<OccurrencePolicyView> = {}): OccurrencePolicyView => ({
+  ...makeEventOccurrencePolicy(occurrenceId),
+  allowedPlatformTypes: [],
+  allowedPlatformIds: [],
+  allowedCategoryIds: [],
+  ...overrides,
+});
+
+/** A date's policy row as a read with the view's embed returns it: the lists as join rows. */
+const withDateJoinRows = ({
+  allowedPlatformTypes,
+  allowedPlatformIds,
+  allowedCategoryIds,
+  ...row
+}: OccurrencePolicyView) => ({
+  ...row,
+  allowedPlatformTypes: allowedPlatformTypes.map((platformType) => ({ platformType })),
+  allowedPlatforms: allowedPlatformIds.map((platformId) => ({ platformId })),
+  allowedCategories: allowedCategoryIds.map((categoryId) => ({ categoryId })),
+});
+
 const dependentRecordNotFound = () =>
   new Prisma.PrismaClientKnownRequestError('No record was found for an update.', {
     code: 'P2025',
@@ -82,8 +105,8 @@ describe('EventPolicyService', () => {
   /** The lists stored on the policy. */
   let lists: StoredLists;
 
-  /** Each date's own policy row. */
-  let datePolicies: EventOccurrencePolicy[];
+  /** Each date's own policy, as it is served. */
+  let datePolicies: OccurrencePolicyView[];
 
   const update = (dto: UpdateEventPolicyDto) => service.updatePolicy('event-1', dto);
 
@@ -129,7 +152,8 @@ describe('EventPolicyService', () => {
       Promise.resolve(
         underUpdateCeiling(args) ? stored && withJoinRows(stored, lists) : readable && withJoinRows(readable, lists),
       )) as never);
-    tx.eventOccurrencePolicy.findMany.mockImplementation((() => Promise.resolve(datePolicies)) as never);
+    tx.eventOccurrencePolicy.findMany.mockImplementation((() =>
+      Promise.resolve(datePolicies.map(withDateJoinRows))) as never);
     tx.eventPolicy.update.mockImplementation(((args: { data: Partial<EventPolicy> }) =>
       Promise.resolve({ ...(stored as EventPolicy), ...args.data })) as never);
   });
@@ -140,8 +164,9 @@ describe('EventPolicyService', () => {
   // and the dates' overrides it is checked against can't change before the
   // write lands, and a deleted event answers 404. The policy is read next,
   // under the grant's ceiling, before anything that could refuse with a 400
-  // is read (#796).
-  it('locks the event, then reads the policy under the update ceiling, before the date policies (#796)', async () => {
+  // is read. The lists are rewritten before the read back, so the answer
+  // serves them as written (#796, #1268).
+  it('locks the event, reads the policy under the update ceiling before the date policies, and writes before reading back (#796)', async () => {
     const order: string[] = [];
     const record =
       <T>(label: string, answer: () => T) =>
@@ -155,20 +180,37 @@ describe('EventPolicyService', () => {
       underUpdateCeiling(args)
         ? record('read policy', () => stored && withJoinRows(stored, lists))()
         : record('read back', () => readable && withJoinRows(readable, lists))()) as never);
-    tx.eventOccurrencePolicy.findMany.mockImplementation(record('read date policies', () => datePolicies) as never);
+    tx.eventOccurrencePolicy.findMany.mockImplementation(
+      record('read date policies', () => datePolicies.map(withDateJoinRows)) as never,
+    );
+    tx.platform.count.mockImplementation(record('check references', () => 1) as never);
     tx.eventPolicy.update.mockImplementation(record('update', () => stored) as never);
+    tx.eventPolicyPlatform.deleteMany.mockImplementation(record('delete list', () => ({ count: 0 })) as never);
+    tx.eventPolicyPlatform.createMany.mockImplementation(record('create list', () => ({ count: 1 })) as never);
 
-    await update({ gameAdditionMode: GameAdditionMode.RequiresVote });
+    await update({ gameAdditionMode: GameAdditionMode.RequiresVote, allowedPlatformIds: ['plat-1'] });
 
     expect(rawQueryText(tx.$queryRaw.mock.calls[0][0])).toMatch(
       /^SELECT id FROM events WHERE id = \? FOR NO KEY UPDATE$/,
     );
-    expect(order).toEqual(['lock', 'read policy', 'read date policies', 'update', 'read back']);
+    expect(order).toEqual([
+      'lock',
+      'read policy',
+      'read date policies',
+      'check references',
+      'update',
+      'delete list',
+      'create list',
+      'read back',
+    ]);
     expect(tx.eventPolicy.findUnique).toHaveBeenNthCalledWith(1, {
       where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.update) },
       include: EVENT_POLICY_VIEW_INCLUDE,
     });
-    expect(tx.eventOccurrencePolicy.findMany).toHaveBeenCalledWith({ where: { occurrence: { eventId: 'event-1' } } });
+    expect(tx.eventOccurrencePolicy.findMany).toHaveBeenCalledWith({
+      where: { occurrence: { eventId: 'event-1' } },
+      include: OCCURRENCE_POLICY_VIEW_INCLUDE,
+    });
   });
 
   // The patch is judged merged over what is stored: a value already stored
@@ -193,16 +235,10 @@ describe('EventPolicyService', () => {
     });
 
     // The date sets Supermajority and relies on the event's value, so
-    // clearing the event's value leaves the date's rule with none.
+    // clearing the event's value leaves the date's policy with none.
     it("refuses a patch that leaves a date's effective vote threshold without a value (#796)", async () => {
       stored = makeEventPolicy('event-1', { id: 'policy-1', voteThresholdValue: 66 });
-      datePolicies = [
-        {
-          occurrenceId: 'occ-1',
-          voteThresholdType: VoteThresholdType.Supermajority,
-          voteThresholdValue: null,
-        } as EventOccurrencePolicy,
-      ];
+      datePolicies = [datePolicy('occ-1', { voteThresholdType: VoteThresholdType.Supermajority })];
 
       await expect(update({ voteThresholdValue: null })).rejects.toMatchObject({
         status: 400,
@@ -215,13 +251,7 @@ describe('EventPolicyService', () => {
     // 150 is a fine count for the event's FixedCount, but the date reads it as
     // its Supermajority percentage, which no vote can reach.
     it("refuses an event value that a date's percentage threshold would read as above 100 (#796)", async () => {
-      datePolicies = [
-        {
-          occurrenceId: 'occ-1',
-          voteThresholdType: VoteThresholdType.Supermajority,
-          voteThresholdValue: null,
-        } as EventOccurrencePolicy,
-      ];
+      datePolicies = [datePolicy('occ-1', { voteThresholdType: VoteThresholdType.Supermajority })];
 
       await expect(
         update({ voteThresholdType: VoteThresholdType.FixedCount, voteThresholdValue: 150 }),
@@ -231,6 +261,68 @@ describe('EventPolicyService', () => {
       });
 
       expect(tx.eventPolicy.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // A patch is judged against every date's own restrictions, under the lock,
+  // as it leaves the event's: its override scope and its restrictions. The
+  // host changes the dates in the way first, rather than losing what they set
+  // (#796).
+  describe("the dates' restrictions against the override scope the patch leaves", () => {
+    beforeEach(() => {
+      // Every platform id sent matches a row.
+      const countIds = (args: { where: { id: { in: string[] } } }) => Promise.resolve(args.where.id.in.length);
+      tx.platform.count.mockImplementation(countIds as never);
+    });
+
+    /** The refusal naming the dates past the scope: by id for a client, by count in the message. */
+    const exceedsScope = (occurrenceIds: string[]) => ({
+      status: 400,
+      response: {
+        code: 'EVENT_POLICY_OCCURRENCES_EXCEED_SCOPE',
+        message: t('errors.event_policy.occurrences_exceed_scope', { count: occurrenceIds.length }),
+        occurrenceIds,
+      },
+    });
+
+    it('refuses a tighter scope while an occurrence goes past it, naming the occurrence (#796)', async () => {
+      datePolicies = [
+        datePolicy('occ-1', { platformTypesUnrestricted: true }),
+        datePolicy('occ-2', { gameAdditionMode: GameAdditionMode.HostOnly }),
+      ];
+
+      await expect(update({ occurrenceOverrideScope: OccurrenceOverrideScope.TightenOnly })).rejects.toMatchObject(
+        exceedsScope(['occ-1']),
+      );
+
+      expect(tx.eventPolicy.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it("refuses narrowing the event's platforms below what a TightenOnly occurrence sets (#796)", async () => {
+      stored = makeEventPolicy('event-1', {
+        id: 'policy-1',
+        occurrenceOverrideScope: OccurrenceOverrideScope.TightenOnly,
+      });
+      lists = { types: [], platformIds: ['plat-1', 'plat-2'], categoryIds: [] };
+      datePolicies = [datePolicy('occ-1', { allowedPlatformIds: ['plat-2'] })];
+
+      await expect(update({ allowedPlatformIds: ['plat-1'] })).rejects.toMatchObject(exceedsScope(['occ-1']));
+
+      expect(tx.eventPolicy.update).not.toHaveBeenCalled();
+      expect(tx.eventPolicyPlatform.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('allows a tighter scope once the occurrences fit (#796)', async () => {
+      lists = { types: [PlatformType.PC, PlatformType.Tabletop], platformIds: [], categoryIds: [] };
+      datePolicies = [datePolicy('occ-1', { allowedPlatformTypes: [PlatformType.Tabletop] })];
+
+      await update({ occurrenceOverrideScope: OccurrenceOverrideScope.TightenOnly });
+
+      expect(tx.eventPolicy.update).toHaveBeenCalledWith({
+        where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.update) },
+        data: { occurrenceOverrideScope: OccurrenceOverrideScope.TightenOnly },
+      });
     });
   });
 
@@ -387,17 +479,40 @@ describe('EventPolicyService', () => {
       await expect(update({ allowedPlatformIds: ['plat-2'] })).resolves.toEqual(asView(readable, lists));
     });
 
-    it('emits once for a patch that changes only a list, naming the list (#1268)', async () => {
-      await update({ allowedPlatformTypes: [PlatformType.Tabletop, PlatformType.PC] });
+    // The audit row records the list as it is stored and served, deduplicated
+    // and sorted, so its before and after compare by value whatever order the
+    // request sent (#1268).
+    it('emits once for a patch that changes only a list, naming the list as it is stored (#1268)', async () => {
+      await update({ allowedPlatformTypes: [PlatformType.Tabletop, PlatformType.PC, PlatformType.Tabletop] });
 
       const [, emitted] = emitter.emit.mock.calls.find(([name]) => name === EventPolicyUpdatedEvent.eventName) ?? [];
       expect(emitted.before).toEqual({ id: 'policy-1', allowedPlatformTypes: [PlatformType.Tabletop] });
       expect(emitted.after).toEqual({
         id: 'policy-1',
-        allowedPlatformTypes: [PlatformType.Tabletop, PlatformType.PC],
+        allowedPlatformTypes: [PlatformType.PC, PlatformType.Tabletop],
       });
       expect(webhookFields()).toEqual(['allowedPlatformTypes']);
       expect(emitter.emit).toHaveBeenCalledTimes(2);
+    });
+
+    // The lists aren't columns, so a patch that changes only a list leaves
+    // the row's own update with no column to write, and Prisma moves
+    // updatedAt only when it writes one (#1268).
+    it("moves the policy's updatedAt for a patch that changes only a list, and not for one that changes none (#1268)", async () => {
+      await update({ allowedPlatformIds: ['plat-2'] });
+
+      expect(tx.eventPolicy.update).toHaveBeenLastCalledWith({
+        where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.update) },
+        data: { updatedAt: expect.any(Date) },
+      });
+
+      emitter.emit.mockClear();
+      await update({ allowedPlatformIds: ['plat-1'] });
+
+      expect(tx.eventPolicy.update).toHaveBeenLastCalledWith({
+        where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.update) },
+        data: {},
+      });
     });
 
     it('names a changed list beside a changed column (#1268)', async () => {
