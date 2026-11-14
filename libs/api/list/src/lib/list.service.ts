@@ -124,9 +124,15 @@ export class ListService {
    * would close the race is on the user's own row, so it would serialize only
    * that user's creates, but it would contend there with the auth writes that
    * row also takes.
+   *
+   * The route's policy check reads only the action and the type, so the list
+   * about to be written is checked against the create conditions here. An API
+   * key whose `create:list` grant is pinned to one list id names a list that
+   * already exists, so it may create none (#1241).
    */
   async create(dto: CreateListDto): Promise<ListDto> {
     const userId = this.abilityService.getActingUserId();
+    this.abilityService.assertCurrentActorCan(Action.create, ResourceType.List, { userId, kind: ListKind.Custom });
 
     const list = await this.db.$transaction(async (tx) => {
       const held = await tx.list.aggregate({

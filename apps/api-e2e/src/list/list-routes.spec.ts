@@ -112,6 +112,19 @@ describe('list routes (#1241)', () => {
     );
     expect((await addEntry(user, list.id, {}).expect(400)).body.code).toBe('LIST_ENTRY_ONE_TARGET');
     expect(await db.client.listEntry.count({ where: { listId: list.id } })).toBe(2);
+
+    // The list carries the number of entries it holds, refused adds not counted.
+    const entryCount = async () =>
+      listEnvelope(
+        await request(baseUrl).get(`/api/lists/${list.id}`).set(user.headers).expect(200),
+        'GET /api/lists/:id',
+      ).entryCount;
+    expect(await entryCount()).toBe(2);
+    await request(baseUrl)
+      .delete(`${entriesPath(list.id)}/${byGame.id}`)
+      .set(user.headers)
+      .expect(200);
+    expect(await entryCount()).toBe(1);
   });
 
   it("keeps the wishlist's priorities to the wishlist (#1241)", async () => {

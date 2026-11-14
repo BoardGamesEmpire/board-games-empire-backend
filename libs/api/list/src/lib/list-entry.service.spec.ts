@@ -112,20 +112,10 @@ describe('ListEntryService', () => {
   afterEach(() => jest.clearAllMocks());
 
   describe('list', () => {
-    it("reads a list's entries only after reading the list under its ceiling, and 404s a list the actor cannot see (#1241)", async () => {
-      const order: string[] = [];
-      db.list.findFirst.mockImplementation((async () => {
-        order.push('read list');
-        return { id: LIST };
-      }) as never);
-      db.listEntry.findMany.mockImplementation((async () => {
-        order.push('read entries');
-        return [entryRow()];
-      }) as never);
-      db.listEntry.count.mockImplementation((async () => {
-        order.push('count entries');
-        return 1;
-      }) as never);
+    it("reads a list's entries with the list read under its ceiling, and 404s a list the actor cannot see (#1241)", async () => {
+      db.list.findFirst.mockResolvedValue({ id: LIST } as never);
+      db.listEntry.findMany.mockResolvedValue([entryRow()] as never);
+      db.listEntry.count.mockResolvedValue(1);
 
       const page = await service.list(LIST, paginationQuery({ limit: 20 }));
 
@@ -134,7 +124,6 @@ describe('ListEntryService', () => {
         where: { id: LIST, AND: [ceiling(Action.read, ResourceType.List)] },
         select: { id: true },
       });
-      expect(order).toEqual(['read list', 'read entries', 'count entries']);
       // A top-level read of the entries, not a relation filter under the list:
       // Prisma drops a deny-all ceiling inside one (docs/agents/gotchas.md).
       expect(db.listEntry.findMany).toHaveBeenCalledWith(
@@ -143,23 +132,25 @@ describe('ListEntryService', () => {
       expect(db.listEntry.count).toHaveBeenCalledWith({ where: { listId: LIST } });
       expect(page).toEqual({ rows: [entryRow()], total: 1 });
 
-      db.listEntry.findMany.mockClear();
       db.list.findFirst.mockResolvedValue(null);
 
       await expect(service.list('list-9', paginationQuery({ limit: 20 }))).rejects.toMatchObject(LIST_NOT_FOUND);
-      expect(db.listEntry.findMany).not.toHaveBeenCalled();
     });
 
-    it('reads the rows and the count in one REPEATABLE READ transaction (#1241)', async () => {
+    // A list made Private or deleted between a separate check and the entry
+    // read would otherwise be answered with entries the reader may no longer
+    // see, or with an empty 200 for a list that is gone.
+    it('reads the list, its rows and their count in one REPEATABLE READ snapshot (#1241)', async () => {
       db.list.findFirst.mockResolvedValue({ id: LIST } as never);
       db.listEntry.findMany.mockResolvedValue([]);
       db.listEntry.count.mockResolvedValue(0);
 
       await service.list(LIST, paginationQuery({ limit: 20 }));
 
-      expect(batchTransactionCall(db).options).toEqual({
-        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
-      });
+      const { operations, options } = batchTransactionCall(db);
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+      expect(operations).toHaveLength(3);
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     });
   });
 

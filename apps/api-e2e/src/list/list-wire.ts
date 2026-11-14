@@ -9,7 +9,7 @@ import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescripti
  */
 
 /** A list as the routes return it: its columns and the number of entries it holds. */
-export type ListWire = Wire<List> & { readonly _count: { readonly entries: number } };
+export type ListWire = Wire<List> & { readonly entryCount: number };
 
 /** A list entry as the routes return it, with the game or platform game it names embedded. */
 export type ListEntryWire = Wire<ListEntry> & {

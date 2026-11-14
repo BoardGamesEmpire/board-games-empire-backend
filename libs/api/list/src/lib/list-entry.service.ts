@@ -101,29 +101,26 @@ export class ListEntryService {
   ) {}
 
   /**
-   * One page of a list's entries, in order. The list is read first, under the
-   * list read ceiling, which also records the `List` scope `paginated()`
-   * checks; a list the actor can't see is a 404 before any entry is read
+   * One page of a list's entries, in order. The list is read under the list
+   * read ceiling, which also records the `List` scope `paginated()` checks; a
+   * list the actor can't see is a 404 and its entries are never returned
    * (#1241).
    *
-   * The entries are then a top-level read by `listId`, not a relation filter
-   * under the list: Prisma drops a deny-all ceiling inside one
-   * (docs/agents/gotchas.md). The rows and the count share a REPEATABLE READ
-   * snapshot, so the total never disagrees with the rows (#230).
+   * The entries are a top-level read by `listId`, not a relation filter under
+   * the list: Prisma drops a deny-all ceiling inside one
+   * (docs/agents/gotchas.md). The list, the rows and the count share one
+   * REPEATABLE READ snapshot, so a list made Private or deleted mid-read is
+   * never answered with entries from after the change, and the total never
+   * disagrees with the rows (#230).
    */
   async list(listId: string, pagination: PaginationQueryDto): Promise<PaginatedRows<ListEntryDto>> {
-    const list = await this.db.list.findFirst({
-      where: this.scopeComposer.compose(ResourceType.List, Action.read, { id: listId }),
-      select: { id: true },
-    });
-
-    if (!list) {
-      throw listNotFound(listId);
-    }
-
     const where = { listId } satisfies Prisma.ListEntryWhereInput;
-    const [rows, total] = await this.db.$transaction(
+    const [list, rows, total] = await this.db.$transaction(
       [
+        this.db.list.findFirst({
+          where: this.scopeComposer.compose(ResourceType.List, Action.read, { id: listId }),
+          select: { id: true },
+        }),
         this.db.listEntry.findMany({
           where,
           select: LIST_ENTRY_SELECT,
@@ -135,6 +132,10 @@ export class ListEntryService {
       ],
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
+
+    if (!list) {
+      throw listNotFound(listId);
+    }
 
     return { rows, total };
   }

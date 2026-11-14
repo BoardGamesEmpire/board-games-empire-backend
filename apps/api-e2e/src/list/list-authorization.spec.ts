@@ -225,6 +225,26 @@ describe('list authorization (#1241)', () => {
     ]);
   });
 
+  // The create route's policy check reads only the action and the type. A key
+  // whose create:list grant is pinned to one list id names a list that already
+  // exists, so the service's check of the new list refuses it.
+  it('refuses a list create from a key whose create:list grant is pinned to one list (#1241)', async () => {
+    const owner = await actors.user();
+    const custom = await arrangeList(db.client, owner.user.id);
+    const create = { slugs: ['create:list'], resourceType: ResourceType.List };
+    const pinned = await mintApiKey(baseUrl, db.client, owner, { ...create, resourceId: custom.id });
+    const unpinned = await mintApiKey(baseUrl, db.client, owner, create);
+    const held = () => db.client.list.count({ where: { userId: owner.user.id } });
+    const before = await held();
+
+    await request(baseUrl).post('/api/lists').set(pinned.headers).send({ name: 'pinned' }).expect(403);
+    expect(await held()).toBe(before);
+
+    // The control: an unpinned key holding the same slug creates the list.
+    await request(baseUrl).post('/api/lists').set(unpinned.headers).send({ name: 'unpinned' }).expect(201);
+    expect(await held()).toBe(before + 1);
+  });
+
   it("ignores the owner's show-collection-to-friends preference (#1241)", async () => {
     const owner = await actors.user();
     const friend = await actors.user();

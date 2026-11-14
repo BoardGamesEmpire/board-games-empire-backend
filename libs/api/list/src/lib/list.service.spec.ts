@@ -9,7 +9,7 @@ import {
   unwrapTransaction,
   type MockDatabaseService,
 } from '@bge/testing';
-import { Logger } from '@nestjs/common';
+import { ForbiddenException, Logger } from '@nestjs/common';
 import { LISTS_MAX_PER_USER } from './list.constants';
 import { ListService } from './list.service';
 
@@ -39,13 +39,16 @@ const LIST_NOT_FOUND = { status: 404, code: 'LIST_NOT_FOUND' };
 describe('ListService', () => {
   let service: ListService;
   let db: MockDatabaseService;
-  let abilityService: jest.Mocked<Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId'>>;
+  let abilityService: jest.Mocked<
+    Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId' | 'assertCurrentActorCan'>
+  >;
   let compose: jest.SpyInstance;
 
   beforeEach(async () => {
     abilityService = {
       getCurrentResourceConditions: jest.fn().mockReturnValue([COND]),
       getActingUserId: jest.fn().mockReturnValue(ME),
+      assertCurrentActorCan: jest.fn(),
     };
 
     const ctx = await createTestingModuleWithDb({
@@ -171,6 +174,21 @@ describe('ListService', () => {
       expect(db.list.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ position: 0 }) }),
       );
+    });
+
+    it('checks the list it is about to write against the create conditions, and writes nothing when refused (#1241)', async () => {
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+
+      await expect(service.create({ name: 'Top 100' })).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.create, ResourceType.List, {
+        userId: ME,
+        kind: ListKind.Custom,
+      });
+      expect(db.list.aggregate).not.toHaveBeenCalled();
+      expect(db.list.create).not.toHaveBeenCalled();
     });
 
     it('refuses a list past the per-user limit with LIST_LIMIT_REACHED (#1241)', async () => {
