@@ -29,7 +29,7 @@ import type { UpdateEventPolicyDto } from './dto/update-event-policy.dto';
 import type { UpdateOccurrencePolicyDto } from './dto/update-occurrence-policy.dto';
 import { EventPolicyService } from './event-policy.service';
 import { EventPolicyUpdatedEvent, OccurrencePolicyUpdatedEvent } from './events/event-policy.events';
-import { EVENT_POLICY_VIEW_INCLUDE, OCCURRENCE_POLICY_VIEW_INCLUDE, type OccurrencePolicyView } from './policy-view';
+import { POLICY_VIEW_INCLUDE, type OccurrencePolicyView } from './policy-view';
 
 /** A ceiling of its own for each type and action, so a test can tell which one a query was given. */
 const ceiling = (resourceType: string, action: string) => [{ ceiling: `${action}:${resourceType}` }];
@@ -207,11 +207,11 @@ describe('EventPolicyService', () => {
     ]);
     expect(tx.eventPolicy.findUnique).toHaveBeenNthCalledWith(1, {
       where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.update) },
-      include: EVENT_POLICY_VIEW_INCLUDE,
+      include: POLICY_VIEW_INCLUDE,
     });
     expect(tx.eventOccurrencePolicy.findMany).toHaveBeenCalledWith({
       where: { occurrence: { eventId: 'event-1' } },
-      include: OCCURRENCE_POLICY_VIEW_INCLUDE,
+      include: POLICY_VIEW_INCLUDE,
     });
   });
 
@@ -343,7 +343,7 @@ describe('EventPolicyService', () => {
     expect(tx.eventPolicy.findUnique).toHaveBeenCalledTimes(1);
     expect(tx.eventPolicy.findUnique).toHaveBeenCalledWith({
       where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.update) },
-      include: EVENT_POLICY_VIEW_INCLUDE,
+      include: POLICY_VIEW_INCLUDE,
     });
     expect(tx.eventOccurrencePolicy.findMany).not.toHaveBeenCalled();
     expect(tx.eventPolicy.update).not.toHaveBeenCalled();
@@ -379,7 +379,7 @@ describe('EventPolicyService', () => {
     await expect(update({ allowSpectators: false })).resolves.toEqual(asView(readable));
     expect(tx.eventPolicy.findUnique).toHaveBeenLastCalledWith({
       where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.read) },
-      include: EVENT_POLICY_VIEW_INCLUDE,
+      include: POLICY_VIEW_INCLUDE,
     });
 
     emitter.emit.mockClear();
@@ -420,7 +420,7 @@ describe('EventPolicyService', () => {
   });
 
   // A form that re-sends what it loaded changes nothing, so it writes no
-  // audit row and sends no webhook (#728).
+  // audit entry and sends no webhook (#728).
   it('emits nothing, neither the audit event nor the webhook, when the patch changes no value (#728)', async () => {
     await update({ gameAdditionMode: GameAdditionMode.Direct, allowSpectators: true });
 
@@ -481,7 +481,7 @@ describe('EventPolicyService', () => {
       await expect(update({ allowedPlatformIds: ['plat-2'] })).resolves.toEqual(asView(readable, lists));
     });
 
-    // The audit row records the list as it is stored and served, deduplicated
+    // The audit entry records the list as it is stored and served, deduplicated
     // and sorted, so its before and after compare by value whatever order the
     // request sent (#1268).
     it('emits once for a patch that changes only a list, naming the list as it is stored (#1268)', async () => {
@@ -654,11 +654,11 @@ describe('EventPolicyService', () => {
       ]);
       expect(tx.eventPolicy.findUnique).toHaveBeenCalledWith({
         where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.update) },
-        include: EVENT_POLICY_VIEW_INCLUDE,
+        include: POLICY_VIEW_INCLUDE,
       });
       expect(tx.eventOccurrencePolicy.findUnique).toHaveBeenCalledWith({
         where: { occurrenceId: 'occ-1' },
-        include: OCCURRENCE_POLICY_VIEW_INCLUDE,
+        include: POLICY_VIEW_INCLUDE,
       });
     });
 
@@ -737,7 +737,7 @@ describe('EventPolicyService', () => {
       expect(domainEmit().after).toEqual({ id: 'occ-policy-1', maxAttendees: null });
     });
 
-    // The audit row is filed on the date, and the webhook goes to the readers
+    // The audit entry is filed on the date, and the webhook goes to the readers
     // of the event's policy, naming the date (#796, #728).
     it("emits OccurrencePolicyUpdatedEvent and the webhook with the date's id, only when a value changed (#796)", async () => {
       tx.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', householdId: 'hh-1' }));
@@ -951,7 +951,7 @@ describe('EventPolicyService', () => {
       });
       expect(tx.eventOccurrencePolicy.findUniqueOrThrow).toHaveBeenCalledWith({
         where: { id: 'occ-policy-1' },
-        include: OCCURRENCE_POLICY_VIEW_INCLUDE,
+        include: POLICY_VIEW_INCLUDE,
       });
 
       emitter.emit.mockClear();

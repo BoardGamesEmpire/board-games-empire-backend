@@ -11,13 +11,13 @@ import type { EventPolicyView, OccurrencePolicyView } from '../policy-view';
  * context fields; the acting actor, source, and correlationId live in CLS and
  * are read at handle time — never on the payload. All events here are audited
  * by default (opt out per class with `@Auditable(false)`); only before/after
- * reach the audit row, so context fields stay out of persistence.
+ * reach the audit entry, so context fields stay out of persistence.
  */
 
 type EventPolicyUpdatedSnapshot = Readonly<Partial<EventPolicyView> & Pick<EventPolicy, 'id'>>;
 
 /**
- * before/after carry the changed subset only (plus `id`), as every update's audit row does (#728).
+ * before/after carry the changed subset only (plus `id`), as every update's audit entry does (#728).
  * A changed allowed list is in it by its list name, as the ids or types it held (#1268).
  */
 export class EventPolicyUpdatedEvent extends MutationEvent<EventPolicy> {
@@ -46,7 +46,7 @@ type OccurrencePolicyUpdatedSnapshot = Readonly<Partial<OccurrencePolicyView> & 
 /**
  * A change to a date's own policy (#796). It is filed on the date, so the
  * date's audit trail shows it. before/after carry the changed subset only
- * (plus the policy row's `id`), as every update's audit row does (#728); a
+ * (plus the policy row's `id`), as every update's audit entry does (#728); a
  * changed allowed list is in it by its list name. Before the date's first
  * write, every field was the event's: `null`, an empty list, or no flag.
  */

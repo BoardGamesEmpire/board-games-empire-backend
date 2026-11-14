@@ -10,7 +10,7 @@ import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
 
-const EVENTS = "`null` means the event's.";
+const NULL_MEANS_EVENTS = "`null` means the event's.";
 
 /**
  * A patch to a date's own policy (#796): the fields it overrides for that
@@ -36,7 +36,7 @@ export class UpdateOccurrencePolicyDto {
     nullable: true,
     description:
       "`false` lifts the event's category restriction for this date, which `None` and `TightenOnly` refuse " +
-      `while the event restricts categories. ${EVENTS}`,
+      `while the event restricts categories. ${NULL_MEANS_EVENTS}`,
   })
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @IsOptional()
@@ -89,19 +89,19 @@ export class UpdateOccurrencePolicyDto {
 
   // --- Capacity ---
 
-  @ApiPropertyOptional({ nullable: true, description: EVENTS })
+  @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
   @IsOptional()
   maxAttendees?: number | null;
 
-  @ApiPropertyOptional({ nullable: true, description: EVENTS })
+  @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
   @IsOptional()
   maxTotalParticipants?: number | null;
 
-  @ApiPropertyOptional({ nullable: true, description: EVENTS })
+  @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS })
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @IsOptional()
   strictCapacity?: boolean | null;
@@ -117,29 +117,29 @@ export class UpdateOccurrencePolicyDto {
 
   // --- Participation ---
 
-  @ApiPropertyOptional({ nullable: true, description: EVENTS })
+  @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS })
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @IsOptional()
   requireHostApprovalToJoin?: boolean | null;
 
-  @ApiPropertyOptional({ nullable: true, description: EVENTS })
+  @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS })
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @IsOptional()
   allowSpectators?: boolean | null;
 
   // --- Game controls ---
 
-  @ApiPropertyOptional({ enum: GameAdditionMode, nullable: true, description: EVENTS })
+  @ApiPropertyOptional({ enum: GameAdditionMode, nullable: true, description: NULL_MEANS_EVENTS })
   @IsEnum(GameAdditionMode, { message: i18nValidationMessage('validation.isEnum') })
   @IsOptional()
   gameAdditionMode?: GameAdditionMode | null;
 
-  @ApiPropertyOptional({ nullable: true, description: EVENTS })
+  @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS })
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @IsOptional()
   restrictToAttendeePool?: boolean | null;
 
-  @ApiPropertyOptional({ nullable: true, description: `Minutes. ${EVENTS}` })
+  @ApiPropertyOptional({ nullable: true, description: `Minutes. ${NULL_MEANS_EVENTS}` })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
   @IsOptional()
@@ -147,7 +147,7 @@ export class UpdateOccurrencePolicyDto {
 
   // --- Voting controls (only meaningful when gameAdditionMode = RequiresVote) ---
 
-  @ApiPropertyOptional({ enum: VoteThresholdType, nullable: true, description: EVENTS })
+  @ApiPropertyOptional({ enum: VoteThresholdType, nullable: true, description: NULL_MEANS_EVENTS })
   @IsEnum(VoteThresholdType, { message: i18nValidationMessage('validation.isEnum') })
   @IsOptional()
   voteThresholdType?: VoteThresholdType | null;
@@ -156,14 +156,14 @@ export class UpdateOccurrencePolicyDto {
     nullable: true,
     description:
       "Supermajority (e.g. 66) and FixedCount (e.g. 3) need a value, the date's or the event's. A Supermajority " +
-      `percentage is at most 100. ${EVENTS}`,
+      `percentage is at most 100. ${NULL_MEANS_EVENTS}`,
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
   @IsOptional()
   voteThresholdValue?: number | null;
 
-  @ApiPropertyOptional({ enum: VoteQuorumType, nullable: true, description: EVENTS })
+  @ApiPropertyOptional({ enum: VoteQuorumType, nullable: true, description: NULL_MEANS_EVENTS })
   @IsEnum(VoteQuorumType, { message: i18nValidationMessage('validation.isEnum') })
   @IsOptional()
   voteQuorumType?: VoteQuorumType | null;
@@ -172,26 +172,26 @@ export class UpdateOccurrencePolicyDto {
     nullable: true,
     description:
       "PercentOfAttendees and FixedCount quorum types need a value, the date's or the event's. A " +
-      `PercentOfAttendees percentage is at most 100. ${EVENTS}`,
+      `PercentOfAttendees percentage is at most 100. ${NULL_MEANS_EVENTS}`,
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
   @IsOptional()
   voteQuorumValue?: number | null;
 
-  @ApiPropertyOptional({ enum: VoteEligibility, nullable: true, description: EVENTS })
+  @ApiPropertyOptional({ enum: VoteEligibility, nullable: true, description: NULL_MEANS_EVENTS })
   @IsEnum(VoteEligibility, { message: i18nValidationMessage('validation.isEnum') })
   @IsOptional()
   voteEligibility?: VoteEligibility | null;
 
-  @ApiPropertyOptional({ enum: InterestedWeight, nullable: true, description: EVENTS })
+  @ApiPropertyOptional({ enum: InterestedWeight, nullable: true, description: NULL_MEANS_EVENTS })
   @IsEnum(InterestedWeight, { message: i18nValidationMessage('validation.isEnum') })
   @IsOptional()
   interestedWeight?: InterestedWeight | null;
 
   @ApiPropertyOptional({
     nullable: true,
-    description: `Hours a nomination for this date stays open for votes. ${EVENTS}`,
+    description: `Hours a nomination for this date stays open for votes. ${NULL_MEANS_EVENTS}`,
   })
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })

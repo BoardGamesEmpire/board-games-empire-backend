@@ -1,6 +1,14 @@
 import { Action, ResourceType, type Prisma } from '@bge/database';
 import type { AbilityService } from '@bge/permissions';
-import { EVENT_POLICY_VIEW_INCLUDE, toEventPolicyView, type EventPolicyRow, type EventPolicyView } from './policy-view';
+import {
+  POLICY_VIEW_INCLUDE,
+  toEventPolicyView,
+  toOccurrencePolicyView,
+  type EventPolicyRow,
+  type EventPolicyView,
+  type OccurrencePolicyRow,
+  type OccurrencePolicyView,
+} from './policy-view';
 
 /**
  * The query for an event's policy under the `read:event_policy` ceiling, with
@@ -20,7 +28,7 @@ export function eventPolicyReadArgs(abilityService: AbilityService, eventId: str
       // eslint-disable-next-line no-restricted-syntax -- the event's one policy row, not a collection read
       AND: abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.read),
     },
-    include: EVENT_POLICY_VIEW_INCLUDE,
+    include: POLICY_VIEW_INCLUDE,
   } satisfies Prisma.EventPolicyFindUniqueArgs;
 }
 
@@ -56,4 +64,31 @@ export async function canReadEventPolicy(
   const { where } = eventPolicyReadArgs(abilityService, eventId);
 
   return (await client.eventPolicy.count({ where })) > 0;
+}
+
+/**
+ * A date's own policy as it is served (#796, #1211): its row as a view, or
+ * `null` when the actor may not read the event's policy or the date has no
+ * policy row. A date's policy is the event's with overrides and has no read
+ * permission of its own, so the event policy's read ceiling is its ceiling.
+ * `canReadPolicy` is that ceiling's answer for the date's event, from
+ * {@link canReadEventPolicy} or a read with {@link eventPolicyReadArgs}.
+ */
+export function serveOccurrencePolicy(
+  row: OccurrencePolicyRow | null,
+  canReadPolicy: boolean,
+): OccurrencePolicyView | null {
+  return canReadPolicy && row ? toOccurrencePolicyView(row) : null;
+}
+
+/**
+ * The dates' own policies of one event, each served as
+ * {@link serveOccurrencePolicy} serves one: `[]` when the actor may not read
+ * the event's policy.
+ */
+export function serveOccurrencePolicies(
+  rows: readonly OccurrencePolicyRow[],
+  canReadPolicy: boolean,
+): OccurrencePolicyView[] {
+  return canReadPolicy ? rows.map(toOccurrencePolicyView) : [];
 }

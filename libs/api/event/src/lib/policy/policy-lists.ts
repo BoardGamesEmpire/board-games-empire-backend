@@ -1,16 +1,19 @@
-import type { PlatformType, Prisma } from '@bge/database';
+import type { Prisma } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
 import { Http } from '@status/codes';
+import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
 import type { PolicyListsView } from './policy-view';
 
 /**
  * The allowed lists sent with a policy write, the event's or a date's (#1268).
  * A list left out is left as it is.
  */
-export interface PolicyLists {
-  allowedPlatformTypes?: PlatformType[];
-  allowedPlatformIds?: string[];
-  allowedCategoryIds?: string[];
+export type PolicyLists = Partial<PolicyListsView>;
+
+/** The lists a policy write changes, as they were and as they will be stored. */
+export interface ChangedPolicyLists {
+  before: PolicyLists;
+  after: PolicyLists;
 }
 
 const LIST_KEYS = ['allowedPlatformTypes', 'allowedPlatformIds', 'allowedCategoryIds'] as const;
@@ -28,13 +31,10 @@ function sameMembers(stored: readonly string[], sent: readonly string[]): boolea
  * (`before`) and as they will be stored (`after`) (#1268). A list equal to the
  * stored one in any order, or left out, is no change. Both sides are
  * deduplicated and sorted, as the lists are stored and served, so an audit
- * row's before and after compare by value. `after` is what the write
+ * entry's before and after compare by value. `after` is what the write
  * replaces, and its keys, in the lists' own order, name what changed.
  */
-export function changedPolicyLists(
-  stored: PolicyListsView,
-  sent: PolicyLists,
-): { before: PolicyLists; after: PolicyLists } {
+export function changedPolicyLists(stored: PolicyListsView, sent: PolicyLists): ChangedPolicyLists {
   const changed = LIST_KEYS.filter((key) => {
     const list = sent[key];
     return list !== undefined && !sameMembers(stored[key], list);
@@ -43,6 +43,57 @@ export function changedPolicyLists(
   return {
     before: Object.fromEntries(changed.map((key) => [key, stored[key]])),
     after: Object.fromEntries(changed.map((key) => [key, [...new Set(sent[key])].sort()])),
+  };
+}
+
+/**
+ * A policy patch, the event's or a date's, split into the columns it sets and
+ * the lists it changes, measured against the stored policy with
+ * {@link changedPolicyLists} (#1268). The lists are not columns of the row:
+ * the columns go to the row's write, and the changed lists to
+ * `replaceEventPolicyLists` or `replaceOccurrencePolicyLists`.
+ */
+export function splitPolicyPatch<Patch extends PolicyLists>(stored: PolicyListsView, patch: Patch) {
+  const { allowedPlatformTypes, allowedPlatformIds, allowedCategoryIds, ...columns } = patch;
+
+  return {
+    columns,
+    lists: changedPolicyLists(stored, { allowedPlatformTypes, allowedPlatformIds, allowedCategoryIds }),
+  };
+}
+
+/**
+ * The columns a policy write sets on its row. Prisma moves `updatedAt` only
+ * when it writes a column, and the lists are not columns, so a write that
+ * changes a list moves it here (#1268).
+ */
+export function policyColumnsUpdate<Columns extends object>(
+  columns: Columns,
+  lists: ChangedPolicyLists,
+): Columns & { updatedAt?: Date } {
+  return Object.keys(lists.after).length > 0 ? { ...columns, updatedAt: new Date() } : columns;
+}
+
+/**
+ * What a policy write changed, for its audit entry and webhook (#728, #1268):
+ * the names of the columns whose values changed and of the lists that
+ * changed, and their values before and after, with the row's `id`. The lists
+ * are not columns of the row, so their values come from what was read before
+ * the write and what it wrote. An empty `changed` means the write changed
+ * nothing and emits nothing.
+ */
+export function policyChange<Columns extends object>(
+  before: Columns & { id: string },
+  after: Columns & { id: string },
+  columnKeys: readonly (keyof Columns)[],
+  lists: ChangedPolicyLists,
+) {
+  const changedColumns = changedKeys<Columns>(before, after, columnKeys);
+
+  return {
+    changed: [...changedColumns, ...Object.keys(lists.after)],
+    before: { ...pickSnapshot(before, changedColumns), ...lists.before },
+    after: { ...pickSnapshot(after, changedColumns), ...lists.after },
   };
 }
 

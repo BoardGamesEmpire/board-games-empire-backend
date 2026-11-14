@@ -32,7 +32,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { lineupStillAhead } from '../attendee/attendance';
 import { GameRemovedFromEventEvent } from '../nomination/events/nomination.events';
-import { OCCURRENCE_POLICY_VIEW_INCLUDE } from '../policy/policy-view';
+import { POLICY_VIEW_INCLUDE } from '../policy/policy-view';
 import { OccurrenceEvents } from './constants';
 import { EventOccurrenceService } from './event-occurrence.service';
 import {
@@ -274,7 +274,7 @@ describe('EventOccurrenceService', () => {
       await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
       await service.getOccurrence('event-1', 'occ-1');
 
-      const include = { policy: { include: OCCURRENCE_POLICY_VIEW_INCLUDE } };
+      const include = { policy: { include: POLICY_VIEW_INCLUDE } };
       expect(db.eventOccurrence.findMany).toHaveBeenCalledWith(expect.objectContaining({ include }));
       expect(db.eventOccurrence.findUnique).toHaveBeenCalledWith(expect.objectContaining({ include }));
     });
@@ -434,15 +434,20 @@ describe('EventOccurrenceService', () => {
         Promise.resolve('suppliedBy' in args.where ? [] : [game('g1', 'occ-1')])) as never);
     });
 
-    it.each(answeredThroughReads)('$name embeds the policy alone in its write', async ({ name, op, status }) => {
-      db.eventOccurrence.findUnique.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status }));
+    it.each(answeredThroughReads)(
+      '$name embeds the policy alone in its write (#1211)',
+      async ({ name, op, status }) => {
+        db.eventOccurrence.findUnique.mockResolvedValue(
+          makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status }),
+        );
 
-      await run(name);
+        await run(name);
 
-      expect(db.eventOccurrence[op]).toHaveBeenCalledWith(
-        expect.objectContaining({ include: { policy: { include: OCCURRENCE_POLICY_VIEW_INCLUDE } } }),
-      );
-    });
+        expect(db.eventOccurrence[op]).toHaveBeenCalledWith(
+          expect.objectContaining({ include: { policy: { include: POLICY_VIEW_INCLUDE } } }),
+        );
+      },
+    );
 
     // A new date has no policy row, so its answer's `policy` is `null` with no read (#1211).
     it('addOccurrence embeds nothing, and answers with a null policy (#1211)', async () => {

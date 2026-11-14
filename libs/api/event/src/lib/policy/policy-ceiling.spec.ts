@@ -13,7 +13,7 @@ import {
   readEventPolicyView,
   toEventPolicyViewOrNull,
 } from './policy-ceiling';
-import { EVENT_POLICY_VIEW_INCLUDE } from './policy-view';
+import { POLICY_VIEW_INCLUDE } from './policy-view';
 
 const asTx = (mock: MockDatabaseService): Prisma.TransactionClient => mock as unknown as Prisma.TransactionClient;
 
@@ -55,7 +55,7 @@ describe('the event policy read ceiling', () => {
   it("puts the read:event_policy ceiling in the read's top-level where, with the lists embedded (#796)", () => {
     expect(eventPolicyReadArgs(ability, 'event-1')).toEqual({
       where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.read) },
-      include: EVENT_POLICY_VIEW_INCLUDE,
+      include: POLICY_VIEW_INCLUDE,
     });
   });
 

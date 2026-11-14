@@ -46,7 +46,7 @@ const invalid = (key: I18nPath) => new CodedHttpException(Http.BadRequest, 'EVEN
  * event's scope (#796). `strictCapacity` beside no capacity limit restricts
  * nothing, so it stands.
  */
-export function assertOccurrenceRestrictionsConsistent(occurrence: OccurrenceRestrictions): void {
+function assertOccurrenceRestrictionsConsistent(occurrence: OccurrenceRestrictions): void {
   if (occurrence.platformTypesUnrestricted && occurrence.allowedPlatformTypes.length > 0) {
     throw invalid('errors.event_policy.platform_types_unrestricted_with_list');
   }

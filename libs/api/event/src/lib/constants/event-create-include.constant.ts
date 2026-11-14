@@ -1,5 +1,5 @@
 import { Prisma } from '@bge/database';
-import { EVENT_POLICY_VIEW_INCLUDE, type EventPolicyView } from '../policy/policy-view';
+import { POLICY_VIEW_INCLUDE, type EventPolicyView } from '../policy/policy-view';
 import { ATTENDEE_ORDER } from './attendee-order.constant';
 import { OCCURRENCE_ORDER } from './occurrence-order.constant';
 
@@ -26,7 +26,7 @@ export const EVENT_CREATE_ATTENDEE_INCLUDE = {
  */
 export const EVENT_CREATE_INCLUDE = {
   occurrences: { orderBy: OCCURRENCE_ORDER },
-  policy: { include: EVENT_POLICY_VIEW_INCLUDE },
+  policy: { include: POLICY_VIEW_INCLUDE },
   attendees: { include: EVENT_CREATE_ATTENDEE_INCLUDE, orderBy: ATTENDEE_ORDER },
 } as const satisfies Prisma.EventInclude;
 

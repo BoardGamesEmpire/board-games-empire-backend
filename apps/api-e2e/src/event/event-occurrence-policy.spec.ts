@@ -55,7 +55,7 @@ describe("a date's own policy and the allowed lists (#796)", () => {
   const baseUrl = requireBaseUrl(process.env);
 
   /** The audit listener writes after the response; generous for a loaded CI runner. */
-  const AUDIT_ROW_LANDS_MS = 5_000;
+  const AUDIT_ENTRY_LANDS_MS = 5_000;
 
   /**
    * The `event` column of a date policy change's audit entry. Inlined rather
@@ -66,6 +66,9 @@ describe("a date's own policy and the allowed lists (#796)", () => {
 
   /** The keys that name a date's policy row rather than set anything for the date. */
   const ROW_IDENTITY = new Set(['id', 'occurrenceId', 'createdAt', 'updatedAt']);
+
+  /** The "no restriction" flags, which a date leaves unset as `false` rather than `null`. */
+  const UNRESTRICTED_FLAGS = new Set(['platformTypesUnrestricted', 'platformsUnrestricted', 'capacityUnrestricted']);
 
   let db: TestDatabase;
   let actors: Actors;
@@ -145,12 +148,19 @@ describe("a date's own policy and the allowed lists (#796)", () => {
       include: { allowedPlatformTypes: { orderBy: { platformType: 'asc' } } },
     });
 
-  /** What a served date's policy sets for the date: each field that isn't `null`, an empty list or an unset flag. */
+  /**
+   * What a served date's policy sets for the date: each field that isn't
+   * `null`, an empty list or an unset "no restriction" flag. Any other
+   * `false`, such as `allowSpectators: false`, is set, so it shows.
+   */
   const fieldsSet = (policy: OccurrencePolicyWire) =>
     Object.fromEntries(
       Object.entries(policy).filter(
         ([key, value]) =>
-          !ROW_IDENTITY.has(key) && value !== null && value !== false && !(Array.isArray(value) && value.length === 0),
+          !ROW_IDENTITY.has(key) &&
+          value !== null &&
+          !(UNRESTRICTED_FLAGS.has(key) && value === false) &&
+          !(Array.isArray(value) && value.length === 0),
       ),
     );
 
@@ -170,7 +180,7 @@ describe("a date's own policy and the allowed lists (#796)", () => {
       },
       {
         description: `the audit entry for a change to ${field} on date ${occurrenceId}'s policy`,
-        timeoutMs: AUDIT_ROW_LANDS_MS,
+        timeoutMs: AUDIT_ENTRY_LANDS_MS,
       },
     );
 
@@ -183,8 +193,10 @@ describe("a date's own policy and the allowed lists (#796)", () => {
       );
       expect(created.policy).toEqual(expect.objectContaining({ allowedPlatformTypes: [PlatformType.Tabletop] }));
 
-      // The create named no scope, so Any is the column's default, which only
-      // a real database applies (#796).
+      // The create named no scope, and the policy is served with Any, the
+      // column's default. This can't tell the default from a service that
+      // writes Any itself, only that a create naming no scope ends up with
+      // it (#796).
       const read = await readEvent(host, created.id);
       expect(read.policy).toEqual(
         expect.objectContaining({

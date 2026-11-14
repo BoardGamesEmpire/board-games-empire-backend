@@ -75,7 +75,7 @@ describe('changedPolicyLists', () => {
   });
 
   // Both sides deduplicated and sorted, as the lists are stored and served,
-  // so an audit row's before and after compare by value (#1268).
+  // so an audit entry's before and after compare by value (#1268).
   it('gives each changed list as it was and as it will be stored, deduplicated and sorted (#1268)', () => {
     expect(
       changedPolicyLists(stored, {

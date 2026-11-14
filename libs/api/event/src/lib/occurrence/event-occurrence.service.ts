@@ -22,13 +22,8 @@ import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
 import { assertEventNotCancelled } from '../lifecycle/event-lifecycle.helpers';
-import { canReadEventPolicy } from '../policy/policy-ceiling';
-import {
-  OCCURRENCE_POLICY_VIEW_INCLUDE,
-  toOccurrencePolicyView,
-  type OccurrencePolicyRow,
-  type OccurrencePolicyView,
-} from '../policy/policy-view';
+import { canReadEventPolicy, serveOccurrencePolicy } from '../policy/policy-ceiling';
+import { POLICY_VIEW_INCLUDE, type OccurrencePolicyView } from '../policy/policy-view';
 import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
 import { AVAILABILITY_VOTE_SLUG, countsAsVoter, voterGrantSelect } from '../vote/vote-grant';
 import { OccurrenceEvents } from './constants';
@@ -93,7 +88,7 @@ export class EventOccurrenceService {
       [
         this.db.eventOccurrence.findMany({
           where,
-          include: { policy: { include: OCCURRENCE_POLICY_VIEW_INCLUDE } },
+          include: { policy: { include: POLICY_VIEW_INCLUDE } },
           orderBy: OCCURRENCE_ORDER,
           skip: pagination.skip,
           take: pagination.pageSize,
@@ -107,7 +102,12 @@ export class EventOccurrenceService {
     const canReadPolicy = await canReadEventPolicy(this.db, this.abilityService, eventId);
 
     return {
-      rows: await this.withVotesAndGames(occurrences.map((occurrence) => servePolicy(occurrence, canReadPolicy))),
+      rows: await this.withVotesAndGames(
+        occurrences.map((occurrence) => ({
+          ...occurrence,
+          policy: serveOccurrencePolicy(occurrence.policy, canReadPolicy),
+        })),
+      ),
       total,
     };
   }
@@ -122,14 +122,16 @@ export class EventOccurrenceService {
         // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.read),
       },
-      include: { policy: { include: OCCURRENCE_POLICY_VIEW_INCLUDE } },
+      include: { policy: { include: POLICY_VIEW_INCLUDE } },
     });
 
     assert(occurrence, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
 
     const canReadPolicy = await canReadEventPolicy(this.db, this.abilityService, eventId);
 
-    const [detail] = await this.withVotesAndGames([servePolicy(occurrence, canReadPolicy)]);
+    const [detail] = await this.withVotesAndGames([
+      { ...occurrence, policy: serveOccurrencePolicy(occurrence.policy, canReadPolicy) },
+    ]);
     return detail;
   }
 
@@ -335,7 +337,7 @@ export class EventOccurrenceService {
               location: dto.location,
               sortOrder: dto.sortOrder,
             },
-            include: { policy: { include: OCCURRENCE_POLICY_VIEW_INCLUDE } },
+            include: { policy: { include: POLICY_VIEW_INCLUDE } },
           });
 
           return { existing, updated };
@@ -355,7 +357,8 @@ export class EventOccurrenceService {
 
       const removedIds = new Set(removedGames.map((game) => game.id));
       return {
-        ...servePolicy(updated, canReadPolicy),
+        ...updated,
+        policy: serveOccurrencePolicy(updated.policy, canReadPolicy),
         availabilityVotes,
         games: games.filter((game) => !removedIds.has(game.id)),
       };
@@ -426,7 +429,7 @@ export class EventOccurrenceService {
 
           return tx.eventOccurrence.delete({
             where: { id: occurrenceId, AND: deleteConditions },
-            include: { policy: { include: OCCURRENCE_POLICY_VIEW_INCLUDE } },
+            include: { policy: { include: POLICY_VIEW_INCLUDE } },
           });
         }),
       );
@@ -447,7 +450,7 @@ export class EventOccurrenceService {
       );
       emitRemovedGames(this.eventEmitter, eventId, removedGames, initiatedAt);
 
-      return { ...servePolicy(removed, canReadPolicy), availabilityVotes, games };
+      return { ...removed, policy: serveOccurrencePolicy(removed.policy, canReadPolicy), availabilityVotes, games };
     } catch (error) {
       this.logger.error(`Error removing occurrence ${occurrenceId} from event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -549,7 +552,7 @@ export class EventOccurrenceService {
             AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
           },
           data: { status: newStatus, ...extraData },
-          include: { policy: { include: OCCURRENCE_POLICY_VIEW_INCLUDE } },
+          include: { policy: { include: POLICY_VIEW_INCLUDE } },
         });
 
         return { before: current, updated: written };
@@ -572,7 +575,7 @@ export class EventOccurrenceService {
         ),
       );
 
-      return { ...servePolicy(updated, canReadPolicy), availabilityVotes, games };
+      return { ...updated, policy: serveOccurrencePolicy(updated.policy, canReadPolicy), availabilityVotes, games };
     } catch (error) {
       this.logger.error(`Error transitioning occurrence ${occurrenceId} to ${newStatus}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -877,22 +880,6 @@ export type OccurrenceDetail = Prisma.EventOccurrenceGetPayload<{
     games: { select: typeof OCCURRENCE_GAME_SELECT };
   };
 }> & { policy: OccurrencePolicyView | null; availabilityVotes: OccurrenceVote[] };
-
-/**
- * The date with its own policy served as `policy`, or `null` when the actor
- * may not read the event's policy: a date's policy is the event's with
- * overrides and has no read permission of its own, so the event policy's
- * ceiling is its ceiling (#796, #1211). A date with no policy row is `null`
- * either way.
- */
-function servePolicy<TOccurrence extends { policy: OccurrencePolicyRow | null }>(
-  occurrence: TOccurrence,
-  canReadPolicy: boolean,
-): Omit<TOccurrence, 'policy'> & { policy: OccurrencePolicyView | null } {
-  const { policy, ...rest } = occurrence;
-
-  return { ...rest, policy: canReadPolicy && policy ? toOccurrencePolicyView(policy) : null };
-}
 
 type VotesAndGames = Pick<OccurrenceDetail, 'availabilityVotes' | 'games'>;
 

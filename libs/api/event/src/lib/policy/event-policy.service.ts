@@ -16,40 +16,41 @@ import { Http } from '@status/codes';
 import assert from 'node:assert';
 import { eventWebhookIds } from '../event.service';
 import { lockLiveEvent } from '../utils/lock-live-event.util';
-import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
 import type { UpdateEventPolicyDto } from './dto/update-event-policy.dto';
 import type { UpdateOccurrencePolicyDto } from './dto/update-occurrence-policy.dto';
 import { assertValidVotingPolicy, foldPolicy } from './effective-policy';
 import { EventPolicyUpdatedEvent, OccurrencePolicyUpdatedEvent } from './events/event-policy.events';
 import { assertWithinOverrideScope, occurrencesExceedingScope } from './override-scope';
-import { canReadEventPolicy, readEventPolicyView } from './policy-ceiling';
+import { canReadEventPolicy, readEventPolicyView, serveOccurrencePolicy } from './policy-ceiling';
 import {
   assertPolicyReferencesExist,
-  changedPolicyLists,
+  policyChange,
+  policyColumnsUpdate,
   replaceEventPolicyLists,
   replaceOccurrencePolicyLists,
+  splitPolicyPatch,
 } from './policy-lists';
 import {
-  EVENT_POLICY_VIEW_INCLUDE,
-  OCCURRENCE_POLICY_VIEW_INCLUDE,
+  POLICY_VIEW_INCLUDE,
   toEventPolicyView,
   toOccurrencePolicyView,
   type EventPolicyView,
   type OccurrencePolicyView,
+  type PolicyListsView,
 } from './policy-view';
 
 /** The columns of a date's own policy, without the row's identity and timestamps. */
 type OccurrencePolicyColumns = Omit<EventOccurrencePolicy, 'id' | 'occurrenceId' | 'createdAt' | 'updatedAt'>;
 
-/** A date's own policy as it is served, without the row's identity and timestamps. */
-type OccurrencePolicyFields = Omit<OccurrencePolicyView, 'id' | 'occurrenceId' | 'createdAt' | 'updatedAt'>;
+/** A date's own policy as it is served, its columns and its lists, without the row's identity and timestamps. */
+type OccurrencePolicyColumnsAndLists = OccurrencePolicyColumns & PolicyListsView;
 
 /**
  * A date's policy before its first write: it sets nothing of its own, so each
  * field is the event's, and no "no restriction" flag is set. The schema's
  * defaults, for a date that has no row yet (#796).
  */
-const NO_OCCURRENCE_OVERRIDES: Readonly<OccurrencePolicyFields> = {
+const NO_OCCURRENCE_OVERRIDES: Readonly<OccurrencePolicyColumnsAndLists> = {
   restrictToGameCategories: null,
   allowedCategoryIds: [],
   allowedPlatformTypes: [],
@@ -126,13 +127,12 @@ export class EventPolicyService {
         const event = await lockLiveEvent(tx, eventId);
         const { updateCeiling, policy: existing } = await this.readPolicyToUpdate(tx, eventId);
 
-        const { allowedPlatformTypes, allowedPlatformIds, allowedCategoryIds, ...columns } = dto;
-        const lists = changedPolicyLists(existing, { allowedPlatformTypes, allowedPlatformIds, allowedCategoryIds });
+        const { columns, lists } = splitPolicyPatch(existing, dto);
 
-        const datePolicies = (
+        const storedOccurrencePolicies = (
           await tx.eventOccurrencePolicy.findMany({
             where: { occurrence: { eventId } },
-            include: OCCURRENCE_POLICY_VIEW_INCLUDE,
+            include: POLICY_VIEW_INCLUDE,
           })
         ).map(toOccurrencePolicyView);
 
@@ -140,14 +140,14 @@ export class EventPolicyService {
         // it, and each list sent in place of the stored one.
         const merged = { ...existing, ...columns, ...lists.after };
         assertValidVotingPolicy(merged);
-        for (const datePolicy of datePolicies) {
-          assertValidVotingPolicy(foldPolicy(merged, datePolicy));
+        for (const occurrencePolicy of storedOccurrencePolicies) {
+          assertValidVotingPolicy(foldPolicy(merged, occurrencePolicy));
         }
 
         // Every date's own restrictions stay within the scope the patch
         // leaves, measured against the restrictions it leaves (#796). The
         // dates in the way are named, and the host changes them first.
-        const exceeding = occurrencesExceedingScope(merged, datePolicies, merged.occurrenceOverrideScope);
+        const exceeding = occurrencesExceedingScope(merged, storedOccurrencePolicies, merged.occurrenceOverrideScope);
         if (exceeding.length > 0) {
           throw new CodedHttpException(
             Http.BadRequest,
@@ -157,12 +157,15 @@ export class EventPolicyService {
           );
         }
 
-        await assertPolicyReferencesExist(tx, { platformIds: allowedPlatformIds, categoryIds: allowedCategoryIds });
+        await assertPolicyReferencesExist(tx, {
+          platformIds: dto.allowedPlatformIds,
+          categoryIds: dto.allowedCategoryIds,
+        });
 
-        // The lists are not columns, and Prisma moves updatedAt only when it
-        // writes a column, so a changed list moves it here (#1268).
-        const data = Object.keys(lists.after).length > 0 ? { ...columns, updatedAt: new Date() } : columns;
-        const updated = await tx.eventPolicy.update({ where: { eventId, AND: updateCeiling }, data });
+        const updated = await tx.eventPolicy.update({
+          where: { eventId, AND: updateCeiling },
+          data: policyColumnsUpdate(columns, lists),
+        });
 
         // Only a list that differs is rewritten, so a re-sent list costs no writes.
         await replaceEventPolicyLists(tx, existing.id, lists.after);
@@ -172,14 +175,13 @@ export class EventPolicyService {
         return { event, existing, updated, columns, policy, lists };
       });
 
-      const changedColumns = changedKeys(existing, updated, Object.keys(columns) as (keyof EventPolicy)[]);
-      const changed = [...changedColumns, ...Object.keys(lists.after)];
+      const { changed, before, after } = policyChange<EventPolicy>(
+        existing,
+        updated,
+        Object.keys(columns) as (keyof EventPolicy)[],
+        lists,
+      );
       if (changed.length > 0) {
-        // The lists are not columns of the row, so their values come from what
-        // was read before and what was written.
-        const before = { ...pickSnapshot(existing, changedColumns), ...lists.before };
-        const after = { ...pickSnapshot(updated, changedColumns), ...lists.after };
-
         this.eventEmitter.emit(
           EventPolicyUpdatedEvent.eventName,
           new EventPolicyUpdatedEvent(before, after, eventId, initiatedAt),
@@ -187,7 +189,9 @@ export class EventPolicyService {
 
         // Their names, never their values: `data` is copied verbatim to a URL
         // the subscriber controls, and a receiver reads the values with its
-        // own credentials. No occurrenceId, as for `updateEvent` (#796).
+        // own credentials. The envelope's `occurrenceId`, its key for
+        // deduplicating deliveries and not a date's id, is left unset: as
+        // for `updateEvent`, each emit is its own delivery (#796).
         this.eventEmitter.emit(
           WebhookEventType.EventPolicyUpdated,
           webhookEnvelope({
@@ -260,55 +264,53 @@ export class EventPolicyService {
 
           const row = await tx.eventOccurrencePolicy.findUnique({
             where: { occurrenceId },
-            include: OCCURRENCE_POLICY_VIEW_INCLUDE,
+            include: POLICY_VIEW_INCLUDE,
           });
-          const existing: OccurrencePolicyFields = row ? toOccurrencePolicyView(row) : NO_OCCURRENCE_OVERRIDES;
+          const existing: OccurrencePolicyColumnsAndLists = row ? toOccurrencePolicyView(row) : NO_OCCURRENCE_OVERRIDES;
 
-          const { allowedPlatformTypes, allowedPlatformIds, allowedCategoryIds, ...columns } = dto;
-          const lists = changedPolicyLists(existing, { allowedPlatformTypes, allowedPlatformIds, allowedCategoryIds });
+          const { columns, lists } = splitPolicyPatch(existing, dto);
 
           // The date's policy the patch leaves, lists included.
           const merged = { ...existing, ...columns, ...lists.after };
           assertValidVotingPolicy(foldPolicy(eventPolicy, merged));
           assertWithinOverrideScope(eventPolicy, merged, eventPolicy.occurrenceOverrideScope);
 
-          await assertPolicyReferencesExist(tx, { platformIds: allowedPlatformIds, categoryIds: allowedCategoryIds });
+          await assertPolicyReferencesExist(tx, {
+            platformIds: dto.allowedPlatformIds,
+            categoryIds: dto.allowedCategoryIds,
+          });
 
-          // A changed list moves updatedAt, as on the event's policy (#1268).
-          const update = Object.keys(lists.after).length > 0 ? { ...columns, updatedAt: new Date() } : columns;
           const updated = await tx.eventOccurrencePolicy.upsert({
             where: { occurrenceId },
             create: { occurrenceId, ...columns },
-            update,
+            update: policyColumnsUpdate(columns, lists),
           });
 
           await replaceOccurrencePolicyLists(tx, updated.id, lists.after);
 
-          const policy = (await canReadEventPolicy(tx, this.abilityService, eventId))
-            ? toOccurrencePolicyView(
-                await tx.eventOccurrencePolicy.findUniqueOrThrow({
-                  where: { id: updated.id },
-                  include: OCCURRENCE_POLICY_VIEW_INCLUDE,
-                }),
-              )
+          // The row is read back only for an actor it is served to (#1211).
+          const canReadPolicy = await canReadEventPolicy(tx, this.abilityService, eventId);
+          const readBack = canReadPolicy
+            ? await tx.eventOccurrencePolicy.findUniqueOrThrow({
+                where: { id: updated.id },
+                include: POLICY_VIEW_INCLUDE,
+              })
             : null;
+          const policy = serveOccurrencePolicy(readBack, canReadPolicy);
 
           return { event, eventPolicy, existing, updated, columns, lists, policy };
         },
       );
 
-      const changedColumns = changedKeys<OccurrencePolicyColumns>(
-        existing,
+      // Before the date's first write there was no row, and every field was
+      // the event's; the snapshots name the row that now holds them.
+      const { changed, before, after } = policyChange<OccurrencePolicyColumns>(
+        { ...existing, id: updated.id },
         updated,
         Object.keys(columns) as (keyof OccurrencePolicyColumns)[],
+        lists,
       );
-      const changed = [...changedColumns, ...Object.keys(lists.after)];
       if (changed.length > 0) {
-        // Before the date's first write there was no row, and every field
-        // was the event's; the snapshots name the row that now holds them.
-        const before = { ...pickSnapshot({ ...existing, id: updated.id }, changedColumns), ...lists.before };
-        const after = { ...pickSnapshot(updated, changedColumns), ...lists.after };
-
         this.eventEmitter.emit(
           OccurrencePolicyUpdatedEvent.eventName,
           new OccurrencePolicyUpdatedEvent(before, after, occurrenceId, eventId, initiatedAt),
@@ -356,7 +358,7 @@ export class EventPolicyService {
     const updateCeiling = this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.update);
     const row = await tx.eventPolicy.findUnique({
       where: { eventId, AND: updateCeiling },
-      include: EVENT_POLICY_VIEW_INCLUDE,
+      include: POLICY_VIEW_INCLUDE,
     });
     assert(row, new ForbiddenException(t('common.forbidden.update')));
 

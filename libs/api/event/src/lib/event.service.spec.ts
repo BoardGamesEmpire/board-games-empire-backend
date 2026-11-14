@@ -42,7 +42,7 @@ import type { CreateEventDto } from './dto/create-event.dto';
 import { ListEventsQueryDto } from './dto/list-events.query.dto';
 import { EventService } from './event.service';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
-import { EVENT_POLICY_VIEW_INCLUDE, OCCURRENCE_POLICY_VIEW_INCLUDE } from './policy/policy-view';
+import { POLICY_VIEW_INCLUDE } from './policy/policy-view';
 import { EVENT_ATTENDANCE_SELECT } from './utils/event-attendance.util';
 import { EVENT_STATUS_DATE_SELECT } from './utils/event-status.util';
 import { upcomingDateWhere, upcomingEventWhere } from './utils/upcoming-events.util';
@@ -542,7 +542,7 @@ describe('EventService', () => {
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.EventPolicy, Action.read);
       expect(db.eventPolicy.findUnique).toHaveBeenCalledWith({
         where: { eventId: 'event-1', AND: [COND] },
-        include: EVENT_POLICY_VIEW_INCLUDE,
+        include: POLICY_VIEW_INCLUDE,
       });
     });
 
@@ -590,7 +590,7 @@ describe('EventService', () => {
 
       expect(db.eventOccurrencePolicy.findMany).toHaveBeenCalledWith({
         where: { occurrence: { eventId: 'event-1' } },
-        include: OCCURRENCE_POLICY_VIEW_INCLUDE,
+        include: POLICY_VIEW_INCLUDE,
         // In the dates' own order, as `occurrences` is.
         orderBy: [{ occurrence: { sortOrder: 'asc' } }, { occurrence: { id: 'asc' } }],
       });
@@ -707,7 +707,7 @@ describe('EventService', () => {
       expect(detail.status).toBe(EventStatus.Scheduled);
     });
 
-    it('takes the seven reads from one REPEATABLE READ snapshot', async () => {
+    it('takes the seven reads from one REPEATABLE READ snapshot (#1211)', async () => {
       await service.getEventById('event-1');
 
       const { operations, options } = batchTransactionCall(db);
@@ -858,7 +858,7 @@ describe('EventService', () => {
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.EventPolicy, Action.read);
       expect(tx.eventPolicy.findUnique).toHaveBeenCalledWith({
         where: { eventId: 'event-1', AND: [COND] },
-        include: EVENT_POLICY_VIEW_INCLUDE,
+        include: POLICY_VIEW_INCLUDE,
       });
       expect(tx.event.update.mock.calls[0][0].include).not.toHaveProperty('policy');
       expect(tx.event.update.mock.invocationCallOrder[0]).toBeLessThan(
@@ -1623,7 +1623,7 @@ describe('EventService', () => {
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.EventPolicy, Action.read);
       expect(db.eventPolicy.findUnique).toHaveBeenCalledWith({
         where: { eventId: 'event-1', AND: [COND] },
-        include: EVENT_POLICY_VIEW_INCLUDE,
+        include: POLICY_VIEW_INCLUDE,
       });
       expect(batchTransactionCall(db).options).toEqual({
         isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,

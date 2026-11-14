@@ -72,7 +72,7 @@ describe('assertWithinOverrideScope', () => {
       ['restricting categories', { restrictToGameCategories: true }],
       ['lifting categories', { restrictToGameCategories: false }],
       ['a lower attendee cap', { maxAttendees: 4 }],
-      ['a lower participant cap', { maxTotalParticipants: 4 }],
+      ['a lower cap counting spectators', { maxTotalParticipants: 4 }],
       ['strict capacity', { strictCapacity: true }],
       ['no platform type restriction', { platformTypesUnrestricted: true }],
       ['no platform restriction', { platformsUnrestricted: true }],
@@ -108,7 +108,7 @@ describe('assertWithinOverrideScope', () => {
       ['the same lists', { allowedPlatformTypes: [PlatformType.Tabletop, PlatformType.PC] }],
       ['a lower attendee cap', { maxAttendees: 4 }],
       ['the same attendee cap', { maxAttendees: 8 }],
-      ['a lower participant cap', { maxTotalParticipants: 9 }],
+      ['a lower cap counting spectators', { maxTotalParticipants: 9 }],
       ['strict capacity', { strictCapacity: true }],
     ])('allows %s (#796)', (_, overrides) => {
       allows(restricted, date(overrides), TightenOnly);
@@ -120,7 +120,7 @@ describe('assertWithinOverrideScope', () => {
       ['a platform outside the list', { allowedPlatformIds: ['plat-1', 'plat-3'] }],
       ['a category outside the list', { allowedCategoryIds: ['cat-3'] }],
       ['a higher attendee cap', { maxAttendees: 9 }],
-      ['a higher participant cap', { maxTotalParticipants: 11 }],
+      ['a higher cap counting spectators', { maxTotalParticipants: 11 }],
       ['no platform type restriction', { platformTypesUnrestricted: true }],
       ['no platform restriction', { platformsUnrestricted: true }],
       ['no capacity limit', { capacityUnrestricted: true }],
@@ -209,7 +209,7 @@ describe('assertWithinOverrideScope', () => {
         'errors.event_policy.capacity_unrestricted_with_limit',
       ],
       [
-        'a participant cap',
+        'a cap counting spectators',
         { capacityUnrestricted: true, maxTotalParticipants: 4 },
         'errors.event_policy.capacity_unrestricted_with_limit',
       ],

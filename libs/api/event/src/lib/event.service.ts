@@ -44,14 +44,14 @@ import type { ListEventsQueryDto } from './dto/list-events.query.dto';
 import type { UpdateEventDto } from './dto/update-event.dto';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
 import { countLiveDates } from './occurrence/live-dates.util';
-import { eventPolicyReadArgs, readEventPolicyView, toEventPolicyViewOrNull } from './policy/policy-ceiling';
-import { assertPolicyReferencesExist, policyListsCreateData } from './policy/policy-lists';
 import {
-  OCCURRENCE_POLICY_VIEW_INCLUDE,
-  toOccurrencePolicyView,
-  type EventPolicyView,
-  type OccurrencePolicyView,
-} from './policy/policy-view';
+  eventPolicyReadArgs,
+  readEventPolicyView,
+  serveOccurrencePolicies,
+  toEventPolicyViewOrNull,
+} from './policy/policy-ceiling';
+import { assertPolicyReferencesExist, policyListsCreateData } from './policy/policy-lists';
+import { POLICY_VIEW_INCLUDE, type EventPolicyView, type OccurrencePolicyView } from './policy/policy-view';
 import {
   EVENT_ATTENDANCE_SELECT,
   readEventAttendance,
@@ -346,7 +346,7 @@ export class EventService {
           // and for any date the caller isn't served. Read in the dates' order.
           this.db.eventOccurrencePolicy.findMany({
             where: { occurrence: { eventId: id } },
-            include: OCCURRENCE_POLICY_VIEW_INCLUDE,
+            include: POLICY_VIEW_INCLUDE,
             orderBy: OCCURRENCE_ORDER.map((order) => ({ occurrence: order })),
           }),
 
@@ -365,16 +365,17 @@ export class EventService {
     // leaves at most one row when one was.
     const ownRow = ownRows?.[0];
 
-    const servedDateIds = new Set(occurrences.map(({ id: dateId }) => dateId));
+    const servedOccurrenceIds = new Set(occurrences.map(({ id: occurrenceId }) => occurrenceId));
 
     return {
       ...withEventStatus(event, statusDates, now),
       occurrences,
       attendees,
       policy: toEventPolicyViewOrNull(policyRow),
-      occurrencePolicies: policyRow
-        ? occurrencePolicyRows.filter(({ occurrenceId }) => servedDateIds.has(occurrenceId)).map(toOccurrencePolicyView)
-        : [],
+      occurrencePolicies: serveOccurrencePolicies(
+        occurrencePolicyRows.filter(({ occurrenceId }) => servedOccurrenceIds.has(occurrenceId)),
+        policyRow !== null,
+      ),
       attendance: ownRow ? toEventAttendance(ownRow) : null,
     };
   }

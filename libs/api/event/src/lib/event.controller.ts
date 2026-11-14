@@ -93,6 +93,14 @@ export class EventController {
   @ApiOperation({
     summary: 'Get event by ID',
     description:
+      '`policy` is the event\u2019s policy, with its allowed lists (`allowedPlatformTypes`, `allowedPlatformIds`, ' +
+      '`allowedCategoryIds`) and its `occurrenceOverrideScope`, or `null` when the actor doesn\u2019t have ' +
+      'permission to read it. `occurrencePolicies` holds each date\u2019s own policy, for the dates in ' +
+      '`occurrences` that have one, in the same order, and only what the date overrides: a field that is ' +
+      '`null`, or a list that is empty, is the event\u2019s, and a date missing from it takes everything from the ' +
+      'event\u2019s policy. `platformTypesUnrestricted`, `platformsUnrestricted` and `capacityUnrestricted` set ' +
+      'to `true` mean no restriction of that kind on that date. A date\u2019s policy is the event\u2019s with ' +
+      'those overrides laid over it. `occurrencePolicies` is `[]` when `policy` is `null` (#796, #1211). ' +
       '`attendance` is `null` when the acting user doesn\u2019t attend or was removed, or when the actor doesn\u2019t ' +
       'have permission to read attendees.',
   })

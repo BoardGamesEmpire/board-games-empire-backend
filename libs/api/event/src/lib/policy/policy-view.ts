@@ -22,14 +22,18 @@ interface PolicyListJoinRows {
  */
 export type EventPolicyView = EventPolicy & PolicyListsView;
 
-/** The embed a policy read takes to be served as an `EventPolicyView`. */
-export const EVENT_POLICY_VIEW_INCLUDE = {
+/**
+ * The embed a policy read takes to be served as a view, an `EventPolicyView`
+ * or an `OccurrencePolicyView`. The event's policy and a date's name their
+ * three lists the same way, so one embed serves both.
+ */
+export const POLICY_VIEW_INCLUDE = {
   allowedPlatformTypes: { select: { platformType: true } },
   allowedPlatforms: { select: { platformId: true } },
   allowedCategories: { select: { categoryId: true } },
-} as const satisfies Prisma.EventPolicyInclude;
+} as const satisfies Prisma.EventPolicyInclude & Prisma.EventOccurrencePolicyInclude;
 
-export type EventPolicyRow = Prisma.EventPolicyGetPayload<{ include: typeof EVENT_POLICY_VIEW_INCLUDE }>;
+export type EventPolicyRow = Prisma.EventPolicyGetPayload<{ include: typeof POLICY_VIEW_INCLUDE }>;
 
 /**
  * What a date's own policy is served as (#796, #1211): the row, with its lists
@@ -39,16 +43,7 @@ export type EventPolicyRow = Prisma.EventPolicyGetPayload<{ include: typeof EVEN
  */
 export type OccurrencePolicyView = EventOccurrencePolicy & PolicyListsView;
 
-/** The embed a date's policy read takes to be served as an `OccurrencePolicyView`. */
-export const OCCURRENCE_POLICY_VIEW_INCLUDE = {
-  allowedPlatformTypes: { select: { platformType: true } },
-  allowedPlatforms: { select: { platformId: true } },
-  allowedCategories: { select: { categoryId: true } },
-} as const satisfies Prisma.EventOccurrencePolicyInclude;
-
-export type OccurrencePolicyRow = Prisma.EventOccurrencePolicyGetPayload<{
-  include: typeof OCCURRENCE_POLICY_VIEW_INCLUDE;
-}>;
+export type OccurrencePolicyRow = Prisma.EventOccurrencePolicyGetPayload<{ include: typeof POLICY_VIEW_INCLUDE }>;
 
 /**
  * A row with its join rows flattened to lists. The lists are sorted, so the
