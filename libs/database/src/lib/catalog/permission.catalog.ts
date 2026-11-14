@@ -1535,6 +1535,81 @@ export const PERMISSION_CATALOG = [
     reason: 'Remove game from collection',
   }),
 
+  // --- List ---
+  // A list has its own reach, private by default, and its owner alone writes
+  // it. Its entries are read with it. The ladder mirrors the collection's, with
+  // two differences on purpose (#1241): no "show my collection to friends"
+  // preference arm, because that preference is about the collection and a list
+  // says who may read it through its own reach; and no household rule, because
+  // a household's lists are a separate feature, and nothing here lets a
+  // household member read a list. Lists hard-delete, so no rule tests
+  // `deletedAt`. The public rule carries no block veto, as the collection's
+  // doesn't; if #988 locks one, this rule takes it.
+  permission({
+    action: Action.read,
+    subject: ResourceType.List,
+    conditions: { userId: '{{ user.id }}' },
+    slug: 'read:list',
+    riskLevel: RiskLevel.Low,
+    reason: 'View your own lists',
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.List,
+    conditions: { reach: reachAdmittingFriends, user: { is: acceptedFriendOfActingUser } },
+    slug: 'read:list:friends',
+    riskLevel: RiskLevel.Medium,
+    reason: "View your friends' lists",
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.List,
+    conditions: { AND: [{ reach: 'FriendsOfFriends' }, { user: { is: friendOfFriendOfActingUser } }] },
+    slug: 'read:list:friends-of-friends',
+    riskLevel: RiskLevel.Medium,
+    reason: "View a friend of a friend's lists that reach friends of friends",
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.List,
+    conditions: { AND: [{ reach: 'ExtendedNetwork' }, { user: { is: withinExtendedNetworkOfActingUser } }] },
+    slug: 'read:list:extended-network',
+    riskLevel: RiskLevel.Medium,
+    reason: 'View a list in your extended network that reaches it',
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.List,
+    conditions: { reach: 'Public' },
+    slug: 'read:list:public',
+    riskLevel: RiskLevel.Low,
+    reason: 'View public lists',
+  }),
+  permission({
+    action: Action.create,
+    subject: ResourceType.List,
+    conditions: { userId: '{{ user.id }}' },
+    slug: 'create:list',
+    riskLevel: RiskLevel.Low,
+    reason: 'Create a list',
+  }),
+  permission({
+    action: Action.update,
+    subject: ResourceType.List,
+    conditions: { userId: '{{ user.id }}' },
+    slug: 'update:list',
+    riskLevel: RiskLevel.Low,
+    reason: 'Update your lists and their entries',
+  }),
+  permission({
+    action: Action.delete,
+    subject: ResourceType.List,
+    conditions: { userId: '{{ user.id }}' },
+    slug: 'delete:list',
+    riskLevel: RiskLevel.Low,
+    reason: 'Delete your lists',
+  }),
+
   // --- DataGateway ---
   permission({
     action: Action.read,

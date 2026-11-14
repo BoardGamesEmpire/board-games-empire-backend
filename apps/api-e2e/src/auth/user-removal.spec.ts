@@ -60,7 +60,8 @@ describe('removing a user', () => {
     const headers = await ownerHeaders();
     const target = await actors.user();
     const userId = target.user.id;
-    await db.client.list.create({ data: { userId } });
+    // A custom list needs a name (#1241).
+    await db.client.list.create({ data: { userId, name: 'Weekend picks' } });
     await mintApiKey(baseUrl, db.client, target);
 
     const response = await postToAuth(baseUrl, REMOVE_USER_PATH).set(headers).send({ userId });

@@ -28,7 +28,7 @@ model GameRelease {
 
   // Downstream opt-in references
   collections GameCollection[]
-  gameLists   GameList[]
+  listEntries ListEntry[]
 
   eventGames       EventGame[]
   eventNominations EventGameNomination[]

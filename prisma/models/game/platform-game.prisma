@@ -37,7 +37,7 @@ model PlatformGame {
 
   releases     GameRelease[]
   collections  GameCollection[]
-  gameLists    GameList[]
+  listEntries  ListEntry[]
   ruleVariants RuleVariant[]
 
   // Event chain

@@ -70,6 +70,7 @@ model Game {
   updatedById String? @map("updated_by_id")
 
   shares             GameShare[]
+  listEntries        ListEntry[]
   userCustomizations UserGameCustomization[]
   favorites          FavoriteGame[]          @relation("FavoriteGames")
   disliked           DislikedGame[]          @relation("DislikedGames")

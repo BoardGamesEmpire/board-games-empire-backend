@@ -1,0 +1,9 @@
+// What a list is for. A user has at most one Wishlist
+// (`lists_one_wishlist_per_user`); Custom is any other. #1242's automatic list
+// is the expected next kind.
+enum ListKind {
+  Custom
+  Wishlist
+
+  @@map("list_kinds")
+}

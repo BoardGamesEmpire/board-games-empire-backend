@@ -166,6 +166,53 @@ describe('the shipped catalogs', () => {
       ]);
     });
 
+    it('gives an anonymous user no list permission at all (#1241)', () => {
+      expect(
+        ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser].filter(
+          (slug) => slug.endsWith(':list') || slug.includes(':list:'),
+        ),
+      ).toEqual([]);
+    });
+
+    it('lets no household or event role read a list (#1241)', () => {
+      const scoped = Object.values(SystemRole).filter((role) => ROLE_SCOPE[role] !== 'global');
+      const holders = scoped.filter((role) =>
+        ROLE_PERMISSION_CATALOG[role].some((slug) => slug.endsWith(':list') || slug.includes(':list:')),
+      );
+
+      expect(scoped.length).toBeGreaterThan(0);
+      expect(holders).toEqual([]);
+    });
+
+    it('gives only the User role the list permissions, all eight (#1241)', () => {
+      const listSlugs = PERMISSION_CATALOG.filter(({ subject }) => subject === ResourceType.List).map(
+        ({ slug }) => slug,
+      );
+
+      expect(listSlugs.sort()).toEqual(
+        [
+          'create:list',
+          'delete:list',
+          'read:list',
+          'read:list:extended-network',
+          'read:list:friends',
+          'read:list:friends-of-friends',
+          'read:list:public',
+          'update:list',
+        ].sort(),
+      );
+      for (const slug of listSlugs) {
+        expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain(slug);
+      }
+
+      // Every other role, global ones included: a staff role holding a list
+      // slug would mirror User's, and roles augment rather than mirror.
+      const holders = Object.values(SystemRole).filter((role) =>
+        ROLE_PERMISSION_CATALOG[role].some((slug) => listSlugs.includes(slug)),
+      );
+      expect(holders).toEqual([SystemRole.User]);
+    });
+
     it('reads a Public game’s platform games through read:platform_game:public, for anonymous users only (#1076)', () => {
       const entry = PERMISSION_CATALOG.find(({ slug }) => slug === 'read:platform_game:public');
 
@@ -443,6 +490,7 @@ describe('the shipped catalogs', () => {
       ['read:event_policy:friends', (reach: unknown) => ({ event: { is: { reach } } })],
       ['read:household_member:friends', (reach: unknown) => ({ household: { is: { reach } } })],
       ['read:game_collection:friends', (reach: unknown) => ({ reach })],
+      ['read:list:friends', (reach: unknown) => ({ reach })],
       ['read:user:profile:friends', (reach: unknown) => ({ reach })],
       ['read:game:friends', (reach: unknown) => ({ reach })],
     ])('let a friend read through %s at every rung from Friends up', (slug, at) => {
@@ -549,6 +597,13 @@ describe('the shipped catalogs', () => {
         },
         RiskLevel.Medium,
       ],
+      // A list has no collection preference to keep: its own reach is the only
+      // say its owner has (#1241).
+      [
+        'read:list:friends-of-friends',
+        { AND: [{ reach: 'FriendsOfFriends' }, { user: { is: FRIEND_OF_FRIEND_OF_ACTING_USER } }] },
+        RiskLevel.Medium,
+      ],
     ])('let a friend of a friend read through %s, with no block between them (#496)', (slug, conditions, risk) => {
       const entry = PERMISSION_CATALOG.find((candidate) => candidate.slug === slug);
 
@@ -631,6 +686,11 @@ describe('the shipped catalogs', () => {
         },
         RiskLevel.Medium,
       ],
+      [
+        'read:list:extended-network',
+        { AND: [{ reach: 'ExtendedNetwork' }, { user: { is: WITHIN_EXTENDED_NETWORK_OF_ACTING_USER } }] },
+        RiskLevel.Medium,
+      ],
     ])(
       'let a reader within three friendship steps read through %s, with no block between them (#497)',
       (slug, conditions, risk) => {
@@ -665,6 +725,8 @@ describe('the shipped catalogs', () => {
       ],
       ['read:game:friends-of-friends', 'read:game:public', { deletedAt: null, reach: 'Public' }],
       ['read:game_collection:friends-of-friends', 'read:game_collection:public', { deletedAt: null, reach: 'Public' }],
+      ['read:list:friends-of-friends', 'read:list:public', { reach: 'Public' }],
+      ['read:list:extended-network', 'read:list:public', { reach: 'Public' }],
       ['read:event:extended-network', 'read:event:public', { reach: 'Public' }],
       [
         'read:event_occurrence:extended-network',
