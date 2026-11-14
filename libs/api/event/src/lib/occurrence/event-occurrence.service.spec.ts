@@ -614,11 +614,14 @@ describe('EventOccurrenceService', () => {
         await expect(run()).resolves.toEqual(expect.objectContaining({ policy: servedPolicy }));
       });
 
-      it('reads the ceiling before it writes (#1211)', async () => {
+      // Under the lock, an event made private meanwhile can't be answered
+      // with the date's policy on a ceiling read before it was (#1211).
+      it("reads the ceiling under the event's lock, before it writes (#1211)", async () => {
         canReadPolicy(true);
 
         await run();
 
+        expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(db.eventPolicy.count.mock.invocationCallOrder[0]);
         expect(db.eventPolicy.count.mock.invocationCallOrder[0]).toBeLessThan(
           db.eventOccurrence[op].mock.invocationCallOrder[0],
         );

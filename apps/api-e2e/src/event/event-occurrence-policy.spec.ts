@@ -381,6 +381,11 @@ describe("a date's own policy and the allowed lists (#796)", () => {
         throw new Error(`date ${dateId} has no policy row after its first change`);
       }
 
+      // Each entry is written by a listener the route doesn't wait for, so
+      // the first change's could still land after the last change's. Waiting
+      // for it here keeps the poll below from returning without it (#728).
+      await auditEntriesOnceOneChanges(dateId, 'allowedPlatformTypes');
+
       // The same members in another order: the row, its updatedAt and its
       // list rows, ids and all, stay as they were (#1268).
       await updateDatePolicy(host, eventId, dateId, {
@@ -390,9 +395,9 @@ describe("a date's own policy and the allowed lists (#796)", () => {
 
       // An absence is only worth asserting once this harness is shown to
       // record a change at all, so a real change runs after the re-send and
-      // its entry is polled for. Entries land in the order their changes were
-      // emitted, so one from the re-send would be in the list the poll
-      // returns (#728).
+      // its entry is polled for. One from the re-send, emitted a request
+      // earlier, would almost always be in the list the poll returns; a
+      // listener nothing waits for can't promise more (#728).
       await updateDatePolicy(host, eventId, dateId, { allowSpectators: false }).expect(200);
 
       const entries = await auditEntriesOnceOneChanges(dateId, 'allowSpectators');

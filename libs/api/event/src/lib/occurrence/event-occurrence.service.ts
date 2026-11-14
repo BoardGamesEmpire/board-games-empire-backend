@@ -306,14 +306,11 @@ export class EventOccurrenceService {
 
     // Read before the write, so a failed read leaves the occurrence as it was.
     // The write can take games off the lineup, and the answer leaves those out.
-    const [[{ availabilityVotes, games }], canReadPolicy] = await Promise.all([
-      this.withVotesAndGames([found]),
-      canReadEventPolicy(this.db, this.abilityService, eventId),
-    ]);
+    const [{ availabilityVotes, games }] = await this.withVotesAndGames([found]);
 
     try {
       const {
-        written: { existing, updated },
+        written: { existing, updated, canReadPolicy },
         removedGames,
       } = await this.db.$transaction((tx) =>
         writeEventDates(tx, eventId, initiatedAt, async () => {
@@ -328,6 +325,11 @@ export class EventOccurrenceService {
             where: { id: occurrenceId, eventId },
           });
           assert(existing, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
+
+          // Under the lock, so the answer and the policy it serves come from
+          // the same state: an event made private meanwhile is read as it now
+          // is (#1211).
+          const canReadPolicy = await canReadEventPolicy(tx, this.abilityService, eventId);
 
           const updated = await tx.eventOccurrence.update({
             where: {
@@ -345,7 +347,7 @@ export class EventOccurrenceService {
             include: { policy: { include: POLICY_VIEW_INCLUDE } },
           });
 
-          return { existing, updated };
+          return { existing, updated, canReadPolicy };
         }),
       );
 
@@ -393,13 +395,13 @@ export class EventOccurrenceService {
     // a lock on the date's row, held in an interactive transaction across both
     // reads and the delete, and this answer is all it would protect: the
     // domain event below carries the date's own columns, not that list (#677).
-    const [[{ availabilityVotes, games }], canReadPolicy] = await Promise.all([
-      this.withVotesAndGames([existing]),
-      canReadEventPolicy(this.db, this.abilityService, eventId),
-    ]);
+    const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
 
     try {
-      const { written: removed, removedGames } = await this.db.$transaction((tx) =>
+      const {
+        written: { removed, canReadPolicy },
+        removedGames,
+      } = await this.db.$transaction((tx) =>
         writeEventDates(tx, eventId, initiatedAt, async () => {
           // eslint-disable-next-line no-restricted-syntax -- single-row delete by id, not a collection read
           const deleteConditions = this.abilityService.getCurrentResourceConditions(
@@ -434,10 +436,15 @@ export class EventOccurrenceService {
             new BadRequestException(t('errors.occurrence.confirmed_remove')),
           );
 
-          return tx.eventOccurrence.delete({
+          // Under the lock, as updateOccurrence reads it (#1211).
+          const canReadPolicy = await canReadEventPolicy(tx, this.abilityService, eventId);
+
+          const removed = await tx.eventOccurrence.delete({
             where: { id: occurrenceId, AND: deleteConditions },
             include: { policy: { include: POLICY_VIEW_INCLUDE } },
           });
+
+          return { removed, canReadPolicy };
         }),
       );
       // Date first, then its games, so the audit order reads the way it happened.
@@ -536,13 +543,10 @@ export class EventOccurrenceService {
 
     // Read before the write, which changes neither, so a failed read leaves
     // the occurrence as it was.
-    const [[{ availabilityVotes, games }], canReadPolicy] = await Promise.all([
-      this.withVotesAndGames([existing]),
-      canReadEventPolicy(this.db, this.abilityService, eventId),
-    ]);
+    const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
 
     try {
-      const { before, updated } = await this.db.$transaction(async (tx) => {
+      const { before, updated, canReadPolicy } = await this.db.$transaction(async (tx) => {
         await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${eventId} FOR NO KEY UPDATE`);
 
         if (refuseOnCancelledEvent) {
@@ -551,6 +555,9 @@ export class EventOccurrenceService {
 
         const current = await readStatus(tx);
         assertTransitionAllowed(current, transition);
+
+        // Under the lock, as updateOccurrence reads it (#1211).
+        const canReadPolicy = await canReadEventPolicy(tx, this.abilityService, eventId);
 
         const written = await tx.eventOccurrence.update({
           where: {
@@ -564,7 +571,7 @@ export class EventOccurrenceService {
           include: { policy: { include: POLICY_VIEW_INCLUDE } },
         });
 
-        return { before: current, updated: written };
+        return { before: current, updated: written, canReadPolicy };
       });
 
       const domainEvent =

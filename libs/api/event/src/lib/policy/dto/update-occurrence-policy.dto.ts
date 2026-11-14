@@ -8,9 +8,17 @@ import {
 } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
 
 const NULL_MEANS_EVENTS = "`null` means the event's.";
+
+/**
+ * The value as sent. Implicit conversion would turn any non-empty string into
+ * `true`, so `"false"` would lift a restriction for the date. Read as sent, a
+ * string is refused as not a boolean.
+ */
+const asSent = Transform(({ obj, key }) => obj[key]);
 
 /**
  * A patch to a date's own policy (#796): the fields it overrides for that
@@ -38,6 +46,7 @@ export class UpdateOccurrencePolicyDto {
       "`false` lifts the event's category restriction for this date. `None` refuses any value but `null`, " +
       `and \`TightenOnly\` refuses \`false\` while the event restricts categories. ${NULL_MEANS_EVENTS}`,
   })
+  @asSent
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @IsOptional()
   restrictToGameCategories?: boolean | null;
@@ -75,6 +84,7 @@ export class UpdateOccurrencePolicyDto {
       'scope, and not beside `allowedPlatformTypes`.',
   })
   @ValidateIf((_, value) => value !== undefined)
+  @asSent
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   platformTypesUnrestricted?: boolean;
 
@@ -84,6 +94,7 @@ export class UpdateOccurrencePolicyDto {
       'and not beside `allowedPlatformIds`.',
   })
   @ValidateIf((_, value) => value !== undefined)
+  @asSent
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   platformsUnrestricted?: boolean;
 
@@ -102,6 +113,7 @@ export class UpdateOccurrencePolicyDto {
   maxTotalParticipants?: number | null;
 
   @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS })
+  @asSent
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @IsOptional()
   strictCapacity?: boolean | null;
@@ -112,17 +124,20 @@ export class UpdateOccurrencePolicyDto {
       'not beside `maxAttendees` or `maxTotalParticipants`.',
   })
   @ValidateIf((_, value) => value !== undefined)
+  @asSent
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   capacityUnrestricted?: boolean;
 
   // --- Participation ---
 
   @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS })
+  @asSent
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @IsOptional()
   requireHostApprovalToJoin?: boolean | null;
 
   @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS })
+  @asSent
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @IsOptional()
   allowSpectators?: boolean | null;
@@ -135,6 +150,7 @@ export class UpdateOccurrencePolicyDto {
   gameAdditionMode?: GameAdditionMode | null;
 
   @ApiPropertyOptional({ nullable: true, description: NULL_MEANS_EVENTS })
+  @asSent
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @IsOptional()
   restrictToAttendeePool?: boolean | null;

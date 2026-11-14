@@ -70,6 +70,25 @@ describe('UpdateOccurrencePolicyDto', () => {
     ).resolves.toEqual([]);
   });
 
+  // Implicit conversion would make the string "false" true, so a malformed
+  // "false" would lift the date's restriction instead of being refused (#796).
+  it('refuses a string where a boolean belongs, rather than reading "false" as true (#796)', async () => {
+    const booleans = [
+      'restrictToGameCategories',
+      'platformTypesUnrestricted',
+      'platformsUnrestricted',
+      'strictCapacity',
+      'capacityUnrestricted',
+      'requireHostApprovalToJoin',
+      'allowSpectators',
+      'restrictToAttendeePool',
+    ];
+
+    await expect(propertiesWithErrors(Object.fromEntries(booleans.map((key) => [key, 'false'])))).resolves.toEqual(
+      booleans,
+    );
+  });
+
   // An empty list is the event's, so there is nothing for null to mean (#1268).
   it("refuses null for each list, and accepts an empty one, which is the event's (#1268)", async () => {
     await expect(
