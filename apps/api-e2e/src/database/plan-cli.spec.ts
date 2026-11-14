@@ -1,4 +1,4 @@
-import { CATALOG_MANIFEST, MIGRATION_NAMES, reconcileCatalog, SystemRole } from '@bge/database';
+import { CATALOG_MANIFEST, DATA_MIGRATIONS, MIGRATION_NAMES, reconcileCatalog, SystemRole } from '@bge/database';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
@@ -86,7 +86,9 @@ describe('db:plan against Postgres', () => {
       'Catalog reconcile: permissions +0 ~0 revived 0 retired 0; roles +0 ~0; grants +0 -0',
     );
     expect(result.stdout).toMatch(/nothing to write/i);
-    expect(result.stdout).toContain('Data migrations: none pending.');
+    // The harness boot applied every shipped entry, so none is pending and the
+    // line counts them (the wishlist backfill, #1241, was the first).
+    expect(result.stdout).toContain(`Data migrations: none pending, ${DATA_MIGRATIONS.length} applied.`);
     expect(await db.client.rolePermission.count()).toBe(before);
   });
 
@@ -132,7 +134,7 @@ describe('db:plan against Postgres', () => {
     expect(result.stdout).toContain(
       'Data migrations: not planned; the boot skips them over a database ahead of this build, and no CLI applies them, so there is nothing to preview.',
     );
-    expect(result.stdout).not.toContain('Data migrations: none pending.');
+    expect(result.stdout).not.toContain('Data migrations: none pending');
     expect(await db.client.rolePermission.count(readGameGrant)).toBe(0);
   });
 

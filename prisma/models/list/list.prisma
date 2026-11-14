@@ -1,11 +1,31 @@
 model List {
-  id   String @id @default(cuid(2))
-  name String @default("My Wishlist")
+  id String @id @default(cuid(2))
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId String @map("user_id")
 
-  games GameList[]
+  kind ListKind @default(Custom)
 
+  // No default: a Custom list must have one (`lists_custom_needs_name`), and a
+  // Wishlist without one is shown under its client's own translated name.
+  name String?
+
+  // Markdown, stored as written.
+  description String?
+
+  // Who may see the list beyond its owner. A list's entries are read with it.
+  reach Reach @default(Private)
+
+  // The order the user chose among their lists.
+  position Int @default(0)
+
+  entries ListEntry[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  // One wishlist per user is a partial unique index, hand-written in the
+  // migration: `lists_one_wishlist_per_user`.
+  @@index([userId, position])
   @@map("lists")
 }

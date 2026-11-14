@@ -1,0 +1,11 @@
+// How much a user wants a wishlisted game. BoardGameGeek's five priorities in
+// its order, 1 to 5, so a synced wishlist maps onto them (#1227).
+enum WishlistPriority {
+  MustHave
+  LoveToHave
+  LikeToHave
+  ThinkingAboutIt
+  DontBuy
+
+  @@map("wishlist_priorities")
+}

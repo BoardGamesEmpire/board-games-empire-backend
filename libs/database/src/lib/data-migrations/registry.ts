@@ -1,11 +1,12 @@
+import { wishlistForEveryUser } from './20261114120000_wishlist_for_every_user';
 import type { DataMigrationEntry } from './data-migration-entry';
 
 /**
  * The one-time data migrations this build ships (#236). The api's boot
  * sequence applies each one once, after the seeds and the catalog reconcile,
  * in one transaction with its `data_migrations` row; `npm run db:plan` lists
- * the pending ones. Empty until the first backfill needs it: the ledger exists
- * so that day has somewhere to write.
+ * the pending ones. The first entry gives every existing registered user a
+ * wishlist (#1241).
  *
  * To add one: a file beside this one exporting a `DataMigrationEntry` named
  * `YYYYMMDDHHMMSS_snake_case` at `revision: 1`, whose `run` does the work on
@@ -14,4 +15,4 @@ import type { DataMigrationEntry } from './data-migration-entry';
  * databases that applied the old one then refuse to boot, which is the point,
  * and the fix is a new entry, not an edit.
  */
-export const DATA_MIGRATIONS: readonly DataMigrationEntry[] = [];
+export const DATA_MIGRATIONS: readonly DataMigrationEntry[] = [wishlistForEveryUser];

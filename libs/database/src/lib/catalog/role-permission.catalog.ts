@@ -392,6 +392,16 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:game_collection:public',
     'update:game_collection',
 
+    // lists
+    'create:list',
+    'delete:list',
+    'read:list',
+    'read:list:friends',
+    'read:list:friends-of-friends',
+    'read:list:extended-network',
+    'read:list:public',
+    'update:list',
+
     // household
     'create:household',
     'read:households',

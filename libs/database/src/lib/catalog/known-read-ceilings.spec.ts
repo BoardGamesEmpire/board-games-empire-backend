@@ -171,6 +171,15 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
     HouseholdOwner: { 'read:game_share:household': 'binds householdId, user.id' },
     HouseholdAdmin: { 'read:game_share:household': 'binds householdId, user.id' },
   },
+  List: {
+    User: {
+      'read:list': 'binds user.id',
+      'read:list:friends': 'binds user.id',
+      'read:list:friends-of-friends': 'binds user.id',
+      'read:list:extended-network': 'binds user.id',
+      'read:list:public': 'fixed filter',
+    },
+  },
   Platform: {
     User: { 'read:platform': 'every row' },
   },

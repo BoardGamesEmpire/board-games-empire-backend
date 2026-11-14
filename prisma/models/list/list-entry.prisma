@@ -1,0 +1,40 @@
+// What a list entry names. Exactly one of `game` and `platformGame` is set
+// (`list_entries_one_target`), so "Catan, on any platform" and "Catan on PC"
+// are both expressible. A release needs a platform game
+// (`list_entries_release_needs_platform_game`). Both CHECK constraints are
+// hand-written in the migration, because Prisma cannot model them (#1241).
+model ListEntry {
+  id String @id @default(cuid(2))
+
+  list   List   @relation(fields: [listId], references: [id], onDelete: Cascade)
+  listId String @map("list_id")
+
+  game   Game?   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String? @map("game_id")
+
+  platformGame   PlatformGame? @relation(fields: [platformGameId], references: [id], onDelete: Cascade)
+  platformGameId String?       @map("platform_game_id")
+  release        GameRelease?  @relation(fields: [releaseId], references: [id], onDelete: SetNull)
+  releaseId      String?       @map("release_id")
+
+  // The order the user chose. Every list has it.
+  position Int @default(0)
+
+  // Only a wishlist's entries may carry one; the service refuses it elsewhere.
+  priority WishlistPriority?
+
+  // Markdown, stored as written.
+  note String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  // NULLs are distinct in Postgres, so each unique only bites its own kind of entry.
+  @@unique([listId, gameId])
+  @@unique([listId, platformGameId])
+  @@index([listId, position])
+  @@index([gameId])
+  @@index([platformGameId])
+  @@index([releaseId])
+  @@map("list_entries")
+}

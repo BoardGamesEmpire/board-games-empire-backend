@@ -134,6 +134,9 @@
       "path": "../../libs/api/game-collection/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/list/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/game/tsconfig.lib.json"
     },
     {

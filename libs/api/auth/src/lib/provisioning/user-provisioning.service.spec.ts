@@ -1,4 +1,4 @@
-import { SystemRole, type User } from '@bge/database';
+import { ListKind, SystemRole, type User } from '@bge/database';
 import { PermissionsService } from '@bge/permissions';
 import { ServiceAccountService } from '@bge/services';
 import { createMockDatabaseService, createTestingModuleWithDb, makeUser, MockDatabaseService } from '@bge/testing';
@@ -84,6 +84,33 @@ describe('UserProvisioningService', () => {
       data: { role: 'admin', emailVerified: true },
     });
     expect(serviceAccount.ensure).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates the wishlist with the preferences and profile, in the same transaction (#1241)', async () => {
+    db.user.findUniqueOrThrow.mockResolvedValue(makeUser({ id: 'u2', username: 'b', email: 'b@x.io' }));
+    db.user.findFirst.mockResolvedValue({ id: 'u1' } as never);
+    db.role.findMany.mockResolvedValue([{ id: 'role-user', name: SystemRole.User }] as never);
+    // The callback gets a distinct client, so a write on `this.db` instead of the transaction's would not be seen.
+    const tx = createMockDatabaseService();
+    db.$transaction.mockImplementation((cb) => cb(tx as never));
+
+    await service.provisionNewUser('u2');
+
+    // No name (a client shows its own translated "Wishlist") and no reach (it defaults to private).
+    expect(tx.list.create).toHaveBeenCalledWith({ data: { userId: 'u2', kind: ListKind.Wishlist } });
+    expect(db.list.create).not.toHaveBeenCalled();
+  });
+
+  it('gives an anonymous user no wishlist (#1241)', async () => {
+    db.user.findUniqueOrThrow.mockResolvedValue(
+      makeUser({ id: 'u3', username: 'guest', email: 'g@x.io', isAnonymous: true }),
+    );
+    db.role.findMany.mockResolvedValue([{ id: 'role-anon', name: SystemRole.AnonymousUser }] as never);
+    db.$transaction.mockImplementation((cb) => cb(db));
+
+    await service.provisionNewUser('u3');
+
+    expect(db.list.create).not.toHaveBeenCalled();
   });
 
   it('gives everyone after the first human the base User role alone, and no service account', async () => {

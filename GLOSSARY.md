@@ -143,7 +143,7 @@ A signed-in period of use by a registered or anonymous user.
 _Avoid_: session for a play or a search
 
 **Provisioning**:
-What the server does for a newly signed-up user: giving them their starting role and profile, and settling whether they are the server's first person.
+What the server does for a newly signed-up user: giving them their starting role, profile and wishlist, and settling whether they are the server's first person.
 _Avoid_: onboarding, setup, registration (for this after-signup step)
 
 **Owner election**:
@@ -741,8 +741,20 @@ The planned ranked list of a user's favorite games on their profile, whether or 
 _Avoid_: favorites, for this list
 
 **List**:
-A user's named list of games. Planned: every user has a wishlist by default.
+A user's named, ordered list of games, such as their top 100 or the games they want to play. Every registered user has a wishlist.
 _Avoid_: list for an attendee's offered games
+
+**List entry**:
+One game, or one platform game, on a list, with its position and an optional note.
+_Avoid_: game list
+
+**Wishlist**:
+The one list every registered user has, of the games they want to own. It can't be deleted.
+_Avoid_: wantlist
+
+**Wishlist priority**:
+How much a user wants a game on their wishlist, from must have to don't buy this.
+_Avoid_: priority on its own for a list's order (say position)
 
 **Game customization**:
 A user's planned private changes to a game, such as its title or image, which only that user sees.

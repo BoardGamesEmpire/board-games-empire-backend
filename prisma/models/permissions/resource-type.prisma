@@ -41,6 +41,7 @@ enum ResourceType {
   GamePlayResult
   GamePlaySession
   GameShare
+  List
   Platform
   PlatformGame
   RuleVariant

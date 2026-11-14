@@ -28,6 +28,7 @@ import {
   UnknownErrorFilter,
 } from '@bge/i18n';
 import { LanguageModule } from '@bge/language';
+import { ListModule } from '@bge/list';
 import { MediaModule } from '@bge/media';
 import { MetricsModule } from '@bge/metrics';
 import { NotificationsModule } from '@bge/notifications';
@@ -206,6 +207,7 @@ import { createThrottlers } from './lib/throttlers';
     HealthModule,
     HouseholdModule,
     LanguageModule,
+    ListModule,
     MediaModule,
     MetricsModule,
     NotificationsModule,
