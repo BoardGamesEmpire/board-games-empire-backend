@@ -1,4 +1,11 @@
-import { GameAdditionMode, InterestedWeight, VoteEligibility, VoteQuorumType, VoteThresholdType } from '@bge/database';
+import {
+  GameAdditionMode,
+  InterestedWeight,
+  PlatformType,
+  VoteEligibility,
+  VoteQuorumType,
+  VoteThresholdType,
+} from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
@@ -67,6 +74,21 @@ export class CreateEventPolicyDto {
   @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
   @ValidateIf((o: CreateEventPolicyDto) => o.restrictToGameCategories === true)
   allowedCategoryIds?: string[];
+
+  @ApiPropertyOptional({ enum: PlatformType, isArray: true, description: 'Empty means no platform type restriction.' })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsArray({ message: i18nValidationMessage('validation.isArray') })
+  @IsEnum(PlatformType, { each: true, message: i18nValidationMessage('validation.each.isEnum') })
+  allowedPlatformTypes?: PlatformType[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Empty means no platform restriction. When both lists are set, a game must satisfy both.',
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsArray({ message: i18nValidationMessage('validation.isArray') })
+  @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
+  allowedPlatformIds?: string[];
 
   @ApiPropertyOptional()
   @IsInt({ message: i18nValidationMessage('validation.isInt') })

@@ -26,7 +26,12 @@ describe('EventPolicyController', () => {
   afterEach(() => jest.clearAllMocks());
 
   it('delegates the patch and answers with a message and the policy', async () => {
-    const policy = makeEventPolicy('event-1');
+    const policy = {
+      ...makeEventPolicy('event-1'),
+      allowedPlatformTypes: [],
+      allowedPlatformIds: [],
+      allowedCategoryIds: [],
+    };
     service.updatePolicy.mockResolvedValue(policy);
     const dto = { allowSpectators: false };
 

@@ -17,6 +17,19 @@ import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
 import type { UpdateEventPolicyDto } from './dto/update-event-policy.dto';
 import { assertValidVotingPolicy, foldPolicy } from './effective-policy';
 import { EventPolicyUpdatedEvent } from './events/event-policy.events';
+import { readEventPolicyView } from './policy-ceiling';
+import { assertPolicyReferencesExist, replaceEventPolicyLists, type EventPolicyLists } from './policy-lists';
+import { EVENT_POLICY_VIEW_INCLUDE, toEventPolicyView, type EventPolicyView } from './policy-view';
+
+const LIST_KEYS = ['allowedPlatformTypes', 'allowedPlatformIds', 'allowedCategoryIds'] as const;
+
+/** Whether two lists hold the same members, whatever their order. */
+function sameMembers(stored: readonly string[], sent: readonly string[]): boolean {
+  const members = new Set(stored);
+  const sentMembers = new Set(sent);
+
+  return members.size === sentMembers.size && [...sentMembers].every((member) => members.has(member));
+}
 
 @Injectable()
 export class EventPolicyService {
@@ -46,63 +59,94 @@ export class EventPolicyService {
    * started in, a resolve uses the policy in force when it runs, and a voting
    * deadline already set stays.
    *
+   * The allowed lists replace the stored ones when sent (#1268). One equal to
+   * the stored set, in any order, is not a change, and one that differs is, so a
+   * patch that changes only a list still emits, with the list's name among the
+   * changed fields.
+   *
    * The answer is the row read back under the read ceiling, so a writer who may
    * change the policy but not read it gets `null`. Only the columns whose values
    * changed are audited, and a patch that changes none emits nothing (#728).
    */
-  async updatePolicy(eventId: string, dto: UpdateEventPolicyDto): Promise<EventPolicy | null> {
+  async updatePolicy(eventId: string, dto: UpdateEventPolicyDto): Promise<EventPolicyView | null> {
     const initiatedAt = new Date();
     assert(Object.keys(dto).length > 0, new BadRequestException(t('common.at_least_one_field')));
 
     try {
-      const { event, existing, updated, policy } = await this.db.$transaction(async (tx) => {
-        const event = await lockLiveEvent(tx, eventId);
+      const { event, existing, updated, columns, policy, changedLists, sentLists } = await this.db.$transaction(
+        async (tx) => {
+          const event = await lockLiveEvent(tx, eventId);
 
-        // The route's guard passes anyone holding the grant on any event, so
-        // the policy is read under this event's update ceiling before anything
-        // else is read. A caller it doesn't reach finds no row and gets 403,
-        // never a 400 that tells them what the stored policy holds (#796).
-        // Every event is created with its policy row, which goes only with the
-        // event, so no row means no grant. The write repeats the ceiling.
-        //
-        // The row is whole, whatever the caller may read: the patch is judged
-        // against it, and the audit records what it replaced.
-        // eslint-disable-next-line no-restricted-syntax -- the event's one policy row, not a collection read
-        const updateCeiling = this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.update);
-        const existing = await tx.eventPolicy.findUnique({ where: { eventId, AND: updateCeiling } });
-        assert(existing, new ForbiddenException(t('common.forbidden.update')));
+          // The route's guard passes anyone holding the grant on any event, so
+          // the policy is read under this event's update ceiling before anything
+          // else is read. A caller it doesn't reach finds no row and gets 403,
+          // never a 400 that tells them what the stored policy holds (#796).
+          // Every event is created with its policy row, which goes only with the
+          // event, so no row means no grant. The write repeats the ceiling.
+          //
+          // The row is whole, whatever the caller may read: the patch is judged
+          // against it, and the audit records what it replaced.
+          // eslint-disable-next-line no-restricted-syntax -- the event's one policy row, not a collection read
+          const updateCeiling = this.abilityService.getCurrentResourceConditions(
+            ResourceType.EventPolicy,
+            Action.update,
+          );
+          const existingRow = await tx.eventPolicy.findUnique({
+            where: { eventId, AND: updateCeiling },
+            include: EVENT_POLICY_VIEW_INCLUDE,
+          });
+          assert(existingRow, new ForbiddenException(t('common.forbidden.update')));
+          const existing = toEventPolicyView(existingRow);
 
-        const datePolicies = await tx.eventOccurrencePolicy.findMany({ where: { occurrence: { eventId } } });
+          const { allowedPlatformTypes, allowedPlatformIds, allowedCategoryIds, ...columns } = dto;
+          const sentLists: EventPolicyLists = { allowedPlatformTypes, allowedPlatformIds, allowedCategoryIds };
+          const changedLists = LIST_KEYS.filter((key) => {
+            const sent = sentLists[key];
+            return sent !== undefined && !sameMembers(existing[key], sent);
+          });
 
-        const merged = { ...existing, ...dto };
-        assertValidVotingPolicy(merged);
-        for (const datePolicy of datePolicies) {
-          assertValidVotingPolicy(foldPolicy(merged, datePolicy));
-        }
+          const datePolicies = await tx.eventOccurrencePolicy.findMany({ where: { occurrence: { eventId } } });
 
-        const updated = await tx.eventPolicy.update({ where: { eventId, AND: updateCeiling }, data: dto });
+          const merged = { ...existing, ...columns };
+          assertValidVotingPolicy(merged);
+          for (const datePolicy of datePolicies) {
+            assertValidVotingPolicy(foldPolicy(merged, datePolicy));
+          }
 
-        const policy = await tx.eventPolicy.findUnique({
-          where: {
-            eventId,
-            // eslint-disable-next-line no-restricted-syntax -- the event's one policy row, not a collection read
-            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.read),
-          },
-        });
+          await assertPolicyReferencesExist(tx, { platformIds: allowedPlatformIds, categoryIds: allowedCategoryIds });
 
-        return { event, existing, updated, policy };
-      });
+          const updated = await tx.eventPolicy.update({ where: { eventId, AND: updateCeiling }, data: columns });
 
-      const changed = changedKeys(existing, updated, Object.keys(dto) as (keyof EventPolicy)[]);
+          // Only a list that differs is rewritten, so a re-sent list costs no writes.
+          await replaceEventPolicyLists(
+            tx,
+            existing.id,
+            Object.fromEntries(changedLists.map((key) => [key, sentLists[key]])) as EventPolicyLists,
+          );
+
+          const policy = await readEventPolicyView(tx, this.abilityService, eventId);
+
+          return { event, existing, updated, columns, policy, changedLists, sentLists };
+        },
+      );
+
+      const changedColumns = changedKeys(existing, updated, Object.keys(columns) as (keyof EventPolicy)[]);
+      const changed = [...changedColumns, ...changedLists];
       if (changed.length > 0) {
+        // The lists are not columns of the row, so their values come from what
+        // was read before and what was written.
+        const before = {
+          ...pickSnapshot(existing, changedColumns),
+          ...Object.fromEntries(changedLists.map((key) => [key, existing[key]])),
+        };
+        const after = {
+          ...pickSnapshot(updated, changedColumns),
+          ...Object.fromEntries(changedLists.map((key) => [key, sentLists[key]])),
+        };
+
         this.eventEmitter.emit(
           EventPolicyUpdatedEvent.eventName,
-          new EventPolicyUpdatedEvent(
-            pickSnapshot(existing, changed),
-            pickSnapshot(updated, changed),
-            eventId,
-            initiatedAt,
-          ),
+          new EventPolicyUpdatedEvent(before, after, eventId, initiatedAt),
         );
 
         // Their names, never their values: `data` is copied verbatim to a URL

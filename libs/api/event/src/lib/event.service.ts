@@ -44,6 +44,9 @@ import type { ListEventsQueryDto } from './dto/list-events.query.dto';
 import type { UpdateEventDto } from './dto/update-event.dto';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
 import { countLiveDates } from './occurrence/live-dates.util';
+import { eventPolicyReadArgs, readEventPolicyView } from './policy/policy-ceiling';
+import { assertPolicyReferencesExist, policyListsCreateData } from './policy/policy-lists';
+import { toEventPolicyView, type EventPolicyView } from './policy/policy-view';
 import {
   EVENT_ATTENDANCE_SELECT,
   readEventAttendance,
@@ -307,7 +310,7 @@ export class EventService {
     const now = new Date();
     const ownAttendeeWhere = this.ownAttendeeWhere(resolveActingUserIdOrNull(this.abilityService));
 
-    const [event, occurrences, attendees, policy, statusDates, ownRows] = await this.db.$transaction(
+    const [event, occurrences, attendees, policyRow, statusDates, ownRows] = await this.db.$transaction(
       [
         this.db.event.findUnique({
           where: {
@@ -329,13 +332,7 @@ export class EventService {
           orderBy: ATTENDEE_ORDER,
         }),
 
-        this.db.eventPolicy.findUnique({
-          where: {
-            eventId: id,
-            // eslint-disable-next-line no-restricted-syntax -- the event's one policy row, not a collection read
-            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.read),
-          },
-        }),
+        this.db.eventPolicy.findUnique(eventPolicyReadArgs(this.abilityService, id)),
 
         this.db.eventOccurrence.findMany({ where: { eventId: id }, select: EVENT_STATUS_DATE_SELECT }),
 
@@ -356,7 +353,7 @@ export class EventService {
       ...withEventStatus(event, statusDates, now),
       occurrences,
       attendees,
-      policy,
+      policy: policyRow ? toEventPolicyView(policyRow) : null,
       attendance: ownRow ? toEventAttendance(ownRow) : null,
     };
   }
@@ -409,7 +406,14 @@ export class EventService {
 
           await assertInvitable(tx, userId, uniqueInviteIds);
 
-          return tx.event.create({
+          // An unknown id answers 400 with its own code, where the nested
+          // connect would fail inside Prisma (#1268).
+          await assertPolicyReferencesExist(tx, {
+            platformIds: policy?.allowedPlatformIds,
+            categoryIds: policy?.allowedCategoryIds,
+          });
+
+          const row = await tx.event.create({
             data: {
               ...eventFields,
               clientRequestId,
@@ -458,15 +462,7 @@ export class EventService {
                       voteEligibility: policy.voteEligibility,
                       interestedWeight: policy.interestedWeight,
                       votingWindowHours: policy.votingWindowHours,
-                      ...(policy.allowedCategoryIds?.length
-                        ? {
-                            allowedCategories: {
-                              create: policy.allowedCategoryIds.map((catId) => ({
-                                category: { connect: { id: catId } },
-                              })),
-                            },
-                          }
-                        : {}),
+                      ...policyListsCreateData(policy),
                       // always create an event policy -- even an empty one
                     }
                   : {},
@@ -499,6 +495,8 @@ export class EventService {
 
             include: EVENT_CREATE_INCLUDE,
           });
+
+          return { ...row, policy: row.policy ? toEventPolicyView(row.policy) : null };
         });
 
         // The create read back every date it made, with no ceiling.
@@ -615,7 +613,7 @@ export class EventService {
     // first, so a cancel committed since would pair its not-yet-cancelled row
     // with the cancel's dates: a status the event had neither before nor after.
     const now = new Date();
-    const [row, occurrences, attendees, policy, statusDates] = await this.db.$transaction(
+    const [row, occurrences, attendees, policyRow, statusDates] = await this.db.$transaction(
       [
         this.db.event.findUnique({ where: { id: event.id } }),
 
@@ -633,13 +631,7 @@ export class EventService {
           orderBy: ATTENDEE_ORDER,
         }),
 
-        this.db.eventPolicy.findUnique({
-          where: {
-            eventId: event.id,
-            // eslint-disable-next-line no-restricted-syntax -- the event's one policy row, not a collection read
-            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.read),
-          },
-        }),
+        this.db.eventPolicy.findUnique(eventPolicyReadArgs(this.abilityService, event.id)),
 
         this.db.eventOccurrence.findMany({ where: { eventId: event.id }, select: EVENT_STATUS_DATE_SELECT }),
       ],
@@ -648,7 +640,11 @@ export class EventService {
 
     // `row` is gone only if a household delete cascaded to it since; its
     // dates went with it, and the row read above still names the create.
-    return withEventStatus({ ...(row ?? event), occurrences, attendees, policy }, statusDates, now);
+    return withEventStatus(
+      { ...(row ?? event), occurrences, attendees, policy: policyRow ? toEventPolicyView(policyRow) : null },
+      statusDates,
+      now,
+    );
   }
 
   async updateEvent(id: string, dto: UpdateEventDto) {
@@ -694,13 +690,7 @@ export class EventService {
 
         // Read under the policy ceiling, as GET /events/:id does (#796). A
         // writer who may update the event but not read its policy gets a null.
-        const policy = await tx.eventPolicy.findUnique({
-          where: {
-            eventId: id,
-            // eslint-disable-next-line no-restricted-syntax -- the event's one policy row, not a collection read
-            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.read),
-          },
-        });
+        const policy = await readEventPolicyView(tx, this.abilityService, id);
 
         return { existing, updated, policy };
       });
@@ -831,6 +821,5 @@ export type EventDetail = Prisma.EventGetPayload<{
   include: {
     occurrences: true;
     attendees: { include: typeof ATTENDEE_USER_AND_ROLE_INCLUDE };
-    policy: true;
   };
-}> & { status: EventStatus; attendance: EventAttendance | null };
+}> & { policy: EventPolicyView | null; status: EventStatus; attendance: EventAttendance | null };

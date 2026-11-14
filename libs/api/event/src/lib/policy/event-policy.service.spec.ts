@@ -1,6 +1,7 @@
 import {
   Action,
   GameAdditionMode,
+  PlatformType,
   Prisma,
   ResourceType,
   VoteThresholdType,
@@ -25,6 +26,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { UpdateEventPolicyDto } from './dto/update-event-policy.dto';
 import { EventPolicyService } from './event-policy.service';
 import { EventPolicyUpdatedEvent } from './events/event-policy.events';
+import { EVENT_POLICY_VIEW_INCLUDE } from './policy-view';
 
 /** A ceiling of its own for each type and action, so a test can tell which one a query was given. */
 const ceiling = (resourceType: string, action: string) => [{ ceiling: `${action}:${resourceType}` }];
@@ -32,6 +34,29 @@ const ceiling = (resourceType: string, action: string) => [{ ceiling: `${action}
 /** Whether a policy read carries the update ceiling: the read under the lock, as opposed to the read back. */
 const underUpdateCeiling = (args: { where: { AND?: unknown } }) =>
   JSON.stringify(args.where.AND) === JSON.stringify(ceiling(ResourceType.EventPolicy, Action.update));
+
+/** The lists stored on the policy, as the ids and types they hold. */
+interface StoredLists {
+  types: PlatformType[];
+  platformIds: string[];
+  categoryIds: string[];
+}
+
+/** A policy row as a read with the view's embed returns it: the lists as join rows. */
+const withJoinRows = (policy: EventPolicy, lists: StoredLists) => ({
+  ...policy,
+  allowedPlatformTypes: lists.types.map((platformType) => ({ platformType })),
+  allowedPlatforms: lists.platformIds.map((platformId) => ({ platformId })),
+  allowedCategories: lists.categoryIds.map((categoryId) => ({ categoryId })),
+});
+
+/** The policy as it is served, with the lists as plain lists. */
+const asView = (policy: EventPolicy, lists: StoredLists = { types: [], platformIds: [], categoryIds: [] }) => ({
+  ...policy,
+  allowedPlatformTypes: lists.types,
+  allowedPlatformIds: lists.platformIds,
+  allowedCategoryIds: lists.categoryIds,
+});
 
 const dependentRecordNotFound = () =>
   new Prisma.PrismaClientKnownRequestError('No record was found for an update.', {
@@ -53,6 +78,9 @@ describe('EventPolicyService', () => {
 
   /** The policy row the read under the read ceiling finds after the write. */
   let readable: EventPolicy | null;
+
+  /** The lists stored on the policy. */
+  let lists: StoredLists;
 
   /** Each date's own policy row. */
   let datePolicies: EventOccurrencePolicy[];
@@ -91,13 +119,16 @@ describe('EventPolicyService', () => {
     stored = makeEventPolicy('event-1', { id: 'policy-1' });
     readable = null;
     datePolicies = [];
+    lists = { types: [], platformIds: [], categoryIds: [] };
 
     tx.$queryRaw.mockResolvedValue([]);
     tx.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1' }));
 
     // The read under the lock carries the update ceiling; the read back carries the read ceiling.
     tx.eventPolicy.findUnique.mockImplementation(((args: { where: { AND?: unknown } }) =>
-      Promise.resolve(underUpdateCeiling(args) ? stored : readable)) as never);
+      Promise.resolve(
+        underUpdateCeiling(args) ? stored && withJoinRows(stored, lists) : readable && withJoinRows(readable, lists),
+      )) as never);
     tx.eventOccurrencePolicy.findMany.mockImplementation((() => Promise.resolve(datePolicies)) as never);
     tx.eventPolicy.update.mockImplementation(((args: { data: Partial<EventPolicy> }) =>
       Promise.resolve({ ...(stored as EventPolicy), ...args.data })) as never);
@@ -122,8 +153,8 @@ describe('EventPolicyService', () => {
     tx.$queryRaw.mockImplementation(record('lock', () => []) as never);
     tx.eventPolicy.findUnique.mockImplementation(((args: { where: { AND?: unknown } }) =>
       underUpdateCeiling(args)
-        ? record('read policy', () => stored)()
-        : record('read back', () => readable)()) as never);
+        ? record('read policy', () => stored && withJoinRows(stored, lists))()
+        : record('read back', () => readable && withJoinRows(readable, lists))()) as never);
     tx.eventOccurrencePolicy.findMany.mockImplementation(record('read date policies', () => datePolicies) as never);
     tx.eventPolicy.update.mockImplementation(record('update', () => stored) as never);
 
@@ -135,6 +166,7 @@ describe('EventPolicyService', () => {
     expect(order).toEqual(['lock', 'read policy', 'read date policies', 'update', 'read back']);
     expect(tx.eventPolicy.findUnique).toHaveBeenNthCalledWith(1, {
       where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.update) },
+      include: EVENT_POLICY_VIEW_INCLUDE,
     });
     expect(tx.eventOccurrencePolicy.findMany).toHaveBeenCalledWith({ where: { occurrence: { eventId: 'event-1' } } });
   });
@@ -217,6 +249,7 @@ describe('EventPolicyService', () => {
     expect(tx.eventPolicy.findUnique).toHaveBeenCalledTimes(1);
     expect(tx.eventPolicy.findUnique).toHaveBeenCalledWith({
       where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.update) },
+      include: EVENT_POLICY_VIEW_INCLUDE,
     });
     expect(tx.eventOccurrencePolicy.findMany).not.toHaveBeenCalled();
     expect(tx.eventPolicy.update).not.toHaveBeenCalled();
@@ -249,9 +282,10 @@ describe('EventPolicyService', () => {
   it('answers with the policy read under the read ceiling, null when the caller cannot read it (#796)', async () => {
     readable = makeEventPolicy('event-1', { id: 'policy-1', allowSpectators: false });
 
-    await expect(update({ allowSpectators: false })).resolves.toEqual(readable);
+    await expect(update({ allowSpectators: false })).resolves.toEqual(asView(readable));
     expect(tx.eventPolicy.findUnique).toHaveBeenLastCalledWith({
       where: { eventId: 'event-1', AND: ceiling(ResourceType.EventPolicy, Action.read) },
+      include: EVENT_POLICY_VIEW_INCLUDE,
     });
 
     emitter.emit.mockClear();
@@ -298,6 +332,89 @@ describe('EventPolicyService', () => {
 
     expect(tx.eventPolicy.update).toHaveBeenCalled();
     expect(emitter.emit).not.toHaveBeenCalled();
+  });
+
+  /**
+   * #1268. The allowed lists are not columns: a list sent replaces the stored
+   * one, an empty one clears it, and one left out stays.
+   */
+  describe('the allowed lists', () => {
+    beforeEach(() => {
+      lists = { types: [PlatformType.Tabletop], platformIds: ['plat-1'], categoryIds: ['cat-1', 'cat-2'] };
+      // Every id sent matches a row, unless a test says otherwise.
+      const countIds = (args: { where: { id: { in: string[] } } }) => Promise.resolve(args.where.id.in.length);
+      tx.platform.count.mockImplementation(countIds as never);
+      tx.category.count.mockImplementation(countIds as never);
+    });
+
+    const webhookFields = () =>
+      emitter.emit.mock.calls.find(([name]) => name === WebhookEventType.EventPolicyUpdated)?.[1].data.changedFields;
+
+    it('replaces a list it is sent and keeps one it is not (#1268)', async () => {
+      await update({ allowedPlatformIds: ['plat-2'] });
+
+      expect(tx.eventPolicyPlatform.deleteMany).toHaveBeenCalledWith({ where: { eventPolicyId: 'policy-1' } });
+      expect(tx.eventPolicyPlatform.createMany).toHaveBeenCalledWith({
+        data: [{ eventPolicyId: 'policy-1', platformId: 'plat-2' }],
+      });
+      expect(tx.eventPolicyPlatformType.deleteMany).not.toHaveBeenCalled();
+      expect(tx.eventPolicyCategory.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('clears a list sent empty (#1268)', async () => {
+      await update({ allowedCategoryIds: [] });
+
+      expect(tx.eventPolicyCategory.deleteMany).toHaveBeenCalledWith({ where: { eventPolicyId: 'policy-1' } });
+      expect(tx.eventPolicyCategory.createMany).toHaveBeenCalledWith({ data: [] });
+    });
+
+    it('checks the ids it is sent exist, in the transaction, before writing (#1268)', async () => {
+      tx.platform.count.mockResolvedValue(0 as never);
+
+      await expect(update({ allowedPlatformIds: ['nope'] })).rejects.toMatchObject({
+        status: 400,
+        response: { code: 'EVENT_POLICY_UNKNOWN_REFERENCE', message: t('errors.event_policy.unknown_platform') },
+      });
+
+      expect(tx.platform.count).toHaveBeenCalledWith({ where: { id: { in: ['nope'] } } });
+      expect(tx.eventPolicy.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('serves the lists it holds after the write as ids and types (#1268)', async () => {
+      readable = makeEventPolicy('event-1', { id: 'policy-1' });
+
+      await expect(update({ allowedPlatformIds: ['plat-2'] })).resolves.toEqual(asView(readable, lists));
+    });
+
+    it('emits once for a patch that changes only a list, naming the list (#1268)', async () => {
+      await update({ allowedPlatformTypes: [PlatformType.Tabletop, PlatformType.PC] });
+
+      const [, emitted] = emitter.emit.mock.calls.find(([name]) => name === EventPolicyUpdatedEvent.eventName) ?? [];
+      expect(emitted.before).toEqual({ id: 'policy-1', allowedPlatformTypes: [PlatformType.Tabletop] });
+      expect(emitted.after).toEqual({
+        id: 'policy-1',
+        allowedPlatformTypes: [PlatformType.Tabletop, PlatformType.PC],
+      });
+      expect(webhookFields()).toEqual(['allowedPlatformTypes']);
+      expect(emitter.emit).toHaveBeenCalledTimes(2);
+    });
+
+    it('names a changed list beside a changed column (#1268)', async () => {
+      await update({ allowSpectators: false, allowedCategoryIds: ['cat-3'] });
+
+      expect(webhookFields()).toEqual(['allowSpectators', 'allowedCategoryIds']);
+    });
+
+    // A form that re-sends what it loaded changes nothing, in whatever order
+    // its lists come back (#728, #1268).
+    it('emits nothing for a list re-sent unchanged, in any order, and rewrites nothing (#1268)', async () => {
+      await update({ allowedCategoryIds: ['cat-2', 'cat-1'], allowedPlatformTypes: [PlatformType.Tabletop] });
+
+      expect(emitter.emit).not.toHaveBeenCalled();
+      expect(tx.eventPolicyCategory.deleteMany).not.toHaveBeenCalled();
+      expect(tx.eventPolicyPlatformType.deleteMany).not.toHaveBeenCalled();
+    });
   });
 
   it('answers 400 for an empty body (#796)', async () => {

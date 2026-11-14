@@ -1,6 +1,7 @@
 import { MutationEvent } from '@bge/actor-context';
 import { ResourceType, type EventPolicy } from '@bge/database';
 import { EventEvents } from '../../constants/event-events.constant';
+import type { EventPolicyView } from '../policy-view';
 
 /**
  * Domain mutation events for an event's policy (#796).
@@ -12,9 +13,12 @@ import { EventEvents } from '../../constants/event-events.constant';
  * reach the audit row, so context fields stay out of persistence.
  */
 
-type EventPolicyUpdatedSnapshot = Readonly<Partial<EventPolicy> & Pick<EventPolicy, 'id'>>;
+type EventPolicyUpdatedSnapshot = Readonly<Partial<EventPolicyView> & Pick<EventPolicy, 'id'>>;
 
-/** before/after carry the changed subset only (plus `id`), as every update's audit row does (#728). */
+/**
+ * before/after carry the changed subset only (plus `id`), as every update's audit row does (#728).
+ * A changed allowed list is in it by its list name, as the ids or types it held (#1268).
+ */
 export class EventPolicyUpdatedEvent extends MutationEvent<EventPolicy> {
   static readonly eventName = EventEvents.EventPolicyUpdated;
 

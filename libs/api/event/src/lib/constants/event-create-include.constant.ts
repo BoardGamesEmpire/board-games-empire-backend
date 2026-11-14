@@ -1,4 +1,5 @@
 import { Prisma } from '@bge/database';
+import { EVENT_POLICY_VIEW_INCLUDE, type EventPolicyView } from '../policy/policy-view';
 import { ATTENDEE_ORDER } from './attendee-order.constant';
 import { OCCURRENCE_ORDER } from './occurrence-order.constant';
 
@@ -25,8 +26,15 @@ export const EVENT_CREATE_ATTENDEE_INCLUDE = {
  */
 export const EVENT_CREATE_INCLUDE = {
   occurrences: { orderBy: OCCURRENCE_ORDER },
-  policy: true,
+  policy: { include: EVENT_POLICY_VIEW_INCLUDE },
   attendees: { include: EVENT_CREATE_ATTENDEE_INCLUDE, orderBy: ATTENDEE_ORDER },
 } as const satisfies Prisma.EventInclude;
 
-export type CreatedEvent = Prisma.EventGetPayload<{ include: typeof EVENT_CREATE_INCLUDE }>;
+/**
+ * The create reads the policy with its lists embedded as join rows; what is
+ * served is the `EventPolicyView` (#1268), the same shape every policy answer
+ * has.
+ */
+export type CreatedEvent = Omit<Prisma.EventGetPayload<{ include: typeof EVENT_CREATE_INCLUDE }>, 'policy'> & {
+  policy: EventPolicyView | null;
+};

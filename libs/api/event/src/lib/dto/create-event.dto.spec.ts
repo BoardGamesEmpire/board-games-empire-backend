@@ -50,4 +50,15 @@ describe('CreateEventDto', () => {
       ]);
     });
   });
+
+  // The lists are optional, and null is refused as a value (#1268).
+  it('accepts the allowed platform lists on a policy, and refuses a type or null that is not one (#1268)', async () => {
+    const policy = (fields: PlainPayload) => ({ title: 'Game night', policy: fields });
+
+    await expect(
+      propertiesWithErrors(policy({ allowedPlatformTypes: ['Tabletop', 'PC'], allowedPlatformIds: ['plat-1'] })),
+    ).resolves.toEqual([]);
+    await expect(propertiesWithErrors(policy({ allowedPlatformTypes: ['Nope'] }))).resolves.toEqual(['policy']);
+    await expect(propertiesWithErrors(policy({ allowedPlatformIds: null }))).resolves.toEqual(['policy']);
+  });
 });
