@@ -6,6 +6,7 @@ import type {
   EventGameNomination,
   EventGameVote,
   EventOccurrence,
+  EventOccurrencePolicy,
   EventParticipationStatus,
   EventPolicy,
   EventStatus,
@@ -13,6 +14,7 @@ import type {
   GameMedium,
   Platform,
   PlatformGame,
+  PlatformType,
   User,
   UserProfile,
 } from '@bge/database';
@@ -102,24 +104,59 @@ export interface ResolutionWire {
   readonly eligibleVoterCount: number;
 }
 
-/** An occurrence as its routes serve it, with its votes and games. */
+/**
+ * A policy's allowed platform types, platforms and categories, as every policy
+ * answer serves them: plain lists, sorted, rather than join rows (#1268).
+ */
+export interface PolicyListsWire {
+  readonly allowedPlatformTypes: readonly PlatformType[];
+  readonly allowedPlatformIds: readonly string[];
+  readonly allowedCategoryIds: readonly string[];
+}
+
+/**
+ * An event's policy as every route serves it (#796, #1268): the row, which
+ * carries `occurrenceOverrideScope`, and its allowed lists. An empty list is
+ * no restriction of its kind.
+ */
+export type EventPolicyWire = Wire<EventPolicy> & PolicyListsWire;
+
+/**
+ * A date's own policy as it is served (#796, #1211): the row, and its allowed
+ * lists. Each field holds only what the date sets itself: `null` or an empty
+ * list is the event's, and a `*Unrestricted` flag is no restriction of its
+ * kind for that date.
+ */
+export type OccurrencePolicyWire = Wire<EventOccurrencePolicy> & PolicyListsWire;
+
+/**
+ * An occurrence as its routes serve it, with its votes, its games and its own
+ * policy. The policy is `null` for a date with no policy row yet, and for a
+ * caller who may not read the event's policy (#1211).
+ */
 export type EventOccurrenceWire = Wire<EventOccurrence> & {
   readonly availabilityVotes: readonly OccurrenceVoteWire[];
   readonly games: readonly OccurrenceGameWire[];
+  readonly policy: OccurrencePolicyWire | null;
 };
 
 /**
  * `GET /api/events/:id`'s event, with its occurrences, attendees and policy.
  * Each comes from a read under its own type's ceiling (#560), so a caller
  * without a read on one gets `[]` for it, or `null` for the policy.
+ * `occurrencePolicies` holds the own policy of each served date that has a
+ * policy row, and is `[]` whenever `policy` is `null` (#1211).
  */
-export type EventDetailWire = EventReadWire & EventEmbedsWire;
+export type EventDetailWire = EventReadWire &
+  EventEmbedsWire & {
+    readonly occurrencePolicies: readonly OccurrencePolicyWire[];
+  };
 
 /** The embeds a create's replay shares with the event read. */
 export interface EventEmbedsWire {
   readonly occurrences: readonly Wire<EventOccurrence>[];
   readonly attendees: readonly EventAttendeeWire[];
-  readonly policy: Wire<EventPolicy> | null;
+  readonly policy: EventPolicyWire | null;
 }
 
 /** A create's replay: the event and its embeds, without `attendance` (#867). */
@@ -288,32 +325,53 @@ export function eventReplayEnvelope(response: HttpResponseLike, request: Request
       );
 }
 
-/** `GET /api/events/:id`: `{ event }`, as {@link eventReplayEnvelope} checks it, plus `attendance`. */
+/**
+ * `GET /api/events/:id`: `{ event }`, as {@link eventReplayEnvelope} checks it,
+ * plus `attendance` and the `occurrencePolicies` array (#1211).
+ */
 export function eventDetailEnvelope(response: HttpResponseLike, request: RequestDescription): EventDetailWire {
-  const event = eventReplayEnvelope(response, request) as EventReplayWire & { readonly attendance?: unknown };
+  const event = eventReplayEnvelope(response, request) as EventReplayWire & {
+    readonly attendance?: unknown;
+    readonly occurrencePolicies?: unknown;
+  };
 
-  return hasAttendance(event)
+  return hasAttendance(event) && Array.isArray(event.occurrencePolicies)
     ? (event as EventDetailWire)
-    : fail("its 'event' carried no 'attendance' object or null", request, response);
+    : fail("its 'event' carried no 'attendance' object or null, or no 'occurrencePolicies' array", request, response);
 }
 
 /**
- * `PATCH /api/events/:eventId/policy`: `{ message, policy }` (#796). `policy`
- * is the row read back under the caller's own read of it, so it is `null` for
- * a caller who may change the policy but not read it. A missing key, or a
- * `policy` with no id, means the envelope changed, not that the read was
- * refused.
+ * A policy write's `{ message, policy }`. `policy` is read back under the
+ * caller's own read of the event's policy, so it is `null` for a caller who
+ * may change the policy but not read it. A missing key, or a `policy` with no
+ * id, means the envelope changed, not that the read was refused.
  */
-export function eventPolicyEnvelope(response: HttpResponseLike, request: RequestDescription): Wire<EventPolicy> | null {
+function policyEnvelope<TPolicy>(response: HttpResponseLike, request: RequestDescription): TPolicy | null {
   const policy = isRecord(response.body) ? response.body['policy'] : undefined;
   if (policy === null) {
     return null;
   }
 
   return (
-    withId<Wire<EventPolicy>>(policy) ??
+    withId<TPolicy>(policy) ??
     fail("it carried no 'policy' object with a string id, and no null 'policy'", request, response)
   );
+}
+
+/** `PATCH /api/events/:eventId/policy`: `{ message, policy }`, as {@link policyEnvelope} checks it (#796). */
+export function eventPolicyEnvelope(response: HttpResponseLike, request: RequestDescription): EventPolicyWire | null {
+  return policyEnvelope<EventPolicyWire>(response, request);
+}
+
+/**
+ * `PATCH /api/events/:eventId/occurrences/:occurrenceId/policy`: `{ message, policy }`,
+ * the date's own policy, as {@link policyEnvelope} checks it (#796).
+ */
+export function occurrencePolicyEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): OccurrencePolicyWire | null {
+  return policyEnvelope<OccurrencePolicyWire>(response, request);
 }
 
 /** What a row must be for {@link withId}. */
