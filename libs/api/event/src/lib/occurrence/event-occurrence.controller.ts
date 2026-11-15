@@ -115,6 +115,11 @@ export class EventOccurrenceController {
   })
   @ApiParam({ name: 'occurrenceId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Occurrence confirmed' })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description:
+      'The date is not proposed, its event is cancelled, or the date has passed (code OCCURRENCE_DATE_PASSED)',
+  })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence))
   @Post(':occurrenceId/confirm')
   confirm(@Param('eventId') eventId: string, @Param('occurrenceId') occurrenceId: string) {
@@ -155,7 +160,10 @@ export class EventOccurrenceController {
   @ApiOperation({ summary: 'Submit or update your availability for a proposed occurrence' })
   @ApiParam({ name: 'occurrenceId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Availability recorded' })
-  @ApiResponse({ status: Http.BadRequest, description: 'Occurrence is not in Proposed status' })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description: 'Occurrence is not in Proposed status, or the date has passed (code OCCURRENCE_DATE_PASSED)',
+  })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.EventAvailabilityVote))
   @Post(':occurrenceId/availability')
   submitAvailability(

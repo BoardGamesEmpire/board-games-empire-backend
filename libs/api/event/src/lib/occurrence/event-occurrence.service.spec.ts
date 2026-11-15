@@ -455,7 +455,7 @@ describe('EventOccurrenceService', () => {
       '$name embeds the policy alone in its write (#1211)',
       async ({ name, op, status }) => {
         db.eventOccurrence.findUnique.mockResolvedValue(
-          makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status }),
+          makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status, startDate: null, endDate: null }),
         );
 
         await run(name);
@@ -480,7 +480,7 @@ describe('EventOccurrenceService', () => {
       '$name answers with the votes and games read under their own ceilings',
       async ({ name, status }) => {
         db.eventOccurrence.findUnique.mockResolvedValue(
-          makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status }),
+          makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status, startDate: null, endDate: null }),
         );
 
         const answer = await run(name);
@@ -509,7 +509,9 @@ describe('EventOccurrenceService', () => {
     });
 
     it.each(answeredThroughReads)('$name reads the votes and games before it writes', async ({ name, op, status }) => {
-      db.eventOccurrence.findUnique.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status }));
+      db.eventOccurrence.findUnique.mockResolvedValue(
+        makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status, startDate: null, endDate: null }),
+      );
 
       await run(name);
 
@@ -522,7 +524,7 @@ describe('EventOccurrenceService', () => {
       '$name writes nothing and emits nothing when a read fails',
       async ({ name, op, status }) => {
         db.eventOccurrence.findUnique.mockResolvedValue(
-          makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status }),
+          makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status, startDate: null, endDate: null }),
         );
         db.eventGame.findMany.mockRejectedValue(new Error('connection lost'));
 
@@ -555,7 +557,10 @@ describe('EventOccurrenceService', () => {
       allowedCategoryIds: [],
     };
     const row = (status: OccurrenceStatus = OccurrenceStatus.Proposed) =>
-      ({ ...makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status }), policy: joinRows(dayPolicy) }) as never;
+      ({
+        ...makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status, startDate: null, endDate: null }),
+        policy: joinRows(dayPolicy),
+      }) as never;
 
     const canReadPolicy = (can: boolean) => {
       db.eventPolicy.count.mockResolvedValue(can ? 1 : 0);
@@ -1086,7 +1091,8 @@ describe('EventOccurrenceService', () => {
     };
 
     beforeEach(() => {
-      const row = makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' });
+      // Undated, so a confirm isn't refused as a passed date (#1005).
+      const row = makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', startDate: null, endDate: null });
       db.event.findUnique.mockResolvedValue({
         id: 'event-1',
         schedulingMode: EventSchedulingMode.MultiDay,
@@ -1198,6 +1204,8 @@ describe('EventOccurrenceService', () => {
       db.eventOccurrence.findUnique.mockResolvedValue({
         id: 'occ-1',
         status: OccurrenceStatus.Proposed,
+        startDate: null,
+        endDate: null,
       } as EventOccurrence);
       db.eventOccurrence.update.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
 
@@ -1213,6 +1221,8 @@ describe('EventOccurrenceService', () => {
       db.eventOccurrence.findUnique.mockResolvedValue({
         id: 'occ-1',
         status: OccurrenceStatus.Proposed,
+        startDate: null,
+        endDate: null,
       } as EventOccurrence);
       db.eventOccurrence.update.mockResolvedValue(
         makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status: OccurrenceStatus.Confirmed }),
@@ -1233,6 +1243,8 @@ describe('EventOccurrenceService', () => {
       db.eventOccurrence.findUnique.mockResolvedValue({
         id: 'occ-1',
         status: OccurrenceStatus.Proposed,
+        startDate: null,
+        endDate: null,
       } as EventOccurrence);
       db.eventOccurrence.update.mockResolvedValue(
         makeEventOccurrence({
@@ -1258,6 +1270,8 @@ describe('EventOccurrenceService', () => {
       db.eventOccurrence.findUnique.mockResolvedValue({
         id: 'occ-1',
         status: OccurrenceStatus.Proposed,
+        startDate: null,
+        endDate: null,
       } as EventOccurrence);
       db.eventOccurrence.update.mockResolvedValue(
         makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status: OccurrenceStatus.Confirmed }),
@@ -1267,6 +1281,58 @@ describe('EventOccurrenceService', () => {
 
       const [, emitted] = emitter.emit.mock.calls[0];
       expect(emitted.actingUserId).toBeNull();
+    });
+
+    describe('a passed Proposed date (#1005)', () => {
+      const HOUR = 60 * 60 * 1000;
+      const passed = () => ({
+        id: 'occ-1',
+        status: OccurrenceStatus.Proposed,
+        startDate: new Date(Date.now() - HOUR),
+        endDate: null,
+      });
+      const upcoming = () => ({
+        id: 'occ-1',
+        status: OccurrenceStatus.Proposed,
+        startDate: new Date(Date.now() + HOUR),
+        endDate: null,
+      });
+
+      it('refuses to confirm a Proposed date that has passed (#1005)', async () => {
+        db.eventOccurrence.findUnique.mockResolvedValue(passed() as never);
+
+        const rejection: unknown = await service.confirmOccurrence('event-1', 'occ-1').catch((e: unknown) => e);
+
+        expect(rejection).toBeInstanceOf(CodedHttpException);
+        expect((rejection as CodedHttpException).getResponse()).toMatchObject({
+          code: 'OCCURRENCE_DATE_PASSED',
+          message: t('errors.occurrence.confirm_date_passed'),
+        });
+        expect(db.eventOccurrence.update).not.toHaveBeenCalled();
+      });
+
+      it('reads whether the date has passed again under the event lock (#1005)', async () => {
+        db.eventOccurrence.findUnique
+          .mockResolvedValueOnce(upcoming() as never)
+          .mockResolvedValueOnce(passed() as never);
+
+        const rejection: unknown = await service.confirmOccurrence('event-1', 'occ-1').catch((e: unknown) => e);
+
+        expect(rejection).toBeInstanceOf(CodedHttpException);
+        expect((rejection as CodedHttpException).getResponse()).toMatchObject({ code: 'OCCURRENCE_DATE_PASSED' });
+        expect(db.eventOccurrence.update).not.toHaveBeenCalled();
+      });
+
+      it('still declines a Proposed date that has passed (#1005)', async () => {
+        db.eventOccurrence.findUnique.mockResolvedValue(passed() as never);
+        db.eventOccurrence.update.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
+
+        await service.declineOccurrence('event-1', 'occ-1');
+
+        expect(db.eventOccurrence.update).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ status: OccurrenceStatus.Declined }) }),
+        );
+      });
     });
 
     it('rejects an illegal source status', async () => {
@@ -1281,7 +1347,12 @@ describe('EventOccurrenceService', () => {
     // A confirm that comes second sees the cancel; one that comes first is
     // caught by the cancel's update. Either way no date stays Confirmed.
     it("confirms in a transaction that takes the event's lock, then reads its cancel (#795)", async () => {
-      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1', status: OccurrenceStatus.Proposed } as never);
+      db.eventOccurrence.findUnique.mockResolvedValue({
+        id: 'occ-1',
+        status: OccurrenceStatus.Proposed,
+        startDate: null,
+        endDate: null,
+      } as never);
       db.eventOccurrence.update.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
 
       await service.confirmOccurrence('event-1', 'occ-1');
@@ -1296,7 +1367,12 @@ describe('EventOccurrenceService', () => {
     });
 
     it('refuses to confirm a date of a cancelled event with 400 (#795)', async () => {
-      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1', status: OccurrenceStatus.Proposed } as never);
+      db.eventOccurrence.findUnique.mockResolvedValue({
+        id: 'occ-1',
+        status: OccurrenceStatus.Proposed,
+        startDate: null,
+        endDate: null,
+      } as never);
       eventIsCancelled();
 
       const rejection: unknown = await service.confirmOccurrence('event-1', 'occ-1').catch((e: unknown) => e);
@@ -1338,8 +1414,8 @@ describe('EventOccurrenceService', () => {
       async (_, from, run) => {
         const moved = from === OccurrenceStatus.Proposed ? OccurrenceStatus.Declined : OccurrenceStatus.Cancelled;
         db.eventOccurrence.findUnique
-          .mockResolvedValueOnce({ id: 'occ-1', status: from } as never)
-          .mockResolvedValueOnce({ id: 'occ-1', status: moved } as never);
+          .mockResolvedValueOnce({ id: 'occ-1', status: from, startDate: null, endDate: null } as never)
+          .mockResolvedValueOnce({ id: 'occ-1', status: moved, startDate: null, endDate: null } as never);
 
         const rejection: unknown = await run().catch((e: unknown) => e);
 
@@ -1353,7 +1429,12 @@ describe('EventOccurrenceService', () => {
     );
 
     it('writes only from the status it read under the lock, and reports that status as before (#795)', async () => {
-      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1', status: OccurrenceStatus.Proposed } as never);
+      db.eventOccurrence.findUnique.mockResolvedValue({
+        id: 'occ-1',
+        status: OccurrenceStatus.Proposed,
+        startDate: null,
+        endDate: null,
+      } as never);
       db.eventOccurrence.update.mockResolvedValue(
         makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status: OccurrenceStatus.Declined }),
       );
@@ -1406,6 +1487,8 @@ describe('EventOccurrenceService', () => {
       db.eventOccurrence.findUnique.mockResolvedValue({
         id: 'occ-1',
         status: OccurrenceStatus.Proposed,
+        startDate: null,
+        endDate: null,
       } as EventOccurrence);
       db.eventAvailabilityVote.upsert.mockResolvedValue({
         id: 'vote-1',
@@ -1463,6 +1546,72 @@ describe('EventOccurrenceService', () => {
         ResourceType.EventAvailabilityVote,
         { occurrenceId: 'occ-1', attendeeId: 'att-1', attendee: { userId: 'user-1', eventId: 'event-1' } },
       );
+    });
+
+    describe('a passed Proposed date (#1005)', () => {
+      const HOUR = 60 * 60 * 1000;
+
+      it('refuses a vote on a Proposed date that has passed, with OCCURRENCE_DATE_PASSED (#1005)', async () => {
+        db.eventOccurrence.findUnique.mockResolvedValue({
+          id: 'occ-1',
+          status: OccurrenceStatus.Proposed,
+          startDate: new Date(Date.now() - HOUR),
+          endDate: null,
+        } as never);
+
+        const rejection: unknown = await service
+          .submitAvailability('event-1', 'occ-1', { response: AvailabilityResponse.Available })
+          .catch((e: unknown) => e);
+
+        expect(db.eventOccurrence.findUnique).toHaveBeenCalledWith({
+          where: { id: 'occ-1', eventId: 'event-1' },
+          select: { id: true, status: true, startDate: true, endDate: true },
+        });
+        expect(rejection).toBeInstanceOf(CodedHttpException);
+        expect((rejection as CodedHttpException).getResponse()).toMatchObject({
+          code: 'OCCURRENCE_DATE_PASSED',
+          message: t('errors.occurrence.vote_date_passed'),
+        });
+        expect(db.eventAvailabilityVote.upsert).not.toHaveBeenCalled();
+      });
+
+      it('refuses a vote on a Proposed date that ends exactly now (#1005)', async () => {
+        const now = new Date('2026-11-15T12:00:00Z');
+        jest.useFakeTimers().setSystemTime(now);
+
+        try {
+          db.eventOccurrence.findUnique.mockResolvedValue({
+            id: 'occ-1',
+            status: OccurrenceStatus.Proposed,
+            startDate: new Date(now.getTime() - HOUR),
+            endDate: now,
+          } as never);
+
+          const rejection: unknown = await service
+            .submitAvailability('event-1', 'occ-1', { response: AvailabilityResponse.Available })
+            .catch((e: unknown) => e);
+
+          expect(rejection).toBeInstanceOf(CodedHttpException);
+          expect((rejection as CodedHttpException).getResponse()).toMatchObject({ code: 'OCCURRENCE_DATE_PASSED' });
+          expect(db.eventAvailabilityVote.upsert).not.toHaveBeenCalled();
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('takes a vote on a Proposed date with no start (#1005)', async () => {
+        db.eventOccurrence.findUnique.mockResolvedValue({
+          id: 'occ-1',
+          status: OccurrenceStatus.Proposed,
+          startDate: null,
+          endDate: null,
+        } as never);
+        db.eventAvailabilityVote.findUnique.mockResolvedValue(null);
+
+        await service.submitAvailability('event-1', 'occ-1', { response: AvailabilityResponse.Available });
+
+        expect(db.eventAvailabilityVote.upsert).toHaveBeenCalled();
+      });
     });
 
     it('refuses before writing when the instance check denies', async () => {

@@ -25,6 +25,8 @@ import { assertEventExists, resolveActingAttendeeId } from '../event-access.help
 import { assertEventNotCancelled } from '../lifecycle/event-lifecycle.helpers';
 import { canReadEventPolicy, eventPolicyReadArgs, serveOccurrencePolicy } from '../policy/policy-ceiling';
 import { POLICY_VIEW_INCLUDE, type OccurrencePolicyView } from '../policy/policy-view';
+import { hasDatePassed, type DateWindow } from '../utils/date-end.util';
+import { EVENT_STATUS_DATE_SELECT } from '../utils/event-status.util';
 import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
 import { AVAILABILITY_VOTE_SLUG, countsAsVoter, voterGrantSelect } from '../vote/vote-grant';
 import { OccurrenceEvents } from './constants';
@@ -493,7 +495,7 @@ export class EventOccurrenceService {
       [OccurrenceStatus.Proposed],
       OccurrenceStatus.Confirmed,
       { confirmedAt: new Date() },
-      { refuseOnCancelledEvent: true },
+      { refuseOnCancelledEvent: true, refuseOncePassed: true },
     );
   }
 
@@ -531,6 +533,13 @@ export class EventOccurrenceService {
    * With `refuseOnCancelledEvent`, it also reads the event's cancel under
    * the lock ({@link assertEventNotCancelled}), so a confirm on a cancelled
    * event answers 400.
+   *
+   * With `refuseOncePassed`, a date that has passed answers 400, so a
+   * confirm can't record a past date as one that is still ahead (#1005). The
+   * status check comes first, so a date in the wrong status keeps its own
+   * answer. The early read judges the date at `initiatedAt`; the one under
+   * the lock judges it at the time of that read, since the lock may have
+   * waited.
    */
   private async transitionStatus(
     eventId: string,
@@ -538,19 +547,26 @@ export class EventOccurrenceService {
     allowedFrom: OccurrenceStatus[],
     newStatus: OccurrenceStatus,
     extraData: Record<string, unknown> = {},
-    { refuseOnCancelledEvent = false }: { refuseOnCancelledEvent?: boolean } = {},
+    {
+      refuseOnCancelledEvent = false,
+      refuseOncePassed = false,
+    }: { refuseOnCancelledEvent?: boolean; refuseOncePassed?: boolean } = {},
   ): Promise<OccurrenceDetail> {
     const initiatedAt = new Date();
     const actingUserId = resolveActingUserIdOrNull(this.abilityService);
     const readStatus = (client: Prisma.TransactionClient) =>
       client.eventOccurrence.findUnique({
         where: { id: occurrenceId, eventId },
-        select: { id: true, status: true },
+        select: { id: true, ...EVENT_STATUS_DATE_SELECT },
       });
 
     const transition = { eventId, occurrenceId, allowedFrom, newStatus };
     const existing = await readStatus(this.db);
     assertTransitionAllowed(existing, transition);
+
+    if (refuseOncePassed) {
+      assertDateNotPassed(existing, initiatedAt, 'confirm_date_passed');
+    }
 
     // Read before the write, which changes neither, so a failed read leaves
     // the occurrence as it was.
@@ -566,6 +582,10 @@ export class EventOccurrenceService {
 
         const current = await readStatus(tx);
         assertTransitionAllowed(current, transition);
+
+        if (refuseOncePassed) {
+          assertDateNotPassed(current, new Date(), 'confirm_date_passed');
+        }
 
         // Under the lock, as updateOccurrence reads it (#1211).
         const canReadPolicy = await canReadEventPolicy(tx, this.abilityService, eventId);
@@ -633,7 +653,7 @@ export class EventOccurrenceService {
 
     const occurrence = await this.db.eventOccurrence.findUnique({
       where: { id: occurrenceId, eventId },
-      select: { id: true, status: true },
+      select: { id: true, ...EVENT_STATUS_DATE_SELECT },
     });
 
     if (!occurrence) {
@@ -643,6 +663,8 @@ export class EventOccurrenceService {
     if (occurrence.status !== OccurrenceStatus.Proposed) {
       throw new BadRequestException(t('errors.occurrence.availability_proposed_only', { status: occurrence.status }));
     }
+
+    assertDateNotPassed(occurrence, initiatedAt, 'vote_date_passed');
 
     // Pre-read classifies create vs update for the audit before-snapshot.
     // Best-effort, not transactional: the unique (occurrence, attendee) key
@@ -935,6 +957,17 @@ interface StatusTransition {
   occurrenceId: string;
   allowedFrom: OccurrenceStatus[];
   newStatus: OccurrenceStatus;
+}
+
+/**
+ * 400 with its own code for a date that has passed (#1005). Edit and remove
+ * stay open, so a host can move the date later and it takes votes and
+ * confirms again.
+ */
+function assertDateNotPassed(date: DateWindow, now: Date, key: 'vote_date_passed' | 'confirm_date_passed'): void {
+  if (hasDatePassed(date, now)) {
+    throw new CodedHttpException(Http.BadRequest, 'OCCURRENCE_DATE_PASSED', t(`errors.occurrence.${key}`));
+  }
 }
 
 /** 404 for a date not in the event, 400 for one whose status the transition can't start from. */

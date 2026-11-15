@@ -1,4 +1,5 @@
 import { EventStatus, OccurrenceStatus, type Event, type EventOccurrence } from '@bge/database';
+import { dateEnd } from './date-end.util';
 
 /** The columns of a date the event's status is worked out from. */
 export type EventStatusDate = Pick<EventOccurrence, 'status' | 'startDate' | 'endDate'>;
@@ -39,12 +40,14 @@ export function deriveEventStatus(
   let latestEnd: number | null = null;
 
   for (const { status, startDate, endDate } of dates) {
-    if (status !== OccurrenceStatus.Confirmed || startDate === null) {
+    const endsAt = dateEnd({ startDate, endDate });
+
+    if (status !== OccurrenceStatus.Confirmed || startDate === null || endsAt === null) {
       continue;
     }
 
     const start = startDate.getTime();
-    const end = Math.max(start, endDate?.getTime() ?? start);
+    const end = endsAt.getTime();
 
     earliestStart = earliestStart === null ? start : Math.min(earliestStart, start);
     latestEnd = latestEnd === null ? end : Math.max(latestEnd, end);

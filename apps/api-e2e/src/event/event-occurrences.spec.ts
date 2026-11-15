@@ -1,4 +1,5 @@
 import {
+  AvailabilityResponse,
   EventSchedulingMode,
   GameAdditionMode,
   NominationStatus,
@@ -297,6 +298,94 @@ describe('event occurrences', () => {
       .set(stranger.headers)
       .expect(403);
     expect(await db.client.eventOccurrence.count({ where: { id: occurrence.id } })).toBe(1);
+  });
+
+  /**
+   * A Proposed date that has passed takes no vote and no confirm (#1005).
+   *
+   * Nothing marked such a date, so a host could confirm one that was over, and
+   * a vote on it counted toward a choice nobody could still make. Edit and
+   * remove stay open, so moving the date later reopens it; decline stays open
+   * so a host can clear it away.
+   */
+  describe('a passed Proposed date (#1005)', () => {
+    const HOUR_MS = 60 * 60 * 1000;
+    const hoursFromNow = (hours: number) => new Date(Date.now() + hours * HOUR_MS).toISOString();
+
+    const addDate = async (
+      actor: AuthenticatedActor,
+      eventId: string,
+      dates: { startDate: string; endDate?: string },
+    ) =>
+      occurrenceEnvelope(
+        await request(baseUrl).post(occurrencesPath(eventId)).set(actor.headers).send(dates).expect(201),
+        'POST /api/events/:eventId/occurrences',
+      ).id;
+
+    const vote = (actor: AuthenticatedActor, eventId: string, occurrenceId: string) =>
+      request(baseUrl)
+        .post(`${occurrencesPath(eventId)}/${occurrenceId}/availability`)
+        .set(actor.headers)
+        .send({ response: AvailabilityResponse.Available });
+
+    const change = (actor: AuthenticatedActor, eventId: string, occurrenceId: string, action: 'confirm' | 'decline') =>
+      request(baseUrl)
+        .post(`${occurrencesPath(eventId)}/${occurrenceId}/${action}`)
+        .set(actor.headers);
+
+    const arrange = async () => {
+      const host = await actors.user();
+      const eventId = await createdEventId(host, { schedulingMode: EventSchedulingMode.Poll });
+      const passedId = await addDate(host, eventId, { startDate: hoursFromNow(-3), endDate: hoursFromNow(-1) });
+      const aheadId = await addDate(host, eventId, { startDate: hoursFromNow(24) });
+
+      return { host, eventId, passedId, aheadId };
+    };
+
+    const statusOf = async (id: string) =>
+      (await db.client.eventOccurrence.findUniqueOrThrow({ where: { id }, select: { status: true } })).status;
+
+    it('refuses a vote on it with its own code, and records none', async () => {
+      const { host, eventId, passedId, aheadId } = await arrange();
+
+      const refused = await vote(host, eventId, passedId).expect(400);
+
+      expect(refused.body.code).toBe('OCCURRENCE_DATE_PASSED');
+      expect(await db.client.eventAvailabilityVote.count({ where: { occurrenceId: passedId } })).toBe(0);
+      // The same vote on the date ahead is taken.
+      await vote(host, eventId, aheadId).expect(201);
+    });
+
+    it('refuses to confirm it with its own code, and leaves it Proposed', async () => {
+      const { host, eventId, passedId } = await arrange();
+
+      const refused = await change(host, eventId, passedId, 'confirm').expect(400);
+
+      expect(refused.body.code).toBe('OCCURRENCE_DATE_PASSED');
+      expect(await statusOf(passedId)).toBe(OccurrenceStatus.Proposed);
+    });
+
+    it('takes a vote and a confirm once the host moves it to a later time', async () => {
+      const { host, eventId, passedId } = await arrange();
+
+      await request(baseUrl)
+        .patch(`${occurrencesPath(eventId)}/${passedId}`)
+        .set(host.headers)
+        .send({ startDate: hoursFromNow(48), endDate: hoursFromNow(50) })
+        .expect(200);
+
+      await vote(host, eventId, passedId).expect(201);
+      await change(host, eventId, passedId, 'confirm').expect(201);
+      expect(await statusOf(passedId)).toBe(OccurrenceStatus.Confirmed);
+    });
+
+    it('can still be declined', async () => {
+      const { host, eventId, passedId } = await arrange();
+
+      await change(host, eventId, passedId, 'decline').expect(201);
+
+      expect(await statusOf(passedId)).toBe(OccurrenceStatus.Declined);
+    });
   });
 
   /**

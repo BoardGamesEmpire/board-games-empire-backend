@@ -1,6 +1,7 @@
 import { OccurrenceStatus, Prisma, type DatabaseService } from '@bge/database';
 import { type PaginatedRows } from '@bge/shared';
 import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
+import { dateNotPassedWhere } from './date-end.util';
 import {
   readEventAttendance,
   withEventAttendance,
@@ -10,17 +11,13 @@ import {
 import { withEventStatus } from './event-status.util';
 
 /**
- * A date that hasn't ended at `now`: Confirmed, with a start, and its start or
- * its end still ahead. It is `deriveEventStatus`'s window, where a date with
- * no end ends at its start and an end before its start is clamped up to it, so
- * an event with such a date reads Scheduled or Ongoing (#962).
+ * A date that hasn't ended at `now`: Confirmed, and not passed by
+ * {@link dateNotPassedWhere}, the query form of the rule `deriveEventStatus`
+ * shares, so an event with such a date reads Scheduled or Ongoing (#962,
+ * #1005).
  */
 export function upcomingDateWhere(now: Date): Prisma.EventOccurrenceWhereInput {
-  return {
-    status: OccurrenceStatus.Confirmed,
-    startDate: { not: null },
-    OR: [{ startDate: { gt: now } }, { endDate: { gt: now } }],
-  };
+  return { status: OccurrenceStatus.Confirmed, ...dateNotPassedWhere(now) };
 }
 
 /**

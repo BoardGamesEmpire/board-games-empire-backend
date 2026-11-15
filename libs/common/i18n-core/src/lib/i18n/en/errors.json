@@ -95,7 +95,9 @@
     "confirmed_remove": "This date is confirmed. Cancel it first, then remove it.",
     "fixed_mode_single": "This event takes one date, and it already has one. Cancel or decline that date first, or change the event's scheduling mode.",
     "invalid_transition": "Cannot transition from \"{from}\" to \"{to}\". Allowed source statuses: {allowed}.",
-    "availability_proposed_only": "Availability votes are only accepted for Proposed occurrences. Current status: \"{status}\"."
+    "availability_proposed_only": "Availability votes are only accepted for Proposed occurrences. Current status: \"{status}\".",
+    "vote_date_passed": "This date has already passed, so it no longer takes availability votes. The host can move it to a later time so it takes votes again.",
+    "confirm_date_passed": "This date has already passed, so it can't be confirmed. Move it to a later time, or add a confirmed date to record one that happened."
   },
   "attendee": {
     "not_found": "Attendee {attendeeId} not found for event {eventId}",
