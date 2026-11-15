@@ -259,21 +259,21 @@ export class HouseholdPluginDisabledEvent extends MutationEvent<HouseholdPlugin>
 type UserPluginSwitchSnapshot = Readonly<Pick<UserPlugin, 'id' | 'userId' | 'pluginId' | 'enabled'>>;
 
 /**
- * The user flipped their own unit's `enabled` switch ON (#323). Never
- * creation-shaped: `decide()` remains the only creator of `UserPlugin`
- * rows (#225), so this event always carries a real `before`. Shares the
- * `plugin.enabled` routing key; `subject` disambiguates.
+ * The user flipped their own unit's `enabled` switch ON (#323), or switched
+ * the plugin on for the first time with a consent act, creating the row
+ * (`before` is `null` exactly then; #1150). Shares the `plugin.enabled`
+ * routing key; `subject` disambiguates.
  */
 export class UserPluginEnabledEvent extends MutationEvent<UserPlugin> {
   static readonly eventName = PluginEvent.Enabled;
 
-  declare readonly before: UserPluginSwitchSnapshot;
+  declare readonly before: UserPluginSwitchSnapshot | null;
   declare readonly after: UserPluginSwitchSnapshot;
 
   readonly subject = ResourceType.UserPlugin;
   readonly subjectId: string;
 
-  constructor(before: UserPluginSwitchSnapshot, after: UserPluginSwitchSnapshot, initiatedAt: Date) {
+  constructor(before: UserPluginSwitchSnapshot | null, after: UserPluginSwitchSnapshot, initiatedAt: Date) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }

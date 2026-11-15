@@ -9,6 +9,7 @@ export * from './lib/consent/consent-classification.types';
 export * from './lib/consent/consent-presentation.errors';
 export * from './lib/consent/consent-presentation.types';
 export * from './lib/consent/plugin-consent-act.errors';
+export * from './lib/consent/plugin-consent-act.service';
 export * from './lib/consent/plugin-consent-act.types';
 export * from './lib/consent/plugin-consent-check-classifier.service';
 export * from './lib/consent/plugin-consent-presentation.service';
