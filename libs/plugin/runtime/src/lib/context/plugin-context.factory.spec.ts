@@ -1,4 +1,5 @@
 import { AuditContextService, type Actor } from '@bge/actor-context';
+import type { SafeHttpRequestOptions, SecureHttpService } from '@bge/secure-http';
 import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -14,10 +15,14 @@ describe('PluginContextFactory', () => {
   let emitter: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
   let configService: jest.Mocked<Pick<PluginConfigService, 'snapshotFor'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getActor'>>;
+  let secureHttp: { request: jest.Mock };
   let factory: PluginContextFactory;
 
-  const manifest = (emits: readonly string[]): PluginManifest =>
-    ({ events: { subscribes: [], emits: [...emits] } }) as unknown as PluginManifest;
+  const manifest = (emits: readonly string[], outboundDomains: readonly string[] = []): PluginManifest =>
+    ({
+      events: { subscribes: [], emits: [...emits] },
+      network: { outboundDomains: [...outboundDomains] },
+    }) as unknown as PluginManifest;
 
   beforeEach(() => {
     emitter = { emit: jest.fn() } as unknown as jest.Mocked<Pick<EventEmitter2, 'emit'>>;
@@ -27,11 +32,15 @@ describe('PluginContextFactory', () => {
     auditContext = { getActor: jest.fn().mockReturnValue(null) } as unknown as jest.Mocked<
       Pick<AuditContextService, 'getActor'>
     >;
+    secureHttp = {
+      request: jest.fn().mockResolvedValue({ status: 200, headers: {}, body: new ArrayBuffer(0) }),
+    };
 
     factory = new PluginContextFactory(
       emitter as unknown as EventEmitter2,
       configService as unknown as PluginConfigService,
       auditContext as unknown as AuditContextService,
+      secureHttp as unknown as SecureHttpService,
     );
   });
 
@@ -115,6 +124,28 @@ describe('PluginContextFactory', () => {
 
         expect(context.actor.current()).toBeNull();
       });
+    });
+  });
+
+  describe('http', () => {
+    // Each context closes over its own manifest's outbound domains, so one
+    // plugin's declaration never lets another out (#1083).
+    it("gives each plugin an http client held to its own manifest's hosts", async () => {
+      const one = factory.create({ pluginId, slug, manifest: manifest([], ['api.one.example']) });
+      const two = factory.create({
+        pluginId: 'plugin-2',
+        slug: 'other-sink',
+        manifest: manifest([], ['api.two.example']),
+      });
+
+      await one.http.fetch('https://api.one.example/', { method: 'GET', headers: {} });
+      await two.http.fetch('https://api.two.example/', { method: 'GET', headers: {} });
+
+      const [allowOne, allowTwo] = secureHttp.request.mock.calls.map(
+        ([, options]) => (options as SafeHttpRequestOptions).allowHost as (hostname: string) => boolean,
+      );
+      expect([allowOne('api.one.example'), allowOne('api.two.example')]).toEqual([true, false]);
+      expect([allowTwo('api.two.example'), allowTwo('api.one.example')]).toEqual([true, false]);
     });
   });
 

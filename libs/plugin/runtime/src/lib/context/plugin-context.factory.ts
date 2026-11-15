@@ -1,4 +1,5 @@
 import { AuditContextService } from '@bge/actor-context';
+import { SecureHttpService } from '@bge/secure-http';
 import type {
   PluginActorAccessor,
   PluginActorView,
@@ -13,6 +14,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigService } from '../config/plugin-config.service';
 import { PluginEmitNotDeclaredError } from '../loader/loader.errors';
 import { toPluginActorView } from './plugin-actor-view.projection';
+import { buildPluginHttp } from './plugin-http';
 
 export interface PluginContextInput {
   readonly pluginId: string;
@@ -23,9 +25,9 @@ export interface PluginContextInput {
 /**
  * Builds the per-plugin capability surface (#59). One context per loaded
  * plugin, constructed at load time and closed over the plugin's identity —
- * a plugin cannot reach another plugin's config or emit under another
- * plugin's namespace because the closures simply never carry foreign
- * identity.
+ * a plugin cannot reach another plugin's config, emit under another
+ * plugin's namespace, or call out to another plugin's hosts (#1083) because
+ * the closures simply never carry foreign identity.
  */
 @Injectable()
 export class PluginContextFactory {
@@ -33,6 +35,7 @@ export class PluginContextFactory {
     private readonly emitter: EventEmitter2,
     private readonly configService: PluginConfigService,
     private readonly auditContext: AuditContextService,
+    private readonly secureHttp: SecureHttpService,
   ) {}
 
   create(input: PluginContextInput): PluginContext {
@@ -43,6 +46,7 @@ export class PluginContextFactory {
       config: this.buildConfigAccessor(input.slug),
       events: this.buildEventPublisher(input.slug, input.manifest),
       actor: this.buildActorAccessor(),
+      http: buildPluginHttp(input.slug, input.manifest.network.outboundDomains, this.secureHttp),
     };
   }
 
