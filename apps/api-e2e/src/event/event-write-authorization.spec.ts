@@ -9,10 +9,10 @@ import {
   SystemRole,
   VoteType,
 } from '@bge/database';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import { createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { mintApiKey } from '../support/api-key';
+import { mintApiKey, type Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { arrangeListEntry, hoursFromNow } from './event-fixtures';
@@ -58,8 +58,8 @@ describe('event write authorization', () => {
 
   const { createEvent, createdEventId } = createEventClient(baseUrl);
 
-  const updateEvent = (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
-    request(baseUrl).patch(`${EVENTS_PATH}/${eventId}`).set(actor.headers).send(body);
+  const updateEvent = (caller: Caller, eventId: string, body: Record<string, unknown>) =>
+    request(baseUrl).patch(`${EVENTS_PATH}/${eventId}`).set(caller.headers).send(body);
 
   const addAttendee = (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
     request(baseUrl).post(`${EVENTS_PATH}/${eventId}/attendees`).set(actor.headers).send(body);
@@ -236,6 +236,54 @@ describe('event write authorization', () => {
 
       const row = await db.client.event.findUniqueOrThrow({ where: { id: eventId }, select: { householdId: true } });
       expect(row.householdId).toBe(household.id);
+    });
+  });
+
+  // The cancel and archive grants are bound to the columns they write, which
+  // a PATCH never sends. With no field in its ceiling, the PATCH passed any
+  // update rule on Event, so a key holding only one of those grants, whose
+  // owner hosts the event, edited the whole event (#1295).
+  describe('editing an event through an API key (#1295)', () => {
+    const keyFor = (owner: SessionActor, eventId: string, slug: string) =>
+      mintApiKey(baseUrl, db.client, owner, { slugs: [slug], resourceType: ResourceType.Event, resourceId: eventId });
+
+    const storedTitle = async (eventId: string) =>
+      (await db.client.event.findUniqueOrThrow({ where: { id: eventId }, select: { title: true } })).title;
+
+    it('lets a key holding update:event edit an event its owner hosts', async () => {
+      const host = await actors.user();
+      const eventId = await createdEventId(host);
+      const key = await keyFor(host, eventId, 'update:event');
+
+      await updateEvent(key, eventId, { title: 'Edited through the key' }).expect(200);
+      expect(await storedTitle(eventId)).toBe('Edited through the key');
+    });
+
+    it('refuses a PATCH from a key holding only update:event:cancel, which can still cancel the event', async () => {
+      const host = await actors.user();
+      const eventId = await createdEventId(host);
+      const before = await storedTitle(eventId);
+      const key = await keyFor(host, eventId, 'update:event:cancel');
+
+      await updateEvent(key, eventId, { title: 'Edited through a cancel key' }).expect(403);
+      expect(await storedTitle(eventId)).toBe(before);
+
+      // Control: the key's grant reaches this event, for the columns it is bound to.
+      await request(baseUrl).post(`${EVENTS_PATH}/${eventId}/cancel`).set(key.headers).send({}).expect(200);
+    });
+
+    it('refuses a PATCH from a key holding only update:event:archive, whose grant still reaches the event', async () => {
+      const host = await actors.user();
+      const eventId = await createdEventId(host);
+      const before = await storedTitle(eventId);
+      const key = await keyFor(host, eventId, 'update:event:archive');
+
+      await updateEvent(key, eventId, { title: 'Edited through an archive key' }).expect(403);
+      expect(await storedTitle(eventId)).toBe(before);
+
+      // Control: the archive route lets the key through to judge the event,
+      // which is live and so can't be archived: a 400, not a 403.
+      await request(baseUrl).post(`${EVENTS_PATH}/${eventId}/archive`).set(key.headers).expect(400);
     });
   });
 

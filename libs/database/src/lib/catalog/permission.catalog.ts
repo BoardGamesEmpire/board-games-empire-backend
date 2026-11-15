@@ -134,8 +134,8 @@ const attendingRoleInEvent = {
 // bound to (#795). Leaving out the cancel columns and `archivedAt` is what
 // keeps those grants from passing the cancel and archive routes, whose checks
 // name those columns: an organizer edits an event but doesn't call it off.
-// `PATCH` itself still checks no field, so the list binds nothing there until
-// #589 names the columns a patch writes. Module-private for the reasons
+// `PATCH` reads its ceiling for each column a patch sends, so only these
+// grants pass it (#1295). Module-private for the reasons
 // `acceptedFriendOfActingUser` gives.
 const EVENT_PATCH_FIELDS = [
   'title',

@@ -686,8 +686,15 @@ export class EventService {
         // grant is checked against this row before the patch is judged, so a
         // caller it doesn't reach gets 403, never a 400 that tells them how
         // many live dates the event has (#796). The write repeats it.
-        // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-        const updateCeiling = this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update);
+        //
+        // The ceiling is read for each column the patch sends, and the event
+        // must fall under every one. Read with no field, it took every update
+        // rule on Event, so a key holding only the cancel or archive grant,
+        // whose fields leave these columns out, could edit the event (#1295).
+        const updateCeiling = Object.keys(dto).flatMap((field) =>
+          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+          this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update, field),
+        );
         const entitled = (await tx.event.count({ where: { id, AND: updateCeiling } })) > 0;
         assert(entitled, new ForbiddenException(t('common.forbidden.update')));
 

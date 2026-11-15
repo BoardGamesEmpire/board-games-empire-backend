@@ -841,10 +841,73 @@ describe('EventService', () => {
 
       await service.updateEvent('event-1', { title: 'New' } as never);
 
-      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Event, Action.update);
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+        ResourceType.Event,
+        Action.update,
+        'title',
+      );
       expect(tx.event.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ id: 'event-1', AND: [COND] }) }),
       );
+    });
+
+    // Read with no field, the ceiling took every update rule on Event, the
+    // cancel and archive grants among them, whose fields leave the patch's
+    // columns out. A key holding only one of those could then edit the event
+    // (#1295).
+    describe('the update ceiling, per column the patch sends (#1295)', () => {
+      const TITLE_COND = { title: 'ceiling' } as never;
+      const LOCATION_COND = { location: 'ceiling' } as never;
+
+      beforeEach(() => {
+        abilityService.getCurrentResourceConditions.mockImplementation(((
+          type: ResourceType,
+          action: Action,
+          field?: string,
+        ) => {
+          if (type !== ResourceType.Event || action !== Action.update) return [COND];
+          if (field === 'title') return [TITLE_COND];
+          if (field === 'location') return [LOCATION_COND];
+          return [{ OR: [] }];
+        }) as never);
+      });
+
+      it('reads the ceiling once for each column sent, never with no column (#1295)', async () => {
+        await service.updateEvent('event-1', { title: 'New', location: 'Hall' } as never);
+
+        const eventUpdateCalls = abilityService.getCurrentResourceConditions.mock.calls.filter(
+          ([type, action]) => type === ResourceType.Event && action === Action.update,
+        );
+        expect(eventUpdateCalls).toEqual([
+          [ResourceType.Event, Action.update, 'title'],
+          [ResourceType.Event, Action.update, 'location'],
+        ]);
+      });
+
+      it('holds the count and the write to every column ceiling at once (#1295)', async () => {
+        await service.updateEvent('event-1', { title: 'New', location: 'Hall' } as never);
+
+        expect(tx.event.count).toHaveBeenCalledWith({ where: { id: 'event-1', AND: [TITLE_COND, LOCATION_COND] } });
+        expect(tx.event.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: 'event-1', deletedAt: null, AND: [TITLE_COND, LOCATION_COND] },
+          }),
+        );
+      });
+
+      // No rule admits `url` here, so its ceiling is deny-all, and the event
+      // can't fall under it however the title's ceiling reaches it.
+      it('answers 403 when no rule admits a column the patch sends, and writes nothing (#1295)', async () => {
+        tx.event.count.mockImplementation((({ where }: { where: { AND: unknown[] } }) =>
+          Promise.resolve(where.AND.some((clause) => JSON.stringify(clause) === '{"OR":[]}') ? 0 : 1)) as never);
+
+        await expect(
+          service.updateEvent('event-1', { title: 'New', url: 'https://example.com' } as never),
+        ).rejects.toThrow(new ForbiddenException(t('common.forbidden.update')));
+        expect(tx.event.count).toHaveBeenCalledWith({ where: { id: 'event-1', AND: [TITLE_COND, { OR: [] }] } });
+        expect(tx.event.update).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
     });
 
     // The answer used to carry the policy row whole (`include.policy`), which a
