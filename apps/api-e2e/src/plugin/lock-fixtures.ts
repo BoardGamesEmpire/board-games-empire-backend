@@ -88,9 +88,9 @@ export const GRANT_DECISION_CLAIM =
  */
 export const SERVER_GRANT_INSERT =
   `INSERT INTO plugin_grants
-     (id, plugin_id, scope_type, scope_id, permission_slug, status, manifest_version, decided_risk_level,
+     (id, plugin_id, scope_type, scope_id, permission_slug, status, decided_risk_level,
       decided_at, updated_at)
-   VALUES ($1, $2, '${PluginGrantScope.Server}', '', $3, '${PluginGrantStatus.Granted}', '1.0.0', ` +
+   VALUES ($1, $2, '${PluginGrantScope.Server}', '', $3, '${PluginGrantStatus.Granted}', ` +
   `'${RiskLevel.Low}', now(), now())
    RETURNING id`;
 
@@ -193,7 +193,6 @@ export async function arrangeGrant(
       scopeId: options.scopeId ?? '',
       permissionSlug,
       status: options.status ?? PluginGrantStatus.Granted,
-      manifestVersion: '1.0.0',
       decidedRiskLevel: RiskLevel.Low,
       decidedAt: new Date(),
     },

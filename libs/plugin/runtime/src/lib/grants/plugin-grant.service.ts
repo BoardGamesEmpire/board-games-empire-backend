@@ -111,7 +111,12 @@ export class PluginGrantService {
 
     type DecisionOutcome =
       | { readonly unchanged: true; readonly grant: PluginGrant }
-      | { readonly unchanged: false; readonly before: PluginGrant | null; readonly after: PluginGrant };
+      | {
+          readonly unchanged: false;
+          readonly before: PluginGrant | null;
+          readonly after: PluginGrant;
+          readonly manifestVersion: string;
+        };
 
     /**
      * The plugin as the request first read it. A deadlock replay judges
@@ -247,12 +252,7 @@ export class PluginGrantService {
 
         const existing = await tx.pluginGrant.findUnique({ where: uniqueWhere });
 
-        if (
-          existing !== null &&
-          existing.status === input.status &&
-          existing.manifestVersion === plugin.version &&
-          existing.decidedRiskLevel === decidedRiskLevel
-        ) {
+        if (existing !== null && existing.status === input.status && existing.decidedRiskLevel === decidedRiskLevel) {
           return { unchanged: true, grant: existing };
         }
 
@@ -260,7 +260,6 @@ export class PluginGrantService {
           status: input.status,
           decidedById: input.deciderId,
           decidedAt: initiatedAt,
-          manifestVersion: plugin.version,
           decidedRiskLevel,
         };
 
@@ -308,7 +307,7 @@ export class PluginGrantService {
           });
         }
 
-        return { unchanged: false, before: existing, after: written };
+        return { unchanged: false, before: existing, after: written, manifestVersion: plugin.version };
       });
     };
 
@@ -330,6 +329,9 @@ export class PluginGrantService {
     const event = new EventClass(
       outcome.before === null ? null : this.snapshot(outcome.before),
       this.snapshot(outcome.after),
+      // The row no longer stores the manifest version, so the event states
+      // the one this decision was made against (#1150).
+      { manifestVersion: outcome.manifestVersion, actId: null },
       initiatedAt,
     );
     this.emitter.emit(EventClass.eventName, event);
@@ -370,6 +372,7 @@ export class PluginGrantService {
           status: PluginGrantStatus.Granted,
           ...(input.pluginId === undefined ? {} : { pluginId: input.pluginId }),
         },
+        include: { plugin: { select: { version: true } } },
       });
 
       if (rows.length === 0) {
@@ -410,7 +413,11 @@ export class PluginGrantService {
     }
 
     for (const row of revoked.deleted) {
-      const event = new PluginGrantRevokedEvent(this.snapshot(row), input.reason, initiatedAt);
+      // The row no longer stores the manifest version (#1150): the revocation
+      // records the version of the plugin it was read with, and the act that
+      // wrote the decision it ends.
+      const context = { manifestVersion: row.plugin.version, actId: row.actId };
+      const event = new PluginGrantRevokedEvent(this.snapshot(row), input.reason, context, initiatedAt);
       this.emitter.emit(PluginGrantRevokedEvent.eventName, event);
     }
 
@@ -642,8 +649,8 @@ export class PluginGrantService {
   }
 
   private snapshot(row: PluginGrant) {
-    const { id, pluginId, scopeType, scopeId, permissionSlug, status, manifestVersion, decidedRiskLevel } = row;
+    const { id, pluginId, scopeType, scopeId, permissionSlug, status, decidedRiskLevel } = row;
 
-    return { id, pluginId, scopeType, scopeId, permissionSlug, status, manifestVersion, decidedRiskLevel };
+    return { id, pluginId, scopeType, scopeId, permissionSlug, status, decidedRiskLevel };
   }
 }

@@ -169,7 +169,6 @@ describe('plugin update consent (approve/reject/pending)', () => {
         scopeType: PluginGrantScope.Server,
         scopeId: '',
         permissionSlug: 'read:safe_http_policy',
-        manifestVersion: plugin.version,
         decidedAt: new Date(),
         decidedRiskLevel: RiskLevel.Medium,
         ...overrides,
@@ -327,7 +326,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
       expect(row).toMatchObject({ enabled: true, dormantReason: PluginUnitDormantReason.NeedsConfiguration });
     });
 
-    it('re-stamps a risk-escalated server grant at today’s risk and the new version', async () => {
+    it('re-stamps a risk-escalated server grant at today’s risk', async () => {
       const admin = await actors.admin();
       const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK]);
       // Decided when the catalog said Low; the catalog says Medium today.
@@ -345,7 +344,6 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
       const reStamped = await db.client.pluginGrant.findUniqueOrThrow({ where: { id: stale.id } });
       expect(reStamped.decidedRiskLevel).toBe(RiskLevel.Medium);
-      expect(reStamped.manifestVersion).toBe('1.3.0');
       expect(reStamped.decidedById).toBe(admin.user.id);
     });
 

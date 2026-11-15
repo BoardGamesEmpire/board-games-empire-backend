@@ -439,7 +439,6 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
           scopeId: '',
           permissionSlug: 'read:safe_http_policy',
           status: PluginGrantStatus.Granted,
-          manifestVersion: plugin.version,
           decidedAt: new Date('2026-07-01T00:00:00Z'),
           decidedRiskLevel: RiskLevel.Low,
         },

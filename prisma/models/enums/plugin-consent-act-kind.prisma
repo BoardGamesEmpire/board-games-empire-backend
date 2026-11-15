@@ -1,0 +1,10 @@
+/// What a person did when they made a consent act (#1150): switched a plugin
+/// on for a unit, toggled one requested permission, reviewed the consent
+/// surface, accepted at install, or approved a staged update.
+enum PluginConsentActKind {
+  SwitchOn
+  Toggle
+  Review
+  InstallAccept
+  UpdateApprove
+}

@@ -310,7 +310,7 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
         pluginSlug: null,
         scopeType: event.before.scopeType,
         scopeId: event.before.scopeId === '' ? null : event.before.scopeId,
-        manifestVersion: event.before.manifestVersion,
+        manifestVersion: event.context.manifestVersion,
         // The grant row is gone (delete-to-pending, #211): the lifecycle row
         // is the only durable record of what was revoked and why.
         payload: {
@@ -330,7 +330,9 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
         // uniqueness enforcement there; no uniqueness rides this table, so
         // the readable form is null.
         scopeId: event.after.scopeId === '' ? null : event.after.scopeId,
-        manifestVersion: event.after.manifestVersion,
+        // The decision row no longer stores the manifest version; the emitter
+        // states it on the event, with the consent act that wrote it (#1150).
+        manifestVersion: event.context.manifestVersion,
         // decidedRiskLevel rides every grant lifecycle row, not just revocations:
         // the risk a unit consented under is the comparison input for update-time
         // escalation, and reconstructing it later from the seed catalog would read
@@ -339,6 +341,7 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
           permissionSlug: event.after.permissionSlug,
           status: event.after.status,
           decidedRiskLevel: event.after.decidedRiskLevel,
+          actId: event.context.actId,
         },
       };
     }

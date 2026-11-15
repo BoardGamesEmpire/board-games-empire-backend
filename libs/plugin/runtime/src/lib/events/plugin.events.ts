@@ -425,11 +425,20 @@ export class PluginLoadFailedEvent extends MutationEvent<Plugin> {
 }
 
 type PluginGrantSnapshot = Readonly<
-  Pick<
-    PluginGrant,
-    'id' | 'pluginId' | 'scopeType' | 'scopeId' | 'permissionSlug' | 'status' | 'manifestVersion' | 'decidedRiskLevel'
-  >
+  Pick<PluginGrant, 'id' | 'pluginId' | 'scopeType' | 'scopeId' | 'permissionSlug' | 'status' | 'decidedRiskLevel'>
 >;
+
+/**
+ * What a grant event carries beyond the row (#1150): the consent decision row
+ * no longer stores the manifest version, so the emitter states it, together
+ * with the consent act that wrote the decision.
+ */
+export interface PluginGrantEventContext {
+  /** Version of the manifest the decision was made against. */
+  readonly manifestVersion: string;
+  /** The consent act that wrote the decision; null for server-scope decisions until #1152. */
+  readonly actId: string | null;
+}
 
 /**
  * A consent unit decided `Granted` — create-shaped on first decision,
@@ -444,7 +453,12 @@ export class PluginGrantCreatedEvent extends MutationEvent<PluginGrant> {
   readonly subject = ResourceType.PluginGrant;
   readonly subjectId: string;
 
-  constructor(before: PluginGrantSnapshot | null, after: PluginGrantSnapshot, initiatedAt: Date) {
+  constructor(
+    before: PluginGrantSnapshot | null,
+    after: PluginGrantSnapshot,
+    public readonly context: PluginGrantEventContext,
+    initiatedAt: Date,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
@@ -460,7 +474,12 @@ export class PluginGrantRejectedEvent extends MutationEvent<PluginGrant> {
   readonly subject = ResourceType.PluginGrant;
   readonly subjectId: string;
 
-  constructor(before: PluginGrantSnapshot | null, after: PluginGrantSnapshot, initiatedAt: Date) {
+  constructor(
+    before: PluginGrantSnapshot | null,
+    after: PluginGrantSnapshot,
+    public readonly context: PluginGrantEventContext,
+    initiatedAt: Date,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
@@ -505,6 +524,7 @@ export class PluginGrantRevokedEvent extends MutationEvent<PluginGrant> {
   constructor(
     before: PluginGrantSnapshot,
     public readonly reason: PluginGrantRevocationReason,
+    public readonly context: PluginGrantEventContext,
     initiatedAt: Date,
   ) {
     super(before, null, initiatedAt);

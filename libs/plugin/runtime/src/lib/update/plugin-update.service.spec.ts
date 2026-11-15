@@ -151,7 +151,7 @@ describe('PluginUpdateService', () => {
     permissionSlug: 'feedback:read',
     status: PluginGrantStatus.Granted,
     decidedById: 'admin-1',
-    manifestVersion: '1.2.0',
+    actId: null,
     decidedRiskLevel: RiskLevel.Medium,
     decidedAt: new Date(0),
     createdAt: new Date(0),
@@ -1305,7 +1305,6 @@ describe('PluginUpdateService', () => {
           scopeType: PluginGrantScope.Server,
           scopeId: '',
           status: PluginGrantStatus.Granted,
-          manifestVersion: '1.3.0',
           decidedById: 'admin-1',
           decidedRiskLevel: RiskLevel.Critical,
         }),
@@ -1773,7 +1772,7 @@ describe('PluginUpdateService', () => {
         expect(db.pluginGrant.create).not.toHaveBeenCalled();
       });
 
-      it('re-stamps the existing grant at the new risk, version, and approver', async () => {
+      it('re-stamps the existing grant at the new risk and approver', async () => {
         await service.approve({
           slug: 'demo-sink',
           approverId: 'admin-2',
@@ -1794,7 +1793,6 @@ describe('PluginUpdateService', () => {
             decidedRiskLevel: RiskLevel.Critical,
             decidedById: 'admin-2',
             decidedAt: expect.any(Date),
-            manifestVersion: '1.3.0',
           },
         });
       });
@@ -2036,7 +2034,6 @@ describe('PluginUpdateService', () => {
         scopeId: 'household-1',
         permissionSlug: 'calendar:read',
         decidedRiskLevel: RiskLevel.Medium,
-        manifestVersion: '1.3.0',
       });
       // compare() → serverChecksToSeed() → activate() grouped household read
       db.pluginGrant.findMany

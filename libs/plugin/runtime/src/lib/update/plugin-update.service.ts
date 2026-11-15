@@ -1397,7 +1397,6 @@ export class PluginUpdateService {
               decidedRiskLevel: corePermissions.get(slug)?.riskLevel ?? RiskLevel.Low,
               decidedById: actorId,
               decidedAt: initiatedAt,
-              manifestVersion: next.manifest.version,
             },
           }),
         );
@@ -1440,7 +1439,6 @@ export class PluginUpdateService {
               scopeId: SERVER_SCOPE_SENTINEL,
               permissionSlug: check.canonicalSlug,
               status: PluginGrantStatus.Granted,
-              manifestVersion: next.manifest.version,
               decidedById: actorId,
               decidedAt: initiatedAt,
               decidedRiskLevel:
@@ -1604,13 +1602,16 @@ export class PluginUpdateService {
     ];
 
     for (const { grant, reason } of revocations) {
-      const { id, pluginId, scopeType, scopeId, permissionSlug, status, manifestVersion, decidedRiskLevel } = grant;
+      const { id, pluginId, scopeType, scopeId, permissionSlug, status, decidedRiskLevel, actId } = grant;
 
       this.emitter.emit(
         PluginGrantRevokedEvent.eventName,
         new PluginGrantRevokedEvent(
-          { id, pluginId, scopeType, scopeId, permissionSlug, status, manifestVersion, decidedRiskLevel },
+          { id, pluginId, scopeType, scopeId, permissionSlug, status, decidedRiskLevel },
           reason,
+          // The row no longer stores the manifest version (#1150): the revoked
+          // decision belongs to the manifest this update replaces.
+          { manifestVersion: before.version, actId },
           initiatedAt,
         ),
       );

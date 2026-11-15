@@ -91,7 +91,7 @@ describe('PluginGrantService', () => {
       permissionSlug: 'feedback:read',
       status: PluginGrantStatus.Granted,
       decidedById: 'user-admin',
-      manifestVersion: '1.2.0',
+      actId: null,
       decidedAt: new Date('2026-07-27T00:00:00.000Z'),
       decidedRiskLevel: RiskLevel.Medium,
       createdAt: new Date('2026-07-27T00:00:00.000Z'),
@@ -230,7 +230,7 @@ describe('PluginGrantService', () => {
       } as unknown as Plugin;
 
       db.plugin.findUnique.mockResolvedValueOnce(plugin).mockResolvedValue(activated);
-      db.pluginGrant.upsert.mockRejectedValueOnce(deadlock()).mockResolvedValue(grantRow({ manifestVersion: '1.4.0' }));
+      db.pluginGrant.upsert.mockRejectedValueOnce(deadlock()).mockResolvedValue(grantRow());
 
       // The first attempt claims a row still at 1.2.0, then loses the deadlock.
       // An activation to 1.4.0 commits before the replay's claim.
@@ -386,8 +386,10 @@ describe('PluginGrantService', () => {
       await expect(service.decide(serverDecision)).rejects.toBeInstanceOf(PluginGrantPluginChangedError);
       await expect(service.decide(serverDecision)).resolves.toMatchObject({ changed: true });
       expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(1);
-      expect(db.pluginGrant.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ create: expect.objectContaining({ manifestVersion: '1.3.0' }) }),
+      // The row no longer stores the version (#1150); the event states it.
+      expect(emitter.emit).toHaveBeenCalledWith(
+        PluginEvent.GrantCreated,
+        expect.objectContaining({ context: { manifestVersion: '1.3.0', actId: null } }),
       );
     });
 
@@ -550,13 +552,17 @@ describe('PluginGrantService', () => {
             permissionSlug: 'feedback:read',
             status: PluginGrantStatus.Granted,
             decidedById: 'user-admin',
-            manifestVersion: '1.2.0',
             decidedRiskLevel: RiskLevel.Medium,
           }),
           update: expect.objectContaining({ status: PluginGrantStatus.Granted, decidedRiskLevel: RiskLevel.Medium }),
         }),
       );
       expect(emitter.emit).toHaveBeenCalledWith(PluginEvent.GrantCreated, expect.any(PluginGrantCreatedEvent));
+      // The row no longer stores the version (#1150); the event states it.
+      expect(emitter.emit).toHaveBeenCalledWith(
+        PluginEvent.GrantCreated,
+        expect.objectContaining({ context: { manifestVersion: '1.2.0', actId: null } }),
+      );
     });
 
     it('resolves plugin-declared risk from the PluginPermission catalog for canonical own-namespace slugs', async () => {
@@ -599,14 +605,17 @@ describe('PluginGrantService', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
-    it('re-consent against a NEW manifest version rewrites the row even when the polarity is unchanged', async () => {
-      db.pluginGrant.findUnique.mockResolvedValue(grantRow({ manifestVersion: '1.1.0' }));
+    // The decision row no longer stores a manifest version (#1150): the same
+    // status at the same risk is a re-statement, and a risk the unit did not
+    // consent under is what makes the decision new.
+    it('a decision at a DIFFERENT risk rewrites the row even when the polarity is unchanged (#1150)', async () => {
+      db.pluginGrant.findUnique.mockResolvedValue(grantRow({ decidedRiskLevel: RiskLevel.Low }));
 
       const result = await service.decide(serverDecision);
 
       expect(result.changed).toBe(true);
       expect(db.pluginGrant.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ update: expect.objectContaining({ manifestVersion: '1.2.0' }) }),
+        expect.objectContaining({ update: expect.objectContaining({ decidedRiskLevel: RiskLevel.Medium }) }),
       );
     });
   });
@@ -1172,7 +1181,7 @@ describe('PluginGrantService', () => {
         scopeId: 'user-a',
         permissionSlug: 'plugin|demo-sink|manage:digest',
       }),
-    ];
+    ].map((row) => ({ ...row, plugin: { version: '1.2.0' } }));
 
     beforeEach(() => {
       db.pluginGrant.findMany.mockResolvedValue(revocable);
@@ -1189,6 +1198,7 @@ describe('PluginGrantService', () => {
       expect(revoked).toHaveLength(2);
       expect(db.pluginGrant.findMany).toHaveBeenCalledWith({
         where: { scopeType: PluginGrantScope.User, scopeId: 'user-a', status: PluginGrantStatus.Granted },
+        include: { plugin: { select: { version: true } } },
       });
       expect(db.pluginGrant.deleteMany).toHaveBeenCalledWith({
         where: { id: { in: ['grant_1', 'grant_2'] }, status: PluginGrantStatus.Granted },
@@ -1254,6 +1264,7 @@ describe('PluginGrantService', () => {
           status: PluginGrantStatus.Granted,
           pluginId: 'plg_1',
         },
+        include: { plugin: { select: { version: true } } },
       });
     });
 

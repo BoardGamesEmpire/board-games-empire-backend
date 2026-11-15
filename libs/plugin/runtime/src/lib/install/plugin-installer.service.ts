@@ -636,7 +636,6 @@ export class PluginInstallerService {
               scopeId: SERVER_SCOPE_SENTINEL,
               permissionSlug: check.canonicalSlug,
               status: PluginGrantStatus.Granted,
-              manifestVersion: manifest.version,
               decidedById: installerId,
               decidedAt: initiatedAt,
               decidedRiskLevel: this.riskFor(manifest.slug, check, corePermissions),

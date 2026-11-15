@@ -323,9 +323,9 @@ describe('PluginLifecycleListener', () => {
           scopeId: '',
           permissionSlug: 'plugin.demo-sink.send',
           status: PluginGrantStatus.Granted,
-          manifestVersion: '1.2.3',
           decidedRiskLevel: RiskLevel.Low,
         },
+        { manifestVersion: '1.2.3', actId: null },
         initiatedAt,
       );
       db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
@@ -345,7 +345,66 @@ describe('PluginLifecycleListener', () => {
             permissionSlug: 'plugin.demo-sink.send',
             status: PluginGrantStatus.Granted,
             decidedRiskLevel: RiskLevel.Low,
+            actId: null,
           },
+        }),
+      );
+    });
+
+    // The decision row no longer stores the manifest version, so the event's
+    // context is the only source of it and of the consent act behind it (#1150).
+    it("records a grant event's manifest version and act id from the event's context (#1150)", async () => {
+      const event = new PluginGrantCreatedEvent(
+        null,
+        {
+          id: 'grant-1',
+          pluginId: 'plugin-1',
+          scopeType: PluginGrantScope.Household,
+          scopeId: 'household-1',
+          permissionSlug: 'plugin.demo-sink.send',
+          status: PluginGrantStatus.Granted,
+          decidedRiskLevel: RiskLevel.Low,
+        },
+        { manifestVersion: '2.0.0', actId: 'act-1' },
+        initiatedAt,
+      );
+      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
+
+      emitter.emit(PluginEvent.GrantCreated, event);
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          manifestVersion: '2.0.0',
+          payload: expect.objectContaining({ actId: 'act-1' }),
+        }),
+      );
+    });
+
+    it("records a server-scope grant event's manifest version with a null act id (#1150)", async () => {
+      const event = new PluginGrantCreatedEvent(
+        null,
+        {
+          id: 'grant-1',
+          pluginId: 'plugin-1',
+          scopeType: PluginGrantScope.Server,
+          scopeId: '',
+          permissionSlug: 'plugin.demo-sink.send',
+          status: PluginGrantStatus.Granted,
+          decidedRiskLevel: RiskLevel.Low,
+        },
+        { manifestVersion: '2.0.0', actId: null },
+        initiatedAt,
+      );
+      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
+
+      emitter.emit(PluginEvent.GrantCreated, event);
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          manifestVersion: '2.0.0',
+          payload: expect.objectContaining({ actId: null }),
         }),
       );
     });
@@ -360,9 +419,9 @@ describe('PluginLifecycleListener', () => {
           scopeId: 'household-1',
           permissionSlug: 'plugin.x.y',
           status: PluginGrantStatus.Granted,
-          manifestVersion: '1.0.0',
           decidedRiskLevel: RiskLevel.Low,
         },
+        { manifestVersion: '1.0.0', actId: null },
         initiatedAt,
       );
       db.plugin.findUnique.mockResolvedValue(null);
@@ -388,10 +447,10 @@ describe('PluginLifecycleListener', () => {
           scopeId: 'user-1',
           permissionSlug: 'read:public_content',
           status: PluginGrantStatus.Granted,
-          manifestVersion: '1.2.3',
           decidedRiskLevel: RiskLevel.Medium,
         },
         'membership-removed',
+        { manifestVersion: '1.2.3', actId: null },
         initiatedAt,
       );
       db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
