@@ -53,7 +53,8 @@ export class PluginOutboundDomainNotDeclaredError extends Error {
  * out, the network failed, the answer was too large, or the URL was not one
  * the client can send. `code` is the secure HTTP service's own, so a plugin
  * can tell a timeout from a refused address; `hostname` is the host the
- * plugin asked for, or null when its URL could not be parsed.
+ * plugin asked for, or null when its URL could not be parsed or names no
+ * host.
  *
  * Only these fields cross. The service's error names the whole URL, and a
  * redirect's target, in its message and fields, and a URL can carry a secret
@@ -71,7 +72,7 @@ export class PluginHttpRequestFailedError extends Error {
   ) {
     super(
       hostname === null
-        ? `Plugin '${slug}' made a request whose URL could not be parsed (${code})`
+        ? `Plugin '${slug}' made a request whose URL could not be parsed or names no host (${code})`
         : `Plugin '${slug}': the request to '${hostname}' failed (${code})`,
     );
   }

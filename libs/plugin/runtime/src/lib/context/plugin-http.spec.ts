@@ -196,6 +196,25 @@ describe('buildPluginHttp', () => {
       expect(request).not.toHaveBeenCalled();
     });
 
+    // `new URL` parses these, with an empty hostname. There is no host to
+    // name, so the plugin gets the null the contract promises, not ''.
+    it.each(['file:///etc/secret-path?token=s3cret', 'mailto:s3cret@example.com', 'data:text/plain,s3cret'])(
+      'refuses %s, a URL that names no host, with a null hostname and without calling out (#1083)',
+      async (url) => {
+        const err = (await buildPluginHttp(slug, declared, secureHttp)
+          .fetch(url, { method: 'GET', headers: {} })
+          .catch((e: unknown) => e)) as Error;
+
+        expect(err).toBeInstanceOf(PluginHttpRequestFailedError);
+        expect(err).toMatchObject({ code: 'INVALID_REQUEST_URL', slug, hostname: null });
+        for (const text of printed(err)) {
+          expect(text).not.toContain('s3cret');
+          expect(text).not.toContain("''");
+        }
+        expect(request).not.toHaveBeenCalled();
+      },
+    );
+
     it('lets an error that is not a request failure propagate as it is (#1083)', async () => {
       const bug = new TypeError('a bug in the service');
       request.mockRejectedValueOnce(bug);
@@ -246,6 +265,139 @@ describe('buildPluginHttp', () => {
       expect([status, response.status, response.body]).toEqual([status, status, null]);
       expect(response.headers.get('etag')).toBe('"v1"');
     }
+  });
+
+  // The service reports a cancelled request as a network error. A
+  // DataGateway driver cancels on purpose, when its caller unsubscribes, and
+  // must be able to tell that from an upstream outage, so the rejection is
+  // the signal's own reason, as with fetch (#1083).
+  describe('a request the plugin cancels (#1083)', () => {
+    const asked = 'https://api.example.com/v1/games?token=s3cret';
+
+    it("rejects with the signal's reason, an AbortError by default (#1083)", async () => {
+      const controller = new AbortController();
+      request.mockImplementationOnce(async () => {
+        controller.abort();
+        throw new OutboundNetworkError(asked, new Error('This operation was aborted'));
+      });
+
+      const err = (await buildPluginHttp(slug, declared, secureHttp)
+        .fetch(asked, { method: 'GET', headers: {}, signal: controller.signal })
+        .catch((e: unknown) => e)) as Error;
+
+      expect(err).toBe(controller.signal.reason);
+      expect(err.name).toBe('AbortError');
+      expect(err.message).not.toContain('s3cret');
+    });
+
+    it('rejects with the reason the plugin gave (#1083)', async () => {
+      const reason = new Error('the search was unsubscribed');
+      request.mockRejectedValueOnce(new OutboundNetworkError(asked, reason));
+
+      await expect(
+        buildPluginHttp(slug, declared, secureHttp).fetch(asked, {
+          method: 'GET',
+          headers: {},
+          signal: AbortSignal.abort(reason),
+        }),
+      ).rejects.toBe(reason);
+    });
+
+    it('still reports a failure as a failure while the signal is not aborted (#1083)', async () => {
+      request.mockRejectedValueOnce(new OutboundNetworkError(asked, new Error('connect ECONNRESET')));
+
+      await expect(
+        buildPluginHttp(slug, declared, secureHttp).fetch(asked, {
+          method: 'GET',
+          headers: {},
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toMatchObject({ code: 'OUTBOUND_NETWORK_ERROR', hostname: 'api.example.com' });
+    });
+
+    it('does not hide a bug behind the cancellation (#1083)', async () => {
+      const bug = new TypeError('a bug in the service');
+      request.mockRejectedValueOnce(bug);
+
+      await expect(
+        buildPluginHttp(slug, declared, secureHttp).fetch(asked, {
+          method: 'GET',
+          headers: {},
+          signal: AbortSignal.abort(),
+        }),
+      ).rejects.toBe(bug);
+    });
+  });
+
+  // The Response constructor takes a status from 200 to 599 only, and takes
+  // neither a URL nor a redirect flag. fetch hands back all of them, and a
+  // DataGateway driver written against fetch reads them (#1083).
+  describe('what the Response constructor does not take (#1083)', () => {
+    const get = (url = 'https://api.example.com/'): Promise<Response> =>
+      buildPluginHttp(slug, declared, secureHttp).fetch(url, { method: 'GET', headers: {} });
+
+    // Some upstreams answer outside the registered range: 999 is a known
+    // "request denied". fetch resolves with it, and so does this client.
+    it.each([999, 600, 199])('resolves a status the constructor refuses: %d (#1083)', async (status) => {
+      request.mockResolvedValueOnce(answer({ status, body: bytesOf('denied') }));
+
+      const response = await get();
+
+      expect([response.status, response.ok]).toEqual([status, false]);
+      expect(await response.clone().text()).toBe('denied');
+      expect([response.clone().status, response.clone().ok]).toEqual([status, false]);
+    });
+
+    it('keeps ok true for a 2xx status and false for any other (#1083)', async () => {
+      for (const [status, ok] of [
+        [200, true],
+        [299, true],
+        [301, false],
+        [404, false],
+        [503, false],
+      ] as const) {
+        request.mockResolvedValueOnce(answer({ status }));
+
+        const response = await get();
+
+        expect([status, response.status, response.ok]).toEqual([status, status, ok]);
+      }
+    });
+
+    it('carries the URL that answered and whether a redirect led there (#1083)', async () => {
+      request.mockResolvedValueOnce(answer({ finalUrl: 'https://api.example.com/v2/games?page=1', redirectCount: 2 }));
+
+      const response = await get('https://api.example.com/v1/games');
+
+      expect([response.url, response.redirected]).toEqual(['https://api.example.com/v2/games?page=1', true]);
+      expect(new URL('?page=2', response.url).href).toBe('https://api.example.com/v2/games?page=2');
+      const copy = response.clone().clone();
+      expect([copy.url, copy.redirected]).toEqual([response.url, true]);
+    });
+
+    it('says no redirect happened when none did (#1083)', async () => {
+      const response = await get();
+
+      expect([response.url, response.redirected]).toEqual(['https://api.example.com/', false]);
+    });
+  });
+
+  // The service joins a repeated header with a comma, and a cookie's Expires
+  // date holds one, so joined cookies can't be split again. The client takes
+  // them from the service's own list (#1083).
+  it('keeps each Set-Cookie header by itself (#1083)', async () => {
+    const cookies = ['a=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT', 'b=2'];
+    request.mockResolvedValueOnce(
+      answer({ headers: { 'set-cookie': cookies.join(', '), 'x-trace': 't-1' }, setCookie: cookies }),
+    );
+
+    const response = await buildPluginHttp(slug, declared, secureHttp).fetch('https://api.example.com/', {
+      method: 'GET',
+      headers: {},
+    });
+
+    expect(response.headers.getSetCookie()).toEqual(cookies);
+    expect(response.headers.get('x-trace')).toBe('t-1');
   });
 
   // A data-gateway plugin hands its client to its DataGateway driver as the

@@ -19,13 +19,22 @@ export interface PluginHttpRequest {
  * under the server's outbound HTTP policy (#1083).
  *
  * The client never asks for compression: the `Response` is built from the
- * bytes as they arrived.
+ * bytes as they arrived. It carries what `fetch`'s own would: the status as
+ * it arrived, the `url` that answered, `redirected`, and each `Set-Cookie`
+ * header by itself.
+ *
+ * A redirect to another origin (another declared host, another port, or
+ * https down to http) goes on without the request's `authorization`,
+ * `cookie` and `proxy-authorization` headers, as with `fetch`. Any other
+ * header follows every redirect, a key in a header of its own included.
  */
 export interface PluginHttp {
   /**
    * A property, not a method, so a plugin can hand it on by itself.
    *
-   * Any HTTP status resolves. A request that fails rejects with an error
+   * Any HTTP status resolves. A request cancelled through its `signal`
+   * rejects with the signal's reason, an `AbortError` unless the plugin gave
+   * another, as with `fetch`. A request that fails rejects with an error
    * that carries a `code`, so a plugin can tell failures apart without
    * importing anything from the server, and names at most a hostname, never
    * the URL, which can carry a secret in its query (#1083):
@@ -38,7 +47,7 @@ export interface PluginHttp {
    *    `REQUEST_TIMEOUT`, `OUTBOUND_NETWORK_ERROR`, `SSRF_REJECTION` or
    *    `REDIRECT_DENIED`, with the `hostname` the plugin asked for, or
    *    `INVALID_REQUEST_URL` with a null `hostname` when the URL can't be
-   *    parsed.
+   *    parsed or names no host.
    */
   readonly fetch: (url: string, request: PluginHttpRequest) => Promise<Response>;
 }

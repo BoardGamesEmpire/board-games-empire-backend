@@ -33,7 +33,14 @@ describe('PluginContextFactory', () => {
       Pick<AuditContextService, 'getActor'>
     >;
     secureHttp = {
-      request: jest.fn().mockResolvedValue({ status: 200, headers: {}, body: new ArrayBuffer(0) }),
+      request: jest.fn().mockResolvedValue({
+        status: 200,
+        headers: {},
+        setCookie: [],
+        body: new ArrayBuffer(0),
+        finalUrl: 'https://api.one.example/',
+        redirectCount: 0,
+      }),
     };
 
     factory = new PluginContextFactory(

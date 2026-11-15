@@ -61,6 +61,15 @@ export function buildPluginHttp(
           allowHost,
         });
       } catch (err) {
+        // The service reports a cancelled request as a network error. The
+        // plugin cancelled on purpose and must be able to tell that from an
+        // outage, so it gets its signal's own reason, as fetch gives. The
+        // reason is the plugin's own value or the platform's AbortError, and
+        // names no URL. A bug stays a bug (#1083).
+        if (request.signal?.aborted && err instanceof SafeHttpError) {
+          throw request.signal.reason;
+        }
+
         throw toPluginError(slug, hostname, err);
       }
 
@@ -72,14 +81,23 @@ export function buildPluginHttp(
 /**
  * The host of the URL the plugin asked for. Node's parser puts the input on
  * the TypeError it throws, so a URL that can't be parsed becomes the
- * runtime's own error, naming no URL (#1083).
+ * runtime's own error, naming no URL. A URL that parses but names no host,
+ * such as `file:///x` or `mailto:`, is refused the same way: there is no host
+ * to send it to, and none to name in a failure (#1083).
  */
 function requestedHostname(slug: string, url: string): string {
+  let hostname: string;
   try {
-    return new URL(url).hostname;
+    hostname = new URL(url).hostname;
   } catch {
     throw new PluginHttpRequestFailedError(slug, 'INVALID_REQUEST_URL', null);
   }
+
+  if (hostname === '') {
+    throw new PluginHttpRequestFailedError(slug, 'INVALID_REQUEST_URL', null);
+  }
+
+  return hostname;
 }
 
 /**
@@ -127,7 +145,51 @@ function refusedHostname(err: unknown): string | undefined {
   return undefined;
 }
 
+/** What fetch reports of an answer and the Response constructor can't be given. */
+interface FetchedFields {
+  readonly status: number;
+  readonly url: string;
+  readonly redirected: boolean;
+}
+
 function toResponse(answer: SafeHttpResponse<ArrayBuffer>): Response {
+  // The service joins a repeated header with a comma, and joined cookies
+  // can't be split again, so they come from its own list (#1083).
+  const headers = new Headers(answer.headers);
+  headers.delete('set-cookie');
+  for (const cookie of answer.setCookie) {
+    headers.append('set-cookie', cookie);
+  }
+
+  // The constructor throws a RangeError for a status outside 200 to 599, and
+  // some upstreams answer with one (999 for a refused request). It is built
+  // with a status it accepts, and `asFetched` puts the real one on it.
+  const constructible = answer.status >= 200 && answer.status <= 599;
   const body = BODILESS_STATUSES.has(answer.status) ? null : answer.body;
-  return new Response(body, { status: answer.status, headers: answer.headers });
+  const response = new Response(body, { status: constructible ? answer.status : 200, headers });
+
+  return asFetched(response, {
+    status: answer.status,
+    url: answer.finalUrl,
+    redirected: answer.redirectCount > 0,
+  });
+}
+
+/**
+ * Gives a built Response what fetch's own would carry: the status as it
+ * arrived, whatever its range, the URL that answered and whether a redirect
+ * led there. The constructor takes none of these, and a DataGateway driver
+ * written against fetch reads them, to branch on a status or to resolve a
+ * relative link against `response.url`. They are set on the object itself,
+ * over the prototype's getters, and `clone` is wrapped so a copy keeps them
+ * (#1083).
+ */
+function asFetched(response: Response, fields: FetchedFields): Response {
+  return Object.defineProperties(response, {
+    status: { value: fields.status, enumerable: true },
+    ok: { value: fields.status >= 200 && fields.status <= 299, enumerable: true },
+    url: { value: fields.url, enumerable: true },
+    redirected: { value: fields.redirected, enumerable: true },
+    clone: { value: (): Response => asFetched(Response.prototype.clone.call(response), fields) },
+  });
 }
