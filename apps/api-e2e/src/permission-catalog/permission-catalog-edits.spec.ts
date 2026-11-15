@@ -14,6 +14,7 @@ import { createActors, type Actors, type AuthenticatedActor, type SessionActor }
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
+import { readConsentSurface, sendSwitchOn, switchOnBody } from '../plugin/consent-act-fixtures';
 import { pluginRowData } from '../plugin/plugin-row-fixtures';
 import { permissionsCacheHas } from '../support/api-cache';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -353,11 +354,23 @@ describe('the Owner edits the permission catalog (#772)', () => {
       return plugin;
     }
 
-    const grantForHousehold = (householdOwner: SessionActor, householdId: string, plugin: Plugin) =>
-      request(baseUrl)
-        .post(`/api/households/${householdId}/plugins/${plugin.slug}/grants`)
-        .set(householdOwner.headers)
-        .send({ permissionSlug: 'read:game:public', status: PluginGrantStatus.Granted });
+    /**
+     * The household's switch-on consent act granting `read:game:public`
+     * (#1150), its body built from the household's consent surface. It also
+     * switches the plugin on for the household.
+     */
+    const grantForHousehold = async (householdOwner: SessionActor, householdId: string, plugin: Plugin) => {
+      const unit = { householdId };
+      const surface = await readConsentSurface(baseUrl, householdOwner, unit, plugin.slug);
+
+      return sendSwitchOn(
+        baseUrl,
+        householdOwner,
+        unit,
+        plugin.slug,
+        switchOnBody(surface, { 'read:game:public': PluginGrantStatus.Granted }),
+      ).expect(200);
+    };
 
     /** The household's state of the feature its decision on `read:game:public` gates. */
     async function readDigest(householdOwner: SessionActor, householdId: string, plugin: Plugin) {
@@ -378,13 +391,16 @@ describe('the Owner edits the permission catalog (#772)', () => {
       const plugin = await arrangePlugin();
 
       // The served household has the plugin switched on; the unserved one
-      // never switched it on, so its decision confers nothing and is not in
-      // force, though it is granted all the same.
-      await db.client.householdPlugin.create({
-        data: { householdId: served.household.id, pluginId: plugin.id, enabled: true },
-      });
-      await grantForHousehold(servedOwner, served.household.id, plugin).expect(200);
-      await grantForHousehold(unservedOwner, unserved.household.id, plugin).expect(200);
+      // switched it on and then off again, which keeps its consent decisions
+      // (#1150), so its decision confers nothing and is not in force, though
+      // it is granted all the same.
+      await grantForHousehold(servedOwner, served.household.id, plugin);
+      await grantForHousehold(unservedOwner, unserved.household.id, plugin);
+      await request(baseUrl)
+        .post(`/api/households/${unserved.household.id}/plugins/${plugin.slug}/disable`)
+        .set(unservedOwner.headers)
+        .send({})
+        .expect(200);
 
       const decisions = await db.client.pluginGrant.findMany({
         where: { pluginId: plugin.id },

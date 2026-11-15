@@ -1,6 +1,6 @@
 import { PluginGrantStatus, type RiskLevel } from '@bge/database';
-import type { SessionActor } from '@bge/testing-e2e';
 import request from 'supertest';
+import type { Caller } from '../support/api-key';
 
 /**
  * Consent acts driven over HTTP, with every body built from a consent surface
@@ -13,6 +13,9 @@ import request from 'supertest';
  * fixture's manifest or catalog changes. So no helper here takes a sha or a
  * risk level: each one reads them off a {@link ConsentSurface}.
  */
+
+/** Whoever sends the request: a session, or an API key (#1150). Only its headers are sent. */
+export type ActCaller = Caller;
 
 /** A decision a unit can answer with: the two statuses an act accepts. */
 export type ConsentAnswerStatus = typeof PluginGrantStatus.Granted | typeof PluginGrantStatus.Denied;
@@ -28,12 +31,24 @@ export interface ConsentAnswerBody {
 export interface ConsentSurface {
   readonly manifestSha256: string;
   readonly stagedUpdate: { readonly manifestVersion: string; readonly manifestSha256: string } | null;
-  readonly checks: readonly {
-    readonly slug: string;
-    readonly required: boolean;
-    readonly riskLevel: RiskLevel | null;
-    readonly decidableByUnit: boolean;
-  }[];
+  readonly checks: readonly ConsentSurfaceCheck[];
+}
+
+/**
+ * One requested permission as the consent surface shows it: the fields an act
+ * body is built from, and the ones a spec compares an act's recorded
+ * presentation against (#1150).
+ */
+export interface ConsentSurfaceCheck {
+  readonly slug: string;
+  readonly required: boolean;
+  readonly feature: string | null;
+  readonly riskLevel: RiskLevel | null;
+  readonly decidableByUnit: boolean;
+  readonly grantable: boolean;
+  readonly stagedOnly: boolean;
+  readonly decision: string;
+  readonly reason: { readonly value: string };
 }
 
 /**
@@ -58,7 +73,7 @@ export function unitPluginsPath(unit: ConsentActUnit): string {
  */
 export async function readConsentSurface(
   baseUrl: string,
-  actor: SessionActor,
+  actor: ActCaller,
   unit: ConsentActUnit,
   slug: string,
   options: { readonly staged?: boolean } = {},
@@ -147,7 +162,7 @@ export function reviewBody(
 /** Sends a switch-on (`POST …/:slug/enable`) and returns the response unasserted. */
 export function sendSwitchOn(
   baseUrl: string,
-  actor: SessionActor,
+  actor: ActCaller,
   unit: ConsentActUnit,
   slug: string,
   body: Record<string, unknown>,
@@ -161,7 +176,7 @@ export function sendSwitchOn(
 /** Sends a toggle (`POST …/:slug/consent/toggle`) and returns the response unasserted. */
 export function sendToggle(
   baseUrl: string,
-  actor: SessionActor,
+  actor: ActCaller,
   unit: ConsentActUnit,
   slug: string,
   body: Record<string, unknown>,
@@ -175,7 +190,7 @@ export function sendToggle(
 /** Sends a review (`POST …/:slug/consent/review`) and returns the response unasserted. */
 export function sendReview(
   baseUrl: string,
-  actor: SessionActor,
+  actor: ActCaller,
   unit: ConsentActUnit,
   slug: string,
   body: Record<string, unknown>,

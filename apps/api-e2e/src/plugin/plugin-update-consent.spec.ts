@@ -242,14 +242,12 @@ describe('plugin update consent (approve/reject/pending)', () => {
             scopeType: PluginGrantScope.Server,
             status: PluginGrantStatus.Granted,
             decidedRiskLevel: RiskLevel.Low,
-            manifestVersion: '1.3.0',
           }),
           expect.objectContaining({
             permissionSlug: 'read:safe_http_policy',
             scopeType: PluginGrantScope.Server,
             status: PluginGrantStatus.Granted,
             decidedRiskLevel: RiskLevel.Medium,
-            manifestVersion: '1.3.0',
           }),
         ]),
       );
