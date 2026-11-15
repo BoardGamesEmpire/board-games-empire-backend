@@ -31,9 +31,9 @@ import {
 } from './lock-order';
 
 /**
- * The claimed total order — `plugin row -> grant row -> advisory key -> unit
- * row`, with the household row ahead of it since #548 — proven the only two
- * ways it can be (#360).
+ * The claimed total order — `plugin row -> advisory key -> grant row -> unit
+ * row`, with the household row ahead of it since #548 and the key ahead of the
+ * grant rows since #1150 — proven the only two ways it can be (#360).
  *
  * Neither half counts alone, and saying which is which is the point:
  *
@@ -84,8 +84,17 @@ describe('the plugin consent path is one lock order (#360)', () => {
   });
   const NO_SNAPSHOT = null;
 
+  /** Stage 2: the `(scopeId, pluginId)` key, and the format it is built from. */
+  const advisoryLock = readShippedSql(UNIT_SCOPE_LOCK, ['scopeKey'], {
+    after: 'lockHouseholdUnitScope',
+    matching: /pg_advisory_xact_lock/,
+  });
+  const advisoryKeyFormat = readShippedValue(UNIT_SCOPE_LOCK, ['householdId', 'pluginId'], {
+    after: 'lockHouseholdUnitScope',
+  });
+
   /**
-   * Stage 2: the server grant rows, as activation takes them (#356).
+   * Stage 3: the server grant rows, as activation takes them (#356).
    * Anchored on the declaration — D-CN (#370) added a second `FOR UPDATE`
    * statement to this file (the plugin-config lock), so a bare
    * `/FOR UPDATE/` no longer resolves to one statement without help.
@@ -93,15 +102,6 @@ describe('the plugin consent path is one lock order (#360)', () => {
   const grantRowLock = readShippedSql(UPDATE_SERVICE, ['plugin.id'], {
     after: 'lockedGrantRows',
     matching: /FOR UPDATE/,
-  });
-
-  /** Stage 3: the `(scopeId, pluginId)` key, and the format it is built from. */
-  const advisoryLock = readShippedSql(UNIT_SCOPE_LOCK, ['scopeKey'], {
-    after: 'lockHouseholdUnitScope',
-    matching: /pg_advisory_xact_lock/,
-  });
-  const advisoryKeyFormat = readShippedValue(UNIT_SCOPE_LOCK, ['householdId', 'pluginId'], {
-    after: 'lockHouseholdUnitScope',
   });
 
   /**
@@ -282,7 +282,7 @@ describe('the plugin consent path is one lock order (#360)', () => {
    * claim. Where it is not, an exemption has to say why that is safe.
    */
   describe('the locks nobody wrote — FK-implied parent locks (#399)', () => {
-    const { installerService: INSTALLER_SERVICE } = LOCK_SOURCES;
+    const { installerService: INSTALLER_SERVICE, consentActService: CONSENT_ACT_SERVICE } = LOCK_SOURCES;
 
     /**
      * Every FK-child write in the plugin runtime, and what the audit says about
@@ -290,17 +290,20 @@ describe('the plugin consent path is one lock order (#360)', () => {
      * wrong seven.
      */
     const KNOWN_FK_CHILD_WRITES = [
-      { file: GRANT_SERVICE, enclosing: 'attempt', write: 'pluginGrant.upsert', claimed: true },
-      { file: GRANT_SERVICE, enclosing: 'attempt', write: 'userPlugin.upsert', claimed: true },
-      { file: INSTALLER_SERVICE, enclosing: 'persist', write: 'pluginPermission.create', claimed: false },
-      { file: INSTALLER_SERVICE, enclosing: 'persist', write: 'pluginGrant.create', claimed: false },
-      { file: UNIT_LIFECYCLE, enclosing: 'enableHousehold', write: 'householdPlugin.create', claimed: true },
+      // The consent act writes the decisions and the unit enablement under its
+      // own claim, `claimPluginForAct` (#1150).
+      { file: CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'pluginGrant.upsert', claimed: true },
+      { file: CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'householdPlugin.create', claimed: true },
       // The two updates are here because their `data` SPREADS, which makes the
       // key set unreadable — so the re-parent guard cannot rule them out and
       // reports them rather than skipping them. Both are claimed anyway, which
       // is why neither needs an exemption; they are the audit saying what it
       // could not settle, not a finding.
-      { file: UNIT_LIFECYCLE, enclosing: 'enableHousehold', write: 'householdPlugin.update', claimed: true },
+      { file: CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'householdPlugin.update', claimed: true },
+      { file: CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'userPlugin.upsert', claimed: true },
+      { file: GRANT_SERVICE, enclosing: 'attempt', write: 'pluginGrant.upsert', claimed: true },
+      { file: INSTALLER_SERVICE, enclosing: 'persist', write: 'pluginPermission.create', claimed: false },
+      { file: INSTALLER_SERVICE, enclosing: 'persist', write: 'pluginGrant.create', claimed: false },
       { file: UNIT_LIFECYCLE, enclosing: 'updateHouseholdConfig', write: 'householdPlugin.update', claimed: true },
       { file: UPDATE_SERVICE, enclosing: 'activateInTransaction', write: 'pluginPermission.create', claimed: true },
       { file: UPDATE_SERVICE, enclosing: 'activateInTransaction', write: 'pluginGrant.create', claimed: true },
@@ -410,14 +413,17 @@ describe('the plugin consent path is one lock order (#360)', () => {
     });
 
     it('recognises the plugin-row claim through the delegates the unit paths use', () => {
-      // `enableHousehold` holds the plugin row and nothing in its own text says
-      // so — the lock is two calls away, in `assertStillLiving`. Asserted here
-      // because it is the difference between this check being usable and it
-      // reporting the most-travelled compliant path in the tree as a violation.
-      const enableHousehold = fkChildWriteAudit().find((site) => site.enclosing === 'enableHousehold');
+      // `updateHouseholdConfig` holds the plugin row and nothing in its own
+      // text says so — the lock is two calls away, in `assertStillLiving`.
+      // Asserted here because it is the difference between this check being
+      // usable and it reporting a compliant unit path as a violation. It stands
+      // in for the household switch-on, which moved to the consent act (#1150).
+      const configWrite = fkChildWriteAudit().find((site) => site.enclosing === 'updateHouseholdConfig');
 
-      expect(enableHousehold).toMatchObject({ claimed: true, exemption: undefined });
-      expect(readShippedFunction(UNIT_LIFECYCLE, 'enableHousehold').body).not.toMatch(stageNamed('plugin row').pattern);
+      expect(configWrite).toMatchObject({ claimed: true, exemption: undefined });
+      expect(readShippedFunction(UNIT_LIFECYCLE, 'updateHouseholdConfig').body).not.toMatch(
+        stageNamed('plugin row').pattern,
+      );
     });
   });
 
@@ -453,9 +459,10 @@ describe('the plugin consent path is one lock order (#360)', () => {
     });
 
     it('queues a decision behind an activation that got to the grant row first', async () => {
-      // decide()-vs-activation, order one. The two paths never share a first
-      // lock — a decision does not touch the plugin row at all — so the grant
-      // row is where they meet, which is the whole reason #356 put a lock there.
+      // A decision-vs-activation, order one. The replay leaves out the
+      // decision's plugin-row claim (#398) and starts at its grant-row write, so
+      // the grant row is where they meet, which is the whole reason #356 put a
+      // lock there.
       const plugin = await arrangeContendedPlugin();
 
       await withBarrier(async (barrier) => {
@@ -712,8 +719,8 @@ describe('the plugin consent path is one lock order (#360)', () => {
       const replayed: ReadonlyArray<readonly [LockStageName, string]> = [
         ['household row', householdShareLock.text],
         ['plugin row', pluginShareLock.text],
-        ['grant row', grantRowLock.text],
         ['advisory key', advisoryLock.text],
+        ['grant row', grantRowLock.text],
         ['unit row', unitRowLock.text],
       ];
 

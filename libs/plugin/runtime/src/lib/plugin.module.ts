@@ -4,6 +4,7 @@ import { Global, Module } from '@nestjs/common';
 import { PluginConfigEventsService } from './config/plugin-config-events.service';
 import { PluginConfigSchemaService } from './config/plugin-config-schema.service';
 import { PluginConfigService } from './config/plugin-config.service';
+import { PluginConsentActService } from './consent/plugin-consent-act.service';
 import { PluginConsentCheckClassifier } from './consent/plugin-consent-check-classifier.service';
 import { PluginConsentPresentationService } from './consent/plugin-consent-presentation.service';
 import { PluginConsentStandingService } from './consent/plugin-consent-standing.service';
@@ -57,6 +58,7 @@ import { PluginUpdateService } from './update/plugin-update.service';
   providers: [
     { provide: PLUGIN_MODULE_IMPORTER, useClass: DynamicImportPluginModuleImporter },
     { provide: PLUGIN_REQUESTED_PERMISSIONS_READER, useClass: StoredManifestRequestedPermissionsReader },
+    PluginConsentActService,
     PluginConsentCheckClassifier,
     PluginConsentPresentationService,
     PluginConsentStandingService,
@@ -80,6 +82,9 @@ import { PluginUpdateService } from './update/plugin-update.service';
     PluginUpdateService,
   ],
   exports: [
+    // #1150's consent act writer: switch-on, toggle and review, for the API
+    // edges of household and user units.
+    PluginConsentActService,
     PluginConsentPresentationService,
     // #1149's read-time consent standing: what a unit still owes, for the
     // API edges that report a unit's state code.

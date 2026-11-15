@@ -176,7 +176,6 @@ describe('plugin lifecycle (server-level)', () => {
           scopeId: '',
           permissionSlug: 'feedback:read',
           status: PluginGrantStatus.Denied,
-          manifestVersion: plugin.version,
           decidedAt: new Date(),
           decidedRiskLevel: RiskLevel.Medium,
         },

@@ -6,6 +6,7 @@ import request from 'supertest';
 import type { Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { readConsentSurface, reviewBody, switchOnBody, toggleBody, type ConsentSurface } from './consent-act-fixtures';
 import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
 import { householdPluginKey } from './plugin-api-key';
 import { pluginRowData } from './plugin-row-fixtures';
@@ -43,6 +44,7 @@ describe('household plugin routes for a missing or deleted household (#553)', ()
   let db: TestDatabase;
   let actors: Actors;
   let plugin: Plugin;
+  let surface: ConsentSurface;
 
   beforeAll(() => {
     db = createTestDatabase();
@@ -68,6 +70,11 @@ describe('household plugin routes for a missing or deleted household (#553)', ()
     await db.client.pluginPermission.create({
       data: { pluginId: plugin.id, slug: `plugin|${plugin.slug}|manage:digest`, riskLevel: RiskLevel.Low },
     });
+
+    const reader = await actors.user();
+    const { household } = await actors.householdWithMembers({ owner: reader, name: 'Reads the consent surface' });
+
+    surface = await readConsentSurface(baseUrl, reader, { householdId: household.id }, plugin.slug);
   });
 
   afterAll(async () => {
@@ -94,22 +101,36 @@ describe('household plugin routes for a missing or deleted household (#553)', ()
     },
   ];
 
+  /**
+   * The three consent act routes (#1150), each with a body its DTO accepts:
+   * the instance check runs in the handler, after validation, so a 400 would
+   * hide the answer under test. Built from a consent surface its household's
+   * owner read (`beforeEach`), since a missing or deleted household has none.
+   */
   const WRITES: readonly { readonly name: string; readonly send: (actor: Caller, id: string) => request.Test }[] = [
-    {
-      name: 'POST grants',
-      send: (actor, id) =>
-        request(baseUrl)
-          .post(`${base(id)}/${plugin.slug}/grants`)
-          .set(actor.headers)
-          .send({ permissionSlug: HOUSEHOLD_CHECK.slug, status: PluginGrantStatus.Granted }),
-    },
     {
       name: 'POST enable',
       send: (actor, id) =>
         request(baseUrl)
           .post(`${base(id)}/${plugin.slug}/enable`)
           .set(actor.headers)
-          .send({}),
+          .send(switchOnBody(surface)),
+    },
+    {
+      name: 'POST consent/toggle',
+      send: (actor, id) =>
+        request(baseUrl)
+          .post(`${base(id)}/${plugin.slug}/consent/toggle`)
+          .set(actor.headers)
+          .send(toggleBody(surface, HOUSEHOLD_CHECK.slug, PluginGrantStatus.Granted)),
+    },
+    {
+      name: 'POST consent/review',
+      send: (actor, id) =>
+        request(baseUrl)
+          .post(`${base(id)}/${plugin.slug}/consent/review`)
+          .set(actor.headers)
+          .send(reviewBody(surface, { [HOUSEHOLD_CHECK.slug]: PluginGrantStatus.Granted })),
     },
     {
       name: 'POST disable',
@@ -196,7 +217,7 @@ describe('household plugin routes for a missing or deleted household (#553)', ()
   });
 
   describe('a household role', () => {
-    it("answers 404 to a deleted household's owner on all seven routes, where it answered 403", async () => {
+    it("answers 404 to a deleted household's owner on all nine routes, where it answered 403", async () => {
       const { householdId, owner } = await deletedHousehold();
       const routes = [...READS, ...WRITES];
 
@@ -214,14 +235,14 @@ describe('household plugin routes for a missing or deleted household (#553)', ()
   describe('a user with no role in the household', () => {
     // A user session reads Household, so the guard answers it as the
     // household routes do: 404 for a missing id, 403 for a hidden live one.
-    it('answers 404 on all seven routes for a household that never existed, where it answered 403', async () => {
+    it('answers 404 on all nine routes for a household that never existed, where it answered 403', async () => {
       const user = await actors.user();
       const routes = [...READS, ...WRITES];
 
       await expect(statuses(routes, user, `missing-${randomUUID()}`)).resolves.toEqual(all404(routes));
     });
 
-    it('still answers 403 on all seven routes for a live household it cannot see', async () => {
+    it('still answers 403 on all nine routes for a live household it cannot see', async () => {
       const user = await actors.user();
       const routes = [...READS, ...WRITES];
 
@@ -245,7 +266,7 @@ describe('household plugin routes for a missing or deleted household (#553)', ()
       await READS[0].send(await pluginKey(owner), household.id).expect(200);
     });
 
-    it('answers 403 on all seven routes, whether the household is missing, deleted or live', async () => {
+    it('answers 403 on all nine routes, whether the household is missing, deleted or live', async () => {
       const owner = await actors.user();
       await actors.householdWithMembers({ owner, name: 'Owned by the key owner' });
       const key = await pluginKey(owner);
@@ -266,7 +287,7 @@ describe('household plugin routes for a missing or deleted household (#553)', ()
      * the key is refused 403 like any other. A write that loses the race to the
      * delete must answer the same (`plugin-household-tombstone.spec.ts`).
      */
-    it("answers 403 on all seven routes for its owner's own household once it is deleted", async () => {
+    it("answers 403 on all nine routes for its owner's own household once it is deleted", async () => {
       const owner = await actors.user();
       // Kept, so the key still holds plugin rules and the 403 is the deleted household's.
       await actors.householdWithMembers({ owner, name: 'Kept by the key owner' });

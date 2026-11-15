@@ -170,9 +170,9 @@ export interface PluginInventoryEntry extends PluginInventoryIdentity {
 export interface PluginInventoryUnitState {
   /**
    * Whether a unit enablement exists at all. False is a real, common state:
-   * per #225 `decide()` is the only `UserPlugin` creator, so a user who has
-   * consented to nothing is unanchored on every plugin — which is why this
-   * is distinct from `enabled: false`.
+   * the unit's own switch-on, a consent act, is the only creator of its
+   * enablement (#1150), so a unit that never switched a plugin on is
+   * unanchored on it — which is why this is distinct from `enabled: false`.
    */
   readonly anchored: boolean;
   readonly enabled: boolean;
@@ -429,12 +429,12 @@ export class PluginInventoryService {
    * as a plugin whose SCOPE a user cannot be anchored under — and therefore
    * no orphan state to flag.
    *
-   * There IS a narrowing this does not apply, and #381 owns it: `decide()`
-   * anchors only on a Granted user-scope decision, so a plugin whose manifest
-   * declares no `consentScope: 'user'` check can never hold a row for anyone
-   * and is noise here. That predicate lives in `manifest_json` and is not
-   * expressible as a `WHERE`, so post-filtering it would falsify the `total`
-   * D-CD requires. The field-level exposure is already closed — this read
+   * There IS a narrowing this does not apply, and #381 owns it: a user's
+   * switch-on is refused for a plugin whose active manifest requests nothing
+   * at user scope (#1150), so no user can switch such a plugin on and it is
+   * noise here. That predicate lives in `manifest_json` and
+   * is not expressible as a `WHERE`, so post-filtering it would falsify the
+   * `total` the page reports. The field-level exposure is already closed — this read
    * serves no version, provenance, install history or tombstones — so what
    * #381 weighs is the enumeration alone.
    *

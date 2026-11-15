@@ -30,6 +30,7 @@ describe('PluginConsentStandingService (#1149)', () => {
     decision: 'pending',
     decidedRiskLevel: null,
     staleRisk: false,
+    ungrantable: null,
     ...overrides,
   });
 

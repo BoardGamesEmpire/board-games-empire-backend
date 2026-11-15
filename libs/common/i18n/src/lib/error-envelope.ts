@@ -54,7 +54,7 @@ export function reasonPhrase(status: number): string {
 /**
  * Derives an error code from an error class name, so a family of refusal
  * classes (the plugin errors, the deadlock) needs no hand-kept code table:
- * `PluginGrantScopeIdError` → `PLUGIN_GRANT_SCOPE_ID`. A trailing `Error` is
+ * `PluginConsentActStaleError` → `PLUGIN_CONSENT_ACT_STALE`. A trailing `Error` is
  * dropped, and an acronym stays one word (`PluginSDKVersionError` →
  * `PLUGIN_SDK_VERSION`) (#1260).
  */

@@ -4,6 +4,9 @@
 ///
 /// Semantics: NO ROW = pending / never asked. status=Denied is a durable,
 /// first-class rejection ("rejection is durable", #59 escalation model).
+/// Household and user decisions are written by a consent act (#1150):
+/// `actId` names the PluginConsentAct that holds what the person was shown
+/// and which manifest it came from, so the row keeps only the decision.
 /// Decision changes UPDATE the row in place and emit
 /// plugin.grant_created / plugin.grant_rejected lifecycle events; ability
 /// resolution (#60 PluginAbilityFactory) intersects Granted rows only.
@@ -37,9 +40,10 @@ model PluginGrant {
   /// id, no FK — decisions must survive principal deletion.
   decidedById String? @map("decided_by_id")
 
-  /// Manifest version the consent text was shown from — escalation
-  /// comparison (#59 update flow) diffs against this.
-  manifestVersion String @map("manifest_version")
+  /// The consent act that wrote this decision (#1150). Plain String id, no
+  /// FK — the act table is append-only and outlives the row. Null for
+  /// server-scope decisions until #1152 records those as acts too.
+  actId String? @map("act_id")
 
   /// `riskLevel` of the permission AT DECISION TIME. Makes the
   /// server-gating "risk escalated" comparison detectable: current risk >

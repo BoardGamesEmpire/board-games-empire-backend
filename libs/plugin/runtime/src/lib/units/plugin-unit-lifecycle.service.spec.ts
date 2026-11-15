@@ -17,16 +17,13 @@ import { PluginConfigSchemaService } from '../config/plugin-config-schema.servic
 import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginDisabledEvent,
-  HouseholdPluginEnabledEvent,
   UserPluginDisabledEvent,
-  UserPluginEnabledEvent,
 } from '../events/plugin.events';
 import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginUnitLifecycleService } from './plugin-unit-lifecycle.service';
 import {
   PluginUnitAuthorityError,
-  PluginUnitConfigRequiredError,
   PluginUnitHouseholdNotFoundError,
   PluginUnitNotEnrolledError,
   PluginUnitPluginChangedError,
@@ -37,8 +34,6 @@ import {
 
 describe('PluginUnitLifecycleService', () => {
   const options = buildPluginModuleOptions();
-
-  const CANONICAL_DIGEST = 'plugin|demo-sink|manage:digest';
 
   /** Household-scope manifest with one REQUIRED household-consented check. */
   const householdManifest = (config?: Partial<PluginManifest['config']>): PluginManifest =>
@@ -191,58 +186,17 @@ describe('PluginUnitLifecycleService', () => {
 
   const emittedEvents = () => emitter.emit.mock.calls.map(([name, event]) => ({ name, event }));
 
-  describe('enableHousehold', () => {
-    it('creates the row enabled with empty config on first enable and emits a creation-shaped enabled event', async () => {
-      db.householdPlugin.findUnique.mockResolvedValue(null);
-      const created = makeHouseholdRow({ config: {} });
-      db.householdPlugin.create.mockResolvedValue(created);
-
-      const row = await service.enableHousehold(enableInput);
-
-      expect(row).toBe(created);
-      expect(db.householdPlugin.create).toHaveBeenCalledWith({
-        data: {
-          householdId: 'hh-1',
-          pluginId: 'plugin-1',
-          enabled: true,
-          config: {},
-        },
-      });
-
-      const [{ name, event }] = emittedEvents();
-      expect(name).toBe(PluginEvent.Enabled);
-      expect(event).toBeInstanceOf(HouseholdPluginEnabledEvent);
-      expect(event.before).toBeNull();
-      expect(event.after.enabled).toBe(true);
-      expect(event).not.toHaveProperty('bornSuspendedSlugs');
-    });
-
-    it('first enable beside a durable required denial creates the row enabled; standing, not the row, reports the refusal', async () => {
-      // A durable denial of a required household-scope check no longer vetoes
-      // the row (#1149): consent standing derives review pending at read time.
-      db.householdPlugin.findUnique.mockResolvedValue(null);
-      db.pluginGrant.findMany.mockResolvedValue([{ permissionSlug: CANONICAL_DIGEST }] as never);
-      db.householdPlugin.create.mockImplementation((({ data }: { data: Partial<HouseholdPlugin> }) =>
-        Promise.resolve(makeHouseholdRow(data))) as never);
-
-      const row = await service.enableHousehold(enableInput);
-
-      expect(row.enabled).toBe(true);
-      expect(db.householdPlugin.create).toHaveBeenCalledWith({
-        data: { householdId: 'hh-1', pluginId: 'plugin-1', enabled: true, config: {} },
-      });
-      expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
-
-      const [{ event }] = emittedEvents();
-      expect(event).toBeInstanceOf(HouseholdPluginEnabledEvent);
-      expect(event).not.toHaveProperty('bornSuspendedSlugs');
-    });
+  // The household's switch-on is a consent act now, in PluginConsentActService
+  // (#1150). The unit transaction it used to exercise here is the one the
+  // config PATCH and disable still open, so the guards are pinned through them.
+  describe('the household unit transaction', () => {
+    const configInput = { ...enableInput, config: { webhookUrl: 'https://x' } };
 
     it('opens the transaction household row first: share lock, plugin-row re-read, scope lock, unit row', async () => {
-      db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow({ enabled: false }));
+      db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow());
       db.householdPlugin.update.mockResolvedValue(makeHouseholdRow());
 
-      await service.enableHousehold(enableInput);
+      await service.updateHouseholdConfig(configInput);
 
       const [advisoryStrings, ...advisoryValues] = db.$executeRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
       expect(rawQueryText(advisoryStrings)).toContain('pg_advisory_xact_lock(hashtextextended(');
@@ -259,10 +213,10 @@ describe('PluginUnitLifecycleService', () => {
       // runs and touches no plugin table, so taking it first can only queue.
       //
       // The plugin row MUST precede the advisory lock. Uninstall and
-      // activation claim that row before touching grant rows, and decide()
-      // holds a grant row while taking this advisory — advisory-first would
-      // close the cycle advisory → plugin → grant → advisory, which
-      // Postgres resolves by aborting a caller.
+      // activation claim that row before touching grant rows, and a consent
+      // act holds grant rows while taking this advisory (#1150) —
+      // advisory-first would close the cycle advisory → plugin → grant →
+      // advisory, which Postgres resolves by aborting a caller.
       const householdOrder = db.$queryRaw.mock.invocationCallOrder[householdAt];
       const livenessOrder = db.$queryRaw.mock.invocationCallOrder[livenessAt];
       const advisoryOrder = db.$executeRaw.mock.invocationCallOrder[0];
@@ -273,17 +227,16 @@ describe('PluginUnitLifecycleService', () => {
     });
 
     it('refuses when a concurrent activation promoted a new version after the manifest was read', async () => {
-      // The config gate was derived from 1.2.0's manifest. Applying it
-      // against 1.3.0 would validate a document against a schema that is
-      // gone, so the enable refuses rather than act on the stale judgment.
-      db.householdPlugin.findUnique.mockResolvedValue(null);
+      // The config was validated against 1.2.0's schema. Writing it under
+      // 1.3.0 would apply a judgment against a schema that is gone.
+      db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow());
       db.$queryRaw.mockResolvedValue([livingRow({ version: '1.3.0' })] as never);
 
-      await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
+      await expect(service.updateHouseholdConfig(configInput)).rejects.toMatchObject({
         name: 'PluginUnitPluginChangedError',
         kind: 'version-activated',
       });
-      expect(db.householdPlugin.create).not.toHaveBeenCalled();
+      expect(db.householdPlugin.update).not.toHaveBeenCalled();
       expect(db.$executeRaw).not.toHaveBeenCalled();
     });
 
@@ -291,14 +244,14 @@ describe('PluginUnitLifecycleService', () => {
       // The installer's reinstall branch updates manifestJson on the same
       // row at possibly the same version, stamping a fresh installedAt.
       // Version alone cannot see that, so installedAt is carried too.
-      db.householdPlugin.findUnique.mockResolvedValue(null);
+      db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow());
       db.$queryRaw.mockResolvedValue([livingRow({ installed_at: new Date(9_000) })] as never);
 
-      await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
+      await expect(service.updateHouseholdConfig(configInput)).rejects.toMatchObject({
         name: 'PluginUnitPluginChangedError',
         kind: 'reinstalled',
       });
-      expect(db.householdPlugin.create).not.toHaveBeenCalled();
+      expect(db.householdPlugin.update).not.toHaveBeenCalled();
     });
 
     it('classifies a DIFFERENT-version reinstall as a reinstall, not an activation', async () => {
@@ -307,16 +260,16 @@ describe('PluginUnitLifecycleService', () => {
       // installer is its only writer — testing version first would report
       // this as an activation and tell the client consent survived, when
       // the reinstall's uninstall purged every grant.
-      db.householdPlugin.findUnique.mockResolvedValue(null);
+      db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow());
       db.$queryRaw.mockResolvedValue([livingRow({ version: '1.3.0', installed_at: new Date(9_000) })] as never);
 
-      await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
+      await expect(service.updateHouseholdConfig(configInput)).rejects.toMatchObject({
         name: 'PluginUnitPluginChangedError',
         kind: 'reinstalled',
         expectedVersion: '1.2.0',
         actualVersion: '1.3.0',
       });
-      expect(db.householdPlugin.create).not.toHaveBeenCalled();
+      expect(db.householdPlugin.update).not.toHaveBeenCalled();
     });
 
     it('refuses an A-B-A activation pair: both discriminators match while the manifest content moved', async () => {
@@ -327,10 +280,10 @@ describe('PluginUnitLifecycleService', () => {
       // therefore agree with the pre-read while `manifest_json` has been
       // replaced twice, and the config schema is a judgment made against a
       // manifest that is gone.
-      db.householdPlugin.findUnique.mockResolvedValue(null);
+      db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow());
       db.$queryRaw.mockResolvedValue([livingRow({ manifest_matches: false })] as never);
 
-      await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
+      await expect(service.updateHouseholdConfig(configInput)).rejects.toMatchObject({
         name: 'PluginUnitPluginChangedError',
         // Grants SURVIVED — an activation keeps them — which is the whole of
         // what `kind` reports, so this needs no third arm.
@@ -338,7 +291,7 @@ describe('PluginUnitLifecycleService', () => {
         expectedVersion: '1.2.0',
         actualVersion: '1.2.0',
       });
-      expect(db.householdPlugin.create).not.toHaveBeenCalled();
+      expect(db.householdPlugin.update).not.toHaveBeenCalled();
       expect(db.$executeRaw).not.toHaveBeenCalled();
     });
 
@@ -346,10 +299,10 @@ describe('PluginUnitLifecycleService', () => {
       // The reason `kind` staying two-valued still needs a third phrasing:
       // the version-move sentence reads 'activated from 1.2.0 to 1.2.0' here,
       // which describes nothing and reads as a bug in the guard.
-      db.householdPlugin.findUnique.mockResolvedValue(null);
+      db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow());
       db.$queryRaw.mockResolvedValue([livingRow({ manifest_matches: false })] as never);
 
-      await expect(service.enableHousehold(enableInput)).rejects.toThrow(
+      await expect(service.updateHouseholdConfig(configInput)).rejects.toThrow(
         /re-activated at version 1\.2\.0 with different plugin manifest content/,
       );
     });
@@ -361,10 +314,10 @@ describe('PluginUnitLifecycleService', () => {
       // pre-read document (not the re-read row, and not the validated object,
       // which is a parsed product rather than the stored bytes) is what makes
       // the comparison mean 'the manifest my gates came from'.
-      db.householdPlugin.findUnique.mockResolvedValue(null);
-      db.householdPlugin.create.mockResolvedValue(makeHouseholdRow());
+      db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow());
+      db.householdPlugin.update.mockResolvedValue(makeHouseholdRow());
 
-      await service.enableHousehold(enableInput);
+      await service.updateHouseholdConfig(configInput);
 
       const [strings, ...values] = db.$queryRaw.mock.calls[rawCallIndex(PLUGIN_ROW)] as [
         TemplateStringsArray,
@@ -380,18 +333,18 @@ describe('PluginUnitLifecycleService', () => {
       // legitimately come back NULL here — and a guard that read 'not false'
       // as 'unchanged' would pass every row a future refactor forgot to
       // answer for.
-      db.householdPlugin.findUnique.mockResolvedValue(null);
+      db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow());
       db.$queryRaw.mockResolvedValue([livingRow({ manifest_matches: null })] as never);
 
-      await expect(service.enableHousehold(enableInput)).rejects.toBeInstanceOf(PluginUnitPluginChangedError);
-      expect(db.householdPlugin.create).not.toHaveBeenCalled();
+      await expect(service.updateHouseholdConfig(configInput)).rejects.toBeInstanceOf(PluginUnitPluginChangedError);
+      expect(db.householdPlugin.update).not.toHaveBeenCalled();
     });
 
     it('binds no manifest on the paths that derive nothing from one', async () => {
-      // The other half of the deliberate asymmetry below: disable and the
-      // user toggles do not merely tolerate a moved manifest, they never ask.
-      // A NULL parameter makes the comparison NULL, which is why the disable
-      // case can carry that row and still succeed.
+      // The other half of the deliberate asymmetry below: the switch-offs do
+      // not merely tolerate a moved manifest, they never ask. A NULL
+      // parameter makes the comparison NULL, which is why the disable case
+      // can carry that row and still succeed.
       db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow({ enabled: true }));
       db.householdPlugin.update.mockResolvedValue(makeHouseholdRow({ enabled: false }));
 
@@ -399,15 +352,6 @@ describe('PluginUnitLifecycleService', () => {
 
       const [, ...values] = db.$queryRaw.mock.calls[rawCallIndex(PLUGIN_ROW)] as [TemplateStringsArray, ...unknown[]];
       expect(values[0]).toBeNull();
-    });
-
-    it('refuses a config PATCH judged against a superseded schema', async () => {
-      db.$queryRaw.mockResolvedValue([livingRow({ version: '1.3.0' })] as never);
-
-      await expect(
-        service.updateHouseholdConfig({ ...enableInput, config: { webhookUrl: 'https://x' } }),
-      ).rejects.toBeInstanceOf(PluginUnitPluginChangedError);
-      expect(db.householdPlugin.update).not.toHaveBeenCalled();
     });
 
     it('does NOT refuse a version move on disable — no manifest judgment rides a switch flip', async () => {
@@ -422,13 +366,12 @@ describe('PluginUnitLifecycleService', () => {
 
     it('refuses when a concurrent activation re-scoped the plugin to server after the pre-read', async () => {
       // Activation rewrites version/scope/manifestJson together, and the
-      // FOR SHARE re-read is what sees it. A household row for a
-      // server-scope plugin is an artifact the manifest gate says cannot
-      // exist and nothing else cleans up, so the refusal is the whole point.
+      // FOR SHARE re-read is what sees it. Household config for a
+      // server-scope plugin lands on a surface the manifest gate says cannot
+      // exist, so the refusal is the whole point.
       db.$queryRaw.mockResolvedValue([livingRow({ scope: PluginScope.Server })] as never);
 
-      await expect(service.enableHousehold(enableInput)).rejects.toBeInstanceOf(PluginUnitScopeError);
-      expect(db.householdPlugin.create).not.toHaveBeenCalled();
+      await expect(service.updateHouseholdConfig(configInput)).rejects.toBeInstanceOf(PluginUnitScopeError);
       expect(db.householdPlugin.update).not.toHaveBeenCalled();
       // Refused before serializing anyone else on this unit's advisory key.
       expect(db.$executeRaw).not.toHaveBeenCalled();
@@ -436,323 +379,25 @@ describe('PluginUnitLifecycleService', () => {
 
     it('refuses inside the transaction when a concurrent uninstall tombstoned the plugin after the pre-read', async () => {
       // The pre-transaction load saw the plugin alive; the FOR SHARE
-      // re-read is what keeps an enable from committing a fresh row beside
-      // a tombstone whose purge promised no such row exists.
-      db.householdPlugin.findUnique.mockResolvedValue(null);
+      // re-read is what keeps a write from committing against a plugin
+      // whose purge already promised its unit enablements gone.
+      db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow());
       db.$queryRaw.mockResolvedValue([livingRow({ uninstalled_at: new Date(7) })] as never);
 
-      await expect(service.enableHousehold(enableInput)).rejects.toBeInstanceOf(PluginUnitPluginTombstonedError);
-      expect(db.householdPlugin.create).not.toHaveBeenCalled();
-    });
-
-    it('validates inline config, writes it with the creation, and announces the initial document as a config write', async () => {
-      db.householdPlugin.findUnique.mockResolvedValue(null);
-      db.householdPlugin.create.mockResolvedValue(makeHouseholdRow({ config: { webhookUrl: 'https://x' } }));
-
-      await service.enableHousehold({ ...enableInput, config: { webhookUrl: 'https://x' } });
-
-      expect(db.householdPlugin.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ config: { webhookUrl: 'https://x' } }),
-      });
-
-      const events = emittedEvents();
-      expect(events).toHaveLength(2);
-      expect(events[0].event).toBeInstanceOf(HouseholdPluginEnabledEvent);
-      expect(events[1].event).toBeInstanceOf(HouseholdPluginConfigUpdatedEvent);
-      // The before is the `{}` column default the row was born from.
-      expect(events[1].event.before.config).toEqual({});
-      expect(events[1].event.after.config).toEqual({ webhookUrl: 'https://x' });
-    });
-
-    it('rejects schema-invalid inline config with the validator issues, before any transaction', async () => {
-      await expect(service.enableHousehold({ ...enableInput, config: { webhookUrl: 42 } })).rejects.toMatchObject({
-        constructor: PluginConfigValidationError,
-        issues: [expect.objectContaining({ path: '/webhookUrl' })],
-      });
-
-      expect(db.$transaction).not.toHaveBeenCalled();
-    });
-
-    it('refuses a first enable without config when the manifest requires household config (empty issues)', async () => {
-      const requiring = householdManifest({
-        schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-        requiresHouseholdConfig: true,
-      });
-      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: requiring as unknown as Prisma.JsonValue }));
-      db.householdPlugin.findUnique.mockResolvedValue(null);
-
-      await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
-        constructor: PluginUnitConfigRequiredError,
-        issues: [],
-      });
-      expect(db.householdPlugin.create).not.toHaveBeenCalled();
-    });
-
-    it('refuses an enable whose RETAINED config no longer satisfies the active schema, naming the violations', async () => {
-      const requiring = householdManifest({
-        schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-        requiresHouseholdConfig: true,
-      });
-      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: requiring as unknown as Prisma.JsonValue }));
-      db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow({ enabled: false, config: {} }));
-
-      await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
-        constructor: PluginUnitConfigRequiredError,
-        issues: [expect.objectContaining({ keyword: 'required' })],
-      });
+      await expect(service.updateHouseholdConfig(configInput)).rejects.toBeInstanceOf(PluginUnitPluginTombstonedError);
       expect(db.householdPlugin.update).not.toHaveBeenCalled();
-    });
-
-    it('idempotency outranks the gate: an ALREADY-ENABLED unit with stale retained config returns unchanged', async () => {
-      // The gate guards the transition INTO service; a retry of a
-      // previously successful enable must not 409 a unit that never left.
-      const requiring = householdManifest({
-        schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-        requiresHouseholdConfig: true,
-      });
-      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: requiring as unknown as Prisma.JsonValue }));
-      const enabled = makeHouseholdRow({ enabled: true, config: {} });
-      db.householdPlugin.findUnique.mockResolvedValue(enabled);
-
-      await expect(service.enableHousehold(enableInput)).resolves.toBe(enabled);
-      expect(db.householdPlugin.update).not.toHaveBeenCalled();
-      expect(emitter.emit).not.toHaveBeenCalled();
-    });
-
-    it('enables over a retained config that still satisfies the required schema', async () => {
-      const requiring = householdManifest({
-        schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-        requiresHouseholdConfig: true,
-      });
-      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: requiring as unknown as Prisma.JsonValue }));
-      const retained = makeHouseholdRow({ enabled: false, config: { webhookUrl: 'https://x' } });
-      db.householdPlugin.findUnique.mockResolvedValue(retained);
-      db.householdPlugin.update.mockResolvedValue({ ...retained, enabled: true });
-
-      const row = await service.enableHousehold(enableInput);
-
-      expect(row.enabled).toBe(true);
-    });
-
-    it('flips an existing disabled row without touching consent state, and the event carries the real before', async () => {
-      const before = makeHouseholdRow({ enabled: false });
-      db.householdPlugin.findUnique.mockResolvedValue(before);
-      db.householdPlugin.update.mockResolvedValue({ ...before, enabled: true });
-
-      await service.enableHousehold(enableInput);
-
-      // The admin's switch write touches `enabled` alone (#1149).
-      expect(db.householdPlugin.update).toHaveBeenCalledWith({ where: { id: 'hp-1' }, data: { enabled: true } });
-
-      const [{ event }] = emittedEvents();
-      expect(event).toBeInstanceOf(HouseholdPluginEnabledEvent);
-      expect(event.before.enabled).toBe(false);
-    });
-
-    it('re-enabling an already-enabled row without config is a no-op: no write, no event', async () => {
-      db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow());
-
-      await service.enableHousehold(enableInput);
-
-      expect(db.householdPlugin.update).not.toHaveBeenCalled();
-      expect(emitter.emit).not.toHaveBeenCalled();
-    });
-
-    it('enable with config on an already-enabled row writes the config and emits ONLY the config event', async () => {
-      const before = makeHouseholdRow();
-      db.householdPlugin.findUnique.mockResolvedValue(before);
-      db.householdPlugin.update.mockResolvedValue({ ...before, config: { webhookUrl: 'https://y' } });
-
-      await service.enableHousehold({ ...enableInput, config: { webhookUrl: 'https://y' } });
-
-      expect(db.householdPlugin.update).toHaveBeenCalledWith({
-        where: { id: 'hp-1' },
-        data: { config: { webhookUrl: 'https://y' } },
-      });
-      const events = emittedEvents();
-      expect(events).toHaveLength(1);
-      expect(events[0].event).toBeInstanceOf(HouseholdPluginConfigUpdatedEvent);
-    });
-
-    /**
-     * The short-circuit above it exists because "an enable that changes nothing
-     * must return the unchanged row". A DORMANT row makes that premise false:
-     * dormancy is written without touching `enabled`, so the row reads as
-     * enabled while serving nothing, and answering 200-unchanged would leave the
-     * admin's obvious next move — press Enable again — doing nothing forever.
-     */
-    it('re-runs the gate for an ENABLED but dormant row, healing it from the retained document', async () => {
-      const requiring = householdManifest({
-        schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-        requiresHouseholdConfig: true,
-      });
-      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: requiring as unknown as Prisma.JsonValue }));
-      const dormant = makeHouseholdRow({
-        enabled: true,
-        config: { webhookUrl: 'https://retained' },
-        dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-        dormantAt: new Date(0),
-      });
-      db.householdPlugin.findUnique.mockResolvedValue(dormant);
-      db.householdPlugin.update.mockResolvedValue({ ...dormant, dormantReason: null, dormantAt: null });
-
-      const row = await service.enableHousehold(enableInput);
-
-      expect(row.dormantReason).toBeNull();
-      // `enabled` is absent from the write: it was already true, and the only
-      // thing this enable had to change was the dormancy.
-      expect(db.householdPlugin.update).toHaveBeenCalledWith({
-        where: { id: 'hp-1' },
-        data: { dormantReason: null, dormantAt: null },
-      });
-    });
-
-    it('refuses that same enable with the retained violations when the document still does not conform', async () => {
-      const requiring = householdManifest({
-        schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-        requiresHouseholdConfig: true,
-      });
-      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: requiring as unknown as Prisma.JsonValue }));
-      db.householdPlugin.findUnique.mockResolvedValue(
-        makeHouseholdRow({
-          enabled: true,
-          config: {},
-          dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-          dormantAt: new Date(0),
-        }),
-      );
-
-      // Actionable, where the short-circuit answered 200 and explained nothing.
-      await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
-        constructor: PluginUnitConfigRequiredError,
-        issues: [expect.objectContaining({ keyword: 'required' })],
-      });
-      expect(db.householdPlugin.update).not.toHaveBeenCalled();
-    });
-
-    /**
-     * The gate's second trigger. `requiresHouseholdConfig` is the manifest
-     * demanding a document at all; it does not decide whether the schema binds
-     * one the row already holds. A later manifest can make household config
-     * optional while the row still carries the document that condemned it — and
-     * the write this enable performs is what CURES a config dormancy, so without
-     * the dormancy arm of the condition it would clear the reason without ever
-     * re-judging the document and put it straight back into service.
-     */
-    it('still judges the retained document for a dormant row when the manifest no longer requires config', async () => {
-      const optional = householdManifest({
-        schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-        requiresHouseholdConfig: false,
-      });
-      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: optional as unknown as Prisma.JsonValue }));
-      db.householdPlugin.findUnique.mockResolvedValue(
-        makeHouseholdRow({
-          enabled: true,
-          config: {},
-          dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-          dormantAt: new Date(0),
-        }),
-      );
-
-      await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
-        constructor: PluginUnitConfigRequiredError,
-        issues: [expect.objectContaining({ keyword: 'required' })],
-      });
-      expect(db.householdPlugin.update).not.toHaveBeenCalled();
-    });
-
-    it('heals that same row from a conforming retained document under the optional-config manifest', async () => {
-      const optional = householdManifest({
-        schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-        requiresHouseholdConfig: false,
-      });
-      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: optional as unknown as Prisma.JsonValue }));
-      const dormant = makeHouseholdRow({
-        enabled: true,
-        config: { webhookUrl: 'https://retained' },
-        dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-        dormantAt: new Date(0),
-      });
-      db.householdPlugin.findUnique.mockResolvedValue(dormant);
-      db.householdPlugin.update.mockResolvedValue({ ...dormant, dormantReason: null, dormantAt: null });
-
-      expect((await service.enableHousehold(enableInput)).dormantReason).toBeNull();
-    });
-
-    /**
-     * The `config` column is Json, so its type admits arrays, `null` and
-     * scalars, and a permissive schema accepts every one of them. Reconciliation
-     * calls such a document nonconforming; this gate must agree, or the pass
-     * that condemned the row and the write that returns it to service would
-     * disagree about what a valid retained document is. Not reachable through
-     * the API — both config DTOs are `@IsObject` — so the mock is the only way
-     * to hold the cast to it.
-     */
-    it('refuses a retained document that is not a JSON object, however permissive the schema', async () => {
-      const permissive = householdManifest({ schema: {}, requiresHouseholdConfig: true });
-      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: permissive as unknown as Prisma.JsonValue }));
-      db.householdPlugin.findUnique.mockResolvedValue(
-        makeHouseholdRow({
-          enabled: true,
-          config: [] as unknown as Prisma.JsonValue,
-          dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-          dormantAt: new Date(0),
-        }),
-      );
-
-      await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
-        constructor: PluginUnitConfigRequiredError,
-        issues: [expect.objectContaining({ keyword: 'type' })],
-      });
-      expect(db.householdPlugin.update).not.toHaveBeenCalled();
-    });
-
-    it('leaves an ordinary enable ungated: optional config, no dormancy, and a document nothing ever judged', async () => {
-      const optional = householdManifest({
-        schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-        requiresHouseholdConfig: false,
-      });
-      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: optional as unknown as Prisma.JsonValue }));
-      const before = makeHouseholdRow({ enabled: false, config: {} });
-      db.householdPlugin.findUnique.mockResolvedValue(before);
-      db.householdPlugin.update.mockResolvedValue({ ...before, enabled: true });
-
-      await service.enableHousehold(enableInput);
-
-      // The widened gate must not start refusing this: an optional-config
-      // manifest never demanded a document here, and no reconciliation ever
-      // condemned the one the row holds.
-      expect(db.householdPlugin.update).toHaveBeenCalledWith({ where: { id: 'hp-1' }, data: { enabled: true } });
-    });
-
-    it('clears a config dormancy when the enable supplies a conforming document (#370)', async () => {
-      const before = makeHouseholdRow({
-        enabled: false,
-        config: { webhookUrl: 42 },
-        dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-        dormantAt: new Date(0),
-      });
-      db.householdPlugin.findUnique.mockResolvedValue(before);
-      db.householdPlugin.update.mockResolvedValue({ ...before, enabled: true, dormantReason: null, dormantAt: null });
-
-      await service.enableHousehold({ ...enableInput, config: { webhookUrl: 'https://z' } });
-
-      expect(db.householdPlugin.update).toHaveBeenCalledWith({
-        where: { id: 'hp-1' },
-        data: { enabled: true, config: { webhookUrl: 'https://z' }, dormantReason: null, dormantAt: null },
-      });
     });
 
     it('refuses the household surface for a server-scope plugin — the scope-coherence rule at the writer', async () => {
       db.plugin.findUnique.mockResolvedValue(makePlugin({ scope: PluginScope.Server }));
 
-      await expect(service.enableHousehold(enableInput)).rejects.toBeInstanceOf(PluginUnitScopeError);
+      await expect(service.updateHouseholdConfig(configInput)).rejects.toBeInstanceOf(PluginUnitScopeError);
     });
 
     it('refuses a non-admin of the anchoring household', async () => {
       authority.householdAdminStanding.mockResolvedValue('none');
 
-      await expect(service.enableHousehold(enableInput)).rejects.toBeInstanceOf(PluginUnitAuthorityError);
+      await expect(service.updateHouseholdConfig(configInput)).rejects.toBeInstanceOf(PluginUnitAuthorityError);
       expect(authority.householdAdminStanding).toHaveBeenCalledWith('admin-1', 'hh-1');
       expect(db.$transaction).not.toHaveBeenCalled();
     });
@@ -764,16 +409,16 @@ describe('PluginUnitLifecycleService', () => {
       // rather than a 403 that depends on which check the delete landed between.
       authority.householdAdminStanding.mockResolvedValue('deleted');
 
-      await expect(service.enableHousehold(enableInput)).rejects.toBeInstanceOf(PluginUnitHouseholdNotFoundError);
+      await expect(service.updateHouseholdConfig(configInput)).rejects.toBeInstanceOf(PluginUnitHouseholdNotFoundError);
       expect(db.$transaction).not.toHaveBeenCalled();
     });
 
     it('404s an unknown slug and 410s a tombstone', async () => {
       db.plugin.findUnique.mockResolvedValue(null);
-      await expect(service.enableHousehold(enableInput)).rejects.toBeInstanceOf(PluginUnitPluginNotFoundError);
+      await expect(service.updateHouseholdConfig(configInput)).rejects.toBeInstanceOf(PluginUnitPluginNotFoundError);
 
       db.plugin.findUnique.mockResolvedValue(makePlugin({ uninstalledAt: new Date(5) }));
-      await expect(service.enableHousehold(enableInput)).rejects.toBeInstanceOf(PluginUnitPluginTombstonedError);
+      await expect(service.updateHouseholdConfig(configInput)).rejects.toBeInstanceOf(PluginUnitPluginTombstonedError);
     });
   });
 
@@ -801,7 +446,7 @@ describe('PluginUnitLifecycleService', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
-    it('404s a household that never enabled the plugin — enable is the row creator', async () => {
+    it("404s a household that never enabled the plugin — the household's switch-on, a consent act, is the row creator (#1150)", async () => {
       db.householdPlugin.findUnique.mockResolvedValue(null);
 
       await expect(service.disableHousehold(enableInput)).rejects.toBeInstanceOf(PluginUnitNotEnrolledError);
@@ -810,10 +455,10 @@ describe('PluginUnitLifecycleService', () => {
     /**
      * D-CL. The row is dormant, on the household admin's screen with a reason
      * attached (#354's list), and disable is the only operation that could act
-     * on it — so this path does not require the household surface the other two
-     * writers do.
+     * on it — so this path does not require the household surface the config
+     * PATCH does.
      */
-    it('switches off a row the plugin scope no longer admits, where enable and config PATCH refuse', async () => {
+    it('switches off a row the plugin scope no longer admits, where config PATCH refuses', async () => {
       db.plugin.findUnique.mockResolvedValue(makePlugin({ scope: PluginScope.Server }));
       db.$queryRaw.mockResolvedValue([livingRow({ scope: PluginScope.Server })] as never);
       const before = makeHouseholdRow({ dormantReason: PluginUnitDormantReason.ScopeOrphaned });
@@ -828,7 +473,6 @@ describe('PluginUnitLifecycleService', () => {
       // rather than one this path invented.
       expect(db.householdPlugin.update).toHaveBeenCalledWith({ where: { id: 'hp-1' }, data: { enabled: false } });
 
-      await expect(service.enableHousehold(enableInput)).rejects.toBeInstanceOf(PluginUnitScopeError);
       await expect(
         service.updateHouseholdConfig({ ...enableInput, config: { webhookUrl: 'https://z' } }),
       ).rejects.toBeInstanceOf(PluginUnitScopeError);
@@ -905,7 +549,6 @@ describe('PluginUnitLifecycleService', () => {
 
   describe('a household soft-deleted while the write is in flight (#548)', () => {
     const WRITERS = [
-      { name: 'enable', write: () => service.enableHousehold(enableInput) },
       { name: 'disable', write: () => service.disableHousehold(enableInput) },
       {
         name: 'config PATCH',
@@ -933,69 +576,56 @@ describe('PluginUnitLifecycleService', () => {
     it('names the household it could not find', async () => {
       householdGone();
 
-      await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
+      await expect(service.disableHousehold(enableInput)).rejects.toMatchObject({
         name: 'PluginUnitHouseholdNotFoundError',
         householdId: 'hh-1',
       });
     });
   });
 
-  describe('user enable/disable', () => {
+  describe('user switch-off', () => {
     const userInput = { slug: 'demo-sink', userId: 'user-1' };
 
-    it('re-enables the anchor under the user advisory lock and emits the user enabled event', async () => {
-      const before = makeUserRow({ enabled: false });
-      db.userPlugin.findUnique.mockResolvedValue(before);
-      db.userPlugin.update.mockResolvedValue({ ...before, enabled: true });
-
-      const row = await service.enableUser(userInput);
-
-      expect(row.enabled).toBe(true);
-      const [strings, ...values] = db.$executeRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
-      expect(rawQueryText(strings)).toContain('pg_advisory_xact_lock(hashtextextended(');
-      expect(values).toContain('plugin_grant:user_unit:user-1:plugin-1');
-
-      const [{ name, event }] = emittedEvents();
-      expect(name).toBe(PluginEvent.Enabled);
-      expect(event).toBeInstanceOf(UserPluginEnabledEvent);
-    });
-
-    it('disables by writing only the enabled flag and emits the user disabled event (#1149)', async () => {
+    it('disables under the user advisory lock, writing only the enabled flag, and emits the user disabled event (#1149)', async () => {
       const before = makeUserRow();
       db.userPlugin.findUnique.mockResolvedValue(before);
       db.userPlugin.update.mockResolvedValue({ ...before, enabled: false });
 
       const row = await service.disableUser(userInput);
 
+      const [strings, ...values] = db.$executeRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
+      expect(rawQueryText(strings)).toContain('pg_advisory_xact_lock(hashtextextended(');
+      expect(values).toContain('plugin_grant:user_unit:user-1:plugin-1');
+
       expect(db.userPlugin.update).toHaveBeenCalledWith({ where: { id: 'up-1' }, data: { enabled: false } });
       expect(row.enabled).toBe(false);
-      const [{ event }] = emittedEvents();
+      const [{ name, event }] = emittedEvents();
+      expect(name).toBe(PluginEvent.Disabled);
       expect(event).toBeInstanceOf(UserPluginDisabledEvent);
     });
 
     it('is idempotent: a matching state returns unchanged with no write, no event', async () => {
-      db.userPlugin.findUnique.mockResolvedValue(makeUserRow());
+      db.userPlugin.findUnique.mockResolvedValue(makeUserRow({ enabled: false }));
 
-      await service.enableUser(userInput);
+      await service.disableUser(userInput);
 
       expect(db.userPlugin.update).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
-    it('404s without an anchor row — decide() remains the only creator (#225)', async () => {
+    it("404s without a unit enablement — the user's switch-on, a consent act, is its only creator (#1150)", async () => {
       db.userPlugin.findUnique.mockResolvedValue(null);
 
-      await expect(service.enableUser(userInput)).rejects.toBeInstanceOf(PluginUnitNotEnrolledError);
       await expect(service.disableUser(userInput)).rejects.toBeInstanceOf(PluginUnitNotEnrolledError);
     });
 
     it('410s a tombstoned plugin, both before the transaction and on the in-transaction re-read', async () => {
       db.plugin.findUnique.mockResolvedValue(makePlugin({ uninstalledAt: new Date(5) }));
-      await expect(service.enableUser(userInput)).rejects.toBeInstanceOf(PluginUnitPluginTombstonedError);
+      await expect(service.disableUser(userInput)).rejects.toBeInstanceOf(PluginUnitPluginTombstonedError);
 
       db.plugin.findUnique.mockResolvedValue(makePlugin());
       db.$queryRaw.mockResolvedValue([livingRow({ uninstalled_at: new Date(6) })] as never);
-      await expect(service.enableUser(userInput)).rejects.toBeInstanceOf(PluginUnitPluginTombstonedError);
+      await expect(service.disableUser(userInput)).rejects.toBeInstanceOf(PluginUnitPluginTombstonedError);
     });
   });
 });

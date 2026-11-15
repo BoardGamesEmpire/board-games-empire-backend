@@ -1,24 +1,26 @@
 import type { PluginUnit } from '@bge/actor-context';
 import {
-  bindsConsentUnit,
   CONSENT_UNIT_BINDING_REFUSAL,
   DatabaseService,
   grantScopeCoordinatesForUnit,
-  PluginGrantScope,
   PluginGrantStatus,
   riskCovers,
-  type Permission,
+  type Prisma,
   type RiskLevel,
 } from '@bge/database';
 import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import { Injectable, Logger } from '@nestjs/common';
+import { consentUngrantableCause } from '../grants/consent-grantability';
 import { CONSENT_SCOPE_TO_GRANT_SCOPE } from '../grants/consent-scope.map';
+import { consentCatalogFlags, type ConsentCatalogPermission } from './consent-catalog-flags';
 import {
   unitConsumesConsentScope,
   type ClassifiedConsentCheck,
   type ConsentCheckClassification,
   type ConsentCheckDecision,
+  type ConsentManifestSource,
 } from './consent-classification.types';
+import { presentedRiskLevel } from './presented-risk-level';
 
 /**
  * Classifies manifest checks against a unit's `PluginGrant` rows AT EACH
@@ -53,7 +55,11 @@ export class PluginConsentCheckClassifier {
     pluginId: string,
     unit: PluginUnit,
     checks: readonly NormalizedPermissionRequest[],
+    options: ConsentClassifyOptions = {},
   ): Promise<ConsentCheckClassification> {
+    const { source = 'active' } = options;
+    const client = options.client ?? this.db;
+
     if (checks.length === 0) {
       return { decisions: new Map(), currentRiskBySlug: new Map() };
     }
@@ -65,7 +71,7 @@ export class PluginConsentCheckClassifier {
     const [grants, catalog] = await Promise.all([
       addressable.length === 0
         ? []
-        : this.db.pluginGrant.findMany({
+        : client.pluginGrant.findMany({
             where: {
               pluginId,
               status: { in: [PluginGrantStatus.Granted, PluginGrantStatus.Denied] },
@@ -74,7 +80,7 @@ export class PluginConsentCheckClassifier {
             },
             select: { permissionSlug: true, scopeType: true, status: true, decidedRiskLevel: true },
           }),
-      this.loadCatalogState(pluginId, checks),
+      this.loadCatalogState(client, pluginId, checks),
     ]);
     const grantByScopeAndSlug = new Map(grants.map((grant) => [`${grant.scopeType}|${grant.permissionSlug}`, grant]));
 
@@ -90,9 +96,19 @@ export class PluginConsentCheckClassifier {
         corePermission: catalog.corePermissionsBySlug.get(check.canonicalSlug),
       });
 
+      // Under a staged manifest, a declared permission has no catalog row
+      // until activation creates it at the Low a declared row is locked to,
+      // so a pre-consent is judged against that Low, as the consent surface
+      // shows it. Under the active manifest a missing row confers nothing
+      // (#1150).
+      const judgedRiskLevel =
+        source === 'staged' && check.origin === 'plugin'
+          ? presentedRiskLevel(check.origin, currentRiskLevel)
+          : currentRiskLevel;
+
       const { decision, cause } = this.decide(pluginId, check.canonicalSlug, {
         grant,
-        currentRiskLevel,
+        currentRiskLevel: judgedRiskLevel,
         wildcardSubject,
         unboundedUnitScope,
       });
@@ -103,6 +119,15 @@ export class PluginConsentCheckClassifier {
         // Not marked stale when the grant cannot confer for structural
         // reasons: staleness says "re-consent fixes this", and it does not.
         staleRisk: cause === 'stale_risk',
+        // A property of the permission and its deciding scope, so it is
+        // reported whether or not a decision exists (#1150).
+        ungrantable: consentUngrantableCause({
+          check,
+          decidingScope,
+          corePermission: catalog.corePermissionsBySlug.get(check.canonicalSlug),
+          catalogRisk: currentRiskLevel ?? undefined,
+          source,
+        }),
       });
     }
 
@@ -145,6 +170,7 @@ export class PluginConsentCheckClassifier {
    * rules.
    */
   private async loadCatalogState(
+    client: ConsentReadClient,
     pluginId: string,
     checks: readonly NormalizedPermissionRequest[],
   ): Promise<{
@@ -156,7 +182,7 @@ export class PluginConsentCheckClassifier {
 
     const [corePermissions, ownPermissions] = await Promise.all([
       coreSlugs.length > 0
-        ? this.db.permission.findMany({
+        ? client.permission.findMany({
             // A retired row (#235) reads as vanished, exactly as the ability
             // path reads it: the grant confers nothing, so the check is pending.
             where: { slug: { in: coreSlugs }, retiredAt: null },
@@ -172,7 +198,7 @@ export class PluginConsentCheckClassifier {
           })
         : [],
       ownSlugs.length > 0
-        ? this.db.pluginPermission.findMany({
+        ? client.pluginPermission.findMany({
             where: { pluginId, slug: { in: ownSlugs } },
             select: { slug: true, riskLevel: true },
           })
@@ -188,11 +214,23 @@ export class PluginConsentCheckClassifier {
   }
 }
 
-/** The catalog columns the shared rule reads off a core permission row. */
-export type ConsentCatalogPermission = Pick<
-  Permission,
-  'slug' | 'action' | 'subject' | 'fields' | 'conditions' | 'inverted'
->;
+// The flags live in their own module, which the pure grantability rule imports
+// without this service; re-exported here for the classifier's other readers (#1150).
+export { consentCatalogFlags, type ConsentCatalogPermission } from './consent-catalog-flags';
+
+/** What the classifier reads through: the request's database, or a transaction a caller holds open (#1150). */
+export type ConsentReadClient = Prisma.TransactionClient | DatabaseService;
+
+export interface ConsentClassifyOptions {
+  /**
+   * Which manifest the requested permissions come from. A staged manifest's
+   * new declared permission has no catalog row until activation creates it,
+   * and is still grantable. Default `active`.
+   */
+  readonly source?: ConsentManifestSource;
+  /** Read through this client, so a consent act's transaction sees its own writes. Default: the service's database. */
+  readonly client?: ConsentReadClient;
+}
 
 export interface ConsentCheckDecisionInput {
   /** The row at the check's deciding scope, `Granted` or `Denied`; `undefined` when none exists. */
@@ -209,31 +247,6 @@ export interface ConsentCheckDecisionInput {
  */
 export type ConsentCheckNonConferringCause =
   'no_row' | 'denied' | 'wildcard_subject' | 'unbound_unit_scope' | 'no_catalog_row' | 'stale_risk';
-
-/**
- * The two catalog-derived inputs of the rule, read the same way wherever the
- * rule runs. A core subject drifted to the `all` wildcard: grant-time forbids
- * wildcard subjects (#59), so such a grant confers nothing at consumption. A
- * core permission consented at household or user scope confers nothing unless
- * it binds the consenting unit (#60, #591), mirroring the ability read path;
- * server-consented checks are exempt.
- */
-export function consentCatalogFlags(input: {
-  readonly origin: NormalizedPermissionRequest['origin'];
-  readonly decidingScope: PluginGrantScope;
-  readonly corePermission: ConsentCatalogPermission | undefined;
-}): Pick<ConsentCheckDecisionInput, 'wildcardSubject' | 'unboundedUnitScope'> {
-  const { origin, decidingScope, corePermission } = input;
-
-  return {
-    wildcardSubject: origin === 'core' && corePermission?.subject === 'all',
-    unboundedUnitScope:
-      origin === 'core' &&
-      decidingScope !== PluginGrantScope.Server &&
-      corePermission !== undefined &&
-      !bindsConsentUnit(corePermission, decidingScope),
-  };
-}
 
 /**
  * The one rule for "does this check confer" (#1149), pure so that every

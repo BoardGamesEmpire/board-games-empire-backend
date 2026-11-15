@@ -5,7 +5,7 @@ import type {
   PluginConsentScopeValue,
   ResolvedLocalizedString,
 } from '@boardgamesempire/plugin-manifest';
-import type { ConsentCheckDecision } from './consent-classification.types';
+import type { ConsentCheckDecision, ConsentManifestSource } from './consent-classification.types';
 
 /**
  * The decision state of one check as seen from the presented unit: the
@@ -46,6 +46,18 @@ export interface PluginCheckPresentation {
    * given for a different classification — and re-consent re-stamps it.
    */
   readonly staleRisk: boolean;
+  /**
+   * Whether consent at this requested permission's consent scope could ever
+   * confer it (#1150). `true` for a permission another unit axis decides
+   * (`per-unit`): this surface cannot judge another unit's binding.
+   */
+  readonly grantable: boolean;
+  /**
+   * Staged surface only: the active manifest does not request this permission
+   * at this consent scope, so the only consent it can have is a pre-consent
+   * to this staged update (#1150). Always `false` on the active surface.
+   */
+  readonly stagedOnly: boolean;
   /** The author's justification, localized per the requested locale with fallback provenance. */
   readonly reason: ResolvedLocalizedString;
 }
@@ -79,10 +91,18 @@ export interface PluginConsentPresentation {
      */
     readonly enabled: boolean;
   };
-  /** Version of the manifest whose checks are presented — the pending version when `source` is `'pending'`. */
+  /** Version of the manifest whose checks are presented — the staged version when `source` is `'staged'`. */
   readonly manifestVersion: string;
   /** Which stored manifest the surface came from: the active version or a staged update awaiting approval. */
-  readonly source: 'active' | 'pending';
+  readonly source: ConsentManifestSource;
+  /**
+   * The artifact sha of the manifest presented: the installed artifact's on
+   * the active surface, the staged artifact's on a staged surface. A consent
+   * act names it, so consent is tied to what the unit was shown (#1150).
+   */
+  readonly manifestSha256: string;
+  /** On the active surface: the staged update a unit may pre-consent to, or null. Always null on a staged surface (#1150). */
+  readonly stagedUpdate: { readonly manifestVersion: string; readonly manifestSha256: string } | null;
   readonly unit: PluginUnit;
   readonly displayName: ResolvedLocalizedString;
   readonly description: ResolvedLocalizedString;

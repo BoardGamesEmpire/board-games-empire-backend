@@ -3,6 +3,7 @@ import { DatabaseService } from '@bge/database';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
   MODULE_OPTIONS_TOKEN,
+  PluginConsentActService,
   PluginConsentPresentationService,
   PluginDirectoryResolverService,
   PluginFeatureStateService,
@@ -42,6 +43,7 @@ import { PluginsController } from './plugins.controller';
     { provide: PluginLifecycleService, useValue: {} },
     { provide: PluginUpdateService, useValue: {} },
     { provide: PluginGrantService, useValue: {} },
+    { provide: PluginConsentActService, useValue: {} },
     { provide: PluginConsentPresentationService, useValue: {} },
     { provide: PluginUnitLifecycleService, useValue: {} },
     { provide: PluginFeatureStateService, useValue: {} },
@@ -62,6 +64,7 @@ import { PluginsController } from './plugins.controller';
     PluginLifecycleService,
     PluginUpdateService,
     PluginGrantService,
+    PluginConsentActService,
     PluginConsentPresentationService,
     PluginUnitLifecycleService,
     PluginFeatureStateService,

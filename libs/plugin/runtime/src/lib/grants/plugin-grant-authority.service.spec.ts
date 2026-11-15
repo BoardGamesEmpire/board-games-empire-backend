@@ -74,7 +74,7 @@ describe('PluginGrantAuthorityService', () => {
 
   // User-scope decisions carry no predicate here (#225 uniform enablement):
   // the subject check, tombstone gate, and manifest scope coherence are all
-  // enforced by PluginGrantService.decide() itself, so this service exposes
+  // enforced by the user's consent act (#1150), so this service exposes
   // nothing for that scope — asserted structurally rather than left implied.
   it('exposes no user-scope authority predicate', () => {
     expect('hasQualifyingHouseholdForPlugin' in service).toBe(false);

@@ -574,16 +574,18 @@ export class PermissionsService {
    *   own id, or it is an allowlisted public read. A condition-free row is
    *   subject-wide authority, and a fixed-condition one reaches every
    *   matching row install-wide; only SERVER consent can confer either.
-   *   Warned, not debug — the install/update gates and `decide()` refuse to
-   *   create such grants, so one existing can only mean the catalog drifted
-   *   under a recorded decision.
-   * - **Bounded by the active manifest.** A decision confers only while
-   *   the active manifest requests that permission at that decision's
-   *   scope (#577). Activation deletes decisions on a permission an update
-   *   stops requesting, but the bound is applied here as well: a
-   *   pre-consent decision, recorded against a pending manifest, must not
-   *   confer before its update lands. The manifest is re-validated, never
-   *   trusted; one that fails rejects the whole ability.
+   *   Warned, not debug — the install/update gates and the consent act
+   *   (#1150) refuse to create such grants, so one existing means the
+   *   permission changed under a recorded consent decision: the catalog
+   *   drifted, or, since #772, an Owner edited the permission's conditions.
+   * - **Bounded by the active manifest.** A consent decision confers only
+   *   while the active manifest requests that permission at that decision's
+   *   scope (#577). A decision the active manifest does not request is an
+   *   ordinary state, not corruption: either a pre-consent recorded against
+   *   a staged update's requested permission (#1150), which confers once
+   *   that update is activated, or a decision on a permission a later
+   *   manifest dropped. The manifest is re-validated, never trusted; one
+   *   that fails rejects the whole ability.
    *
    * On a core permission, the wildcard, unit-binding and risk checks are
    * `judgeConsentDecision`'s, which the permission catalog's count of the
@@ -827,6 +829,9 @@ export class PermissionsService {
         return true;
       }
 
+      // Debug, not warn (#1150): a pre-consent recorded against a staged
+      // update, or a decision on a permission a later manifest dropped, is an
+      // ordinary state, not an anomaly.
       this.logger.debug(
         `Plugin ${plugin.id} decision on '${grant.permissionSlug}' at ${grant.scopeType} scope is not requested ` +
           'by the active manifest; conferring nothing',

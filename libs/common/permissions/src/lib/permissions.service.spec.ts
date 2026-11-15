@@ -1082,6 +1082,28 @@ describe('PermissionsService', () => {
         );
       });
 
+      it('a consent decision stops conferring once its permission no longer binds the unit (#1150, #772)', async () => {
+        // Both decisions are requested by the active manifest at household
+        // scope. `create:event` carries the fixed conditions an Owner's edit can
+        // leave behind, so it binds no unit; `update:calendar` still binds.
+        const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+        const edited = PERMISSION_CATALOG.find((permission) => permission.slug === 'create:event');
+        expect(edited).toBeDefined();
+        grantRows([
+          grantRow('update:calendar', RiskLevel.Low, PluginGrantScope.Household),
+          grantRow('create:event', RiskLevel.Low, PluginGrantScope.Household),
+        ]);
+        db.permission.findMany.mockResolvedValue([
+          makePermission({ slug: 'update:calendar', ...UNIT_BOUND_RULES.Household }),
+          makePermission({ slug: 'create:event', conditions: edited?.conditions as never }),
+        ] as never);
+
+        const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+
+        expect(snapshot?.corePermissions.map((permission) => permission.slug)).toEqual(['update:calendar']);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("'create:event'"));
+      });
+
       it('excludes a granted core permission whose subject drifted to the all wildcard (the wildcard re-check)', async () => {
         grantRows([grantRow('read:everything', RiskLevel.Critical)]);
         db.permission.findMany.mockResolvedValue([
@@ -1129,6 +1151,28 @@ describe('PermissionsService', () => {
         const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
 
         expect(snapshot).toMatchObject({ servable: true, corePermissions: [], ownGrantSlugs: [] });
+      });
+
+      it('a pre-consent on a permission only a staged manifest requests confers nothing (#1150)', async () => {
+        // `update:game` is requested only by a staged update, so its decision is
+        // a pre-consent. It sits beside a decision the active manifest does
+        // request, which must keep conferring.
+        grantRows([
+          grantRow('read:game', RiskLevel.Low, PluginGrantScope.Household),
+          grantRow('update:game', RiskLevel.Low, PluginGrantScope.Household),
+        ]);
+        db.permission.findMany.mockResolvedValue([
+          makePermission({ slug: 'read:game', ...UNIT_BOUND_RULES.Household }),
+          makePermission({ slug: 'update:game', ...UNIT_BOUND_RULES.Household }),
+        ] as never);
+        reader.read.mockReturnValue({
+          valid: true,
+          requested: [{ slug: 'read:game', scopeType: PluginGrantScope.Household }],
+        });
+
+        const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+
+        expect(snapshot?.corePermissions.map((permission) => permission.slug)).toEqual(['read:game']);
       });
 
       it('confers a decision on a declared permission only while the active manifest requests it', async () => {

@@ -323,9 +323,9 @@ describe('PluginLifecycleListener', () => {
           scopeId: '',
           permissionSlug: 'plugin.demo-sink.send',
           status: PluginGrantStatus.Granted,
-          manifestVersion: '1.2.3',
           decidedRiskLevel: RiskLevel.Low,
         },
+        { manifestVersion: '1.2.3', actId: null },
         initiatedAt,
       );
       db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
@@ -345,7 +345,66 @@ describe('PluginLifecycleListener', () => {
             permissionSlug: 'plugin.demo-sink.send',
             status: PluginGrantStatus.Granted,
             decidedRiskLevel: RiskLevel.Low,
+            actId: null,
           },
+        }),
+      );
+    });
+
+    // The decision row no longer stores the manifest version, so the event's
+    // context is the only source of it and of the consent act behind it (#1150).
+    it("records a grant event's manifest version and act id from the event's context (#1150)", async () => {
+      const event = new PluginGrantCreatedEvent(
+        null,
+        {
+          id: 'grant-1',
+          pluginId: 'plugin-1',
+          scopeType: PluginGrantScope.Household,
+          scopeId: 'household-1',
+          permissionSlug: 'plugin.demo-sink.send',
+          status: PluginGrantStatus.Granted,
+          decidedRiskLevel: RiskLevel.Low,
+        },
+        { manifestVersion: '2.0.0', actId: 'act-1' },
+        initiatedAt,
+      );
+      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
+
+      emitter.emit(PluginEvent.GrantCreated, event);
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          manifestVersion: '2.0.0',
+          payload: expect.objectContaining({ actId: 'act-1' }),
+        }),
+      );
+    });
+
+    it("records a server-scope grant event's manifest version with a null act id (#1150)", async () => {
+      const event = new PluginGrantCreatedEvent(
+        null,
+        {
+          id: 'grant-1',
+          pluginId: 'plugin-1',
+          scopeType: PluginGrantScope.Server,
+          scopeId: '',
+          permissionSlug: 'plugin.demo-sink.send',
+          status: PluginGrantStatus.Granted,
+          decidedRiskLevel: RiskLevel.Low,
+        },
+        { manifestVersion: '2.0.0', actId: null },
+        initiatedAt,
+      );
+      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
+
+      emitter.emit(PluginEvent.GrantCreated, event);
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          manifestVersion: '2.0.0',
+          payload: expect.objectContaining({ actId: null }),
         }),
       );
     });
@@ -360,9 +419,9 @@ describe('PluginLifecycleListener', () => {
           scopeId: 'household-1',
           permissionSlug: 'plugin.x.y',
           status: PluginGrantStatus.Granted,
-          manifestVersion: '1.0.0',
           decidedRiskLevel: RiskLevel.Low,
         },
+        { manifestVersion: '1.0.0', actId: null },
         initiatedAt,
       );
       db.plugin.findUnique.mockResolvedValue(null);
@@ -379,7 +438,7 @@ describe('PluginLifecycleListener', () => {
       );
     });
 
-    it('persists a GrantRevoked row from the BEFORE snapshot with the reason — the deleted grant leaves only this record (#211)', async () => {
+    it('persists a GrantRevoked row from the BEFORE snapshot with the reason and the act that wrote it — the deleted grant leaves only this record (#211, #1150)', async () => {
       const event = new PluginGrantRevokedEvent(
         {
           id: 'grant-1',
@@ -388,10 +447,10 @@ describe('PluginLifecycleListener', () => {
           scopeId: 'user-1',
           permissionSlug: 'read:public_content',
           status: PluginGrantStatus.Granted,
-          manifestVersion: '1.2.3',
           decidedRiskLevel: RiskLevel.Medium,
         },
-        'membership-removed',
+        'permission-no-longer-requested',
+        { manifestVersion: '1.2.3', actId: 'act-1' },
         initiatedAt,
       );
       db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
@@ -408,7 +467,8 @@ describe('PluginLifecycleListener', () => {
           payload: {
             permissionSlug: 'read:public_content',
             decidedRiskLevel: RiskLevel.Medium,
-            reason: 'membership-removed',
+            reason: 'permission-no-longer-requested',
+            actId: 'act-1',
           },
         }),
       );
@@ -435,7 +495,8 @@ describe('PluginLifecycleListener', () => {
           pluginSlug: 'demo-sink',
           scopeType: PluginGrantScope.Household,
           scopeId: 'household-1',
-          payload: {},
+          manifestVersion: null,
+          payload: { actId: null },
         }),
       );
     });
@@ -481,6 +542,83 @@ describe('PluginLifecycleListener', () => {
           pluginId: 'plugin-1',
           scopeType: PluginGrantScope.User,
           scopeId: 'user-9',
+        }),
+      );
+    });
+
+    it.each([
+      {
+        label: 'a household switch',
+        routingKey: PluginEvent.Enabled,
+        event: () =>
+          new HouseholdPluginEnabledEvent(
+            { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: false },
+            { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true },
+            initiatedAt,
+            { manifestVersion: '1.2.0', actId: 'act-1' },
+          ),
+      },
+      {
+        label: 'a user switch',
+        routingKey: PluginEvent.Disabled,
+        event: () =>
+          new UserPluginDisabledEvent(
+            { id: 'up-1', userId: 'user-9', pluginId: 'plugin-1', enabled: true },
+            { id: 'up-1', userId: 'user-9', pluginId: 'plugin-1', enabled: false },
+            initiatedAt,
+            { manifestVersion: '1.2.0', actId: 'act-1' },
+          ),
+      },
+      {
+        label: 'a household config write',
+        routingKey: PluginEvent.ConfigUpdated,
+        event: () =>
+          new HouseholdPluginConfigUpdatedEvent(
+            { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', config: {} },
+            { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', config: { webhookUrl: 'https://x' } },
+            initiatedAt,
+            { manifestVersion: '1.2.0', actId: 'act-1' },
+          ),
+      },
+    ])(
+      'persists $label a consent act made with the act id and its manifest version (#1150)',
+      async ({ routingKey, event }) => {
+        db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
+
+        emitter.emit(routingKey, event());
+        await flush();
+
+        expect(createdRow()).toEqual(
+          expect.objectContaining({ pluginId: 'plugin-1', manifestVersion: '1.2.0', payload: { actId: 'act-1' } }),
+        );
+      },
+    );
+
+    it('persists a UnitRevived row a consent act caused with the act id (#1150)', async () => {
+      const event = new HouseholdPluginUnitRevivedEvent(
+        {
+          id: 'hp-1',
+          householdId: 'household-1',
+          pluginId: 'plugin-1',
+          enabled: true,
+          dormantReason: PluginUnitDormantReason.NeedsConfiguration,
+        },
+        { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true, dormantReason: null },
+        PluginUnitDormantReason.NeedsConfiguration,
+        '1.2.0',
+        initiatedAt,
+        'act-1',
+      );
+      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
+
+      emitter.emit(PluginEvent.UnitRevived, event);
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          event: PluginLifecycleEventType.UnitRevived,
+          manifestVersion: '1.2.0',
+          payload: { clearedReason: PluginUnitDormantReason.NeedsConfiguration, actId: 'act-1' },
         }),
       );
     });
@@ -601,7 +739,7 @@ describe('PluginLifecycleListener', () => {
           event: PluginLifecycleEventType.UnitRevived,
           scopeId: 'household-1',
           manifestVersion: '1.4.0',
-          payload: { clearedReason: PluginUnitDormantReason.ScopeOrphaned },
+          payload: { clearedReason: PluginUnitDormantReason.ScopeOrphaned, actId: null },
         }),
       );
     });

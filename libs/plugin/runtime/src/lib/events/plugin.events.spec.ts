@@ -217,12 +217,12 @@ describe('plugin lifecycle events', () => {
       scopeId: 'hh_1',
       permissionSlug: 'plugin|demo-sink|update:calendar',
       status: PluginGrantStatus.Granted,
-      manifestVersion: '1.2.0',
       decidedRiskLevel: RiskLevel.Low,
     };
+    const context = { manifestVersion: '1.2.0', actId: null };
 
     it('first decision is create-shaped', () => {
-      const event = new PluginGrantCreatedEvent(null, grantRow, initiatedAt);
+      const event = new PluginGrantCreatedEvent(null, grantRow, context, initiatedAt);
 
       expect(event.action).toBe('create');
       expect(event.subject).toBe('PluginGrant');
@@ -233,6 +233,7 @@ describe('plugin lifecycle events', () => {
       const event = new PluginGrantCreatedEvent(
         { ...grantRow, status: PluginGrantStatus.Denied },
         grantRow,
+        context,
         initiatedAt,
       );
 
@@ -242,18 +243,18 @@ describe('plugin lifecycle events', () => {
 
     it('rejection events carry the Denied row as the after snapshot', () => {
       const denied = { ...grantRow, status: PluginGrantStatus.Denied };
-      const event = new PluginGrantRejectedEvent(null, denied, initiatedAt);
+      const event = new PluginGrantRejectedEvent(null, denied, context, initiatedAt);
 
       expect(event.after.status).toBe(PluginGrantStatus.Denied);
       expect(PluginGrantRejectedEvent.eventName).toBe(PluginEvent.GrantRejected);
     });
 
-    it('revocation is delete-shaped and carries the authority-loss reason (#211)', () => {
-      const event = new PluginGrantRevokedEvent(grantRow, 'membership-removed', initiatedAt);
+    it('revocation is delete-shaped and carries the plugin manifest change that caused it (#211)', () => {
+      const event = new PluginGrantRevokedEvent(grantRow, 'permission-no-longer-requested', context, initiatedAt);
 
       expect(event.action).toBe('delete');
       expect(event.after).toBeNull();
-      expect(event.reason).toBe('membership-removed');
+      expect(event.reason).toBe('permission-no-longer-requested');
       expect(event.before.decidedRiskLevel).toBe(RiskLevel.Low);
       expect(PluginGrantRevokedEvent.eventName).toBe(PluginEvent.GrantRevoked);
     });

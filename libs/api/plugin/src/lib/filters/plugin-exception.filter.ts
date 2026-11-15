@@ -13,7 +13,14 @@ import { AbilityService } from '@bge/permissions';
 import {
   PluginConfigSchemaUnusableError,
   PluginConfigValidationError,
+  PluginConsentActAnswerError,
+  PluginConsentActNoUserScopeError,
+  PluginConsentActRequiredSetError,
+  PluginConsentActStaleError,
+  PluginConsentActUngrantableError,
+  PluginConsentActUnitOffError,
   PluginConsentPresentationManifestError,
+  PluginConsentPresentationNoStagedUpdateError,
   PluginConsentPresentationNotFoundError,
   PluginConsentPresentationTombstonedError,
   PluginDirectoryLayoutError,
@@ -24,14 +31,11 @@ import {
   PluginGrantAuthorityError,
   PluginGrantConsentScopeMismatchError,
   PluginGrantExclusionError,
-  PluginGrantHouseholdNotFoundError,
   PluginGrantManifestInvalidError,
   PluginGrantPluginChangedError,
   PluginGrantPluginNotFoundError,
   PluginGrantPluginTombstonedError,
   PluginGrantRequiredDenialError,
-  PluginGrantScopeIdError,
-  PluginGrantScopeNotRevocableError,
   PluginGrantUnknownPermissionError,
   PluginInstallAuthorityError,
   PluginInstallConflictError,
@@ -249,9 +253,7 @@ function buildRenderers(): RendererMap {
   // like arriving after it, when the liveness guard answers first (#553). Only
   // for an actor that guard would answer: the filter hands anyone else the
   // admin check's 403 instead (`PluginExceptionFilter.asTheActorSeesIt`).
-  const householdNotFound = (
-    exception: PluginUnitHouseholdNotFoundError | PluginGrantHouseholdNotFoundError,
-  ): PluginErrorRendering => ({
+  const householdNotFound = (exception: PluginUnitHouseholdNotFoundError): PluginErrorRendering => ({
     status: Http.NotFound,
     message: t('errors.household.not_found', { id: exception.householdId }),
     fields: { householdId: exception.householdId },
@@ -331,6 +333,14 @@ function buildRenderers(): RendererMap {
     fields: { slug: exception.pluginSlug },
   }));
 
+  // A household or user asked for the staged consent surface to pre-consent,
+  // and nothing is staged (#1150): that surface does not exist.
+  renders(PluginConsentPresentationNoStagedUpdateError, (exception) => ({
+    status: Http.NotFound,
+    message: t('errors.plugin.consent_presentation_no_staged_update', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug },
+  }));
+
   renders(PluginLifecycleNotFoundError, (exception) => ({
     status: Http.NotFound,
     message: t('errors.plugin.lifecycle_not_found', { slug: exception.slug }),
@@ -344,13 +354,11 @@ function buildRenderers(): RendererMap {
   }));
 
   renders(PluginUnitHouseholdNotFoundError, householdNotFound);
-  renders(PluginGrantHouseholdNotFoundError, householdNotFound);
 
   // A unit with no enablement row is addressed state that does not exist —
   // a 404 on the unit, distinct from the plugin-level 404 above, and the
-  // scopeType tells one client handler which axis to prompt for (enable
-  // creates household rows; a user's row comes from their first Granted
-  // consent).
+  // scopeType tells one client handler which axis to prompt for (either
+  // unit's row comes from its switch-on, a consent act, #1150).
   renders(PluginUnitNotEnrolledError, (exception) => ({
     status: Http.NotFound,
     message: t('errors.plugin.unit_not_enrolled', { slug: exception.pluginSlug }),
@@ -489,6 +497,57 @@ function buildRenderers(): RendererMap {
   renders(PluginLifecyclePluginChangedError, manifestMoveConflict('errors.plugin.lifecycle_plugin_changed'));
   renders(PluginGrantPluginChangedError, manifestMoveConflict('errors.plugin.grant_plugin_changed'));
 
+  // ─── consent acts (#1150) ─────────────────────────────────────────────────
+  // A household or user switching a plugin on, toggling one requested
+  // permission, or reviewing. The two conflicts a reload cures (stale, unit
+  // off) and the one only a server admin can cure (ungrantable) are 409; an
+  // answer set the request itself got wrong, or a user switch-on of a plugin
+  // that asks nothing of a user, is 422.
+
+  // `kind` says whether the plugin manifest moved or a shown risk changed;
+  // `staleRisks` names each changed risk, so the client can show the new one.
+  renders(PluginConsentActStaleError, (exception) => ({
+    status: Http.Conflict,
+    message: t('errors.plugin.consent_act_stale', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug, kind: exception.kind, staleRisks: exception.staleRisks },
+  }));
+
+  renders(PluginConsentActRequiredSetError, (exception) => ({
+    status: Http.UnprocessableEntity,
+    message: t('errors.plugin.consent_act_required_set', { slug: exception.pluginSlug }),
+    fields: {
+      slug: exception.pluginSlug,
+      missingSlugs: exception.missingSlugs,
+      refusedSlugs: exception.refusedSlugs,
+    },
+  }));
+
+  renders(PluginConsentActAnswerError, (exception) => ({
+    status: Http.UnprocessableEntity,
+    message: t('errors.plugin.consent_act_answer', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug, rule: exception.rule, permissionSlugs: exception.permissionSlugs },
+  }));
+
+  renders(PluginConsentActUngrantableError, (exception) => ({
+    status: Http.Conflict,
+    message: t('errors.plugin.consent_act_ungrantable', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug, permissions: exception.permissions },
+  }));
+
+  // Refused whatever the answers, and no reload cures it: the plugin asks
+  // nothing of a user, so a user switch-on would accept nothing (#381).
+  renders(PluginConsentActNoUserScopeError, (exception) => ({
+    status: Http.UnprocessableEntity,
+    message: t('errors.plugin.consent_act_no_user_scope', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug },
+  }));
+
+  renders(PluginConsentActUnitOffError, (exception) => ({
+    status: Http.Conflict,
+    message: t('errors.plugin.consent_act_unit_off', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug, scopeType: exception.scopeType },
+  }));
+
   // ─── 409 — confirmation challenges (prompt inputs come FROM the error) ───
 
   renders(PluginInstallCriticalConfirmationError, criticalConfirmation('errors.plugin.install_critical_confirmation'));
@@ -575,18 +634,6 @@ function buildRenderers(): RendererMap {
       expected: exception.expected,
       received: exception.received,
     },
-  }));
-
-  renders(PluginGrantScopeIdError, (exception) => ({
-    status: Http.UnprocessableEntity,
-    message: t('errors.plugin.grant_scope_id', { scopeType: exception.scopeType }),
-    fields: { scopeType: exception.scopeType },
-  }));
-
-  renders(PluginGrantScopeNotRevocableError, (exception) => ({
-    status: Http.UnprocessableEntity,
-    message: t('errors.plugin.grant_scope_not_revocable', { scopeType: exception.scopeType }),
-    fields: { scopeType: exception.scopeType },
   }));
 
   renders(PluginUnitScopeError, (exception) => ({
@@ -733,7 +780,7 @@ export const PLUGIN_EXCEPTION_FILTER_CATCHES: readonly ErrorCtor<Error>[] = [...
  *
  * Response bodies are the error envelope (`{ statusCode, error, message,
  * code, …fields }`, #1260). `code` is derived from the domain error's `name`
- * (`PluginGrantScopeIdError` → `PLUGIN_GRANT_SCOPE_ID`); the name is a
+ * (`PluginGrantExclusionError` → `PLUGIN_GRANT_EXCLUSION`); the name is a
  * hand-pinned string literal on every runtime error class, so the code
  * survives minification and class renames, letting clients dispatch without
  * parsing copy.
@@ -802,21 +849,14 @@ export class PluginExceptionFilter extends BaseExceptionFilter {
    * The original error stays the response's `cause`, for the logs.
    */
   private asTheActorSeesIt(exception: Error): Error {
-    const householdGone =
-      exception instanceof PluginUnitHouseholdNotFoundError || exception instanceof PluginGrantHouseholdNotFoundError;
-
-    if (!householdGone || alreadyTellsHouseholdsApart(this.abilityService.getCurrentAbilities())) {
+    if (
+      !(exception instanceof PluginUnitHouseholdNotFoundError) ||
+      alreadyTellsHouseholdsApart(this.abilityService.getCurrentAbilities())
+    ) {
       return exception;
     }
 
-    const actorId = this.abilityService.getActingUserId();
-
-    return exception instanceof PluginUnitHouseholdNotFoundError
-      ? new PluginUnitAuthorityError(actorId)
-      : new PluginGrantAuthorityError(
-          actorId,
-          `Household-scope consent requires an owner/admin membership in household '${exception.householdId}'`,
-        );
+    return new PluginUnitAuthorityError(this.abilityService.getActingUserId());
   }
 
   /**

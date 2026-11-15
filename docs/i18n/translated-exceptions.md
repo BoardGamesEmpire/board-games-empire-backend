@@ -135,7 +135,7 @@ edge. Its code wins over a field named `code`, and `ErrorCode`
 other exception class (`RpcException` aside, whose code is the gRPC status).
 
 A family of refusal classes derives its codes from the class name with
-`toErrorCode`: `PluginGrantScopeIdError` → `PLUGIN_GRANT_SCOPE_ID`, and the
+`toErrorCode`: `PluginConsentActStaleError` → `PLUGIN_CONSENT_ACT_STALE`, and the
 deadlock's `TransactionDeadlockError` → `TRANSACTION_DEADLOCK`. The name is a
 pinned string, never read from the class, so a rename or minification cannot
 change the code.

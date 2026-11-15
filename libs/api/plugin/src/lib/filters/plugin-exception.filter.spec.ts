@@ -1,9 +1,10 @@
-import { Action, PluginGrantScope, ResourceType } from '@bge/database';
+import { Action, PluginGrantScope, ResourceType, RiskLevel } from '@bge/database';
 import { toErrorCode } from '@bge/i18n';
 import * as pluginRuntime from '@bge/plugin';
 import {
   type PluginConfigIssue,
   PluginConsentPresentationManifestError,
+  PluginConsentPresentationNoStagedUpdateError,
   PluginConsentPresentationNotFoundError,
   PluginConsentPresentationTombstonedError,
   PluginDirectoryLayoutError,
@@ -14,14 +15,11 @@ import {
   PluginGrantAuthorityError,
   PluginGrantConsentScopeMismatchError,
   PluginGrantExclusionError,
-  PluginGrantHouseholdNotFoundError,
   PluginGrantManifestInvalidError,
   PluginGrantPluginChangedError,
   PluginGrantPluginNotFoundError,
   PluginGrantPluginTombstonedError,
   PluginGrantRequiredDenialError,
-  PluginGrantScopeIdError,
-  PluginGrantScopeNotRevocableError,
   PluginGrantUnknownPermissionError,
   PluginInstallAuthorityError,
   PluginInstallConflictError,
@@ -139,15 +137,20 @@ describe('PluginExceptionFilter', () => {
 
   describe('the error envelope (#1260)', () => {
     it('derives the code from the error class name', () => {
-      filter.catch(new PluginGrantScopeIdError(PluginGrantScope.Server, 'scopeId must be absent'), host);
+      filter.catch(
+        new PluginGrantConsentScopeMismatchError('read:household', PluginGrantScope.Household, PluginGrantScope.Server),
+        host,
+      );
 
       expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
       expect(body()).toEqual({
         statusCode: 422,
         error: 'Unprocessable Entity',
-        message: 't:errors.plugin.grant_scope_id',
-        code: 'PLUGIN_GRANT_SCOPE_ID',
-        scopeType: PluginGrantScope.Server,
+        message: 't:errors.plugin.grant_consent_scope_mismatch',
+        code: 'PLUGIN_GRANT_CONSENT_SCOPE_MISMATCH',
+        permissionSlug: 'read:household',
+        expected: PluginGrantScope.Household,
+        received: PluginGrantScope.Server,
       });
     });
   });
@@ -206,6 +209,15 @@ describe('PluginExceptionFilter', () => {
 
       expect(rendered().getStatus()).toBe(Http.NotFound);
       expect(body()['message']).toBe(`t:errors.plugin.${key}`);
+      expect(body()['slug']).toBe('sample');
+    });
+
+    it('maps a staged consent surface with nothing staged to 404 with its stable code (#1150)', () => {
+      filter.catch(new PluginConsentPresentationNoStagedUpdateError('sample'), host);
+
+      expect(rendered().getStatus()).toBe(Http.NotFound);
+      expect(body()['code']).toBe('PLUGIN_CONSENT_PRESENTATION_NO_STAGED_UPDATE');
+      expect(body()['message']).toBe('t:errors.plugin.consent_presentation_no_staged_update');
       expect(body()['slug']).toBe('sample');
     });
   });
@@ -382,8 +394,6 @@ describe('PluginExceptionFilter', () => {
         new PluginGrantConsentScopeMismatchError('read:household', PluginGrantScope.Household, PluginGrantScope.User),
         'grant_consent_scope_mismatch',
       ],
-      [new PluginGrantScopeIdError(PluginGrantScope.Server, 'scopeId must be absent'), 'grant_scope_id'],
-      [new PluginGrantScopeNotRevocableError(PluginGrantScope.Server), 'grant_scope_not_revocable'],
     ] as const)('maps %s to 422', (exception, key) => {
       filter.catch(exception, host);
 
@@ -419,23 +429,19 @@ describe('PluginExceptionFilter', () => {
       expect(body()['code']).toBe(toErrorCode(exception.name));
     });
 
-    it.each([
-      ['unit write', new PluginUnitHouseholdNotFoundError('hh_1')],
-      ['consent decision', new PluginGrantHouseholdNotFoundError('hh_1')],
-    ] as const)(
-      'maps a household deleted under a %s to 404 with the household copy the route guard gives (#548)',
-      (_path, exception) => {
-        filter.catch(exception, host);
+    it('maps a household deleted under a unit write or a consent act to 404 with the household copy the route guard gives (#548)', () => {
+      const exception = new PluginUnitHouseholdNotFoundError('hh_1');
 
-        expect(rendered().getStatus()).toBe(Http.NotFound);
-        // The same marker the household liveness guard answers with, so a
-        // request that loses the race to a delete reads like one that arrived
-        // after it.
-        expect(body()['message']).toBe('t:errors.household.not_found');
-        expect(body()['householdId']).toBe('hh_1');
-        expect(body()['code']).toBe(toErrorCode(exception.name));
-      },
-    );
+      filter.catch(exception, host);
+
+      expect(rendered().getStatus()).toBe(Http.NotFound);
+      // The same marker the household liveness guard answers with, so a
+      // request that loses the race to a delete reads like one that arrived
+      // after it.
+      expect(body()['message']).toBe('t:errors.household.not_found');
+      expect(body()['householdId']).toBe('hh_1');
+      expect(body()['code']).toBe(toErrorCode(exception.name));
+    });
 
     // The liveness guard's rule (#553), applied where the status is chosen: an
     // actor it passes through untouched was never told which households exist,
@@ -449,11 +455,6 @@ describe('PluginExceptionFilter', () => {
         exception: new PluginUnitHouseholdNotFoundError('hh_1'),
         key: 'unit_authority',
         code: 'PLUGIN_UNIT_AUTHORITY',
-      },
-      {
-        exception: new PluginGrantHouseholdNotFoundError('hh_1'),
-        key: 'grant_authority',
-        code: 'PLUGIN_GRANT_AUTHORITY',
       },
     ];
 
@@ -805,6 +806,74 @@ describe('PluginExceptionFilter', () => {
 
       expect(body()['message']).toBe(`t:errors.plugin.${key}`);
       expect(body()['rule']).toBe(rule);
+    });
+  });
+
+  // The five refusals of a consent act (#1150): each carries its stable code
+  // and the fields a client needs to say what to do next.
+  describe('consent act refusals (#1150)', () => {
+    it.each([
+      {
+        exception: new pluginRuntime.PluginConsentActStaleError('sample', 'risk', [
+          { permissionSlug: 'plugin|sample|sync', shownRiskLevel: RiskLevel.Low, currentRiskLevel: RiskLevel.High },
+        ]),
+        status: Http.Conflict,
+        code: 'PLUGIN_CONSENT_ACT_STALE',
+        key: 'consent_act_stale',
+        fields: {
+          slug: 'sample',
+          kind: 'risk',
+          staleRisks: [
+            { permissionSlug: 'plugin|sample|sync', shownRiskLevel: RiskLevel.Low, currentRiskLevel: RiskLevel.High },
+          ],
+        },
+      },
+      {
+        exception: new pluginRuntime.PluginConsentActRequiredSetError(
+          'sample',
+          ['plugin|sample|a'],
+          ['plugin|sample|b'],
+        ),
+        status: Http.UnprocessableEntity,
+        code: 'PLUGIN_CONSENT_ACT_REQUIRED_SET',
+        key: 'consent_act_required_set',
+        fields: { slug: 'sample', missingSlugs: ['plugin|sample|a'], refusedSlugs: ['plugin|sample|b'] },
+      },
+      {
+        exception: new pluginRuntime.PluginConsentActAnswerError('sample', 'duplicate', ['plugin|sample|a']),
+        status: Http.UnprocessableEntity,
+        code: 'PLUGIN_CONSENT_ACT_ANSWER',
+        key: 'consent_act_answer',
+        fields: { slug: 'sample', rule: 'duplicate', permissionSlugs: ['plugin|sample|a'] },
+      },
+      {
+        exception: new pluginRuntime.PluginConsentActUngrantableError('sample', [
+          { permissionSlug: 'read:all', cause: 'wildcard_subject' },
+        ]),
+        status: Http.Conflict,
+        code: 'PLUGIN_CONSENT_ACT_UNGRANTABLE',
+        key: 'consent_act_ungrantable',
+        fields: { slug: 'sample', permissions: [{ permissionSlug: 'read:all', cause: 'wildcard_subject' }] },
+      },
+      {
+        exception: new pluginRuntime.PluginConsentActNoUserScopeError('sample'),
+        status: Http.UnprocessableEntity,
+        code: 'PLUGIN_CONSENT_ACT_NO_USER_SCOPE',
+        key: 'consent_act_no_user_scope',
+        fields: { slug: 'sample' },
+      },
+      {
+        exception: new pluginRuntime.PluginConsentActUnitOffError('sample', 'Household'),
+        status: Http.Conflict,
+        code: 'PLUGIN_CONSENT_ACT_UNIT_OFF',
+        key: 'consent_act_unit_off',
+        fields: { slug: 'sample', scopeType: 'Household' },
+      },
+    ])('renders $code with its status and fields (#1150)', ({ exception, status, code, key, fields }) => {
+      filter.catch(exception, host);
+
+      expect(rendered().getStatus()).toBe(status);
+      expect(body()).toEqual(expect.objectContaining({ code, message: `t:errors.plugin.${key}`, ...fields }));
     });
   });
 

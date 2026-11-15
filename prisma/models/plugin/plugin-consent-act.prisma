@@ -1,0 +1,56 @@
+/// One consent act (#1150): the record of a person deciding, in one step,
+/// what a plugin may do for a consent unit, and of exactly what they were
+/// shown when they decided. Every PluginGrant row a decision writes points
+/// back here through `actId`.
+///
+/// Append-only ON PURPOSE: the only statement any code issues against this
+/// table is `create`. An act is evidence of what somebody agreed to; editing
+/// or deleting it would rewrite that evidence.
+///
+/// No relations ON PURPOSE: rows must survive plugin uninstall and principal
+/// deletion, hence the plain-String ids and the denormalized pluginSlug
+/// (PluginLifecycleEvent and AuditLog precedent).
+model PluginConsentAct {
+  id String @id @default(cuid(2))
+
+  /// Plugin row id at decision time — NOT an FK; survives uninstall.
+  pluginId String @map("plugin_id")
+
+  /// Denormalized slug so the record stays readable after uninstall.
+  pluginSlug String @map("plugin_slug")
+
+  scopeType PluginGrantScope @map("scope_type")
+
+  /// Consent-unit id: Household.id or User.id per scopeType; the
+  /// EMPTY-STRING SENTINEL for Server scope, as on PluginGrant. The same
+  /// CHECK constraint as there, `(scope_type <> 'Server') => (scope_id <> '')`,
+  /// is hand-authored in the migration SQL, so an act that names no unit is
+  /// rejected by the database: an append-only row could never be corrected.
+  scopeId String @default("") @map("scope_id")
+
+  kind PluginConsentActKind
+
+  /// Manifest the consent surface was rendered from: its version, and the
+  /// digest that pins the exact bytes behind that version.
+  manifestVersion String @map("manifest_version")
+  manifestSha256  String @map("manifest_sha256")
+
+  /// What the person was shown: the requested permissions and the copy and
+  /// risk each carried, captured at decision time rather than rebuilt later
+  /// from a catalog that may since have changed.
+  presentation Json
+
+  /// Actor who made the act. Plain String id, no FK — the record must
+  /// survive the person's deletion.
+  decidedById String? @map("decided_by_id")
+
+  decidedAt DateTime @map("decided_at") @db.Timestamptz(3)
+
+  correlationId String? @map("correlation_id")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  /// A unit's act history for one plugin, newest last.
+  @@index([pluginId, scopeType, scopeId, decidedAt])
+  @@map("plugin_consent_acts")
+}

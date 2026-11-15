@@ -4,7 +4,6 @@ import {
   Action,
   deriveReadCeilings,
   PERMISSION_CATALOG,
-  PluginGrantScope,
   PluginGrantStatus,
   ResourceType,
   ROLE_PERMISSION_CATALOG,
@@ -68,7 +67,7 @@ const NO_LONGER_REQUESTED = ['feedback:read'];
 const PRESENTATION = {
   plugin: { id: 'plugin-1', slug: 'demo-sink', enabled: true },
   manifestVersion: '1.3.0',
-  source: 'pending',
+  source: 'staged',
   checks: [],
 } as unknown as PluginConsentPresentation;
 const ACTIVE_PRESENTATION = {
@@ -429,7 +428,6 @@ describe('PluginsController (delegation)', () => {
 
       expect(grants.decide).toHaveBeenCalledWith({
         slug: 'demo-sink',
-        scopeType: PluginGrantScope.Server,
         permissionSlug: 'feedback:read',
         status: PluginGrantStatus.Granted,
         deciderId: MOCK_ACTING_USER_ID,

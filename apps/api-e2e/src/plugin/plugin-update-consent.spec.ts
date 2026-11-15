@@ -169,7 +169,6 @@ describe('plugin update consent (approve/reject/pending)', () => {
         scopeType: PluginGrantScope.Server,
         scopeId: '',
         permissionSlug: 'read:safe_http_policy',
-        manifestVersion: plugin.version,
         decidedAt: new Date(),
         decidedRiskLevel: RiskLevel.Medium,
         ...overrides,
@@ -243,14 +242,12 @@ describe('plugin update consent (approve/reject/pending)', () => {
             scopeType: PluginGrantScope.Server,
             status: PluginGrantStatus.Granted,
             decidedRiskLevel: RiskLevel.Low,
-            manifestVersion: '1.3.0',
           }),
           expect.objectContaining({
             permissionSlug: 'read:safe_http_policy',
             scopeType: PluginGrantScope.Server,
             status: PluginGrantStatus.Granted,
             decidedRiskLevel: RiskLevel.Medium,
-            manifestVersion: '1.3.0',
           }),
         ]),
       );
@@ -327,7 +324,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
       expect(row).toMatchObject({ enabled: true, dormantReason: PluginUnitDormantReason.NeedsConfiguration });
     });
 
-    it('re-stamps a risk-escalated server grant at today’s risk and the new version', async () => {
+    it('re-stamps a risk-escalated server grant at today’s risk', async () => {
       const admin = await actors.admin();
       const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK]);
       // Decided when the catalog said Low; the catalog says Medium today.
@@ -345,7 +342,6 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
       const reStamped = await db.client.pluginGrant.findUniqueOrThrow({ where: { id: stale.id } });
       expect(reStamped.decidedRiskLevel).toBe(RiskLevel.Medium);
-      expect(reStamped.manifestVersion).toBe('1.3.0');
       expect(reStamped.decidedById).toBe(admin.user.id);
     });
 
@@ -719,7 +715,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
       // The plugin envelope rides inside the presentation — one wire name
       // for one fact.
       expect(presentation.plugin).toEqual({ id: plugin.id, slug: plugin.slug, enabled: true });
-      expect(presentation.source).toBe('pending');
+      expect(presentation.source).toBe('staged');
       expect(presentation.manifestVersion).toBe('1.3.0');
       expect(presentation.unit).toEqual({ scopeType: 'Server' });
       // The default locale resolves without fallback — the provenance the

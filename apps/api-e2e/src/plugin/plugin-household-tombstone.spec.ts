@@ -7,6 +7,16 @@ import type { Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import {
+  readConsentSurface,
+  reviewBody,
+  sendReview,
+  sendSwitchOn,
+  sendToggle,
+  switchOnBody,
+  toggleBody,
+  type ConsentSurface,
+} from './consent-act-fixtures';
 import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
 import { householdPluginKey } from './plugin-api-key';
 import { pluginRowData } from './plugin-row-fixtures';
@@ -16,8 +26,9 @@ import { pluginRowData } from './plugin-row-fixtures';
  * in front of its transaction, racing a soft-delete that commits first.
  *
  * The admin check reads membership without a lock, so a delete committing
- * between it and the write used to leave an enablement row, or a consent
- * decision, on a household the API treats as gone. Each write now opens its
+ * between it and the write used to leave a unit enablement, or a consent
+ * decision, on a household the API treats as gone. Since #1150 both are
+ * written by a consent act, so the writes here are the three acts. Each write now opens its
  * transaction with the household's share lock, which is what these cases drive.
  *
  * The barrier holds a real soft-delete open. Every read in front of the lock is
@@ -85,53 +96,97 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
     readonly householdId: string;
     readonly owner: SessionActor;
     readonly plugin: Plugin;
+    /** The household's consent surface, read while the household was live; every act body is built from it (#1150). */
+    readonly surface: ConsentSurface;
   }
 
-  const arrange = async (): Promise<Arrangement> => {
+  /**
+   * A live household and plugin. `switchedOn` arranges the household's unit
+   * enablement switched on, on the rows, so that a toggle or a review would
+   * succeed there if the household were not deleted under it.
+   */
+  const arrange = async (switchedOn: boolean): Promise<Arrangement> => {
     const owner = await actors.user();
     const { household } = await actors.householdWithMembers({ owner, name: 'Deleted while a plugin write waits' });
+    const plugin = await arrangePlugin();
+    const surface = await readConsentSurface(baseUrl, owner, { householdId: household.id }, plugin.slug);
 
-    return { householdId: household.id, owner, plugin: await arrangePlugin() };
+    if (switchedOn) {
+      await db.client.householdPlugin.create({
+        data: { householdId: household.id, pluginId: plugin.id, enabled: true },
+      });
+    }
+
+    return { householdId: household.id, owner, plugin, surface };
+  };
+
+  /** What a toggle or review would write for the household: an act or a consent decision. */
+  const actWrites = async ({ householdId, plugin }: Arrangement): Promise<number> => {
+    const scope = { pluginId: plugin.id, scopeType: PluginGrantScope.Household, scopeId: householdId };
+
+    return (
+      (await db.client.pluginConsentAct.count({ where: scope })) + (await db.client.pluginGrant.count({ where: scope }))
+    );
   };
 
   /**
    * Each write, sent on behalf of the household's owner, who would succeed on a
-   * live household. That is what makes the refusal mean the lock refused it.
-   * `code` is the refusal the owner's session gets; `hiddenCode` is the one an
-   * actor that cannot tell households apart gets instead.
+   * live household: the toggle and the review find the unit switched on. That
+   * is what makes the refusal mean the lock refused it. `code` is the refusal
+   * the owner's session gets; `hiddenCode` is the one an actor that cannot
+   * tell households apart gets instead. The three consent acts (#1150) open
+   * their transaction with the same household share lock.
    */
   const WRITES: readonly {
     readonly name: string;
     readonly code: string;
     readonly hiddenCode: string;
+    /** Whether the household's unit enablement is arranged switched on first. */
+    readonly switchedOn: boolean;
     readonly send: (a: Arrangement, caller: Caller) => request.Test;
     readonly written: (a: Arrangement) => Promise<number>;
   }[] = [
     {
-      name: 'enable',
+      name: 'switch-on',
       code: 'PLUGIN_UNIT_HOUSEHOLD_NOT_FOUND',
       hiddenCode: 'PLUGIN_UNIT_AUTHORITY',
-      send: ({ householdId, plugin }, caller) =>
-        request(baseUrl)
-          .post(`/api/households/${householdId}/plugins/${plugin.slug}/enable`)
-          .set(caller.headers)
-          .send({}),
-      written: ({ householdId, plugin }) =>
-        db.client.householdPlugin.count({ where: { householdId, pluginId: plugin.id } }),
+      switchedOn: false,
+      send: ({ householdId, plugin, surface }, caller) =>
+        sendSwitchOn(baseUrl, caller, { householdId }, plugin.slug, switchOnBody(surface)),
+      // An act, a consent decision, or the unit enablement a switch-on creates.
+      written: async (a) =>
+        (await actWrites(a)) +
+        (await db.client.householdPlugin.count({ where: { householdId: a.householdId, pluginId: a.plugin.id } })),
     },
     {
-      name: 'consent decision',
-      code: 'PLUGIN_GRANT_HOUSEHOLD_NOT_FOUND',
-      hiddenCode: 'PLUGIN_GRANT_AUTHORITY',
-      send: ({ householdId, plugin }, caller) =>
-        request(baseUrl)
-          .post(`/api/households/${householdId}/plugins/${plugin.slug}/grants`)
-          .set(caller.headers)
-          .send({ permissionSlug: HOUSEHOLD_CHECK.slug, status: PluginGrantStatus.Granted }),
-      written: ({ householdId, plugin }) =>
-        db.client.pluginGrant.count({
-          where: { pluginId: plugin.id, scopeType: PluginGrantScope.Household, scopeId: householdId },
-        }),
+      name: 'toggle',
+      code: 'PLUGIN_UNIT_HOUSEHOLD_NOT_FOUND',
+      hiddenCode: 'PLUGIN_UNIT_AUTHORITY',
+      switchedOn: true,
+      send: ({ householdId, plugin, surface }, caller) =>
+        sendToggle(
+          baseUrl,
+          caller,
+          { householdId },
+          plugin.slug,
+          toggleBody(surface, HOUSEHOLD_CHECK.slug, PluginGrantStatus.Granted),
+        ),
+      written: actWrites,
+    },
+    {
+      name: 'review',
+      code: 'PLUGIN_UNIT_HOUSEHOLD_NOT_FOUND',
+      hiddenCode: 'PLUGIN_UNIT_AUTHORITY',
+      switchedOn: true,
+      send: ({ householdId, plugin, surface }, caller) =>
+        sendReview(
+          baseUrl,
+          caller,
+          { householdId },
+          plugin.slug,
+          reviewBody(surface, { [HOUSEHOLD_CHECK.slug]: PluginGrantStatus.Granted }),
+        ),
+      written: actWrites,
     },
   ];
 
@@ -201,7 +256,7 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
     });
 
   it.each(WRITES)('answers 404 for a $name that queued behind the soft-delete', async (write) => {
-    const arrangement = await arrange();
+    const arrangement = await arrange(write.switchedOn);
 
     const response = await raceTheDelete(arrangement, write.name, () => write.send(arrangement, arrangement.owner));
 
@@ -220,7 +275,7 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
   it.each(WRITES)(
     "answers 403 to the owner's API key with no household read, for a $name that queued behind the soft-delete",
     async (write) => {
-      const arrangement = await arrange();
+      const arrangement = await arrange(write.switchedOn);
       const key = await householdPluginKey(baseUrl, db.client, arrangement.owner);
 
       const response = await raceTheDelete(arrangement, write.name, () => write.send(arrangement, key));

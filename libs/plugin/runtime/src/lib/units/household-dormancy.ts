@@ -2,6 +2,7 @@ import { PluginScope, PluginUnitDormantReason, type HouseholdPlugin, type Prisma
 import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
+import { householdDormancySnapshot } from '../events/plugin-event-snapshots';
 import { HouseholdPluginUnitDormantEvent, HouseholdPluginUnitRevivedEvent } from '../events/plugin.events';
 import { MANIFEST_SCOPE_TO_PRISMA } from '../install/manifest-enum.maps';
 
@@ -38,17 +39,19 @@ export interface HouseholdDormancyTransition {
  * request-shaped unit writer takes (D-CO, extending the exception
  * `unit-scope-lock.ts` documents). Per-row locks here would acquire N advisory
  * keys AFTER the plugin row, against the total order
- * plugin row → grant row → advisory → unit row, closing the cycle that file
+ * plugin row → advisory → grant row → unit row, closing the cycle that file
  * warns about. They are also unnecessary: both callers claim the plugin row
  * exclusively before reaching this, and every household unit writer reads that
- * row `FOR SHARE` before touching a unit row — so a concurrent enable either
- * committed before the claim (and is in the rows read here) or blocks until the
- * caller's transaction commits. `decide()` joined that discipline in #398 — it
- * claims the plugin row `FOR SHARE` as the first statement of its transaction —
- * and could not invalidate this read even before it did: it cannot create or
- * re-scope a household row. Its claim also compares the plugin manifest it
- * judged against, so it refuses rather than writes after an activation moved
- * it (#361).
+ * row `FOR SHARE` before touching a unit enablement — so a concurrent
+ * switch-on, a consent act (#1150), either committed before the claim (and is
+ * in the rows read here) or blocks until the caller's transaction commits.
+ * `decide()` joined that discipline in #398 — it claims the plugin row
+ * `FOR SHARE` as the first statement of its transaction — and cannot
+ * invalidate this read: it
+ * writes server-scope decisions only (#1150) and never creates or re-scopes a
+ * household row. Its claim also compares the plugin manifest it judged
+ * against, so it refuses rather than writes after an activation moved it
+ * (#361).
  */
 export async function reconcileHouseholdDormancy(args: {
   readonly tx: Prisma.TransactionClient;
@@ -143,8 +146,8 @@ export function emitHouseholdDormancy(
   initiatedAt: Date,
 ): void {
   for (const transition of transitions) {
-    const before = snapshot(transition.before);
-    const after = snapshot(transition.after);
+    const before = householdDormancySnapshot(transition.before);
+    const after = householdDormancySnapshot(transition.after);
 
     if (transition.kind === 'dormant') {
       emitter.emit(
@@ -159,13 +162,6 @@ export function emitHouseholdDormancy(
       new HouseholdPluginUnitRevivedEvent(before, after, transition.reason, manifestVersion, initiatedAt),
     );
   }
-}
-
-/** The dormancy events' snapshot: the switch fields plus the reason, so a diff shows what moved and what deliberately did not. */
-function snapshot(unit: HouseholdPlugin) {
-  const { id, householdId, pluginId, enabled, dormantReason } = unit;
-
-  return { id, householdId, pluginId, enabled, dormantReason };
 }
 
 /**

@@ -1,6 +1,7 @@
 import { assertNeverPluginUnit, type PluginUnit } from '@bge/actor-context';
 import type { RiskLevel } from '@bge/database';
 import type { PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest';
+import type { ConsentUngrantableCause } from '../grants/consent-grantability';
 
 /**
  * Consent-classification vocabulary shared by the classifier, feature-state
@@ -40,6 +41,14 @@ export const unitConsumesConsentScope = (consentScope: PluginConsentScopeValue, 
   consentScope === 'server' || unitOwnsConsentScope(consentScope, unit);
 
 /**
+ * Which manifest a consent surface or a consent act reads: the installed
+ * (`active`) one, or the staged update waiting for the server admin. One
+ * spelling everywhere, including the wire and the act's stored record
+ * (#1150).
+ */
+export type ConsentManifestSource = 'active' | 'staged';
+
+/**
  * A consent decision as the unit experiences it: `denied` is a durable
  * refusal at the deciding scope; `pending` is a decision nobody has made —
  * which includes a `Granted` row that no longer confers (stale risk,
@@ -54,6 +63,11 @@ export interface ClassifiedConsentCheck {
   readonly decidedRiskLevel: RiskLevel | null;
   /** A `Granted` row exists but its `decidedRiskLevel` no longer covers today's risk (#59): reported pending, re-consent re-stamps. */
   readonly staleRisk: boolean;
+  /**
+   * Why this requested permission can never be granted at its deciding scope;
+   * `null` when it can. Reported whether or not a decision exists (#1150).
+   */
+  readonly ungrantable: ConsentUngrantableCause | null;
 }
 
 export interface ConsentCheckClassification {

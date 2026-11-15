@@ -1,5 +1,5 @@
 import { AuditContextService, type HouseholdPluginUnit } from '@bge/actor-context';
-import { Action, DatabaseService, PluginGrantScope, ResourceType } from '@bge/database';
+import { Action, DatabaseService, ResourceType } from '@bge/database';
 import {
   alreadyTellsHouseholdsApart,
   householdExists,
@@ -9,11 +9,13 @@ import {
 import { t } from '@bge/i18n';
 import { AbilityService, CheckPolicies, PoliciesGuard, ScopeComposer } from '@bge/permissions';
 import {
+  PluginConsentActService,
   PluginConsentPresentationService,
   PluginFeatureStateService,
-  PluginGrantService,
   PluginInventoryService,
   PluginUnitLifecycleService,
+  type ConsentActAnswer,
+  type ConsentActInput,
 } from '@bge/plugin';
 import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
 import {
@@ -34,9 +36,14 @@ import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import {
-  DecidePluginGrantDto,
-  EnableHouseholdPluginDto,
+  consentActResponse,
+  ConsentActResponseDto,
+  ConsentSurfaceQueryDto,
+  ConsentSurfaceResponseDto,
   PluginHouseholdInventoryEntryDto,
+  ReviewConsentDto,
+  SwitchOnHouseholdPluginDto,
+  ToggleConsentDto,
   UpdatePluginConfigDto,
 } from './dto';
 import { PluginExceptionFilter } from './filters/plugin-exception.filter';
@@ -45,7 +52,7 @@ const PaginatedHouseholdPluginsResponse = PaginatedResponseDto(PluginHouseholdIn
 
 /**
  * Household-scope plugin consent (#59 Phase C4, #322): the household
- * admin's grant decisions and the consent surface they decide from. #323
+ * admin's consent acts (#1150) and the consent surface they answer. #323
  * adds the unit enable/disable/config endpoints to this class. Nested under
  * the household per D-AX; plugins stay slug-addressed.
  *
@@ -82,7 +89,7 @@ const PaginatedHouseholdPluginsResponse = PaginatedResponseDto(PluginHouseholdIn
 @Controller('households/:householdId/plugins')
 export class HouseholdPluginsController {
   constructor(
-    private readonly grants: PluginGrantService,
+    private readonly consentActs: PluginConsentActService,
     private readonly abilityService: AbilityService,
     private readonly presentation: PluginConsentPresentationService,
     private readonly units: PluginUnitLifecycleService,
@@ -136,118 +143,90 @@ export class HouseholdPluginsController {
   }
 
   @ApiOperation({
-    summary: 'Record a household-scope consent decision for one requested permission',
+    summary: "Present the consent surface for this household: the active manifest's, or a staged update's",
     description:
-      'Grant or durably deny a permission the active manifest requests at household consent scope, for this ' +
-      'household. Idempotent on exact re-statement (changed: false). A decision never creates or flips the unit ' +
-      'enablement: a household that has not switched the plugin on stays off (state off), and one that has keeps ' +
-      'running while a denial leaves a REQUIRED household check outstanding, with state review_pending until it ' +
-      'is granted.',
+      "The household's consent surface: every requested permission, with this household's " +
+      "decision state per permission — server-consented ones show the server's concrete state (one addressable " +
+      "decider), user-consented ones read 'per-unit' (every user decides for themself) — plus riskLevel, " +
+      'required, grantable, localized reason, and the localized features[] they group under. manifestSha256 names ' +
+      'the plugin artifact presented, and stagedUpdate names an update waiting for the server admin. With ' +
+      'manifest=staged it presents that update instead, so the household can pre-consent; stagedOnly then marks ' +
+      'what the active manifest does not request.',
   })
   @ApiParam({ name: 'householdId', type: String })
-  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
-  @ApiResponse({
-    status: Http.Forbidden,
-    description: 'Not an owner/admin of this household, or a categorically ungrantable permission',
-  })
-  @ApiResponse({ status: Http.NotFound, description: 'Household not found or deleted, or plugin not installed' })
-  @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
-  @ApiResponse({
-    status: Http.Conflict,
-    description:
-      'The plugin manifest was replaced while the decision was in flight, so it was not recorded; reload the ' +
-      "plugin's permissions and decide again",
-  })
-  @ApiResponse({
-    status: Http.UnprocessableEntity,
-    description: 'Not requested by the manifest, or decided at the wrong consent scope',
-  })
-  @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.HouseholdPlugin))
-  @HttpCode(Http.Ok)
-  @Post(':slug/grants')
-  decideGrant(
-    @Param('householdId') householdId: string,
-    @Param('slug') slug: string,
-    @Body() dto: DecidePluginGrantDto,
-  ) {
-    this.abilityService.assertCurrentActorCan(Action.manage, ResourceType.HouseholdPlugin, { householdId });
-
-    return from(
-      this.grants.decide({
-        slug,
-        scopeType: PluginGrantScope.Household,
-        scopeId: householdId,
-        permissionSlug: dto.permissionSlug,
-        status: dto.status,
-        deciderId: this.abilityService.getActingUserId(),
-      }),
-    ).pipe(
-      map(({ grant, changed }) => ({
-        message: t('success.plugin.grant_decided', { slug, permissionSlug: dto.permissionSlug }),
-        grant,
-        changed,
-      })),
-    );
-  }
-
-  @ApiOperation({
-    summary: "Present the active manifest's consent surface for this household",
-    description:
-      "The household admin's consent screen: every check the active manifest requests, with this household's " +
-      "decision state per check — server-consented checks show the server's concrete state (one addressable " +
-      "decider), user-consented checks read 'per-unit' (every user decides for themself) — plus riskLevel, " +
-      'required, localized reason, and the localized features[] the checks group under.',
-  })
-  @ApiParam({ name: 'householdId', type: String })
+  @ApiResponse({ status: Http.Ok, type: ConsentSurfaceResponseDto })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not a member with read access to this household' })
-  @ApiResponse({ status: Http.NotFound, description: 'Household not found or deleted, or plugin not installed' })
+  @ApiResponse({
+    status: Http.NotFound,
+    description: 'Household not found or deleted, plugin not installed, or (manifest=staged) no update waiting',
+  })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.HouseholdPlugin))
-  // Must stay out of the response cache: read right before a decide POST,
-  // which must be visible on the re-read.
+  // Must stay out of the response cache: read right before a consent act,
+  // whose writes must be visible on the re-read (#1150).
   @Get(':slug/consent')
-  consentPresentation(@Param('householdId') householdId: string, @Param('slug') slug: string) {
+  consentPresentation(
+    @Param('householdId') householdId: string,
+    @Param('slug') slug: string,
+    @Query() query: ConsentSurfaceQueryDto = {},
+  ) {
     this.abilityService.assertCurrentActorCan(Action.read, ResourceType.HouseholdPlugin, { householdId });
 
     const unit: HouseholdPluginUnit = { scopeType: 'Household', householdId };
+    const locale = this.auditContext.getLocale() ?? undefined;
 
     return from(
       this.assertLiveForUnguardedActor(householdId).then(() =>
-        this.presentation.presentForUnitBySlug(slug, unit, this.auditContext.getLocale() ?? undefined),
+        // The staged consent surface lets the household pre-consent (#1150).
+        query.manifest === 'staged'
+          ? this.presentation.presentStagedForUnitBySlug(slug, unit, locale)
+          : this.presentation.presentForUnitBySlug(slug, unit, locale),
       ),
     ).pipe(map((presentation) => ({ presentation })));
   }
 
-  // ─── Unit enablement (#323): the admin's switch and config ────────────────
+  // ─── Consent acts (#1150) and unit enablement (#323) ──────────────────────
+  // Switching on, toggling and reviewing are each one recorded consent act.
+  // Each answers 200 whether or not it changed anything (changed: false and
+  // act: null when it did not), so repeating one is safe.
 
   @ApiOperation({
-    summary: 'Enable the plugin for this household',
+    summary: 'Switch the plugin on for this household, answering its requested permissions',
     description:
-      "The household admin's own switch (enabled), layered under the server-level one — consent standing is " +
-      'worked out on every read and this endpoint never writes it, so a required check still outstanding leaves ' +
-      'the unit running with state review_pending. ' +
-      'First enable creates the unit enablement; optional config is validated against the manifest config.schema ' +
-      'and written atomically with it. When the manifest requires household config, enabling without config ' +
-      'demands a valid retained document (409 with the violations otherwise). A unit enablement created while a required ' +
-      'household permission carries a durable denial starts in state review_pending and clears when the ' +
-      'household grants the permission.',
+      'One consent act: the household admin answers the requested permissions this household decides, as the ' +
+      "active manifest's consent surface (GET …/consent) showed them, and the plugin is switched on here. A " +
+      'switch-on names the active manifest only; to pre-consent to a staged update, send a review ' +
+      '(POST …/consent/review) against the manifest=staged consent surface. Every required permission must be Granted; optional ones may be ' +
+      'answered either way or left for later. manifestSha256 names the consent surface the answers were read ' +
+      "from. Optional config is validated against the manifest's config.schema and written with the switch-on. " +
+      'Switching on again without config, when nothing would change, answers changed: false; a switch-on that ' +
+      'sends config always records a consent act and writes the config.',
   })
   @ApiParam({ name: 'householdId', type: String })
+  @ApiResponse({ status: Http.Ok, type: ConsentActResponseDto })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
-  @ApiResponse({ status: Http.Forbidden, description: 'Not an owner/admin of this household' })
-  @ApiResponse({ status: Http.NotFound, description: 'Household not found or deleted, or plugin not installed' })
-  @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
+  @ApiResponse({ status: Http.Forbidden, description: 'You are not an owner or admin of this household' })
+  @ApiResponse({
+    status: Http.NotFound,
+    description: 'The household does not exist or was deleted, or the plugin is not installed',
+  })
+  @ApiResponse({ status: Http.Gone, description: 'The plugin was uninstalled' })
   @ApiResponse({
     status: Http.Conflict,
     description:
-      'Required household config neither supplied nor validly retained (issues[] names violations), or the ' +
-      "plugin's active manifest was replaced mid-request — an activation or a reinstall, not necessarily at a new " +
-      'version — so the config and denial gates were judged against the old one',
+      'PLUGIN_CONSENT_ACT_STALE: the plugin or a permission risk changed since the consent surface was read; ' +
+      'read it again and answer again. PLUGIN_CONSENT_ACT_UNGRANTABLE: a required permission cannot be granted ' +
+      'here, which only a server admin can fix. PLUGIN_UNIT_CONFIG_REQUIRED: the plugin needs household ' +
+      'configuration and none valid was sent or kept (issues[] names what to fix).',
   })
   @ApiResponse({
     status: Http.UnprocessableEntity,
-    description: 'Supplied config violates the declared schema, or the plugin is server-scoped',
+    description:
+      'PLUGIN_CONSENT_ACT_REQUIRED_SET: a required permission was left out (missingSlugs) or Denied ' +
+      '(refusedSlugs). PLUGIN_CONSENT_ACT_ANSWER: an answer does not match what the plugin asks for (rule and ' +
+      "permissionSlugs say which). PLUGIN_CONFIG_VALIDATION: config does not match the plugin's schema. " +
+      'PLUGIN_UNIT_SCOPE: the plugin cannot be switched on per household. Also a body that fails validation.',
   })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.HouseholdPlugin))
   @HttpCode(Http.Ok)
@@ -255,18 +234,104 @@ export class HouseholdPluginsController {
   enable(
     @Param('householdId') householdId: string,
     @Param('slug') slug: string,
-    @Body() dto: EnableHouseholdPluginDto,
+    @Body() dto: SwitchOnHouseholdPluginDto,
   ) {
     this.abilityService.assertCurrentActorCan(Action.manage, ResourceType.HouseholdPlugin, { householdId });
 
     return from(
-      this.units.enableHousehold({
-        slug,
-        householdId,
-        actorId: this.abilityService.getActingUserId(),
+      this.consentActs.switchOn({
+        ...this.actInput(householdId, slug, dto.manifestSha256, dto.answers),
         config: dto.config,
       }),
-    ).pipe(map((unit) => ({ message: t('success.plugin.enabled', { slug }), unit })));
+    ).pipe(map((result) => consentActResponse(t('success.plugin.enabled', { slug }), result)));
+  }
+
+  @ApiOperation({
+    summary: 'Grant or refuse one optional requested permission for this household',
+    description:
+      'One consent act that changes the answer to one optional requested permission while the plugin is ' +
+      'switched on here. A required permission cannot be toggled: refusing one means switching the plugin off, ' +
+      'or answering it in a review. Repeating the current answer answers changed: false.',
+  })
+  @ApiParam({ name: 'householdId', type: String })
+  @ApiResponse({ status: Http.Ok, type: ConsentActResponseDto })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'You are not an owner or admin of this household' })
+  @ApiResponse({
+    status: Http.NotFound,
+    description: 'The household does not exist or was deleted, or the plugin is not installed',
+  })
+  @ApiResponse({ status: Http.Gone, description: 'The plugin was uninstalled' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description:
+      'PLUGIN_CONSENT_ACT_UNIT_OFF: the plugin is switched off for this household; switch it on first. ' +
+      'PLUGIN_CONSENT_ACT_STALE: the plugin or the permission risk changed since the consent surface was read. ' +
+      'PLUGIN_CONSENT_ACT_UNGRANTABLE: the permission cannot be granted here.',
+  })
+  @ApiResponse({
+    status: Http.UnprocessableEntity,
+    description:
+      'PLUGIN_CONSENT_ACT_ANSWER: the permission is not requested, is required, or is not decided by this ' +
+      'household (rule says which). Also a body that fails validation.',
+  })
+  @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.HouseholdPlugin))
+  @HttpCode(Http.Ok)
+  @Post(':slug/consent/toggle')
+  toggleConsent(@Param('householdId') householdId: string, @Param('slug') slug: string, @Body() dto: ToggleConsentDto) {
+    this.abilityService.assertCurrentActorCan(Action.manage, ResourceType.HouseholdPlugin, { householdId });
+
+    return from(this.consentActs.toggle(this.actInput(householdId, slug, dto.manifestSha256, [dto.answer]))).pipe(
+      map((result) => consentActResponse(t('success.plugin.consent_recorded', { slug }), result)),
+    );
+  }
+
+  @ApiOperation({
+    summary: 'Answer what the plugin, or its staged update, still asks this household',
+    description:
+      'One consent act that answers the requested permissions the active manifest leaves outstanding, or, ' +
+      'with the sha of a staged update, those the update adds (pre-consent). Refusing a required permission ' +
+      'switches the plugin off for this household in the same consent act, and the response says so ' +
+      '(switchedOff: true). Sending that review again changes nothing and answers the same way.',
+  })
+  @ApiParam({ name: 'householdId', type: String })
+  @ApiResponse({ status: Http.Ok, type: ConsentActResponseDto })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'You are not an owner or admin of this household' })
+  @ApiResponse({
+    status: Http.NotFound,
+    description: 'The household does not exist or was deleted, or the plugin is not installed',
+  })
+  @ApiResponse({ status: Http.Gone, description: 'The plugin was uninstalled' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description:
+      'PLUGIN_CONSENT_ACT_UNIT_OFF: the plugin is switched off for this household. PLUGIN_CONSENT_ACT_STALE: ' +
+      'the plugin, its staged update or a permission risk changed since the consent surface was read. ' +
+      'PLUGIN_CONSENT_ACT_UNGRANTABLE: a permission answered Granted cannot be granted here.',
+  })
+  @ApiResponse({
+    status: Http.UnprocessableEntity,
+    description:
+      'PLUGIN_CONSENT_ACT_ANSWER: an answer does not match what is outstanding (rule and permissionSlugs say ' +
+      'which). Also a body that fails validation, such as an empty answers list.',
+  })
+  @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.HouseholdPlugin))
+  @HttpCode(Http.Ok)
+  @Post(':slug/consent/review')
+  reviewConsent(@Param('householdId') householdId: string, @Param('slug') slug: string, @Body() dto: ReviewConsentDto) {
+    this.abilityService.assertCurrentActorCan(Action.manage, ResourceType.HouseholdPlugin, { householdId });
+
+    return from(this.consentActs.review(this.actInput(householdId, slug, dto.manifestSha256, dto.answers))).pipe(
+      map((result) =>
+        consentActResponse(
+          result.switchedOff
+            ? t('success.plugin.consent_refused_switched_off', { slug })
+            : t('success.plugin.consent_recorded', { slug }),
+          result,
+        ),
+      ),
+    );
   }
 
   @ApiOperation({
@@ -401,6 +466,29 @@ export class HouseholdPluginsController {
     ) {
       throw new ForbiddenException(t('common.forbidden.action'));
     }
+  }
+
+  /**
+   * What every household consent act hands the service (#1150): the route
+   * household as the unit, the acting user, and the locale the consent
+   * surface was shown in, as the consent read passes it. The service verifies
+   * the actor's authority again before its transaction; inside it, only the
+   * household's liveness is locked.
+   */
+  private actInput(
+    householdId: string,
+    slug: string,
+    manifestSha256: string,
+    answers: readonly ConsentActAnswer[],
+  ): ConsentActInput {
+    return {
+      slug,
+      unit: { scopeType: 'Household', householdId },
+      actorId: this.abilityService.getActingUserId(),
+      manifestSha256,
+      answers,
+      locale: this.auditContext.getLocale() ?? undefined,
+    };
   }
 
   /** The household's plugins, once it is known to be live. */

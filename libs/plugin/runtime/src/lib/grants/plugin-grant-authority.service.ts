@@ -35,8 +35,8 @@ export type HouseholdAdminStanding = 'admin' | 'deleted' | 'none';
  * database directly, and the preference is to keep it that way (#409).
  *
  * User-scope decisions need no predicate HERE (#225 uniform enablement):
- * the authority question reduces to conditions `PluginGrantService.decide()`
- * already enforces — the decider is the subject, the plugin is not
+ * the authority question reduces to conditions a user's consent act
+ * (`PluginConsentActService`, #1150) already enforces — the decider is the subject, the plugin is not
  * tombstoned, and the active manifest requests the permission at user
  * scope. Household membership is irrelevant to both the decision and its
  * validity; the former `hasQualifyingHouseholdForPlugin` anchor was the

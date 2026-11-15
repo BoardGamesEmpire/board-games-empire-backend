@@ -198,6 +198,17 @@ export class PluginConfigUpdatedEvent extends MutationEvent<Plugin> {
   }
 }
 
+/**
+ * The consent act behind a unit event (#1150): the manifest version it was
+ * decided against and the act's id, so the lifecycle row of every switch,
+ * revival or config write an act causes names the act. Null when no act caused
+ * the change: a switch-off or a config write through the unit lifecycle.
+ */
+export interface PluginConsentActEventContext {
+  readonly manifestVersion: string;
+  readonly actId: string;
+}
+
 type HouseholdPluginConfigSnapshot = Readonly<Pick<HouseholdPlugin, 'id' | 'householdId' | 'pluginId' | 'config'>>;
 
 /** Per-household plugin configuration changed (`HouseholdPlugin.config`). Same routing key as the server-scope event. */
@@ -210,7 +221,13 @@ export class HouseholdPluginConfigUpdatedEvent extends MutationEvent<HouseholdPl
   readonly subject = ResourceType.HouseholdPlugin;
   readonly subjectId: string;
 
-  constructor(before: HouseholdPluginConfigSnapshot, after: HouseholdPluginConfigSnapshot, initiatedAt: Date) {
+  constructor(
+    before: HouseholdPluginConfigSnapshot,
+    after: HouseholdPluginConfigSnapshot,
+    initiatedAt: Date,
+    /** The consent act that made the change; null for one no act caused. */
+    public readonly act: PluginConsentActEventContext | null = null,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
@@ -234,7 +251,13 @@ export class HouseholdPluginEnabledEvent extends MutationEvent<HouseholdPlugin> 
   readonly subject = ResourceType.HouseholdPlugin;
   readonly subjectId: string;
 
-  constructor(before: HouseholdPluginSwitchSnapshot | null, after: HouseholdPluginSwitchSnapshot, initiatedAt: Date) {
+  constructor(
+    before: HouseholdPluginSwitchSnapshot | null,
+    after: HouseholdPluginSwitchSnapshot,
+    initiatedAt: Date,
+    /** The consent act that made the change; null for one no act caused. */
+    public readonly act: PluginConsentActEventContext | null = null,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
@@ -250,7 +273,13 @@ export class HouseholdPluginDisabledEvent extends MutationEvent<HouseholdPlugin>
   readonly subject = ResourceType.HouseholdPlugin;
   readonly subjectId: string;
 
-  constructor(before: HouseholdPluginSwitchSnapshot, after: HouseholdPluginSwitchSnapshot, initiatedAt: Date) {
+  constructor(
+    before: HouseholdPluginSwitchSnapshot,
+    after: HouseholdPluginSwitchSnapshot,
+    initiatedAt: Date,
+    /** The consent act that made the change; null for one no act caused. */
+    public readonly act: PluginConsentActEventContext | null = null,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
@@ -259,21 +288,27 @@ export class HouseholdPluginDisabledEvent extends MutationEvent<HouseholdPlugin>
 type UserPluginSwitchSnapshot = Readonly<Pick<UserPlugin, 'id' | 'userId' | 'pluginId' | 'enabled'>>;
 
 /**
- * The user flipped their own unit's `enabled` switch ON (#323). Never
- * creation-shaped: `decide()` remains the only creator of `UserPlugin`
- * rows (#225), so this event always carries a real `before`. Shares the
- * `plugin.enabled` routing key; `subject` disambiguates.
+ * The user flipped their own unit's `enabled` switch ON (#323), or switched
+ * the plugin on for the first time with a consent act, creating the row
+ * (`before` is `null` exactly then; #1150). Shares the `plugin.enabled`
+ * routing key; `subject` disambiguates.
  */
 export class UserPluginEnabledEvent extends MutationEvent<UserPlugin> {
   static readonly eventName = PluginEvent.Enabled;
 
-  declare readonly before: UserPluginSwitchSnapshot;
+  declare readonly before: UserPluginSwitchSnapshot | null;
   declare readonly after: UserPluginSwitchSnapshot;
 
   readonly subject = ResourceType.UserPlugin;
   readonly subjectId: string;
 
-  constructor(before: UserPluginSwitchSnapshot, after: UserPluginSwitchSnapshot, initiatedAt: Date) {
+  constructor(
+    before: UserPluginSwitchSnapshot | null,
+    after: UserPluginSwitchSnapshot,
+    initiatedAt: Date,
+    /** The consent act that made the change; null for one no act caused. */
+    public readonly act: PluginConsentActEventContext | null = null,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
@@ -289,7 +324,13 @@ export class UserPluginDisabledEvent extends MutationEvent<UserPlugin> {
   readonly subject = ResourceType.UserPlugin;
   readonly subjectId: string;
 
-  constructor(before: UserPluginSwitchSnapshot, after: UserPluginSwitchSnapshot, initiatedAt: Date) {
+  constructor(
+    before: UserPluginSwitchSnapshot,
+    after: UserPluginSwitchSnapshot,
+    initiatedAt: Date,
+    /** The consent act that made the change; null for one no act caused. */
+    public readonly act: PluginConsentActEventContext | null = null,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
@@ -425,11 +466,20 @@ export class PluginLoadFailedEvent extends MutationEvent<Plugin> {
 }
 
 type PluginGrantSnapshot = Readonly<
-  Pick<
-    PluginGrant,
-    'id' | 'pluginId' | 'scopeType' | 'scopeId' | 'permissionSlug' | 'status' | 'manifestVersion' | 'decidedRiskLevel'
-  >
+  Pick<PluginGrant, 'id' | 'pluginId' | 'scopeType' | 'scopeId' | 'permissionSlug' | 'status' | 'decidedRiskLevel'>
 >;
+
+/**
+ * What a grant event carries beyond the row (#1150): the consent decision row
+ * no longer stores the manifest version, so the emitter states it, together
+ * with the consent act that wrote the decision.
+ */
+export interface PluginGrantEventContext {
+  /** Version of the manifest the decision was made against. */
+  readonly manifestVersion: string;
+  /** The consent act that wrote the decision; null for server-scope decisions until #1152. */
+  readonly actId: string | null;
+}
 
 /**
  * A consent unit decided `Granted` — create-shaped on first decision,
@@ -444,7 +494,12 @@ export class PluginGrantCreatedEvent extends MutationEvent<PluginGrant> {
   readonly subject = ResourceType.PluginGrant;
   readonly subjectId: string;
 
-  constructor(before: PluginGrantSnapshot | null, after: PluginGrantSnapshot, initiatedAt: Date) {
+  constructor(
+    before: PluginGrantSnapshot | null,
+    after: PluginGrantSnapshot,
+    public readonly context: PluginGrantEventContext,
+    initiatedAt: Date,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
@@ -460,22 +515,28 @@ export class PluginGrantRejectedEvent extends MutationEvent<PluginGrant> {
   readonly subject = ResourceType.PluginGrant;
   readonly subjectId: string;
 
-  constructor(before: PluginGrantSnapshot | null, after: PluginGrantSnapshot, initiatedAt: Date) {
+  constructor(
+    before: PluginGrantSnapshot | null,
+    after: PluginGrantSnapshot,
+    public readonly context: PluginGrantEventContext,
+    initiatedAt: Date,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
 }
 
 /**
- * Why an authority-loss revocation fired (#211). Carried on the event
- * and persisted into the lifecycle row payload — the grant row itself is
- * DELETED (delete-to-pending), so this is the only durable record of why.
+ * Why a revocation fired. Carried on the event and persisted into the
+ * lifecycle row payload — the grant row itself is DELETED
+ * (delete-to-pending), so this is the only durable record of why.
+ *
+ * Every reason is a change to what the plugin requests: an update that was
+ * activated, or a staged one that was rejected. Losing authority revokes
+ * nothing: a consent decision belongs to the unit and survives the person
+ * who made it (#1150).
  */
 export type PluginGrantRevocationReason =
-  | 'membership-removed'
-  | 'role-demoted'
-  | 'user-deleted'
-  | 'household-deleted'
   /** The declaring plugin's update removed the permission from `declares[]` — the catalog diff deleted its grants. */
   | 'permission-removed'
   /** The plugin's update stopped requesting the permission, so every decision on it was deleted (#577). */
@@ -485,7 +546,13 @@ export type PluginGrantRevocationReason =
    * decision recorded at the OLD scope no longer authorizes anything — the
    * principal that made it does not own the permission any more.
    */
-  | 'consent-scope-changed';
+  | 'consent-scope-changed'
+  /**
+   * The staged update was rejected, so the pre-consents households and users
+   * gave to it were deleted with it: a later update that requests the same
+   * permission starts from no decision (#1150).
+   */
+  | 'staged-update-rejected';
 
 /**
  * A grant was revoked because the authority that justified it lapsed
@@ -505,6 +572,7 @@ export class PluginGrantRevokedEvent extends MutationEvent<PluginGrant> {
   constructor(
     before: PluginGrantSnapshot,
     public readonly reason: PluginGrantRevocationReason,
+    public readonly context: PluginGrantEventContext,
     initiatedAt: Date,
   ) {
     super(before, null, initiatedAt);
@@ -555,9 +623,11 @@ export class HouseholdPluginUnitDormantEvent extends MutationEvent<HouseholdPlug
  * household axis, so the row's surface exists once more and the retained
  * document conforms to the schema now in force (#369, D-CP).
  *
- * Symmetric with {@link HouseholdPluginUnitDormantEvent}. A revival is a side
- * effect of an admin activating a version, and no household consented to
- * anything.
+ * Symmetric with {@link HouseholdPluginUnitDormantEvent}. Most revivals are a
+ * side effect of an admin activating a version, and no household consented to
+ * anything. The one a household causes is a switch-on whose retained document
+ * now conforms, which lifts a configuration dormancy as a consent act and names
+ * it (#1150).
  */
 export class HouseholdPluginUnitRevivedEvent extends MutationEvent<HouseholdPlugin> {
   static readonly eventName = PluginEvent.UnitRevived;
@@ -573,9 +643,11 @@ export class HouseholdPluginUnitRevivedEvent extends MutationEvent<HouseholdPlug
     after: HouseholdPluginDormancySnapshot,
     /** The dormancy that was lifted — what the row is no longer. */
     public readonly clearedReason: PluginUnitDormantReason,
-    /** The manifest version whose activation revived the row. */
+    /** The manifest version whose activation revived the row, or the one a consent act was decided against. */
     public readonly manifestVersion: string,
     initiatedAt: Date,
+    /** The consent act that revived the row (#1150); null for a revival an activation caused. */
+    public readonly actId: string | null = null,
   ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;

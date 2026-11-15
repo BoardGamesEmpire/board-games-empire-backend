@@ -1,9 +1,6 @@
 import type { Plugin, PluginGrant, Prisma } from '@bge/database';
 import {
-  bindsConsentUnit,
-  CONSENT_UNIT_BINDING_REFUSAL,
   DatabaseService,
-  lockLiveHousehold,
   PluginGrantScope,
   PluginGrantStatus,
   retryOnDeadlock,
@@ -12,10 +9,10 @@ import {
 } from '@bge/database';
 import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import { parsePluginPermissionSlug } from '@boardgamesempire/plugin-manifest';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import type { PluginGrantRevocationReason } from '../events/plugin.events';
-import { PluginGrantCreatedEvent, PluginGrantRejectedEvent, PluginGrantRevokedEvent } from '../events/plugin.events';
+import { grantSnapshot } from '../events/plugin-event-snapshots';
+import { PluginGrantCreatedEvent, PluginGrantRejectedEvent } from '../events/plugin.events';
 import { bindManifest, classifyManifestMove, type ClaimedPluginRow } from '../manifest/manifest-move';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import type { PluginModuleOptions } from '../plugin-module.options';
@@ -25,30 +22,24 @@ import {
   PluginGrantAuthorityError,
   PluginGrantConsentScopeMismatchError,
   PluginGrantExclusionError,
-  PluginGrantHouseholdNotFoundError,
   PluginGrantManifestInvalidError,
   PluginGrantPluginChangedError,
   PluginGrantPluginNotFoundError,
   PluginGrantPluginTombstonedError,
   PluginGrantRequiredDenialError,
-  PluginGrantScopeIdError,
-  PluginGrantScopeNotRevocableError,
   PluginGrantUnknownPermissionError,
 } from './grant.errors';
 import { isPluginAdministrationSlug } from './plugin-admin-permissions';
 import { PluginGrantAuthorityService } from './plugin-grant-authority.service';
-import { lockUserUnitScope } from './unit-scope-lock';
 
+/** Server-scope consent decisions only, until #1152 replaces them with the operator's acts. */
 export interface PluginGrantDecisionInput {
-  /** The plugin's slug — the HTTP edge's addressing (D-AX/D-BO); the service resolves the row. */
+  /** The plugin's slug — the HTTP edge's addressing; the service resolves the row. */
   readonly slug: string;
-  readonly scopeType: PluginGrantScope;
-  /** Household.id / User.id for the matching scopeType; omit for Server. */
-  readonly scopeId?: string;
   /** CANONICAL slug: `plugin|<slug>|<bare>` for plugin-declared permissions, the core slug otherwise. */
   readonly permissionSlug: string;
   readonly status: PluginGrantStatus;
-  /** The consenting user — authority is verified, never assumed. */
+  /** The consenting server admin — authority is verified, never assumed. */
   readonly deciderId: string;
 }
 
@@ -58,20 +49,18 @@ export interface PluginGrantDecisionResult {
   readonly changed: boolean;
 }
 
-/** Authority-loss revocation input (#211): always unit-addressed, never Server-scope. */
-export interface PluginGrantRevocationInput {
-  readonly scopeType: Exclude<PluginGrantScope, typeof PluginGrantScope.Server>;
-  readonly scopeId: string;
-  readonly reason: PluginGrantRevocationReason;
-  /** Restrict to one plugin (e.g. household-plugin teardown); omit to revoke the unit's grants across all plugins. */
-  readonly pluginId?: string;
-}
-
 /**
- * The consent write path (#59 Phase C1). Owns every `PluginGrant` mutation:
- * per-unit decisions (grant/deny with grant-time authority verification),
- * the user's unit enablement a first Granted user-scope decision creates
- * (#225), and authority-loss revocation (delete-to-pending, #211).
+ * The server's consent decisions (#59 Phase C1): grant or deny one
+ * permission the active manifest requests at server consent scope, with
+ * grant-time authority verification. Household and user consent decisions,
+ * and the unit enablements a switch-on creates, are recorded by consent acts
+ * in `PluginConsentActService` (#1150); #1152 moves the server's decisions
+ * onto the operator's acts as well.
+ *
+ * Nothing here revokes consent when a member leaves, loses a role or is
+ * deleted: a consent decision belongs to the unit and survives the person
+ * who made it (#1150).
+ *
  * Reads for ability resolution deliberately live elsewhere —
  * `PermissionsService` queries `PluginGrant` directly, keeping the
  * permissions lib off this one.
@@ -83,8 +72,6 @@ export interface PluginGrantRevocationInput {
  */
 @Injectable()
 export class PluginGrantService {
-  private readonly logger = new Logger(PluginGrantService.name);
-
   constructor(
     private readonly db: DatabaseService,
     private readonly authority: PluginGrantAuthorityService,
@@ -93,25 +80,27 @@ export class PluginGrantService {
   ) {}
 
   /**
-   * Record a consent decision for one (plugin, unit, permission). Upsert
+   * Record a server consent decision for one (plugin, permission). Upsert
    * semantics on the unique quadruple: polarity flips update the row in
-   * place; an exact re-statement (same status, manifest version, and risk)
-   * is a no-op — no write, no event.
+   * place; an exact re-statement (same status and risk) is a no-op — no
+   * write, no event.
    *
-   * A decision writes one grant row and, for a first user grant, the user's
-   * unit enablement. What the unit still owes is read, never written: its
-   * consent standing is worked out from the grant rows whenever it is
-   * needed (#1149). A decision used to mirror that standing onto the unit
-   * row, suspending it on a required denial and lifting the suspension on
-   * the grant that cleared the last one, and every way that mirror drifted
-   * from the grants was a bug: #1061, #1063 and #1147.
+   * A decision writes one grant row and nothing else: it takes no household
+   * lock and writes no unit enablement (#1150). A permission the manifest
+   * requests at household or user consent scope is refused with the scope
+   * mismatch, since a consent act records it.
    */
   async decide(input: PluginGrantDecisionInput): Promise<PluginGrantDecisionResult> {
     const initiatedAt = new Date();
 
     type DecisionOutcome =
       | { readonly unchanged: true; readonly grant: PluginGrant }
-      | { readonly unchanged: false; readonly before: PluginGrant | null; readonly after: PluginGrant };
+      | {
+          readonly unchanged: false;
+          readonly before: PluginGrant | null;
+          readonly after: PluginGrant;
+          readonly manifestVersion: string;
+        };
 
     /**
      * The plugin as the request first read it. A deadlock replay judges
@@ -144,7 +133,7 @@ export class PluginGrantService {
       const plugin = firstRead;
       const check = this.resolveRequestedCheck(plugin, input.permissionSlug);
 
-      this.assertScopeCoherence(check, input);
+      this.assertServerScope(check);
 
       // D-AV (#322): a denial against a check the ACTIVE manifest requires at
       // server consent scope is refused, not recorded — the decider IS the
@@ -160,43 +149,32 @@ export class PluginGrantService {
         throw new PluginGrantRequiredDenialError(plugin.slug, check.canonicalSlug);
       }
 
-      const scopeId = this.normalizeScopeId(input);
-      await this.assertDeciderAuthority(input, scopeId);
+      await this.assertServerAdmin(input.deciderId);
 
       const uniqueWhere = {
         pluginId_scopeType_scopeId_permissionSlug: {
           pluginId: plugin.id,
-          scopeType: input.scopeType,
-          scopeId,
+          scopeType: PluginGrantScope.Server,
+          scopeId: SERVER_SCOPE_SENTINEL,
           permissionSlug: check.canonicalSlug,
         },
       };
 
       return this.db.$transaction(async (tx): Promise<DecisionOutcome> => {
-        // A household decision locks its household first (#548). The admin
-        // check above ran outside this transaction and took no lock, so a
-        // soft-delete can commit in between; this waits out one in flight and
-        // refuses one that committed. Ahead of the plugin-row claim because a
-        // soft-delete holds the household row while it runs and touches no
-        // plugin table, so a decision queued here holds nothing it waits on.
-        if (input.scopeType === PluginGrantScope.Household && !(await lockLiveHousehold(tx, scopeId))) {
-          throw new PluginGrantHouseholdNotFoundError(scopeId);
-        }
-
-        // The plugin row, claimed next and shared (#398). Its first job is
-        // WHERE the lock lands. Every INSERT into `plugin_grants` takes
-        // `FOR KEY SHARE` on this row through the FK, and RI checks are AFTER
-        // ROW triggers, so that lock arrives only once the grant tuple is
-        // already written: the upsert below would otherwise take the plugin row
-        // LAST and invert the total order plugin row → grant row → advisory →
-        // unit enablement. Activation follows it and skips the advisory: its plugin
-        // row `FOR UPDATE`, then its server grant
-        // rows `FOR UPDATE`, then — only for dormancy, since it writes no unit's
-        // enablement (#1149) — household unit enablements. Against activation that
-        // inversion is a cycle rather than a queue, and the loser rendered
-        // an untyped 500 (#398). Claiming here makes this transaction block
-        // BEFORE it writes the grant tuple, so nothing can be waiting on that
-        // tuple while this transaction waits on the plugin row.
+        // The plugin row, claimed first and shared (#398), then the grant
+        // row: a server decision takes nothing else, no household lock and no
+        // unit-scope advisory key, because it writes no unit enablement
+        // (#1150). The claim's first job is WHERE the lock lands. Every INSERT
+        // into `plugin_grants` takes `FOR KEY SHARE` on this row through the
+        // FK, and RI checks are AFTER ROW triggers, so that lock arrives only
+        // once the grant tuple is already written: the upsert below would
+        // otherwise take the plugin row LAST and invert the total order plugin
+        // row → grant row. Activation follows that order: its plugin row
+        // `FOR UPDATE`, then its server grant rows `FOR UPDATE`. Against
+        // activation that inversion is a cycle rather than a queue, and the
+        // loser rendered an untyped 500 (#398). Claiming here makes this
+        // transaction block BEFORE it writes the grant tuple, so nothing can be
+        // waiting on that tuple while this transaction waits on the plugin row.
         //
         // Its second job is the check that keeps every gate's judgment current
         // (#361). The claim reads the row it locks and compares it with the
@@ -247,12 +225,7 @@ export class PluginGrantService {
 
         const existing = await tx.pluginGrant.findUnique({ where: uniqueWhere });
 
-        if (
-          existing !== null &&
-          existing.status === input.status &&
-          existing.manifestVersion === plugin.version &&
-          existing.decidedRiskLevel === decidedRiskLevel
-        ) {
+        if (existing !== null && existing.status === input.status && existing.decidedRiskLevel === decidedRiskLevel) {
           return { unchanged: true, grant: existing };
         }
 
@@ -260,7 +233,6 @@ export class PluginGrantService {
           status: input.status,
           decidedById: input.deciderId,
           decidedAt: initiatedAt,
-          manifestVersion: plugin.version,
           decidedRiskLevel,
         };
 
@@ -275,40 +247,15 @@ export class PluginGrantService {
           where: uniqueWhere,
           create: {
             pluginId: plugin.id,
-            scopeType: input.scopeType,
-            scopeId,
+            scopeType: PluginGrantScope.Server,
+            scopeId: SERVER_SCOPE_SENTINEL,
             permissionSlug: check.canonicalSlug,
             ...decisionFields,
           },
           update: decisionFields,
         });
 
-        // The consent act IS the enabling act (#225): a Granted user-scope
-        // decision ensures the user's unit enablement exists, atomically with
-        // the decision — committing consent without the row would leave a
-        // user who consented but is not enabled, a state only another
-        // decision could heal. The row carries enablement and nothing about
-        // consent: the update arm is empty because the row may exist
-        // user-disabled and consent never writes `enabled`, and the create
-        // arm records no consent state because the unit's consent standing is
-        // read from its grant rows (#1149). A Denied decision creates no row:
-        // a refusal confers no enablement, and the durable denial already
-        // lives on the grant row itself.
-        //
-        // The scope lock comes first, as it does for every writer of this
-        // unit's enablement, the user's own enable toggle included: the row
-        // may not exist yet, and the advisory key does (see lockUserUnitScope).
-        if (input.status === PluginGrantStatus.Granted && input.scopeType === PluginGrantScope.User) {
-          await lockUserUnitScope(tx, scopeId, plugin.id);
-
-          await tx.userPlugin.upsert({
-            where: { userId_pluginId: { userId: scopeId, pluginId: plugin.id } },
-            create: { userId: scopeId, pluginId: plugin.id },
-            update: {},
-          });
-        }
-
-        return { unchanged: false, before: existing, after: written };
+        return { unchanged: false, before: existing, after: written, manifestVersion: plugin.version };
       });
     };
 
@@ -328,99 +275,16 @@ export class PluginGrantService {
 
     const EventClass = input.status === PluginGrantStatus.Granted ? PluginGrantCreatedEvent : PluginGrantRejectedEvent;
     const event = new EventClass(
-      outcome.before === null ? null : this.snapshot(outcome.before),
-      this.snapshot(outcome.after),
+      outcome.before === null ? null : grantSnapshot(outcome.before),
+      grantSnapshot(outcome.after),
+      // The row no longer stores the manifest version, so the event states
+      // the one this decision was made against (#1150).
+      { manifestVersion: outcome.manifestVersion, actId: null },
       initiatedAt,
     );
     this.emitter.emit(EventClass.eventName, event);
 
     return { grant: outcome.after, changed: true };
-  }
-
-  /**
-   * Delete-to-pending revocation on authority loss (#211): GRANTED
-   * rows are removed — returning those permissions to pending — and one
-   * `plugin.grant_revoked` event per row carries the only durable record of
-   * what lapsed and why into the lifecycle table. `Denied` rows are
-   * deliberately untouched: a denial wields no authority, so there is
-   * nothing to revoke, and deleting it would re-open a permission the unit
-   * durably refused (#59 durable-denial model).
-   *
-   * Returns exactly the rows this call deleted — never rows a concurrent
-   * decision saved from deletion.
-   */
-  async revokeForAuthorityLoss(input: PluginGrantRevocationInput): Promise<readonly PluginGrant[]> {
-    const initiatedAt = new Date();
-
-    // Type-level Exclude + runtime guard: Server grants are never
-    // authority-revoked — they live and die with the plugin row (cascade).
-    if ((input.scopeType as PluginGrantScope) === PluginGrantScope.Server) {
-      throw new PluginGrantScopeNotRevocableError(PluginGrantScope.Server);
-    }
-
-    if (input.scopeId === SERVER_SCOPE_SENTINEL) {
-      throw new PluginGrantScopeIdError(input.scopeType, 'scopeId must identify the unit losing authority');
-    }
-
-    const revoked = await this.db.$transaction(async (tx) => {
-      const rows = await tx.pluginGrant.findMany({
-        where: {
-          scopeType: input.scopeType,
-          scopeId: input.scopeId,
-          status: PluginGrantStatus.Granted,
-          ...(input.pluginId === undefined ? {} : { pluginId: input.pluginId }),
-        },
-      });
-
-      if (rows.length === 0) {
-        return { deleted: rows, survived: rows };
-      }
-
-      const ids = rows.map((row) => row.id);
-
-      // The status predicate is repeated on the DELETE, not just the SELECT:
-      // a concurrent decision could flip a row to Denied between the two
-      // statements, and deleting by id alone would destroy that denial.
-      const removed = await tx.pluginGrant.deleteMany({
-        where: { id: { in: ids }, status: PluginGrantStatus.Granted },
-      });
-
-      if (removed.count === rows.length) {
-        return { deleted: rows, survived: [] };
-      }
-
-      // Counts disagree, so at least one row was flipped and skipped. Read
-      // back inside the same transaction to learn WHICH: a lifecycle row
-      // saying a grant was revoked when it actually became a denial is worse
-      // than a slow path here, and the caller's return value must not claim
-      // rows it did not remove either.
-      const survivors = await tx.pluginGrant.findMany({ where: { id: { in: ids } }, select: { id: true } });
-      const survivingIds = new Set(survivors.map((survivor) => survivor.id));
-
-      return {
-        deleted: rows.filter((row) => !survivingIds.has(row.id)),
-        survived: rows.filter((row) => survivingIds.has(row.id)),
-      };
-    });
-
-    if (revoked.survived.length > 0) {
-      this.logger.warn(
-        `Revocation for ${input.scopeType} '${input.scopeId}' left ${revoked.survived.length} row(s) intact — a concurrent decision flipped them to Denied between the read and the delete; no revocation event emitted for those.`,
-      );
-    }
-
-    for (const row of revoked.deleted) {
-      const event = new PluginGrantRevokedEvent(this.snapshot(row), input.reason, initiatedAt);
-      this.emitter.emit(PluginGrantRevokedEvent.eventName, event);
-    }
-
-    if (revoked.deleted.length > 0) {
-      this.logger.warn(
-        `Revoked ${revoked.deleted.length} grant(s) for ${input.scopeType} '${input.scopeId}' (${input.reason})`,
-      );
-    }
-
-    return revoked.deleted;
   }
 
   private async loadPlugin(slug: string): Promise<Plugin> {
@@ -472,28 +336,17 @@ export class PluginGrantService {
     return check;
   }
 
-  private assertScopeCoherence(check: NormalizedPermissionRequest, input: PluginGrantDecisionInput): void {
+  /**
+   * A permission the manifest requests at household or user consent scope is
+   * decided by a consent act (#1150), never here: refused before the
+   * transaction, with the scope it is consented at.
+   */
+  private assertServerScope(check: NormalizedPermissionRequest): void {
     const expected = CONSENT_SCOPE_TO_GRANT_SCOPE[check.consentScope];
 
-    if (expected !== input.scopeType) {
-      throw new PluginGrantConsentScopeMismatchError(check.canonicalSlug, expected, input.scopeType);
+    if (expected !== PluginGrantScope.Server) {
+      throw new PluginGrantConsentScopeMismatchError(check.canonicalSlug, expected, PluginGrantScope.Server);
     }
-  }
-
-  private normalizeScopeId(input: PluginGrantDecisionInput): string {
-    if (input.scopeType === PluginGrantScope.Server) {
-      if (input.scopeId !== undefined && input.scopeId !== SERVER_SCOPE_SENTINEL) {
-        throw new PluginGrantScopeIdError(input.scopeType, 'Server-scope decisions carry no unit id');
-      }
-
-      return SERVER_SCOPE_SENTINEL;
-    }
-
-    if (input.scopeId === undefined || input.scopeId === SERVER_SCOPE_SENTINEL) {
-      throw new PluginGrantScopeIdError(input.scopeType, 'a Household/User decision must identify its unit');
-    }
-
-    return input.scopeId;
   }
 
   /**
@@ -572,78 +425,17 @@ export class PluginGrantService {
       );
     }
 
-    // Unit-boundedness (#60, #591): a household/user cannot consent to more
-    // than its own slice, so below server scope the permission must bind
-    // the consenting unit — restrict it to its own id, or be an allowlisted
-    // public read. Refused here rather than recorded as a grant the read path
-    // would ignore — a decision that can never confer is not a decision, it
-    // is a trap for whoever reads the consent screen.
-    const scope = CONSENT_SCOPE_TO_GRANT_SCOPE[check.consentScope];
-
-    if (scope !== PluginGrantScope.Server && !bindsConsentUnit(permission, scope)) {
-      throw new PluginGrantExclusionError(
-        check.canonicalSlug,
-        `consented at ${check.consentScope} scope, ${CONSENT_UNIT_BINDING_REFUSAL}; request it at server ` +
-          'scope or seed a unit-conditioned variant (#315)',
-      );
-    }
+    // No unit-boundedness check (#60, #591) here: server consent is
+    // server-wide authority. A unit-scope consent decision is a consent act
+    // (#1150), and a permission that cannot bind its unit is refused at
+    // install by the consent gates and confers nothing on the read path.
 
     return permission.riskLevel;
   }
 
-  private async assertDeciderAuthority(
-    input: PluginGrantDecisionInput,
-    /** Output of `normalizeScopeId` — the sentinel for Server, a verified non-empty unit id otherwise. */
-    scopeId: string,
-  ): Promise<void> {
-    switch (input.scopeType) {
-      case PluginGrantScope.Server: {
-        if (!(await this.authority.isServerAdmin(input.deciderId))) {
-          throw new PluginGrantAuthorityError(input.deciderId, 'Server-scope consent requires a server admin');
-        }
-
-        return;
-      }
-      case PluginGrantScope.Household: {
-        const householdId = scopeId;
-        const standing = await this.authority.householdAdminStanding(input.deciderId, householdId);
-
-        if (standing === 'admin') {
-          return;
-        }
-
-        // Once the household is deleted, its own admin gets the 404; anyone
-        // else keeps the 403 whatever state the household is in, so the
-        // refusal says nothing about which households exist.
-        if (standing === 'deleted') {
-          throw new PluginGrantHouseholdNotFoundError(householdId);
-        }
-
-        throw new PluginGrantAuthorityError(
-          input.deciderId,
-          `Household-scope consent requires an owner/admin membership in household '${householdId}'`,
-        );
-      }
-      case PluginGrantScope.User: {
-        // The subject check is the WHOLE user-scope authority predicate
-        // (#225 uniform enablement): the remaining conditions — plugin not
-        // tombstoned, manifest requests the permission at user scope — are
-        // enforced by loadPlugin and resolveRequestedCheck/
-        // assertScopeCoherence before this switch runs. Household
-        // membership is irrelevant to a user's consent about their own
-        // data.
-        if (input.deciderId !== scopeId) {
-          throw new PluginGrantAuthorityError(input.deciderId, 'User-scope consent is decided by the user themself');
-        }
-
-        return;
-      }
+  private async assertServerAdmin(deciderId: string): Promise<void> {
+    if (!(await this.authority.isServerAdmin(deciderId))) {
+      throw new PluginGrantAuthorityError(deciderId, 'Server-scope consent requires a server admin');
     }
-  }
-
-  private snapshot(row: PluginGrant) {
-    const { id, pluginId, scopeType, scopeId, permissionSlug, status, manifestVersion, decidedRiskLevel } = row;
-
-    return { id, pluginId, scopeType, scopeId, permissionSlug, status, manifestVersion, decidedRiskLevel };
   }
 }

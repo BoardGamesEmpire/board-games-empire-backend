@@ -38,6 +38,7 @@ import {
   decideConsentCheck,
   type ConsentCheckDecisionInput,
 } from '../consent/plugin-consent-check-classifier.service';
+import { grantSnapshot, householdSwitchSnapshot, userSwitchSnapshot } from '../events/plugin-event-snapshots';
 import {
   HouseholdPluginReconsentRequestedEvent,
   PluginGrantRevokedEvent,
@@ -326,6 +327,12 @@ interface ActivationOutcome {
   readonly unrequestedGrants: readonly PluginGrant[];
   /** Grants deleted because their permission moved consent scope. */
   readonly scopeMovedGrants: readonly PluginGrant[];
+  /**
+   * The manifest version each deleted decision's consent act answered, by act
+   * id (#1150). A decision can outlive the version it was made against, so
+   * its revocation names the act's version, not the one this update replaces.
+   */
+  readonly revokedActVersions: ReadonlyMap<string, string>;
   /** Server-scope grants whose `decidedRiskLevel` this approval refreshed (#59). */
   readonly reStampedGrants: readonly PluginGrant[];
   /** Enabled household units that owe re-consent — announced after commit, never written (#1149). */
@@ -663,6 +670,9 @@ export class PluginUpdateService {
       throw new PluginUpdateStagingReplacedError(plugin.slug, input.stagingId);
     }
 
+    const stagedVersion = plugin.pendingVersion;
+    const activeUnitRequests = this.activeUnitRequests(plugin);
+
     // Conditional on the EXACT staging the rejector saw, like every other
     // staged-update writer: an unconditional clear racing an approve would
     // report "rejected" for an update that in fact activated, and emit
@@ -674,7 +684,7 @@ export class PluginUpdateService {
     // artifact again gives the same one. pendingStagingId, written fresh by
     // every staging, is what pins the staging this rejection targets (#357);
     // pendingSince is for display, and two stagings can share its millisecond.
-    const rejected = await this.db.$transaction(async (tx) => {
+    const { rejected, preConsents } = await this.db.$transaction(async (tx) => {
       const cleared = await tx.plugin.updateMany({
         where: {
           id: plugin.id,
@@ -712,7 +722,43 @@ export class PluginUpdateService {
       // `after` snapshot, a staged update nobody rejected. The atomic
       // single-statement update this replaced could not express that state;
       // the guarded updateMany can.
-      return tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      const rejected = await tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+
+      // The pre-consents households and users gave to this staged update go
+      // with it (#1150). Left in place, a later update that requests the same
+      // permission would find it already granted, a consent nobody gave to
+      // that update: the inheritance activation prevents for a permission an
+      // update stops requesting (#577). A pre-consent is a household or user
+      // decision the active manifest does not request at its scope, and with
+      // the staged update gone nothing requests it at all.
+      //
+      // Read and deleted under the claim above, which holds the plugin row.
+      // A staged review claims that row `FOR SHARE` before it writes, so one
+      // in flight either committed first, and its decisions are read here,
+      // or waits for this transaction and is then refused: its sha is no
+      // longer the staged one. Read before the delete, because the
+      // revocation events are the only durable record of what went.
+      const preConsents =
+        activeUnitRequests === null
+          ? []
+          : await tx.pluginGrant.findMany({
+              where: {
+                pluginId: plugin.id,
+                OR: [
+                  {
+                    scopeType: PluginGrantScope.Household,
+                    permissionSlug: { notIn: [...activeUnitRequests.household] },
+                  },
+                  { scopeType: PluginGrantScope.User, permissionSlug: { notIn: [...activeUnitRequests.user] } },
+                ],
+              },
+            });
+
+      if (preConsents.length > 0) {
+        await tx.pluginGrant.deleteMany({ where: { id: { in: preConsents.map((grant) => grant.id) } } });
+      }
+
+      return { rejected, preConsents };
     });
 
     // Removing the staged artifact's directory, once no living row names it,
@@ -722,9 +768,69 @@ export class PluginUpdateService {
       PluginUpdateRejectedEvent.eventName,
       new PluginUpdateRejectedEvent(this.stagingSnapshot(plugin), this.stagingSnapshot(rejected), initiatedAt),
     );
-    this.logger.log(`Plugin '${plugin.slug}' pending update ${plugin.pendingVersion} rejected and cleared`);
+
+    for (const grant of preConsents) {
+      this.emitter.emit(
+        PluginGrantRevokedEvent.eventName,
+        new PluginGrantRevokedEvent(
+          grantSnapshot(grant),
+          'staged-update-rejected',
+          // The pre-consent was given to the staged manifest, not the active one.
+          { manifestVersion: stagedVersion, actId: grant.actId },
+          initiatedAt,
+        ),
+      );
+    }
+
+    this.logger.log(
+      `Plugin '${plugin.slug}' pending update ${stagedVersion} rejected and cleared, ` +
+        `${preConsents.length} pre-consent(s) deleted`,
+    );
 
     return rejected;
+  }
+
+  /**
+   * The permissions the ACTIVE manifest requests of households and of users,
+   * which is what tells a pre-consent from a consent decision in force:
+   * rejecting a staged update deletes the household and user decisions
+   * outside these sets (#1150).
+   *
+   * Null when the stored active manifest cannot be read. A rejection must
+   * stay possible then, as it does over a corrupt staged manifest (#1117),
+   * so it clears the staged update and leaves every decision alone rather
+   * than guess which are pre-consents. Nothing confers from such a plugin,
+   * and no update of it can be staged or approved until the active manifest
+   * reads again; the warning below records that pre-consents may remain.
+   */
+  private activeUnitRequests(
+    plugin: Plugin,
+  ): { readonly household: ReadonlySet<string>; readonly user: ReadonlySet<string> } | null {
+    let active: PluginManifestValidationResult;
+
+    try {
+      active = this.validateActiveManifest(plugin);
+    } catch (err) {
+      if (!(err instanceof PluginUpdateManifestError)) {
+        throw err;
+      }
+
+      this.logger.warn(
+        `Plugin '${plugin.slug}': the active manifest cannot be read, so rejecting its staged update deletes no ` +
+          `pre-consents (${err.message})`,
+      );
+
+      return null;
+    }
+
+    const requestedAt = (consentScope: NormalizedPermissionRequest['consentScope']): ReadonlySet<string> =>
+      new Set(
+        active.permissionChecks
+          .filter((check) => check.consentScope === consentScope)
+          .map((check) => check.canonicalSlug),
+      );
+
+    return { household: requestedAt('household'), user: requestedAt('user') };
   }
 
   /**
@@ -1162,7 +1268,7 @@ export class PluginUpdateService {
       // activation). Raw SQL because Prisma's query API cannot express FOR
       // UPDATE; unqualified table name so the search_path (per-worker test
       // schemas) resolves it. Placed first in the transaction, ahead of the
-      // grant lock below, matching the plugin row → grant row → advisory →
+      // grant lock below, matching the plugin row → advisory → grant row →
       // unit row total order `household-dormancy.ts` and `unit-scope-lock.ts`
       // already document.
       const [current] = await tx.$queryRaw<{ config: Prisma.JsonValue }[]>`
@@ -1356,9 +1462,9 @@ export class PluginUpdateService {
       // provenance (#577). Left in place, a later version that requests the
       // permission again would inherit a consent decision nobody made for
       // it. Read before the delete, for the same reason as the declares diff.
-      // A decide() that judged against the outgoing plugin manifest cannot
-      // write one back afterwards: its claim waits for this transaction and
-      // then refuses the moved plugin manifest (#361).
+      // A decide() or a consent act (#1150) that judged against the outgoing
+      // plugin manifest cannot write one back afterwards: its claim waits for
+      // this transaction and then refuses the moved plugin manifest (#361).
       const droppedRequests = requestedSlugsDropped(active, next, removedDeclares);
       let unrequestedGrants: PluginGrant[] = [];
 
@@ -1397,7 +1503,6 @@ export class PluginUpdateService {
               decidedRiskLevel: corePermissions.get(slug)?.riskLevel ?? RiskLevel.Low,
               decidedById: actorId,
               decidedAt: initiatedAt,
-              manifestVersion: next.manifest.version,
             },
           }),
         );
@@ -1440,7 +1545,6 @@ export class PluginUpdateService {
               scopeId: SERVER_SCOPE_SENTINEL,
               permissionSlug: check.canonicalSlug,
               status: PluginGrantStatus.Granted,
-              manifestVersion: next.manifest.version,
               decidedById: actorId,
               decidedAt: initiatedAt,
               decidedRiskLevel:
@@ -1551,6 +1655,24 @@ export class PluginUpdateService {
         initiatedAt,
       });
 
+      // The acts behind the deleted decisions, for the version each revocation
+      // names. The act table is append-only, so every act a row names is still
+      // there to read.
+      const revokedActIds = [
+        ...new Set(
+          [...revokedGrants, ...unrequestedGrants, ...scopeMovedGrants].flatMap((grant) =>
+            grant.actId === null ? [] : [grant.actId],
+          ),
+        ),
+      ];
+      const revokedActs =
+        revokedActIds.length === 0
+          ? []
+          : await tx.pluginConsentAct.findMany({
+              where: { id: { in: revokedActIds } },
+              select: { id: true, manifestVersion: true },
+            });
+
       return {
         plugin: updated,
         seededChecks,
@@ -1558,6 +1680,7 @@ export class PluginUpdateService {
         revokedGrants,
         unrequestedGrants,
         scopeMovedGrants,
+        revokedActVersions: new Map(revokedActs.map((act) => [act.id, act.manifestVersion])),
         reStampedGrants,
         reconsentHouseholdUnits,
         reconsentUserUnits,
@@ -1604,13 +1727,20 @@ export class PluginUpdateService {
     ];
 
     for (const { grant, reason } of revocations) {
-      const { id, pluginId, scopeType, scopeId, permissionSlug, status, manifestVersion, decidedRiskLevel } = grant;
-
       this.emitter.emit(
         PluginGrantRevokedEvent.eventName,
         new PluginGrantRevokedEvent(
-          { id, pluginId, scopeType, scopeId, permissionSlug, status, manifestVersion, decidedRiskLevel },
+          grantSnapshot(grant),
           reason,
+          // The row no longer stores the manifest version (#1150), so a
+          // household or user decision names its act's: consent given at one
+          // version can outlive the next unchanged one. A server decision has
+          // no act until #1152 and names the manifest this update replaces.
+          {
+            manifestVersion:
+              (grant.actId === null ? undefined : outcome.revokedActVersions.get(grant.actId)) ?? before.version,
+            actId: grant.actId,
+          },
           initiatedAt,
         ),
       );
@@ -1623,7 +1753,7 @@ export class PluginUpdateService {
       this.emitter.emit(
         HouseholdPluginReconsentRequestedEvent.eventName,
         new HouseholdPluginReconsentRequestedEvent(
-          this.householdUnitSnapshot(candidate.unit),
+          householdSwitchSnapshot(candidate.unit),
           candidate.outstanding,
           next.manifest.version,
           initiatedAt,
@@ -1635,7 +1765,7 @@ export class PluginUpdateService {
       this.emitter.emit(
         UserPluginReconsentRequestedEvent.eventName,
         new UserPluginReconsentRequestedEvent(
-          this.userUnitSnapshot(candidate.unit),
+          userSwitchSnapshot(candidate.unit),
           candidate.outstanding,
           next.manifest.version,
           initiatedAt,
@@ -1732,17 +1862,5 @@ export class PluginUpdateService {
     const { id, slug, version, pendingVersion, pendingStagingId } = plugin;
 
     return { id, slug, version, pendingVersion, pendingStagingId };
-  }
-
-  private householdUnitSnapshot(unit: HouseholdPlugin) {
-    const { id, householdId, pluginId, enabled } = unit;
-
-    return { id, householdId, pluginId, enabled };
-  }
-
-  private userUnitSnapshot(unit: UserPlugin) {
-    const { id, userId, pluginId, enabled } = unit;
-
-    return { id, userId, pluginId, enabled };
   }
 }

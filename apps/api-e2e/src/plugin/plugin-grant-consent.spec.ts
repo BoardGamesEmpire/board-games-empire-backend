@@ -4,6 +4,14 @@ import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plug
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import {
+  readConsentSurface,
+  reviewBody,
+  sendReview,
+  sendSwitchOn,
+  switchOnBody,
+  type ConsentAnswerStatus,
+} from './consent-act-fixtures';
 import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
 /**
@@ -12,11 +20,12 @@ import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plug
  * pinned as its 409 (and its pending-manifest exception as the C4.3
  * integration: the denial lands, and it is APPROVE that refuses), the
  * authority matrix per scope including the household instance gate, the
- * user's unit enablement a first grant creates (#225), the household
- * exclusion of condition-free core checks, the consent standing the feature
- * read derives from the grants without a unit-enablement write (#1149), and the
+ * user's unit enablement a switch-on creates (#1150), the household refusal
+ * of condition-free core checks, the consent standing the feature read
+ * derives from the grants without a unit-enablement write (#1149), and the
  * presentation's decision states (`per-unit`, `staleRisk`) from each
- * viewpoint.
+ * viewpoint. Household and user decisions are consent acts (#1150); the
+ * server's stay on the operator's grants route.
  *
  * Plugin state is arranged directly on the rows (the install ingress is
  * #84's; no endpoint exists), including the `PluginPermission` catalog rows
@@ -119,11 +128,50 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
   const decideServer = (actor: SessionActor, slug: string, body: Record<string, unknown>) =>
     request(baseUrl).post(`${PLUGINS_PATH}/${slug}/grants`).set(actor.headers).send(body);
 
-  const decideHousehold = (actor: SessionActor, householdId: string, slug: string, body: Record<string, unknown>) =>
-    request(baseUrl).post(`/api/households/${householdId}/plugins/${slug}/grants`).set(actor.headers).send(body);
+  /**
+   * A household switch-on (#1150), its body built from the household's
+   * consent surface, asserted to answer `status`. The consent surface is read
+   * by `reader`, so an actor refused the act can still be shown it.
+   */
+  const switchOnHousehold = async (
+    actor: SessionActor,
+    householdId: string,
+    slug: string,
+    answers: Readonly<Record<string, ConsentAnswerStatus>>,
+    status: number,
+    reader: SessionActor = actor,
+  ) => {
+    const unit = { householdId };
+    const surface = await readConsentSurface(baseUrl, reader, unit, slug);
 
-  const decideUser = (actor: SessionActor, slug: string, body: Record<string, unknown>) =>
-    request(baseUrl).post(`/api/users/me/plugins/${slug}/grants`).set(actor.headers).send(body);
+    return sendSwitchOn(baseUrl, actor, unit, slug, switchOnBody(surface, answers)).expect(status);
+  };
+
+  /** A user switch-on (#1150), its body built from the user's own consent surface, asserted to answer `status`. */
+  const switchOnUser = async (
+    actor: SessionActor,
+    slug: string,
+    answers: Readonly<Record<string, ConsentAnswerStatus>>,
+    status: number,
+  ) => {
+    const surface = await readConsentSurface(baseUrl, actor, 'me', slug);
+
+    return sendSwitchOn(baseUrl, actor, 'me', slug, switchOnBody(surface, answers)).expect(status);
+  };
+
+  /** A household review (#1150) of the active manifest, built from the household's consent surface, asserted to answer `status`. */
+  const reviewHousehold = async (
+    actor: SessionActor,
+    householdId: string,
+    slug: string,
+    answers: Readonly<Record<string, ConsentAnswerStatus>>,
+    status: number,
+  ) => {
+    const unit = { householdId };
+    const surface = await readConsentSurface(baseUrl, actor, unit, slug);
+
+    return sendReview(baseUrl, actor, unit, slug, reviewBody(surface, answers)).expect(status);
+  };
 
   const readServerConsent = (actor: SessionActor, slug: string) =>
     request(baseUrl).get(`${PLUGINS_PATH}/${slug}/consent`).set(actor.headers);
@@ -230,7 +278,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
         .expect(401);
     });
 
-    it('household decide: owner passes; a plain member and an admin of ANOTHER household are both refused', async () => {
+    it('household switch-on: owner passes; a plain member and an admin of ANOTHER household are both refused (#1150)', async () => {
       const ownerA = await actors.user();
       const memberA = await actors.user();
       const ownerB = await actors.user();
@@ -242,40 +290,46 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       // — that is what makes the cross-household 403 pin the instance gate.
       await actors.householdWithMembers({ owner: ownerB });
       const plugin = await arrangePlugin();
-
-      const ok = await decideHousehold(ownerA, fixtureA.household.id, plugin.slug, granted('read:game:public')).expect(
-        200,
-      );
-      expect(ok.body.grant).toMatchObject({
-        scopeType: PluginGrantScope.Household,
-        scopeId: fixtureA.household.id,
-        status: PluginGrantStatus.Granted,
-      });
+      const answers = { 'read:game:public': PluginGrantStatus.Granted } as const;
 
       // A plain member holds no manage:plugin:household rule — the coarse
       // gate refuses before anything else runs.
-      await decideHousehold(memberA, fixtureA.household.id, plugin.slug, granted('read:game:public')).expect(403);
+      await switchOnHousehold(memberA, fixtureA.household.id, plugin.slug, answers, 403, ownerA);
 
       // Owner of B addressing A: the type-level gate passes (they hold the
       // permission SOMEWHERE), so this pins the per-household instance gate.
-      await decideHousehold(ownerB, fixtureA.household.id, plugin.slug, granted('read:game:public')).expect(403);
+      await switchOnHousehold(ownerB, fixtureA.household.id, plugin.slug, answers, 403, ownerA);
+      expect(await db.client.pluginGrant.count({ where: { pluginId: plugin.id } })).toBe(0);
+
+      await switchOnHousehold(ownerA, fixtureA.household.id, plugin.slug, answers, 200);
+      expect(await db.client.pluginGrant.findMany({ where: { pluginId: plugin.id } })).toEqual([
+        expect.objectContaining({
+          scopeType: PluginGrantScope.Household,
+          scopeId: fixtureA.household.id,
+          permissionSlug: 'read:game:public',
+          status: PluginGrantStatus.Granted,
+        }),
+      ]);
     });
 
-    it('user decide: any authenticated user, for their own unit only — Granted creates the #225 unit enablement, Denied creates nothing', async () => {
+    it('user switch-on: any authenticated user, for their own unit only — it creates their unit enablement, switched on, whatever the optional answers (#1150)', async () => {
       const user = await actors.user();
       const plugin = await arrangePlugin();
 
-      await decideUser(user, plugin.slug, denied('read:game_collection:public')).expect(200);
-      expect(await db.client.userPlugin.count({ where: { pluginId: plugin.id } })).toBe(0);
+      await switchOnUser(user, plugin.slug, { 'read:game_collection:public': PluginGrantStatus.Denied }, 200);
 
-      await decideUser(user, plugin.slug, granted('read:game_collection:public')).expect(200);
       const units = await db.client.userPlugin.findMany({ where: { pluginId: plugin.id } });
-      expect(units).toHaveLength(1);
-      // The first user grant writes the user's unit enablement, switched on.
-      expect(units[0].enabled).toBe(true);
+      expect(units).toEqual([expect.objectContaining({ userId: user.user.id, enabled: true })]);
+      expect(await db.client.pluginGrant.findMany({ where: { pluginId: plugin.id } })).toEqual([
+        expect.objectContaining({
+          scopeType: PluginGrantScope.User,
+          scopeId: user.user.id,
+          status: PluginGrantStatus.Denied,
+        }),
+      ]);
     });
 
-    it('D60-7: a household decision on a condition-free core check is the typed 403 exclusion', async () => {
+    it('a household grant of a condition-free core permission is refused as one that cannot be granted (#1150)', async () => {
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner });
       const plugin = await arrangePlugin([
@@ -289,15 +343,19 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
         },
       ]);
 
-      const response = await decideHousehold(
+      const response = await switchOnHousehold(
         owner,
         fixture.household.id,
         plugin.slug,
-        granted('read:platform_game'),
-      ).expect(403);
+        { 'read:platform_game': PluginGrantStatus.Granted },
+        409,
+      );
 
-      expect(response.body.code).toBe('PLUGIN_GRANT_EXCLUSION');
-      expect(response.body.permissionSlug).toBe('read:platform_game');
+      expect(response.body.code).toBe('PLUGIN_CONSENT_ACT_UNGRANTABLE');
+      expect(response.body.permissions).toEqual([
+        { permissionSlug: 'read:platform_game', cause: 'unbound_unit_scope' },
+      ]);
+      expect(await db.client.pluginGrant.count({ where: { pluginId: plugin.id } })).toBe(0);
     });
   });
 
@@ -306,12 +364,38 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       const admin = await actors.admin();
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner });
-      const plugin = await arrangePlugin(DEFAULT_CHECKS, { uninstalledAt: new Date('2026-08-10T00:00:00Z') });
+      const plugin = await arrangePlugin();
+      const unit = { householdId: fixture.household.id };
+      // Read while the plugin is installed: a tombstone has no consent surface
+      // to read, and the act names what the unit was shown before (#1150).
+      const householdSurface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
+      const userSurface = await readConsentSurface(baseUrl, owner, 'me', plugin.slug);
+
+      await db.client.plugin.update({
+        where: { id: plugin.id },
+        data: { uninstalledAt: new Date('2026-08-10T00:00:00Z'), enabled: false },
+      });
 
       const server = await decideServer(admin, plugin.slug, granted('read:safe_http_policy')).expect(410);
       expect(server.body.code).toBe('PLUGIN_GRANT_PLUGIN_TOMBSTONED');
-      await decideHousehold(owner, fixture.household.id, plugin.slug, granted('read:game:public')).expect(410);
-      await decideUser(owner, plugin.slug, granted('read:game_collection:public')).expect(410);
+
+      const household = await sendSwitchOn(
+        baseUrl,
+        owner,
+        unit,
+        plugin.slug,
+        switchOnBody(householdSurface, { 'read:game:public': PluginGrantStatus.Granted }),
+      ).expect(410);
+      expect(household.body.code).toBe('PLUGIN_UNIT_PLUGIN_TOMBSTONED');
+
+      const user = await sendSwitchOn(
+        baseUrl,
+        owner,
+        'me',
+        plugin.slug,
+        switchOnBody(userSurface, { 'read:game_collection:public': PluginGrantStatus.Granted }),
+      ).expect(410);
+      expect(user.body.code).toBe('PLUGIN_UNIT_PLUGIN_TOMBSTONED');
     });
 
     it('does NOT gate on Plugin.enabled — consent-before-enable is a legitimate ordering', async () => {
@@ -375,9 +459,22 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner });
       const plugin = await arrangePlugin();
-      const unit = await arrangeEnabledHouseholdUnit(fixture.household.id, plugin.id);
-
-      await decideHousehold(owner, fixture.household.id, plugin.slug, denied('read:game:public')).expect(200);
+      await arrangeEnabledHouseholdUnit(fixture.household.id, plugin.id);
+      // Arranged on the rows (#1150): no consent act leaves a switched-on unit
+      // refusing a required permission, since a review refusing one switches
+      // the unit off. An update can still leave this state, when a
+      // permission the household had refused becomes required.
+      await db.client.pluginGrant.create({
+        data: {
+          pluginId: plugin.id,
+          scopeType: PluginGrantScope.Household,
+          scopeId: fixture.household.id,
+          permissionSlug: 'read:game:public',
+          status: PluginGrantStatus.Denied,
+          decidedAt: new Date(),
+          decidedRiskLevel: RiskLevel.Low,
+        },
+      });
 
       const response = await readHouseholdFeatures(owner, fixture.household.id, plugin.slug).expect(200);
       const featureState = response.body.featureState;
@@ -388,15 +485,9 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
           expect.objectContaining({ slug: 'read:game:public', kind: 'refused', required: true }),
         ]),
       );
-
-      // The decision wrote one grant row and nothing on the unit: the
-      // household admin's unit enablement is exactly as they left it.
-      const row = await unitRow(unit.id);
-      expect(row.enabled).toBe(true);
-      expect(row.updatedAt).toEqual(unit.updatedAt);
     });
 
-    it('the Granted decision that clears the last outstanding check flips state to on with no unit-enablement write', async () => {
+    it('the review that grants the last outstanding check flips state to on with no unit-enablement write (#1150)', async () => {
       const admin = await actors.admin();
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner });
@@ -412,7 +503,13 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
         expect.objectContaining({ slug: 'read:game:public', kind: 'never_asked' }),
       ]);
 
-      await decideHousehold(owner, fixture.household.id, plugin.slug, granted('read:game:public')).expect(200);
+      await reviewHousehold(
+        owner,
+        fixture.household.id,
+        plugin.slug,
+        { 'read:game:public': PluginGrantStatus.Granted },
+        200,
+      );
 
       const after = await readHouseholdFeatures(owner, fixture.household.id, plugin.slug).expect(200);
       expect(after.body.featureState).toMatchObject({ served: true, state: 'on' });
@@ -439,7 +536,6 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
           scopeId: '',
           permissionSlug: 'read:safe_http_policy',
           status: PluginGrantStatus.Granted,
-          manifestVersion: plugin.version,
           decidedAt: new Date('2026-07-01T00:00:00Z'),
           decidedRiskLevel: RiskLevel.Low,
         },
@@ -490,7 +586,19 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       await actors.householdWithMembers({ owner: ownerB });
       const plugin = await arrangePlugin();
 
-      await decideHousehold(ownerA, fixtureA.household.id, plugin.slug, denied('read:game:public')).expect(200);
+      // A review refusing the required check: the consent act that records a
+      // household's denial of one (#1150). It switches the unit off, which the
+      // consent surface does not depend on.
+      await db.client.householdPlugin.create({
+        data: { householdId: fixtureA.household.id, pluginId: plugin.id, enabled: true },
+      });
+      await reviewHousehold(
+        ownerA,
+        fixtureA.household.id,
+        plugin.slug,
+        { 'read:game:public': PluginGrantStatus.Denied },
+        200,
+      );
 
       const response = await readHouseholdConsent(ownerA, fixtureA.household.id, plugin.slug).expect(200);
       const checks: { slug: string; decision: string; decidableByUnit: boolean }[] = response.body.presentation.checks;
@@ -519,7 +627,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       const user = await actors.user();
       const plugin = await arrangePlugin();
 
-      await decideUser(user, plugin.slug, granted('read:game_collection:public')).expect(200);
+      await switchOnUser(user, plugin.slug, { 'read:game_collection:public': PluginGrantStatus.Granted }, 200);
 
       const response = await readUserConsent(user, plugin.slug).expect(200);
       const checks: { slug: string; decision: string }[] = response.body.presentation.checks;

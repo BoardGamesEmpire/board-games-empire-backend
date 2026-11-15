@@ -1,6 +1,6 @@
 /// Per-household enablement + configuration for Household-scoped plugins
-/// (#59 consent-unit model). A row exists once a household enables the
-/// plugin; absence means never enabled there.
+/// (#59 consent-unit model). A switch-on consent act creates it (#1150);
+/// absence means the household never switched the plugin on.
 ///
 /// `householdId` is a plain String id (no FK relation) to keep this file
 /// from fanning edits into the household domain models — cleanup on
@@ -15,12 +15,14 @@ model HouseholdPlugin {
   plugin   Plugin @relation(fields: [pluginId], references: [id], onDelete: Cascade)
 
   /// Household-level switch, layered UNDER Plugin.enabled — the household
-  /// ADMIN's intent, and only theirs. Consent never touches it: consent
-  /// standing is derived at read time from the manifest's requirements and
-  /// the recorded grants (#1149), so a later consent changes what the
-  /// ability confers and the unit's state code, never whether the unit is
-  /// served, and never rewrites the admin's choice. The serving predicate is
-  /// `enabled && dormantReason == null`.
+  /// ADMIN's intent, and only theirs. A switch-on consent act creates the
+  /// unit enablement switched on, and a review that refuses a required
+  /// permission writes `enabled = false` in the same consent act (#1150).
+  /// Any other consent decision leaves it alone: consent standing is derived
+  /// at read time from the manifest's requirements and the recorded
+  /// decisions (#1149), so it changes what the ability confers and the
+  /// unit's state code, not whether the unit is served. The serving
+  /// predicate is `enabled && dormantReason == null`.
   enabled Boolean @default(true)
 
   /// Household-scope plugin configuration (manifest config.schema governs

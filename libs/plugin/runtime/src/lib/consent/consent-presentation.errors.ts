@@ -34,8 +34,9 @@ export class PluginConsentPresentationNotFoundError extends Error {
 }
 
 /**
- * The requested plugin is tombstoned (#322): its grants are purged and
- * `decide()` refuses new ones, so no consent surface exists — but the
+ * The requested plugin is tombstoned (#322): its grants are purged, and
+ * neither `decide()` nor a consent act (#1150) records new ones, so no
+ * consent surface exists — but the
  * record exists and says so, which is D-AY's 410, never a 404.
  */
 export class PluginConsentPresentationTombstonedError extends Error {
@@ -46,5 +47,18 @@ export class PluginConsentPresentationTombstonedError extends Error {
     public readonly uninstalledAt: Date,
   ) {
     super(`Plugin '${pluginSlug}' was uninstalled at ${uninstalledAt.toISOString()} and has no consent surface`);
+  }
+}
+
+/**
+ * A household or user asked for the staged consent surface, to pre-consent,
+ * but the plugin has no staged update (#1150). A 404: the surface asked for
+ * does not exist, though the plugin does.
+ */
+export class PluginConsentPresentationNoStagedUpdateError extends Error {
+  override readonly name = 'PluginConsentPresentationNoStagedUpdateError';
+
+  constructor(public readonly pluginSlug: string) {
+    super(`Plugin '${pluginSlug}' has no update waiting`);
   }
 }
