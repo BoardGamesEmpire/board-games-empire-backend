@@ -63,7 +63,10 @@
     "connect_failed": "Failed to connect to the DataGateway.",
     "disconnect_failed": "Failed to disconnect from the DataGateway.",
     "disabled": "DataGateway with ID {id} is disabled. Enable it before asking for an interview.",
-    "interview_failed": "The DataGateway's interview failed."
+    "interview_failed": "The DataGateway's interview failed.",
+    "plugin_connection_fields": "This DataGateway comes from a plugin, so it has no connection address, port, authentication type or credentials to change. Leave those fields out.",
+    "connection_field_required": "A remote DataGateway needs its connection address, port and authentication type. Enter a value instead of clearing it.",
+    "plugin_row_delete": "This DataGateway comes from a plugin, so it can't be deleted. Uninstalling the plugin disables it and keeps it, so the games imported through it keep their source."
   },
   "event": {
     "not_found": "Event with ID {id} not found",

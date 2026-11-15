@@ -266,12 +266,22 @@ export class GatewayCallAnswerDto {
   message?: string;
 }
 
-/** Create, update with `enabled: true`, and connect: the row plus the coordinator's connect answer. */
+/**
+ * Create, update with `enabled: true`, and connect: the row plus the
+ * coordinator's answer. A remote DataGateway is connected; a plugin
+ * DataGateway, which the coordinator builds itself, is interviewed (#1083).
+ */
 export class DataGatewayConnectAnswerDto extends DataGatewayEnvelopeDto {
   @ApiProperty({ description: 'False when no connect was asked for, such as a DataGateway created disabled' })
   connection_attempt!: boolean;
 
-  @ApiProperty({ type: GatewayCallAnswerDto, nullable: true })
+  @ApiProperty({
+    type: GatewayCallAnswerDto,
+    nullable: true,
+    description:
+      "For a remote DataGateway, the connect's answer. For a plugin DataGateway, which has no connection to " +
+      "make, the interview's answer, with the interview's generic copy on a failure (#1083).",
+  })
   connection_response!: GatewayCallAnswerDto | null;
 }
 

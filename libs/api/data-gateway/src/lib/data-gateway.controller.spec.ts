@@ -326,6 +326,52 @@ describe('DataGatewayController', () => {
     });
   });
 
+  // A plugin DataGateway's row has no connection fields to send: the
+  // coordinator builds its driver itself, so connecting it is an interview
+  // (#1083).
+  describe("a plugin's row", () => {
+    const pluginRow = makeGateway({ pluginId: 'plugin-1', connectionUrl: null, connectionPort: null, authType: null });
+    const routes = [
+      ['connect', (c: DataGatewayController) => c.connect('gw-1')],
+      ['update, enabled', (c: DataGatewayController) => c.update('gw-1', { enabled: true })],
+    ] as const;
+
+    beforeEach(() => {
+      const mocked = service as unknown as jest.Mocked<DataGatewayService>;
+      mocked.update.mockResolvedValue(pluginRow);
+      mocked.getById.mockResolvedValue(pluginRow);
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it.each(routes)("asks for an interview, not a connect, for a plugin's row (#1083): %s", async (_route, call) => {
+      const response = await firstValueFrom<Record<string, unknown>>(
+        call(controller) as Observable<Record<string, unknown>>,
+      );
+
+      expect(coordinator.connectGateway).not.toHaveBeenCalled();
+      expect(coordinator.reinterviewGateway).toHaveBeenCalledWith({ gatewayId: 'gw-1' });
+      expect(response).toEqual({
+        dataGateway: toDataGatewayView(pluginRow),
+        connection_response: { success: true },
+        connection_attempt: true,
+      });
+    });
+
+    it("answers a failed interview with the interview's generic copy (#1083)", async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      coordinator.reinterviewGateway.mockReturnValue(of({ success: false, error: 'raw detail' }));
+
+      const response = await firstValueFrom(controller.connect('gw-1'));
+
+      expect(response.connection_response).toEqual({
+        success: false,
+        message: t('errors.data_gateway.interview_failed'),
+      });
+      expect(JSON.stringify(response)).not.toContain('raw detail');
+    });
+  });
+
   describe("the coordinator's answer", () => {
     // What the coordinator reports when a Bearer gateway's credentials are
     // built: the refusal's key and args, meant for the server's logs.

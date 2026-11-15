@@ -88,6 +88,23 @@ describe('toDataGatewayView', () => {
     expect(toDataGatewayView(makeGateway({ authParameters })).hasAuthParameters).toBe(expected);
   });
 
+  // A client tells the two kinds apart by pluginId (#1083).
+  it("maps a plugin's row with its pluginId and no connection fields (#1083)", () => {
+    const view = toDataGatewayView(
+      makeGateway({ pluginId: 'plugin-1', connectionUrl: null, connectionPort: null, authType: null }),
+    );
+
+    expect(view).toEqual(
+      expect.objectContaining({
+        pluginId: 'plugin-1',
+        connectionUrl: null,
+        connectionPort: null,
+        authType: null,
+        hasAuthParameters: false,
+      }),
+    );
+  });
+
   it('carries the interview status beside the raw columns', () => {
     const row = makeGateway({
       firstInterviewedAt: T1,
