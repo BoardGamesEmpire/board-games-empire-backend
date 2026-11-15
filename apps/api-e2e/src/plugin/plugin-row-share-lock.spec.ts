@@ -291,7 +291,7 @@ describe('plugin row share lock (FOR SHARE)', () => {
    *    exactly where the request found them, so the content is the only thing
    *    left that differs;
    *  - a document that differs only in key order or spacing must NOT be, or
-   *    every enable behind a round-tripped manifest 409s forever. That is the
+   *    every unit write behind a round-tripped manifest 409s forever. That is the
    *    expensive direction, and it is the one a hand-rolled comparison in the
    *    application would have had to get right for itself.
    */

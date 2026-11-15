@@ -17,9 +17,12 @@ import { LOCK_SOURCES } from './lock-order';
  * document the decision read. An uninstalled plugin or a move refuses the
  * decision.
  *
- * The decision is the whole transaction: it writes one grant row and, for a
- * user's first grant, the user's unit enablement, and no pass runs after it
- * commits, because consent standing is worked out when read (#1149).
+ * The decision is the whole transaction: it writes one server grant row and
+ * nothing else, since household and user decisions are consent acts (#1150),
+ * and no pass runs after it commits, because consent standing is worked out
+ * when read (#1149). A consent act claims the row the same way and compares the
+ * manifest sha instead (`plugin-consent-race.spec.ts` races it against an
+ * activation).
  *
  * The unit suite mocks `$queryRaw`: it pins the statement's text and the
  * service's answer to each row, and nothing about what Postgres returns. Three

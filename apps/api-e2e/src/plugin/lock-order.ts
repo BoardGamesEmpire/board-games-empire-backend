@@ -56,8 +56,10 @@ import { readShippedTree, workspaceRoot } from '../support/shipped-sql';
  * `decide()` is how that was found: it claimed `['grant row', 'unit row']`, said
  * outright that it took no plugin-row lock, and deadlocked against activation's
  * `FOR UPDATE` on every contended grant INSERT while both the barrier suite and
- * the pin suite stayed green (#398). Its entries now claim the plugin row it
- * really does take, first, because the source now says so.
+ * the pin suite stayed green (#398). Its entry now claims the plugin row it
+ * really does take, first, because the source now says so; the consent act,
+ * which took over every household and user decision (#1150), claims it the
+ * same way before it writes its first consent decision.
  *
  * The rule that gap left in prose is now enforced (#399): every write to an
  * FK-child table in the plugin runtime must be preceded, on every path that
@@ -79,8 +81,8 @@ export const CLAIMED_LOCK_ORDER = [
   {
     /**
      * The household's share lock, which a household-scope write takes first so
-     * a soft-deleted household refuses it (#548). `openHouseholdUnit` and
-     * `decide()`'s household branch both call `lockLiveHousehold`.
+     * a soft-deleted household refuses it (#548). `openHouseholdUnit` and a
+     * household consent act (#1150) both call `lockLiveHousehold`.
      *
      * The SQL lives in `@bge/database` (#552), outside the plugin runtime, so a
      * stage matched only by its `FOR SHARE` clause would see nothing in these
@@ -97,9 +99,16 @@ export const CLAIMED_LOCK_ORDER = [
   },
   {
     /**
-     * Taken by the unit paths through `assertStillLiving`, and by uninstall and
-     * activation as the claiming write they already make. Both are the plugin
-     * row; what matters is that nothing else is taken before it.
+     * Taken by the unit paths through `assertStillLiving`, by a consent act
+     * through `claimPluginForAct` (#1150), and by uninstall and activation as
+     * the claiming write they already make. All are the plugin row; what
+     * matters is that nothing else is taken before it.
+     *
+     * The consent act's raw `FOR SHARE` lives in `claimPluginForAct`'s body,
+     * not in `commit`'s, so the call is what `commit` shows — the same reason
+     * the household row is matched by `lockLiveHousehold(` (#401). The FK-child
+     * audit below reads this pattern too, which is how the act's grant and
+     * unit writes count as claimed.
      *
      * Activation also takes it by raw `FOR UPDATE` (D-CN, #370): the
      * server-config read guarding `Plugin.config` against a concurrent PATCH,
@@ -124,6 +133,7 @@ export const CLAIMED_LOCK_ORDER = [
     name: 'plugin row',
     pattern: anyOf(
       /assertStillLiving\(/,
+      /claimPluginForAct\(/,
       relationLock('plugins', 'FOR SHARE'),
       relationLock('plugins', 'FOR UPDATE'),
       /tx\.plugin\.update/,
@@ -132,10 +142,12 @@ export const CLAIMED_LOCK_ORDER = [
   },
   {
     /**
-     * `decide()`'s upsert takes it; activation's `FOR UPDATE` takes it. The
-     * idempotency pre-read in `decide()` is deliberately NOT matched — it runs
-     * before the upsert and locks nothing, so counting it would date the stage
-     * to a read that orders nothing.
+     * The upserts of `decide()` and of a consent act take it (#1150);
+     * activation's `FOR UPDATE` takes it. The idempotency pre-reads — the
+     * `findUnique` in `decide()`, the standing-decision `findMany` in a consent
+     * act — are deliberately NOT matched: they run before the upsert and lock
+     * nothing, so counting them would date the stage to a read that orders
+     * nothing.
      */
     name: 'grant row',
     pattern: anyOf(/pluginGrant\.upsert\(/, relationLock('plugin_grants', 'FOR UPDATE')),
@@ -214,6 +226,7 @@ const GRANT_SERVICE = 'libs/plugin/runtime/src/lib/grants/plugin-grant.service.t
 const UNIT_LIFECYCLE = 'libs/plugin/runtime/src/lib/units/plugin-unit-lifecycle.service.ts';
 const UPDATE_SERVICE = 'libs/plugin/runtime/src/lib/update/plugin-update.service.ts';
 const LIFECYCLE_SERVICE = 'libs/plugin/runtime/src/lib/lifecycle/plugin-lifecycle.service.ts';
+const CONSENT_ACT_SERVICE = 'libs/plugin/runtime/src/lib/consent/plugin-consent-act.service.ts';
 
 /**
  * The installer, which takes no entry in {@link LOCK_ORDER_PATHS}.
@@ -232,6 +245,7 @@ export const LOCK_SOURCES = {
   updateService: UPDATE_SERVICE,
   lifecycleService: LIFECYCLE_SERVICE,
   installerService: INSTALLER_SERVICE,
+  consentActService: CONSENT_ACT_SERVICE,
   unitScopeLock: 'libs/plugin/runtime/src/lib/grants/unit-scope-lock.ts',
 } as const;
 
@@ -239,12 +253,11 @@ export const LOCK_SOURCES = {
  * Every writer that takes more than one of these locks.
  *
  * A path taking a single lock cannot be out of order with itself, so the list
- * is exactly the set where the claim has content. `decide()` appears more than
- * once because its branches are independent: a household decision takes the
- * household row and writes no unit enablement, a granted user decision creates the
- * user's unit enablement and takes no household row, and neither runs in the
- * other's transaction — so one claim over both would describe a path that
- * never runs.
+ * is exactly the set where the claim has content. The consent act is the one
+ * path that takes all five: it writes household and user decisions and creates
+ * or switches the unit enablement in one transaction (#1150). `decide()` is now
+ * a server decision only, so it takes the plugin-row prefix and the grant row
+ * and nothing after.
  */
 export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
   {
@@ -266,39 +279,34 @@ export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
     because: 'The user-scope twin, which takes the same prefix for the same reason.',
   },
   {
-    label: 'decide() — a household decision',
-    file: GRANT_SERVICE,
-    functionName: 'decide',
-    stages: ['household row', 'plugin row', 'grant row'],
+    label: 'consent act (every household and user act)',
+    file: CONSENT_ACT_SERVICE,
+    functionName: 'commit',
+    stages: ['household row', 'plugin row', 'grant row', 'advisory key', 'unit row'],
     because:
-      'A household decision opens with the household share lock (#548), then the plugin-row claim (#398), ' +
-      'then the upsert takes the grant row, and writes nothing else: consent standing is worked out when ' +
-      'read, so no unit enablement follows (#1149). The plugin-row lock is not optional decoration: the grant ' +
-      'INSERT takes FOR KEY SHARE on that row through the FK anyway, and takes it AFTER writing the grant ' +
-      'tuple, so without the claim this path holds the plugin row LAST and deadlocks against activation. ' +
-      'The same claim compares the plugin manifest the gates were judged against, so nothing is re-read ' +
-      'after the write (#361).',
+      'Every switch-on, toggle and review is one transaction through commit (#1150), so it is the one writer ' +
+      'that takes all five. A household act opens with the household share lock, so a soft-deleted household ' +
+      'refuses it (#548); a user act skips that stage. Then the plugin-row claim (#398), which is not optional ' +
+      'decoration: the grant upserts take FOR KEY SHARE on that row through the FK anyway, AFTER writing the ' +
+      'grant tuple, so without the claim this path holds the plugin row LAST and deadlocks against activation. ' +
+      'The claim also compares the sha the consent surface named, so nothing judged under it is judged against ' +
+      'a moved manifest (#361). Then the grant rows, in permission order, then the unit-scope key, which exists ' +
+      'before the unit enablement does, and only then the unit enablement write: the key before the row, so an ' +
+      'act waits out an uncommitted switch-off or config write on the same unit, which takes the same key ' +
+      'first (#323). Taking those two the other way round is a cycle against every unit writer.',
   },
   {
-    label: 'decide() — the grant row precedes the unit-scope key',
+    label: 'decide() — a server decision',
     file: GRANT_SERVICE,
     functionName: 'decide',
-    stages: ['plugin row', 'grant row', 'advisory key'],
+    stages: ['plugin row', 'grant row'],
     because:
-      "The consent act is the enabling act (#225), so a granted user decision creates the user's unit " +
-      'enablement in the decision transaction — which puts the key after the upsert that already holds the ' +
-      'grant row, and both after the claim that opens the transaction.',
-  },
-  {
-    label: "decide() — inside the branch that creates the user's unit enablement",
-    file: GRANT_SERVICE,
-    functionName: 'decide',
-    branch: /Granted && input\.scopeType === PluginGrantScope\.User/,
-    stages: ['advisory key', 'unit row'],
-    because:
-      'Scoped to the branch, so the pin reads the suffix where it is taken: the key before the row, so the ' +
-      "first grant waits out an uncommitted creation by the user's own enable toggle, which takes the same " +
-      'key first (#323). Taking those two the other way round is a cycle against every unit writer.',
+      'A server decision takes the plugin-row claim (#398), then the upsert takes the grant row, and writes ' +
+      'nothing else: household and user decisions are consent acts now, so no household lock, no unit-scope ' +
+      'key and no unit enablement follow (#1150). The claim comes first for the same FK reason as the act: ' +
+      'without it the grant INSERT takes the plugin row last and deadlocks against activation. The same ' +
+      'claim compares the plugin manifest the gates were judged against, so nothing is re-read after the ' +
+      'write (#361).',
   },
   {
     label: 'activateInTransaction (approval)',
@@ -677,7 +685,7 @@ function auditFkChildWrites(): readonly AuditedFkChildWrite[] {
     .filter((file) => mentions.test(file.source))
     .flatMap((file) =>
       // Delegates are resolved per FILE, because that is the scope they are
-      // resolvable in: `enableHousehold` holds the plugin row through
+      // resolvable in: `updateHouseholdConfig` holds the plugin row through
       // `openHouseholdUnit` through `assertStillLiving`, and nothing in its own
       // text looks like a lock.
       auditedWrites(file.source, file.path, writes, claimsIncludingDelegates(file.source, file.path, pluginRow)).map(

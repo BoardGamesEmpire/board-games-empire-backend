@@ -54,8 +54,8 @@ export const ACTIVATION_VERSION_BUMP =
 export const FK_PLUGIN_LOCK = 'SELECT p.id FROM plugins p WHERE p.id = $1 FOR KEY SHARE';
 
 /**
- * What `decide()` does to an existing grant row, as a statement a barrier can
- * hold open.
+ * What `decide()` and a consent act (#1150) do to an existing grant row, as a
+ * statement a barrier can hold open.
  *
  * Prisma issues the real one as an upsert — `INSERT … ON CONFLICT DO UPDATE` —
  * and its update arm is this write. Standing in for it follows the
@@ -100,8 +100,8 @@ export const SERVER_GRANT_INSERT =
  *
  * No shipped statement locks a unit enablement by raw SQL since consent standing
  * became a read-time derivation (#1149): the unit writers that remain take the
- * row through a Prisma write (`tx.householdPlugin.update`, the user's first
- * grant's `upsert`, the dormancy pass's `updateMany`), which Prisma cannot
+ * row through a Prisma write (`tx.householdPlugin.update`, a consent act's
+ * create or `upsert` (#1150), the dormancy pass's `updateMany`), which Prisma cannot
  * express as a held lock. So this states the stage in the form the `unit row`
  * pattern recognises. `FOR UPDATE` is the strongest row mode, at least as
  * strong as the `FOR NO KEY UPDATE` an UPDATE of non-key columns takes, so a

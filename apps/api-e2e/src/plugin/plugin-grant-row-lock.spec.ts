@@ -13,9 +13,9 @@ import { LOCK_SOURCES } from './lock-order';
  * This file once covered three `FOR UPDATE` statements. The two on the unit
  * rows (`household_plugins`, `user_plugins`) belonged to the passes that kept a
  * stored suspension in step with the grants, and went with them when consent
- * standing became a read-time derivation (#1149): a decision now writes its
- * grant row and, for a user's first grant, the user's unit enablement, and
- * nothing locks a unit row by raw SQL. Ordering the unit writers that remain is
+ * standing became a read-time derivation (#1149). A server decision now writes
+ * only its grant row, a consent act writes its grant rows and then the unit
+ * enablement (#1150), and nothing locks a unit row by raw SQL. Ordering the unit writers that remain is
  * the advisory key's job (`unit-scope-advisory-lock.spec.ts`) and the claimed
  * lock order's (`plugin-lock-order.spec.ts`).
  *
