@@ -16,6 +16,7 @@ export * from './lib/events/plugin-lifecycle-event-type.map';
 export * from './lib/events/plugin.events';
 export * from './lib/features/feature-state.errors';
 export * from './lib/features/plugin-feature-state.service';
+export * from './lib/grants/consent-grantability';
 export * from './lib/grants/consent-scope.map';
 export * from './lib/grants/grant.errors';
 export * from './lib/grants/plugin-admin-permissions';

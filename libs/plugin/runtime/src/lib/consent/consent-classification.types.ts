@@ -1,6 +1,7 @@
 import { assertNeverPluginUnit, type PluginUnit } from '@bge/actor-context';
 import type { RiskLevel } from '@bge/database';
 import type { PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest';
+import type { ConsentUngrantableCause } from '../grants/consent-grantability';
 
 /**
  * Consent-classification vocabulary shared by the classifier, feature-state
@@ -54,6 +55,11 @@ export interface ClassifiedConsentCheck {
   readonly decidedRiskLevel: RiskLevel | null;
   /** A `Granted` row exists but its `decidedRiskLevel` no longer covers today's risk (#59): reported pending, re-consent re-stamps. */
   readonly staleRisk: boolean;
+  /**
+   * Why this requested permission can never be granted at its deciding scope;
+   * `null` when it can. Reported whether or not a decision exists (#1150).
+   */
+  readonly ungrantable: ConsentUngrantableCause | null;
 }
 
 export interface ConsentCheckClassification {

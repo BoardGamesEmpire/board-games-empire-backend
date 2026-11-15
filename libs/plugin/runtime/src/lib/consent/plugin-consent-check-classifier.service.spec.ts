@@ -134,6 +134,7 @@ describe('PluginConsentCheckClassifier', () => {
       decision: 'pending',
       decidedRiskLevel: null,
       staleRisk: false,
+      ungrantable: 'unbound_unit_scope',
     });
   });
 
@@ -156,6 +157,7 @@ describe('PluginConsentCheckClassifier', () => {
       decision: 'denied',
       decidedRiskLevel: RiskLevel.Low,
       staleRisk: false,
+      ungrantable: 'unbound_unit_scope',
     });
   });
 
@@ -182,6 +184,7 @@ describe('PluginConsentCheckClassifier', () => {
       decision: 'granted',
       decidedRiskLevel: RiskLevel.Low,
       staleRisk: false,
+      ungrantable: null,
     });
   });
 
@@ -208,6 +211,7 @@ describe('PluginConsentCheckClassifier', () => {
       decision: 'pending',
       decidedRiskLevel: RiskLevel.Low,
       staleRisk: true,
+      ungrantable: null,
     });
   });
 
@@ -232,6 +236,7 @@ describe('PluginConsentCheckClassifier', () => {
       decision: 'pending',
       decidedRiskLevel: RiskLevel.Low,
       staleRisk: false,
+      ungrantable: 'unbound_unit_scope',
     });
   });
 
@@ -252,6 +257,7 @@ describe('PluginConsentCheckClassifier', () => {
         decision: 'pending',
         decidedRiskLevel: RiskLevel.Low,
         staleRisk: false,
+        ungrantable: 'unbound_unit_scope',
       });
     });
 
@@ -262,6 +268,7 @@ describe('PluginConsentCheckClassifier', () => {
           decision: 'granted',
           decidedRiskLevel: RiskLevel.Low,
           staleRisk: false,
+          ungrantable: null,
         });
       },
     );
@@ -303,6 +310,7 @@ describe('PluginConsentCheckClassifier', () => {
             decision: 'pending',
             decidedRiskLevel: RiskLevel.Low,
             staleRisk: false,
+            ungrantable: 'unbound_unit_scope',
           });
           expect(warn).toHaveBeenCalledWith(expect.stringContaining(CONSENT_UNIT_BINDING_REFUSAL));
         },
@@ -360,6 +368,7 @@ describe('PluginConsentCheckClassifier', () => {
       decision: 'pending',
       decidedRiskLevel: RiskLevel.Low,
       staleRisk: false,
+      ungrantable: 'wildcard_subject',
     });
   });
 
@@ -379,6 +388,7 @@ describe('PluginConsentCheckClassifier', () => {
       decision: 'pending',
       decidedRiskLevel: RiskLevel.Low,
       staleRisk: false,
+      ungrantable: 'no_catalog_row',
     });
     expect(result.currentRiskBySlug.has('create:notification')).toBe(false);
   });
@@ -402,6 +412,7 @@ describe('PluginConsentCheckClassifier', () => {
       decision: 'pending',
       decidedRiskLevel: RiskLevel.Low,
       staleRisk: true,
+      ungrantable: null,
     });
     expect(db.pluginPermission.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ pluginId: 'plg_1' }) }),
@@ -430,6 +441,55 @@ describe('PluginConsentCheckClassifier', () => {
       decision: 'pending',
       decidedRiskLevel: null,
       staleRisk: false,
+      ungrantable: null,
     });
+  });
+
+  it('reports why a requested permission cannot be granted, whether or not a decision exists (#1150)', async () => {
+    // No conditions: nothing binds the household, so no consent decision can
+    // make this grantable, and none exists yet.
+    db.permission.findMany.mockResolvedValue([
+      { slug: 'create:notification', riskLevel: RiskLevel.Low, subject: 'Notification', conditions: null },
+    ] as never);
+
+    const result = await classifier.classify('plg_1', HOUSEHOLD_UNIT, [check('create:notification')]);
+
+    expect(result.decisions.get('create:notification')).toEqual({
+      decision: 'pending',
+      decidedRiskLevel: null,
+      staleRisk: false,
+      ungrantable: 'unbound_unit_scope',
+    });
+  });
+
+  it('judges a declared permission without a catalog row against the manifest source it is handed (#1150)', async () => {
+    const declared = check(OWN_CANONICAL, { origin: 'plugin' });
+
+    const active = await classifier.classify('plg_1', HOUSEHOLD_UNIT, [declared]);
+    const staged = await classifier.classify('plg_1', HOUSEHOLD_UNIT, [declared], { source: 'pending' });
+
+    expect(active.decisions.get(OWN_CANONICAL)?.ungrantable).toBe('no_catalog_row');
+    expect(staged.decisions.get(OWN_CANONICAL)?.ungrantable).toBeNull();
+  });
+
+  it('reads the catalog and the decisions through the client it is handed (#1150)', async () => {
+    const other = createMockDatabaseService();
+    other.pluginGrant.findMany.mockResolvedValue([] as never);
+    other.permission.findMany.mockResolvedValue([] as never);
+    other.pluginPermission.findMany.mockResolvedValue([] as never);
+
+    await classifier.classify(
+      'plg_1',
+      HOUSEHOLD_UNIT,
+      [check('create:notification'), check(OWN_CANONICAL, { origin: 'plugin' })],
+      { client: other as unknown as DatabaseService },
+    );
+
+    expect(other.pluginGrant.findMany).toHaveBeenCalled();
+    expect(other.permission.findMany).toHaveBeenCalled();
+    expect(other.pluginPermission.findMany).toHaveBeenCalled();
+    expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
+    expect(db.permission.findMany).not.toHaveBeenCalled();
+    expect(db.pluginPermission.findMany).not.toHaveBeenCalled();
   });
 });
