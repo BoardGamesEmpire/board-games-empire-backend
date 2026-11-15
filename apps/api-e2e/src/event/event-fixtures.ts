@@ -3,6 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
 import { tabletopPlatform } from '../support/seeded-platforms';
 
+const HOUR_MS = 60 * 60 * 1000;
+
+/** An ISO timestamp `hours` from now, or before now when negative, as a date's start or end is sent. */
+export const hoursFromNow = (hours: number): string => new Date(Date.now() + hours * HOUR_MS).toISOString();
+
 /**
  * An offered entry for `ownerId`'s attendee row on `eventId`: a fresh game in
  * the owner's collection, put on their list for the event. The owner must

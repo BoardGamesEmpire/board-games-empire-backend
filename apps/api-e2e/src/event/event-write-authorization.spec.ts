@@ -14,7 +14,7 @@ import request from 'supertest';
 import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { arrangeListEntry } from './event-fixtures';
+import { arrangeListEntry, hoursFromNow } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import { attendeeEnvelope, eventEnvelope, eventGameEnvelope, occurrenceEnvelope } from './event-wire';
 
@@ -640,8 +640,6 @@ describe('event write authorization', () => {
   });
 
   describe("a date's status changes (#979)", () => {
-    const HOUR_MS = 60 * 60 * 1000;
-    const hoursFromNow = (hours: number) => new Date(Date.now() + hours * HOUR_MS).toISOString();
     const POLL_WITH_DATE = {
       schedulingMode: EventSchedulingMode.Poll,
       occurrences: [{ startDate: hoursFromNow(24) }],

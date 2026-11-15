@@ -40,14 +40,12 @@ export function deriveEventStatus(
   let latestEnd: number | null = null;
 
   for (const { status, startDate, endDate } of dates) {
-    const endsAt = dateEnd({ startDate, endDate });
-
-    if (status !== OccurrenceStatus.Confirmed || startDate === null || endsAt === null) {
+    if (status !== OccurrenceStatus.Confirmed || startDate === null) {
       continue;
     }
 
     const start = startDate.getTime();
-    const end = endsAt.getTime();
+    const end = dateEnd({ startDate, endDate }).getTime();
 
     earliestStart = earliestStart === null ? start : Math.min(earliestStart, start);
     latestEnd = latestEnd === null ? end : Math.max(latestEnd, end);

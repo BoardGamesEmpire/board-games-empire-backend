@@ -68,7 +68,7 @@
   "event": {
     "not_found": "Event with ID {id} not found",
     "not_attendee": "You are not an attendee of this event.",
-    "fixed_mode_single": "Fixed scheduling mode allows at most one occurrence.",
+    "fixed_mode_single": "This event takes one date, so it can be created with one date at most. Send one date, or choose another scheduling mode.",
     "fixed_mode_live_dates": "This event has more than one date still proposed or confirmed. Decline, cancel or remove dates until one is left, then switch to Fixed.",
     "invitee_friends_only": "This server only allows you to place your friends on an event",
     "invitee_friends_of_friends_only": "This server only allows you to place your friends and friends of friends on an event",
@@ -93,11 +93,11 @@
   "occurrence": {
     "not_found": "Occurrence {occurrenceId} not found for event {eventId}",
     "confirmed_remove": "This date is confirmed. Cancel it first, then remove it.",
-    "fixed_mode_single": "This event takes one date, and it already has one. Cancel or decline that date first, or change the event's scheduling mode.",
+    "fixed_mode_single": "This event takes one date, and it already has one. Cancel that date if it's confirmed, or decline it if it's proposed, then add the new one. You can also change the event's scheduling mode.",
     "invalid_transition": "Cannot transition from \"{from}\" to \"{to}\". Allowed source statuses: {allowed}.",
     "availability_proposed_only": "Availability votes are only accepted for Proposed occurrences. Current status: \"{status}\".",
     "vote_date_passed": "This date has already passed, so it no longer takes availability votes. The host can move it to a later time so it takes votes again.",
-    "confirm_date_passed": "This date has already passed, so it can't be confirmed. Move it to a later time, or add a confirmed date to record one that happened."
+    "confirm_date_passed": "This date has already passed, so it can't be confirmed. Move it to a later time. To record a date that happened, decline this one and add a confirmed date."
   },
   "attendee": {
     "not_found": "Attendee {attendeeId} not found for event {eventId}",

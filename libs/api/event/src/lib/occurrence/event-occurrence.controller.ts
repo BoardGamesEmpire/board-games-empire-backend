@@ -7,6 +7,7 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTag
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
+import { OCCURRENCE_EDIT_FIELDS } from './constants/occurrence-edit-fields.constant';
 import { AddOccurrenceDto } from './dto/add-occurrence.dto';
 import { CancelOccurrenceDto } from './dto/cancel-occurrence.dto';
 import { SubmitAvailabilityDto } from './dto/submit-availability.dto';
@@ -73,6 +74,12 @@ export class EventOccurrenceController {
       'takes everything from the event’s (#796, #1211).',
   })
   @ApiResponse({ status: Http.Created, description: 'Occurrence added' })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description:
+      'The event is cancelled, or it takes one date and already has one that is proposed or confirmed ' +
+      '(code OCCURRENCE_FIXED_MODE_HAS_DATE)',
+  })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.EventOccurrence))
   @Post()
   addOccurrence(@Param('eventId') eventId: string, @Body() dto: AddOccurrenceDto) {
@@ -92,7 +99,11 @@ export class EventOccurrenceController {
   })
   @ApiParam({ name: 'occurrenceId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Occurrence updated' })
-  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence))
+  // A permission bound only to status columns can edit none of these, so it
+  // is refused here rather than by the write's ceiling (#979).
+  @CheckPolicies((ability) =>
+    OCCURRENCE_EDIT_FIELDS.some((field) => ability.can(Action.update, ResourceType.EventOccurrence, field)),
+  )
   @Patch(':occurrenceId')
   updateOccurrence(
     @Param('eventId') eventId: string,

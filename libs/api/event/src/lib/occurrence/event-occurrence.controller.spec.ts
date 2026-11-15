@@ -87,6 +87,30 @@ describe('EventOccurrenceController', () => {
     });
   });
 
+  // A permission bound only to status columns passed a field-less check, and
+  // the edit got as far as the write's ceiling before it was refused (#979).
+  describe('update permission check', () => {
+    /** Whether the edit route's check passes an ability admitting only `fields`. */
+    const passesWith = (fields: string[]) => {
+      const [handler] = Reflect.getMetadata(
+        CHECK_POLICIES_KEY,
+        EventOccurrenceController.prototype.updateOccurrence,
+      ) as Array<(ability: AppAbility) => boolean>;
+      const can = (_action: Action, _type: ResourceType, field?: string) =>
+        field !== undefined && fields.includes(field);
+
+      return handler({ can } as unknown as AppAbility);
+    };
+
+    it.each(['label', 'startDate', 'endDate', 'location', 'sortOrder'])('passes a permission covering %s', (field) => {
+      expect(passesWith([field])).toBe(true);
+    });
+
+    it('refuses a permission bound only to status columns, such as the cancel', () => {
+      expect(passesWith(['status', 'cancelledAt', 'cancelledById', 'cancelReason'])).toBe(false);
+    });
+  });
+
   describe('getOccurrences', () => {
     it('delegates with the paging and wraps the rows in the envelope', async () => {
       const occurrences = [stubOccDetail(), stubOccDetail()];

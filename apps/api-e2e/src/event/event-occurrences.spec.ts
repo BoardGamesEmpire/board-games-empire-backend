@@ -13,7 +13,7 @@ import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { arrangeListEntry } from './event-fixtures';
+import { arrangeListEntry, hoursFromNow } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import { eventGameEnvelope, listOccurrencesEnvelope, nominationEnvelope, occurrenceEnvelope } from './event-wire';
 
@@ -309,9 +309,6 @@ describe('event occurrences', () => {
    * so a host can clear it away.
    */
   describe('a passed Proposed date (#1005)', () => {
-    const HOUR_MS = 60 * 60 * 1000;
-    const hoursFromNow = (hours: number) => new Date(Date.now() + hours * HOUR_MS).toISOString();
-
     const addDate = async (
       actor: AuthenticatedActor,
       eventId: string,

@@ -851,6 +851,23 @@ describe('EventOccurrenceService', () => {
       );
     });
 
+    // Every edit field is bound to the same permissions, so a patch sending
+    // five fields would otherwise put the same clause in the WHERE five times.
+    it('keeps each ceiling clause once when the fields share their permissions (#979)', async () => {
+      const keyCondition = { id: 'key-condition' };
+      abilityService.getCurrentResourceConditions.mockImplementation(() => [{ id: 'session-condition' }, keyCondition]);
+      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
+      db.eventOccurrence.update.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
+
+      await service.updateOccurrence('event-1', 'occ-1', { label: 'x', location: 'y', sortOrder: 2 });
+
+      expect(db.eventOccurrence.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ AND: [{ id: 'session-condition' }, keyCondition] }),
+        }),
+      );
+    });
+
     it('emits an OccurrenceUpdatedEvent carrying the changed subset', async () => {
       db.eventOccurrence.findUnique.mockResolvedValue(
         makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', label: 'Old' }),
@@ -1547,6 +1564,13 @@ describe('EventOccurrenceService', () => {
   });
 
   describe('submitAvailability', () => {
+    /** The date's row as the share-locked read inside the vote's transaction finds it (#1005). */
+    const dateUnderLock = (row: Pick<EventOccurrence, 'status' | 'startDate' | 'endDate'> | null) =>
+      db.$queryRaw.mockImplementation(((query: unknown) =>
+        Promise.resolve(
+          /FROM event_occurrences .* FOR SHARE$/.test(rawQueryText(query)) && row !== null ? [row] : [],
+        )) as never);
+
     beforeEach(() => {
       abilityService.getActingUserId.mockReturnValue('user-1');
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1' } as never);
@@ -1556,6 +1580,7 @@ describe('EventOccurrenceService', () => {
         startDate: null,
         endDate: null,
       } as EventOccurrence);
+      dateUnderLock({ status: OccurrenceStatus.Proposed, startDate: null, endDate: null });
       db.eventAvailabilityVote.upsert.mockResolvedValue({
         id: 'vote-1',
         occurrenceId: 'occ-1',
@@ -1663,6 +1688,51 @@ describe('EventOccurrenceService', () => {
         } finally {
           jest.useRealTimers();
         }
+      });
+
+      // The early read can be overtaken by an edit moving the date into the
+      // past, or by a confirm. The vote reads the date again under a share
+      // lock those writes conflict with, and judges it as they left it.
+      it('reads the date again under a share lock and refuses one that has passed meanwhile (#1005)', async () => {
+        dateUnderLock({ status: OccurrenceStatus.Proposed, startDate: new Date(Date.now() - HOUR), endDate: null });
+
+        const rejection: unknown = await service
+          .submitAvailability('event-1', 'occ-1', { response: AvailabilityResponse.Available })
+          .catch((e: unknown) => e);
+
+        expect(rawQueryText(db.$queryRaw.mock.calls[0][0])).toMatch(/FROM event_occurrences WHERE id = \? FOR SHARE$/);
+        expect(rejection).toBeInstanceOf(CodedHttpException);
+        expect((rejection as CodedHttpException).getResponse()).toMatchObject({ code: 'OCCURRENCE_DATE_PASSED' });
+        expect(db.eventAvailabilityVote.upsert).not.toHaveBeenCalled();
+      });
+
+      it('refuses a vote on a date confirmed meanwhile, read under the share lock', async () => {
+        dateUnderLock({ status: OccurrenceStatus.Confirmed, startDate: null, endDate: null });
+
+        await expect(
+          service.submitAvailability('event-1', 'occ-1', { response: AvailabilityResponse.Available }),
+        ).rejects.toThrow(BadRequestException);
+        expect(db.eventAvailabilityVote.upsert).not.toHaveBeenCalled();
+      });
+
+      it('answers 404 for a date removed meanwhile, read under the share lock', async () => {
+        dateUnderLock(null);
+
+        await expect(
+          service.submitAvailability('event-1', 'occ-1', { response: AvailabilityResponse.Available }),
+        ).rejects.toThrow(NotFoundException);
+        expect(db.eventAvailabilityVote.upsert).not.toHaveBeenCalled();
+      });
+
+      it('writes the vote inside the transaction that holds the share lock', async () => {
+        db.eventAvailabilityVote.findUnique.mockResolvedValue(null);
+
+        await service.submitAvailability('event-1', 'occ-1', { response: AvailabilityResponse.Available });
+
+        expect(db.$transaction).toHaveBeenCalledTimes(1);
+        expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+          db.eventAvailabilityVote.upsert.mock.invocationCallOrder[0],
+        );
       });
 
       it('takes a vote on a Proposed date with no start (#1005)', async () => {

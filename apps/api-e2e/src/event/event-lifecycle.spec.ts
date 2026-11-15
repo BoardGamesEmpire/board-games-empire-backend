@@ -5,15 +5,13 @@ import type { UnreadNotificationWire } from '../notification/notification-wire';
 import { unreadWhen } from '../notification/unread-poll';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { hoursFromNow } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import { eventEnvelope, listEventsEnvelope, occurrenceEnvelope } from './event-wire';
 
 const CANCELLED = 'This event is cancelled. Reopen it first.';
 const ARCHIVED = 'This event is archived. Unarchive it first.';
 const NOT_ARCHIVABLE = 'Only a cancelled event, or one whose dates have all passed, can be archived.';
-
-const HOUR = 60 * 60 * 1000;
-const hoursFromNow = (hours: number) => new Date(Date.now() + hours * HOUR).toISOString();
 
 /**
  * Cancel, reopen and archive an event, and the status worked out from its

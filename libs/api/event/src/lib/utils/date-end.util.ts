@@ -8,6 +8,8 @@ export type DateWindow = Pick<EventOccurrence, 'startDate' | 'endDate'>;
  * before the start is moved up to the start, so a date never ends before it
  * begins. A date with no start has no end either, because it isn't scheduled.
  */
+export function dateEnd(date: DateWindow & { startDate: Date }): Date;
+export function dateEnd(date: DateWindow): Date | null;
 export function dateEnd(date: DateWindow): Date | null {
   if (date.startDate === null) {
     return null;
