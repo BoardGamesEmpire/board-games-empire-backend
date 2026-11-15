@@ -1,18 +1,20 @@
-import { AuthType, type DataGateway, type Plugin } from '@bge/database';
+import { AuthType, type DataGateway } from '@bge/database';
+import type { RoutedPlugin } from '../plugin-driver-source';
 
 type Where = Readonly<Record<string, unknown>>;
 
-/** A select names a scalar with `true`, and a relation with its own select, which the fake doesn't narrow by. */
+/**
+ * A select names a scalar with `true`, and a relation with its own select,
+ * which the fake doesn't narrow by. An include names relations the same way.
+ */
 interface Query {
   where?: Where;
   select?: Readonly<Record<string, boolean | object>>;
+  include?: Readonly<Record<string, boolean | object>>;
 }
 
-/** What a routing decision reads of the plugin behind a plugin DataGateway's row (#1083). */
-type SeededPlugin = Pick<Plugin, 'id' | 'slug' | 'enabled' | 'uninstalledAt' | 'loadFailed' | 'installedAt'>;
-
 /** A stored row, with the plugin a read may select beside it: null for a remote DataGateway. */
-type StoredRow = DataGateway & { plugin: SeededPlugin | null };
+type StoredRow = DataGateway & { plugin: RoutedPlugin | null };
 
 interface Update {
   where: Where;
@@ -45,6 +47,8 @@ const matchesField = (actual: unknown, condition: unknown): boolean => {
         return sameValue(actual, operand);
       case 'in':
         return (operand as unknown[]).some((candidate) => sameValue(actual, candidate));
+      case 'not':
+        return !sameValue(actual, operand);
       default:
         throw new Error(`The fake data_gateways table doesn't support the '${operator}' filter`);
     }
@@ -54,15 +58,17 @@ const matchesField = (actual: unknown, condition: unknown): boolean => {
 const matches = (row: StoredRow, where: Where = {}): boolean =>
   Object.entries(where).every(([field, condition]) => matchesField(row[field as keyof StoredRow], condition));
 
-/** Without a select, the row's own columns, as Prisma answers: a relation comes only when selected. */
-const project = (row: StoredRow, select?: Query['select']): Partial<StoredRow> => {
+/**
+ * Without a select, the row's own columns, as Prisma answers: a relation
+ * comes only when selected, or included beside the columns.
+ */
+const project = (row: StoredRow, { select, include }: Pick<Query, 'select' | 'include'>): Partial<StoredRow> => {
   if (select) {
     return Object.fromEntries(Object.keys(select).map((field) => [field, row[field as keyof StoredRow]]));
   }
 
-  const columns: Partial<StoredRow> = { ...row };
-  delete columns.plugin;
-  return columns;
+  const { plugin, ...columns } = row;
+  return include?.plugin ? { ...columns, plugin } : columns;
 };
 
 /**
@@ -150,9 +156,9 @@ export class FakeDataGatewayTable {
   }
 
   readonly delegate = {
-    findUnique: async ({ where, select }: Query) => this.findAll(where, select)[0] ?? null,
-    findFirst: async ({ where, select }: Query = {}) => this.findAll(where, select)[0] ?? null,
-    findMany: async ({ where, select }: Query = {}) => this.findAll(where, select),
+    findUnique: async (query: Query) => this.findAll(query)[0] ?? null,
+    findFirst: async (query: Query = {}) => this.findAll(query)[0] ?? null,
+    findMany: async (query: Query = {}) => this.findAll(query),
 
     updateMany: async ({ where, data }: Update) => {
       const rows = this.matching(where);
@@ -165,8 +171,8 @@ export class FakeDataGatewayTable {
     return [...this.rows.values()].filter((row) => matches(row, where));
   }
 
-  private findAll(where?: Where, select?: Query['select']): Partial<StoredRow>[] {
-    return this.matching(where).map((row) => project(row, select));
+  private findAll({ where, ...shape }: Query): Partial<StoredRow>[] {
+    return this.matching(where).map((row) => project(row, shape));
   }
 
   private apply(row: StoredRow, data: Update['data']): StoredRow {

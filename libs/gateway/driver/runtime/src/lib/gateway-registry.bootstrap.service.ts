@@ -4,14 +4,17 @@ import { GatewayRegistryService } from './gateway-registry.service';
 import { remoteConnectionOptions } from './utils/remote-connection-options';
 
 /**
- * Eagerly connects to all enabled gateways once the application is fully
- * bootstrapped. Uses OnApplicationBootstrap (not OnModuleInit) so that
- * Test.createTestingModule().compile() does NOT trigger gateway connection
- * attempts — only real app starts via app.init() / app.listen() do.
+ * Eagerly connects to all enabled remote DataGateways once the application
+ * is fully bootstrapped. Uses OnApplicationBootstrap (not OnModuleInit) so
+ * that Test.createTestingModule().compile() does NOT trigger gateway
+ * connection attempts — only real app starts via app.init() / app.listen() do.
  *
  * Connecting a DataGateway never interviewed runs its first interview. One
  * that fails it isn't routed, and is connected and interviewed again when
  * next reached.
+ *
+ * A plugin DataGateway is left out: the gateway registry builds its driver
+ * on first use, once the plugin loader has run (#1083).
  */
 @Injectable()
 export class GatewayRegistryBootstrapService implements OnApplicationBootstrap {
@@ -24,15 +27,20 @@ export class GatewayRegistryBootstrapService implements OnApplicationBootstrap {
 
   async onApplicationBootstrap(): Promise<void> {
     const gateways = await this.db.dataGateway.findMany({
-      where: { enabled: true, deletedAt: null },
+      where: { enabled: true, deletedAt: null, pluginId: null },
     });
 
-    this.logger.log(`Seeding gateway registry with ${gateways.length} enabled gateway(s)`);
+    this.logger.log(`Seeding gateway registry with ${gateways.length} enabled remote DataGateway(s)`);
 
     for (const gateway of gateways) {
-      // A plugin DataGateway's row has no connection fields, so there is nothing to dial (#1083).
+      // Every row read is a remote DataGateway's, and the table's CHECK gives
+      // each its connection fields. One without them is said, not skipped in
+      // silence: the lazy connect throws for the same row.
       const options = remoteConnectionOptions(gateway);
       if (!options) {
+        this.logger.error(
+          `DataGateway '${gateway.name}' (${gateway.id}) has no connection fields; not connected during bootstrap`,
+        );
         continue;
       }
 

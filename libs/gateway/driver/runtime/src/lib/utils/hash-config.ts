@@ -8,6 +8,9 @@ type ConfigOptions = Pick<DataGateway, 'connectionUrl' | 'connectionPort' | 'aut
  * Used by the registry to detect when a config update actually requires
  * reconnecting, and by config-event publishers to populate the hash field
  * on the published payload.
+ *
+ * A plugin DataGateway's row has none of these fields, and hashes to one
+ * value: nothing an admin can change on it calls for a new driver (#1083).
  */
 export function hashGatewayConfig(gateway: ConfigOptions): string {
   return [
