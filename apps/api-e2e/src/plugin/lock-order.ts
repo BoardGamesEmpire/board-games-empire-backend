@@ -254,6 +254,21 @@ const CONSENT_ACT_SERVICE = 'libs/plugin/runtime/src/lib/consent/plugin-consent-
 const INSTALLER_SERVICE = 'libs/plugin/runtime/src/lib/install/plugin-installer.service.ts';
 
 /**
+ * Where the installer places a plugin DataGateway's row (#1083), named for the
+ * same reason: an exemption points at it.
+ */
+const PLUGIN_DATA_GATEWAY_ROW = 'libs/plugin/runtime/src/lib/install/plugin-data-gateway-row.ts';
+
+/**
+ * The function in it that places the row, by name.
+ *
+ * One spelling for two uses: the exemption that names it as the enclosing
+ * function, and the search for its callers. Renamed in the runtime, the
+ * exemption goes stale and fails, and correcting the name here corrects both.
+ */
+const PLACE_PLUGIN_DATA_GATEWAY_ROW = 'placePluginDataGatewayRow';
+
+/**
  * The two files outside the plugin runtime that write an FK child (#1083):
  * the DataGateway routes' service and the interview, which both write
  * `data_gateways`. Neither takes a lock of the claimed order, so neither has
@@ -273,6 +288,7 @@ export const LOCK_SOURCES = {
   installerService: INSTALLER_SERVICE,
   consentActService: CONSENT_ACT_SERVICE,
   unitScopeLock: 'libs/plugin/runtime/src/lib/grants/unit-scope-lock.ts',
+  pluginDataGatewayRow: PLUGIN_DATA_GATEWAY_ROW,
   dataGatewayService: DATA_GATEWAY_SERVICE,
   gatewayInterviewService: GATEWAY_INTERVIEW_SERVICE,
 } as const;
@@ -570,6 +586,17 @@ export interface ClaimExemption {
  * would let a genuinely late claim date early somewhere else — the failure the
  * stage patterns are scoped so carefully to avoid (#399).
  *
+ * And once more from a file away. `placePluginDataGatewayRow` holds the one
+ * write in the tree that sets `data_gateways.plugin_id` (#1083), so it takes
+ * the implied lock like any other child insert. `persist()` calls it below that
+ * `if/else`, so the same two arms answer for it. `activateInTransaction()`
+ * calls it too, for an update that makes the plugin a data-gateway plugin,
+ * below the `FOR UPDATE` on the plugin row that every activation starts with.
+ * The audit cannot see either: it judges a write inside the function that
+ * holds it and resolves a delegate within one file, so where it reads there is
+ * no claim. That exemption rests on its callers, and
+ * {@link pluginDataGatewayRowPlacements} is what holds each caller to it.
+ *
  * The second is a write to `data_gateways` that cannot set its key (#1083).
  * That table differs from the other four in the one way that matters here:
  * `pluginId` is nullable, and null on every remote DataGateway's row. Postgres
@@ -586,7 +613,7 @@ export interface ClaimExemption {
  * What is NOT done here either: the scan is not taught that a nullable key is
  * safe. Nullable describes the column, and whether a write sets the key
  * describes the write. A rule that cleared the table would clear, along with
- * these, the first write that does set it.
+ * these, the one write that does set it.
  */
 export const PLUGIN_ROW_CLAIM_EXEMPTIONS: readonly ClaimExemption[] = [
   {
@@ -603,6 +630,21 @@ export const PLUGIN_ROW_CLAIM_EXEMPTIONS: readonly ClaimExemption[] = [
     enclosing: 'persist',
     site: /pluginGrant\.create/,
     because: 'The seeded server grants, reached by the same two branches and safe for the same two reasons.',
+  },
+  {
+    file: PLUGIN_DATA_GATEWAY_ROW,
+    enclosing: PLACE_PLUGIN_DATA_GATEWAY_ROW,
+    site: /dataGateway\.create\(/,
+    because:
+      "Creates a plugin DataGateway's row, with the one write that sets the key, so its FK check does lock the " +
+      'plugin row. Each of its two callers holds that row first, in the same transaction. persist() calls it ' +
+      'below the if/else that creates the plugin row on a fresh install (a tuple no other transaction can see ' +
+      'or queue behind) and claims it on a reinstall, through the plugin.updateMany that matches the plugin ' +
+      'row only while it is uninstalled: the two arms the two exemptions above rest on. ' +
+      'activateInTransaction() calls it for an update that makes the plugin a data-gateway plugin, below the ' +
+      'FOR UPDATE on the plugin row and the claim that every activation starts with. The audit stops at the ' +
+      'file boundary and cannot see a caller, so the spec pins both through pluginDataGatewayRowPlacements ' +
+      '(#1083).',
   },
   {
     file: DATA_GATEWAY_SERVICE,
@@ -695,7 +737,65 @@ export function fkChildWritesOutsideScope(): readonly string[] {
     ...children.map((child) => child.table),
     FK_CHILD_PARENT_ACCESSOR,
   ].map((name) => name.replace(/[^A-Za-z0-9_]/g, ''));
-  // `execFileSync` with an argument array: the pattern is built from schema
+
+  return shippedFilesNaming(identifiers)
+    .filter((path) => !FK_CHILD_WRITE_SCOPES.some((scope) => path.startsWith(`${scope}/`)))
+    .filter((path) => auditedWrites(readFileSync(join(root, path), 'utf8'), path, writes, pluginRow).length > 0);
+}
+
+/**
+ * Every call to `placePluginDataGatewayRow` in the shipped tree, each marked
+ * with whether the plugin row is already held on every path that reaches it
+ * (#1083).
+ *
+ * This is the half of that function's exemption the audit cannot check. The
+ * write inside it is safe because of where it is CALLED, and the audit never
+ * looks there: it judges a write within the function that holds it, and
+ * credits a delegate within one file (`unconditionalClaimants` says why that
+ * boundary fails conservatively). Following a call across modules for one site
+ * would be a new analysis. Reading the caller with the reader that already
+ * exists is not.
+ *
+ * The call is the shape, because the call is what a caller shows of the
+ * write — the reason the `'household row'` stage matches `lockLiveHousehold(`.
+ * `claimed` then means what it means everywhere else here: the pattern runs on
+ * every path to the site, both arms of an `if` or neither.
+ *
+ * The pattern is the `'plugin row'` stage's own, plus `tx.plugin.create`. That
+ * create stays out of the stage, as {@link PLUGIN_ROW_CLAIM_EXEMPTIONS} says it
+ * must: the stage asks whether a path queues at the plugin row, and a create
+ * queues behind nothing. The question here is a different one — whether the
+ * transaction already holds the plugin row when it places the plugin's
+ * DataGateway row — and on a fresh install it holds the plugin row by having
+ * made it.
+ *
+ * Callers are found by NAME over the whole shipped tree, not the scanned
+ * scope, since a call from anywhere is a caller the exemption has to answer
+ * for. What this cannot see is the function handed on as a value and called
+ * under another name. No call in this tree is made that way, and a reader
+ * adding the first one should widen this rather than trust it.
+ */
+export function pluginDataGatewayRowPlacements(): readonly SourceSite[] {
+  const root = workspaceRoot();
+  const placed: WriteShape = { pattern: new RegExp(String.raw`(?:^|\.)\s*${PLACE_PLUGIN_DATA_GATEWAY_ROW}$`) };
+  const pluginRowHeld = anyOf(stageNamed('plugin row').pattern, /tx\.plugin\.create\(/);
+
+  return shippedFilesNaming([PLACE_PLUGIN_DATA_GATEWAY_ROW]).flatMap((path) =>
+    auditedWrites(readFileSync(join(root, path), 'utf8'), path, [placed], pluginRowHeld),
+  );
+}
+
+/**
+ * The shipped `.ts` files naming any of the given identifiers,
+ * workspace-relative: the candidates, for the caller to parse and judge.
+ *
+ * Naming nothing is an error here, not an empty list: `git grep` exits
+ * non-zero when no file matches, and that is left to throw. Both callers ask
+ * about names the tree is expected to spell, so an empty answer means a
+ * renamed identifier, and returned quietly it would read as a clean tree.
+ */
+function shippedFilesNaming(identifiers: readonly string[]): readonly string[] {
+  // `execFileSync` with an argument array: the pattern is built from
   // identifiers rather than typed here, and a shell would give those a second
   // meaning.
   const found = execFileSync(
@@ -703,11 +803,11 @@ export function fkChildWritesOutsideScope(): readonly string[] {
     [
       'grep',
       '-lE',
-      // Untracked files count. A write added in a file nobody has committed yet
-      // is exactly the write this is for, and `git grep` reads the index by
-      // default — so without this the check passes on the change that
-      // introduces the problem and fails on the commit after it. Ignored paths
-      // stay excluded, so `node_modules` is not walked.
+      // Untracked files count. A write or a call added in a file nobody has
+      // committed yet is exactly what this is asked to find, and `git grep`
+      // reads the index by default — so without this a check passes on the
+      // change that introduces the problem and fails on the commit after it.
+      // Ignored paths stay excluded, so `node_modules` is not walked.
       '--untracked',
       `(^|[^A-Za-z0-9_])(${identifiers.join('|')})($|[^A-Za-z0-9_])`,
       '--',
@@ -715,13 +815,10 @@ export function fkChildWritesOutsideScope(): readonly string[] {
       ':!*.spec.ts',
       ':!apps/api-e2e/*',
     ],
-    { cwd: root, encoding: 'utf8' },
+    { cwd: workspaceRoot(), encoding: 'utf8' },
   );
 
-  return found
-    .split('\n')
-    .filter((path) => path.length > 0 && !FK_CHILD_WRITE_SCOPES.some((scope) => path.startsWith(`${scope}/`)))
-    .filter((path) => auditedWrites(readFileSync(join(root, path), 'utf8'), path, writes, pluginRow).length > 0);
+  return found.split('\n').filter((path) => path.length > 0);
 }
 
 /**

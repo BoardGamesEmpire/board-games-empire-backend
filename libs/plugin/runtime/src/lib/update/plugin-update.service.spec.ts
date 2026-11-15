@@ -51,6 +51,7 @@ import {
   PluginUpdateAuthorityError,
   PluginUpdateBlockedByDenialError,
   PluginUpdateCriticalConfirmationError,
+  PluginUpdateDataGatewayNameConflictError,
   PluginUpdateManifestError,
   PluginUpdateNoPendingError,
   PluginUpdatePendingConflictError,
@@ -198,6 +199,8 @@ describe('PluginUpdateService', () => {
   let queueGrantLock: (rows: readonly ReturnType<typeof lockedRow>[]) => void;
   /** The row the plugin-config lock (D-CN) answers with — defaults to an empty retained config. */
   let setPluginConfigLock: (config: unknown) => void;
+  /** The category that locked read finds on the plugin's row (#1083). Defaults to the fixture plugin's. */
+  let setLockedCategory: (category: PluginCategory) => void;
 
   const directory = (): PluginArtifactDirectory => ({
     slug: 'demo-sink',
@@ -268,11 +271,17 @@ describe('PluginUpdateService', () => {
     // one entry per activation attempt a test drives — falling back to
     // "nothing locked" (today's default) once the queue is empty.
     const grantLockQueue: (readonly ReturnType<typeof lockedRow>[])[] = [];
-    let pluginConfigLockRow: { config: unknown } = { config: {} };
+    let pluginConfigLockRow: { config: unknown; category: PluginCategory } = {
+      config: {},
+      category: PluginCategory.FeedbackSink,
+    };
 
     queueGrantLock = (rows) => grantLockQueue.push(rows);
     setPluginConfigLock = (config) => {
-      pluginConfigLockRow = { config };
+      pluginConfigLockRow = { ...pluginConfigLockRow, config };
+    };
+    setLockedCategory = (category) => {
+      pluginConfigLockRow = { ...pluginConfigLockRow, category };
     };
 
     db.$queryRaw.mockImplementation(((strings: TemplateStringsArray) => {
@@ -442,6 +451,129 @@ describe('PluginUpdateService', () => {
       expect(db.plugin.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ installedSha256: 'd'.repeat(64) }) }),
       );
+    });
+
+    // installedAt names the install, and an update keeps it: the copy of the
+    // plugin already running still counts as this install's, so its
+    // DataGateway keeps being routed until a restart loads the new version.
+    // A reinstall writes a new one (#1083).
+    it("an update's activation leaves installedAt alone, so the running copy still counts as this install's (#1083)", async () => {
+      await writeManifest(nextManifest());
+
+      const result = await service.stage(input());
+
+      expect(result.activated).toBe(true);
+      const [claim] = db.plugin.updateMany.mock.calls[0];
+      expect(claim.data).toMatchObject({ version: '1.3.0' });
+      expect(claim.data).not.toHaveProperty('installedAt');
+    });
+
+    // A version may move a plugin to another category. Its DataGateway row
+    // follows a move into or out of data-gateway, as it follows an install
+    // and an uninstall, and stays untouched by every other update (#1083).
+    describe('a plugin an update moves into or out of the data-gateway category (#1083)', () => {
+      /** A data-gateway plugin, as the load and the locked read in the transaction both find it. */
+      const dataGatewayPlugin = (): Plugin => {
+        setLockedCategory(PluginCategory.DataGateway);
+
+        return makePlugin({ category: PluginCategory.DataGateway });
+      };
+
+      it('creates the DataGateway row when the update makes it a data-gateway plugin, named and attributed as an install would', async () => {
+        db.dataGateway.updateMany.mockResolvedValue({ count: 0 });
+        db.dataGateway.findUnique.mockResolvedValue(null);
+        await writeManifest(nextManifest({ category: 'data-gateway' }));
+
+        const result = await service.stage(input());
+
+        expect(result.activated).toBe(true);
+        expect(db.dataGateway.create).toHaveBeenCalledWith({
+          data: { name: 'Demo Sink', pluginId: 'plugin-1', enabled: true, createdById: 'admin-1' },
+        });
+        // Under the claim: the plugin row is this transaction's before the row's foreign key locks it.
+        expect(db.plugin.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+          db.dataGateway.create.mock.invocationCallOrder[0],
+        );
+      });
+
+      it('enables the row the plugin kept from an earlier time in the category, and creates none', async () => {
+        db.dataGateway.updateMany.mockResolvedValue({ count: 1 });
+        await writeManifest(nextManifest({ category: 'data-gateway' }));
+
+        await service.stage(input());
+
+        expect(db.dataGateway.updateMany).toHaveBeenCalledWith({
+          where: { pluginId: 'plugin-1' },
+          data: { enabled: true },
+        });
+        expect(db.dataGateway.create).not.toHaveBeenCalled();
+      });
+
+      it('disables the row and keeps it when the update moves the plugin to another category', async () => {
+        db.plugin.findUnique.mockResolvedValue(dataGatewayPlugin());
+        db.dataGateway.updateMany.mockResolvedValue({ count: 1 });
+        await writeManifest(nextManifest({ category: 'feedback-sink' }));
+
+        const result = await service.stage(input());
+
+        expect(result.activated).toBe(true);
+        expect(db.dataGateway.updateMany).toHaveBeenCalledTimes(1);
+        expect(db.dataGateway.updateMany).toHaveBeenCalledWith({
+          where: { pluginId: 'plugin-1' },
+          data: { enabled: false },
+        });
+        expect(db.dataGateway.create).not.toHaveBeenCalled();
+        expect(db.dataGateway.delete).not.toHaveBeenCalled();
+        expect(db.dataGateway.deleteMany).not.toHaveBeenCalled();
+      });
+
+      // A row an admin disabled must not come back enabled with the plugin's next version.
+      it.each<[string, () => Plugin, PluginManifest['category']]>([
+        ['stays a data-gateway plugin', dataGatewayPlugin, 'data-gateway'],
+        ['stays in another category', () => makePlugin(), 'feedback-sink'],
+      ])('touches no DataGateway row when the plugin %s', async (_case, plugin, category) => {
+        db.plugin.findUnique.mockResolvedValue(plugin());
+        await writeManifest(nextManifest({ category }));
+
+        const result = await service.stage(input());
+
+        expect(result.activated).toBe(true);
+        expect(db.dataGateway.updateMany).not.toHaveBeenCalled();
+        expect(db.dataGateway.create).not.toHaveBeenCalled();
+      });
+
+      // With nothing staged, the claim doesn't pin the category, so another
+      // activation can move the plugin between this one's load and its lock.
+      it('goes by the category read under the lock, not the one loaded before it', async () => {
+        // Loaded as a data-gateway plugin, and moved out since: the row was disabled then.
+        db.plugin.findUnique.mockResolvedValue(makePlugin({ category: PluginCategory.DataGateway }));
+        setLockedCategory(PluginCategory.FeedbackSink);
+        db.dataGateway.updateMany.mockResolvedValue({ count: 1 });
+        await writeManifest(nextManifest({ category: 'data-gateway' }));
+
+        await service.stage(input());
+
+        // Back into the category, so the kept row is enabled again. By the load, nothing would have moved.
+        expect(db.dataGateway.updateMany).toHaveBeenCalledWith({
+          where: { pluginId: 'plugin-1' },
+          data: { enabled: true },
+        });
+      });
+
+      it("refuses with the update's own conflict when another DataGateway holds the name, from inside the transaction", async () => {
+        db.dataGateway.updateMany.mockResolvedValue({ count: 0 });
+        db.dataGateway.findUnique.mockResolvedValue({ id: 'gw-other' } as never);
+        await writeManifest(nextManifest({ category: 'data-gateway' }));
+
+        const failure = await service.stage(input()).catch((err: unknown) => err);
+
+        expect(failure).toBeInstanceOf(PluginUpdateDataGatewayNameConflictError);
+        expect(failure).toMatchObject({ slug: 'demo-sink', dataGatewayName: 'Demo Sink' });
+        // Thrown inside the transaction's callback, so the claim goes back with it.
+        expect(db.$transaction).toHaveBeenCalledTimes(1);
+        expect(db.dataGateway.create).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalledWith(PluginUpdateApprovedEvent.eventName, expect.anything());
+      });
     });
 
     it('refuses to activate onto a row uninstalled mid-flight — the whole transaction rolls back', async () => {

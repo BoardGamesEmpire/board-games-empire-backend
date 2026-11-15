@@ -34,6 +34,7 @@ describe('presentArtifactChecks', () => {
       criticalSlugsToReenter: [],
       analysis,
       forbiddenImportsToAccept: [],
+      dataGatewayNameConflict: null,
     };
   };
 

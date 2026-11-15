@@ -24,6 +24,7 @@ import {
   PluginInstallAuthorityError,
   PluginInstallConflictError,
   PluginInstallCriticalConfirmationError,
+  PluginInstallDataGatewayNameConflictError,
   PluginInstallForbiddenPermissionError,
   PluginInstallManifestError,
   PluginInstallPermissionCollisionError,
@@ -44,6 +45,7 @@ import {
   PluginUpdateAuthorityError,
   PluginUpdateBlockedByDenialError,
   PluginUpdateCriticalConfirmationError,
+  PluginUpdateDataGatewayNameConflictError,
   PluginUpdateForbiddenPermissionError,
   PluginUpdateManifestError,
   PluginUpdateNoPendingError,
@@ -264,6 +266,42 @@ describe('PluginExceptionFilter', () => {
       expect(body()['code']).toBe('PLUGIN_REINSTALL_CONFLICT');
       expect(body()['message']).toBe('t:errors.plugin.reinstall_conflict');
       expect(body()['slug']).toBe('sample');
+    });
+
+    it('renders a taken DataGateway name as 409 naming the plugin and the name, so the admin knows which row to rename (#1083)', () => {
+      filter.catch(new PluginInstallDataGatewayNameConflictError('sample', 'Sample Gateway'), host);
+
+      expect(rendered().getStatus()).toBe(Http.Conflict);
+      expect(body()).toEqual({
+        statusCode: 409,
+        error: 'Conflict',
+        message: 't:errors.plugin.data_gateway_name_conflict',
+        code: 'PLUGIN_INSTALL_DATA_GATEWAY_NAME_CONFLICT',
+        slug: 'sample',
+        dataGatewayName: 'Sample Gateway',
+      });
+      expect(translate).toHaveBeenCalledWith(
+        'errors.plugin.data_gateway_name_conflict',
+        expect.objectContaining({ args: { slug: 'sample', name: 'Sample Gateway' } }),
+      );
+    });
+
+    it('renders a DataGateway name an update needs and another row holds as 409, with copy for an update (#1083)', () => {
+      filter.catch(new PluginUpdateDataGatewayNameConflictError('sample', 'Sample Gateway'), host);
+
+      expect(rendered().getStatus()).toBe(Http.Conflict);
+      expect(body()).toEqual({
+        statusCode: 409,
+        error: 'Conflict',
+        message: 't:errors.plugin.update_data_gateway_name_conflict',
+        code: 'PLUGIN_UPDATE_DATA_GATEWAY_NAME_CONFLICT',
+        slug: 'sample',
+        dataGatewayName: 'Sample Gateway',
+      });
+      expect(translate).toHaveBeenCalledWith(
+        'errors.plugin.update_data_gateway_name_conflict',
+        expect.objectContaining({ args: { slug: 'sample', name: 'Sample Gateway' } }),
+      );
     });
 
     it('names the plugin and the staging the caller answered when that staging was replaced (#357)', () => {

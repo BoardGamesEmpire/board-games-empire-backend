@@ -11,6 +11,7 @@ import {
   PluginUninstalledEvent,
 } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
+import { disablePluginDataGatewayRow } from '../install/plugin-data-gateway-row';
 import { PluginInstanceRegistry } from '../loader/plugin-instance-registry';
 import { bindManifest, classifyManifestMove, type ClaimedPluginRow } from '../manifest/manifest-move';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
@@ -227,6 +228,10 @@ export class PluginLifecycleService {
 
       await tx.pluginGrant.deleteMany({ where: { pluginId: plugin.id } });
       await tx.pluginPermission.deleteMany({ where: { pluginId: plugin.id } });
+      // A data-gateway plugin's DataGateway row is disabled and kept, even
+      // under purgeData: the game sources imported through it hang on it, and
+      // a reinstall enables it again (#1083). Other categories have no row.
+      await disablePluginDataGatewayRow(tx, plugin.id);
 
       if (input.purgeData === true) {
         await tx.householdPlugin.deleteMany({ where: { pluginId: plugin.id } });

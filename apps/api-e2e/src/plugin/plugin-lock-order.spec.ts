@@ -25,6 +25,7 @@ import {
   LOCK_ORDER_PATHS,
   LOCK_SOURCES,
   PLUGIN_ROW_CLAIM_EXEMPTIONS,
+  pluginDataGatewayRowPlacements,
   stageNamed,
   stagesNamed,
   type LockStageName,
@@ -282,7 +283,11 @@ describe('the plugin consent path is one lock order (#360)', () => {
    * claim. Where it is not, an exemption has to say why that is safe.
    */
   describe('the locks nobody wrote — FK-implied parent locks (#399)', () => {
-    const { installerService: INSTALLER_SERVICE, consentActService: CONSENT_ACT_SERVICE } = LOCK_SOURCES;
+    const {
+      installerService: INSTALLER_SERVICE,
+      consentActService: CONSENT_ACT_SERVICE,
+      pluginDataGatewayRow: DATA_GATEWAY_ROW,
+    } = LOCK_SOURCES;
     const { dataGatewayService: DATA_GATEWAY_SERVICE, gatewayInterviewService: GATEWAY_INTERVIEW_SERVICE } =
       LOCK_SOURCES;
 
@@ -304,6 +309,10 @@ describe('the plugin consent path is one lock order (#360)', () => {
       { file: CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'householdPlugin.update', claimed: true },
       { file: CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'userPlugin.upsert', claimed: true },
       { file: GRANT_SERVICE, enclosing: 'attempt', write: 'pluginGrant.upsert', claimed: true },
+      // The one write that sets `data_gateways.plugin_id` (#1083). Unclaimed
+      // where the audit reads it and exempt on the strength of its caller,
+      // which the placement case below pins.
+      { file: DATA_GATEWAY_ROW, enclosing: 'placePluginDataGatewayRow', write: 'dataGateway.create', claimed: false },
       { file: INSTALLER_SERVICE, enclosing: 'persist', write: 'pluginPermission.create', claimed: false },
       { file: INSTALLER_SERVICE, enclosing: 'persist', write: 'pluginGrant.create', claimed: false },
       { file: UNIT_LIFECYCLE, enclosing: 'updateHouseholdConfig', write: 'householdPlugin.update', claimed: true },
@@ -443,6 +452,31 @@ describe('the plugin consent path is one lock order (#360)', () => {
       expect(readShippedFunction(UNIT_LIFECYCLE, 'updateHouseholdConfig').body).not.toMatch(
         stageNamed('plugin row').pattern,
       );
+    });
+
+    it('places a plugin DataGateway’s row only where the plugin row is already held, from persist() and from activation, as its exemption claims (#1083)', () => {
+      // The one exemption whose reason is not in the function it names.
+      // `placePluginDataGatewayRow` holds the only write that sets
+      // `data_gateways.plugin_id`, so it does take the implied lock, and it
+      // claims nothing itself. What makes it safe is its caller, a file away,
+      // where the audit's delegate resolution deliberately stops. So the caller
+      // is pinned here: every call in the shipped tree, and whether the plugin
+      // row is claimed or created on every path that reaches it.
+      //
+      // Two calls. One in `persist()`, below the `if/else` that creates the
+      // plugin row on a fresh install and claims it on a reinstall. One in
+      // `activateInTransaction()`, for an update that makes the plugin a
+      // data-gateway plugin, below the `FOR UPDATE` on the plugin row. A third
+      // caller, or either of these moved above its claim or onto a path that
+      // skips it, would lock a plugin row another transaction may already
+      // hold, and lock it AFTER writing the plugin's DataGateway row — the
+      // #398 shape — while the exemption went on saying otherwise.
+      expect(
+        pluginDataGatewayRowPlacements().map(({ file, enclosing, claimed }) => ({ file, enclosing, claimed })),
+      ).toEqual([
+        { file: INSTALLER_SERVICE, enclosing: 'persist', claimed: true },
+        { file: UPDATE_SERVICE, enclosing: 'activateInTransaction', claimed: true },
+      ]);
     });
   });
 

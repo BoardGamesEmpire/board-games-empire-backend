@@ -53,6 +53,7 @@ const receipt = (state: 'none' | 'installed' | 'uninstalled' = 'none') => ({
     criticalSlugsToReenter: ['manage:game'],
     forbiddenImportsToAccept: ['axios'],
     analysis: { findings: [], scannedFileCount: 3, deepScannedFileCount: 0, truncated: false },
+    dataGatewayNameConflict: null as string | null,
   },
   installedPlugin: { state, version: state === 'none' ? null : '1.0.0' },
 });
@@ -190,6 +191,22 @@ describe('PluginArtifactsController (#1094)', () => {
       const result = await firstValueFrom(controller.post({ url: 'https://example.test/x.tgz', sha256: SHA }));
 
       expect(result.manifest.executionMode).toBe('worker');
+    });
+
+    it('answers with no DataGateway name conflict when the install would meet none (#1083)', async () => {
+      const result = await firstValueFrom(controller.post({ url: 'https://example.test/x.tgz', sha256: SHA }));
+
+      expect(result.dataGatewayNameConflict).toBeNull();
+    });
+
+    it('answers with the DataGateway name the install would find taken, ahead of the install (#1083)', async () => {
+      const conflicted = receipt();
+      conflicted.assessment.dataGatewayNameConflict = 'Demo Gateway';
+      receiver.receiveByLink.mockResolvedValue(conflicted);
+
+      const result = await firstValueFrom(controller.post({ url: 'https://example.test/x.tgz', sha256: SHA }));
+
+      expect(result.dataGatewayNameConflict).toBe('Demo Gateway');
     });
 
     it.each([undefined, null, ''])('treats a url of %p beside a file as an upload (#1094)', async (url) => {

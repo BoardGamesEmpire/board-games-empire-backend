@@ -207,7 +207,8 @@ export class PluginArtifactsController {
   @ApiResponse({
     status: Http.Conflict,
     description:
-      'A confirmation is missing or wrong, the plugin is already installed, or someone reinstalled it at the same moment',
+      'A confirmation is missing or wrong, the plugin is already installed, someone reinstalled it at the same ' +
+      "moment, or another DataGateway already has the name a data-gateway plugin's DataGateway would take",
   })
   @ApiResponse({
     status: Http.ServiceUnavailable,
@@ -268,6 +269,7 @@ export class PluginArtifactsController {
       checks: [...presentArtifactChecks(assessment, locale, defaultLocale)] as PluginArtifactResponseDto['checks'],
       criticalSlugsToReenter: [...assessment.criticalSlugsToReenter],
       forbiddenImportsToAccept: [...assessment.forbiddenImportsToAccept],
+      dataGatewayNameConflict: assessment.dataGatewayNameConflict,
       analysis: {
         findings: [...assessment.analysis.findings],
         truncated: assessment.analysis.truncated,

@@ -1,5 +1,6 @@
 import {
   DatabaseService,
+  PluginCategory,
   PluginGrantScope,
   PluginGrantStatus,
   Prisma,
@@ -17,6 +18,7 @@ import {
   validatePluginManifest,
   type ManifestWarning,
   type NormalizedPermissionRequest,
+  type PluginManifest,
   type PluginManifestValidationResult,
 } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger } from '@nestjs/common';
@@ -47,6 +49,7 @@ import {
   PluginInstallAuthorityError,
   PluginInstallConflictError,
   PluginInstallCriticalConfirmationError,
+  PluginInstallDataGatewayNameConflictError,
   PluginInstallForbiddenPermissionError,
   PluginInstallManifestError,
   PluginInstallPermissionCollisionError,
@@ -59,6 +62,7 @@ import {
   MANIFEST_EXECUTION_MODE_TO_PRISMA,
   MANIFEST_SCOPE_TO_PRISMA,
 } from './manifest-enum.maps';
+import { findDataGatewayNameHolder, placePluginDataGatewayRow, pluginDataGatewayName } from './plugin-data-gateway-row';
 import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
 import { gatingFindings, type StaticAnalysisFinding, type StaticAnalysisReport } from './static-analysis.types';
 
@@ -112,6 +116,12 @@ export interface PluginInstallAssessment {
   readonly analysis: StaticAnalysisReport;
   /** Forbidden import specifiers `install()` wants acknowledged, distinct. */
   readonly forbiddenImportsToAccept: readonly string[];
+  /**
+   * The name a data-gateway plugin's DataGateway row would take, when another
+   * row holds it and `install()` would refuse (#1083). Null when the install
+   * would create no row under a taken name, and for every other category.
+   */
+  readonly dataGatewayNameConflict: string | null;
 }
 
 export interface PluginInstallResult {
@@ -196,6 +206,13 @@ export class PluginInstallerService {
     const assessment = await this.assess(directory, { deepScan: input.deepScan });
     const { validated, serverChecks, corePermissions, analysis } = assessment;
 
+    // Before the confirmation gates: no confirmation cures a taken name, so
+    // the server admin is not asked to re-enter anything first (#1083). The
+    // transaction's own check is the one that holds; this one is early.
+    if (assessment.dataGatewayNameConflict !== null) {
+      throw new PluginInstallDataGatewayNameConflictError(validated.manifest.slug, assessment.dataGatewayNameConflict);
+    }
+
     this.assertCriticalConfirmation(validated, assessment.criticalSlugsToReenter, input.confirmCriticalSlugs ?? []);
     const acknowledgedForbiddenImports = this.resolveForbiddenAcknowledgement(
       directory.slug,
@@ -279,7 +296,39 @@ export class PluginInstallerService {
       criticalSlugsToReenter: criticalConfirmationExpectation(serverChecks, corePermissions),
       analysis,
       forbiddenImportsToAccept: resolveForbiddenSpecifierAcknowledgement(gatingFindings(analysis), []).reported,
+      dataGatewayNameConflict: await this.findDataGatewayNameConflict(validated.manifest),
     };
+  }
+
+  /**
+   * The name the plugin's DataGateway row would take, when installing it
+   * would create the row under a taken name (#1083). An uninstalled plugin
+   * keeps its row and its id, so its existing row's id goes along: a reinstall
+   * creates no row and meets no name.
+   *
+   * Null while the slug's plugin is installed and live: that install is
+   * refused as already installed (an update goes through the staged-update
+   * flow), so it would never reach the row, and a name conflict would name
+   * the wrong cause.
+   */
+  private async findDataGatewayNameConflict(manifest: PluginManifest): Promise<string | null> {
+    if (MANIFEST_CATEGORY_TO_PRISMA[manifest.category] !== PluginCategory.DataGateway) {
+      return null;
+    }
+
+    const existing = await this.db.plugin.findUnique({
+      where: { slug: manifest.slug },
+      select: { id: true, uninstalledAt: true },
+    });
+
+    if (existing !== null && existing.uninstalledAt === null) {
+      return null;
+    }
+
+    const name = pluginDataGatewayName(manifest, this.options.defaultLocale);
+    const holder = await findDataGatewayNameHolder(this.db, name, existing?.id ?? null);
+
+    return holder === null ? null : name;
   }
 
   /**
@@ -605,6 +654,17 @@ export class PluginInstallerService {
           manifest,
           configSchema: this.configSchema,
           initiatedAt,
+        });
+      }
+
+      // A data-gateway plugin's DataGateway row, created or (on a reinstall)
+      // enabled in the same transaction as the plugin row it names (#1083).
+      if (sharedColumns.category === PluginCategory.DataGateway) {
+        await placePluginDataGatewayRow(tx, {
+          pluginId: plugin.id,
+          name: pluginDataGatewayName(manifest, this.options.defaultLocale),
+          installerId,
+          nameTaken: (name) => new PluginInstallDataGatewayNameConflictError(manifest.slug, name),
         });
       }
 

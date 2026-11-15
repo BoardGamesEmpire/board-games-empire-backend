@@ -317,7 +317,9 @@ export class PluginsController {
     description:
       'No staged update; the staging named by stagingId was replaced since it was read ' +
       '(PluginUpdateStagingReplacedError — read it again); or a challenge: Critical confirmation required ' +
-      '(expectedSlugs), or activation is blocked by a durable denial (deniedRequiredSlugs)',
+      '(expectedSlugs), or activation is blocked by a durable denial (deniedRequiredSlugs); or the update makes ' +
+      'the plugin a data-gateway plugin and another DataGateway already has the name its DataGateway would take ' +
+      '(dataGatewayName — rename that DataGateway, then approve again)',
   })
   @ApiResponse({
     status: Http.UnprocessableEntity,
