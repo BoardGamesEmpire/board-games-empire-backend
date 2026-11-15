@@ -10,6 +10,7 @@ import { Agent, MockAgent, type Dispatcher, type Interceptable } from 'undici';
 import type { DnsResolver, ResolvedAddress } from './dns/dns-resolver.interface';
 import { DnsResolutionError } from './dns/dns-resolver.interface';
 import {
+  HostNotAllowedError,
   InvalidRequestUrlError,
   OutboundNetworkError,
   RedirectLimitExceededError,
@@ -331,6 +332,106 @@ describe('SecureHttpService', () => {
 
       expect(secondMethod).toBe('GET');
       expect(secondBody).toBeFalsy();
+    });
+
+    // A caller held to named hosts (a plugin, to its manifest's outbound
+    // domains) can't check a redirect's target before the request, because
+    // this service follows redirects itself. So the rule is asked on every
+    // hop, ahead of the outbound HTTP policy's address lookup (#1083).
+    describe('a caller host rule', () => {
+      it("refuses a first URL the caller's host rule rejects, before any lookup (#1083)", async () => {
+        const dns = new FakeDnsResolver();
+        dns.set('example.com', [v4('8.8.8.8')]);
+        const evaluate = jest.spyOn(IpPolicyService.prototype, 'evaluate');
+        const build = jest.spyOn(FakeDispatcherFactory.prototype, 'build');
+        const { service } = buildService({ dns, mockAgent });
+
+        const refusal = service.request('http://example.com/data', { allowHost: () => false });
+
+        await expect(refusal).rejects.toBeInstanceOf(HostNotAllowedError);
+        await expect(refusal).rejects.toMatchObject({ code: 'HOST_NOT_ALLOWED', host: 'example.com' });
+        expect(evaluate).not.toHaveBeenCalled();
+        expect(build).not.toHaveBeenCalled();
+      });
+
+      it('refuses a redirect to a host the rule rejects (#1083)', async () => {
+        const dns = new FakeDnsResolver();
+        dns.set('example.com', [v4('8.8.8.8')]);
+        dns.set('elsewhere.com', [v4('1.1.1.1')]);
+        mockAgent
+          .get('http://example.com')
+          .intercept({ path: '/redirect' })
+          .reply(Http.Found, '', { headers: { location: 'http://elsewhere.com/final' } });
+        const onRedirectDenied = jest.fn();
+        const build = jest.spyOn(FakeDispatcherFactory.prototype, 'build');
+        const { service } = buildService({ dns, mockAgent, observer: { onRedirectDenied } });
+
+        const refusal = service.request('http://example.com/redirect', {
+          allowHost: (hostname) => hostname === 'example.com',
+        });
+
+        await expect(refusal).rejects.toBeInstanceOf(RedirectToDisallowedTargetError);
+        const err = (await refusal.catch((e: unknown) => e)) as RedirectToDisallowedTargetError;
+        expect(err.cause).toBeInstanceOf(HostNotAllowedError);
+        expect(err.cause).toMatchObject({ host: 'elsewhere.com' });
+        expect(build).toHaveBeenCalledTimes(1);
+        expect(onRedirectDenied).toHaveBeenCalledWith({
+          from: 'http://example.com/redirect',
+          to: 'http://elsewhere.com/final',
+          reason: 'host-not-allowed',
+        });
+      });
+
+      it("asks the rule once per hop, with each hop's hostname (#1083)", async () => {
+        const dns = new FakeDnsResolver();
+        dns.set('example.com', [v4('8.8.8.8')]);
+        dns.set('elsewhere.com', [v4('1.1.1.1')]);
+        mockAgent
+          .get('http://example.com')
+          .intercept({ path: '/redirect' })
+          .reply(Http.Found, '', { headers: { location: 'http://elsewhere.com/final' } });
+        mockAgent.get('http://elsewhere.com').intercept({ path: '/final' }).reply(Http.Ok, { ok: true });
+        const allowHost = jest.fn(() => true);
+        const { service } = buildService({ dns, mockAgent });
+
+        const response = await service.request('http://example.com/redirect', { allowHost });
+
+        expect(response.status).toBe(Http.Ok);
+        expect(allowHost.mock.calls).toEqual([['example.com'], ['elsewhere.com']]);
+      });
+
+      it('never retries a host refusal (#1083)', async () => {
+        const dns = new FakeDnsResolver();
+        dns.set('example.com', [v4('8.8.8.8')]);
+        const allowHost = jest.fn(() => false);
+        const { service } = buildService({ dns, mockAgent });
+
+        await expect(
+          service.request('http://example.com/data', {
+            allowHost,
+            retry: { attempts: 3, baseDelayMs: 1, jitter: false },
+          }),
+        ).rejects.toBeInstanceOf(HostNotAllowedError);
+
+        expect(allowHost).toHaveBeenCalledTimes(1);
+      });
+
+      it('without a rule, behaves as before (#1083)', async () => {
+        const dns = new FakeDnsResolver();
+        dns.set('example.com', [v4('8.8.8.8')]);
+        dns.set('elsewhere.com', [v4('1.1.1.1')]);
+        mockAgent
+          .get('http://example.com')
+          .intercept({ path: '/redirect' })
+          .reply(Http.Found, '', { headers: { location: 'http://elsewhere.com/final' } });
+        mockAgent.get('http://elsewhere.com').intercept({ path: '/final' }).reply(Http.Ok, { ok: true });
+        const { service } = buildService({ dns, mockAgent });
+
+        const response = await service.request('http://example.com/redirect');
+
+        expect(response.status).toBe(Http.Ok);
+        expect(response.finalUrl).toBe('http://elsewhere.com/final');
+      });
     });
   });
 

@@ -6,6 +6,7 @@ import { pipeline } from 'node:stream/promises';
 import { request as undiciRequest } from 'undici';
 import type Dispatcher from 'undici/types/dispatcher';
 import {
+  HostNotAllowedError,
   InvalidRequestUrlError,
   OutboundNetworkError,
   RedirectLimitExceededError,
@@ -83,6 +84,8 @@ interface ResolvedOptions {
    * leaves it out, so each hop gets its own `timeoutMs`.
    */
   deadline?: AbortSignal;
+  /** The caller's host rule, asked on every hop. `download()` never sets it. */
+  allowHost?: (hostname: string) => boolean;
 }
 
 /** Where a terminal 2xx body goes instead of memory. */
@@ -129,7 +132,8 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
  *      and TCP connect.
  *   4. Manual redirect handling: 3xx responses re-run the full gauntlet on
  *      `Location` before issuing the next hop. No "first hop validated,
- *      subsequent hops trusted" shortcuts.
+ *      subsequent hops trusted" shortcuts. A caller's `allowHost` rule is
+ *      asked on every hop too, ahead of step 2 (#1083).
  *   5. Body parsing per `responseType` (json/text/arraybuffer).
  *
  * Retries (when configured) re-run the gauntlet on every attempt, so a
@@ -207,9 +211,11 @@ export class SecureHttpService {
 
         // SSRF and URL errors are policy failures, not transient — never retry.
         // Redirect-limit also doesn't retry (the loop is the bug, not the network).
-        // An oversized body won't shrink on a second try (#1094).
+        // An oversized body won't shrink on a second try (#1094). Nor will
+        // the caller's own host rule change its answer (#1083).
         if (
           safeErr instanceof SsrfRejectionError ||
+          safeErr instanceof HostNotAllowedError ||
           safeErr instanceof InvalidRequestUrlError ||
           safeErr instanceof RedirectToDisallowedTargetError ||
           safeErr instanceof RedirectLimitExceededError ||
@@ -330,6 +336,18 @@ export class SecureHttpService {
 
     while (true) {
       const parsedUrl = this.parseUrl(currentUrl);
+
+      // ── Caller's host rule for this hop ────────────────────────
+      // Ahead of the lookup, so a refused host is never resolved (#1083).
+      if (options.allowHost && !options.allowHost(parsedUrl.hostname)) {
+        const hostErr = new HostNotAllowedError(parsedUrl.hostname);
+        if (redirectCount === 0) {
+          throw hostErr;
+        }
+
+        await this.notify('onRedirectDenied', { from: initialUrl, to: currentUrl, reason: 'host-not-allowed' });
+        throw new RedirectToDisallowedTargetError(initialUrl, currentUrl, hostErr);
+      }
 
       // ── SSRF gauntlet for this hop ─────────────────────────────
       const decision = await this.ipPolicy.evaluate(parsedUrl, snapshot);
@@ -624,6 +642,7 @@ export class SecureHttpService {
       responseType: options.responseType ?? 'json',
       retry: options.retry,
       signal: options.signal,
+      allowHost: options.allowHost,
     };
   }
 

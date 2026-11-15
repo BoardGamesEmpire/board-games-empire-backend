@@ -62,7 +62,11 @@ export interface RedirectDeniedEvent {
   from: string;
   /** The `Location` target that failed the gauntlet. */
   to: string;
-  reason: SsrfRejectionReason;
+  /**
+   * The gauntlet's reason, or `host-not-allowed` when the caller's own host
+   * rule (`SafeHttpRequestOptions.allowHost`) refused the target (#1083).
+   */
+  reason: SsrfRejectionReason | 'host-not-allowed';
 }
 
 /**

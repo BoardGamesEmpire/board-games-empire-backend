@@ -36,8 +36,12 @@ export type SafeHttpRequestBody = string | Uint8Array | ArrayBuffer | Record<str
  *
  * Notably absent (by design):
  *   - `trust` — every call goes through the same gauntlet
- *   - `allowedDomains` — caller can pre-check the URL before calling
  *   - `strict` — strict mode is global, not per-call
+ *
+ * A caller held to named hosts can't simply pre-check the URL: the service
+ * follows redirects itself, and a check made before the request can't see
+ * where a redirect goes. `allowHost` exists for that, and is asked on every
+ * hop (#1083).
  */
 export interface SafeHttpRequestOptions {
   /** Default `GET`. */
@@ -82,6 +86,16 @@ export interface SafeHttpRequestOptions {
    * whichever fires first wins.
    */
   signal?: AbortSignal;
+
+  /**
+   * The caller's own host rule, asked with `URL.hostname` of the first URL
+   * and of every redirect target, before the outbound HTTP policy looks the
+   * address up. It narrows the policy and never widens it. A refusal is a
+   * `HostNotAllowedError` on the first URL, and a
+   * `RedirectToDisallowedTargetError` caused by one on a redirect; neither
+   * is retried (#1083).
+   */
+  allowHost?: (hostname: string) => boolean;
 }
 
 /**
