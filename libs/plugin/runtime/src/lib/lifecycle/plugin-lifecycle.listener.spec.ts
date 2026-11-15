@@ -438,7 +438,7 @@ describe('PluginLifecycleListener', () => {
       );
     });
 
-    it('persists a GrantRevoked row from the BEFORE snapshot with the reason — the deleted grant leaves only this record (#211)', async () => {
+    it('persists a GrantRevoked row from the BEFORE snapshot with the reason and the act that wrote it — the deleted grant leaves only this record (#211, #1150)', async () => {
       const event = new PluginGrantRevokedEvent(
         {
           id: 'grant-1',
@@ -450,7 +450,7 @@ describe('PluginLifecycleListener', () => {
           decidedRiskLevel: RiskLevel.Medium,
         },
         'permission-no-longer-requested',
-        { manifestVersion: '1.2.3', actId: null },
+        { manifestVersion: '1.2.3', actId: 'act-1' },
         initiatedAt,
       );
       db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
@@ -468,6 +468,7 @@ describe('PluginLifecycleListener', () => {
             permissionSlug: 'read:public_content',
             decidedRiskLevel: RiskLevel.Medium,
             reason: 'permission-no-longer-requested',
+            actId: 'act-1',
           },
         }),
       );

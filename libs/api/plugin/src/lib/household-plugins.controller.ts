@@ -200,7 +200,8 @@ export class HouseholdPluginsController {
       '(POST …/consent/review) against the manifest=staged consent surface. Every required permission must be Granted; optional ones may be ' +
       'answered either way or left for later. manifestSha256 names the consent surface the answers were read ' +
       "from. Optional config is validated against the manifest's config.schema and written with the switch-on. " +
-      'Switching on again when nothing would change answers changed: false.',
+      'Switching on again without config, when nothing would change, answers changed: false; a switch-on that ' +
+      'sends config always records a consent act and writes the config.',
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Ok, type: ConsentActResponseDto })

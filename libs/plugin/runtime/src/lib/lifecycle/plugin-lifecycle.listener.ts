@@ -317,11 +317,13 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
         scopeId: event.before.scopeId === '' ? null : event.before.scopeId,
         manifestVersion: event.context.manifestVersion,
         // The grant row is gone (delete-to-pending, #211): the lifecycle row
-        // is the only durable record of what was revoked and why.
+        // is the only durable record of what was revoked and why, and of the
+        // consent act that wrote it (#1150).
         payload: {
           permissionSlug: event.before.permissionSlug,
           decidedRiskLevel: event.before.decidedRiskLevel,
           reason: event.reason,
+          actId: event.context.actId,
         },
       };
     }

@@ -986,6 +986,9 @@ describe('consent acts (#1150)', () => {
         payload: expect.objectContaining({
           permissionSlug: HOUSEHOLD_REQUIRED.slug,
           reason: 'staged-update-rejected',
+          // The deleted row named the review that pre-consented; the
+          // lifecycle row is the only place that link survives.
+          actId: reviewed.body.act.id,
         }),
       });
 
