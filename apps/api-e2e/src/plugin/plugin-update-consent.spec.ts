@@ -12,6 +12,7 @@ import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plug
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
+import { errorText } from '../support/error-text';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
@@ -621,25 +622,6 @@ describe('plugin update consent (approve/reject/pending)', () => {
   });
 
   describe('the staged-update columns (#357)', () => {
-    /**
-     * Every string an error carries, own properties included (`message`,
-     * `cause`, Prisma's `meta`), so the assertion doesn't depend on which
-     * layer the driver adapter put Postgres's words in.
-     */
-    const errorText = (value: unknown, depth = 0): string => {
-      if (depth > 4 || value === null || value === undefined) {
-        return '';
-      }
-
-      if (typeof value !== 'object') {
-        return String(value);
-      }
-
-      return Object.getOwnPropertyNames(value)
-        .map((key) => errorText((value as Record<string, unknown>)[key], depth + 1))
-        .join(' ');
-    };
-
     it('the database refuses a half-staged plugin row (#357)', async () => {
       // Both guarded writes key on the staging id. A row with some staged
       // columns set and others null would let their predicates match the

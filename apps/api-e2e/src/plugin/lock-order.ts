@@ -57,10 +57,11 @@ import { readShippedTree, workspaceRoot } from '../support/shipped-sql';
  * Prisma call known to lock. Postgres also takes locks nobody wrote: an INSERT
  * into a table with an FK to `plugins` takes `FOR KEY SHARE` on the parent row
  * from the referential-integrity trigger, and RI checks are AFTER ROW triggers,
- * so that lock lands only once the child tuple is already written. Four tables
+ * so that lock lands only once the child tuple is already written. Five tables
  * carry that FK — `plugin_grants`, `household_plugins`, `plugin_permissions`,
- * `user_plugins` — so four child writes take a plugin-row lock this constant
- * cannot observe, in the LAST position rather than the first.
+ * `user_plugins` and `data_gateways` (#1083) — so a write to any of the five
+ * can take a plugin-row lock this constant cannot observe, in the LAST
+ * position rather than the first.
  *
  * `decide()` is how that was found: it claimed `['grant row', 'unit row']`, said
  * outright that it took no plugin-row lock, and deadlocked against activation's
@@ -71,10 +72,11 @@ import { readShippedTree, workspaceRoot } from '../support/shipped-sql';
  * same way before it writes its first consent decision.
  *
  * The rule that gap left in prose is now enforced (#399): every write to an
- * FK-child table in the plugin runtime must be preceded, on every path that
- * reaches it, by a plugin-row claim. {@link fkChildWriteAudit} below is that
- * check, over tables read from the Prisma schema rather than from a list — a
- * hand-kept list of the four is the same blind spot one level out.
+ * FK-child table must be preceded, on every path that reaches it, by a
+ * plugin-row claim, or carry an exemption that says why it needs none.
+ * {@link fkChildWriteAudit} below is that check, over tables read from the
+ * Prisma schema rather than from a list — a hand-kept list of them is the same
+ * blind spot one level out.
  *
  * It is a REQUIREMENT check and deliberately not a fifth stage. A stage is a
  * first occurrence in a body, and the implied lock's honest position is AFTER
@@ -251,6 +253,16 @@ const CONSENT_ACT_SERVICE = 'libs/plugin/runtime/src/lib/consent/plugin-consent-
  */
 const INSTALLER_SERVICE = 'libs/plugin/runtime/src/lib/install/plugin-installer.service.ts';
 
+/**
+ * The two files outside the plugin runtime that write an FK child (#1083):
+ * the DataGateway routes' service and the interview, which both write
+ * `data_gateways`. Neither takes a lock of the claimed order, so neither has
+ * an entry in {@link LOCK_ORDER_PATHS}. They are named for the reason the
+ * installer is: each has exemptions pointing at it.
+ */
+const DATA_GATEWAY_SERVICE = 'libs/api/data-gateway/src/lib/data-gateway.service.ts';
+const GATEWAY_INTERVIEW_SERVICE = 'libs/gateway/driver/runtime/src/lib/gateway-interview.service.ts';
+
 /** The files the pinned paths live in, so no spec retypes one. */
 export const LOCK_SOURCES = {
   householdShareLock: 'libs/database/src/lib/utils/household-share-lock.ts',
@@ -261,6 +273,8 @@ export const LOCK_SOURCES = {
   installerService: INSTALLER_SERVICE,
   consentActService: CONSENT_ACT_SERVICE,
   unitScopeLock: 'libs/plugin/runtime/src/lib/grants/unit-scope-lock.ts',
+  dataGatewayService: DATA_GATEWAY_SERVICE,
+  gatewayInterviewService: GATEWAY_INTERVIEW_SERVICE,
 } as const;
 
 /**
@@ -438,22 +452,50 @@ const FK_CHILD_PARENT_ACCESSOR = 'plugin';
  * Pinned as a literal AND derived from the schema, and the pair is the point.
  * Deriving alone can quietly find nothing — a relation syntax this reader stops
  * recognising returns an empty set, and an empty set has no violations in it.
- * A literal alone goes stale the day a fifth child table lands, which is the
+ * A literal alone goes stale the day another child table lands, which is the
  * exact event this whole check exists for. Held against each other, a new child
  * table fails loudly and says to extend the pin.
+ *
+ * `data_gateways` is one of them because a plugin DataGateway's row names its
+ * plugin by `pluginId` (#1083).
  */
-export const FK_CHILD_TABLES = ['household_plugins', 'plugin_grants', 'plugin_permissions', 'user_plugins'] as const;
+export const FK_CHILD_TABLES = [
+  'data_gateways',
+  'household_plugins',
+  'plugin_grants',
+  'plugin_permissions',
+  'user_plugins',
+] as const;
 
 /**
- * The tree scanned for writes to them.
+ * The trees scanned for writes to them: every directory that has a reason to
+ * write an FK child.
  *
- * The plugin runtime entire, not the four files `LOCK_SOURCES` names. Scoping
- * this to the pinned paths would inherit the blind spot it closes:
+ * The plugin runtime entire, not only the files the pinned paths live in.
+ * Scoping this to the pinned paths would inherit the blind spot it closes:
  * `plugin-installer.service.ts` writes two of these tables and has no entry in
  * {@link LOCK_ORDER_PATHS} at all — it is compliant, and nothing here would
  * have said so.
+ *
+ * And the two libraries that write `data_gateways` (#1083). It is the one
+ * child that anything outside the plugin runtime writes, because most of its
+ * rows belong to no plugin: a remote DataGateway's row has a null key, the
+ * DataGateway routes create and edit it, and the interview stores its answers
+ * on it. Those writes belong where they are, so their libraries are scanned
+ * rather than carved out of {@link fkChildWritesOutsideScope} by name. A
+ * carve-out is a list of files nobody reads again, and the next write added to
+ * one of them would be covered by it unseen. Scanned, every site in them is
+ * enumerated in the spec, and each unclaimed one has to say why it needs no
+ * plugin-row claim.
+ *
+ * A list of directories rather than their common ancestor, which is `libs`. A
+ * scope is only worth having while every site in it can be written out.
  */
-export const FK_CHILD_WRITE_SCOPE = 'libs/plugin/runtime/src/lib';
+export const FK_CHILD_WRITE_SCOPES = [
+  'libs/plugin/runtime/src/lib',
+  'libs/api/data-gateway/src/lib',
+  'libs/gateway/driver/runtime/src/lib',
+] as const;
 
 /**
  * The Prisma methods that INSERT, which is one of the two ways the implied
@@ -514,10 +556,12 @@ export interface ClaimExemption {
 /**
  * The sites that take no dominating plugin-row claim and are safe regardless.
  *
- * One shape, twice. `persist()` reaches both writes through an `if/else` that
- * claims the plugin row on the REINSTALL arm (`plugin.updateMany`, guarded on
- * the tombstone) and creates it on the FRESH-INSTALL arm. The reinstall path is
- * ordered by the claim like every other writer; the fresh path holds no lock
+ * Two shapes.
+ *
+ * The first is `persist()`, twice. It reaches both writes through an `if/else`
+ * that claims the plugin row on the REINSTALL arm (`plugin.updateMany`, guarded
+ * on the tombstone) and creates it on the FRESH-INSTALL arm. The reinstall path
+ * is ordered by the claim like every other writer; the fresh path holds no lock
  * and cannot need one.
  *
  * Note what is NOT done here: `tx.plugin.create` is not added to the
@@ -525,6 +569,24 @@ export interface ClaimExemption {
  * inserted is not the ordering claim a `FOR SHARE` is, and admitting it as one
  * would let a genuinely late claim date early somewhere else — the failure the
  * stage patterns are scoped so carefully to avoid (#399).
+ *
+ * The second is a write to `data_gateways` that cannot set its key (#1083).
+ * That table differs from the other four in the one way that matters here:
+ * `pluginId` is nullable, and null on every remote DataGateway's row. Postgres
+ * checks the key against `plugins`, and takes the lock this audit is about,
+ * only where there is a key to check: an INSERT whose key is set, or an UPDATE
+ * that leaves it set and either changes it or rewrites a row its own
+ * transaction inserted. A write that leaves the key alone on a row some earlier
+ * transaction committed therefore takes no plugin-row lock at all, and there is
+ * nothing for a claim to order. The DataGateway routes and the interview make
+ * such writes. The audit reports them because their payloads are a spread or a
+ * name, which it rightly refuses to read, so each exemption says where the
+ * payload comes from instead.
+ *
+ * What is NOT done here either: the scan is not taught that a nullable key is
+ * safe. Nullable describes the column, and whether a write sets the key
+ * describes the write. A rule that cleared the table would clear, along with
+ * these, the first write that does set it.
  */
 export const PLUGIN_ROW_CLAIM_EXEMPTIONS: readonly ClaimExemption[] = [
   {
@@ -542,6 +604,41 @@ export const PLUGIN_ROW_CLAIM_EXEMPTIONS: readonly ClaimExemption[] = [
     site: /pluginGrant\.create/,
     because: 'The seeded server grants, reached by the same two branches and safe for the same two reasons.',
   },
+  {
+    file: DATA_GATEWAY_SERVICE,
+    enclosing: 'create',
+    site: /dataGateway\.create\(/,
+    because:
+      'Creates a remote DataGateway, whose pluginId is null, and Postgres checks a foreign key on INSERT only ' +
+      'when the key is set: no plugin row is read, so none is locked. The payload spreads CreateDataGatewayDto, ' +
+      "which declares no pluginId, and the api's validation pipe refuses a body carrying a property its DTO " +
+      'does not declare (whitelist with forbidNonWhitelisted), so the route, the only caller of this write, ' +
+      'cannot be handed one (#1083).',
+  },
+  {
+    file: DATA_GATEWAY_SERVICE,
+    enclosing: 'update',
+    site: /dataGateway\.update\(/,
+    because:
+      'Edits a DataGateway of either kind and cannot name the key: the payload is built from ' +
+      'UpdateDataGatewayDto, the partial of the create DTO plus disabledCapabilities, behind the same ' +
+      'validation pipe, and the enable and disable routes pass `enabled` alone. So a remote DataGateway keeps ' +
+      'its null pluginId and a plugin DataGateway keeps the one its install wrote. Postgres checks a foreign ' +
+      "key again on UPDATE only when the key changes or the row is the same transaction's insert, and this " +
+      'statement runs in no transaction but its own, so it takes no plugin-row lock. Reported because the ' +
+      'payload spreads, which the audit cannot read (#1083).',
+  },
+  {
+    file: GATEWAY_INTERVIEW_SERVICE,
+    enclosing: 'storeOver',
+    site: /dataGateway\.updateMany\(/,
+    because:
+      "The interview stores a DataGateway's answers on its row, whichever kind it is, and never the key: the " +
+      "payload is an InterviewData, which is Prisma's DataGatewayUpdateManyMutationInput, a type with no " +
+      "pluginId in it, filled from the answers and the interview's own times. The key is left as it was, by a " +
+      'statement that runs in no transaction but its own, so Postgres does not check it again and no plugin ' +
+      'row is locked. Reported because the payload is passed by name, which the audit cannot read (#1083).',
+  },
 ];
 
 /** One FK-child write the scan found, with the exemption covering it if any. */
@@ -552,11 +649,11 @@ export interface AuditedFkChildWrite extends SourceSite {
 let audited: readonly AuditedFkChildWrite[] | undefined;
 
 /**
- * Every FK-child write in {@link FK_CHILD_WRITE_SCOPE}, audited.
+ * Every FK-child write in {@link FK_CHILD_WRITE_SCOPES}, audited.
  *
  * Computed on first ask and kept, rather than at module load. Three other specs
- * import this module for `LOCK_SOURCES` alone, and the scan parses the plugin
- * runtime whole and can REFUSE — an unreadable schema, a child with no `@@map`.
+ * import this module for `LOCK_SOURCES` alone, and the scan parses every scope
+ * whole and can REFUSE — an unreadable schema, a child with no `@@map`.
  * At module load that refusal lands as an import error in a spec that never
  * asked, naming neither the check nor the reason; here it lands inside the case
  * that wanted the answer.
@@ -568,14 +665,14 @@ export function fkChildWriteAudit(): readonly AuditedFkChildWrite[] {
 }
 
 /**
- * Every file OUTSIDE {@link FK_CHILD_WRITE_SCOPE} that holds an FK-child write.
+ * Every file OUTSIDE {@link FK_CHILD_WRITE_SCOPES} that holds an FK-child write.
  *
- * The audit reads one directory, which is the same hand-scoping the derived
- * table list exists to refuse, one level further out. A child write added in
- * another library, in the app, or in this library above `src/lib` takes the
- * same implied lock, deadlocks the same way, and every case in the suite stays
- * green. So the scope is not asserted to be the right one; it is asserted to be
- * ALL of them.
+ * The audit reads a short list of directories, which is the same hand-scoping
+ * the derived table list exists to refuse, one level further out. A child write
+ * added in another library, in the app, or in a scanned library above `src/lib`
+ * takes the same implied lock, deadlocks the same way, and every case in the
+ * suite stays green. So the scope is not asserted to be the right one; it is
+ * asserted to be ALL of them.
  *
  * Candidates are found by grep and judged by the SHAPES, never by a second and
  * coarser pattern written for this check alone. A hand-written twin looks for
@@ -623,7 +720,7 @@ export function fkChildWritesOutsideScope(): readonly string[] {
 
   return found
     .split('\n')
-    .filter((path) => path.length > 0 && !path.startsWith(`${FK_CHILD_WRITE_SCOPE}/`))
+    .filter((path) => path.length > 0 && !FK_CHILD_WRITE_SCOPES.some((scope) => path.startsWith(`${scope}/`)))
     .filter((path) => auditedWrites(readFileSync(join(root, path), 'utf8'), path, writes, pluginRow).length > 0);
 }
 
@@ -632,8 +729,8 @@ export function fkChildWritesOutsideScope(): readonly string[] {
  *
  * Built from the schema so the accessor, the table, the FK field and the mapped
  * column of each child always agree with each other. Each re-parent shape is
- * paired with ITS OWN foreign key rather than a pooled guard over all four:
- * pooling emits the same alternative four times today, and the day one child
+ * paired with ITS OWN foreign key rather than a pooled guard over all five:
+ * pooling emits the same alternative five times today, and the day one child
  * keys differently it would count a write of another child's column as a
  * re-parent, producing a site whose exemption could only say "that is not this
  * table's key".
@@ -689,7 +786,7 @@ function auditFkChildWrites(): readonly AuditedFkChildWrite[] {
   // quietly wrong.
   const pluginRow = stageNamed('plugin row').pattern;
   // Cheap gate on the expensive part. Resolving delegates parses a file two to
-  // four times over, and 54 of the ~58 files in this tree contain no candidate
+  // four times over, and nearly every file in these trees contains no candidate
   // write at all — a file that never names a child accessor, a child table or
   // the parent accessor cannot hold a site under any shape above.
   const mentions = new RegExp(
@@ -698,7 +795,9 @@ function auditFkChildWrites(): readonly AuditedFkChildWrite[] {
       .join('|'),
   );
 
-  return readShippedTree(FK_CHILD_WRITE_SCOPE)
+  // Each scope is read on its own, so each keeps `readShippedTree`'s refusal:
+  // a library that moved fails by name instead of dropping out of the scan.
+  return FK_CHILD_WRITE_SCOPES.flatMap((scope) => readShippedTree(scope))
     .filter((file) => mentions.test(file.source))
     .flatMap((file) =>
       // Delegates are resolved per FILE, because that is the scope they are

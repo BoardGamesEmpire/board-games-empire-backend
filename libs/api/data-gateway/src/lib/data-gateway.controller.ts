@@ -241,18 +241,38 @@ export class DataGatewayController {
   }
 
   private connectToGateway(gateway: DataGatewayWithSections, write: Action) {
-    const request: ConnectGatewayRequest = {
-      gatewayId: gateway.id,
-      connectionUrl: gateway.connectionUrl,
-      connectionPort: gateway.connectionPort,
-      authType: gateway.authType,
-      authParametersJson: JSON.stringify(gateway.authParameters || {}),
-    };
-
     // Log the coordinator's error server-side, whether it answers with one or
     // the call itself fails, but never surface it to the client — return a
     // generic, translated message instead (§6).
     const failed = () => ({ success: false, message: t('errors.data_gateway.connect_failed') });
+
+    return this.connectAttempt(gateway, failed).pipe(
+      // Connecting waits for a first interview, and the row records how it
+      // went, so it's read again whatever the outcome. It's read under the
+      // write that came before, so a key that may write but not read sees it.
+      concatMap((connection_response) =>
+        from(this.dataGatewayService.getById(gateway.id, write)).pipe(
+          map((row) => ({ dataGateway: toDataGatewayView(row), connection_response, connection_attempt: true })),
+        ),
+      ),
+    );
+  }
+
+  /** Asks the coordinator to connect the DataGateway its row describes, answering `failed()` when it can't. */
+  private connectAttempt<Failure>(gateway: DataGatewayWithSections, failed: () => Failure) {
+    // A plugin DataGateway's row has no connection fields to send (#1083).
+    const { connectionUrl, connectionPort, authType } = gateway;
+    if (connectionUrl === null || connectionPort === null || authType === null) {
+      return of(failed());
+    }
+
+    const request: ConnectGatewayRequest = {
+      gatewayId: gateway.id,
+      connectionUrl,
+      connectionPort,
+      authType,
+      authParametersJson: JSON.stringify(gateway.authParameters || {}),
+    };
 
     return this.coordinator.connectGateway(request).pipe(
       map((response) => {
@@ -270,14 +290,6 @@ export class DataGatewayController {
         this.logger.error(`Error connecting to gateway ${gateway.id}`, error);
         return of(failed());
       }),
-      // Connecting waits for a first interview, and the row records how it
-      // went, so it's read again whatever the outcome. It's read under the
-      // write that came before, so a key that may write but not read sees it.
-      concatMap((connection_response) =>
-        from(this.dataGatewayService.getById(gateway.id, write)).pipe(
-          map((row) => ({ dataGateway: toDataGatewayView(row), connection_response, connection_attempt: true })),
-        ),
-      ),
     );
   }
 

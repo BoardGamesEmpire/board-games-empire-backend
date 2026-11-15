@@ -13,13 +13,22 @@ model DataGateway {
   apiDocumentation String? @map("api_documentation")
   apiVersion       String? @map("api_version")
 
-  // Connection details for the gateway
-  connectionUrl  String @map("connection_url")
-  connectionPort Int    @map("connection_port")
+  // The plugin a plugin DataGateway's row belongs to, null for a remote
+  // DataGateway. A plugin has one row, and the row outlives an uninstall, so
+  // the plugin can't be deleted from under it (#1083).
+  plugin   Plugin? @relation(fields: [pluginId], references: [id], onDelete: Restrict)
+  pluginId String? @unique @map("plugin_id")
 
-  enabled        Boolean  @default(true)
-  authType       AuthType @map("auth_type")
-  authParameters Json?    @map("auth_parameters")
+  // Where a remote DataGateway is reached. A remote DataGateway sets
+  // connectionUrl, connectionPort and authType, and a plugin DataGateway
+  // sets none of them: the migration's data_gateways_row_kind CHECK holds a
+  // row to one kind or the other (#1083).
+  connectionUrl  String? @map("connection_url")
+  connectionPort Int?    @map("connection_port")
+
+  enabled        Boolean   @default(true)
+  authType       AuthType? @map("auth_type")
+  authParameters Json?     @map("auth_parameters")
 
   usageCount Int       @default(0) @map("usage_count")
   lastUsed   DateTime? @map("last_used") @db.Timestamptz(3)

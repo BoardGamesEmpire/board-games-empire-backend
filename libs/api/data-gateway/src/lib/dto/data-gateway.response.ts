@@ -119,17 +119,24 @@ export class DataGatewayResponseDto implements DataGatewayView {
   @ApiProperty({ type: String, nullable: true })
   apiVersion!: string | null;
 
-  @ApiProperty()
-  connectionUrl!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'The plugin a plugin DataGateway belongs to. Null for a remote DataGateway (#1083).',
+  })
+  pluginId!: string | null;
 
-  @ApiProperty()
-  connectionPort!: number;
+  @ApiProperty({ type: String, nullable: true, description: 'Null for a plugin DataGateway.' })
+  connectionUrl!: string | null;
+
+  @ApiProperty({ type: Number, nullable: true, description: 'Null for a plugin DataGateway.' })
+  connectionPort!: number | null;
 
   @ApiProperty()
   enabled!: boolean;
 
-  @ApiProperty({ enum: AuthType, enumName: 'AuthType' })
-  authType!: AuthType;
+  @ApiProperty({ enum: AuthType, enumName: 'AuthType', nullable: true, description: 'Null for a plugin DataGateway.' })
+  authType!: AuthType | null;
 
   @ApiProperty({
     description: 'Whether credentials are stored. The credentials themselves are never returned (#753).',

@@ -1,6 +1,7 @@
 import { DatabaseService } from '@bge/database';
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { GatewayRegistryService } from './gateway-registry.service';
+import { remoteConnectionOptions } from './utils/remote-connection-options';
 
 /**
  * Eagerly connects to all enabled gateways once the application is fully
@@ -29,14 +30,14 @@ export class GatewayRegistryBootstrapService implements OnApplicationBootstrap {
     this.logger.log(`Seeding gateway registry with ${gateways.length} enabled gateway(s)`);
 
     for (const gateway of gateways) {
+      // A plugin DataGateway's row has no connection fields, so there is nothing to dial (#1083).
+      const options = remoteConnectionOptions(gateway);
+      if (!options) {
+        continue;
+      }
+
       try {
-        await this.registry.connect({
-          gatewayId: gateway.id,
-          connectionUrl: gateway.connectionUrl,
-          connectionPort: gateway.connectionPort,
-          authType: gateway.authType,
-          authParameters: gateway.authParameters ?? undefined,
-        });
+        await this.registry.connect(options);
 
         this.logger.log(`Successfully connected gateway '${gateway.name}' (${gateway.id}) during bootstrap`);
       } catch (error) {

@@ -225,6 +225,7 @@ function makeGateway(overrides: Partial<DataGatewayWithSections> = {}): DataGate
     apiBaseUrl: null,
     apiDocumentation: null,
     apiVersion: null,
+    pluginId: null,
     connectionUrl: 'localhost',
     connectionPort: 50051,
     enabled: true,

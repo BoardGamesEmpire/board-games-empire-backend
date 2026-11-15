@@ -19,6 +19,7 @@ import { GatewayInterviewService } from './gateway-interview.service';
 import type { GatewayConfigEvent, GatewayConnectionOptions } from './interfaces';
 import type { CoverageFilter } from './utils/coverage-filter';
 import { hashGatewayConfig } from './utils/hash-config';
+import { remoteConnectionOptions } from './utils/remote-connection-options';
 
 /**
  * How a cached driver entered the routing table. Config-update events from
@@ -665,14 +666,14 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       throw new Error(`Gateway ${gatewayId} is not available (absent, disabled, or deleted); cannot connect.`);
     }
 
+    // A plugin DataGateway's row has no connection fields, so there is nothing to dial (#1083).
+    const options = remoteConnectionOptions(gateway);
+    if (!options) {
+      throw new Error(`DataGateway ${gatewayId} has no connection fields; cannot connect.`);
+    }
+
     this.logger.log(`Lazily connecting to gateway '${gateway.name}' (${gatewayId}) on demand`);
-    await this.connect({
-      gatewayId: gateway.id,
-      connectionUrl: gateway.connectionUrl,
-      connectionPort: gateway.connectionPort,
-      authType: gateway.authType,
-      authParameters: gateway.authParameters ?? undefined,
-    });
+    await this.connect(options);
   }
 
   /**

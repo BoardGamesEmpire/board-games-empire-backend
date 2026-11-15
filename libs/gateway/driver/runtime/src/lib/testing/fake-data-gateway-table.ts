@@ -1,11 +1,18 @@
-import { AuthType, type DataGateway } from '@bge/database';
+import { AuthType, type DataGateway, type Plugin } from '@bge/database';
 
 type Where = Readonly<Record<string, unknown>>;
 
+/** A select names a scalar with `true`, and a relation with its own select, which the fake doesn't narrow by. */
 interface Query {
   where?: Where;
-  select?: Readonly<Record<string, boolean>>;
+  select?: Readonly<Record<string, boolean | object>>;
 }
+
+/** What a routing decision reads of the plugin behind a plugin DataGateway's row (#1083). */
+type SeededPlugin = Pick<Plugin, 'id' | 'slug' | 'enabled' | 'uninstalledAt' | 'loadFailed' | 'installedAt'>;
+
+/** A stored row, with the plugin a read may select beside it: null for a remote DataGateway. */
+type StoredRow = DataGateway & { plugin: SeededPlugin | null };
 
 interface Update {
   where: Where;
@@ -44,13 +51,19 @@ const matchesField = (actual: unknown, condition: unknown): boolean => {
   });
 };
 
-const matches = (row: DataGateway, where: Where = {}): boolean =>
-  Object.entries(where).every(([field, condition]) => matchesField(row[field as keyof DataGateway], condition));
+const matches = (row: StoredRow, where: Where = {}): boolean =>
+  Object.entries(where).every(([field, condition]) => matchesField(row[field as keyof StoredRow], condition));
 
-const project = (row: DataGateway, select?: Query['select']): Partial<DataGateway> =>
-  select
-    ? Object.fromEntries(Object.keys(select).map((field) => [field, row[field as keyof DataGateway]]))
-    : { ...row };
+/** Without a select, the row's own columns, as Prisma answers: a relation comes only when selected. */
+const project = (row: StoredRow, select?: Query['select']): Partial<StoredRow> => {
+  if (select) {
+    return Object.fromEntries(Object.keys(select).map((field) => [field, row[field as keyof StoredRow]]));
+  }
+
+  const columns: Partial<StoredRow> = { ...row };
+  delete columns.plugin;
+  return columns;
+};
 
 /**
  * An in-memory `data_gateways` table behind the slice of Prisma's delegate
@@ -60,12 +73,17 @@ const project = (row: DataGateway, select?: Query['select']): Partial<DataGatewa
  * rather than passing against a filter the fake silently ignores.
  */
 export class FakeDataGatewayTable {
-  private readonly rows = new Map<string, DataGateway>();
+  private readonly rows = new Map<string, StoredRow>();
 
-  /** Adds a row: enabled, never interviewed, with no answers, unless overridden. */
-  seed(overrides: Partial<DataGateway> & Pick<DataGateway, 'id'>): DataGateway {
+  /**
+   * Adds a row: a remote DataGateway's, enabled, never interviewed, with no
+   * answers, unless overridden. A plugin DataGateway's row passes its
+   * `plugin`, and takes the plugin's id and no connection fields (#1083).
+   */
+  seed(overrides: Partial<StoredRow> & Pick<DataGateway, 'id'>): DataGateway {
     const now = new Date();
-    const row: DataGateway = {
+    const plugin = overrides.plugin ?? null;
+    const row: StoredRow = {
       name: overrides.id,
       description: null,
       messageContext: null,
@@ -75,10 +93,11 @@ export class FakeDataGatewayTable {
       apiBaseUrl: null,
       apiDocumentation: null,
       apiVersion: null,
-      connectionUrl: 'localhost',
-      connectionPort: 50051,
+      pluginId: plugin?.id ?? null,
+      connectionUrl: plugin ? null : 'localhost',
+      connectionPort: plugin ? null : 50051,
       enabled: true,
-      authType: AuthType.None,
+      authType: plugin ? null : AuthType.None,
       authParameters: null,
       usageCount: 0,
       lastUsed: null,
@@ -103,6 +122,7 @@ export class FakeDataGatewayTable {
       createdAt: now,
       updatedAt: now,
       ...overrides,
+      plugin,
     };
 
     this.rows.set(row.id, row);
@@ -115,8 +135,12 @@ export class FakeDataGatewayTable {
     return row && { ...row };
   }
 
-  /** Changes a row outside any delegate call, as another process would. */
-  patch(id: string, changes: Partial<DataGateway>): void {
+  /**
+   * Changes a row outside any delegate call, as another process would. A
+   * change to `plugin` replaces what the row's plugin reads as, the way an
+   * admin's write to the plugin's own row would.
+   */
+  patch(id: string, changes: Partial<StoredRow>): void {
     const row = this.rows.get(id);
     if (!row) {
       throw new Error(`No data_gateways row ${id} to patch`);
@@ -137,15 +161,15 @@ export class FakeDataGatewayTable {
     },
   };
 
-  private matching(where?: Where): DataGateway[] {
+  private matching(where?: Where): StoredRow[] {
     return [...this.rows.values()].filter((row) => matches(row, where));
   }
 
-  private findAll(where?: Where, select?: Query['select']): Partial<DataGateway>[] {
+  private findAll(where?: Where, select?: Query['select']): Partial<StoredRow>[] {
     return this.matching(where).map((row) => project(row, select));
   }
 
-  private apply(row: DataGateway, data: Update['data']): DataGateway {
+  private apply(row: StoredRow, data: Update['data']): StoredRow {
     Object.assign(row, data, { updatedAt: new Date() });
     return row;
   }

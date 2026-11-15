@@ -283,9 +283,11 @@ describe('the plugin consent path is one lock order (#360)', () => {
    */
   describe('the locks nobody wrote — FK-implied parent locks (#399)', () => {
     const { installerService: INSTALLER_SERVICE, consentActService: CONSENT_ACT_SERVICE } = LOCK_SOURCES;
+    const { dataGatewayService: DATA_GATEWAY_SERVICE, gatewayInterviewService: GATEWAY_INTERVIEW_SERVICE } =
+      LOCK_SOURCES;
 
     /**
-     * Every FK-child write in the plugin runtime, and what the audit says about
+     * Every FK-child write in the scanned scope, and what the audit says about
      * it. Written out rather than counted, because a count is satisfied by the
      * wrong seven.
      */
@@ -307,13 +309,23 @@ describe('the plugin consent path is one lock order (#360)', () => {
       { file: UNIT_LIFECYCLE, enclosing: 'updateHouseholdConfig', write: 'householdPlugin.update', claimed: true },
       { file: UPDATE_SERVICE, enclosing: 'activateInTransaction', write: 'pluginPermission.create', claimed: true },
       { file: UPDATE_SERVICE, enclosing: 'activateInTransaction', write: 'pluginGrant.create', claimed: true },
+      // The FK-child writes outside the plugin runtime (#1083). Most
+      // `data_gateways` rows belong to no plugin, and the DataGateway routes
+      // and the interview write them in their own libraries. None of the three
+      // can set the key, so none takes the implied lock and none is claimed:
+      // each carries an exemption saying why it needs no claim. The update and
+      // the interview's write are reported for the reason the two updates above
+      // are, an unreadable `data`, and the create because every insert is.
+      { file: DATA_GATEWAY_SERVICE, enclosing: 'create', write: 'dataGateway.create', claimed: false },
+      { file: DATA_GATEWAY_SERVICE, enclosing: 'update', write: 'dataGateway.update', claimed: false },
+      { file: GATEWAY_INTERVIEW_SERVICE, enclosing: 'storeOver', write: 'dataGateway.updateMany', claimed: false },
     ];
 
     it('reads the FK-child tables out of the schema rather than trusting the list here', () => {
       // Both halves are load-bearing. Deriving alone can find nothing — a
       // relation syntax this reader stops recognising returns an empty set, and
       // an empty set has no violations in it. The literal alone goes stale on
-      // the fifth child table, which is the event the whole check exists for.
+      // the next child table, which is the event the whole check exists for.
       expect(
         childRelationsOf(FK_CHILD_PARENT)
           .map((child) => child.table)
@@ -321,11 +333,13 @@ describe('the plugin consent path is one lock order (#360)', () => {
       ).toEqual([...FK_CHILD_TABLES]);
     });
 
-    it('finds every FK-child write in the runtime, not only the ones pinned above', () => {
+    it('finds every FK-child write in the scanned scope, not only the ones pinned above', () => {
       // The self-test on the scan. A source scan that quietly matches nothing
       // reports a clean tree, so what is asserted is the enumeration itself —
       // and it deliberately reaches `plugin-installer.service.ts`, which writes
-      // two of these tables and has no entry in LOCK_ORDER_PATHS at all.
+      // two of these tables and has no entry in LOCK_ORDER_PATHS at all, and
+      // the two libraries outside the plugin runtime that write
+      // `data_gateways` (#1083).
       expect(
         fkChildWriteAudit().map((site) => ({
           file: site.file,
@@ -372,12 +386,17 @@ describe('the plugin consent path is one lock order (#360)', () => {
     });
 
     it('writes these tables nowhere outside the scanned scope', () => {
-      // The audit reads one directory, which is the same hand-scoping the
-      // derived table list exists to refuse — one level further out. A child
-      // write added in another library, in the app, or in this library above
-      // `src/lib` takes the same implied lock, deadlocks the same way, and
-      // every case above stays green. So the scope is not asserted to be the
-      // right one; it is asserted to be ALL of them.
+      // The audit reads a short list of directories, which is the same
+      // hand-scoping the derived table list exists to refuse — one level
+      // further out. A child write added in another library, in the app, or in
+      // a scanned library above `src/lib` takes the same implied lock,
+      // deadlocks the same way, and every case above stays green. So the scope
+      // is not asserted to be the right one; it is asserted to be ALL of them.
+      //
+      // Two of the directories are there for `data_gateways`, which the
+      // DataGateway routes and the interview write (#1083). They are scanned,
+      // not excused from this case, so their sites are enumerated above like
+      // every other.
       //
       // The candidates are judged by the audit's own shapes rather than by a
       // grep pattern written here; `fkChildWritesOutsideScope` says why.

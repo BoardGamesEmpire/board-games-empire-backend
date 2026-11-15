@@ -11,7 +11,8 @@ import { workspaceRoot } from './shipped-sql';
  * referential-integrity trigger, and nothing in the application source says so
  * (#398, #399). A check over that class has to know which tables are in it —
  * and a hand-kept list of them is the same shape of blind spot one level out.
- * Four tables carry that FK today. The fifth is the one this module exists for.
+ * Five tables carry that FK today; `data_gateways` was the fifth, and this
+ * module is how it was noticed (#1083). The next is the one it exists for.
  *
  * The names are read from the SCHEMA rather than derived from the model name.
  * Prisma's table name is whatever `@@map` says, so a model without one, or one
