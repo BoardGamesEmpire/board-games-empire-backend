@@ -1154,7 +1154,7 @@ A permission a plugin defines in its own namespace for its own features. It is a
 _Avoid_: own-namespace permission, plugin-declared, plugin permission
 
 **Required permission**:
-A permission a plugin asks for and cannot work without: a server that refuses one blocks any update needing it, and a household or user that has not granted one keeps running on what it did grant, with the plugin's state reported as review pending. Refusing an optional permission only switches off its feature.
+A permission a plugin asks for and cannot work without: a server that refuses one blocks any update needing it, and a household or user cannot switch the plugin on without granting every one, and a unit that later owes one keeps running on what it granted, with the plugin's state reported as review pending. Refusing an optional permission only switches off its feature.
 _Avoid_: mandatory
 
 **Consent standing**:
@@ -1164,6 +1164,10 @@ _Avoid_: late acceptance
 **Consent decision**:
 An answer to a plugin's request for a permission, given for the server, a household or a user: granted or denied.
 _Avoid_: grant, plugin grant (for the record itself)
+
+**Consent act**:
+One recorded answer a household or user gives about a plugin: switching it on, changing one optional permission, or reviewing what an update or a risk change left outstanding. The record keeps which version of the plugin was shown and what it showed, and is never changed afterwards.
+_Avoid_: consent event, decision batch
 
 **Pending decision**:
 A permission a plugin requests that the deciding unit has not answered, or whose earlier grant no longer counts, for example because its risk has risen since. It confers nothing.
@@ -1178,7 +1182,7 @@ A grant given when the permission carried a lower risk level than it does now. I
 _Avoid_: stale risk, risk-stale grant
 
 **Revocation**:
-A consent decision undone without anyone choosing to undo it. Either whoever gave it lost the authority to, for example by leaving the household, or an update removed the permission, stopped requesting it, or moved it to another consent scope. The permission goes back to awaiting an answer, and the reason is kept.
+A consent decision undone without anyone choosing to undo it. An update removed the permission, stopped requesting it, or moved it to another consent scope. A decision is never revoked because whoever gave it left or lost their role. The permission goes back to awaiting an answer, and the reason is kept.
 _Avoid_: invalidation; durable denial (a refusal someone chose)
 
 **Categorical exclusion**:
@@ -1194,7 +1198,7 @@ Retyping each Critical-risk permission that an install or update gives server co
 _Avoid_: second factor, typed confirmation
 
 **Unit enablement**:
-A household's or user's own participation in a plugin: their on/off choice and their settings. A household creates it by switching the plugin on; a user's is created by their first grant. A client receives one of five state codes for a unit: `off` (not switched on, or no unit enablement), `on` (running with everything the plugin asks for), `review_pending` (running on what was agreed while a required permission is outstanding), `needs_configuration` (switched on but its settings no longer fit the plugin) and `unavailable` (switched on, but the server cannot run it for this unit: the server switch is off, the stored manifest cannot be read, or this version has no surface at the unit's scope).
+A household's or user's own participation in a plugin: their on/off choice and their settings. A household creates it by switching the plugin on; a user creates theirs the same way. A client receives one of five state codes for a unit: `off` (not switched on, or no unit enablement), `on` (running with everything the plugin asks for), `review_pending` (running on what was agreed while a required permission is outstanding), `needs_configuration` (switched on but its settings no longer fit the plugin) and `unavailable` (switched on, but the server cannot run it for this unit: the server switch is off, the stored manifest cannot be read, or this version has no surface at the unit's scope).
 _Avoid_: enablement row, anchor, enrolled, unit row
 
 **Re-consent**:
@@ -1206,7 +1210,7 @@ The state of a unit that is switched on and running while its consent standing l
 _Avoid_: suspension, suspended, suspended for consent, disabled, auto-disabled
 
 **Pre-consent**:
-Consent given ahead of an update, which takes effect when the update lands.
+Consent given ahead of an update, which takes effect when the update lands. It can only accept, and only permissions the current version does not already request.
 _Avoid_: dormant grant
 
 ### Plugin lifecycle and updates

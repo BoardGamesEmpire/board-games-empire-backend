@@ -10,6 +10,8 @@ _All C2 decisions are now recorded on #59 through D-AM. D-AL (declared gates / r
 
 _2026-11-07: consent standing is derived at read time and the stored suspension is removed; a unit missing a required permission keeps running on its grants and reports review pending. See [ADR 0004](adr/0004-plugin-consent-is-worked-out-when-read.md), epic #1154 and #1149 (this change)._
 
+_2026-11-14: a household or user switches a plugin on, changes an optional permission and answers what an update or a risk change left outstanding through consent acts (#1150). Each act is one recorded row (`plugin_consent_acts`) that keeps the version and artifact sha it named and what it showed, and switching on must grant every required permission at that scope. Three routes at household and user scope carry them: `POST :slug/enable`, `POST :slug/consent/toggle` and `POST :slug/consent/review`. The consent surface now reports the artifact sha and can be read for a staged update (`?manifest=staged`), where a review is a pre-consent. A decision is no longer revoked when whoever made it leaves or loses a role. Removed: the household and user `POST :slug/grants` routes and `decide()` at those scopes. Server scope is untouched until #1152, so the operator's `POST /api/plugins/:slug/grants` stays and the operator's install and update approval record no act yet._
+
 ## Recommended order
 
 Check items off as PRs merge. Ordering rationale in the notes column; parallelizable work is marked.
