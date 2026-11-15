@@ -1,14 +1,22 @@
 import {
   HostNotAllowedError,
+  InvalidRequestUrlError,
+  OutboundNetworkError,
+  RedirectLimitExceededError,
   RedirectToDisallowedTargetError,
   RequestTimeoutError,
+  ResponseTooLargeError,
   SsrfRejectionError,
   type SafeHttpRequestOptions,
   type SafeHttpResponse,
   type SecureHttpService,
 } from '@bge/secure-http';
 import type { UpstreamFetch } from '@boardgamesempire/gateway-driver-contract';
-import { PluginOutboundDomainNotDeclaredError, PluginOutboundDomainsNotSupportedError } from './context.errors';
+import {
+  PluginHttpRequestFailedError,
+  PluginOutboundDomainNotDeclaredError,
+  PluginOutboundDomainsNotSupportedError,
+} from './context.errors';
 import { buildPluginHttp } from './plugin-http';
 
 describe('buildPluginHttp', () => {
@@ -120,24 +128,81 @@ describe('buildPluginHttp', () => {
     }
   });
 
-  it('passes every other SafeHttpError through as it is', async () => {
-    const others = [
-      new SsrfRejectionError('api.example.com', 'private-range', '10.0.0.1'),
-      new RedirectToDisallowedTargetError(
-        'https://api.example.com/r',
-        'https://api.example.com/internal',
-        new SsrfRejectionError('api.example.com', 'private-range', '10.0.0.1'),
-      ),
-      new RequestTimeoutError('https://api.example.com/slow', 5_000),
-    ];
+  // The secure HTTP service's errors name the whole URL, and a redirect's
+  // target, in their message and fields. A DataGateway driver may put a
+  // secret in a URL's query and copy `err.message` into its log and its
+  // answer to the searching user, so a failure reaches the plugin as the
+  // runtime's own error: the service's code and the host the plugin asked
+  // for, nothing else, and no `cause` a logger could print (#1083).
+  describe('a failed request names the host, never the URL (#1083)', () => {
+    const asked = 'https://api.example.com/v1/secret-path?token=s3cret';
+    const redirectTarget = 'https://internal.example.com/admin?token=s3cret';
 
-    for (const other of others) {
-      request.mockRejectedValueOnce(other);
+    /** Everything a log line could print from the error. */
+    const printed = (err: Error): string[] => [JSON.stringify(err), err.message, err.stack ?? ''];
+
+    it.each([
+      ['a timeout', 'REQUEST_TIMEOUT', new RequestTimeoutError(asked, 5_000)],
+      [
+        'a network error',
+        'OUTBOUND_NETWORK_ERROR',
+        new OutboundNetworkError(asked, new Error(`connect ECONNRESET for ${asked}`)),
+      ],
+      [
+        'a redirect the outbound HTTP policy refuses',
+        'REDIRECT_DENIED',
+        new RedirectToDisallowedTargetError(
+          asked,
+          redirectTarget,
+          new SsrfRejectionError('internal.example.com', 'private-range', '10.0.0.1'),
+        ),
+      ],
+      ['an address the policy refuses', 'SSRF_REJECTION', new SsrfRejectionError('api.example.com', 'private-range')],
+      ['too many redirects', 'REDIRECT_LIMIT_EXCEEDED', new RedirectLimitExceededError(asked, 5)],
+      ['an answer over the size limit', 'RESPONSE_TOO_LARGE', new ResponseTooLargeError(asked, 10)],
+      ['a scheme the client cannot send', 'INVALID_REQUEST_URL', new InvalidRequestUrlError(asked, 'invalid-scheme')],
+    ])("%s rejects as the runtime's own coded error (#1083)", async (_label, code, failure) => {
+      request.mockRejectedValueOnce(failure);
+
+      const err = (await buildPluginHttp(slug, declared, secureHttp)
+        .fetch(asked, { method: 'GET', headers: {} })
+        .catch((e: unknown) => e)) as Error;
+
+      expect(err).toBeInstanceOf(PluginHttpRequestFailedError);
+      expect(err).toMatchObject({ code, slug, hostname: 'api.example.com' });
+      expect(err).not.toHaveProperty('cause');
+      for (const text of printed(err)) {
+        expect(text).not.toContain('secret-path');
+        expect(text).not.toContain('s3cret');
+        expect(text).not.toContain('internal.example.com');
+      }
+    });
+
+    // Node's URL parser puts the input on its TypeError, so that error must
+    // not reach the plugin either.
+    it("refuses a URL it can't parse with the runtime's own coded error, without calling out (#1083)", async () => {
+      const err = (await buildPluginHttp(slug, declared, secureHttp)
+        .fetch('api.example.com/v1/secret-path?token=s3cret', { method: 'GET', headers: {} })
+        .catch((e: unknown) => e)) as Error;
+
+      expect(err).toBeInstanceOf(PluginHttpRequestFailedError);
+      expect(err).toMatchObject({ code: 'INVALID_REQUEST_URL', slug, hostname: null });
+      expect(err).not.toHaveProperty('cause');
+      for (const text of printed(err)) {
+        expect(text).not.toContain('secret-path');
+        expect(text).not.toContain('s3cret');
+      }
+      expect(request).not.toHaveBeenCalled();
+    });
+
+    it('lets an error that is not a request failure propagate as it is (#1083)', async () => {
+      const bug = new TypeError('a bug in the service');
+      request.mockRejectedValueOnce(bug);
 
       await expect(
         buildPluginHttp(slug, declared, secureHttp).fetch('https://api.example.com/', { method: 'GET', headers: {} }),
-      ).rejects.toBe(other);
-    }
+      ).rejects.toBe(bug);
+    });
   });
 
   // `configured` means the hosts come from the plugin's configuration, which

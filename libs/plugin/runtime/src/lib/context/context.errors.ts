@@ -1,3 +1,5 @@
+import type { SafeHttpErrorCode } from '@bge/secure-http';
+
 /**
  * Typed failures for the plugin context surface (#59 Phase B).
  *
@@ -6,8 +8,9 @@
  * Returning `null` instead would be indistinguishable from an
  * unauthenticated context and would let a de-synced or forged CLS actor read
  * as "nobody" — the loud failure is the safer signal for both sides. The
- * outbound-domain errors reject `PluginContext.http.fetch`, and carry a
- * `code` so a plugin can recognise them without importing the host (#1083).
+ * outbound-domain and request-failed errors are every rejection of
+ * `PluginContext.http.fetch`, and carry a `code` so a plugin can recognise
+ * them without importing the host (#1083).
  */
 
 /**
@@ -39,6 +42,36 @@ export class PluginOutboundDomainNotDeclaredError extends Error {
     public readonly hostname: string,
   ) {
     super(`Plugin '${slug}' may not reach '${hostname}': it is not declared in the manifest's network.outboundDomains`);
+  }
+}
+
+/**
+ * A plugin's request failed for a reason other than an undeclared host: the
+ * outbound HTTP policy refused the address or a redirect, the request timed
+ * out, the network failed, the answer was too large, or the URL was not one
+ * the client can send. `code` is the secure HTTP service's own, so a plugin
+ * can tell a timeout from a refused address; `hostname` is the host the
+ * plugin asked for, or null when its URL could not be parsed.
+ *
+ * Only these fields cross. The service's error names the whole URL, and a
+ * redirect's target, in its message and fields, and a URL can carry a secret
+ * in its query: a driver that logs `err.message`, or a logger that prints a
+ * `cause` chain, would print it. So the underlying error is never attached
+ * (#1083).
+ */
+export class PluginHttpRequestFailedError extends Error {
+  override readonly name = 'PluginHttpRequestFailedError';
+
+  constructor(
+    public readonly slug: string,
+    public readonly code: SafeHttpErrorCode,
+    public readonly hostname: string | null,
+  ) {
+    super(
+      hostname === null
+        ? `Plugin '${slug}' made a request whose URL could not be parsed (${code})`
+        : `Plugin '${slug}': the request to '${hostname}' failed (${code})`,
+    );
   }
 }
 

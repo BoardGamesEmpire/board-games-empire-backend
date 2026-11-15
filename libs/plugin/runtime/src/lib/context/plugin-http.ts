@@ -1,11 +1,16 @@
 import {
   HostNotAllowedError,
   RedirectToDisallowedTargetError,
+  SafeHttpError,
   type SafeHttpResponse,
   type SecureHttpService,
 } from '@bge/secure-http';
 import type { PluginHttp, PluginHttpRequest } from '@boardgamesempire/plugin-contract';
-import { PluginOutboundDomainNotDeclaredError, PluginOutboundDomainsNotSupportedError } from './context.errors';
+import {
+  PluginHttpRequestFailedError,
+  PluginOutboundDomainNotDeclaredError,
+  PluginOutboundDomainsNotSupportedError,
+} from './context.errors';
 
 /** Statuses whose Response may not carry a body, not even an empty one. */
 const BODILESS_STATUSES: ReadonlySet<number> = new Set([204, 205, 304]);
@@ -39,6 +44,8 @@ export function buildPluginHttp(
 
   return {
     fetch: async (url: string, request: PluginHttpRequest): Promise<Response> => {
+      const hostname = requestedHostname(slug, url);
+
       let answer: SafeHttpResponse<ArrayBuffer>;
       try {
         answer = await secureHttp.request<ArrayBuffer>(url, {
@@ -50,15 +57,45 @@ export function buildPluginHttp(
           allowHost,
         });
       } catch (err) {
-        // Only the host refusal becomes the plugin's own error; anything else
-        // the service throws is already a coded SafeHttpError.
-        const hostname = refusedHostname(err);
-        throw hostname === undefined ? err : new PluginOutboundDomainNotDeclaredError(slug, hostname);
+        throw toPluginError(slug, hostname, err);
       }
 
       return toResponse(answer);
     },
   };
+}
+
+/**
+ * The host of the URL the plugin asked for. Node's parser puts the input on
+ * the TypeError it throws, so a URL that can't be parsed becomes the
+ * runtime's own error, naming no URL (#1083).
+ */
+function requestedHostname(slug: string, url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    throw new PluginHttpRequestFailedError(slug, 'INVALID_REQUEST_URL', null);
+  }
+}
+
+/**
+ * What the plugin sees of a failed request: only the runtime's own errors,
+ * naming a host, never a URL. The service's error carries the whole URL, and
+ * a redirect's target, so none of it is copied across, not even as `cause`.
+ * Anything that isn't a SafeHttpError is a bug and propagates as it is
+ * (#1083).
+ */
+function toPluginError(slug: string, hostname: string, err: unknown): unknown {
+  const refused = refusedHostname(err);
+  if (refused !== undefined) {
+    return new PluginOutboundDomainNotDeclaredError(slug, refused);
+  }
+
+  if (err instanceof SafeHttpError) {
+    return new PluginHttpRequestFailedError(slug, err.code, hostname);
+  }
+
+  return err;
 }
 
 /**

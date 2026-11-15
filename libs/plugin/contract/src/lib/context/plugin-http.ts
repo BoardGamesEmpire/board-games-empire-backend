@@ -18,12 +18,26 @@ export interface PluginHttpRequest {
  * `network.outboundDomains`, on the first URL and on every redirect, and
  * under the server's outbound HTTP policy (#1083).
  *
- * A request to a host the manifest doesn't declare rejects with an error
- * whose `code` is `PLUGIN_OUTBOUND_DOMAIN_NOT_DECLARED`, so a plugin can tell
- * it apart without importing anything from the host. The client never asks
- * for compression: the `Response` is built from the bytes as they arrived.
+ * The client never asks for compression: the `Response` is built from the
+ * bytes as they arrived.
  */
 export interface PluginHttp {
-  /** A property, not a method, so a plugin can hand it on by itself. */
+  /**
+   * A property, not a method, so a plugin can hand it on by itself.
+   *
+   * Any HTTP status resolves. A request that fails rejects with an error
+   * that carries a `code`, so a plugin can tell failures apart without
+   * importing anything from the host, and names at most a hostname, never
+   * the URL, which can carry a secret in its query (#1083):
+   *  - `PLUGIN_OUTBOUND_DOMAIN_NOT_DECLARED`, with `hostname`: the request, or
+   *    a redirect it was sent on, went to a host the manifest doesn't declare;
+   *  - `PLUGIN_OUTBOUND_DOMAINS_CONFIGURED_UNSUPPORTED`: the manifest declares
+   *    `configured` outbound domains, and every request is refused (#1293);
+   *  - otherwise the outbound HTTP service's own code, such as
+   *    `REQUEST_TIMEOUT`, `OUTBOUND_NETWORK_ERROR`, `SSRF_REJECTION` or
+   *    `REDIRECT_DENIED`, with the `hostname` the plugin asked for, or
+   *    `INVALID_REQUEST_URL` with a null `hostname` when the URL can't be
+   *    parsed.
+   */
   readonly fetch: (url: string, request: PluginHttpRequest) => Promise<Response>;
 }
