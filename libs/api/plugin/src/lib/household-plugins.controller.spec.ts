@@ -1,5 +1,5 @@
 import type { AuditContextService } from '@bge/actor-context';
-import { Action, PluginGrantScope, PluginGrantStatus, ResourceType, type DatabaseService } from '@bge/database';
+import { Action, PluginGrantStatus, ResourceType, RiskLevel, type DatabaseService } from '@bge/database';
 import { HouseholdLivenessGuard } from '@bge/household';
 import {
   CHECK_POLICIES_KEY,
@@ -9,11 +9,11 @@ import {
   type AppAbility,
 } from '@bge/permissions';
 import type {
+  PluginConsentActService,
   PluginConsentPresentation,
   PluginConsentPresentationService,
   PluginFeatureStateService,
   PluginFeatureUnitState,
-  PluginGrantService,
   PluginInventoryService,
   PluginUnitLifecycleService,
 } from '@bge/plugin';
@@ -38,8 +38,11 @@ const STAGED_PRESENTATION = {
   source: 'pending',
   checks: [],
 } as unknown as PluginConsentPresentation;
-const GRANT = { id: 'grant-1', permissionSlug: 'update:calendar', status: PluginGrantStatus.Granted } as never;
 const UNIT_ROW = { id: 'hp-1', householdId: 'hh-1', pluginId: 'plugin-1', enabled: true } as never;
+const SHA = 'a'.repeat(64);
+const ANSWER = { permissionSlug: 'update:calendar', status: PluginGrantStatus.Granted, riskLevel: RiskLevel.Medium };
+const DECIDED_AT = new Date('2026-11-14T00:00:00Z');
+const ACT = { id: 'act-1', kind: 'SwitchOn', decidedAt: DECIDED_AT, presentation: {} } as never;
 const INVENTORY_PAGE = {
   rows: [
     {
@@ -92,13 +95,11 @@ const FEATURE_STATE = {
 
 describe('HouseholdPluginsController (delegation + household instance gate)', () => {
   let controller: HouseholdPluginsController;
-  let grants: jest.Mocked<Pick<PluginGrantService, 'decide'>>;
+  let consentActs: jest.Mocked<Pick<PluginConsentActService, 'switchOn' | 'toggle' | 'review'>>;
   let presentation: jest.Mocked<
     Pick<PluginConsentPresentationService, 'presentForUnitBySlug' | 'presentStagedForUnitBySlug'>
   >;
-  let units: jest.Mocked<
-    Pick<PluginUnitLifecycleService, 'enableHousehold' | 'disableHousehold' | 'updateHouseholdConfig'>
-  >;
+  let units: jest.Mocked<Pick<PluginUnitLifecycleService, 'disableHousehold' | 'updateHouseholdConfig'>>;
   let featureState: jest.Mocked<Pick<PluginFeatureStateService, 'resolveForUnitBySlug'>>;
   let inventory: jest.Mocked<Pick<PluginInventoryService, 'listForHousehold'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale'>>;
@@ -107,13 +108,17 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
   let scopeComposer: ScopeComposer;
 
   beforeEach(() => {
-    grants = { decide: jest.fn().mockResolvedValue({ grant: GRANT, changed: true }) };
+    const result = { act: ACT, changed: true, unit: UNIT_ROW, switchedOff: false };
+    consentActs = {
+      switchOn: jest.fn().mockResolvedValue(result),
+      toggle: jest.fn().mockResolvedValue(result),
+      review: jest.fn().mockResolvedValue(result),
+    };
     presentation = {
       presentForUnitBySlug: jest.fn().mockResolvedValue(PRESENTATION),
       presentStagedForUnitBySlug: jest.fn().mockResolvedValue(STAGED_PRESENTATION),
     };
     units = {
-      enableHousehold: jest.fn().mockResolvedValue(UNIT_ROW),
       disableHousehold: jest.fn().mockResolvedValue(UNIT_ROW),
       updateHouseholdConfig: jest.fn().mockResolvedValue(UNIT_ROW),
     };
@@ -128,7 +133,7 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
     // is composed and recorded as it is in a request.
     scopeComposer = new ScopeComposer(abilityService as never);
     controller = new HouseholdPluginsController(
-      grants as never,
+      consentActs as never,
       abilityService as never,
       presentation as never,
       units as never,
@@ -141,32 +146,6 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
   });
 
   afterEach(() => jest.clearAllMocks());
-
-  it('decideGrant records a Household-scope decision for the route household, decider from CLS', async () => {
-    const result = await firstValueFrom(
-      controller.decideGrant('hh-1', 'demo-sink', {
-        permissionSlug: 'update:calendar',
-        status: PluginGrantStatus.Granted,
-      }),
-    );
-
-    expect(grants.decide).toHaveBeenCalledWith({
-      slug: 'demo-sink',
-      scopeType: PluginGrantScope.Household,
-      scopeId: 'hh-1',
-      permissionSlug: 'update:calendar',
-      status: PluginGrantStatus.Granted,
-      deciderId: MOCK_ACTING_USER_ID,
-    });
-    expect(result).toEqual({
-      message: expect.objectContaining({
-        key: 'success.plugin.grant_decided',
-        args: { slug: 'demo-sink', permissionSlug: 'update:calendar' },
-      }),
-      grant: GRANT,
-      changed: true,
-    });
-  });
 
   it('consentPresentation renders the route household as the unit, locale from CLS', async () => {
     auditContext.getLocale.mockReturnValue('de');
@@ -194,20 +173,135 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
     expect(result).toEqual({ presentation: STAGED_PRESENTATION });
   });
 
-  it('enable passes the route household, the CLS actor, and the nested config through to the unit writer', async () => {
-    const result = await firstValueFrom(
-      controller.enable('hh-1', 'demo-sink', { config: { webhookUrl: 'https://x' } }),
-    );
+  // The three consent act routes (#1150): each hands the service the route
+  // household as the unit, the acting user, the sha and the answers the client
+  // read from the consent surface, and the locale it was shown in.
+  describe('consent acts (#1150)', () => {
+    const unit = { scopeType: 'Household', householdId: 'hh-1' };
+    const actBody = { id: 'act-1', kind: 'SwitchOn', decidedAt: DECIDED_AT };
 
-    expect(units.enableHousehold).toHaveBeenCalledWith({
-      slug: 'demo-sink',
-      householdId: 'hh-1',
-      actorId: MOCK_ACTING_USER_ID,
-      config: { webhookUrl: 'https://x' },
+    it('enable switches the plugin on with the unit, the actor, the sha, the answers, the config and the locale (#1150)', async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
+      const result = await firstValueFrom(
+        controller.enable('hh-1', 'demo-sink', {
+          manifestSha256: SHA,
+          answers: [ANSWER],
+          config: { webhookUrl: 'https://x' },
+        }),
+      );
+
+      expect(consentActs.switchOn).toHaveBeenCalledWith({
+        slug: 'demo-sink',
+        unit,
+        actorId: MOCK_ACTING_USER_ID,
+        manifestSha256: SHA,
+        answers: [ANSWER],
+        config: { webhookUrl: 'https://x' },
+        locale: 'de',
+      });
+      expect(result).toEqual({
+        message: expect.objectContaining({ key: 'success.plugin.enabled', args: { slug: 'demo-sink' } }),
+        changed: true,
+        switchedOff: false,
+        act: actBody,
+        unit: UNIT_ROW,
+      });
     });
-    expect(result).toEqual({
-      message: expect.objectContaining({ key: 'success.plugin.enabled', args: { slug: 'demo-sink' } }),
-      unit: UNIT_ROW,
+
+    it('toggle records one answer with the unit, the actor, the sha and the locale (#1150)', async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
+      const result = await firstValueFrom(
+        controller.toggleConsent('hh-1', 'demo-sink', { manifestSha256: SHA, answer: ANSWER }),
+      );
+
+      expect(consentActs.toggle).toHaveBeenCalledWith({
+        slug: 'demo-sink',
+        unit,
+        actorId: MOCK_ACTING_USER_ID,
+        manifestSha256: SHA,
+        answers: [ANSWER],
+        locale: 'de',
+      });
+      expect(result).toEqual(
+        expect.objectContaining({
+          message: expect.objectContaining({ key: 'success.plugin.consent_recorded', args: { slug: 'demo-sink' } }),
+          changed: true,
+        }),
+      );
+    });
+
+    it('review records the answers with the unit, the actor, the sha and the locale (#1150)', async () => {
+      const result = await firstValueFrom(
+        controller.reviewConsent('hh-1', 'demo-sink', { manifestSha256: SHA, answers: [ANSWER] }),
+      );
+
+      expect(consentActs.review).toHaveBeenCalledWith({
+        slug: 'demo-sink',
+        unit,
+        actorId: MOCK_ACTING_USER_ID,
+        manifestSha256: SHA,
+        answers: [ANSWER],
+        locale: undefined,
+      });
+      expect(result).toEqual(
+        expect.objectContaining({
+          message: expect.objectContaining({ key: 'success.plugin.consent_recorded' }),
+          act: actBody,
+        }),
+      );
+    });
+
+    it('a review that switched the unit off answers with the switched-off message (#1150)', async () => {
+      consentActs.review.mockResolvedValue({ act: ACT, changed: true, unit: UNIT_ROW, switchedOff: true });
+
+      const result = await firstValueFrom(
+        controller.reviewConsent('hh-1', 'demo-sink', { manifestSha256: SHA, answers: [ANSWER] }),
+      );
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          message: expect.objectContaining({
+            key: 'success.plugin.consent_refused_switched_off',
+            args: { slug: 'demo-sink' },
+          }),
+          switchedOff: true,
+        }),
+      );
+    });
+
+    it('an act that changes nothing answers changed false and no act (#1150)', async () => {
+      consentActs.toggle.mockResolvedValue({ act: null, changed: false, unit: UNIT_ROW, switchedOff: false });
+
+      const result = await firstValueFrom(
+        controller.toggleConsent('hh-1', 'demo-sink', { manifestSha256: SHA, answer: ANSWER }),
+      );
+
+      expect(result).toEqual(expect.objectContaining({ changed: false, act: null, unit: UNIT_ROW }));
+    });
+
+    it("the household routes refuse an actor who cannot manage this household's plugins before the service is called (#1150)", () => {
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+
+      expect(() => controller.enable('hh-other', 'demo-sink', { manifestSha256: SHA, answers: [] })).toThrow(
+        ForbiddenException,
+      );
+      expect(() => controller.toggleConsent('hh-other', 'demo-sink', { manifestSha256: SHA, answer: ANSWER })).toThrow(
+        ForbiddenException,
+      );
+      expect(() =>
+        controller.reviewConsent('hh-other', 'demo-sink', { manifestSha256: SHA, answers: [ANSWER] }),
+      ).toThrow(ForbiddenException);
+
+      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.manage, ResourceType.HouseholdPlugin, {
+        householdId: 'hh-other',
+      });
+      expect(consentActs.switchOn).not.toHaveBeenCalled();
+      expect(consentActs.toggle).not.toHaveBeenCalled();
+      expect(consentActs.review).not.toHaveBeenCalled();
     });
   });
 
@@ -271,31 +365,19 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
       expect(presentation.presentForUnitBySlug).not.toHaveBeenCalled();
     });
 
-    it('refuses a decide the same way — before the service is even asked', async () => {
-      abilityService.assertCurrentActorCan.mockImplementation(() => {
-        throw new ForbiddenException();
-      });
-
-      expect(() =>
-        controller.decideGrant('hh-other', 'demo-sink', {
-          permissionSlug: 'update:calendar',
-          status: PluginGrantStatus.Denied,
-        }),
-      ).toThrow(ForbiddenException);
-      expect(grants.decide).not.toHaveBeenCalled();
-    });
-
     it('binds every #323 write and read to ITS household before the service is asked', async () => {
       abilityService.assertCurrentActorCan.mockImplementation(() => {
         throw new ForbiddenException();
       });
 
-      expect(() => controller.enable('hh-other', 'demo-sink', {})).toThrow(ForbiddenException);
+      expect(() => controller.enable('hh-other', 'demo-sink', { manifestSha256: SHA, answers: [] })).toThrow(
+        ForbiddenException,
+      );
       expect(() => controller.disable('hh-other', 'demo-sink')).toThrow(ForbiddenException);
       expect(() => controller.updateConfig('hh-other', 'demo-sink', { config: {} })).toThrow(ForbiddenException);
       expect(() => controller.featureStates('hh-other', 'demo-sink')).toThrow(ForbiddenException);
 
-      expect(units.enableHousehold).not.toHaveBeenCalled();
+      expect(consentActs.switchOn).not.toHaveBeenCalled();
       expect(units.disableHousehold).not.toHaveBeenCalled();
       expect(units.updateHouseholdConfig).not.toHaveBeenCalled();
       expect(featureState.resolveForUnitBySlug).not.toHaveBeenCalled();
@@ -497,25 +579,31 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
       ]);
     });
 
-    it.each(['list', 'decideGrant', 'consentPresentation', 'enable', 'disable', 'updateConfig', 'featureStates'])(
-      'probes the route household on %s, and answers 404 when it is gone',
-      async (handler) => {
-        const count = jest.fn().mockResolvedValue(0);
-        const guard = new HouseholdLivenessGuard(
-          new Reflector(),
-          { household: { count } } as unknown as DatabaseService,
-          { getCurrentAbilities: () => [{ can: () => true }] } as unknown as AbilityService,
-        );
-        const context = {
-          getClass: () => HouseholdPluginsController,
-          getHandler: () => HouseholdPluginsController.prototype[handler as keyof HouseholdPluginsController],
-          switchToHttp: () => ({ getRequest: () => ({ params: { householdId: 'hh-gone', slug: 'demo-sink' } }) }),
-        } as unknown as ExecutionContext;
+    it.each([
+      'list',
+      'consentPresentation',
+      'enable',
+      'toggleConsent',
+      'reviewConsent',
+      'disable',
+      'updateConfig',
+      'featureStates',
+    ])('probes the route household on %s, and answers 404 when it is gone', async (handler) => {
+      const count = jest.fn().mockResolvedValue(0);
+      const guard = new HouseholdLivenessGuard(
+        new Reflector(),
+        { household: { count } } as unknown as DatabaseService,
+        { getCurrentAbilities: () => [{ can: () => true }] } as unknown as AbilityService,
+      );
+      const context = {
+        getClass: () => HouseholdPluginsController,
+        getHandler: () => HouseholdPluginsController.prototype[handler as keyof HouseholdPluginsController],
+        switchToHttp: () => ({ getRequest: () => ({ params: { householdId: 'hh-gone', slug: 'demo-sink' } }) }),
+      } as unknown as ExecutionContext;
 
-        await expect(guard.canActivate(context)).rejects.toBeInstanceOf(NotFoundException);
-        expect(count).toHaveBeenCalledWith({ where: { id: 'hh-gone', deletedAt: null } });
-      },
-    );
+      await expect(guard.canActivate(context)).rejects.toBeInstanceOf(NotFoundException);
+      expect(count).toHaveBeenCalledWith({ where: { id: 'hh-gone', deletedAt: null } });
+    });
   });
 
   describe('policy gates', () => {
@@ -543,8 +631,9 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
     it.each([
       ['consentPresentation', Action.read],
       ['featureStates', Action.read],
-      ['decideGrant', Action.manage],
       ['enable', Action.manage],
+      ['toggleConsent', Action.manage],
+      ['reviewConsent', Action.manage],
       ['disable', Action.manage],
       ['updateConfig', Action.manage],
     ] as const)('%s gates on %s:HouseholdPlugin', (handler, action) => {
@@ -574,9 +663,10 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
     // deliberately. #323 extends this class; its routes join this list.
     it.each([
       ['list', '/', RequestMethod.GET],
-      ['decideGrant', ':slug/grants', RequestMethod.POST],
       ['consentPresentation', ':slug/consent', RequestMethod.GET],
       ['enable', ':slug/enable', RequestMethod.POST],
+      ['toggleConsent', ':slug/consent/toggle', RequestMethod.POST],
+      ['reviewConsent', ':slug/consent/review', RequestMethod.POST],
       ['disable', ':slug/disable', RequestMethod.POST],
       ['updateConfig', ':slug/config', RequestMethod.PATCH],
       ['featureStates', ':slug/features', RequestMethod.GET],
@@ -585,7 +675,7 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
       expect(Reflect.getMetadata('method', HouseholdPluginsController.prototype[handler])).toBe(method);
     });
 
-    it('registers exactly the grant-consent and unit-enablement routes', () => {
+    it('registers exactly the consent and unit-enablement routes, with no per-permission grant route (#1150)', () => {
       const handlers = Object.getOwnPropertyNames(HouseholdPluginsController.prototype).filter(
         (name) =>
           name !== 'constructor' &&
@@ -594,9 +684,10 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
 
       expect(handlers).toEqual([
         'list',
-        'decideGrant',
         'consentPresentation',
         'enable',
+        'toggleConsent',
+        'reviewConsent',
         'disable',
         'updateConfig',
         'featureStates',

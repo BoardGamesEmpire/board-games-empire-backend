@@ -13,6 +13,11 @@ import { AbilityService } from '@bge/permissions';
 import {
   PluginConfigSchemaUnusableError,
   PluginConfigValidationError,
+  PluginConsentActAnswerError,
+  PluginConsentActRequiredSetError,
+  PluginConsentActStaleError,
+  PluginConsentActUngrantableError,
+  PluginConsentActUnitOffError,
   PluginConsentPresentationManifestError,
   PluginConsentPresentationNoStagedUpdateError,
   PluginConsentPresentationNotFoundError,
@@ -497,6 +502,48 @@ function buildRenderers(): RendererMap {
   renders(PluginUnitPluginChangedError, manifestMoveConflict('errors.plugin.unit_plugin_changed'));
   renders(PluginLifecyclePluginChangedError, manifestMoveConflict('errors.plugin.lifecycle_plugin_changed'));
   renders(PluginGrantPluginChangedError, manifestMoveConflict('errors.plugin.grant_plugin_changed'));
+
+  // ─── consent acts (#1150) ─────────────────────────────────────────────────
+  // A household or user switching a plugin on, toggling one requested
+  // permission, or reviewing. The two conflicts a reload cures (stale, unit
+  // off) and the one only a server admin can cure (ungrantable) are 409; an
+  // answer set the request itself got wrong is 422.
+
+  // `kind` says whether the plugin manifest moved or a shown risk changed;
+  // `staleRisks` names each changed risk, so the client can show the new one.
+  renders(PluginConsentActStaleError, (exception) => ({
+    status: Http.Conflict,
+    message: t('errors.plugin.consent_act_stale', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug, kind: exception.kind, staleRisks: exception.staleRisks },
+  }));
+
+  renders(PluginConsentActRequiredSetError, (exception) => ({
+    status: Http.UnprocessableEntity,
+    message: t('errors.plugin.consent_act_required_set', { slug: exception.pluginSlug }),
+    fields: {
+      slug: exception.pluginSlug,
+      missingSlugs: exception.missingSlugs,
+      refusedSlugs: exception.refusedSlugs,
+    },
+  }));
+
+  renders(PluginConsentActAnswerError, (exception) => ({
+    status: Http.UnprocessableEntity,
+    message: t('errors.plugin.consent_act_answer', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug, rule: exception.rule, permissionSlugs: exception.permissionSlugs },
+  }));
+
+  renders(PluginConsentActUngrantableError, (exception) => ({
+    status: Http.Conflict,
+    message: t('errors.plugin.consent_act_ungrantable', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug, permissions: exception.permissions },
+  }));
+
+  renders(PluginConsentActUnitOffError, (exception) => ({
+    status: Http.Conflict,
+    message: t('errors.plugin.consent_act_unit_off', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug, scopeType: exception.scopeType },
+  }));
 
   // ─── 409 — confirmation challenges (prompt inputs come FROM the error) ───
 

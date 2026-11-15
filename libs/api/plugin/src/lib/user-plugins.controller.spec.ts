@@ -1,12 +1,12 @@
 import type { Actor, AuditContextService } from '@bge/actor-context';
-import { Action, PluginGrantScope, PluginGrantStatus, ResourceType } from '@bge/database';
+import { Action, PluginGrantStatus, ResourceType, RiskLevel } from '@bge/database';
 import { CHECK_POLICIES_KEY, PoliciesGuard, ScopeComposer, type AppAbility } from '@bge/permissions';
 import type {
+  PluginConsentActService,
   PluginConsentPresentation,
   PluginConsentPresentationService,
   PluginFeatureStateService,
   PluginFeatureUnitState,
-  PluginGrantService,
   PluginInventoryService,
   PluginUnitLifecycleService,
 } from '@bge/plugin';
@@ -32,8 +32,11 @@ const STAGED_PRESENTATION = {
   source: 'pending',
   checks: [],
 } as unknown as PluginConsentPresentation;
-const GRANT = { id: 'grant-1', permissionSlug: 'read:public_content', status: PluginGrantStatus.Granted } as never;
 const UNIT_ROW = { id: 'up-1', userId: USER_ID, pluginId: 'plugin-1', enabled: true } as never;
+const SHA = 'b'.repeat(64);
+const ANSWER = { permissionSlug: 'read:public_content', status: PluginGrantStatus.Granted, riskLevel: RiskLevel.Low };
+const DECIDED_AT = new Date('2026-11-14T00:00:00Z');
+const ACT = { id: 'act-1', kind: 'Toggle', decidedAt: DECIDED_AT, presentation: {} } as never;
 const INVENTORY_PAGE = {
   rows: [
     {
@@ -57,11 +60,11 @@ const FEATURE_STATE = {
 
 describe('UserPluginsController (delegation + actor-kind floor)', () => {
   let controller: UserPluginsController;
-  let grants: jest.Mocked<Pick<PluginGrantService, 'decide'>>;
+  let consentActs: jest.Mocked<Pick<PluginConsentActService, 'switchOn' | 'toggle' | 'review'>>;
   let presentation: jest.Mocked<
     Pick<PluginConsentPresentationService, 'presentForUnitBySlug' | 'presentStagedForUnitBySlug'>
   >;
-  let units: jest.Mocked<Pick<PluginUnitLifecycleService, 'enableUser' | 'disableUser'>>;
+  let units: jest.Mocked<Pick<PluginUnitLifecycleService, 'disableUser'>>;
   let featureState: jest.Mocked<Pick<PluginFeatureStateService, 'resolveForUnitBySlug'>>;
   let inventory: jest.Mocked<Pick<PluginInventoryService, 'listForUser'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale' | 'getActor'>>;
@@ -69,13 +72,17 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
   let scopeComposer: ScopeComposer;
 
   beforeEach(() => {
-    grants = { decide: jest.fn().mockResolvedValue({ grant: GRANT, changed: true }) };
+    const result = { act: ACT, changed: true, unit: UNIT_ROW, switchedOff: false };
+    consentActs = {
+      switchOn: jest.fn().mockResolvedValue(result),
+      toggle: jest.fn().mockResolvedValue(result),
+      review: jest.fn().mockResolvedValue(result),
+    };
     presentation = {
       presentForUnitBySlug: jest.fn().mockResolvedValue(PRESENTATION),
       presentStagedForUnitBySlug: jest.fn().mockResolvedValue(STAGED_PRESENTATION),
     };
     units = {
-      enableUser: jest.fn().mockResolvedValue(UNIT_ROW),
       disableUser: jest.fn().mockResolvedValue(UNIT_ROW),
     };
     featureState = { resolveForUnitBySlug: jest.fn().mockResolvedValue(FEATURE_STATE) };
@@ -89,7 +96,7 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
     // is composed and recorded as it is in a request.
     scopeComposer = new ScopeComposer(abilityService as never);
     controller = new UserPluginsController(
-      grants as never,
+      consentActs as never,
       presentation as never,
       units as never,
       featureState as never,
@@ -100,32 +107,6 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
   });
 
   afterEach(() => jest.clearAllMocks());
-
-  it('decideGrant addresses the session user as BOTH decider and unit — no other user is addressable', async () => {
-    const result = await firstValueFrom(
-      controller.decideGrant('demo-sink', {
-        permissionSlug: 'read:public_content',
-        status: PluginGrantStatus.Granted,
-      }),
-    );
-
-    expect(grants.decide).toHaveBeenCalledWith({
-      slug: 'demo-sink',
-      scopeType: PluginGrantScope.User,
-      scopeId: USER_ID,
-      permissionSlug: 'read:public_content',
-      status: PluginGrantStatus.Granted,
-      deciderId: USER_ID,
-    });
-    expect(result).toEqual({
-      message: expect.objectContaining({
-        key: 'success.plugin.grant_decided',
-        args: { slug: 'demo-sink', permissionSlug: 'read:public_content' },
-      }),
-      grant: GRANT,
-      changed: true,
-    });
-  });
 
   it('consentPresentation renders the session user as the unit, locale from CLS', async () => {
     auditContext.getLocale.mockReturnValue('de-AT');
@@ -167,15 +148,86 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
     );
   });
 
-  it('enable/disable address the session user only, and render the unit with the shared success keys', async () => {
-    const enabled = await firstValueFrom(controller.enable('demo-sink'));
+  // The three consent act routes (#1150): the session user is both the unit
+  // and the actor, so no other user's unit is addressable.
+  describe('consent acts (#1150)', () => {
+    const unit = { scopeType: 'User', userId: USER_ID };
+    const actBody = { id: 'act-1', kind: 'Toggle', decidedAt: DECIDED_AT };
 
-    expect(units.enableUser).toHaveBeenCalledWith({ slug: 'demo-sink', userId: USER_ID });
-    expect(enabled).toEqual({
-      message: expect.objectContaining({ key: 'success.plugin.enabled', args: { slug: 'demo-sink' } }),
-      unit: UNIT_ROW,
+    it('enable switches the plugin on with the unit, the actor, the sha, the answers and the locale (#1150)', async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
+      const result = await firstValueFrom(controller.enable('demo-sink', { manifestSha256: SHA, answers: [ANSWER] }));
+
+      expect(consentActs.switchOn).toHaveBeenCalledWith({
+        slug: 'demo-sink',
+        unit,
+        actorId: USER_ID,
+        manifestSha256: SHA,
+        answers: [ANSWER],
+        locale: 'de',
+      });
+      expect(result).toEqual({
+        message: expect.objectContaining({ key: 'success.plugin.enabled', args: { slug: 'demo-sink' } }),
+        changed: true,
+        switchedOff: false,
+        act: actBody,
+        unit: UNIT_ROW,
+      });
     });
 
+    it('toggle records one answer with the unit, the actor, the sha and the locale (#1150)', async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
+      const result = await firstValueFrom(
+        controller.toggleConsent('demo-sink', { manifestSha256: SHA, answer: ANSWER }),
+      );
+
+      expect(consentActs.toggle).toHaveBeenCalledWith({
+        slug: 'demo-sink',
+        unit,
+        actorId: USER_ID,
+        manifestSha256: SHA,
+        answers: [ANSWER],
+        locale: 'de',
+      });
+      expect(result).toEqual(
+        expect.objectContaining({
+          message: expect.objectContaining({ key: 'success.plugin.consent_recorded', args: { slug: 'demo-sink' } }),
+        }),
+      );
+    });
+
+    it('review records the answers with the unit, the actor, the sha and the locale (#1150)', async () => {
+      await firstValueFrom(controller.reviewConsent('demo-sink', { manifestSha256: SHA, answers: [ANSWER] }));
+
+      expect(consentActs.review).toHaveBeenCalledWith({
+        slug: 'demo-sink',
+        unit,
+        actorId: USER_ID,
+        manifestSha256: SHA,
+        answers: [ANSWER],
+        locale: undefined,
+      });
+    });
+
+    it('a review that switched the unit off answers with the switched-off message (#1150)', async () => {
+      consentActs.review.mockResolvedValue({ act: ACT, changed: true, unit: UNIT_ROW, switchedOff: true });
+
+      const result = await firstValueFrom(
+        controller.reviewConsent('demo-sink', { manifestSha256: SHA, answers: [ANSWER] }),
+      );
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          message: expect.objectContaining({ key: 'success.plugin.consent_refused_switched_off' }),
+          switchedOff: true,
+        }),
+      );
+    });
+  });
+
+  it('disable addresses the session user only, and renders the unit with the shared success key', async () => {
     const disabled = await firstValueFrom(controller.disable('demo-sink'));
 
     expect(units.disableUser).toHaveBeenCalledWith({ slug: 'demo-sink', userId: USER_ID });
@@ -211,16 +263,13 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
       ['apiKey', { kind: 'apiKey', userId: USER_ID, apiKeyId: 'key-1' }],
       ['system', { kind: 'system', reason: 'migration' }],
       ['plugin', { kind: 'plugin', pluginId: 'plugin-1', slug: 'demo-sink', unit: { scopeType: 'Server' } }],
-    ] as const)('refuses a %s actor on decide — before the service is even asked', (_kind, actor) => {
+    ] as const)('refuses a %s actor on a consent act — before the service is even asked (#1150)', (_kind, actor) => {
       auditContext.getActor.mockReturnValue(actor as unknown as Actor);
 
-      expect(() =>
-        controller.decideGrant('demo-sink', {
-          permissionSlug: 'read:public_content',
-          status: PluginGrantStatus.Granted,
-        }),
-      ).toThrow(ForbiddenException);
-      expect(grants.decide).not.toHaveBeenCalled();
+      expect(() => controller.toggleConsent('demo-sink', { manifestSha256: SHA, answer: ANSWER })).toThrow(
+        ForbiddenException,
+      );
+      expect(consentActs.toggle).not.toHaveBeenCalled();
     });
 
     it('refuses a non-user actor on the consent read the same way', () => {
@@ -237,14 +286,16 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
     });
 
     it.each([
-      ['enable', () => controller.enable('demo-sink')],
+      ['enable', () => controller.enable('demo-sink', { manifestSha256: SHA, answers: [] })],
+      ['reviewConsent', () => controller.reviewConsent('demo-sink', { manifestSha256: SHA, answers: [ANSWER] })],
       ['disable', () => controller.disable('demo-sink')],
       ['featureStates', () => controller.featureStates('demo-sink')],
-    ] as const)('the floor holds on the #323 %s route too — before the service is asked', (_name, invoke) => {
+    ] as const)('the floor holds on the %s route too — before the service is asked', (_name, invoke) => {
       auditContext.getActor.mockReturnValue({ kind: 'apiKey', userId: USER_ID, apiKeyId: 'key-1' } as unknown as Actor);
 
       expect(invoke).toThrow(ForbiddenException);
-      expect(units.enableUser).not.toHaveBeenCalled();
+      expect(consentActs.switchOn).not.toHaveBeenCalled();
+      expect(consentActs.review).not.toHaveBeenCalled();
       expect(units.disableUser).not.toHaveBeenCalled();
       expect(featureState.resolveForUnitBySlug).not.toHaveBeenCalled();
     });
@@ -344,7 +395,7 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
           (controller[name as keyof UserPluginsController] as (...args: unknown[]) => unknown).call(
             controller,
             'demo-sink',
-            { permissionSlug: 'read:public_content', status: PluginGrantStatus.Granted },
+            { manifestSha256: SHA, answers: [ANSWER], answer: ANSWER },
           ),
         ).toThrow(ForbiddenException);
       }
@@ -356,9 +407,10 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
     // this class; its routes join this list.
     it.each([
       ['list', '/', RequestMethod.GET],
-      ['decideGrant', ':slug/grants', RequestMethod.POST],
       ['consentPresentation', ':slug/consent', RequestMethod.GET],
       ['enable', ':slug/enable', RequestMethod.POST],
+      ['toggleConsent', ':slug/consent/toggle', RequestMethod.POST],
+      ['reviewConsent', ':slug/consent/review', RequestMethod.POST],
       ['disable', ':slug/disable', RequestMethod.POST],
       ['featureStates', ':slug/features', RequestMethod.GET],
     ] as const)('binds %s to %s', (handler, path, method) => {
@@ -366,14 +418,22 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
       expect(Reflect.getMetadata('method', UserPluginsController.prototype[handler])).toBe(method);
     });
 
-    it('registers exactly the grant-consent and unit-enablement routes', () => {
+    it('registers exactly the consent and unit-enablement routes, with no per-permission grant route (#1150)', () => {
       const handlers = Object.getOwnPropertyNames(UserPluginsController.prototype).filter(
         (name) =>
           name !== 'constructor' &&
           Reflect.getMetadata('path', UserPluginsController.prototype[name as never]) !== undefined,
       );
 
-      expect(handlers).toEqual(['list', 'decideGrant', 'consentPresentation', 'enable', 'disable', 'featureStates']);
+      expect(handlers).toEqual([
+        'list',
+        'consentPresentation',
+        'enable',
+        'toggleConsent',
+        'reviewConsent',
+        'disable',
+        'featureStates',
+      ]);
     });
   });
 });

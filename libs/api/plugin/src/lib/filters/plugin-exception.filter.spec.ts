@@ -1,4 +1,4 @@
-import { Action, PluginGrantScope, ResourceType } from '@bge/database';
+import { Action, PluginGrantScope, ResourceType, RiskLevel } from '@bge/database';
 import { toErrorCode } from '@bge/i18n';
 import * as pluginRuntime from '@bge/plugin';
 import {
@@ -815,6 +815,67 @@ describe('PluginExceptionFilter', () => {
 
       expect(body()['message']).toBe(`t:errors.plugin.${key}`);
       expect(body()['rule']).toBe(rule);
+    });
+  });
+
+  // The five refusals of a consent act (#1150): each carries its stable code
+  // and the fields a client needs to say what to do next.
+  describe('consent act refusals (#1150)', () => {
+    it.each([
+      {
+        exception: new pluginRuntime.PluginConsentActStaleError('sample', 'risk', [
+          { permissionSlug: 'plugin|sample|sync', shownRiskLevel: RiskLevel.Low, currentRiskLevel: RiskLevel.High },
+        ]),
+        status: Http.Conflict,
+        code: 'PLUGIN_CONSENT_ACT_STALE',
+        key: 'consent_act_stale',
+        fields: {
+          slug: 'sample',
+          kind: 'risk',
+          staleRisks: [
+            { permissionSlug: 'plugin|sample|sync', shownRiskLevel: RiskLevel.Low, currentRiskLevel: RiskLevel.High },
+          ],
+        },
+      },
+      {
+        exception: new pluginRuntime.PluginConsentActRequiredSetError(
+          'sample',
+          ['plugin|sample|a'],
+          ['plugin|sample|b'],
+        ),
+        status: Http.UnprocessableEntity,
+        code: 'PLUGIN_CONSENT_ACT_REQUIRED_SET',
+        key: 'consent_act_required_set',
+        fields: { slug: 'sample', missingSlugs: ['plugin|sample|a'], refusedSlugs: ['plugin|sample|b'] },
+      },
+      {
+        exception: new pluginRuntime.PluginConsentActAnswerError('sample', 'duplicate', ['plugin|sample|a']),
+        status: Http.UnprocessableEntity,
+        code: 'PLUGIN_CONSENT_ACT_ANSWER',
+        key: 'consent_act_answer',
+        fields: { slug: 'sample', rule: 'duplicate', permissionSlugs: ['plugin|sample|a'] },
+      },
+      {
+        exception: new pluginRuntime.PluginConsentActUngrantableError('sample', [
+          { permissionSlug: 'read:all', cause: 'wildcard_subject' },
+        ]),
+        status: Http.Conflict,
+        code: 'PLUGIN_CONSENT_ACT_UNGRANTABLE',
+        key: 'consent_act_ungrantable',
+        fields: { slug: 'sample', permissions: [{ permissionSlug: 'read:all', cause: 'wildcard_subject' }] },
+      },
+      {
+        exception: new pluginRuntime.PluginConsentActUnitOffError('sample', 'Household'),
+        status: Http.Conflict,
+        code: 'PLUGIN_CONSENT_ACT_UNIT_OFF',
+        key: 'consent_act_unit_off',
+        fields: { slug: 'sample', scopeType: 'Household' },
+      },
+    ])('renders $code with its status and fields (#1150)', ({ exception, status, code, key, fields }) => {
+      filter.catch(exception, host);
+
+      expect(rendered().getStatus()).toBe(status);
+      expect(body()).toEqual(expect.objectContaining({ code, message: `t:errors.plugin.${key}`, ...fields }));
     });
   });
 

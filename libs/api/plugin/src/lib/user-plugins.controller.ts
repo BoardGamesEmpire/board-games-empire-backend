@@ -1,13 +1,15 @@
 import { AuditContextService, requireSessionUserId, type UserPluginUnit } from '@bge/actor-context';
-import { Action, PluginGrantScope, ResourceType } from '@bge/database';
+import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard, ScopeComposer } from '@bge/permissions';
 import {
+  PluginConsentActService,
   PluginConsentPresentationService,
   PluginFeatureStateService,
-  PluginGrantService,
   PluginInventoryService,
   PluginUnitLifecycleService,
+  type ConsentActAnswer,
+  type ConsentActInput,
 } from '@bge/plugin';
 import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
 import { Body, Controller, Get, HttpCode, Param, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
@@ -16,18 +18,22 @@ import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import {
+  consentActResponse,
+  ConsentActResponseDto,
   ConsentSurfaceQueryDto,
   ConsentSurfaceResponseDto,
-  DecidePluginGrantDto,
   PluginUnitInventoryEntryDto,
+  ReviewConsentDto,
+  SwitchOnUserPluginDto,
+  ToggleConsentDto,
 } from './dto';
 import { PluginExceptionFilter } from './filters/plugin-exception.filter';
 
 const PaginatedUserPluginsResponse = PaginatedResponseDto(PluginUnitInventoryEntryDto, 'plugins');
 
 /**
- * User-scope plugin consent (#59 Phase C4, #322): each user's own grant
- * decisions and the consent surface they decide from. #323 adds the unit
+ * User-scope plugin consent (#59 Phase C4, #322): each user's own consent
+ * acts (#1150) and the consent surface they answer. #323 adds the unit
  * enable/disable endpoints to this class. Self-addressed under `/users/me`
  * per D-AX — the acting user from CLS is BOTH the decider and the consent
  * unit, so no one else's unit is addressable. No permission seed exists for
@@ -50,7 +56,7 @@ const PaginatedUserPluginsResponse = PaginatedResponseDto(PluginUnitInventoryEnt
 @Controller('users/me/plugins')
 export class UserPluginsController {
   constructor(
-    private readonly grants: PluginGrantService,
+    private readonly consentActs: PluginConsentActService,
     private readonly presentation: PluginConsentPresentationService,
     private readonly units: PluginUnitLifecycleService,
     private readonly featureState: PluginFeatureStateService,
@@ -97,51 +103,6 @@ export class UserPluginsController {
   }
 
   @ApiOperation({
-    summary: 'Record an own-user consent decision for one requested permission',
-    description:
-      'Grant or durably deny a permission the active manifest requests at user consent scope, for your own ' +
-      'account. A Granted decision creates your unit enablement (#225); a Denied decision creates nothing, so ' +
-      'without an enablement the plugin stays off for you (state off). Once you hold one, a denial that leaves a ' +
-      'REQUIRED user check outstanding leaves the unit running with state review_pending until you grant it.',
-  })
-  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
-  @ApiResponse({ status: Http.Forbidden, description: 'A categorically ungrantable permission' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
-  @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
-  @ApiResponse({
-    status: Http.Conflict,
-    description:
-      'The plugin manifest was replaced while the decision was in flight, so it was not recorded; reload the ' +
-      "plugin's permissions and decide again",
-  })
-  @ApiResponse({
-    status: Http.UnprocessableEntity,
-    description: 'Not requested by the manifest, or decided at the wrong consent scope',
-  })
-  @HttpCode(Http.Ok)
-  @Post(':slug/grants')
-  decideGrant(@Param('slug') slug: string, @Body() dto: DecidePluginGrantDto) {
-    const userId = this.selfUserId();
-
-    return from(
-      this.grants.decide({
-        slug,
-        scopeType: PluginGrantScope.User,
-        scopeId: userId,
-        permissionSlug: dto.permissionSlug,
-        status: dto.status,
-        deciderId: userId,
-      }),
-    ).pipe(
-      map(({ grant, changed }) => ({
-        message: t('success.plugin.grant_decided', { slug, permissionSlug: dto.permissionSlug }),
-        grant,
-        changed,
-      })),
-    );
-  }
-
-  @ApiOperation({
     summary: "Present the consent surface for your own unit: the active manifest's, or a staged update's",
     description:
       'Your consent screen: every requested permission, with your own decision state per permission — ' +
@@ -170,25 +131,126 @@ export class UserPluginsController {
     ).pipe(map((presentation) => ({ presentation })));
   }
 
-  // ─── Unit enablement (#323): the user's own switch ─────────────────────────
+  // ─── Consent acts (#1150) and your own switch (#323) ───────────────────────
+  // Switching on, toggling and reviewing are each one recorded consent act.
+  // Each answers 200 whether or not it changed anything (changed: false and
+  // act: null when it did not), so repeating one is safe.
 
   @ApiOperation({
-    summary: 'Enable your own unit for this plugin',
+    summary: 'Switch the plugin on for yourself, answering its requested permissions',
     description:
-      'Flips your own switch (enabled) back on. Your unit enablement is created by your first Granted user-scope ' +
-      'consent decision (#225) — without one there is nothing to enable (404). Consent standing is worked out ' +
-      'on every read and this endpoint never writes it: a required check still outstanding leaves the unit ' +
-      'running with state review_pending until it is granted.',
+      'One consent act: you answer the requested permissions you decide for yourself, as the consent surface ' +
+      '(GET …/consent, or manifest=staged to pre-consent to a staged update) showed them, and the plugin is ' +
+      'switched on for you. Every required permission must be Granted; optional ones may be answered either ' +
+      'way or left for later. manifestSha256 names the consent surface the answers were read from. Switching ' +
+      'on again when nothing would change answers changed: false.',
   })
+  @ApiResponse({ status: Http.Ok, type: ConsentActResponseDto })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
-  @ApiResponse({ status: Http.Forbidden, description: 'Not a session user (API keys cannot exercise this axis)' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed, or no enablement anchor exists' })
-  @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description: 'Only you can give consent for yourself: API keys and other non-user actors are refused',
+  })
+  @ApiResponse({ status: Http.NotFound, description: 'The plugin is not installed' })
+  @ApiResponse({ status: Http.Gone, description: 'The plugin was uninstalled' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description:
+      'PLUGIN_CONSENT_ACT_STALE: the plugin or a permission risk changed since the consent surface was read; ' +
+      'read it again and answer again. PLUGIN_CONSENT_ACT_UNGRANTABLE: a required permission cannot be granted ' +
+      'here, which only a server admin can fix.',
+  })
+  @ApiResponse({
+    status: Http.UnprocessableEntity,
+    description:
+      'PLUGIN_CONSENT_ACT_REQUIRED_SET: a required permission was left out (missingSlugs) or Denied ' +
+      '(refusedSlugs). PLUGIN_CONSENT_ACT_ANSWER: an answer does not match what the plugin asks for (rule and ' +
+      'permissionSlugs say which). Also a body that fails validation.',
+  })
   @HttpCode(Http.Ok)
   @Post(':slug/enable')
-  enable(@Param('slug') slug: string) {
-    return from(this.units.enableUser({ slug, userId: this.selfUserId() })).pipe(
-      map((unit) => ({ message: t('success.plugin.enabled', { slug }), unit })),
+  enable(@Param('slug') slug: string, @Body() dto: SwitchOnUserPluginDto) {
+    return from(this.consentActs.switchOn(this.actInput(slug, dto.manifestSha256, dto.answers))).pipe(
+      map((result) => consentActResponse(t('success.plugin.enabled', { slug }), result)),
+    );
+  }
+
+  @ApiOperation({
+    summary: 'Grant or refuse one optional requested permission for yourself',
+    description:
+      'One consent act that changes your answer to one optional requested permission while the plugin is ' +
+      'switched on for you. A required permission cannot be toggled: refusing one means switching the plugin ' +
+      'off, or answering it in a review. Repeating your current answer answers changed: false.',
+  })
+  @ApiResponse({ status: Http.Ok, type: ConsentActResponseDto })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description: 'Only you can give consent for yourself: API keys and other non-user actors are refused',
+  })
+  @ApiResponse({ status: Http.NotFound, description: 'The plugin is not installed' })
+  @ApiResponse({ status: Http.Gone, description: 'The plugin was uninstalled' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description:
+      'PLUGIN_CONSENT_ACT_UNIT_OFF: the plugin is switched off for you; switch it on first. ' +
+      'PLUGIN_CONSENT_ACT_STALE: the plugin or the permission risk changed since the consent surface was read. ' +
+      'PLUGIN_CONSENT_ACT_UNGRANTABLE: the permission cannot be granted here.',
+  })
+  @ApiResponse({
+    status: Http.UnprocessableEntity,
+    description:
+      'PLUGIN_CONSENT_ACT_ANSWER: the permission is not requested, is required, or is not yours to decide ' +
+      '(rule says which). Also a body that fails validation.',
+  })
+  @HttpCode(Http.Ok)
+  @Post(':slug/consent/toggle')
+  toggleConsent(@Param('slug') slug: string, @Body() dto: ToggleConsentDto) {
+    return from(this.consentActs.toggle(this.actInput(slug, dto.manifestSha256, [dto.answer]))).pipe(
+      map((result) => consentActResponse(t('success.plugin.consent_recorded', { slug }), result)),
+    );
+  }
+
+  @ApiOperation({
+    summary: 'Answer what the plugin, or its staged update, still asks you',
+    description:
+      'One consent act that answers the requested permissions the active manifest leaves outstanding for you, ' +
+      'or, with the sha of a staged update, those the update adds (pre-consent). Refusing a required permission ' +
+      'switches the plugin off for you in the same consent act, and the response says so (switchedOff: true).',
+  })
+  @ApiResponse({ status: Http.Ok, type: ConsentActResponseDto })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description: 'Only you can give consent for yourself: API keys and other non-user actors are refused',
+  })
+  @ApiResponse({ status: Http.NotFound, description: 'The plugin is not installed' })
+  @ApiResponse({ status: Http.Gone, description: 'The plugin was uninstalled' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description:
+      'PLUGIN_CONSENT_ACT_UNIT_OFF: the plugin is switched off for you. PLUGIN_CONSENT_ACT_STALE: the plugin, ' +
+      'its staged update or a permission risk changed since the consent surface was read. ' +
+      'PLUGIN_CONSENT_ACT_UNGRANTABLE: a permission answered Granted cannot be granted here.',
+  })
+  @ApiResponse({
+    status: Http.UnprocessableEntity,
+    description:
+      'PLUGIN_CONSENT_ACT_ANSWER: an answer does not match what is outstanding (rule and permissionSlugs say ' +
+      'which). Also a body that fails validation, such as an empty answers list.',
+  })
+  @HttpCode(Http.Ok)
+  @Post(':slug/consent/review')
+  reviewConsent(@Param('slug') slug: string, @Body() dto: ReviewConsentDto) {
+    return from(this.consentActs.review(this.actInput(slug, dto.manifestSha256, dto.answers))).pipe(
+      map((result) =>
+        consentActResponse(
+          result.switchedOff
+            ? t('success.plugin.consent_refused_switched_off', { slug })
+            : t('success.plugin.consent_recorded', { slug }),
+          result,
+        ),
+      ),
     );
   }
 
@@ -240,5 +302,24 @@ export class UserPluginsController {
    */
   private selfUserId(): string {
     return requireSessionUserId(this.auditContext.getActor());
+  }
+
+  /**
+   * What every consent act of your own hands the service (#1150): you are
+   * both the unit and the actor, and the locale is the one the consent
+   * surface was shown in. The actor-kind check runs here, before the service
+   * is asked.
+   */
+  private actInput(slug: string, manifestSha256: string, answers: readonly ConsentActAnswer[]): ConsentActInput {
+    const userId = this.selfUserId();
+
+    return {
+      slug,
+      unit: { scopeType: 'User', userId },
+      actorId: userId,
+      manifestSha256,
+      answers,
+      locale: this.auditContext.getLocale() ?? undefined,
+    };
   }
 }

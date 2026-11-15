@@ -24,6 +24,7 @@
   "maxLength": "{property} must be shorter than or equal to {constraints.0} characters",
   "noNullCharacter": "{property} must not contain a null character",
   "isUUID": "{property} must be a UUID",
+  "isSha256": "{property} must be 64 lowercase hexadecimal characters",
   "isNumberString": "{property} must be a number string",
   "nonNegativeIntegerString": "{property} must be a non-negative integer string",
   "isHostnameOrWildcard": "Each entry must be a valid hostname or wildcard (e.g. \"example.com\" or \"*.example.com\")",
