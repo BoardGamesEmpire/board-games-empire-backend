@@ -10,11 +10,12 @@ import {
   Prisma,
   ResourceType,
 } from '@bge/database';
-import { t } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import { AbilityService, resolveActingUserIdOrNull, ScopeComposer } from '@bge/permissions';
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Http } from '@status/codes';
 import assert from 'node:assert';
 import { emitRemovedGames, writeEventDates } from '../attendee/attendance';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
@@ -38,6 +39,7 @@ import {
   OccurrenceUpdatedEvent,
 } from './events/occurrence.events';
 import type { AvailabilitySummary, AvailabilitySummaryEntry } from './interfaces';
+import { countLiveDates } from './live-dates.util';
 
 @Injectable()
 export class EventOccurrenceService {
@@ -239,12 +241,14 @@ export class EventOccurrenceService {
         assert(locked, new NotFoundException(t('errors.event.not_found', { id: eventId })));
 
         if (locked.schedulingMode === EventSchedulingMode.Fixed) {
-          // Every date counts here, declined and cancelled ones too. Counting
-          // only live dates is #966's change.
-          const existingCount = await tx.eventOccurrence.count({ where: { eventId } });
-
-          if (existingCount >= 1) {
-            throw new BadRequestException(t('errors.occurrence.fixed_mode_single'));
+          // A cancelled or declined date no longer holds the event's one
+          // date, so it can be given a new one (#966).
+          if ((await countLiveDates(tx, eventId)) >= 1) {
+            throw new CodedHttpException(
+              Http.BadRequest,
+              'OCCURRENCE_FIXED_MODE_HAS_DATE',
+              t('errors.occurrence.fixed_mode_single'),
+            );
           }
         }
 

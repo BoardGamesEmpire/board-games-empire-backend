@@ -230,6 +230,57 @@ describe('event cancel, reopen and archive (#795)', () => {
       await addDate().expect(201);
     });
 
+    it('lets a host give a Fixed event a new date after cancelling and reopening it (#966)', async () => {
+      const host = await actors.user();
+      const eventId = await createdEventId(host, { occurrences: [{ startDate: hoursFromNow(24) }] });
+
+      const addDate = () =>
+        request(baseUrl)
+          .post(`${EVENTS_PATH}/${eventId}/occurrences`)
+          .set(host.headers)
+          .send({ startDate: hoursFromNow(48) });
+
+      // Control: while its one date is live, a second is refused.
+      expect((await addDate().expect(400)).body.code).toBe('OCCURRENCE_FIXED_MODE_HAS_DATE');
+
+      await cancel(host, eventId).expect(200);
+      await transition(host, eventId, 'reopen').expect(200);
+      await addDate().expect(201);
+
+      const statuses = (await datesOf(eventId)).map((date) => date.status);
+      expect(statuses).toHaveLength(2);
+      expect(statuses).toEqual(expect.arrayContaining([OccurrenceStatus.Cancelled, OccurrenceStatus.Confirmed]));
+    });
+
+    it('lets a Fixed event whose only date was declined take a new one (#966)', async () => {
+      const host = await actors.user();
+      const eventId = await createdEventId(host, {
+        schedulingMode: EventSchedulingMode.Poll,
+        occurrences: [{ startDate: hoursFromNow(24) }],
+      });
+      const [{ id: occurrenceId }] = await db.client.eventOccurrence.findMany({
+        where: { eventId },
+        select: { id: true },
+      });
+
+      await request(baseUrl)
+        .post(`${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}/decline`)
+        .set(host.headers)
+        .expect(201);
+      await request(baseUrl)
+        .patch(`${EVENTS_PATH}/${eventId}`)
+        .set(host.headers)
+        .send({ schedulingMode: EventSchedulingMode.Fixed })
+        .expect(200);
+
+      // The declined date is not counted, so the Fixed event has room.
+      await request(baseUrl)
+        .post(`${EVENTS_PATH}/${eventId}/occurrences`)
+        .set(host.headers)
+        .send({ startDate: hoursFromNow(48) })
+        .expect(201);
+    });
+
     // A cancel and a confirm racing end in a legal state either way: the
     // date is never left Confirmed under a cancelled event.
     it('never leaves a date Confirmed when a cancel races its confirm', async () => {

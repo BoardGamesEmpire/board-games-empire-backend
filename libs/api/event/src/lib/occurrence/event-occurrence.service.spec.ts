@@ -11,7 +11,7 @@ import {
   ResourceType,
   ScheduledGameRole,
 } from '@bge/database';
-import { t } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
@@ -764,9 +764,25 @@ describe('EventOccurrenceService', () => {
         where: { id: 'event-1', deletedAt: null },
         select: { schedulingMode: true },
       });
-      expect(rejection).toBeInstanceOf(BadRequestException);
-      expect((rejection as BadRequestException).getResponse()).toEqual(t('errors.occurrence.fixed_mode_single'));
+      expect(rejection).toBeInstanceOf(CodedHttpException);
+      expect((rejection as CodedHttpException).getResponse()).toMatchObject({
+        code: 'OCCURRENCE_FIXED_MODE_HAS_DATE',
+        message: t('errors.occurrence.fixed_mode_single'),
+      });
       expect(db.eventOccurrence.create).not.toHaveBeenCalled();
+    });
+
+    it("counts only live dates toward a Fixed event's one date, so a cancelled or declined one leaves room (#966)", async () => {
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', schedulingMode: EventSchedulingMode.Fixed } as never);
+      db.eventOccurrence.count.mockResolvedValue(0);
+      db.eventOccurrence.create.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
+
+      await service.addOccurrence('event-1', { startDate: new Date() } as never);
+
+      expect(db.eventOccurrence.count).toHaveBeenCalledWith({
+        where: { eventId: 'event-1', status: { in: [OccurrenceStatus.Proposed, OccurrenceStatus.Confirmed] } },
+      });
+      expect(db.eventOccurrence.create).toHaveBeenCalled();
     });
 
     it('refuses a new date on a cancelled event with 400, writing nothing (#795)', async () => {

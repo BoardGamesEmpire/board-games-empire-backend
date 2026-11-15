@@ -11,7 +11,8 @@ export const LIVE_DATE_STATUSES = [OccurrenceStatus.Proposed, OccurrenceStatus.C
 /**
  * How many of an event's dates are live. Call it under the event's row lock
  * (`lockLiveEvent`, `writeEventDates`), or a date written beside it goes
- * unseen. #966 needs the same "live date" rule and reuses this.
+ * unseen. A Fixed event's one date is the same "live date" rule: adding a
+ * date counts with this (#966).
  */
 export function countLiveDates(tx: Prisma.TransactionClient, eventId: string): Promise<number> {
   return tx.eventOccurrence.count({
