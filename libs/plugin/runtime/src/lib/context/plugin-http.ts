@@ -1,4 +1,5 @@
 import {
+  canonicalHostname,
   HostNotAllowedError,
   RedirectToDisallowedTargetError,
   SafeHttpError,
@@ -19,8 +20,8 @@ const BODILESS_STATUSES: ReadonlySet<number> = new Set([204, 205, 304]);
  * Builds a plugin's HTTP client (#1083): every request goes through the
  * server's `SecureHttpService`, so the outbound HTTP policy applies, and the
  * service asks `allowHost` on the first URL and on every redirect, so the
- * plugin is held to the hosts its manifest declares wherever a redirect
- * sends it.
+ * plugin is held to the hosts its plugin manifest declares wherever a
+ * redirect sends it.
  */
 export function buildPluginHttp(
   slug: string,
@@ -38,9 +39,12 @@ export function buildPluginHttp(
   }
 
   // Copied into a Set at construction, as the emit allowlist is: a later
-  // mutation of the manifest object must not widen where the plugin may go.
-  const declaredHosts: ReadonlySet<string> = new Set(outboundDomains.map(normaliseHostname));
-  const allowHost = (hostname: string): boolean => declaredHosts.has(normaliseHostname(hostname));
+  // mutation of the plugin manifest object must not widen where the plugin
+  // may go. An exact match in the canonical form the outbound HTTP policy
+  // compares its own lists in. No wildcard and no subdomain match: the
+  // plugin manifest validator accepts neither (#1083).
+  const declaredHosts: ReadonlySet<string> = new Set(outboundDomains.map(canonicalHostname));
+  const allowHost = (hostname: string): boolean => declaredHosts.has(canonicalHostname(hostname));
 
   return {
     fetch: async (url: string, request: PluginHttpRequest): Promise<Response> => {
@@ -121,17 +125,6 @@ function refusedHostname(err: unknown): string | undefined {
   }
 
   return undefined;
-}
-
-/**
- * Exact match after normalising: hostnames are case-insensitive, and
- * `api.example.com.` (rooted at the DNS root) names the same host as
- * `api.example.com`. No wildcard and no subdomain match: the manifest
- * validator accepts neither (#1083).
- */
-function normaliseHostname(hostname: string): string {
-  const lower = hostname.toLowerCase();
-  return lower.endsWith('.') ? lower.slice(0, -1) : lower;
 }
 
 function toResponse(answer: SafeHttpResponse<ArrayBuffer>): Response {

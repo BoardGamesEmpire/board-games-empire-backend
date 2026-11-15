@@ -14,7 +14,7 @@ export interface PluginHttpRequest {
 }
 
 /**
- * Outbound HTTP for a plugin, held to the hostnames its manifest declares in
+ * Outbound HTTP for a plugin, held to the hostnames its plugin manifest declares in
  * `network.outboundDomains`, on the first URL and on every redirect, and
  * under the server's outbound HTTP policy (#1083).
  *
@@ -27,11 +27,12 @@ export interface PluginHttp {
    *
    * Any HTTP status resolves. A request that fails rejects with an error
    * that carries a `code`, so a plugin can tell failures apart without
-   * importing anything from the host, and names at most a hostname, never
+   * importing anything from the server, and names at most a hostname, never
    * the URL, which can carry a secret in its query (#1083):
    *  - `PLUGIN_OUTBOUND_DOMAIN_NOT_DECLARED`, with `hostname`: the request, or
-   *    a redirect it was sent on, went to a host the manifest doesn't declare;
-   *  - `PLUGIN_OUTBOUND_DOMAINS_CONFIGURED_UNSUPPORTED`: the manifest declares
+   *    a redirect it was sent on, went to a host the plugin manifest doesn't
+   *    declare;
+   *  - `PLUGIN_OUTBOUND_DOMAINS_CONFIGURED_UNSUPPORTED`: the plugin manifest declares
    *    `configured` outbound domains, and every request is refused (#1293);
    *  - otherwise the outbound HTTP service's own code, such as
    *    `REQUEST_TIMEOUT`, `OUTBOUND_NETWORK_ERROR`, `SSRF_REJECTION` or

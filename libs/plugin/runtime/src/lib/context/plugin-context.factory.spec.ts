@@ -128,9 +128,9 @@ describe('PluginContextFactory', () => {
   });
 
   describe('http', () => {
-    // Each context closes over its own manifest's outbound domains, so one
-    // plugin's declaration never lets another out (#1083).
-    it("gives each plugin an http client held to its own manifest's hosts", async () => {
+    // Each context closes over its own plugin manifest's outbound domains, so
+    // one plugin's declaration never lets another out (#1083).
+    it("gives each plugin an http client held to its own plugin manifest's hosts (#1083)", async () => {
       const one = factory.create({ pluginId, slug, manifest: manifest([], ['api.one.example']) });
       const two = factory.create({
         pluginId: 'plugin-2',

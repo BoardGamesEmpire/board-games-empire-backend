@@ -1,3 +1,4 @@
+export * from './canonical-hostname';
 export * from './cidr';
 export * from './hostname-matcher';
 export * from './ip';

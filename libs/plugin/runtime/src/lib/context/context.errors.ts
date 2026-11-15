@@ -10,7 +10,7 @@ import type { SafeHttpErrorCode } from '@bge/secure-http';
  * as "nobody" — the loud failure is the safer signal for both sides. The
  * outbound-domain and request-failed errors are every rejection of
  * `PluginContext.http.fetch`, and carry a `code` so a plugin can recognise
- * them without importing the host (#1083).
+ * them without importing anything from the server (#1083).
  */
 
 /**
@@ -30,7 +30,7 @@ export class UnknownActorKindError extends Error {
 
 /**
  * A plugin's request, or a redirect it was sent on, went to a host its
- * manifest's `network.outboundDomains` doesn't declare. The message names the
+ * plugin manifest's `network.outboundDomains` doesn't declare. The message names the
  * hostname, never the URL: a URL can carry a token in its query (#1083).
  */
 export class PluginOutboundDomainNotDeclaredError extends Error {
@@ -41,7 +41,9 @@ export class PluginOutboundDomainNotDeclaredError extends Error {
     public readonly slug: string,
     public readonly hostname: string,
   ) {
-    super(`Plugin '${slug}' may not reach '${hostname}': it is not declared in the manifest's network.outboundDomains`);
+    super(
+      `Plugin '${slug}' may not reach '${hostname}': it is not declared in the plugin manifest's network.outboundDomains`,
+    );
   }
 }
 

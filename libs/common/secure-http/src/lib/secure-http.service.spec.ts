@@ -334,11 +334,11 @@ describe('SecureHttpService', () => {
       expect(secondBody).toBeFalsy();
     });
 
-    // A caller held to named hosts (a plugin, to its manifest's outbound
+    // A caller held to named hosts (a plugin, to its plugin manifest's outbound
     // domains) can't check a redirect's target before the request, because
     // this service follows redirects itself. So the rule is asked on every
     // hop, ahead of the outbound HTTP policy's address lookup (#1083).
-    describe('a caller host rule', () => {
+    describe('a caller host rule (#1083)', () => {
       it("refuses a first URL the caller's host rule rejects, before any lookup (#1083)", async () => {
         const dns = new FakeDnsResolver();
         dns.set('example.com', [v4('8.8.8.8')]);
@@ -398,6 +398,22 @@ describe('SecureHttpService', () => {
 
         expect(response.status).toBe(Http.Ok);
         expect(allowHost.mock.calls).toEqual([['example.com'], ['elsewhere.com']]);
+      });
+
+      // A caller's rule names hosts, not ports: a plugin manifest can't
+      // declare a port, so a declared host must pass on whichever port the
+      // URL names (#1083).
+      it('asks the rule with the hostname, without the port (#1083)', async () => {
+        const dns = new FakeDnsResolver();
+        dns.set('example.com', [v4('8.8.8.8')]);
+        mockAgent.get('http://example.com:8080').intercept({ path: '/data' }).reply(Http.Ok, { ok: true });
+        const allowHost = jest.fn((hostname: string) => hostname === 'example.com');
+        const { service } = buildService({ dns, mockAgent });
+
+        const response = await service.request('http://example.com:8080/data', { allowHost });
+
+        expect(response.status).toBe(Http.Ok);
+        expect(allowHost.mock.calls).toEqual([['example.com']]);
       });
 
       it('never retries a host refusal (#1083)', async () => {

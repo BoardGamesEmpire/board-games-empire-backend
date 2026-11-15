@@ -50,7 +50,7 @@ describe('buildPluginHttp', () => {
     secureHttp = { request } as unknown as Pick<SecureHttpService, 'request'>;
   });
 
-  it('passes a declared host through under the outbound HTTP policy', async () => {
+  it('passes a declared host through under the outbound HTTP policy (#1083)', async () => {
     request.mockResolvedValue(
       answer({
         status: 201,
@@ -86,8 +86,8 @@ describe('buildPluginHttp', () => {
   });
 
   // The service asks the rule with `URL.hostname` of every hop, which never
-  // carries a port, so a declared host passes on any port. The manifest
-  // declares bare lowercase names, so a host in capitals or written with the
+  // carries a port, so a declared host passes on any port. The plugin
+  // manifest declares bare lowercase names, so a host in capitals or written with the
   // DNS root's trailing dot is still that host; anything else is not, an IP
   // literal included (#1083).
   it('allowHost accepts a declared host in capitals or with a trailing dot, and nothing else (#1083)', async () => {
@@ -233,7 +233,7 @@ describe('buildPluginHttp', () => {
 
   // The Response constructor refuses a body, even an empty one, for these
   // statuses, so the answer's empty bytes must not be handed to it.
-  it('builds a bodiless Response for 204, 205 and 304', async () => {
+  it('builds a bodiless Response for 204, 205 and 304 (#1083)', async () => {
     for (const status of [204, 205, 304]) {
       request.mockResolvedValueOnce(answer({ status, headers: { etag: '"v1"' } }));
 
