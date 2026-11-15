@@ -486,15 +486,15 @@ export class PluginGrantRejectedEvent extends MutationEvent<PluginGrant> {
 }
 
 /**
- * Why an authority-loss revocation fired (#211). Carried on the event
- * and persisted into the lifecycle row payload — the grant row itself is
- * DELETED (delete-to-pending), so this is the only durable record of why.
+ * Why a revocation fired. Carried on the event and persisted into the
+ * lifecycle row payload — the grant row itself is DELETED
+ * (delete-to-pending), so this is the only durable record of why.
+ *
+ * Every reason is a plugin manifest change. Losing authority revokes
+ * nothing: a consent decision belongs to the unit and survives the person
+ * who made it (#1150).
  */
 export type PluginGrantRevocationReason =
-  | 'membership-removed'
-  | 'role-demoted'
-  | 'user-deleted'
-  | 'household-deleted'
   /** The declaring plugin's update removed the permission from `declares[]` — the catalog diff deleted its grants. */
   | 'permission-removed'
   /** The plugin's update stopped requesting the permission, so every decision on it was deleted (#577). */

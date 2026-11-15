@@ -72,7 +72,7 @@ export class UserPluginsController {
     description:
       'Every installed plugin, with no narrowing on the user axis: user-scope consent is legal at any plugin scope ' +
       '(#225), so unlike the household axis there is no plugin you cannot be anchored on. `unit.anchored` is ' +
-      'false until your first Granted decision creates your unit enablement — which is why an empty enablement ' +
+      'false until you switch the plugin on, which creates your unit enablement — which is why an empty enablement ' +
       'history shows a populated list of not-yet-enabled plugins rather than nothing. `unit.state` is the stable ' +
       'unit state code and `unit.consent` the consent standing behind it. Carries no version, provenance or ' +
       'install history, and never tombstones: this surface exists to decide your own participation, not to ' +

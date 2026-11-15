@@ -109,7 +109,8 @@ export const collectWildcardSubjectViolations = (
  * its conditions restrict it to that unit's own id, or it is one of the
  * allowlisted public reads. Anything else reaches past the unit's own slice — subject-wide
  * for a condition-free row, install-wide for fixed conditions — so the read
- * path refuses to confer such grants and `decide()` refuses to record them. A
+ * path refuses to confer such grants and a consent act refuses to record them
+ * as ungrantable (#1150). A
  * manifest declaring one would create a consent surface that is undecidable
  * by design, and the install must not create it.
  */

@@ -574,8 +574,8 @@ export class PermissionsService {
    *   own id, or it is an allowlisted public read. A condition-free row is
    *   subject-wide authority, and a fixed-condition one reaches every
    *   matching row install-wide; only SERVER consent can confer either.
-   *   Warned, not debug — the install/update gates and `decide()` refuse to
-   *   create such grants, so one existing can only mean the catalog drifted
+   *   Warned, not debug — the install/update gates and the consent act
+   *   (#1150) refuse to create such grants, so one existing can only mean the catalog drifted
    *   under a recorded decision.
    * - **Bounded by the active manifest.** A decision confers only while
    *   the active manifest requests that permission at that decision's

@@ -91,11 +91,10 @@ export class PluginUnitScopeError extends Error {
 }
 
 /**
- * No enablement row exists for the addressed unit. For households that
- * means the plugin was never enabled there (enable is the row creator);
- * for users it means no user-scope consent was ever granted —
- * `decide()` remains the only creator of `UserPlugin` rows (#225), so
- * enable/disable here operate on existing rows and 404 otherwise.
+ * No enablement row exists for the addressed unit: the household or user
+ * never switched the plugin on. The switch-on is a consent act and the only
+ * creator of both unit enablements (#1150), so the unit lifecycle's
+ * switch-off and config writes operate on existing rows and 404 otherwise.
  */
 export class PluginUnitNotEnrolledError extends Error {
   override readonly name = 'PluginUnitNotEnrolledError';

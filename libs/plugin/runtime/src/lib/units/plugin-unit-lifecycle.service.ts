@@ -1,5 +1,5 @@
 import type { HouseholdPlugin, Plugin, UserPlugin } from '@bge/database';
-import { DatabaseService, lockLiveHousehold, PluginScope, PluginUnitDormantReason, Prisma } from '@bge/database';
+import { DatabaseService, lockLiveHousehold, PluginScope, Prisma } from '@bge/database';
 import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -8,9 +8,7 @@ import { PluginConfigSchemaService } from '../config/plugin-config-schema.servic
 import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginDisabledEvent,
-  HouseholdPluginEnabledEvent,
   UserPluginDisabledEvent,
-  UserPluginEnabledEvent,
 } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { lockHouseholdUnitScope, lockUserUnitScope } from '../grants/unit-scope-lock';
@@ -22,7 +20,7 @@ import {
 } from '../manifest/manifest-move';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
-import { assertRetainedConfigSatisfiesGate, configDormancyCleared } from './household-config-gate';
+import { configDormancyCleared } from './household-config-gate';
 import {
   PluginUnitAuthorityError,
   PluginUnitHouseholdNotFoundError,
@@ -41,16 +39,6 @@ export interface HouseholdUnitActionInput {
   readonly actorId: string;
 }
 
-export interface HouseholdUnitEnableInput extends HouseholdUnitActionInput {
-  /**
-   * Inline configuration, validated against the manifest's `config.schema`
-   * and written with the enable. Mandatory in effect when the manifest
-   * declares `requiresHouseholdConfig` and no retained row config satisfies
-   * the active schema (#323).
-   */
-  readonly config?: Record<string, unknown>;
-}
-
 export interface HouseholdUnitConfigInput extends HouseholdUnitActionInput {
   readonly config: Record<string, unknown>;
 }
@@ -61,26 +49,21 @@ export interface UserUnitActionInput {
   readonly userId: string;
 }
 
-/** The columns the pre-transaction guards need; the full row is loaded only where the manifest is (enable/config). */
+/** The columns the pre-transaction guards need; the full row is loaded only where the manifest is (config). */
 type LivingPluginRef = Pick<Plugin, 'id' | 'slug' | 'scope'>;
 
-type HouseholdEnableOutcome =
-  | { readonly kind: 'unchanged'; readonly row: HouseholdPlugin }
-  | { readonly kind: 'created'; readonly row: HouseholdPlugin }
-  | { readonly kind: 'updated'; readonly before: HouseholdPlugin; readonly row: HouseholdPlugin };
-
 /**
- * Per-unit plugin enablement (#323): the household admin's
- * enable/disable/config writes and the user's own enable/disable —
- * `enabled` is the unit's OWN switch and only theirs.
- * Consent standing is not stored on the row: it is derived at read time
- * from the grants (#1149), so no write here reads or sets it. A first
- * enable beside a durable refusal of a required household check creates the
- * row `enabled`, and the unit reads review pending while it runs.
+ * Per-unit plugin enablement (#323): the household admin's switch-off and
+ * config writes, and the user's own switch-off — `enabled` is the unit's
+ * OWN switch and only theirs. Consent standing is not stored on the row: it
+ * is derived at read time from the grants (#1149), so no write here reads or
+ * sets it.
  *
- * Household enable is the one creator of `HouseholdPlugin` rows, and one
- * hardening rides that (from the #322/PR #359 review rounds, recorded on
- * #59):
+ * Switching a unit on is a consent act, and lives in
+ * `PluginConsentActService` (#1150): it is the only creator of both unit
+ * enablements, so every path here addresses a row that already exists and
+ * refuses a unit that has none. One hardening rides these writes (from the
+ * #322/PR #359 review rounds, recorded on #59):
  *
  * - **The advisory-lock scheme**: every transaction here opens the same
  *   way — the plugin row under `FOR SHARE`, then the `(scopeId, pluginId)`
@@ -89,13 +72,13 @@ type HouseholdEnableOutcome =
  *   (household row → plugin row → grant row → advisory → unit row). A
  *   household transaction takes the household row's share lock ahead of
  *   all of it (#548), so a soft-deleted household refuses the write. The
- *   row-creating path cannot be serialized without the advisory lock; the
- *   existing-row paths take it too, by rule rather than by need — see the
- *   lock helper's contract before optimizing one away.
+ *   row-creating path, the consent act, cannot be serialized without the
+ *   advisory lock; the existing-row paths here take it too, by rule rather
+ *   than by need — see the lock helper's contract before optimizing one away.
  *
  *   The plugin row comes before the advisory lock, and the order is not
  *   free: uninstall and activation both claim that row before touching
- *   grant rows, while `decide()` holds a grant row (its upsert) while
+ *   grant rows, while a consent act holds grant rows (its upserts) while
  *   taking this advisory lock. Taking the advisory before the plugin row
  *   therefore closed a cycle — advisory → plugin → grant → advisory — that
  *   Postgres resolves by aborting a caller (PR #363 review). Reading the
@@ -105,32 +88,27 @@ type HouseholdEnableOutcome =
  *   The `FOR SHARE` itself exists because uninstall's purge deletes unit
  *   rows without joining the advisory scheme: reading the plugin row
  *   shared blocks a concurrent tombstone until this transaction commits
- *   (so the purge sweeps any row it created), and a tombstone that
- *   committed first is seen and refused — without it, an enable could
- *   commit a fresh row beside a tombstone whose purge promised no such row
- *   exists. It blocks a concurrent ACTIVATION the same way, which is why
- *   the re-read also returns `scope` and `version`: activation rewrites
+ *   (so the purge sweeps the row it wrote), and a tombstone that committed
+ *   first is seen and refused — without it, a write here could commit
+ *   against a plugin whose purge had already promised its unit rows gone.
+ *   It blocks a concurrent ACTIVATION the same way, which is why the
+ *   re-read also returns `scope` and `version`: activation rewrites
  *   `version`/`scope`/`manifestJson` together, so every judgment a caller
  *   already made from the pre-transaction manifest is suspect. A household
- *   row created for a plugin that just became server-scope is an artifact
- *   the manifest gate says cannot exist and nothing else cleans up; and a
- *   caller that DERIVED something from the manifest — the config schema it
- *   validated against — refuses when the manifest CONTENT moved rather than
- *   applying a stale judgment (#368). A version move is one way that
- *   happens, not the test: an A→B→A activation pair replaces the content
- *   and returns the version to where the caller found it.
+ *   config written for a plugin that just became server-scope lands on a
+ *   surface the manifest gate says cannot exist; and a caller that DERIVED
+ *   something from the manifest — the config schema it validated against —
+ *   refuses when the manifest CONTENT moved rather than applying a stale
+ *   judgment (#368). A version move is one way that happens, not the test:
+ *   an A→B→A activation pair replaces the content and returns the version
+ *   to where the caller found it.
  *
- * Enable/disable are idempotent: a request matching current state returns
- * it unchanged — no write, no event, and no re-litigation of the config
- * gate (a stale retained document must not 409 a unit that is already
- * enabled; the gate guards the transition INTO service, and the config
- * PATCH is where stale config heals). Config writes are last-writer-wins
+ * Switch-off is idempotent: a request matching current state returns it
+ * unchanged — no write, no event. Config writes are last-writer-wins
  * between callers — no precondition on the DOCUMENT, matching the server
  * config PATCH — but they do carry the manifest precondition above, because
- * the document was judged against one specific schema. Events
- * are emitted post-commit, one per real transition; a creation with inline
- * config also emits the config event, with the row's `{}` column default
- * as the before — the write is real and its consumers must see it.
+ * the document was judged against one specific schema. Events are emitted
+ * post-commit, one per real transition.
  */
 @Injectable()
 export class PluginUnitLifecycleService {
@@ -143,156 +121,8 @@ export class PluginUnitLifecycleService {
   ) {}
 
   /**
-   * Enable the plugin for a household, creating the enablement row on
-   * first enable (the single row creator, #323). Optional inline config is
-   * validated against the active `config.schema` and written atomically
-   * with the enable; when none is supplied, a retained row config must satisfy
-   * the ACTIVE schema — because the manifest requires household config, or
-   * because the row is dormant for config and this write would cure it — and a
-   * stale retained document fails the gate with its violations.
-   */
-  async enableHousehold(input: HouseholdUnitEnableInput): Promise<HouseholdPlugin> {
-    const initiatedAt = new Date();
-    const plugin = await this.loadLiving(input.slug);
-    this.assertHouseholdSurface(plugin);
-    await this.assertHouseholdAdmin(input.actorId, input.householdId);
-
-    const validated = this.revalidate(plugin);
-    const schema = validated.manifest.config.schema;
-    const requiresConfig = validated.manifest.config.requiresHouseholdConfig;
-
-    if (input.config !== undefined) {
-      const issues = this.configSchema.validate({
-        slug: plugin.slug,
-        version: plugin.version,
-        schema,
-        config: input.config,
-      });
-
-      if (issues.length > 0) {
-        throw new PluginConfigValidationError(plugin.slug, issues);
-      }
-    } else {
-      // The retained-config validation below runs inside the transaction;
-      // compiling the schema is CPU time that must not sit inside the lock
-      // window (see PluginConfigSchemaService.warm).
-      //
-      // Warmed for EVERY config-less enable, not just the `requiresConfig` ones:
-      // the second trigger for that validation is a row already dormant for
-      // config, and whether this row is one cannot be known until it is read
-      // inside the transaction. Warming a schema this call turns out not to
-      // validate costs one cached compile per version; discovering the need
-      // inside the lock window would cost that compile inside it.
-      this.configSchema.warm({ slug: plugin.slug, version: plugin.version, schema });
-    }
-
-    const outcome = await this.db.$transaction(async (tx): Promise<HouseholdEnableOutcome> => {
-      const existing = await this.openHouseholdUnit(tx, plugin, input.householdId, { expected: plugin });
-
-      // Idempotency outranks the config gate: an enable that changes
-      // nothing must return the unchanged row, not re-litigate a retained
-      // document that went stale under a newer schema — the gate guards
-      // the transition INTO service, and this unit is already there.
-      //
-      // A DORMANT row is not there, whatever its switch says (#369, D-CK).
-      // Dormancy is written without touching `enabled`, so such a row reads as
-      // enabled while serving nothing, and short-circuiting it would make the
-      // admin's obvious next move — press Enable again — a 200 that changes
-      // nothing and explains nothing. Falling through puts it back through the
-      // gate, which either heals the row (a retained document that satisfies
-      // today's schema clears the dormancy below) or refuses with the
-      // violations that say what to fix.
-      if (existing !== null && existing.enabled && existing.dormantReason === null && input.config === undefined) {
-        return { kind: 'unchanged', row: existing };
-      }
-
-      // Two triggers, one gate. `requiresConfig` is the manifest demanding a
-      // document at all; a `NeedsConfiguration` row is one whose retained
-      // document a manifest replacement already judged and rejected. The second
-      // does not imply the first — a later manifest may make household config
-      // optional while the row still holds the document that condemned it — and
-      // clearing the dormancy below without re-judging it would put that exact
-      // document back into service. So the flag cannot be the whole condition:
-      // the write below is what cures a config dormancy, and it may only do that
-      // on a document this gate has proven against the ACTIVE schema.
-      if (
-        input.config === undefined &&
-        (requiresConfig || existing?.dormantReason === PluginUnitDormantReason.NeedsConfiguration)
-      ) {
-        assertRetainedConfigSatisfiesGate(this.configSchema, plugin, schema, existing);
-      }
-
-      if (existing === null) {
-        const created = await tx.householdPlugin.create({
-          data: {
-            householdId: input.householdId,
-            pluginId: plugin.id,
-            enabled: true,
-            config: (input.config ?? {}) as Prisma.InputJsonValue,
-          },
-        });
-
-        return { kind: 'created', row: created };
-      }
-
-      // The enable gate above has just proven a conforming document — supplied
-      // inline or retained — so this write cures a config dormancy.
-      const row = await tx.householdPlugin.update({
-        where: { id: existing.id },
-        data: {
-          ...(existing.enabled ? {} : { enabled: true }),
-          ...(input.config !== undefined ? { config: input.config as Prisma.InputJsonValue } : {}),
-          ...configDormancyCleared(existing),
-        },
-      });
-
-      return { kind: 'updated', before: existing, row };
-    });
-
-    if (outcome.kind === 'created') {
-      this.emitter.emit(
-        HouseholdPluginEnabledEvent.eventName,
-        new HouseholdPluginEnabledEvent(null, this.householdSwitchSnapshot(outcome.row), initiatedAt),
-      );
-
-      if (input.config !== undefined) {
-        // The initial document is a real config write its consumers must
-        // see; the before is the `{}` column default the row was born from.
-        this.emitter.emit(
-          HouseholdPluginConfigUpdatedEvent.eventName,
-          new HouseholdPluginConfigUpdatedEvent(
-            { id: outcome.row.id, householdId: outcome.row.householdId, pluginId: outcome.row.pluginId, config: {} },
-            outcome.row,
-            initiatedAt,
-          ),
-        );
-      }
-    } else if (outcome.kind === 'updated') {
-      if (!outcome.before.enabled) {
-        this.emitter.emit(
-          HouseholdPluginEnabledEvent.eventName,
-          new HouseholdPluginEnabledEvent(
-            this.householdSwitchSnapshot(outcome.before),
-            this.householdSwitchSnapshot(outcome.row),
-            initiatedAt,
-          ),
-        );
-      }
-
-      if (input.config !== undefined) {
-        this.emitter.emit(
-          HouseholdPluginConfigUpdatedEvent.eventName,
-          new HouseholdPluginConfigUpdatedEvent(outcome.before, outcome.row, initiatedAt),
-        );
-      }
-    }
-
-    return outcome.row;
-  }
-
-  /**
    * Disable the plugin for a household. 404 on a never-enabled household —
-   * enable is the row creator.
+   * the household's switch-on, a consent act, is the row creator (#1150).
    *
    * The one household operation that does NOT require the household surface to
    * exist (D-CL): a row left dormant by a scope narrowing (#369) is visible to
@@ -384,17 +214,12 @@ export class PluginUnitLifecycleService {
     return row;
   }
 
-  /** Enable the user's own unit. 404 without an anchor row — decide() remains the only creator (#225). */
-  async enableUser(input: UserUnitActionInput): Promise<UserPlugin> {
-    return this.setUserEnabled(input, true);
-  }
-
-  /** Disable the user's own unit. 404 without an anchor row — decide() remains the only creator (#225). */
+  /**
+   * Switch off the user's own unit. 404 without a unit enablement — the
+   * user's switch-on, a consent act, is its only creator (#1150). Already
+   * off: no write, no event.
+   */
   async disableUser(input: UserUnitActionInput): Promise<UserPlugin> {
-    return this.setUserEnabled(input, false);
-  }
-
-  private async setUserEnabled(input: UserUnitActionInput, enabled: boolean): Promise<UserPlugin> {
     const initiatedAt = new Date();
     const plugin = await this.loadLivingRef(input.slug);
 
@@ -405,21 +230,23 @@ export class PluginUnitLifecycleService {
         throw new PluginUnitNotEnrolledError(plugin.slug, 'User');
       }
 
-      if (existing.enabled === enabled) {
+      if (!existing.enabled) {
         return { before: null, row: existing };
       }
 
-      const row = await tx.userPlugin.update({ where: { id: existing.id }, data: { enabled } });
+      const row = await tx.userPlugin.update({ where: { id: existing.id }, data: { enabled: false } });
 
       return { before: existing, row };
     });
 
     if (outcome.before !== null) {
-      const EventClass = enabled ? UserPluginEnabledEvent : UserPluginDisabledEvent;
-
       this.emitter.emit(
-        EventClass.eventName,
-        new EventClass(this.userSwitchSnapshot(outcome.before), this.userSwitchSnapshot(outcome.row), initiatedAt),
+        UserPluginDisabledEvent.eventName,
+        new UserPluginDisabledEvent(
+          this.userSwitchSnapshot(outcome.before),
+          this.userSwitchSnapshot(outcome.row),
+          initiatedAt,
+        ),
       );
     }
 
@@ -432,33 +259,32 @@ export class PluginUnitLifecycleService {
    * household row's liveness under `FOR SHARE` (#548), then the plugin row's,
    * then the advisory lock, then the unit row. See the class doc for why the
    * plugin row must precede the advisory lock (a deadlock cycle against
-   * uninstall/activation and `decide()`) and why its share lock is
+   * uninstall/activation and a consent act) and why its share lock is
    * load-bearing against uninstall's purge.
    *
    * The scope re-check runs on the freshly read row and reuses the same
    * predicate the pre-transaction guard used, so an activation that
-   * re-scoped the plugin mid-request cannot leave a household row behind.
+   * re-scoped the plugin mid-request cannot leave household config behind.
    * It runs BEFORE the advisory lock: a request that is going to be refused
    * has no business serializing other writers of that unit.
    *
-   * `expected` is supplied by the callers that already DERIVED something
-   * from the pre-transaction manifest — the config schema, the
-   * required-check set, the dormancy re-derivation — and refuses the write
-   * if the manifest moved underneath it. The move is detected by comparing
-   * the manifest CONTENT under the lock (#368); `version` and `installedAt`
-   * ride along to say WHICH writer moved it, since the two differ in whether
-   * the client's consent starts again from zero. The paths that read no manifest (disable, the user
-   * toggles) pass nothing: a manifest move changes nothing about flipping a
-   * switch, and refusing one would be a failure invented for no reader's
-   * benefit.
+   * `expected` is supplied by the caller that already DERIVED something
+   * from the pre-transaction manifest — the config schema — and refuses the
+   * write if the manifest moved underneath it. The move is detected by
+   * comparing the manifest CONTENT under the lock (#368); `version` and
+   * `installedAt` ride along to say WHICH writer moved it, since the two
+   * differ in whether the client's consent starts again from zero. The paths
+   * that read no manifest (the switch-offs) pass nothing: a manifest move
+   * changes nothing about flipping a switch, and refusing one would be a
+   * failure invented for no reader's benefit.
    *
-   * `requireSurface: false` is D-CL, and disable is its only caller. A row
+   * `requireSurface: false` exists for disable, its only caller. A row
    * whose plugin has been re-scoped to server is dormant, not absent (#369),
    * and it is on the household's screen with a reason attached — so refusing
    * the one operation that could act on it would leave an admin looking at a
-   * unit with no lever at all. Enable and config PATCH keep refusing: they
-   * would have to write a surface the scope rule says cannot exist, while
-   * disable only records an intent about a row that already does.
+   * unit with no lever at all. Config PATCH keeps refusing: it would have to
+   * write a surface the scope rule says cannot exist, while disable only
+   * records an intent about a row that already does.
    */
   private async openHouseholdUnit(
     tx: Prisma.TransactionClient,
@@ -603,8 +429,8 @@ export class PluginUnitLifecycleService {
 
   /**
    * The narrow variant for paths that never read the manifest (disable,
-   * the user toggles): fetching `manifestJson`/`pendingManifestJson` there
-   * is tens of KB of JSON per toggle for nothing.
+   * the user's switch-off): fetching `manifestJson`/`pendingManifestJson`
+   * there is tens of KB of JSON per switch for nothing.
    */
   private async loadLivingRef(slug: string): Promise<LivingPluginRef> {
     const plugin = await this.db.plugin.findUnique({

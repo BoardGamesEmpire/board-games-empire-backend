@@ -1,5 +1,5 @@
 import { AuditContextService, SERVER_PLUGIN_UNIT } from '@bge/actor-context';
-import { Action, PluginGrantScope, ResourceType } from '@bge/database';
+import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, CheckPolicies, PoliciesGuard, ScopeComposer, Unscoped } from '@bge/permissions';
 import {
@@ -164,7 +164,6 @@ export class PluginsController {
       this.assertUnderCeiling(slug, Action.manage, PluginGrantPluginNotFoundError).then(() =>
         this.grants.decide({
           slug,
-          scopeType: PluginGrantScope.Server,
           permissionSlug: dto.permissionSlug,
           status: dto.status,
           deciderId: this.abilityService.getActingUserId(),

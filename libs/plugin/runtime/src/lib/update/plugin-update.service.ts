@@ -1356,9 +1356,9 @@ export class PluginUpdateService {
       // provenance (#577). Left in place, a later version that requests the
       // permission again would inherit a consent decision nobody made for
       // it. Read before the delete, for the same reason as the declares diff.
-      // A decide() that judged against the outgoing plugin manifest cannot
-      // write one back afterwards: its claim waits for this transaction and
-      // then refuses the moved plugin manifest (#361).
+      // A decide() or a consent act (#1150) that judged against the outgoing
+      // plugin manifest cannot write one back afterwards: its claim waits for
+      // this transaction and then refuses the moved plugin manifest (#361).
       const droppedRequests = requestedSlugsDropped(active, next, removedDeclares);
       let unrequestedGrants: PluginGrant[] = [];
 

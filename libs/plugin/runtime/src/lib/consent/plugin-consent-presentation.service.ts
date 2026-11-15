@@ -78,8 +78,8 @@ const PRESENTABLE_PLUGIN_SELECT = {
  * untranslated surface honestly.
  *
  * Returns `null` when there is nothing to present: no `Plugin` row, a
- * tombstoned plugin (its grants are purged and `decide()` refuses new
- * ones — no consent surface exists, and the tombstone check runs BEFORE
+ * tombstoned plugin (its grants are purged, and neither `decide()` nor a
+ * consent act (#1150) records new ones — no consent surface exists, and the tombstone check runs BEFORE
  * manifest re-validation so a stale stored manifest cannot turn
  * "uninstalled" into a 5xx), or (`presentPendingForUnit`) no staged update.
  */

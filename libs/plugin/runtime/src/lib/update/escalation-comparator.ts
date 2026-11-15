@@ -93,9 +93,10 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
     // subsumes a required promotion above. The grant whose risk went stale
     // belongs to the OLD scope's principal, and activation deletes it
     // (delete-to-pending) — routing it would ask re-consent of units that are
-    // no longer the deciding principal and CANNOT become one: decide() rejects
-    // an off-scope decision (PluginGrantConsentScopeMismatchError), so a
-    // unit asked this way has no action available to answer it. The
+    // no longer the deciding principal and CANNOT become one: a consent act
+    // answers only the permissions its unit's consent scope owns, and
+    // decide() records server-scope decisions only (#1150), so a unit asked
+    // this way has no action available to answer it. The
     // scope change already forces consent from scratch at the new scope,
     // where it is stamped at today's risk.
     if (scopeChangedSlugs.has(grant.permissionSlug)) {

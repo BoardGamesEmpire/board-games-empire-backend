@@ -4,7 +4,6 @@ import {
   Action,
   deriveReadCeilings,
   PERMISSION_CATALOG,
-  PluginGrantScope,
   PluginGrantStatus,
   ResourceType,
   ROLE_PERMISSION_CATALOG,
@@ -429,7 +428,6 @@ describe('PluginsController (delegation)', () => {
 
       expect(grants.decide).toHaveBeenCalledWith({
         slug: 'demo-sink',
-        scopeType: PluginGrantScope.Server,
         permissionSlug: 'feedback:read',
         status: PluginGrantStatus.Granted,
         deciderId: MOCK_ACTING_USER_ID,

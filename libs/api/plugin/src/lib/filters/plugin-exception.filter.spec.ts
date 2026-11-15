@@ -15,14 +15,11 @@ import {
   PluginGrantAuthorityError,
   PluginGrantConsentScopeMismatchError,
   PluginGrantExclusionError,
-  PluginGrantHouseholdNotFoundError,
   PluginGrantManifestInvalidError,
   PluginGrantPluginChangedError,
   PluginGrantPluginNotFoundError,
   PluginGrantPluginTombstonedError,
   PluginGrantRequiredDenialError,
-  PluginGrantScopeIdError,
-  PluginGrantScopeNotRevocableError,
   PluginGrantUnknownPermissionError,
   PluginInstallAuthorityError,
   PluginInstallConflictError,
@@ -140,15 +137,20 @@ describe('PluginExceptionFilter', () => {
 
   describe('the error envelope (#1260)', () => {
     it('derives the code from the error class name', () => {
-      filter.catch(new PluginGrantScopeIdError(PluginGrantScope.Server, 'scopeId must be absent'), host);
+      filter.catch(
+        new PluginGrantConsentScopeMismatchError('read:household', PluginGrantScope.Household, PluginGrantScope.Server),
+        host,
+      );
 
       expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
       expect(body()).toEqual({
         statusCode: 422,
         error: 'Unprocessable Entity',
-        message: 't:errors.plugin.grant_scope_id',
-        code: 'PLUGIN_GRANT_SCOPE_ID',
-        scopeType: PluginGrantScope.Server,
+        message: 't:errors.plugin.grant_consent_scope_mismatch',
+        code: 'PLUGIN_GRANT_CONSENT_SCOPE_MISMATCH',
+        permissionSlug: 'read:household',
+        expected: PluginGrantScope.Household,
+        received: PluginGrantScope.Server,
       });
     });
   });
@@ -392,8 +394,6 @@ describe('PluginExceptionFilter', () => {
         new PluginGrantConsentScopeMismatchError('read:household', PluginGrantScope.Household, PluginGrantScope.User),
         'grant_consent_scope_mismatch',
       ],
-      [new PluginGrantScopeIdError(PluginGrantScope.Server, 'scopeId must be absent'), 'grant_scope_id'],
-      [new PluginGrantScopeNotRevocableError(PluginGrantScope.Server), 'grant_scope_not_revocable'],
     ] as const)('maps %s to 422', (exception, key) => {
       filter.catch(exception, host);
 
@@ -429,23 +429,19 @@ describe('PluginExceptionFilter', () => {
       expect(body()['code']).toBe(toErrorCode(exception.name));
     });
 
-    it.each([
-      ['unit write', new PluginUnitHouseholdNotFoundError('hh_1')],
-      ['consent decision', new PluginGrantHouseholdNotFoundError('hh_1')],
-    ] as const)(
-      'maps a household deleted under a %s to 404 with the household copy the route guard gives (#548)',
-      (_path, exception) => {
-        filter.catch(exception, host);
+    it('maps a household deleted under a unit write or a consent act to 404 with the household copy the route guard gives (#548)', () => {
+      const exception = new PluginUnitHouseholdNotFoundError('hh_1');
 
-        expect(rendered().getStatus()).toBe(Http.NotFound);
-        // The same marker the household liveness guard answers with, so a
-        // request that loses the race to a delete reads like one that arrived
-        // after it.
-        expect(body()['message']).toBe('t:errors.household.not_found');
-        expect(body()['householdId']).toBe('hh_1');
-        expect(body()['code']).toBe(toErrorCode(exception.name));
-      },
-    );
+      filter.catch(exception, host);
+
+      expect(rendered().getStatus()).toBe(Http.NotFound);
+      // The same marker the household liveness guard answers with, so a
+      // request that loses the race to a delete reads like one that arrived
+      // after it.
+      expect(body()['message']).toBe('t:errors.household.not_found');
+      expect(body()['householdId']).toBe('hh_1');
+      expect(body()['code']).toBe(toErrorCode(exception.name));
+    });
 
     // The liveness guard's rule (#553), applied where the status is chosen: an
     // actor it passes through untouched was never told which households exist,
@@ -459,11 +455,6 @@ describe('PluginExceptionFilter', () => {
         exception: new PluginUnitHouseholdNotFoundError('hh_1'),
         key: 'unit_authority',
         code: 'PLUGIN_UNIT_AUTHORITY',
-      },
-      {
-        exception: new PluginGrantHouseholdNotFoundError('hh_1'),
-        key: 'grant_authority',
-        code: 'PLUGIN_GRANT_AUTHORITY',
       },
     ];
 

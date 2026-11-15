@@ -275,8 +275,8 @@ describe('compareForEscalations', () => {
       });
 
       // Asking the household for re-consent would strand it: the permission
-      // is no longer a household check, so decide() refuses a household
-      // decision on it and the unit could never answer.
+      // is no longer a household check, so the household's consent act
+      // refuses an answer on it (#1150) and the unit could never answer.
       expect(result.householdReconsentSlugs).toEqual([]);
       expect(result.userReconsentSlugs).toEqual(['calendar:read']);
       expect(result.escalations).not.toContainEqual(expect.objectContaining({ kind: 'risk-escalated' }));

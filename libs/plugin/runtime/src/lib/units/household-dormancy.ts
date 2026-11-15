@@ -41,14 +41,15 @@ export interface HouseholdDormancyTransition {
  * plugin row → grant row → advisory → unit row, closing the cycle that file
  * warns about. They are also unnecessary: both callers claim the plugin row
  * exclusively before reaching this, and every household unit writer reads that
- * row `FOR SHARE` before touching a unit row — so a concurrent enable either
- * committed before the claim (and is in the rows read here) or blocks until the
- * caller's transaction commits. `decide()` joined that discipline in #398 — it
- * claims the plugin row `FOR SHARE` as the first statement of its transaction —
- * and could not invalidate this read even before it did: it cannot create or
- * re-scope a household row. Its claim also compares the plugin manifest it
- * judged against, so it refuses rather than writes after an activation moved
- * it (#361).
+ * row `FOR SHARE` before touching a unit row — so a concurrent switch-on, a
+ * consent act (#1150), either committed before the claim (and is in the rows
+ * read here) or blocks until the caller's transaction commits. `decide()`
+ * joined that discipline in #398 — it claims the plugin row `FOR SHARE` as the
+ * first statement of its transaction — and cannot invalidate this read: it
+ * writes server-scope decisions only (#1150) and never creates or re-scopes a
+ * household row. Its claim also compares the plugin manifest it judged
+ * against, so it refuses rather than writes after an activation moved it
+ * (#361).
  */
 export async function reconcileHouseholdDormancy(args: {
   readonly tx: Prisma.TransactionClient;

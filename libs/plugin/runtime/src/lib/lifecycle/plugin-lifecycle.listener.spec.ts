@@ -449,7 +449,7 @@ describe('PluginLifecycleListener', () => {
           status: PluginGrantStatus.Granted,
           decidedRiskLevel: RiskLevel.Medium,
         },
-        'membership-removed',
+        'permission-no-longer-requested',
         { manifestVersion: '1.2.3', actId: null },
         initiatedAt,
       );
@@ -467,7 +467,7 @@ describe('PluginLifecycleListener', () => {
           payload: {
             permissionSlug: 'read:public_content',
             decidedRiskLevel: RiskLevel.Medium,
-            reason: 'membership-removed',
+            reason: 'permission-no-longer-requested',
           },
         }),
       );

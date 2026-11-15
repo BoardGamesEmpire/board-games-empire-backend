@@ -249,12 +249,12 @@ describe('plugin lifecycle events', () => {
       expect(PluginGrantRejectedEvent.eventName).toBe(PluginEvent.GrantRejected);
     });
 
-    it('revocation is delete-shaped and carries the authority-loss reason (#211)', () => {
-      const event = new PluginGrantRevokedEvent(grantRow, 'membership-removed', context, initiatedAt);
+    it('revocation is delete-shaped and carries the plugin manifest change that caused it (#211)', () => {
+      const event = new PluginGrantRevokedEvent(grantRow, 'permission-no-longer-requested', context, initiatedAt);
 
       expect(event.action).toBe('delete');
       expect(event.after).toBeNull();
-      expect(event.reason).toBe('membership-removed');
+      expect(event.reason).toBe('permission-no-longer-requested');
       expect(event.before.decidedRiskLevel).toBe(RiskLevel.Low);
       expect(PluginGrantRevokedEvent.eventName).toBe(PluginEvent.GrantRevoked);
     });

@@ -30,14 +30,11 @@ import {
   PluginGrantAuthorityError,
   PluginGrantConsentScopeMismatchError,
   PluginGrantExclusionError,
-  PluginGrantHouseholdNotFoundError,
   PluginGrantManifestInvalidError,
   PluginGrantPluginChangedError,
   PluginGrantPluginNotFoundError,
   PluginGrantPluginTombstonedError,
   PluginGrantRequiredDenialError,
-  PluginGrantScopeIdError,
-  PluginGrantScopeNotRevocableError,
   PluginGrantUnknownPermissionError,
   PluginInstallAuthorityError,
   PluginInstallConflictError,
@@ -255,9 +252,7 @@ function buildRenderers(): RendererMap {
   // like arriving after it, when the liveness guard answers first (#553). Only
   // for an actor that guard would answer: the filter hands anyone else the
   // admin check's 403 instead (`PluginExceptionFilter.asTheActorSeesIt`).
-  const householdNotFound = (
-    exception: PluginUnitHouseholdNotFoundError | PluginGrantHouseholdNotFoundError,
-  ): PluginErrorRendering => ({
+  const householdNotFound = (exception: PluginUnitHouseholdNotFoundError): PluginErrorRendering => ({
     status: Http.NotFound,
     message: t('errors.household.not_found', { id: exception.householdId }),
     fields: { householdId: exception.householdId },
@@ -358,13 +353,11 @@ function buildRenderers(): RendererMap {
   }));
 
   renders(PluginUnitHouseholdNotFoundError, householdNotFound);
-  renders(PluginGrantHouseholdNotFoundError, householdNotFound);
 
   // A unit with no enablement row is addressed state that does not exist —
   // a 404 on the unit, distinct from the plugin-level 404 above, and the
-  // scopeType tells one client handler which axis to prompt for (enable
-  // creates household rows; a user's row comes from their first Granted
-  // consent).
+  // scopeType tells one client handler which axis to prompt for (either
+  // unit's row comes from its switch-on, a consent act, #1150).
   renders(PluginUnitNotEnrolledError, (exception) => ({
     status: Http.NotFound,
     message: t('errors.plugin.unit_not_enrolled', { slug: exception.pluginSlug }),
@@ -633,18 +626,6 @@ function buildRenderers(): RendererMap {
     },
   }));
 
-  renders(PluginGrantScopeIdError, (exception) => ({
-    status: Http.UnprocessableEntity,
-    message: t('errors.plugin.grant_scope_id', { scopeType: exception.scopeType }),
-    fields: { scopeType: exception.scopeType },
-  }));
-
-  renders(PluginGrantScopeNotRevocableError, (exception) => ({
-    status: Http.UnprocessableEntity,
-    message: t('errors.plugin.grant_scope_not_revocable', { scopeType: exception.scopeType }),
-    fields: { scopeType: exception.scopeType },
-  }));
-
   renders(PluginUnitScopeError, (exception) => ({
     status: Http.UnprocessableEntity,
     message: t('errors.plugin.unit_scope', { slug: exception.pluginSlug, scope: exception.scope }),
@@ -789,7 +770,7 @@ export const PLUGIN_EXCEPTION_FILTER_CATCHES: readonly ErrorCtor<Error>[] = [...
  *
  * Response bodies are the error envelope (`{ statusCode, error, message,
  * code, …fields }`, #1260). `code` is derived from the domain error's `name`
- * (`PluginGrantScopeIdError` → `PLUGIN_GRANT_SCOPE_ID`); the name is a
+ * (`PluginGrantExclusionError` → `PLUGIN_GRANT_EXCLUSION`); the name is a
  * hand-pinned string literal on every runtime error class, so the code
  * survives minification and class renames, letting clients dispatch without
  * parsing copy.
@@ -858,21 +839,14 @@ export class PluginExceptionFilter extends BaseExceptionFilter {
    * The original error stays the response's `cause`, for the logs.
    */
   private asTheActorSeesIt(exception: Error): Error {
-    const householdGone =
-      exception instanceof PluginUnitHouseholdNotFoundError || exception instanceof PluginGrantHouseholdNotFoundError;
-
-    if (!householdGone || alreadyTellsHouseholdsApart(this.abilityService.getCurrentAbilities())) {
+    if (
+      !(exception instanceof PluginUnitHouseholdNotFoundError) ||
+      alreadyTellsHouseholdsApart(this.abilityService.getCurrentAbilities())
+    ) {
       return exception;
     }
 
-    const actorId = this.abilityService.getActingUserId();
-
-    return exception instanceof PluginUnitHouseholdNotFoundError
-      ? new PluginUnitAuthorityError(actorId)
-      : new PluginGrantAuthorityError(
-          actorId,
-          `Household-scope consent requires an owner/admin membership in household '${exception.householdId}'`,
-        );
+    return new PluginUnitAuthorityError(this.abilityService.getActingUserId());
   }
 
   /**

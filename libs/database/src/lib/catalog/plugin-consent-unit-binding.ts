@@ -73,8 +73,9 @@ export const CONSENT_UNIT_BINDING_REFUSAL =
 /**
  * Whether a unit's consent can bind a core permission to that unit (#591):
  * the rule every consent seam applies below server scope, so the install and
- * update gates, `decide()`, the consent classification and the ability read
- * cannot disagree on what a household or a user may consent to.
+ * update gates, the consent classification a consent act answers through
+ * (#1150), and the ability read cannot disagree on what a household or a
+ * user may consent to.
  *
  * A permission binds when its conditions restrict every row to the consenting
  * unit's own id (`unit.householdId` at Household scope, `unit.userId` at User
