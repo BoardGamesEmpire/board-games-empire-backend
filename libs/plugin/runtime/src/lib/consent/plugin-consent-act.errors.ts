@@ -64,7 +64,8 @@ export type ConsentActAnswerRule =
   | 'staged-kind'
   | 'staged-refusal'
   | 'staged-not-new'
-  | 'empty';
+  /** A toggle without exactly one answer, or a review with none. */
+  | 'answer-count';
 
 /** An answer breaks `rule`; `permissionSlugs` lists every permission that breaks it. The filter answers 422. */
 export class PluginConsentActAnswerError extends Error {
@@ -85,7 +86,7 @@ export interface ConsentActUngrantablePermission {
 }
 
 /**
- * A required permission of a switch-on, or any permission answered
+ * A required permission of a switch-on (answered or left out), or any permission answered
  * `Granted`, can never be granted at the scope that decides it, or has no
  * risk a consent surface could show. Reading the surface again would not cure
  * it, so it is never the stale refusal. The filter answers 409.

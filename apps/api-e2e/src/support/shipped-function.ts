@@ -578,7 +578,7 @@ export function auditedWrites(
  * them — the delegates a caller is entitled to claim THROUGH.
  *
  * Without this the check reports false failures on the honest shape the unit
- * paths already use: `enableHousehold` claims the plugin row by calling
+ * paths already use: `updateHouseholdConfig` claims the plugin row by calling
  * `openHouseholdUnit`, which claims it by calling `assertStillLiving`, which is
  * where the `FOR SHARE` is actually written. Nothing in the caller's own text
  * looks like a lock, and it is holding one.
@@ -623,7 +623,7 @@ export function unconditionalClaimants(source: string, sourceLabel: string, clai
  * `claims`, widened with a call to every function in the file that takes it on
  * every path, repeated until the set stops growing.
  *
- * Iterated rather than resolved one hop deep: `enableHousehold` reaches the
+ * Iterated rather than resolved one hop deep: `updateHouseholdConfig` reaches the
  * lock through two delegates, and a one-hop rule would happen to cover today's
  * tree while quietly failing the day a third link appears.
  */

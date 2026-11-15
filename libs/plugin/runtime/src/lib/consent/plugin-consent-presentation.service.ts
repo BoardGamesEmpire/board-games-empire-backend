@@ -152,7 +152,7 @@ export class PluginConsentPresentationService {
       manifestJson: plugin.pendingManifestJson,
     });
 
-    return this.assemble(plugin, validated, 'pending', unit, locale);
+    return this.assemble(plugin, validated, 'staged', unit, locale);
   }
 
   private async loadLiveBySlug(slug: string, unit: PluginUnit): Promise<PresentablePluginRow> {
@@ -221,7 +221,7 @@ export class PluginConsentPresentationService {
       manifestJson: plugin.pendingManifestJson,
     });
 
-    return this.assemble(plugin, validated, 'pending', unit, locale);
+    return this.assemble(plugin, validated, 'staged', unit, locale);
   }
 
   private async loadPresentable(pluginId: string, unit: PluginUnit): Promise<PresentablePluginRow | null> {
@@ -267,7 +267,7 @@ export class PluginConsentPresentationService {
     // does not request it at the same consent scope (#1150). The active
     // manifest goes through the same revalidation as the staged one.
     const activeRequests =
-      source === 'pending'
+      source === 'staged'
         ? new Set(
             this.revalidate(plugin, {
               version: plugin.version,

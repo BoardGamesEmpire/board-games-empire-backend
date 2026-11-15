@@ -466,10 +466,47 @@ describe('PluginConsentCheckClassifier', () => {
     const declared = check(OWN_CANONICAL, { origin: 'plugin' });
 
     const active = await classifier.classify('plg_1', HOUSEHOLD_UNIT, [declared]);
-    const staged = await classifier.classify('plg_1', HOUSEHOLD_UNIT, [declared], { source: 'pending' });
+    const staged = await classifier.classify('plg_1', HOUSEHOLD_UNIT, [declared], { source: 'staged' });
 
     expect(active.decisions.get(OWN_CANONICAL)?.ungrantable).toBe('no_catalog_row');
     expect(staged.decisions.get(OWN_CANONICAL)?.ungrantable).toBeNull();
+  });
+
+  describe('a pre-consent on a declared permission the staged update adds, before activation creates its catalog row (#1150)', () => {
+    const declared = check(OWN_CANONICAL, { origin: 'plugin' });
+
+    beforeEach(() => {
+      db.pluginGrant.findMany.mockResolvedValue([
+        {
+          permissionSlug: OWN_CANONICAL,
+          scopeType: PluginGrantScope.Household,
+          status: PluginGrantStatus.Granted,
+          decidedRiskLevel: RiskLevel.Low,
+        },
+      ] as never);
+    });
+
+    it('reads granted under the staged source, judged against the Low a declared permission is locked to (#1150)', async () => {
+      const staged = await classifier.classify('plg_1', HOUSEHOLD_UNIT, [declared], { source: 'staged' });
+
+      expect(staged.decisions.get(OWN_CANONICAL)).toEqual({
+        decision: 'granted',
+        decidedRiskLevel: RiskLevel.Low,
+        staleRisk: false,
+        ungrantable: null,
+      });
+    });
+
+    it('still reads pending under the active source, where a missing declared row confers nothing (#1150)', async () => {
+      const active = await classifier.classify('plg_1', HOUSEHOLD_UNIT, [declared]);
+
+      expect(active.decisions.get(OWN_CANONICAL)).toEqual({
+        decision: 'pending',
+        decidedRiskLevel: RiskLevel.Low,
+        staleRisk: false,
+        ungrantable: 'no_catalog_row',
+      });
+    });
   });
 
   it('reads the catalog and the decisions through the client it is handed (#1150)', async () => {

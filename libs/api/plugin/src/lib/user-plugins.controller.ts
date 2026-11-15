@@ -105,7 +105,7 @@ export class UserPluginsController {
   @ApiOperation({
     summary: "Present the consent surface for your own unit: the active manifest's, or a staged update's",
     description:
-      'Your consent screen: every requested permission, with your own decision state per permission — ' +
+      'Your consent surface: every requested permission, with your own decision state per permission — ' +
       "server-consented ones show the server's concrete state (one addressable decider), household-consented " +
       "ones read 'per-unit' (every household decides for itself) — plus riskLevel, required, grantable, localized " +
       'reason, and the localized features[] they group under. manifestSha256 names the plugin artifact presented, ' +
@@ -116,8 +116,8 @@ export class UserPluginsController {
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed, or (manifest=staged) no update waiting' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
-  // Must stay out of the response cache: read right before a decide POST,
-  // which must be visible on the re-read.
+  // Must stay out of the response cache: read right before a consent act,
+  // whose writes must be visible on the re-read (#1150).
   @Get(':slug/consent')
   consentPresentation(@Param('slug') slug: string, @Query() query: ConsentSurfaceQueryDto = {}) {
     const unit: UserPluginUnit = { scopeType: 'User', userId: this.selfUserId() };
@@ -139,9 +139,10 @@ export class UserPluginsController {
   @ApiOperation({
     summary: 'Switch the plugin on for yourself, answering its requested permissions',
     description:
-      'One consent act: you answer the requested permissions you decide for yourself, as the consent surface ' +
-      '(GET …/consent, or manifest=staged to pre-consent to a staged update) showed them, and the plugin is ' +
-      'switched on for you. Every required permission must be Granted; optional ones may be answered either ' +
+      'One consent act: you answer the requested permissions you decide for yourself, as the active ' +
+      "manifest's consent surface (GET …/consent) showed them, and the plugin is switched on for you. A " +
+      'switch-on names the active manifest only; to pre-consent to a staged update, send a review ' +
+      '(POST …/consent/review) against the manifest=staged consent surface. Every required permission must be Granted; optional ones may be answered either ' +
       'way or left for later. manifestSha256 names the consent surface the answers were read from. Switching ' +
       'on again when nothing would change answers changed: false.',
   })

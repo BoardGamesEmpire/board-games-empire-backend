@@ -41,6 +41,14 @@ export const unitConsumesConsentScope = (consentScope: PluginConsentScopeValue, 
   consentScope === 'server' || unitOwnsConsentScope(consentScope, unit);
 
 /**
+ * Which manifest a consent surface or a consent act reads: the installed
+ * (`active`) one, or the staged update waiting for the server admin. One
+ * spelling everywhere, including the wire and the act's stored record
+ * (#1150).
+ */
+export type ConsentManifestSource = 'active' | 'staged';
+
+/**
  * A consent decision as the unit experiences it: `denied` is a durable
  * refusal at the deciding scope; `pending` is a decision nobody has made —
  * which includes a `Granted` row that no longer confers (stale risk,

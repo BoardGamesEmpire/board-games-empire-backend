@@ -1154,7 +1154,7 @@ A permission a plugin defines in its own namespace for its own features. It is a
 _Avoid_: own-namespace permission, plugin-declared, plugin permission
 
 **Required permission**:
-A permission a plugin asks for and cannot work without: a server that refuses one blocks any update needing it, and a household or user cannot switch the plugin on without granting every one, and a unit that later owes one keeps running on what it granted, with the plugin's state reported as review pending. Refusing an optional permission only switches off its feature.
+A permission a plugin asks for and cannot work without: a server that refuses one blocks any update needing it, and a household or user cannot switch the plugin on without granting every one. A unit that later owes one keeps running on what it granted, with the plugin's state reported as review pending. Refusing an optional permission only switches off its feature.
 _Avoid_: mandatory
 
 **Consent standing**:

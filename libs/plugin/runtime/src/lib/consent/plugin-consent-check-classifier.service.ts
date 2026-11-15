@@ -18,7 +18,9 @@ import {
   type ClassifiedConsentCheck,
   type ConsentCheckClassification,
   type ConsentCheckDecision,
+  type ConsentManifestSource,
 } from './consent-classification.types';
+import { presentedRiskLevel } from './presented-risk-level';
 
 /**
  * Classifies manifest checks against a unit's `PluginGrant` rows AT EACH
@@ -94,9 +96,19 @@ export class PluginConsentCheckClassifier {
         corePermission: catalog.corePermissionsBySlug.get(check.canonicalSlug),
       });
 
+      // Under a staged manifest, a declared permission has no catalog row
+      // until activation creates it at the Low a declared row is locked to,
+      // so a pre-consent is judged against that Low, as the consent surface
+      // shows it. Under the active manifest a missing row confers nothing
+      // (#1150).
+      const judgedRiskLevel =
+        source === 'staged' && check.origin === 'plugin'
+          ? presentedRiskLevel(check.origin, currentRiskLevel)
+          : currentRiskLevel;
+
       const { decision, cause } = this.decide(pluginId, check.canonicalSlug, {
         grant,
-        currentRiskLevel,
+        currentRiskLevel: judgedRiskLevel,
         wildcardSubject,
         unboundedUnitScope,
       });
@@ -202,7 +214,8 @@ export class PluginConsentCheckClassifier {
   }
 }
 
-// The flags moved to a leaf so the pure grantability rule does not import this service (#1150).
+// The flags live in their own module, which the pure grantability rule imports
+// without this service; re-exported here for the classifier's other readers (#1150).
 export { consentCatalogFlags, type ConsentCatalogPermission } from './consent-catalog-flags';
 
 /** What the classifier reads through: the request's database, or a transaction a caller holds open (#1150). */
@@ -214,7 +227,7 @@ export interface ConsentClassifyOptions {
    * new declared permission has no catalog row until activation creates it,
    * and is still grantable. Default `active`.
    */
-  readonly source?: 'active' | 'pending';
+  readonly source?: ConsentManifestSource;
   /** Read through this client, so a consent act's transaction sees its own writes. Default: the service's database. */
   readonly client?: ConsentReadClient;
 }

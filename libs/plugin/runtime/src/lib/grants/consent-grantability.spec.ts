@@ -55,7 +55,7 @@ describe('consentUngrantableCause (#1150)', () => {
         decidingScope: PluginGrantScope.Household,
         corePermission: undefined,
         catalogRisk: undefined,
-        source: 'pending',
+        source: 'staged',
       }),
     ).toBe('no_catalog_row');
   });
@@ -127,7 +127,7 @@ describe('consentUngrantableCause (#1150)', () => {
         decidingScope: PluginGrantScope.Household,
         corePermission: undefined,
         catalogRisk: undefined,
-        source: 'pending',
+        source: 'staged',
       }),
     ).toBeNull();
   });
@@ -163,7 +163,7 @@ describe('consentUngrantableCause (#1150)', () => {
         decidingScope: PluginGrantScope.Household,
         corePermission: undefined,
         catalogRisk: undefined,
-        source: 'pending',
+        source: 'staged',
       }),
     ).toBe('categorical_exclusion');
   });

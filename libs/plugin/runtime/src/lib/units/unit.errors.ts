@@ -91,7 +91,7 @@ export class PluginUnitScopeError extends Error {
 }
 
 /**
- * No enablement row exists for the addressed unit: the household or user
+ * No unit enablement exists for the addressed unit: the household or user
  * never switched the plugin on. The switch-on is a consent act and the only
  * creator of both unit enablements (#1150), so the unit lifecycle's
  * switch-off and config writes operate on existing rows and 404 otherwise.

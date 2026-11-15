@@ -152,12 +152,12 @@ describe('planConsentAct (#1150)', () => {
 
     it('a switch-on or toggle naming the staged manifest is refused (#1150)', () => {
       expectAnswerError(
-        () => plan({ kind: 'SwitchOn', source: 'pending', answers: [granted(REQUIRED_CORE)] }),
+        () => plan({ kind: 'SwitchOn', source: 'staged', answers: [granted(REQUIRED_CORE)] }),
         'staged-kind',
         [REQUIRED_CORE],
       );
       expectAnswerError(
-        () => plan({ kind: 'Toggle', source: 'pending', answers: [granted(OPTIONAL_CORE)] }),
+        () => plan({ kind: 'Toggle', source: 'staged', answers: [granted(OPTIONAL_CORE)] }),
         'staged-kind',
         [OPTIONAL_CORE],
       );
@@ -174,7 +174,7 @@ describe('planConsentAct (#1150)', () => {
     it('a toggle with two answers is refused (#1150)', () => {
       expectAnswerError(
         () => plan({ kind: 'Toggle', answers: [granted(OPTIONAL_CORE), denied(OPTIONAL_CORE)] }),
-        'empty',
+        'answer-count',
         [OPTIONAL_CORE],
       );
     });
@@ -224,8 +224,8 @@ describe('planConsentAct (#1150)', () => {
       expect(result.switchesOff).toBe(false);
     });
 
-    it('a review with no answers is refused as empty (#1150)', () => {
-      expectAnswerError(() => plan({ kind: 'Review', answers: [] }), 'empty', []);
+    it('a review with no answers is refused by the answer count (#1150)', () => {
+      expectAnswerError(() => plan({ kind: 'Review', answers: [] }), 'answer-count', []);
     });
   });
 
@@ -237,7 +237,7 @@ describe('planConsentAct (#1150)', () => {
     const staged = (answers: readonly ConsentActAnswer[]) =>
       plan({
         kind: 'Review',
-        source: 'pending',
+        source: 'staged',
         checks: stagedChecks,
         activeChecks: HOUSEHOLD_CHECKS,
         classification: stagedClassification,
@@ -250,7 +250,7 @@ describe('planConsentAct (#1150)', () => {
       expect(result.decisions).toEqual([
         { permissionSlug: STAGED_ONLY, status: PluginGrantStatus.Granted, decidedRiskLevel: RiskLevel.Low },
       ]);
-      expect(result.presentation.source).toBe('pending');
+      expect(result.presentation.source).toBe('staged');
     });
 
     it('a staged review refuses a Denied answer (#1150)', () => {
@@ -335,6 +335,42 @@ describe('planConsentAct (#1150)', () => {
         pluginSlug: 'plug',
         permissions: [{ permissionSlug: REQUIRED_CORE, cause }],
       });
+    });
+
+    it('a switch-on that leaves out a required permission that cannot be granted is refused as ungrantable, naming it (#1150)', () => {
+      // The consent surface marks it not grantable, so a client leaves it out;
+      // the required-set refusal would ask for something it cannot do.
+      const error = thrown(() =>
+        plan({
+          kind: 'SwitchOn',
+          answers: [granted(REQUIRED_DECLARED)],
+          classification: classification({ decisions: { [REQUIRED_CORE]: { ungrantable: 'wildcard_subject' } } }),
+        }),
+      );
+
+      expect(error).toBeInstanceOf(PluginConsentActUngrantableError);
+      expect(error).toMatchObject({ permissions: [{ permissionSlug: REQUIRED_CORE, cause: 'wildcard_subject' }] });
+    });
+
+    it('a switch-on that leaves out a required core permission with no catalog row is refused as ungrantable, since no risk can be named for it (#1150)', () => {
+      const noRow: ConsentCheckClassification = {
+        decisions: new Map([
+          [REQUIRED_CORE, classified()],
+          [REQUIRED_DECLARED, classified()],
+          [OPTIONAL_CORE, classified()],
+        ]),
+        currentRiskBySlug: new Map([
+          [REQUIRED_DECLARED, RiskLevel.Low],
+          [OPTIONAL_CORE, RiskLevel.Low],
+        ]),
+      };
+
+      const error = thrown(() =>
+        plan({ kind: 'SwitchOn', answers: [granted(REQUIRED_DECLARED)], classification: noRow }),
+      );
+
+      expect(error).toBeInstanceOf(PluginConsentActUngrantableError);
+      expect(error).toMatchObject({ permissions: [{ permissionSlug: REQUIRED_CORE, cause: 'no_catalog_row' }] });
     });
 
     it('a permission whose catalog row is gone is refused as ungrantable, not as stale (#1150)', () => {

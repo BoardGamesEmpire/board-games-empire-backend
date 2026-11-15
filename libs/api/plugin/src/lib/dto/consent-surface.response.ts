@@ -135,8 +135,8 @@ export class ConsentSurfaceDto implements PluginConsentPresentation {
   manifestVersion!: string;
 
   @ApiProperty({
-    enum: ['active', 'pending'],
-    description: 'active: the manifest the plugin runs now. pending: the staged update waiting for the server admin.',
+    enum: ['active', 'staged'],
+    description: 'active: the manifest the plugin runs now. staged: the staged update waiting for the server admin.',
   })
   source!: PluginConsentPresentation['source'];
 

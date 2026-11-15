@@ -4,10 +4,10 @@ import type { PluginConfigSchemaService } from '../config/plugin-config-schema.s
 import { PluginUnitConfigRequiredError } from './unit.errors';
 
 /**
- * The household configuration gate, shared by the two writers that switch a
- * household unit on: `PluginUnitLifecycleService.enableHousehold` and a
- * consent act's switch-on (#1150). One copy, so the two cannot disagree about
- * what puts a unit back into service.
+ * The household configuration gate. A consent act's switch-on runs the
+ * retained-config gate before it puts a household unit into service (#323,
+ * #1150), and shares the dormancy clearing with the config PATCH, so the two
+ * cannot disagree about which write cures a config dormancy (#370).
  */
 
 /**

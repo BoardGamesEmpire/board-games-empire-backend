@@ -429,13 +429,12 @@ export class PluginInventoryService {
    * as a plugin whose SCOPE a user cannot be anchored under — and therefore
    * no orphan state to flag.
    *
-   * Whether any narrowing applies is #381's to settle. It was argued that a
-   * plugin whose manifest declares no `consentScope: 'user'` check could never
-   * hold a row for anyone and was noise here, but that premise no longer
-   * holds: a user's switch-on is now the creator of their unit enablement,
-   * and it needs no granted user-scope consent decision (#1150). Any such
-   * predicate lives in `manifest_json` and is not expressible as a `WHERE`,
-   * so post-filtering it would falsify the `total` D-CD requires. The field-level exposure is already closed — this read
+   * Whether any narrowing applies is #381's to settle. A plugin whose
+   * manifest requests nothing at user scope is still listed: a user's
+   * switch-on creates their unit enablement whatever it requests (#1150).
+   * Any narrowing predicate would live in `manifest_json` and is not
+   * expressible as a `WHERE`, so post-filtering it would falsify the `total`
+   * the page reports. The field-level exposure is already closed — this read
    * serves no version, provenance, install history or tombstones — so what
    * #381 weighs is the enumeration alone.
    *

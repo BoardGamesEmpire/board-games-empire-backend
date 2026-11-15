@@ -1,12 +1,14 @@
-import type { PluginConsentAct } from '@bge/database';
+import { PluginUnitDormantReason, type PluginConsentAct } from '@bge/database';
 import type { ConsentActKind, ConsentActResult } from '@bge/plugin';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
  * OpenAPI model for the answer to a consent act (#1150): switching a plugin
  * on, toggling one requested permission, or a review, at household or user
- * scope. As in `consent-surface.response.ts`, a class that models a runtime
- * shape `implements` it, so a renamed field is a compile error here.
+ * scope. As in `consent-surface.response.ts`, the act summary `implements`
+ * the runtime shape it models, so a renamed field is a compile error here.
+ * `ConsentActUnitDto` describes either unit enablement, a household's or a
+ * user's, so it lists every field the two rows return by hand.
  */
 
 const CONSENT_ACT_KINDS: readonly ConsentActKind[] = ['SwitchOn', 'Toggle', 'Review'];
@@ -41,6 +43,22 @@ class ConsentActUnitDto {
 
   @ApiProperty({ type: 'object', additionalProperties: true, description: 'The unit configuration' })
   config!: Record<string, unknown>;
+
+  @ApiPropertyOptional({
+    enum: PluginUnitDormantReason,
+    nullable: true,
+    description:
+      'Household unit only. Why the unit is switched on but serves nothing until it is cured; null when it serves.',
+  })
+  dormantReason?: PluginUnitDormantReason | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'Household unit only. When the unit became dormant; null when it serves.',
+  })
+  dormantAt?: Date | null;
 
   @ApiProperty({ type: String, format: 'date-time' })
   createdAt!: Date;

@@ -20,9 +20,9 @@ import {
 } from '../manifest/manifest-move';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import { assertHouseholdAdmin } from './household-admin-assertion';
 import { configDormancyCleared } from './household-config-gate';
 import {
-  PluginUnitAuthorityError,
   PluginUnitHouseholdNotFoundError,
   PluginUnitManifestError,
   PluginUnitNotEnrolledError,
@@ -135,7 +135,7 @@ export class PluginUnitLifecycleService {
   async disableHousehold(input: HouseholdUnitActionInput): Promise<HouseholdPlugin> {
     const initiatedAt = new Date();
     const plugin = await this.loadLivingRef(input.slug);
-    await this.assertHouseholdAdmin(input.actorId, input.householdId);
+    await assertHouseholdAdmin(this.authority, input.actorId, input.householdId);
 
     const outcome = await this.db.$transaction(async (tx) => {
       const existing = await this.openHouseholdUnit(tx, plugin, input.householdId, { requireSurface: false });
@@ -177,7 +177,7 @@ export class PluginUnitLifecycleService {
     const initiatedAt = new Date();
     const plugin = await this.loadLiving(input.slug);
     this.assertHouseholdSurface(plugin);
-    await this.assertHouseholdAdmin(input.actorId, input.householdId);
+    await assertHouseholdAdmin(this.authority, input.actorId, input.householdId);
 
     const validated = this.revalidate(plugin);
     const issues = this.configSchema.validate({
@@ -383,26 +383,6 @@ export class PluginUnitLifecycleService {
     }
 
     return { scope: row.scope, version: row.version };
-  }
-
-  /**
-   * The admin check, and what its refusal means. Once the household is
-   * deleted, its own admin gets the 404 the route's liveness guard and the
-   * in-transaction lock give; everyone else keeps the 403, whatever state the
-   * household is in, so the refusal says nothing about which households exist.
-   */
-  private async assertHouseholdAdmin(actorId: string, householdId: string): Promise<void> {
-    const standing = await this.authority.householdAdminStanding(actorId, householdId);
-
-    if (standing === 'admin') {
-      return;
-    }
-
-    if (standing === 'deleted') {
-      throw new PluginUnitHouseholdNotFoundError(householdId);
-    }
-
-    throw new PluginUnitAuthorityError(actorId);
   }
 
   /** A server-scope plugin has no per-household enablement surface (the manifest gate's rule, enforced at the writer too). */

@@ -409,7 +409,12 @@ describe('consent acts (#1150)', () => {
 
       expect(checkOf(surface, UNGRANTABLE.slug)).toMatchObject({ decidableByUnit: true, grantable: false });
 
-      const response = await sendSwitchOn(
+      // The client does what the consent surface says and leaves out the
+      // permission it marked not grantable. The refusal names it, rather than
+      // asking for a required set the household cannot grant.
+      const omitted = await sendSwitchOn(baseUrl, owner, unit, plugin.slug, switchOnBody(surface)).expect(409);
+      // A client that names it anyway is refused the same way.
+      const named = await sendSwitchOn(
         baseUrl,
         owner,
         unit,
@@ -417,12 +422,14 @@ describe('consent acts (#1150)', () => {
         switchOnBody(surface, { [UNGRANTABLE.slug]: PluginGrantStatus.Granted }),
       ).expect(409);
 
-      expect(response.body).toMatchObject({
-        code: 'PLUGIN_CONSENT_ACT_UNGRANTABLE',
-        slug: plugin.slug,
-        // Condition-free, so it does not bind the consenting household (#591).
-        permissions: [{ permissionSlug: UNGRANTABLE.slug, cause: 'unbound_unit_scope' }],
-      });
+      for (const response of [omitted, named]) {
+        expect(response.body).toMatchObject({
+          code: 'PLUGIN_CONSENT_ACT_UNGRANTABLE',
+          slug: plugin.slug,
+          // Condition-free, so it does not bind the consenting household (#591).
+          permissions: [{ permissionSlug: UNGRANTABLE.slug, cause: 'unbound_unit_scope' }],
+        });
+      }
       await expectNothingWritten(plugin.id, householdId);
     });
 
@@ -650,6 +657,64 @@ describe('consent acts (#1150)', () => {
       ]);
       expect(await householdUnit(householdId, plugin.id)).toMatchObject({ enabled: true });
       expect(await actsAt(plugin.id, PluginGrantScope.Household, householdId)).toHaveLength(3);
+    });
+
+    it('a review that refuses a required permission whose denial already stands still switches the unit off and records the act (#1150)', async () => {
+      const { owner, householdId, unit } = await household();
+      const optional = { ...HOUSEHOLD_REQUIRED, required: false };
+      const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK, optional]);
+      const before = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
+
+      // Switched on with the permission refused while it was optional.
+      await sendSwitchOn(
+        baseUrl,
+        owner,
+        unit,
+        plugin.slug,
+        switchOnBody(before, { [HOUSEHOLD_REQUIRED.slug]: PluginGrantStatus.Denied }),
+      ).expect(200);
+
+      // What an activation leaves behind, arranged on the row: the same
+      // permission, now required, with its denial still standing on a unit
+      // that is switched on.
+      const next = manifestWith('1.3.0', [MANAGE_DIGEST_CHECK, HOUSEHOLD_REQUIRED]);
+      await db.client.plugin.update({
+        where: { id: plugin.id },
+        data: { version: next.version, manifestJson: next as never, installedSha256: 'c'.repeat(64) },
+      });
+      const actsBefore = await actsAt(plugin.id, PluginGrantScope.Household, householdId);
+
+      const surface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
+
+      expect(checkOf(surface, HOUSEHOLD_REQUIRED.slug)).toMatchObject({ required: true, decision: 'denied' });
+
+      const reviewed = await sendReview(
+        baseUrl,
+        owner,
+        unit,
+        plugin.slug,
+        reviewBody(surface, { [HOUSEHOLD_REQUIRED.slug]: PluginGrantStatus.Denied }),
+      ).expect(200);
+
+      expect(reviewed.body).toMatchObject({
+        message: `Plugin '${plugin.slug}' was switched off because a required permission was declined`,
+        changed: true,
+        switchedOff: true,
+        act: { kind: PluginConsentActKind.Review },
+        unit: { enabled: false },
+      });
+
+      const acts = await actsAt(plugin.id, PluginGrantScope.Household, householdId);
+      expect(acts).toHaveLength(actsBefore.length + 1);
+      expect(acts.at(-1)).toMatchObject({ id: reviewed.body.act.id, kind: PluginConsentActKind.Review });
+      expect(await decisionsAt(plugin.id, PluginGrantScope.Household, householdId)).toEqual([
+        expect.objectContaining({
+          permissionSlug: HOUSEHOLD_REQUIRED.slug,
+          status: PluginGrantStatus.Denied,
+          actId: reviewed.body.act.id,
+        }),
+      ]);
+      expect(await householdUnit(householdId, plugin.id)).toMatchObject({ enabled: false });
     });
   });
 

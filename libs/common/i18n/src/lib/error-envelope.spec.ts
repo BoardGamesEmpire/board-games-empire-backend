@@ -30,7 +30,7 @@ describe('errorEnvelope (#1260)', () => {
 
 describe('toErrorCode (#1260)', () => {
   it.each([
-    ['PluginGrantScopeIdError', 'PLUGIN_GRANT_SCOPE_ID'],
+    ['PluginConsentActStaleError', 'PLUGIN_CONSENT_ACT_STALE'],
     ['TransactionDeadlockError', 'TRANSACTION_DEADLOCK'],
     ['PluginSDKVersionError', 'PLUGIN_SDK_VERSION'],
     ['PluginArtifactTooLarge', 'PLUGIN_ARTIFACT_TOO_LARGE'],

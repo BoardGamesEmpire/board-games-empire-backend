@@ -29,6 +29,7 @@ import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.se
 import { lockHouseholdUnitScope, lockUserUnitScope } from '../grants/unit-scope-lock';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import { assertHouseholdAdmin } from '../units/household-admin-assertion';
 import { assertRetainedConfigSatisfiesGate, configDormancyCleared } from '../units/household-config-gate';
 import {
   PluginUnitAuthorityError,
@@ -39,14 +40,9 @@ import {
   PluginUnitScopeError,
 } from '../units/unit.errors';
 import { planConsentAct } from './consent-act-plan';
+import type { ConsentManifestSource } from './consent-classification.types';
 import { PluginConsentActStaleError, PluginConsentActUnitOffError } from './plugin-consent-act.errors';
-import type {
-  ConsentActAnswer,
-  ConsentActDecision,
-  ConsentActKind,
-  ConsentActSource,
-  ConsentActUnit,
-} from './plugin-consent-act.types';
+import type { ConsentActAnswer, ConsentActDecision, ConsentActKind, ConsentActUnit } from './plugin-consent-act.types';
 import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
 
 export interface ConsentActInput {
@@ -77,7 +73,7 @@ type UnitEnablement = HouseholdPlugin | UserPlugin;
 
 /** The manifest the act's sha names, as the request first read it. */
 interface NamedManifest {
-  readonly source: ConsentActSource;
+  readonly source: ConsentManifestSource;
   readonly version: string;
   readonly validated: PluginManifestValidationResult;
   /** The ACTIVE manifest, which a staged review's answers are judged against too. */
@@ -179,10 +175,11 @@ export class PluginConsentActService {
     if (household && kind === 'SwitchOn') {
       this.assertHouseholdSurface(plugin.slug, plugin.scope);
 
-      // As `enableHousehold` does (#323): a supplied document is judged
-      // against the ACTIVE schema before the transaction; otherwise the
-      // schema is warmed, so the retained-config gate under the advisory key
-      // does not compile it inside the lock window.
+      // A supplied document is judged against the ACTIVE schema before the
+      // transaction, so an invalid one is refused before any lock is taken
+      // (#323); otherwise the schema is warmed, so the
+      // retained-config gate under the advisory key does not compile it
+      // inside the lock window.
       if (config !== undefined) {
         const issues = this.configSchema.validate({
           slug: plugin.slug,
@@ -292,7 +289,11 @@ export class PluginConsentActService {
             throw new PluginConsentActUnitOffError(plugin.slug, unit.scopeType);
           }
 
-          if (stand) {
+          // A review that refuses a required permission changes the switch
+          // even when its denial already stands (refused while optional, then
+          // promoted by an update), so only an act that leaves the unit on can
+          // change nothing (#1150).
+          if (stand && !plan.switchesOff) {
             return { changed: false, unit: enablementSeen };
           }
         }
@@ -358,6 +359,21 @@ export class PluginConsentActService {
 
         const unitBefore = await this.readUnitEnablement(tx, unit, plugin.id);
 
+        // Every written outcome differs only in the unit it leaves and what
+        // happened to it.
+        const writtenOutcome = (
+          unitAfter: UnitEnablement,
+          { switchedOff = false, configWritten = false } = {},
+        ): ActOutcome => ({
+          changed: true,
+          act,
+          changedDecisions,
+          unitBefore,
+          unit: unitAfter,
+          switchedOff,
+          configWritten,
+        });
+
         if (kind !== 'SwitchOn') {
           // The second half of the unit-off refusal, now that no switch-off can
           // commit under this act.
@@ -366,47 +382,23 @@ export class PluginConsentActService {
           }
 
           if (!plan.switchesOff) {
-            return {
-              changed: true,
-              act,
-              changedDecisions,
-              unitBefore,
-              unit: unitBefore,
-              switchedOff: false,
-              configWritten: false,
-            };
+            return writtenOutcome(unitBefore);
           }
 
           const switchedOff = household
             ? await tx.householdPlugin.update({ where: { id: unitBefore.id }, data: { enabled: false } })
             : await tx.userPlugin.update({ where: { id: unitBefore.id }, data: { enabled: false } });
 
-          return {
-            changed: true,
-            act,
-            changedDecisions,
-            unitBefore,
-            unit: switchedOff,
-            switchedOff: true,
-            configWritten: false,
-          };
+          return writtenOutcome(switchedOff, { switchedOff: true });
         }
 
         if (household) {
           const existing = unitBefore as HouseholdPlugin | null;
 
-          // As `enableHousehold`: a unit already in service needs no write, and
-          // the config gate guards only the transition into service (#323).
+          // A unit already in service needs no write, and the config gate
+          // guards only the transition into service (#323).
           if (existing !== null && existing.enabled && existing.dormantReason === null && config === undefined) {
-            return {
-              changed: true,
-              act,
-              changedDecisions,
-              unitBefore,
-              unit: existing,
-              switchedOff: false,
-              configWritten: false,
-            };
+            return writtenOutcome(existing);
           }
 
           if (
@@ -436,15 +428,7 @@ export class PluginConsentActService {
                   },
                 });
 
-          return {
-            changed: true,
-            act,
-            changedDecisions,
-            unitBefore,
-            unit: written,
-            switchedOff: false,
-            configWritten: config !== undefined,
-          };
+          return writtenOutcome(written, { configWritten: config !== undefined });
         }
 
         const written = await tx.userPlugin.upsert({
@@ -453,15 +437,7 @@ export class PluginConsentActService {
           update: { enabled: true },
         });
 
-        return {
-          changed: true,
-          act,
-          changedDecisions,
-          unitBefore,
-          unit: written,
-          switchedOff: false,
-          configWritten: false,
-        };
+        return writtenOutcome(written);
       }),
     );
 
@@ -489,7 +465,7 @@ export class PluginConsentActService {
     pluginId: string,
     pluginSlug: string,
     expected: {
-      readonly source: ConsentActSource;
+      readonly source: ConsentManifestSource;
       readonly manifestSha256: string;
       /** `installedSha256` of the plugin row read before the transaction. */
       readonly installedSha256: string;
@@ -530,7 +506,7 @@ export class PluginConsentActService {
       throw new PluginUnitPluginNotFoundError(slug);
     }
 
-    // `Plugin.enabled`, the operator's kill switch, does not gate consent, as
+    // `Plugin.enabled`, the server switch, does not gate consent, as
     // it does not gate `decide()` (#225): consenting before the operator
     // switches the plugin on is a legitimate order.
     if (plugin.uninstalledAt !== null) {
@@ -555,7 +531,7 @@ export class PluginConsentActService {
     if (plugin.pendingSha256 !== null && manifestSha256 === plugin.pendingSha256 && plugin.pendingVersion !== null) {
       const staged = this.revalidate(plugin.slug, plugin.pendingVersion, plugin.pendingManifestJson);
 
-      return { source: 'pending', version: plugin.pendingVersion, validated: staged, active };
+      return { source: 'staged', version: plugin.pendingVersion, validated: staged, active };
     }
 
     throw new PluginConsentActStaleError(plugin.slug, 'manifest');
@@ -583,17 +559,7 @@ export class PluginConsentActService {
       return;
     }
 
-    const standing = await this.authority.householdAdminStanding(actorId, unit.householdId);
-
-    if (standing === 'admin') {
-      return;
-    }
-
-    if (standing === 'deleted') {
-      throw new PluginUnitHouseholdNotFoundError(unit.householdId);
-    }
-
-    throw new PluginUnitAuthorityError(actorId);
+    await assertHouseholdAdmin(this.authority, actorId, unit.householdId);
   }
 
   /** A server-scope plugin has no per-household enablement surface. */
@@ -657,8 +623,9 @@ export class PluginConsentActService {
       }
 
       if (outcome.configWritten) {
-        // On creation the before is the `{}` column default the row was born
-        // from, as `enableHousehold` announces it.
+        // On creation the before is the `{}` column default the unit
+        // enablement was born from, so a listener sees the whole document
+        // arrive (#323).
         const configBefore = before ?? {
           id: unit.id,
           householdId: unit.householdId,

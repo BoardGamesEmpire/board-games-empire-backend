@@ -517,6 +517,79 @@ describe('PluginConsentActService', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
+    it('a household switch-on over a unit already in service changes the decisions, not the unit enablement (#1150)', async () => {
+      householdRow = makeHouseholdRow();
+
+      const result = await service.switchOn(householdSwitchOn);
+
+      expect(db.pluginConsentAct.create).toHaveBeenCalledTimes(1);
+      expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(2);
+      // A unit already in service needs no write; the config gate guards only
+      // the transition into service (#323).
+      expect(db.householdPlugin.create).not.toHaveBeenCalled();
+      expect(db.householdPlugin.update).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({ changed: true, switchedOff: false, unit: householdRow }));
+      expect(emitted().map(({ event }) => event.constructor)).toEqual([
+        PluginGrantCreatedEvent,
+        PluginGrantCreatedEvent,
+      ]);
+    });
+
+    describe('a unit dormant for configuration (#369, #370)', () => {
+      const requiringManifest = () =>
+        makePlugin({
+          manifestJson: householdManifest({
+            schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+            requiresHouseholdConfig: true,
+          }) as unknown as Prisma.JsonValue,
+        });
+
+      const dormant = (config: Prisma.JsonValue) =>
+        makeHouseholdRow({
+          config,
+          dormantReason: PluginUnitDormantReason.NeedsConfiguration,
+          dormantAt: new Date(0),
+        });
+
+      beforeEach(() => {
+        db.plugin.findUnique.mockResolvedValue(requiringManifest());
+        standing = [
+          standingGrant(REQUIRED, PluginGrantStatus.Granted),
+          standingGrant(OPTIONAL, PluginGrantStatus.Granted),
+        ];
+      });
+
+      it('a switch-on over it with a conforming retained document clears the dormancy (#1150)', async () => {
+        householdRow = dormant({ webhookUrl: 'https://retained' });
+
+        const result = await service.switchOn(householdSwitchOn);
+
+        // `enabled` is absent from the write: it was already true, and the
+        // dormancy was the only thing in the way of service.
+        expect(db.householdPlugin.update).toHaveBeenCalledWith({
+          where: { id: 'hp-1' },
+          data: { dormantReason: null, dormantAt: null },
+        });
+        expect(result.unit).toEqual(expect.objectContaining({ dormantReason: null, dormantAt: null }));
+      });
+
+      it('a switch-on over it with a stale retained document is refused with the violations, and the unit is not written (#1150)', async () => {
+        householdRow = dormant({});
+
+        await expect(service.switchOn(householdSwitchOn)).rejects.toEqual(
+          expect.objectContaining({
+            constructor: PluginUnitConfigRequiredError,
+            issues: [expect.objectContaining({ keyword: 'required' })],
+          }),
+        );
+        // The refusal is thrown inside the transaction, which rolls back the
+        // act and the decisions written before the gate.
+        expect(db.householdPlugin.create).not.toHaveBeenCalled();
+        expect(db.householdPlugin.update).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
+    });
+
     it('a household switch-on with config writes it with the unit enablement and announces it (#1150)', async () => {
       await service.switchOn({ ...householdSwitchOn, config: { webhookUrl: 'https://example.com' } });
 
@@ -547,6 +620,25 @@ describe('PluginConsentActService', () => {
     it('a toggle on a unit with no unit enablement is refused (#1150)', async () => {
       await expect(service.toggle(householdToggle)).rejects.toBeInstanceOf(PluginConsentActUnitOffError);
       expectNothingWritten();
+    });
+
+    it('a toggle is refused under the advisory key when the unit was switched off after the first read (#1150)', async () => {
+      // On at the unlocked read, off at the read under the key: a switch-off
+      // committed in between.
+      db.householdPlugin.findUnique
+        .mockResolvedValueOnce(makeHouseholdRow())
+        .mockResolvedValueOnce(makeHouseholdRow({ enabled: false }));
+
+      await expect(service.toggle(householdToggle)).rejects.toEqual(
+        expect.objectContaining({ constructor: PluginConsentActUnitOffError, scopeType: 'Household' }),
+      );
+      expect(order).toEqual(['household lock', 'plugin claim', 'act', `grant:${OPTIONAL}`, 'advisory key']);
+      // The act and the decision were written before the key was taken; the
+      // refusal is thrown inside the transaction, which rolls them back.
+      expect(db.pluginConsentAct.create).toHaveBeenCalledTimes(1);
+      expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(1);
+      expect(db.householdPlugin.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
     });
 
     it('a toggle is allowed on a unit that is switched on but dormant (#1150)', async () => {
@@ -596,6 +688,25 @@ describe('PluginConsentActService', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
+    it('a review that refuses a required permission whose denial already stands still switches the unit off and records the act (#1150)', async () => {
+      // Refused while optional, since promoted to required by an update: the
+      // row already holds the denial, but the unit is still switched on.
+      householdRow = makeHouseholdRow();
+      standing = [standingGrant(REQUIRED, PluginGrantStatus.Denied)];
+
+      const result = await service.review(requiredRefusingReview);
+
+      expect(db.pluginConsentAct.create).toHaveBeenCalledTimes(1);
+      expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(1);
+      expect(db.pluginGrant.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ update: expect.objectContaining({ actId: 'act-1' }) }),
+      );
+      expect(db.householdPlugin.update).toHaveBeenCalledWith({ where: { id: 'hp-1' }, data: { enabled: false } });
+      expect(result).toEqual(expect.objectContaining({ changed: true, switchedOff: true }));
+      // The row's status and risk did not change, so no consent decision event.
+      expect(emitted().map(({ event }) => event.constructor)).toEqual([HouseholdPluginDisabledEvent]);
+    });
+
     it('a review that switches the unit off is refused when the unit is off and the denial does not stand yet (#1150)', async () => {
       householdRow = makeHouseholdRow({ enabled: false });
 
@@ -618,14 +729,14 @@ describe('PluginConsentActService', () => {
         'plugin-1',
         HOUSEHOLD_UNIT,
         expect.arrayContaining([expect.objectContaining({ canonicalSlug: STAGED_NEW })]),
-        { source: 'pending', client: db },
+        { source: 'staged', client: db },
       );
       expect(db.pluginConsentAct.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           kind: 'Review',
           manifestVersion: '1.3.0',
           manifestSha256: STAGED_SHA,
-          presentation: expect.objectContaining({ source: 'pending' }),
+          presentation: expect.objectContaining({ source: 'staged' }),
         }),
       });
       expect(result.changed).toBe(true);

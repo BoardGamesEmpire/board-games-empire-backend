@@ -2,6 +2,7 @@ import type { PluginGrantScope, RiskLevel } from '@bge/database';
 import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import { parsePluginPermissionSlug } from '@boardgamesempire/plugin-manifest';
 import { consentCatalogFlags, type ConsentCatalogPermission } from '../consent/consent-catalog-flags';
+import type { ConsentManifestSource } from '../consent/consent-classification.types';
 import { isPluginAdministrationSlug } from './plugin-admin-permissions';
 
 /**
@@ -39,7 +40,7 @@ export function consentUngrantableCause(input: {
   /** The catalog's risk for the slug; undefined when it has no row. */
   readonly catalogRisk: RiskLevel | undefined;
   /** A staged manifest's new declared permission has no catalog row until activation, and is grantable. */
-  readonly source: 'active' | 'pending';
+  readonly source: ConsentManifestSource;
 }): ConsentUngrantableCause | null {
   const { check, decidingScope, corePermission, catalogRisk, source } = input;
 

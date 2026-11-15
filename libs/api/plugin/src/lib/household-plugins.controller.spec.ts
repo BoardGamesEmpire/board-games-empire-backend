@@ -35,7 +35,7 @@ const PRESENTATION = {
 const STAGED_PRESENTATION = {
   plugin: { id: 'plugin-1', slug: 'demo-sink', enabled: true },
   manifestVersion: '1.3.0',
-  source: 'pending',
+  source: 'staged',
   checks: [],
 } as unknown as PluginConsentPresentation;
 const UNIT_ROW = { id: 'hp-1', householdId: 'hh-1', pluginId: 'plugin-1', enabled: true } as never;

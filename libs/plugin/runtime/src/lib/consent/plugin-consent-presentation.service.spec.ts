@@ -406,7 +406,7 @@ describe('PluginConsentPresentationService', () => {
 
       const presentation = await service.presentPendingForUnit('plg_1', SERVER_UNIT);
 
-      expect(presentation).toMatchObject({ manifestVersion: '1.3.0', source: 'pending' });
+      expect(presentation).toMatchObject({ manifestVersion: '1.3.0', source: 'staged' });
       expect(presentation?.checks).toEqual([
         expect.objectContaining({ slug: 'feedback:read', decision: 'granted' }),
         // The new declare's catalog row arrives with activation; its risk is
@@ -442,7 +442,7 @@ describe('PluginConsentPresentationService', () => {
 
         const presentation = await service.presentPendingFromRow(row, SERVER_UNIT);
 
-        expect(presentation).toMatchObject({ manifestVersion: '1.3.0', source: 'pending' });
+        expect(presentation).toMatchObject({ manifestVersion: '1.3.0', source: 'staged' });
         // No row re-read: a re-read could observe a replacement staging —
         // possibly under the same version — and the composed response would
         // mix two updates.
@@ -535,7 +535,7 @@ describe('PluginConsentPresentationService', () => {
 
       expect(active.manifestSha256).toBe(INSTALLED_SHA);
       expect(staged.manifestSha256).toBe(STAGED_SHA);
-      expect(staged).toMatchObject({ source: 'pending', manifestVersion: '1.3.0' });
+      expect(staged).toMatchObject({ source: 'staged', manifestVersion: '1.3.0' });
     });
 
     it('names the staged update on the active surface, and nothing when none is staged (#1150)', async () => {
@@ -600,6 +600,46 @@ describe('PluginConsentPresentationService', () => {
         expect.objectContaining({ slug: 'create:notification', consentScope: 'household', stagedOnly: true }),
         // New in the staged manifest; no catalog row until activation, still grantable.
         expect.objectContaining({ slug: 'plugin|demo-sink|read:digest', stagedOnly: true, grantable: true }),
+      ]);
+    });
+
+    it('shows a pre-consent on a declared permission the staged update adds as granted, before activation creates its catalog row (#1150)', async () => {
+      const preConsentManifest = buildPluginManifest({ scope: 'household', version: '1.3.0' });
+      preConsentManifest.permissions.declares = ['read:digest'];
+      preConsentManifest.permissions.checks = [
+        {
+          slug: 'read:digest',
+          required: false,
+          reason: { en: 'Reads stored digests for insights.' },
+          consentScope: 'household',
+        },
+      ];
+      db.plugin.findUnique.mockResolvedValue(
+        pluginRow({
+          manifestJson: activeManifest,
+          pendingVersion: '1.3.0',
+          pendingManifestJson: preConsentManifest,
+          pendingSha256: STAGED_SHA,
+        }) as never,
+      );
+      db.pluginGrant.findMany.mockResolvedValue([
+        {
+          permissionSlug: 'plugin|demo-sink|read:digest',
+          scopeType: PluginGrantScope.Household,
+          status: PluginGrantStatus.Granted,
+          decidedRiskLevel: RiskLevel.Low,
+        },
+      ] as never);
+
+      const presentation = await service.presentStagedForUnitBySlug('demo-sink', HOUSEHOLD_UNIT);
+
+      expect(presentation.checks).toEqual([
+        expect.objectContaining({
+          slug: 'plugin|demo-sink|read:digest',
+          decision: 'granted',
+          riskLevel: RiskLevel.Low,
+          grantable: true,
+        }),
       ]);
     });
 

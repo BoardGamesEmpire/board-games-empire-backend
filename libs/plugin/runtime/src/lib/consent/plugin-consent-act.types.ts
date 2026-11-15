@@ -1,5 +1,6 @@
 import type { HouseholdPluginUnit, UserPluginUnit } from '@bge/actor-context';
 import type { PluginGrantStatus, RiskLevel } from '@bge/database';
+import type { ConsentManifestSource } from './consent-classification.types';
 
 /**
  * Vocabulary of a consent act (#1150): the one recorded step in which a
@@ -12,9 +13,6 @@ import type { PluginGrantStatus, RiskLevel } from '@bge/database';
 export type ConsentActUnit = HouseholdPluginUnit | UserPluginUnit;
 
 export type ConsentActKind = 'SwitchOn' | 'Toggle' | 'Review';
-
-/** Which manifest the act's sha names: the installed one or the staged update. */
-export type ConsentActSource = 'active' | 'pending';
 
 export interface ConsentActAnswer {
   /** Canonical slug. */
@@ -40,7 +38,8 @@ export interface ConsentActPresentationCheck {
  */
 export interface ConsentActPresentation {
   readonly locale: string;
-  readonly source: ConsentActSource;
+  /** Which manifest the act's sha named: the installed one or the staged update. */
+  readonly source: ConsentManifestSource;
   /** Manifest order. */
   readonly checks: readonly ConsentActPresentationCheck[];
 }

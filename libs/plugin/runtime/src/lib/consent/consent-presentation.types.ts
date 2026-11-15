@@ -5,7 +5,7 @@ import type {
   PluginConsentScopeValue,
   ResolvedLocalizedString,
 } from '@boardgamesempire/plugin-manifest';
-import type { ConsentCheckDecision } from './consent-classification.types';
+import type { ConsentCheckDecision, ConsentManifestSource } from './consent-classification.types';
 
 /**
  * The decision state of one check as seen from the presented unit: the
@@ -91,10 +91,10 @@ export interface PluginConsentPresentation {
      */
     readonly enabled: boolean;
   };
-  /** Version of the manifest whose checks are presented — the pending version when `source` is `'pending'`. */
+  /** Version of the manifest whose checks are presented — the staged version when `source` is `'staged'`. */
   readonly manifestVersion: string;
   /** Which stored manifest the surface came from: the active version or a staged update awaiting approval. */
-  readonly source: 'active' | 'pending';
+  readonly source: ConsentManifestSource;
   /**
    * The artifact sha of the manifest presented: the installed artifact's on
    * the active surface, the staged artifact's on a staged surface. A consent

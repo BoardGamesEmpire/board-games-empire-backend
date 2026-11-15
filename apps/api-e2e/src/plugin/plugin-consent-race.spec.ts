@@ -166,7 +166,7 @@ describe('consent decisions under concurrency (#360)', () => {
    * Had the switch-on answered it, the toggle matching that answer would change
    * nothing and record no act (#1150).
    */
-  const arrangeSwitchedOnWithUndecidedOptional = async (owner: SessionActor, householdId: string) => {
+  const arrangeSwitchedOnWithPendingOptional = async (owner: SessionActor, householdId: string) => {
     const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK, POLICY_READ_CHECK, OPTIONAL_HOUSEHOLD_CHECK]);
     const unit = { householdId };
     const surface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
@@ -236,10 +236,10 @@ describe('consent decisions under concurrency (#360)', () => {
   };
 
   describe('two toggles with opposite answers on one optional household permission', () => {
-    it('two acts racing on one unit both commit, the later wins each permission, and both acts are recorded (#1150)', async () => {
+    it("two acts racing on one unit both commit, one act's answer stands on the permission, and both acts are recorded (#1150)", async () => {
       const owner = await actors.user();
       const { household } = await actors.householdWithMembers({ owner });
-      const { plugin, unit, surface } = await arrangeSwitchedOnWithUndecidedOptional(owner, household.id);
+      const { plugin, unit, surface } = await arrangeSwitchedOnWithPendingOptional(owner, household.id);
       const before = await unitRow(household.id, plugin.id);
 
       const responses = await Promise.all([
@@ -272,7 +272,7 @@ describe('consent decisions under concurrency (#360)', () => {
         owner,
         members: [{ actor: second, role: 'HouseholdAdmin' }],
       });
-      const { plugin, unit, surface } = await arrangeSwitchedOnWithUndecidedOptional(owner, household.id);
+      const { plugin, unit, surface } = await arrangeSwitchedOnWithPendingOptional(owner, household.id);
       const before = await unitRow(household.id, plugin.id);
 
       const responses = await Promise.all([
@@ -307,8 +307,8 @@ describe('consent decisions under concurrency (#360)', () => {
       const owner = await actors.user();
       const approver = await actors.admin();
       const { household } = await actors.householdWithMembers({ owner });
-      const pending = manifestWith('1.3.0', [MANAGE_DIGEST_CHECK, POLICY_READ_CHECK, HOUSEHOLD_CHECK]);
-      const plugin = await arrangePlugin(undefined, stagedUpdateColumns({ manifest: pending, since: STAGED_AT }));
+      const staged = manifestWith('1.3.0', [MANAGE_DIGEST_CHECK, POLICY_READ_CHECK, HOUSEHOLD_CHECK]);
+      const plugin = await arrangePlugin(undefined, stagedUpdateColumns({ manifest: staged, since: STAGED_AT }));
       const unit = { householdId: household.id };
       const surface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
       const oldSha = surface.manifestSha256;
@@ -391,7 +391,7 @@ describe('consent decisions under concurrency (#360)', () => {
   describe('an approval against a server-scope denial', () => {
     it('never activates a manifest over a denial that is already durable', async () => {
       // The pair #356's lock exists for. The active manifest has the policy
-      // read OPTIONAL and the pending one requires it, so the denial is legal
+      // read OPTIONAL and the staged one requires it, so the denial is legal
       // right up until the approval commits — and illegal under the
       // required-denial rule immediately after. Exactly one of them can win.
       // Two admins, for the reason the household case above gives: one session
@@ -400,12 +400,12 @@ describe('consent decisions under concurrency (#360)', () => {
       // 356's row lock exists for.
       const admin = await actors.admin();
       const approver = await actors.admin();
-      const pending = manifestWith('1.3.0', [
+      const staged = manifestWith('1.3.0', [
         MANAGE_DIGEST_CHECK,
         { ...POLICY_READ_CHECK, required: true },
         HOUSEHOLD_CHECK,
       ]);
-      const plugin = await arrangePlugin(undefined, stagedUpdateColumns({ manifest: pending, since: STAGED_AT }));
+      const plugin = await arrangePlugin(undefined, stagedUpdateColumns({ manifest: staged, since: STAGED_AT }));
 
       const [denial, activation] = await Promise.all([
         decideServer(admin, plugin.slug, {
@@ -424,7 +424,7 @@ describe('consent decisions under concurrency (#360)', () => {
             status: PluginGrantStatus.Denied,
           },
         })) > 0;
-      const activated = row.version === pending.version;
+      const activated = row.version === staged.version;
 
       // The pair is pinned to the two outcomes that are legal, and nothing
       // else. A weaker form of this — "they were not both 200" — is satisfied
@@ -465,7 +465,7 @@ describe('consent decisions under concurrency (#360)', () => {
       }
 
       if (!activated) {
-        expect(row.pendingVersion).toBe(pending.version);
+        expect(row.pendingVersion).toBe(staged.version);
       }
     });
   });

@@ -145,7 +145,7 @@ export class HouseholdPluginsController {
   @ApiOperation({
     summary: "Present the consent surface for this household: the active manifest's, or a staged update's",
     description:
-      "The household admin's consent screen: every requested permission, with this household's " +
+      "The household's consent surface: every requested permission, with this household's " +
       "decision state per permission — server-consented ones show the server's concrete state (one addressable " +
       "decider), user-consented ones read 'per-unit' (every user decides for themself) — plus riskLevel, " +
       'required, grantable, localized reason, and the localized features[] they group under. manifestSha256 names ' +
@@ -163,8 +163,8 @@ export class HouseholdPluginsController {
   })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.HouseholdPlugin))
-  // Must stay out of the response cache: read right before a decide POST,
-  // which must be visible on the re-read.
+  // Must stay out of the response cache: read right before a consent act,
+  // whose writes must be visible on the re-read (#1150).
   @Get(':slug/consent')
   consentPresentation(
     @Param('householdId') householdId: string,
@@ -195,8 +195,9 @@ export class HouseholdPluginsController {
     summary: 'Switch the plugin on for this household, answering its requested permissions',
     description:
       'One consent act: the household admin answers the requested permissions this household decides, as the ' +
-      'consent surface (GET …/consent, or manifest=staged to pre-consent to a staged update) showed them, and ' +
-      'the plugin is switched on here. Every required permission must be Granted; optional ones may be ' +
+      "active manifest's consent surface (GET …/consent) showed them, and the plugin is switched on here. A " +
+      'switch-on names the active manifest only; to pre-consent to a staged update, send a review ' +
+      '(POST …/consent/review) against the manifest=staged consent surface. Every required permission must be Granted; optional ones may be ' +
       'answered either way or left for later. manifestSha256 names the consent surface the answers were read ' +
       "from. Optional config is validated against the manifest's config.schema and written with the switch-on. " +
       'Switching on again when nothing would change answers changed: false.',
@@ -470,7 +471,8 @@ export class HouseholdPluginsController {
    * What every household consent act hands the service (#1150): the route
    * household as the unit, the acting user, and the locale the consent
    * surface was shown in, as the consent read passes it. The service verifies
-   * the actor's authority again inside its transaction.
+   * the actor's authority again before its transaction; inside it, only the
+   * household's liveness is locked.
    */
   private actInput(
     householdId: string,

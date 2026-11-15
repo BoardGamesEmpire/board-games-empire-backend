@@ -715,7 +715,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
       // The plugin envelope rides inside the presentation — one wire name
       // for one fact.
       expect(presentation.plugin).toEqual({ id: plugin.id, slug: plugin.slug, enabled: true });
-      expect(presentation.source).toBe('pending');
+      expect(presentation.source).toBe('staged');
       expect(presentation.manifestVersion).toBe('1.3.0');
       expect(presentation.unit).toEqual({ scopeType: 'Server' });
       // The default locale resolves without fallback — the provenance the

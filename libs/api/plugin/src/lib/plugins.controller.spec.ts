@@ -67,7 +67,7 @@ const NO_LONGER_REQUESTED = ['feedback:read'];
 const PRESENTATION = {
   plugin: { id: 'plugin-1', slug: 'demo-sink', enabled: true },
   manifestVersion: '1.3.0',
-  source: 'pending',
+  source: 'staged',
   checks: [],
 } as unknown as PluginConsentPresentation;
 const ACTIVE_PRESENTATION = {

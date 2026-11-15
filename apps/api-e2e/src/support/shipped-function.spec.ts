@@ -906,7 +906,7 @@ describe('shipped-function', () => {
     const CLAIM = /FOR SHARE/;
 
     it('recognises a call to a function that claims on every path', () => {
-      // The shape every unit path uses: nothing in `enableHousehold` looks like
+      // The shape every unit path uses: nothing in `updateHouseholdConfig` looks like
       // a lock, and it is holding one. Without this the check reports a false
       // failure on the most-travelled compliant path in the tree.
       const source = `
@@ -1054,7 +1054,7 @@ describe('shipped-function', () => {
     });
 
     it('does not count a claim that only runs inside a callback', () => {
-      // `enableHousehold` takes its lock inside a `$transaction` arrow. Counting
+      // A unit method takes its lock inside a `$transaction` arrow. Counting
       // that would make the METHOD a delegate, so a caller could claim through
       // it without being in its transaction at all.
       const source = `

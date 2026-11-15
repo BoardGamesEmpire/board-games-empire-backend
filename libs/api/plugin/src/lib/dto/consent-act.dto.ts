@@ -77,12 +77,12 @@ abstract class ConsentActBodyDto {
 }
 
 /**
- * Switching a plugin on for your own unit (#1150): the answers grant at least
- * every required permission at the user scope, and may answer optional ones.
- * The list may be empty when the plugin requires nothing here, but the
+ * What every switch-on carries (#1150): the answers grant at least every
+ * required permission the unit decides, and may answer optional ones. The
+ * list may be empty when the plugin requires nothing of the unit, but the
  * property itself is required, so a client always says what it answered.
  */
-export class SwitchOnUserPluginDto extends ConsentActBodyDto {
+abstract class SwitchOnPluginDto extends ConsentActBodyDto {
   @ApiProperty({
     type: [ConsentAnswerDto],
     maxItems: CONSENT_ACT_MAX_ANSWERS,
@@ -98,13 +98,16 @@ export class SwitchOnUserPluginDto extends ConsentActBodyDto {
   answers!: ConsentAnswerDto[];
 }
 
+/** Switching a plugin on for your own unit (#1150): the answers cover the permissions you decide at user scope. */
+export class SwitchOnUserPluginDto extends SwitchOnPluginDto {}
+
 /**
  * Switching a plugin on for a household (#1150), with optional inline config.
  * Nested under one declared `config` property for the same reasons as the
  * config PATCH: the global pipe strips undeclared top-level properties, and
  * the plugin's own keys must never collide with this body's.
  */
-export class SwitchOnHouseholdPluginDto extends SwitchOnUserPluginDto {
+export class SwitchOnHouseholdPluginDto extends SwitchOnPluginDto {
   @ApiPropertyOptional({
     description:
       "Household configuration written with the switch-on, validated against the manifest's config.schema " +
