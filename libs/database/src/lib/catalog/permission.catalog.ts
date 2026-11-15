@@ -148,6 +148,21 @@ const EVENT_PATCH_FIELDS = [
   'schedulingMode',
 ] as const satisfies readonly Prisma.EventScalarFieldEnum[];
 
+// The EventOccurrence columns `PATCH /events/:eventId/occurrences/:occurrenceId`
+// writes, which the date's edit permissions are bound to (#979). Unlike the event's
+// PATCH (#589), the date's names the fields it writes, so each one a request
+// sends is checked. Leaving out the status columns is what keeps these
+// permissions from passing the confirm, decline and cancel routes: an event
+// organizer edits a date but doesn't confirm, decline or cancel it. Module-private for the
+// reasons `acceptedFriendOfActingUser` gives.
+const OCCURRENCE_EDIT_FIELDS = [
+  'label',
+  'startDate',
+  'endDate',
+  'location',
+  'sortOrder',
+] as const satisfies readonly Prisma.EventOccurrenceScalarFieldEnum[];
+
 // The acting user's membership row, holding `HouseholdOwner` or
 // `HouseholdAdmin`, in the household whose `members.some` it is spliced into.
 // Several permissions gate on it, and one fragment keeps an edit to who counts
@@ -975,6 +990,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.update,
     subject: ResourceType.EventOccurrence,
+    fields: OCCURRENCE_EDIT_FIELDS,
     conditions: { eventId: '{{ eventId }}' },
     slug: 'update:event_occurrence',
     riskLevel: RiskLevel.Medium,
@@ -983,6 +999,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.update,
     subject: ResourceType.EventOccurrence,
+    fields: OCCURRENCE_EDIT_FIELDS,
     conditions: { event: { is: { householdId: '{{ householdId }}' } } },
     slug: 'update:event_occurrence:household',
     riskLevel: RiskLevel.Medium,
@@ -999,9 +1016,18 @@ export const PERMISSION_CATALOG = [
   // No household variant removes an occurrence. A household's owners and
   // admins cancel one; removing it is for the event's own roles, and an owner
   // or admin who doesn't host asks its host instead (#168, #681).
+
+  // #979. Each status change writes its own timestamp column, and each route's
+  // check names that column, since `status` is in all three lists and can't
+  // tell them apart. The edit permissions' `fields` leave these columns out, so
+  // an event organizer edits a date but can't confirm, decline or cancel it, and
+  // an event moderator, who holds only the cancel, cancels but can't confirm or
+  // decline. Which status each change may start from is the service's to
+  // decide, not a condition's.
   permission({
     action: Action.update,
     subject: ResourceType.EventOccurrence,
+    fields: ['status', 'confirmedAt'],
     conditions: { eventId: '{{ eventId }}' },
     slug: 'update:event_occurrence:confirm',
     riskLevel: RiskLevel.Medium,
@@ -1010,6 +1036,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.update,
     subject: ResourceType.EventOccurrence,
+    fields: ['status', 'confirmedAt'],
     conditions: { event: { is: { householdId: '{{ householdId }}' } } },
     slug: 'update:event_occurrence:confirm:household',
     riskLevel: RiskLevel.Medium,
@@ -1018,6 +1045,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.update,
     subject: ResourceType.EventOccurrence,
+    fields: ['status', 'declinedAt'],
     conditions: { eventId: '{{ eventId }}' },
     slug: 'update:event_occurrence:decline',
     riskLevel: RiskLevel.Medium,
@@ -1026,6 +1054,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.update,
     subject: ResourceType.EventOccurrence,
+    fields: ['status', 'declinedAt'],
     conditions: { event: { is: { householdId: '{{ householdId }}' } } },
     slug: 'update:event_occurrence:decline:household',
     riskLevel: RiskLevel.Medium,
@@ -1034,6 +1063,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.update,
     subject: ResourceType.EventOccurrence,
+    fields: ['status', 'cancelledAt', 'cancelledById', 'cancelReason'],
     conditions: { eventId: '{{ eventId }}' },
     slug: 'update:event_occurrence:cancel',
     riskLevel: RiskLevel.Medium,
@@ -1042,6 +1072,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.update,
     subject: ResourceType.EventOccurrence,
+    fields: ['status', 'cancelledAt', 'cancelledById', 'cancelReason'],
     conditions: { event: { is: { householdId: '{{ householdId }}' } } },
     slug: 'update:event_occurrence:cancel:household',
     riskLevel: RiskLevel.Medium,

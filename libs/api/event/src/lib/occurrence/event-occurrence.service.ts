@@ -347,8 +347,7 @@ export class EventOccurrenceService {
           const updated = await tx.eventOccurrence.update({
             where: {
               id: occurrenceId,
-              // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-              AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
+              AND: this.editCeiling(dto),
             },
             data: {
               label: dto.label,
@@ -495,14 +494,19 @@ export class EventOccurrenceService {
       [OccurrenceStatus.Proposed],
       OccurrenceStatus.Confirmed,
       { confirmedAt: new Date() },
-      { refuseOnCancelledEvent: true, refuseOncePassed: true },
+      { field: 'confirmedAt', refuseOnCancelledEvent: true, refuseOncePassed: true },
     );
   }
 
   async declineOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
-    return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Proposed], OccurrenceStatus.Declined, {
-      declinedAt: new Date(),
-    });
+    return this.transitionStatus(
+      eventId,
+      occurrenceId,
+      [OccurrenceStatus.Proposed],
+      OccurrenceStatus.Declined,
+      { declinedAt: new Date() },
+      { field: 'declinedAt' },
+    );
   }
 
   /**
@@ -511,11 +515,32 @@ export class EventOccurrenceService {
    * of its dates are cancelled.
    */
   async cancelOccurrence(eventId: string, occurrenceId: string, reason?: string): Promise<OccurrenceDetail> {
-    return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Confirmed], OccurrenceStatus.Cancelled, {
-      cancelledAt: new Date(),
-      cancelledById: this.abilityService.getActingUserId(),
-      cancelReason: reason ?? null,
-    });
+    return this.transitionStatus(
+      eventId,
+      occurrenceId,
+      [OccurrenceStatus.Confirmed],
+      OccurrenceStatus.Cancelled,
+      {
+        cancelledAt: new Date(),
+        cancelledById: this.abilityService.getActingUserId(),
+        cancelReason: reason ?? null,
+      },
+      { field: 'cancelledAt' },
+    );
+  }
+
+  /**
+   * The write ceiling of an edit: each field the request sends adds the
+   * conditions of the permissions that cover it. A field no permission covers yields
+   * the deny-all, which the CASL extension keeps, so the update finds no row
+   * and answers 403 (#979). The keys are never empty, since
+   * {@link updateOccurrence} refuses an empty patch first.
+   */
+  private editCeiling(dto: UpdateEventOccurrenceDto): Prisma.EventOccurrenceWhereInput[] {
+    return Object.keys(dto).flatMap((field) =>
+      // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+      this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update, field),
+    );
   }
 
   /**
@@ -529,6 +554,10 @@ export class EventOccurrenceService {
    * date the event's cancel declined meanwhile answers 400, even once the
    * event is reopened, rather than reviving the date (#795). The write
    * repeats the status it read.
+   *
+   * `field` is the timestamp column this change writes. The write's ceiling
+   * is built from it, as `status` is in all three permissions' lists and can't
+   * tell them apart (#979).
    *
    * With `refuseOnCancelledEvent`, it also reads the event's cancel under
    * the lock ({@link assertEventNotCancelled}), so a confirm on a cancelled
@@ -548,9 +577,10 @@ export class EventOccurrenceService {
     newStatus: OccurrenceStatus,
     extraData: Record<string, unknown> = {},
     {
+      field,
       refuseOnCancelledEvent = false,
       refuseOncePassed = false,
-    }: { refuseOnCancelledEvent?: boolean; refuseOncePassed?: boolean } = {},
+    }: { field: OccurrenceStatusField; refuseOnCancelledEvent?: boolean; refuseOncePassed?: boolean },
   ): Promise<OccurrenceDetail> {
     const initiatedAt = new Date();
     const actingUserId = resolveActingUserIdOrNull(this.abilityService);
@@ -594,9 +624,11 @@ export class EventOccurrenceService {
           where: {
             id: occurrenceId,
             status: current.status,
-            // Status transitions are mutations → filter by `update`, not `read`.
+            // Status transitions are mutations → filter by `update`, not `read`,
+            // and by the column this change writes, so a grant bound to
+            // another status column doesn't pass it (#979).
             // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update, field),
           },
           data: { status: newStatus, ...extraData },
           include: { policy: { include: POLICY_VIEW_INCLUDE } },
@@ -950,6 +982,9 @@ function groupByOccurrence<TRow extends { occurrenceId: string | null }>(
 
   return groups;
 }
+
+/** The timestamp column each status change writes, which its permission is bound to (#979). */
+type OccurrenceStatusField = 'confirmedAt' | 'declinedAt' | 'cancelledAt';
 
 /** A date status transition: the date, the statuses it may start from, and the one it moves to. */
 interface StatusTransition {

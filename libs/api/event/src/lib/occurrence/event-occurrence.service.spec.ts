@@ -807,7 +807,7 @@ describe('EventOccurrenceService', () => {
     const recordNotFound = () =>
       new Prisma.PrismaClientKnownRequestError('No record was found', { code: 'P2025', clientVersion: 'test' });
 
-    it('filters by UPDATE conditions (tightened from read)', async () => {
+    it('filters by UPDATE conditions on the label the patch sends (tightened from read, #979)', async () => {
       db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
       db.eventOccurrence.update.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
 
@@ -816,9 +816,38 @@ describe('EventOccurrenceService', () => {
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
         ResourceType.EventOccurrence,
         Action.update,
+        'label',
       );
       expect(db.eventOccurrence.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ id: 'occ-1', AND: [COND] }) }),
+      );
+    });
+
+    it('builds the write ceiling from each field the patch sends (#979)', async () => {
+      const labelCondition = { id: 'label-condition' };
+      const startDateCondition = { id: 'start-date-condition' };
+      abilityService.getCurrentResourceConditions.mockImplementation((_type, _action, field) =>
+        field === 'label' ? [labelCondition] : field === 'startDate' ? [startDateCondition] : [COND],
+      );
+      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
+      db.eventOccurrence.update.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
+
+      await service.updateOccurrence('event-1', 'occ-1', { label: 'x', startDate: new Date('2031-01-01') });
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+        ResourceType.EventOccurrence,
+        Action.update,
+        'label',
+      );
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+        ResourceType.EventOccurrence,
+        Action.update,
+        'startDate',
+      );
+      expect(db.eventOccurrence.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ AND: [labelCondition, startDateCondition] }),
+        }),
       );
     });
 
@@ -1200,7 +1229,7 @@ describe('EventOccurrenceService', () => {
   });
 
   describe('status transitions', () => {
-    it('confirmOccurrence filters by UPDATE conditions', async () => {
+    it('confirmOccurrence filters by UPDATE conditions on confirmedAt (#979)', async () => {
       db.eventOccurrence.findUnique.mockResolvedValue({
         id: 'occ-1',
         status: OccurrenceStatus.Proposed,
@@ -1214,6 +1243,43 @@ describe('EventOccurrenceService', () => {
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
         ResourceType.EventOccurrence,
         Action.update,
+        'confirmedAt',
+      );
+    });
+
+    it('declineOccurrence filters by UPDATE conditions on declinedAt (#979)', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue({
+        id: 'occ-1',
+        status: OccurrenceStatus.Proposed,
+        startDate: null,
+        endDate: null,
+      } as EventOccurrence);
+      db.eventOccurrence.update.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
+
+      await service.declineOccurrence('event-1', 'occ-1');
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+        ResourceType.EventOccurrence,
+        Action.update,
+        'declinedAt',
+      );
+    });
+
+    it('cancelOccurrence filters by UPDATE conditions on cancelledAt (#979)', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue({
+        id: 'occ-1',
+        status: OccurrenceStatus.Confirmed,
+        startDate: null,
+        endDate: null,
+      } as EventOccurrence);
+      db.eventOccurrence.update.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
+
+      await service.cancelOccurrence('event-1', 'occ-1');
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+        ResourceType.EventOccurrence,
+        Action.update,
+        'cancelledAt',
       );
     });
 

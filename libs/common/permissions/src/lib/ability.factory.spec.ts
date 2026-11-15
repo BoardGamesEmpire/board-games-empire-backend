@@ -1164,6 +1164,87 @@ describe('AbilityFactory', () => {
       expect(organizer.can(Action.update, 'Event', 'archivedAt')).toBe(false);
     });
 
+    // Each status change is bound to its own timestamp column, and the edit
+    // permissions leave those columns out, so a route that names the column
+    // tells an event host from an event moderator from an event organizer
+    // (#979).
+    it('lets an event host confirm, decline and cancel a date, an event moderator only cancel, and an event organizer none, while each still edits it (#979)', () => {
+      const attendingAs = (roleName: string, slugs: PermissionSlug[]) =>
+        factory.createForUser(
+          makeUser({
+            id: 'user-1',
+            eventsAttended: [{ eventId: 'ev-1', role: makeRole(roleName, slugs.map(catalogPermission)) }],
+          }),
+        );
+      const host = attendingAs('EventHost', [
+        'update:event_occurrence',
+        'update:event_occurrence:confirm',
+        'update:event_occurrence:decline',
+        'update:event_occurrence:cancel',
+      ]);
+      const moderator = attendingAs('EventModerator', ['update:event_occurrence', 'update:event_occurrence:cancel']);
+      const organizer = attendingAs('EventOrganizer', ['update:event_occurrence']);
+
+      expect(host.can(Action.update, 'EventOccurrence', 'confirmedAt')).toBe(true);
+      expect(host.can(Action.update, 'EventOccurrence', 'declinedAt')).toBe(true);
+      expect(host.can(Action.update, 'EventOccurrence', 'cancelledAt')).toBe(true);
+      expect(moderator.can(Action.update, 'EventOccurrence', 'cancelledAt')).toBe(true);
+      expect(moderator.can(Action.update, 'EventOccurrence', 'confirmedAt')).toBe(false);
+      expect(moderator.can(Action.update, 'EventOccurrence', 'declinedAt')).toBe(false);
+      expect(organizer.can(Action.update, 'EventOccurrence', 'confirmedAt')).toBe(false);
+      expect(organizer.can(Action.update, 'EventOccurrence', 'declinedAt')).toBe(false);
+      expect(organizer.can(Action.update, 'EventOccurrence', 'cancelledAt')).toBe(false);
+      expect(organizer.can(Action.update, 'EventOccurrence', 'label')).toBe(true);
+      expect(organizer.can(Action.update, 'EventOccurrence')).toBe(true);
+    });
+
+    it("lets a household owner confirm a date on the household's events only (#979)", () => {
+      const ability = factory.createForUser(
+        householdMemberOf('hh-1', 'HouseholdOwner', [
+          'update:event_occurrence:household',
+          'update:event_occurrence:confirm:household',
+        ]),
+      );
+
+      expect(
+        ability.can(
+          Action.update,
+          asEntity('EventOccurrence', { eventId: 'ev-1', event: { householdId: 'hh-1' } }),
+          'confirmedAt',
+        ),
+      ).toBe(true);
+      expect(
+        ability.can(
+          Action.update,
+          asEntity('EventOccurrence', { eventId: 'ev-2', event: { householdId: 'hh-2' } }),
+          'confirmedAt',
+        ),
+      ).toBe(false);
+    });
+
+    // The household variants carry the same `fields` as the event's own, so a
+    // household owner's edit permission doesn't pass a status change either
+    // (#979).
+    it("keeps a household owner's date edit from passing a status change, and binds each status variant to its column (#979)", () => {
+      const householdDate = asEntity('EventOccurrence', { eventId: 'ev-1', event: { householdId: 'hh-1' } });
+      const editOnly = factory.createForUser(
+        householdMemberOf('hh-1', 'HouseholdOwner', ['update:event_occurrence:household']),
+      );
+      const editAndCancel = factory.createForUser(
+        householdMemberOf('hh-1', 'HouseholdOwner', [
+          'update:event_occurrence:household',
+          'update:event_occurrence:cancel:household',
+        ]),
+      );
+
+      expect(editOnly.can(Action.update, householdDate, 'confirmedAt')).toBe(false);
+      expect(editOnly.can(Action.update, householdDate, 'declinedAt')).toBe(false);
+      expect(editOnly.can(Action.update, householdDate, 'cancelledAt')).toBe(false);
+      expect(editOnly.can(Action.update, householdDate, 'label')).toBe(true);
+      expect(editAndCancel.can(Action.update, householdDate, 'cancelledAt')).toBe(true);
+      expect(editAndCancel.can(Action.update, householdDate, 'confirmedAt')).toBe(false);
+    });
+
     it("lets a household owner cancel the household's events, but not archive them (#795)", () => {
       const ability = factory.createForUser(
         householdMemberOf('hh-1', 'HouseholdOwner', ['update:event:household', 'update:event:cancel:household']),

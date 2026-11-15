@@ -4,12 +4,14 @@ import {
   EventSchedulingMode,
   NominationStatus,
   OccurrenceStatus,
+  ResourceType,
   SystemRole,
   VoteType,
 } from '@bge/database';
 import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { arrangeListEntry } from './event-fixtures';
@@ -634,6 +636,152 @@ describe('event write authorization', () => {
           select: { status: true },
         }),
       ).toEqual({ status: NominationStatus.Open });
+    });
+  });
+
+  describe("a date's status changes (#979)", () => {
+    const HOUR_MS = 60 * 60 * 1000;
+    const hoursFromNow = (hours: number) => new Date(Date.now() + hours * HOUR_MS).toISOString();
+    const POLL_WITH_DATE = {
+      schedulingMode: EventSchedulingMode.Poll,
+      occurrences: [{ startDate: hoursFromNow(24) }],
+    };
+
+    const dateOf = async (eventId: string) =>
+      db.client.eventOccurrence.findFirstOrThrow({
+        where: { eventId },
+        select: { id: true, status: true, label: true },
+      });
+
+    const datePath = (eventId: string, occurrenceId: string, action = '') =>
+      `${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}${action}`;
+
+    const changeStatus = (
+      caller: { headers: Readonly<Record<string, string>> },
+      eventId: string,
+      occurrenceId: string,
+      action: 'confirm' | 'decline' | 'cancel',
+    ) =>
+      request(baseUrl)
+        .post(datePath(eventId, occurrenceId, `/${action}`))
+        .set(caller.headers)
+        .send({});
+
+    const editLabel = (caller: { headers: Readonly<Record<string, string>> }, eventId: string, occurrenceId: string) =>
+      request(baseUrl).patch(datePath(eventId, occurrenceId)).set(caller.headers).send({ label: 'Edited' });
+
+    it.each([
+      ['event organizer', SystemRole.EventOrganizer],
+      ['event moderator', SystemRole.EventModerator],
+    ])('refuses an %s confirming or declining a date, and lets the host', async (_label, delegateRole) => {
+      const host = await actors.user();
+      const delegate = await actors.user();
+      const eventId = await createdEventId(host, POLL_WITH_DATE);
+      await addAttendee(host, eventId, { userId: delegate.user.id, role: delegateRole }).expect(201);
+      const date = await dateOf(eventId);
+      expect(date.status).toBe(OccurrenceStatus.Proposed);
+
+      await changeStatus(delegate, eventId, date.id, 'confirm').expect(403);
+      await changeStatus(delegate, eventId, date.id, 'decline').expect(403);
+      expect((await dateOf(eventId)).status).toBe(OccurrenceStatus.Proposed);
+
+      // Control: the delegate still edits the date, so the refusals above
+      // are about the status permissions and not the whole route.
+      await editLabel(delegate, eventId, date.id).expect(200);
+      expect((await dateOf(eventId)).label).toBe('Edited');
+
+      await changeStatus(host, eventId, date.id, 'confirm').expect(201);
+      expect((await dateOf(eventId)).status).toBe(OccurrenceStatus.Confirmed);
+    });
+
+    it('refuses an event organizer cancelling a date, and lets an event moderator', async () => {
+      const host = await actors.user();
+      const eventOrganizer = await actors.user();
+      const eventModerator = await actors.user();
+      const eventId = await createdEventId(host, {
+        schedulingMode: EventSchedulingMode.Fixed,
+        occurrences: [{ startDate: hoursFromNow(24) }],
+      });
+      await addAttendee(host, eventId, { userId: eventOrganizer.user.id, role: SystemRole.EventOrganizer }).expect(201);
+      await addAttendee(host, eventId, { userId: eventModerator.user.id, role: SystemRole.EventModerator }).expect(201);
+      const date = await dateOf(eventId);
+      expect(date.status).toBe(OccurrenceStatus.Confirmed);
+
+      await changeStatus(eventOrganizer, eventId, date.id, 'cancel').expect(403);
+      expect((await dateOf(eventId)).status).toBe(OccurrenceStatus.Confirmed);
+
+      await changeStatus(eventModerator, eventId, date.id, 'cancel').expect(201);
+      expect((await dateOf(eventId)).status).toBe(OccurrenceStatus.Cancelled);
+    });
+
+    it("lets a household owner confirm and edit a date on the household's event without attending it", async () => {
+      const owner = await actors.user();
+      const host = await actors.user();
+      const { household } = await actors.householdWithMembers({
+        owner,
+        members: [{ actor: host, role: SystemRole.HouseholdMember }],
+      });
+      const eventId = await createdEventId(host, { ...POLL_WITH_DATE, householdId: household.id });
+      const date = await dateOf(eventId);
+
+      await editLabel(owner, eventId, date.id).expect(200);
+      expect((await dateOf(eventId)).label).toBe('Edited');
+
+      await changeStatus(owner, eventId, date.id, 'confirm').expect(201);
+      expect((await dateOf(eventId)).status).toBe(OccurrenceStatus.Confirmed);
+    });
+
+    // The DTO's fields and the edit permission's `fields` are two lists of the
+    // same five columns; this ties them, so a field added to one and not the
+    // other fails here (#979).
+    it('lets the host edit every field a date takes in one patch (#979)', async () => {
+      const host = await actors.user();
+      const eventId = await createdEventId(host, POLL_WITH_DATE);
+      const date = await dateOf(eventId);
+      const edit = {
+        label: 'Every field',
+        startDate: hoursFromNow(48),
+        endDate: hoursFromNow(50),
+        location: 'The game cafe',
+        sortOrder: 3,
+      };
+
+      await request(baseUrl).patch(datePath(eventId, date.id)).set(host.headers).send(edit).expect(200);
+
+      const row = await db.client.eventOccurrence.findUniqueOrThrow({
+        where: { id: date.id },
+        select: { label: true, startDate: true, endDate: true, location: true, sortOrder: true },
+      });
+      expect(row).toEqual({
+        label: edit.label,
+        startDate: new Date(edit.startDate),
+        endDate: new Date(edit.endDate),
+        location: edit.location,
+        sortOrder: edit.sortOrder,
+      });
+    });
+
+    it('refuses an API key scoped to only the cancel permission an edit to the date, and one scoped to only the edit permission a confirm', async () => {
+      const host = await actors.user();
+      const eventId = await createdEventId(host, POLL_WITH_DATE);
+      const date = await dateOf(eventId);
+      const cancelOnly = await mintApiKey(baseUrl, db.client, host, {
+        slugs: ['update:event_occurrence:cancel'],
+        resourceType: ResourceType.EventOccurrence,
+      });
+      const editOnly = await mintApiKey(baseUrl, db.client, host, {
+        slugs: ['update:event_occurrence'],
+        resourceType: ResourceType.EventOccurrence,
+      });
+
+      await editLabel(cancelOnly, eventId, date.id).expect(403);
+      expect((await dateOf(eventId)).label).toBe(date.label);
+
+      // Control: the edit-only key edits, then is refused the status change.
+      await editLabel(editOnly, eventId, date.id).expect(200);
+      expect((await dateOf(eventId)).label).toBe('Edited');
+      await changeStatus(editOnly, eventId, date.id, 'confirm').expect(403);
+      expect((await dateOf(eventId)).status).toBe(OccurrenceStatus.Proposed);
     });
   });
 });

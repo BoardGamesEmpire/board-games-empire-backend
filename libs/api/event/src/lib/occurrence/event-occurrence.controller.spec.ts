@@ -1,4 +1,5 @@
 import {
+  Action,
   AvailabilityResponse,
   EventAvailabilityVote,
   EventOccurrence,
@@ -6,11 +7,12 @@ import {
   ResourceType,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { PoliciesGuard } from '@bge/permissions';
+import { CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { createTestingModuleWithDb, makeEventOccurrence, paginationQuery } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ClsServiceManager } from 'nestjs-cls';
+import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
 import { EventOccurrenceController } from './event-occurrence.controller';
 import { EventOccurrenceService, type OccurrenceDetail } from './event-occurrence.service';
@@ -61,6 +63,29 @@ describe('EventOccurrenceController', () => {
   });
 
   afterEach(() => jest.clearAllMocks());
+
+  /** The one policy handler on `handler`, asked of an ability that records the question. */
+  const askedBy = (handler: object) => {
+    const handlers = Reflect.getMetadata(CHECK_POLICIES_KEY, handler) as Array<(ability: AppAbility) => boolean>;
+    const can = jest.fn().mockReturnValue(true);
+
+    expect(handlers).toHaveLength(1);
+    handlers[0]({ can } as unknown as AppAbility);
+
+    return can.mock.calls;
+  };
+
+  // Each status change checks the column its route writes, since `status` is
+  // in all three permissions' lists and can't tell them apart (#979).
+  describe.each([
+    ['confirm', EventOccurrenceController.prototype.confirm, 'confirmedAt'],
+    ['decline', EventOccurrenceController.prototype.decline, 'declinedAt'],
+    ['cancel', EventOccurrenceController.prototype.cancel, 'cancelledAt'],
+  ])('%s permission check', (_, handler, field) => {
+    it(`asks for update on the date's ${field} column (#979)`, () => {
+      expect(askedBy(handler)).toEqual([[Action.update, ResourceType.EventOccurrence, field]]);
+    });
+  });
 
   describe('getOccurrences', () => {
     it('delegates with the paging and wraps the rows in the envelope', async () => {
