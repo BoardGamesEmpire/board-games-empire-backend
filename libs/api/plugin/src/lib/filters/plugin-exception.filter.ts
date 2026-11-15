@@ -14,6 +14,7 @@ import {
   PluginConfigSchemaUnusableError,
   PluginConfigValidationError,
   PluginConsentPresentationManifestError,
+  PluginConsentPresentationNoStagedUpdateError,
   PluginConsentPresentationNotFoundError,
   PluginConsentPresentationTombstonedError,
   PluginDirectoryLayoutError,
@@ -328,6 +329,14 @@ function buildRenderers(): RendererMap {
   renders(PluginConsentPresentationNotFoundError, (exception) => ({
     status: Http.NotFound,
     message: t('errors.plugin.presentation_not_found', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug },
+  }));
+
+  // A household or user asked for the staged consent surface to pre-consent,
+  // and nothing is staged (#1150): that surface does not exist.
+  renders(PluginConsentPresentationNoStagedUpdateError, (exception) => ({
+    status: Http.NotFound,
+    message: t('errors.plugin.consent_presentation_no_staged_update', { slug: exception.pluginSlug }),
     fields: { slug: exception.pluginSlug },
   }));
 

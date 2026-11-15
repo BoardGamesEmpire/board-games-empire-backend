@@ -415,6 +415,7 @@
     "grant_required_denial": "Cannot deny '{permissionSlug}': the active manifest for plugin '{slug}' requires it — disable or uninstall the plugin instead",
     "presentation_not_found": "Plugin '{slug}' is not installed",
     "presentation_tombstoned": "Plugin '{slug}' was uninstalled and has no consent surface",
+    "consent_presentation_no_staged_update": "Plugin '{slug}' has no update waiting",
     "unit_authority": "Managing this household's plugin enablement requires a household owner or admin",
     "unit_plugin_not_found": "Plugin '{slug}' is not installed",
     "unit_plugin_tombstoned": "Plugin '{slug}' was uninstalled and has no unit enablement",

@@ -26,6 +26,12 @@ const PRESENTATION = {
   source: 'active',
   checks: [],
 } as unknown as PluginConsentPresentation;
+const STAGED_PRESENTATION = {
+  plugin: { id: 'plugin-1', slug: 'demo-sink', enabled: true },
+  manifestVersion: '1.3.0',
+  source: 'pending',
+  checks: [],
+} as unknown as PluginConsentPresentation;
 const GRANT = { id: 'grant-1', permissionSlug: 'read:public_content', status: PluginGrantStatus.Granted } as never;
 const UNIT_ROW = { id: 'up-1', userId: USER_ID, pluginId: 'plugin-1', enabled: true } as never;
 const INVENTORY_PAGE = {
@@ -52,7 +58,9 @@ const FEATURE_STATE = {
 describe('UserPluginsController (delegation + actor-kind floor)', () => {
   let controller: UserPluginsController;
   let grants: jest.Mocked<Pick<PluginGrantService, 'decide'>>;
-  let presentation: jest.Mocked<Pick<PluginConsentPresentationService, 'presentForUnitBySlug'>>;
+  let presentation: jest.Mocked<
+    Pick<PluginConsentPresentationService, 'presentForUnitBySlug' | 'presentStagedForUnitBySlug'>
+  >;
   let units: jest.Mocked<Pick<PluginUnitLifecycleService, 'enableUser' | 'disableUser'>>;
   let featureState: jest.Mocked<Pick<PluginFeatureStateService, 'resolveForUnitBySlug'>>;
   let inventory: jest.Mocked<Pick<PluginInventoryService, 'listForUser'>>;
@@ -62,7 +70,10 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
 
   beforeEach(() => {
     grants = { decide: jest.fn().mockResolvedValue({ grant: GRANT, changed: true }) };
-    presentation = { presentForUnitBySlug: jest.fn().mockResolvedValue(PRESENTATION) };
+    presentation = {
+      presentForUnitBySlug: jest.fn().mockResolvedValue(PRESENTATION),
+      presentStagedForUnitBySlug: jest.fn().mockResolvedValue(STAGED_PRESENTATION),
+    };
     units = {
       enableUser: jest.fn().mockResolvedValue(UNIT_ROW),
       disableUser: jest.fn().mockResolvedValue(UNIT_ROW),
@@ -127,6 +138,21 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
       'de-AT',
     );
     expect(result).toEqual({ presentation: PRESENTATION });
+  });
+
+  it('serves the staged consent surface when asked (#1150)', async () => {
+    auditContext.getLocale.mockReturnValue('de');
+
+    const result = await firstValueFrom(controller.consentPresentation('demo-sink', { manifest: 'staged' }));
+
+    // The user pre-consents from the staged update's consent surface.
+    expect(presentation.presentStagedForUnitBySlug).toHaveBeenCalledWith(
+      'demo-sink',
+      { scopeType: 'User', userId: USER_ID },
+      'de',
+    );
+    expect(presentation.presentForUnitBySlug).not.toHaveBeenCalled();
+    expect(result).toEqual({ presentation: STAGED_PRESENTATION });
   });
 
   it('an unresolved CLS locale is passed as undefined — the presentation falls back to the default locale', async () => {

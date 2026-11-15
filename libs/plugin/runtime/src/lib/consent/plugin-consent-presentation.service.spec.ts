@@ -5,6 +5,7 @@ import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import {
   PluginConsentPresentationManifestError,
+  PluginConsentPresentationNoStagedUpdateError,
   PluginConsentPresentationNotFoundError,
   PluginConsentPresentationTombstonedError,
 } from './consent-presentation.errors';
@@ -57,6 +58,9 @@ describe('PluginConsentPresentationService', () => {
   const SERVER_UNIT: PluginUnit = { scopeType: 'Server' };
   const HOUSEHOLD_UNIT: PluginUnit = { scopeType: 'Household', householdId: 'hh-1' };
 
+  const INSTALLED_SHA = 'a'.repeat(64);
+  const STAGED_SHA = 'b'.repeat(64);
+
   const pluginRow = (
     overrides: Partial<{
       enabled: boolean;
@@ -64,6 +68,7 @@ describe('PluginConsentPresentationService', () => {
       manifestJson: unknown;
       pendingVersion: string | null;
       pendingManifestJson: unknown;
+      pendingSha256: string | null;
     }> = {},
   ) => ({
     id: 'plg_1',
@@ -72,8 +77,10 @@ describe('PluginConsentPresentationService', () => {
     enabled: true,
     uninstalledAt: null,
     manifestJson: manifest,
+    installedSha256: INSTALLED_SHA,
     pendingVersion: null,
     pendingManifestJson: null,
+    pendingSha256: null,
     ...overrides,
   });
 
@@ -390,7 +397,11 @@ describe('PluginConsentPresentationService', () => {
 
     it("presents the PENDING manifest against today's decisions", async () => {
       db.plugin.findUnique.mockResolvedValue(
-        pluginRow({ pendingVersion: '1.3.0', pendingManifestJson: pendingManifest }) as never,
+        pluginRow({
+          pendingVersion: '1.3.0',
+          pendingManifestJson: pendingManifest,
+          pendingSha256: STAGED_SHA,
+        }) as never,
       );
 
       const presentation = await service.presentPendingForUnit('plg_1', SERVER_UNIT);
@@ -423,7 +434,11 @@ describe('PluginConsentPresentationService', () => {
 
     describe('presentPendingFromRow (snapshot-taking form)', () => {
       it('presents from the caller-supplied row without re-reading the plugin — the snapshot guarantee', async () => {
-        const row = pluginRow({ pendingVersion: '1.3.0', pendingManifestJson: pendingManifest });
+        const row = pluginRow({
+          pendingVersion: '1.3.0',
+          pendingManifestJson: pendingManifest,
+          pendingSha256: STAGED_SHA,
+        });
 
         const presentation = await service.presentPendingFromRow(row, SERVER_UNIT);
 
@@ -446,11 +461,169 @@ describe('PluginConsentPresentationService', () => {
 
       it('rejects a structurally invalid unit at the boundary, exactly as the loading form does', async () => {
         await expect(
-          service.presentPendingFromRow(pluginRow({ pendingVersion: '1.3.0', pendingManifestJson: pendingManifest }), {
-            scopeType: 'Household',
-          } as unknown as PluginUnit),
+          service.presentPendingFromRow(
+            pluginRow({ pendingVersion: '1.3.0', pendingManifestJson: pendingManifest, pendingSha256: STAGED_SHA }),
+            {
+              scopeType: 'Household',
+            } as unknown as PluginUnit,
+          ),
         ).rejects.toThrow(RangeError);
       });
+    });
+  });
+
+  describe('the consent surface a unit consents from (#1150)', () => {
+    /**
+     * Active and staged manifests for the staged-only comparison: one
+     * requested permission tightens from optional to required, one moves from
+     * server to household consent scope, and one is new in the staged version.
+     */
+    const activeManifest = buildPluginManifest({ scope: 'household' });
+    activeManifest.permissions.checks = [
+      {
+        slug: 'feedback:read',
+        required: false,
+        reason: { en: 'Reads feedback to compose the digest.' },
+        feature: 'weekly-digest',
+        consentScope: 'server',
+      },
+      {
+        slug: 'create:notification',
+        required: false,
+        reason: { en: 'Sends the digest as a notification.' },
+        consentScope: 'server',
+      },
+    ];
+
+    const stagedManifest = buildPluginManifest({ scope: 'household', version: '1.3.0' });
+    stagedManifest.permissions.declares = ['read:digest'];
+    stagedManifest.permissions.checks = [
+      {
+        slug: 'feedback:read',
+        required: true,
+        reason: { en: 'Reads feedback to compose the digest.' },
+        feature: 'weekly-digest',
+        consentScope: 'server',
+      },
+      {
+        slug: 'create:notification',
+        required: false,
+        reason: { en: 'Sends the digest as a notification.' },
+        consentScope: 'household',
+      },
+      {
+        slug: 'read:digest',
+        required: false,
+        reason: { en: 'Reads stored digests for insights.' },
+        consentScope: 'server',
+      },
+    ];
+
+    const stagedRow = () =>
+      pluginRow({
+        manifestJson: activeManifest,
+        pendingVersion: '1.3.0',
+        pendingManifestJson: stagedManifest,
+        pendingSha256: STAGED_SHA,
+      });
+
+    it('returns the artifact sha the consent surface was built from (#1150)', async () => {
+      db.plugin.findUnique.mockResolvedValue(stagedRow() as never);
+
+      const active = await service.presentForUnitBySlug('demo-sink', HOUSEHOLD_UNIT);
+      const staged = await service.presentStagedForUnitBySlug('demo-sink', HOUSEHOLD_UNIT);
+
+      expect(active.manifestSha256).toBe(INSTALLED_SHA);
+      expect(staged.manifestSha256).toBe(STAGED_SHA);
+      expect(staged).toMatchObject({ source: 'pending', manifestVersion: '1.3.0' });
+    });
+
+    it('names the staged update on the active surface, and nothing when none is staged (#1150)', async () => {
+      db.plugin.findUnique.mockResolvedValueOnce(stagedRow() as never);
+      const withStaged = await service.presentForUnitBySlug('demo-sink', HOUSEHOLD_UNIT);
+      expect(withStaged.stagedUpdate).toEqual({ manifestVersion: '1.3.0', manifestSha256: STAGED_SHA });
+
+      db.plugin.findUnique.mockResolvedValueOnce(stagedRow() as never);
+      const staged = await service.presentStagedForUnitBySlug('demo-sink', HOUSEHOLD_UNIT);
+      expect(staged.stagedUpdate).toBeNull();
+
+      const withoutStaged = await service.presentForUnitBySlug('demo-sink', HOUSEHOLD_UNIT);
+      expect(withoutStaged.stagedUpdate).toBeNull();
+    });
+
+    it('marks a required permission that cannot be granted (#1150)', async () => {
+      // `feedback:read` does not bind a household, so consent at household
+      // scope could never confer it.
+      const unboundManifest = buildPluginManifest({ scope: 'household' });
+      unboundManifest.permissions.declares = [];
+      unboundManifest.permissions.checks = [
+        {
+          slug: 'feedback:read',
+          required: true,
+          reason: { en: 'Reads feedback to compose the digest.' },
+          consentScope: 'household',
+        },
+        {
+          slug: 'create:notification',
+          required: false,
+          reason: { en: 'Sends the digest as a notification.' },
+          consentScope: 'household',
+        },
+        {
+          slug: 'read:public_content',
+          required: false,
+          reason: { en: 'Shows public excerpts in per-user views.' },
+          consentScope: 'user',
+        },
+      ];
+      db.plugin.findUnique.mockResolvedValue(pluginRow({ manifestJson: unboundManifest }) as never);
+
+      const presentation = await service.presentForUnitBySlug('demo-sink', HOUSEHOLD_UNIT);
+
+      expect(presentation.checks).toEqual([
+        expect.objectContaining({ slug: 'feedback:read', required: true, grantable: false, stagedOnly: false }),
+        expect.objectContaining({ slug: 'create:notification', grantable: true, stagedOnly: false }),
+        // Another unit axis decides it, so this surface cannot call it ungrantable.
+        expect.objectContaining({ slug: 'read:public_content', decision: 'per-unit', grantable: true }),
+      ]);
+    });
+
+    it('marks a staged permission the active manifest does not request at that scope as staged only (#1150)', async () => {
+      db.plugin.findUnique.mockResolvedValue(stagedRow() as never);
+
+      const presentation = await service.presentStagedForUnitBySlug('demo-sink', HOUSEHOLD_UNIT);
+
+      expect(presentation.checks).toEqual([
+        // Optional before, required now: still requested at the same scope.
+        expect.objectContaining({ slug: 'feedback:read', stagedOnly: false }),
+        // Server scope before, household scope now: new to this household.
+        expect.objectContaining({ slug: 'create:notification', consentScope: 'household', stagedOnly: true }),
+        // New in the staged manifest; no catalog row until activation, still grantable.
+        expect.objectContaining({ slug: 'plugin|demo-sink|read:digest', stagedOnly: true, grantable: true }),
+      ]);
+    });
+
+    it('refuses a staged surface when nothing is staged (#1150)', async () => {
+      const failure = await service
+        .presentStagedForUnitBySlug('demo-sink', HOUSEHOLD_UNIT)
+        .catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginConsentPresentationNoStagedUpdateError);
+      expect(failure).toMatchObject({ pluginSlug: 'demo-sink' });
+    });
+
+    it('refuses a staged surface for an unknown or uninstalled plugin, tombstone before the manifest (#1150)', async () => {
+      db.plugin.findUnique.mockResolvedValueOnce(null as never);
+      await expect(service.presentStagedForUnitBySlug('ghost', HOUSEHOLD_UNIT)).rejects.toThrow(
+        PluginConsentPresentationNotFoundError,
+      );
+
+      db.plugin.findUnique.mockResolvedValueOnce(
+        pluginRow({ uninstalledAt: new Date(), manifestJson: { corrupted: true } }) as never,
+      );
+      await expect(service.presentStagedForUnitBySlug('demo-sink', HOUSEHOLD_UNIT)).rejects.toThrow(
+        PluginConsentPresentationTombstonedError,
+      );
     });
   });
 });

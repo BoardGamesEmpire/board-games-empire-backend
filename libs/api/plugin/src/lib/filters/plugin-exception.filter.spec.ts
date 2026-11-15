@@ -4,6 +4,7 @@ import * as pluginRuntime from '@bge/plugin';
 import {
   type PluginConfigIssue,
   PluginConsentPresentationManifestError,
+  PluginConsentPresentationNoStagedUpdateError,
   PluginConsentPresentationNotFoundError,
   PluginConsentPresentationTombstonedError,
   PluginDirectoryLayoutError,
@@ -206,6 +207,15 @@ describe('PluginExceptionFilter', () => {
 
       expect(rendered().getStatus()).toBe(Http.NotFound);
       expect(body()['message']).toBe(`t:errors.plugin.${key}`);
+      expect(body()['slug']).toBe('sample');
+    });
+
+    it('maps a staged consent surface with nothing staged to 404 with its stable code (#1150)', () => {
+      filter.catch(new PluginConsentPresentationNoStagedUpdateError('sample'), host);
+
+      expect(rendered().getStatus()).toBe(Http.NotFound);
+      expect(body()['code']).toBe('PLUGIN_CONSENT_PRESENTATION_NO_STAGED_UPDATE');
+      expect(body()['message']).toBe('t:errors.plugin.consent_presentation_no_staged_update');
       expect(body()['slug']).toBe('sample');
     });
   });

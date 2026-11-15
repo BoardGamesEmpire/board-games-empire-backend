@@ -46,6 +46,18 @@ export interface PluginCheckPresentation {
    * given for a different classification — and re-consent re-stamps it.
    */
   readonly staleRisk: boolean;
+  /**
+   * Whether consent at this requested permission's consent scope could ever
+   * confer it (#1150). `true` for a permission another unit axis decides
+   * (`per-unit`): this surface cannot judge another unit's binding.
+   */
+  readonly grantable: boolean;
+  /**
+   * Staged surface only: the active manifest does not request this permission
+   * at this consent scope, so no consent on record covers it yet (#1150).
+   * Always `false` on the active surface.
+   */
+  readonly stagedOnly: boolean;
   /** The author's justification, localized per the requested locale with fallback provenance. */
   readonly reason: ResolvedLocalizedString;
 }
@@ -83,6 +95,14 @@ export interface PluginConsentPresentation {
   readonly manifestVersion: string;
   /** Which stored manifest the surface came from: the active version or a staged update awaiting approval. */
   readonly source: 'active' | 'pending';
+  /**
+   * The artifact sha of the manifest presented: the installed artifact's on
+   * the active surface, the staged artifact's on a staged surface. A consent
+   * act names it, so consent is tied to what the unit was shown (#1150).
+   */
+  readonly manifestSha256: string;
+  /** On the active surface: the staged update a unit may pre-consent to, or null. Always null on a staged surface (#1150). */
+  readonly stagedUpdate: { readonly manifestVersion: string; readonly manifestSha256: string } | null;
   readonly unit: PluginUnit;
   readonly displayName: ResolvedLocalizedString;
   readonly description: ResolvedLocalizedString;

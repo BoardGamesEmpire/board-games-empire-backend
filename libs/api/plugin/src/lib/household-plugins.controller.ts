@@ -34,6 +34,8 @@ import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import {
+  ConsentSurfaceQueryDto,
+  ConsentSurfaceResponseDto,
   DecidePluginGrantDto,
   EnableHouseholdPluginDto,
   PluginHouseholdInventoryEntryDto,
@@ -191,30 +193,45 @@ export class HouseholdPluginsController {
   }
 
   @ApiOperation({
-    summary: "Present the active manifest's consent surface for this household",
+    summary: "Present the consent surface for this household: the active manifest's, or a staged update's",
     description:
-      "The household admin's consent screen: every check the active manifest requests, with this household's " +
-      "decision state per check — server-consented checks show the server's concrete state (one addressable " +
-      "decider), user-consented checks read 'per-unit' (every user decides for themself) — plus riskLevel, " +
-      'required, localized reason, and the localized features[] the checks group under.',
+      "The household admin's consent screen: every requested permission, with this household's " +
+      "decision state per permission — server-consented ones show the server's concrete state (one addressable " +
+      "decider), user-consented ones read 'per-unit' (every user decides for themself) — plus riskLevel, " +
+      'required, grantable, localized reason, and the localized features[] they group under. manifestSha256 names ' +
+      'the plugin artifact presented, and stagedUpdate names an update waiting for the server admin. With ' +
+      'manifest=staged it presents that update instead, so the household can pre-consent; stagedOnly then marks ' +
+      'what the active manifest does not request.',
   })
   @ApiParam({ name: 'householdId', type: String })
+  @ApiResponse({ status: Http.Ok, type: ConsentSurfaceResponseDto })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not a member with read access to this household' })
-  @ApiResponse({ status: Http.NotFound, description: 'Household not found or deleted, or plugin not installed' })
+  @ApiResponse({
+    status: Http.NotFound,
+    description: 'Household not found or deleted, plugin not installed, or (manifest=staged) no update waiting',
+  })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.HouseholdPlugin))
   // Must stay out of the response cache: read right before a decide POST,
   // which must be visible on the re-read.
   @Get(':slug/consent')
-  consentPresentation(@Param('householdId') householdId: string, @Param('slug') slug: string) {
+  consentPresentation(
+    @Param('householdId') householdId: string,
+    @Param('slug') slug: string,
+    @Query() query: ConsentSurfaceQueryDto = {},
+  ) {
     this.abilityService.assertCurrentActorCan(Action.read, ResourceType.HouseholdPlugin, { householdId });
 
     const unit: HouseholdPluginUnit = { scopeType: 'Household', householdId };
+    const locale = this.auditContext.getLocale() ?? undefined;
 
     return from(
       this.assertLiveForUnguardedActor(householdId).then(() =>
-        this.presentation.presentForUnitBySlug(slug, unit, this.auditContext.getLocale() ?? undefined),
+        // The staged consent surface lets the household pre-consent (#1150).
+        query.manifest === 'staged'
+          ? this.presentation.presentStagedForUnitBySlug(slug, unit, locale)
+          : this.presentation.presentForUnitBySlug(slug, unit, locale),
       ),
     ).pipe(map((presentation) => ({ presentation })));
   }

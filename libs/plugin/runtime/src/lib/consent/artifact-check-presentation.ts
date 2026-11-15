@@ -6,11 +6,13 @@ import { presentedRiskLevel } from './presented-risk-level';
 /**
  * One requested permission as the artifact step shows it. An artifact is not
  * installed yet, so no unit has decided anything: the decision fields of
- * `PluginCheckPresentation` do not apply (#1094).
+ * `PluginCheckPresentation` do not apply (#1094), and nor do the consent
+ * surface's `grantable` and `stagedOnly`, which are judged for a unit against
+ * an installed plugin (#1150).
  */
 export type PluginArtifactCheckPresentation = Omit<
   PluginCheckPresentation,
-  'decidableByUnit' | 'decision' | 'decidedRiskLevel' | 'staleRisk'
+  'decidableByUnit' | 'decision' | 'decidedRiskLevel' | 'staleRisk' | 'grantable' | 'stagedOnly'
 >;
 
 /**

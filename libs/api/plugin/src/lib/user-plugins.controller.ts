@@ -15,7 +15,12 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { DecidePluginGrantDto, PluginUnitInventoryEntryDto } from './dto';
+import {
+  ConsentSurfaceQueryDto,
+  ConsentSurfaceResponseDto,
+  DecidePluginGrantDto,
+  PluginUnitInventoryEntryDto,
+} from './dto';
 import { PluginExceptionFilter } from './filters/plugin-exception.filter';
 
 const PaginatedUserPluginsResponse = PaginatedResponseDto(PluginUnitInventoryEntryDto, 'plugins');
@@ -137,25 +142,32 @@ export class UserPluginsController {
   }
 
   @ApiOperation({
-    summary: "Present the active manifest's consent surface for your own unit",
+    summary: "Present the consent surface for your own unit: the active manifest's, or a staged update's",
     description:
-      'Your consent screen: every check the active manifest requests, with your own decision state per check — ' +
-      "server-consented checks show the server's concrete state (one addressable decider), household-consented " +
-      "checks read 'per-unit' (every household decides for itself) — plus riskLevel, required, localized reason, " +
-      'and the localized features[] the checks group under.',
+      'Your consent screen: every requested permission, with your own decision state per permission — ' +
+      "server-consented ones show the server's concrete state (one addressable decider), household-consented " +
+      "ones read 'per-unit' (every household decides for itself) — plus riskLevel, required, grantable, localized " +
+      'reason, and the localized features[] they group under. manifestSha256 names the plugin artifact presented, ' +
+      'and stagedUpdate names an update waiting for the server admin. With manifest=staged it presents that ' +
+      'update instead, so you can pre-consent; stagedOnly then marks what the active manifest does not request.',
   })
+  @ApiResponse({ status: Http.Ok, type: ConsentSurfaceResponseDto })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed, or (manifest=staged) no update waiting' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   // Must stay out of the response cache: read right before a decide POST,
   // which must be visible on the re-read.
   @Get(':slug/consent')
-  consentPresentation(@Param('slug') slug: string) {
+  consentPresentation(@Param('slug') slug: string, @Query() query: ConsentSurfaceQueryDto = {}) {
     const unit: UserPluginUnit = { scopeType: 'User', userId: this.selfUserId() };
+    const locale = this.auditContext.getLocale() ?? undefined;
 
-    return from(this.presentation.presentForUnitBySlug(slug, unit, this.auditContext.getLocale() ?? undefined)).pipe(
-      map((presentation) => ({ presentation })),
-    );
+    // The staged consent surface lets the user pre-consent (#1150).
+    return from(
+      query.manifest === 'staged'
+        ? this.presentation.presentStagedForUnitBySlug(slug, unit, locale)
+        : this.presentation.presentForUnitBySlug(slug, unit, locale),
+    ).pipe(map((presentation) => ({ presentation })));
   }
 
   // ─── Unit enablement (#323): the user's own switch ─────────────────────────

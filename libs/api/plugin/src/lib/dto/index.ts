@@ -1,4 +1,6 @@
 export * from './approve-plugin-update.dto';
+export * from './consent-surface-query.dto';
+export * from './consent-surface.response';
 export * from './decide-plugin-grant.dto';
 export * from './enable-household-plugin.dto';
 export * from './install-plugin.dto';

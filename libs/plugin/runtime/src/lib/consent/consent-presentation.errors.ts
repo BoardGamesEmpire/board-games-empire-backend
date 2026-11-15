@@ -48,3 +48,16 @@ export class PluginConsentPresentationTombstonedError extends Error {
     super(`Plugin '${pluginSlug}' was uninstalled at ${uninstalledAt.toISOString()} and has no consent surface`);
   }
 }
+
+/**
+ * A household or user asked for the staged consent surface, to pre-consent,
+ * but the plugin has no staged update (#1150). A 404: the surface asked for
+ * does not exist, though the plugin does.
+ */
+export class PluginConsentPresentationNoStagedUpdateError extends Error {
+  override readonly name = 'PluginConsentPresentationNoStagedUpdateError';
+
+  constructor(public readonly pluginSlug: string) {
+    super(`Plugin '${pluginSlug}' has no update waiting`);
+  }
+}

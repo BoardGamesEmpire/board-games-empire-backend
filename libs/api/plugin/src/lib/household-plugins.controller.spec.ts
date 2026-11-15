@@ -32,6 +32,12 @@ const PRESENTATION = {
   source: 'active',
   checks: [],
 } as unknown as PluginConsentPresentation;
+const STAGED_PRESENTATION = {
+  plugin: { id: 'plugin-1', slug: 'demo-sink', enabled: true },
+  manifestVersion: '1.3.0',
+  source: 'pending',
+  checks: [],
+} as unknown as PluginConsentPresentation;
 const GRANT = { id: 'grant-1', permissionSlug: 'update:calendar', status: PluginGrantStatus.Granted } as never;
 const UNIT_ROW = { id: 'hp-1', householdId: 'hh-1', pluginId: 'plugin-1', enabled: true } as never;
 const INVENTORY_PAGE = {
@@ -87,7 +93,9 @@ const FEATURE_STATE = {
 describe('HouseholdPluginsController (delegation + household instance gate)', () => {
   let controller: HouseholdPluginsController;
   let grants: jest.Mocked<Pick<PluginGrantService, 'decide'>>;
-  let presentation: jest.Mocked<Pick<PluginConsentPresentationService, 'presentForUnitBySlug'>>;
+  let presentation: jest.Mocked<
+    Pick<PluginConsentPresentationService, 'presentForUnitBySlug' | 'presentStagedForUnitBySlug'>
+  >;
   let units: jest.Mocked<
     Pick<PluginUnitLifecycleService, 'enableHousehold' | 'disableHousehold' | 'updateHouseholdConfig'>
   >;
@@ -100,7 +108,10 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
 
   beforeEach(() => {
     grants = { decide: jest.fn().mockResolvedValue({ grant: GRANT, changed: true }) };
-    presentation = { presentForUnitBySlug: jest.fn().mockResolvedValue(PRESENTATION) };
+    presentation = {
+      presentForUnitBySlug: jest.fn().mockResolvedValue(PRESENTATION),
+      presentStagedForUnitBySlug: jest.fn().mockResolvedValue(STAGED_PRESENTATION),
+    };
     units = {
       enableHousehold: jest.fn().mockResolvedValue(UNIT_ROW),
       disableHousehold: jest.fn().mockResolvedValue(UNIT_ROW),
@@ -168,6 +179,19 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
       'de',
     );
     expect(result).toEqual({ presentation: PRESENTATION });
+  });
+
+  it('serves the staged consent surface when asked (#1150)', async () => {
+    const result = await firstValueFrom(controller.consentPresentation('hh-1', 'demo-sink', { manifest: 'staged' }));
+
+    // The household pre-consents from the staged update's consent surface.
+    expect(presentation.presentStagedForUnitBySlug).toHaveBeenCalledWith(
+      'demo-sink',
+      { scopeType: 'Household', householdId: 'hh-1' },
+      undefined,
+    );
+    expect(presentation.presentForUnitBySlug).not.toHaveBeenCalled();
+    expect(result).toEqual({ presentation: STAGED_PRESENTATION });
   });
 
   it('enable passes the route household, the CLS actor, and the nested config through to the unit writer', async () => {

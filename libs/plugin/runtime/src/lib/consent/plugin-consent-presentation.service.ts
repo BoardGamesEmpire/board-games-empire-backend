@@ -12,6 +12,7 @@ import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module
 import { unitOwnsConsentScope } from './consent-classification.types';
 import {
   PluginConsentPresentationManifestError,
+  PluginConsentPresentationNoStagedUpdateError,
   PluginConsentPresentationNotFoundError,
   PluginConsentPresentationTombstonedError,
 } from './consent-presentation.errors';
@@ -31,7 +32,11 @@ export interface PresentablePluginRow {
   readonly enabled: boolean;
   readonly uninstalledAt: Date | null;
   readonly manifestJson: unknown;
+  /** The installed artifact's sha, which the active consent surface names (#1150). */
+  readonly installedSha256: string;
   readonly pendingVersion: string | null;
+  /** The staged artifact's sha, which the staged consent surface names; `null` when nothing is staged (#1150). */
+  readonly pendingSha256: string | null;
   /**
    * Nullable column — `null` means no staged update. Typed `unknown` like
    * `manifestJson` because stored manifests are distrusted (re-validated on
@@ -48,8 +53,10 @@ const PRESENTABLE_PLUGIN_SELECT = {
   enabled: true,
   uninstalledAt: true,
   manifestJson: true,
+  installedSha256: true,
   pendingVersion: true,
   pendingManifestJson: true,
+  pendingSha256: true,
 } as const satisfies Prisma.PluginSelect;
 
 /**
@@ -111,6 +118,44 @@ export class PluginConsentPresentationService {
    * into a 5xx.
    */
   async presentForUnitBySlug(slug: string, unit: PluginUnit, locale?: string): Promise<PluginConsentPresentation> {
+    const plugin = await this.loadLiveBySlug(slug, unit);
+
+    const validated = this.revalidate(plugin, {
+      version: plugin.version,
+      manifestJson: plugin.manifestJson,
+    });
+
+    return this.assemble(plugin, validated, 'active', unit, locale);
+  }
+
+  /**
+   * The staged twin of {@link presentForUnitBySlug}: the staged update's
+   * consent surface for a household or user, so it can pre-consent before the
+   * operator approves the update (#1150). Same not-found and tombstone
+   * refusals in the same order, then a 404 when nothing is staged. Both stored
+   * manifests are revalidated: each requested permission is compared with the
+   * active manifest to mark what is staged only.
+   */
+  async presentStagedForUnitBySlug(
+    slug: string,
+    unit: PluginUnit,
+    locale?: string,
+  ): Promise<PluginConsentPresentation> {
+    const plugin = await this.loadLiveBySlug(slug, unit);
+
+    if (plugin.pendingVersion === null || plugin.pendingManifestJson === null) {
+      throw new PluginConsentPresentationNoStagedUpdateError(slug);
+    }
+
+    const validated = this.revalidate(plugin, {
+      version: plugin.pendingVersion,
+      manifestJson: plugin.pendingManifestJson,
+    });
+
+    return this.assemble(plugin, validated, 'pending', unit, locale);
+  }
+
+  private async loadLiveBySlug(slug: string, unit: PluginUnit): Promise<PresentablePluginRow> {
     assertPluginUnit(unit, `Consent presentation for plugin '${slug}'`);
 
     const plugin = await this.db.plugin.findUnique({ where: { slug }, select: PRESENTABLE_PLUGIN_SELECT });
@@ -123,12 +168,7 @@ export class PluginConsentPresentationService {
       throw new PluginConsentPresentationTombstonedError(slug, plugin.uninstalledAt);
     }
 
-    const validated = this.revalidate(plugin, {
-      version: plugin.version,
-      manifestJson: plugin.manifestJson,
-    });
-
-    return this.assemble(plugin, validated, 'active', unit, locale);
+    return plugin;
   }
 
   /**
@@ -221,7 +261,20 @@ export class PluginConsentPresentationService {
     unit: PluginUnit,
     locale: string | undefined,
   ): Promise<PluginConsentPresentation> {
-    const classification = await this.classifier.classify(plugin.id, unit, validated.permissionChecks);
+    const classification = await this.classifier.classify(plugin.id, unit, validated.permissionChecks, { source });
+
+    // A staged requested permission is staged only when the active manifest
+    // does not request it at the same consent scope (#1150). The active
+    // manifest goes through the same revalidation as the staged one.
+    const activeRequests =
+      source === 'pending'
+        ? new Set(
+            this.revalidate(plugin, {
+              version: plugin.version,
+              manifestJson: plugin.manifestJson,
+            }).permissionChecks.map((check) => `${check.canonicalSlug}|${check.consentScope}`),
+          )
+        : null;
 
     const resolveText = (value: LocalizedString): ResolvedLocalizedString =>
       resolveLocalizedStringDetailed(value, {
@@ -246,6 +299,9 @@ export class PluginConsentPresentationService {
         riskLevel: presentedRiskLevel(check.origin, catalogRisk),
         decidedRiskLevel: classified?.decidedRiskLevel ?? null,
         staleRisk: classified?.staleRisk ?? false,
+        // A per-unit permission is judged on its own unit's surface (#1150).
+        grantable: classified === undefined || classified.ungrantable === null,
+        stagedOnly: activeRequests !== null && !activeRequests.has(`${check.canonicalSlug}|${check.consentScope}`),
         reason: resolveText(check.reason),
       } satisfies PluginCheckPresentation;
     });
@@ -254,6 +310,11 @@ export class PluginConsentPresentationService {
       plugin: { id: plugin.id, slug: plugin.slug, enabled: plugin.enabled },
       manifestVersion: validated.manifest.version,
       source,
+      manifestSha256: source === 'active' ? plugin.installedSha256 : stagedSha256(plugin),
+      stagedUpdate:
+        source === 'active' && plugin.pendingVersion !== null && plugin.pendingSha256 !== null
+          ? { manifestVersion: plugin.pendingVersion, manifestSha256: plugin.pendingSha256 }
+          : null,
       unit,
       displayName: resolveText(validated.manifest.displayName),
       description: resolveText(validated.manifest.description),
@@ -265,4 +326,16 @@ export class PluginConsentPresentationService {
       checks,
     } satisfies PluginConsentPresentation;
   }
+}
+
+/**
+ * The staged artifact's sha. Staging writes the version, manifest and sha
+ * together, so a staged row without one is corrupt, not "nothing staged".
+ */
+function stagedSha256(plugin: PresentablePluginRow): string {
+  if (plugin.pendingSha256 === null) {
+    throw new PluginConsentPresentationManifestError(plugin.slug, 'the staged update has no artifact sha');
+  }
+
+  return plugin.pendingSha256;
 }
