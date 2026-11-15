@@ -14,6 +14,7 @@ import {
   PluginConfigSchemaUnusableError,
   PluginConfigValidationError,
   PluginConsentActAnswerError,
+  PluginConsentActNoUserScopeError,
   PluginConsentActRequiredSetError,
   PluginConsentActStaleError,
   PluginConsentActUngrantableError,
@@ -500,7 +501,8 @@ function buildRenderers(): RendererMap {
   // A household or user switching a plugin on, toggling one requested
   // permission, or reviewing. The two conflicts a reload cures (stale, unit
   // off) and the one only a server admin can cure (ungrantable) are 409; an
-  // answer set the request itself got wrong is 422.
+  // answer set the request itself got wrong, or a user switch-on of a plugin
+  // that asks nothing of a user, is 422.
 
   // `kind` says whether the plugin manifest moved or a shown risk changed;
   // `staleRisks` names each changed risk, so the client can show the new one.
@@ -530,6 +532,14 @@ function buildRenderers(): RendererMap {
     status: Http.Conflict,
     message: t('errors.plugin.consent_act_ungrantable', { slug: exception.pluginSlug }),
     fields: { slug: exception.pluginSlug, permissions: exception.permissions },
+  }));
+
+  // Refused whatever the answers, and no reload cures it: the plugin asks
+  // nothing of a user, so a user switch-on would accept nothing (#381).
+  renders(PluginConsentActNoUserScopeError, (exception) => ({
+    status: Http.UnprocessableEntity,
+    message: t('errors.plugin.consent_act_no_user_scope', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug },
   }));
 
   renders(PluginConsentActUnitOffError, (exception) => ({

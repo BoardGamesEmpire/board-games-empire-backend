@@ -28,3 +28,15 @@ export function userSwitchSnapshot(row: UserPlugin) {
 
   return { id, userId, pluginId, enabled };
 }
+
+/**
+ * A household's unit enablement, as the dormancy events carry it: the switch
+ * fields plus the reason, so a diff shows what moved and what deliberately did
+ * not. Activation's dormancy pass and a consent act that lifts a configuration
+ * dormancy (#1150) both announce with it.
+ */
+export function householdDormancySnapshot(row: HouseholdPlugin) {
+  const { id, householdId, pluginId, enabled, dormantReason } = row;
+
+  return { id, householdId, pluginId, enabled, dormantReason };
+}

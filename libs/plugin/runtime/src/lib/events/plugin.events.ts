@@ -198,6 +198,17 @@ export class PluginConfigUpdatedEvent extends MutationEvent<Plugin> {
   }
 }
 
+/**
+ * The consent act behind a unit event (#1150): the manifest version it was
+ * decided against and the act's id, so the lifecycle row of every switch,
+ * revival or config write an act causes names the act. Null when no act caused
+ * the change: a switch-off or a config write through the unit lifecycle.
+ */
+export interface PluginConsentActEventContext {
+  readonly manifestVersion: string;
+  readonly actId: string;
+}
+
 type HouseholdPluginConfigSnapshot = Readonly<Pick<HouseholdPlugin, 'id' | 'householdId' | 'pluginId' | 'config'>>;
 
 /** Per-household plugin configuration changed (`HouseholdPlugin.config`). Same routing key as the server-scope event. */
@@ -210,7 +221,13 @@ export class HouseholdPluginConfigUpdatedEvent extends MutationEvent<HouseholdPl
   readonly subject = ResourceType.HouseholdPlugin;
   readonly subjectId: string;
 
-  constructor(before: HouseholdPluginConfigSnapshot, after: HouseholdPluginConfigSnapshot, initiatedAt: Date) {
+  constructor(
+    before: HouseholdPluginConfigSnapshot,
+    after: HouseholdPluginConfigSnapshot,
+    initiatedAt: Date,
+    /** The consent act that made the change; null for one no act caused. */
+    public readonly act: PluginConsentActEventContext | null = null,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
@@ -234,7 +251,13 @@ export class HouseholdPluginEnabledEvent extends MutationEvent<HouseholdPlugin> 
   readonly subject = ResourceType.HouseholdPlugin;
   readonly subjectId: string;
 
-  constructor(before: HouseholdPluginSwitchSnapshot | null, after: HouseholdPluginSwitchSnapshot, initiatedAt: Date) {
+  constructor(
+    before: HouseholdPluginSwitchSnapshot | null,
+    after: HouseholdPluginSwitchSnapshot,
+    initiatedAt: Date,
+    /** The consent act that made the change; null for one no act caused. */
+    public readonly act: PluginConsentActEventContext | null = null,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
@@ -250,7 +273,13 @@ export class HouseholdPluginDisabledEvent extends MutationEvent<HouseholdPlugin>
   readonly subject = ResourceType.HouseholdPlugin;
   readonly subjectId: string;
 
-  constructor(before: HouseholdPluginSwitchSnapshot, after: HouseholdPluginSwitchSnapshot, initiatedAt: Date) {
+  constructor(
+    before: HouseholdPluginSwitchSnapshot,
+    after: HouseholdPluginSwitchSnapshot,
+    initiatedAt: Date,
+    /** The consent act that made the change; null for one no act caused. */
+    public readonly act: PluginConsentActEventContext | null = null,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
@@ -273,7 +302,13 @@ export class UserPluginEnabledEvent extends MutationEvent<UserPlugin> {
   readonly subject = ResourceType.UserPlugin;
   readonly subjectId: string;
 
-  constructor(before: UserPluginSwitchSnapshot | null, after: UserPluginSwitchSnapshot, initiatedAt: Date) {
+  constructor(
+    before: UserPluginSwitchSnapshot | null,
+    after: UserPluginSwitchSnapshot,
+    initiatedAt: Date,
+    /** The consent act that made the change; null for one no act caused. */
+    public readonly act: PluginConsentActEventContext | null = null,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
@@ -289,7 +324,13 @@ export class UserPluginDisabledEvent extends MutationEvent<UserPlugin> {
   readonly subject = ResourceType.UserPlugin;
   readonly subjectId: string;
 
-  constructor(before: UserPluginSwitchSnapshot, after: UserPluginSwitchSnapshot, initiatedAt: Date) {
+  constructor(
+    before: UserPluginSwitchSnapshot,
+    after: UserPluginSwitchSnapshot,
+    initiatedAt: Date,
+    /** The consent act that made the change; null for one no act caused. */
+    public readonly act: PluginConsentActEventContext | null = null,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
@@ -582,9 +623,11 @@ export class HouseholdPluginUnitDormantEvent extends MutationEvent<HouseholdPlug
  * household axis, so the row's surface exists once more and the retained
  * document conforms to the schema now in force (#369, D-CP).
  *
- * Symmetric with {@link HouseholdPluginUnitDormantEvent}. A revival is a side
- * effect of an admin activating a version, and no household consented to
- * anything.
+ * Symmetric with {@link HouseholdPluginUnitDormantEvent}. Most revivals are a
+ * side effect of an admin activating a version, and no household consented to
+ * anything. The one a household causes is a switch-on whose retained document
+ * now conforms, which lifts a configuration dormancy as a consent act and names
+ * it (#1150).
  */
 export class HouseholdPluginUnitRevivedEvent extends MutationEvent<HouseholdPlugin> {
   static readonly eventName = PluginEvent.UnitRevived;
@@ -600,9 +643,11 @@ export class HouseholdPluginUnitRevivedEvent extends MutationEvent<HouseholdPlug
     after: HouseholdPluginDormancySnapshot,
     /** The dormancy that was lifted — what the row is no longer. */
     public readonly clearedReason: PluginUnitDormantReason,
-    /** The manifest version whose activation revived the row. */
+    /** The manifest version whose activation revived the row, or the one a consent act was decided against. */
     public readonly manifestVersion: string,
     initiatedAt: Date,
+    /** The consent act that revived the row (#1150); null for a revival an activation caused. */
+    public readonly actId: string | null = null,
   ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;

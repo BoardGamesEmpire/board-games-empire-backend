@@ -485,6 +485,56 @@ describe('consent acts (#1150)', () => {
       expect(await readFeatureState(other, 'me', plugin.slug)).toMatchObject({ served: false, state: 'off' });
     });
 
+    it("a user's switch-on of a plugin that requests nothing at user scope is refused with 422 and writes nothing (#381, #1150)", async () => {
+      // A user's switch-on accepts the plugin's user-scope requests. This
+      // plugin makes none, so the switch-on would accept nothing and its unit
+      // enablement would confer nothing.
+      const user = await actors.user();
+      const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK, HOUSEHOLD_REQUIRED]);
+      const surface = await readConsentSurface(baseUrl, user, 'me', plugin.slug);
+
+      const refused = await sendSwitchOn(baseUrl, user, 'me', plugin.slug, switchOnBody(surface)).expect(422);
+
+      expect(refused.body).toMatchObject({ code: 'PLUGIN_CONSENT_ACT_NO_USER_SCOPE', slug: plugin.slug });
+      expect(
+        await db.client.userPlugin.findUnique({
+          where: { userId_pluginId: { userId: user.user.id, pluginId: plugin.id } },
+        }),
+      ).toBeNull();
+      expect(await actsAt(plugin.id, PluginGrantScope.User, user.user.id)).toEqual([]);
+    });
+
+    it('switching a plugin on again over decisions that already stand records an act, and its lifecycle row names it (#1150)', async () => {
+      // The decisions change nothing here, so no consent decision event
+      // carries the act id. The unit's own switch event has to.
+      const { owner, householdId, unit } = await household();
+      const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK, HOUSEHOLD_REQUIRED]);
+      const surface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
+      const body = switchOnBody(surface, { [HOUSEHOLD_REQUIRED.slug]: PluginGrantStatus.Granted });
+
+      await sendSwitchOn(baseUrl, owner, unit, plugin.slug, body).expect(200);
+      await disable(owner, unit, plugin.slug).expect(200);
+
+      const again = await sendSwitchOn(baseUrl, owner, unit, plugin.slug, body).expect(200);
+
+      expect(again.body).toMatchObject({ changed: true, unit: { enabled: true } });
+
+      const actId = again.body.act.id as string;
+
+      // The lifecycle listener writes after the response.
+      const row = await pollUntil(
+        async () =>
+          (
+            await db.client.pluginLifecycleEvent.findMany({
+              where: { pluginId: plugin.id, event: PluginLifecycleEventType.Enabled, scopeId: householdId },
+            })
+          ).find((event) => (event.payload as { actId?: unknown } | null)?.actId === actId),
+        { description: `the re-switch-on's enabled lifecycle row for '${plugin.slug}'`, timeoutMs: 5_000 },
+      );
+
+      expect(row).toMatchObject({ scopeType: PluginGrantScope.Household, manifestVersion: '1.2.0' });
+    });
+
     it('a switch-on sent twice changes nothing the second time (#1150)', async () => {
       const { owner, householdId, unit } = await household();
       const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK, HOUSEHOLD_REQUIRED]);

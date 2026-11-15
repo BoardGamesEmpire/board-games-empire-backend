@@ -31,9 +31,9 @@ import {
 } from './lock-order';
 
 /**
- * The claimed total order — `plugin row -> grant row -> advisory key -> unit
- * row`, with the household row ahead of it since #548 — proven the only two
- * ways it can be (#360).
+ * The claimed total order — `plugin row -> advisory key -> grant row -> unit
+ * row`, with the household row ahead of it since #548 and the key ahead of the
+ * grant rows since #1150 — proven the only two ways it can be (#360).
  *
  * Neither half counts alone, and saying which is which is the point:
  *
@@ -84,8 +84,17 @@ describe('the plugin consent path is one lock order (#360)', () => {
   });
   const NO_SNAPSHOT = null;
 
+  /** Stage 2: the `(scopeId, pluginId)` key, and the format it is built from. */
+  const advisoryLock = readShippedSql(UNIT_SCOPE_LOCK, ['scopeKey'], {
+    after: 'lockHouseholdUnitScope',
+    matching: /pg_advisory_xact_lock/,
+  });
+  const advisoryKeyFormat = readShippedValue(UNIT_SCOPE_LOCK, ['householdId', 'pluginId'], {
+    after: 'lockHouseholdUnitScope',
+  });
+
   /**
-   * Stage 2: the server grant rows, as activation takes them (#356).
+   * Stage 3: the server grant rows, as activation takes them (#356).
    * Anchored on the declaration — D-CN (#370) added a second `FOR UPDATE`
    * statement to this file (the plugin-config lock), so a bare
    * `/FOR UPDATE/` no longer resolves to one statement without help.
@@ -93,15 +102,6 @@ describe('the plugin consent path is one lock order (#360)', () => {
   const grantRowLock = readShippedSql(UPDATE_SERVICE, ['plugin.id'], {
     after: 'lockedGrantRows',
     matching: /FOR UPDATE/,
-  });
-
-  /** Stage 3: the `(scopeId, pluginId)` key, and the format it is built from. */
-  const advisoryLock = readShippedSql(UNIT_SCOPE_LOCK, ['scopeKey'], {
-    after: 'lockHouseholdUnitScope',
-    matching: /pg_advisory_xact_lock/,
-  });
-  const advisoryKeyFormat = readShippedValue(UNIT_SCOPE_LOCK, ['householdId', 'pluginId'], {
-    after: 'lockHouseholdUnitScope',
   });
 
   /**
@@ -719,8 +719,8 @@ describe('the plugin consent path is one lock order (#360)', () => {
       const replayed: ReadonlyArray<readonly [LockStageName, string]> = [
         ['household row', householdShareLock.text],
         ['plugin row', pluginShareLock.text],
-        ['grant row', grantRowLock.text],
         ['advisory key', advisoryLock.text],
+        ['grant row', grantRowLock.text],
         ['unit row', unitRowLock.text],
       ];
 

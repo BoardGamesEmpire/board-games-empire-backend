@@ -11,8 +11,10 @@ import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plug
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier } from '../support/lock-barrier';
+import { bindTemplate, readShippedSql, readShippedValue } from '../support/shipped-sql';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { readConsentSurface, sendSwitchOn, sendToggle, switchOnBody, toggleBody } from './consent-act-fixtures';
+import { LOCK_SOURCES } from './lock-order';
 import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
 import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
@@ -25,8 +27,8 @@ import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plug
  * VIOLATED during PR #359's review rounds, and none was caught by a test,
  * because no test at this tier existed. Since #1150 every household and user
  * consent decision is written by a consent act, so the household cases race
- * two acts on one unit and pin that both are recorded and that the surviving
- * decision is the one the later act gave.
+ * two acts on one unit: opposite answers are both recorded and the surviving
+ * decision is the one the later act gave, and identical answers record one act.
  *
  * Two rules these cases follow, and both are about staying useful rather than
  * becoming flaky (#330):
@@ -43,8 +45,8 @@ import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plug
  * What these cases cannot show is that anything BLOCKED. A green run here is
  * consistent with the locks having done nothing and the interleaving simply
  * being kind, which is why the barrier specs exist beside them and why neither
- * tier is redundant. The one case here that holds a barrier does so only to fix
- * the order two requests queue in, not to prove a lock.
+ * tier is redundant. The cases here that hold a barrier do so only to have two
+ * requests in flight at once, or in a known order, not to prove a lock.
  */
 describe('consent decisions under concurrency (#360)', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -57,6 +59,19 @@ describe('consent decisions under concurrency (#360)', () => {
    * answers early is reported at once rather than at the deadline.
    */
   const REQUEST_REACHES_LOCK_MS = 20_000;
+
+  /**
+   * A household unit's advisory key, its statement and its format lifted from
+   * source rather than retyped: a key nothing contends for blocks nobody, and
+   * the case holding it would pass for the wrong reason.
+   */
+  const unitKeyLock = readShippedSql(LOCK_SOURCES.unitScopeLock, ['scopeKey'], {
+    after: 'lockHouseholdUnitScope',
+    matching: /pg_advisory_xact_lock/,
+  });
+  const unitKeyFormat = readShippedValue(LOCK_SOURCES.unitScopeLock, ['householdId', 'pluginId'], {
+    after: 'lockHouseholdUnitScope',
+  });
 
   let db: TestDatabase;
   let actors: Actors;
@@ -293,6 +308,71 @@ describe('consent decisions under concurrency (#360)', () => {
       ]);
 
       await expectBothActsRecordedAndOneWins(responses, plugin, household.id, before.updatedAt);
+    });
+  });
+
+  describe('two identical toggles on one unit', () => {
+    it('queue at the unit key, so the later one reads the earlier decision and records no act (#1150)', async () => {
+      // An act takes the unit's advisory key before it reads the standing
+      // decisions, so of two acts on one unit the later reads what the earlier
+      // wrote. Two identical toggles therefore record ONE act: the later one
+      // finds its answer already standing and changes nothing. Read before the
+      // key, both would pass the check and both would be recorded.
+      //
+      // The key is held so both requests are in flight before either reads;
+      // which one records the act is the race's business and is not asserted.
+      const owner = await actors.user();
+      const { household } = await actors.householdWithMembers({ owner });
+      const { plugin, unit, surface } = await arrangeSwitchedOnWithPendingOptional(owner, household.id);
+      const body = toggleBody(surface, OPTIONAL_HOUSEHOLD_CHECK.slug, PluginGrantStatus.Granted);
+
+      const responses = await withBarrier(async (barrier) => {
+        const { holder } = barrier;
+
+        await holder.begin();
+        await holder.query(unitKeyLock.text, [bindTemplate(unitKeyFormat, [household.id, plugin.id])]);
+
+        const first = fire(() => sendToggle(baseUrl, owner, unit, plugin.slug, body));
+        const second = fire(() => sendToggle(baseUrl, owner, unit, plugin.slug, body));
+
+        await expectBackendsQueuedBehind(barrier, {
+          heldBy: holder.pid,
+          count: 2,
+          description: 'the two identical toggles',
+          timeoutMs: REQUEST_REACHES_LOCK_MS,
+        });
+
+        // Released at once: both requests wait inside an interactive
+        // transaction on its default budget.
+        await holder.commit();
+
+        return [await first.settled, await second.settled];
+      });
+
+      expect(responses.map((response) => response.status)).toEqual([200, 200]);
+      expect(responses.map((response) => response.body.changed as boolean).sort()).toEqual([false, true]);
+
+      const acts = await db.client.pluginConsentAct.findMany({
+        where: {
+          pluginId: plugin.id,
+          scopeType: PluginGrantScope.Household,
+          scopeId: household.id,
+          kind: PluginConsentActKind.Toggle,
+        },
+      });
+
+      expect(acts).toHaveLength(1);
+
+      const decision = await db.client.pluginGrant.findFirstOrThrow({
+        where: {
+          pluginId: plugin.id,
+          scopeType: PluginGrantScope.Household,
+          scopeId: household.id,
+          permissionSlug: OPTIONAL_HOUSEHOLD_CHECK.slug,
+        },
+      });
+
+      expect(decision).toMatchObject({ status: PluginGrantStatus.Granted, actId: acts[0]?.id });
     });
   });
 

@@ -418,6 +418,7 @@
     "consent_act_required_set": "Switching on plugin '{slug}' means accepting every permission it requires.",
     "consent_act_answer": "The answers sent for plugin '{slug}' do not match what it asks for. Reload its permissions and answer again.",
     "consent_act_ungrantable": "Plugin '{slug}' asks for a permission that cannot be granted here. A server admin needs to fix this first.",
+    "consent_act_no_user_scope": "Plugin '{slug}' doesn't ask anything of individual users, so there is nothing to switch on for your account.",
     "consent_act_unit_off": "Plugin '{slug}' is switched off here. Switch it on to change its permissions.",
     "unit_authority": "Managing this household's plugin enablement requires a household owner or admin",
     "unit_plugin_not_found": "Plugin '{slug}' is not installed",

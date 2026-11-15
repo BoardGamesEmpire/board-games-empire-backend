@@ -103,6 +103,22 @@ export class PluginConsentActUngrantableError extends Error {
 }
 
 /**
+ * A user switch-on of a plugin whose active manifest requests nothing at user
+ * scope. A user's switch-on accepts the plugin's user-scope requests, so with
+ * none there is nothing for it to accept, and the unit enablement it would
+ * create confers nothing. Refusing it keeps a user unit enablement to the
+ * plugins that ask something of a user (#381, #1150). Reading the surface again
+ * would not cure it, so it is not the stale refusal. The filter answers 422.
+ */
+export class PluginConsentActNoUserScopeError extends Error {
+  override readonly name = 'PluginConsentActNoUserScopeError';
+
+  constructor(public readonly pluginSlug: string) {
+    super(`Plugin '${pluginSlug}' requests nothing at user scope, so a user has nothing to switch on`);
+  }
+}
+
+/**
  * A toggle or review addressed a unit with no unit enablement, or one whose
  * switch is off. Thrown by the consent act service, not the planner. The
  * filter answers 409.

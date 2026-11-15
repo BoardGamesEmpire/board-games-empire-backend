@@ -1262,7 +1262,7 @@ export class PluginUpdateService {
       // activation). Raw SQL because Prisma's query API cannot express FOR
       // UPDATE; unqualified table name so the search_path (per-worker test
       // schemas) resolves it. Placed first in the transaction, ahead of the
-      // grant lock below, matching the plugin row → grant row → advisory →
+      // grant lock below, matching the plugin row → advisory → grant row →
       // unit row total order `household-dormancy.ts` and `unit-scope-lock.ts`
       // already document.
       const [current] = await tx.$queryRaw<{ config: Prisma.JsonValue }[]>`

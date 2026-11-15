@@ -494,7 +494,8 @@ describe('PluginLifecycleListener', () => {
           pluginSlug: 'demo-sink',
           scopeType: PluginGrantScope.Household,
           scopeId: 'household-1',
-          payload: {},
+          manifestVersion: null,
+          payload: { actId: null },
         }),
       );
     });
@@ -540,6 +541,83 @@ describe('PluginLifecycleListener', () => {
           pluginId: 'plugin-1',
           scopeType: PluginGrantScope.User,
           scopeId: 'user-9',
+        }),
+      );
+    });
+
+    it.each([
+      {
+        label: 'a household switch',
+        routingKey: PluginEvent.Enabled,
+        event: () =>
+          new HouseholdPluginEnabledEvent(
+            { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: false },
+            { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true },
+            initiatedAt,
+            { manifestVersion: '1.2.0', actId: 'act-1' },
+          ),
+      },
+      {
+        label: 'a user switch',
+        routingKey: PluginEvent.Disabled,
+        event: () =>
+          new UserPluginDisabledEvent(
+            { id: 'up-1', userId: 'user-9', pluginId: 'plugin-1', enabled: true },
+            { id: 'up-1', userId: 'user-9', pluginId: 'plugin-1', enabled: false },
+            initiatedAt,
+            { manifestVersion: '1.2.0', actId: 'act-1' },
+          ),
+      },
+      {
+        label: 'a household config write',
+        routingKey: PluginEvent.ConfigUpdated,
+        event: () =>
+          new HouseholdPluginConfigUpdatedEvent(
+            { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', config: {} },
+            { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', config: { webhookUrl: 'https://x' } },
+            initiatedAt,
+            { manifestVersion: '1.2.0', actId: 'act-1' },
+          ),
+      },
+    ])(
+      'persists $label a consent act made with the act id and its manifest version (#1150)',
+      async ({ routingKey, event }) => {
+        db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
+
+        emitter.emit(routingKey, event());
+        await flush();
+
+        expect(createdRow()).toEqual(
+          expect.objectContaining({ pluginId: 'plugin-1', manifestVersion: '1.2.0', payload: { actId: 'act-1' } }),
+        );
+      },
+    );
+
+    it('persists a UnitRevived row a consent act caused with the act id (#1150)', async () => {
+      const event = new HouseholdPluginUnitRevivedEvent(
+        {
+          id: 'hp-1',
+          householdId: 'household-1',
+          pluginId: 'plugin-1',
+          enabled: true,
+          dormantReason: PluginUnitDormantReason.NeedsConfiguration,
+        },
+        { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true, dormantReason: null },
+        PluginUnitDormantReason.NeedsConfiguration,
+        '1.2.0',
+        initiatedAt,
+        'act-1',
+      );
+      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
+
+      emitter.emit(PluginEvent.UnitRevived, event);
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          event: PluginLifecycleEventType.UnitRevived,
+          manifestVersion: '1.2.0',
+          payload: { clearedReason: PluginUnitDormantReason.NeedsConfiguration, actId: 'act-1' },
         }),
       );
     });
@@ -660,7 +738,7 @@ describe('PluginLifecycleListener', () => {
           event: PluginLifecycleEventType.UnitRevived,
           scopeId: 'household-1',
           manifestVersion: '1.4.0',
-          payload: { clearedReason: PluginUnitDormantReason.ScopeOrphaned },
+          payload: { clearedReason: PluginUnitDormantReason.ScopeOrphaned, actId: null },
         }),
       );
     });

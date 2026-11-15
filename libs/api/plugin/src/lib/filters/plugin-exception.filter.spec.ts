@@ -856,6 +856,13 @@ describe('PluginExceptionFilter', () => {
         fields: { slug: 'sample', permissions: [{ permissionSlug: 'read:all', cause: 'wildcard_subject' }] },
       },
       {
+        exception: new pluginRuntime.PluginConsentActNoUserScopeError('sample'),
+        status: Http.UnprocessableEntity,
+        code: 'PLUGIN_CONSENT_ACT_NO_USER_SCOPE',
+        key: 'consent_act_no_user_scope',
+        fields: { slug: 'sample' },
+      },
+      {
         exception: new pluginRuntime.PluginConsentActUnitOffError('sample', 'Household'),
         status: Http.Conflict,
         code: 'PLUGIN_CONSENT_ACT_UNIT_OFF',

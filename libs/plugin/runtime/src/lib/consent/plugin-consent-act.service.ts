@@ -15,11 +15,17 @@ import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
-import { grantSnapshot, householdSwitchSnapshot, userSwitchSnapshot } from '../events/plugin-event-snapshots';
+import {
+  grantSnapshot,
+  householdDormancySnapshot,
+  householdSwitchSnapshot,
+  userSwitchSnapshot,
+} from '../events/plugin-event-snapshots';
 import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginDisabledEvent,
   HouseholdPluginEnabledEvent,
+  HouseholdPluginUnitRevivedEvent,
   PluginGrantCreatedEvent,
   PluginGrantRejectedEvent,
   UserPluginDisabledEvent,
@@ -40,8 +46,12 @@ import {
   PluginUnitPluginTombstonedError,
 } from '../units/unit.errors';
 import { planConsentAct } from './consent-act-plan';
-import type { ConsentManifestSource } from './consent-classification.types';
-import { PluginConsentActStaleError, PluginConsentActUnitOffError } from './plugin-consent-act.errors';
+import { unitOwnsConsentScope, type ConsentManifestSource } from './consent-classification.types';
+import {
+  PluginConsentActNoUserScopeError,
+  PluginConsentActStaleError,
+  PluginConsentActUnitOffError,
+} from './plugin-consent-act.errors';
 import type { ConsentActAnswer, ConsentActDecision, ConsentActKind, ConsentActUnit } from './plugin-consent-act.types';
 import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
 
@@ -97,18 +107,24 @@ interface WrittenDecision {
   readonly after: PluginGrant;
 }
 
+/** What a written act did to its unit enablement besides leaving it as `unit`. */
+interface UnitEffects {
+  readonly switchedOff: boolean;
+  readonly configWritten: boolean;
+  /** The dormancy the act lifted from a household unit, if any. */
+  readonly clearedDormancy: PluginUnitDormantReason | null;
+}
+
 type ActOutcome =
   | { readonly changed: false; readonly unit: UnitEnablement; readonly switchedOff: boolean }
-  | {
+  | (UnitEffects & {
       readonly changed: true;
       readonly act: PluginConsentAct;
       /** Only the decisions whose row changed: the ones an event announces. */
       readonly changedDecisions: readonly WrittenDecision[];
       readonly unitBefore: UnitEnablement | null;
       readonly unit: UnitEnablement;
-      readonly switchedOff: boolean;
-      readonly configWritten: boolean;
-    };
+    });
 
 /**
  * The consent act writer (#1150): a household or user switches a plugin on,
@@ -120,7 +136,7 @@ type ActOutcome =
  *
  * It takes the total lock order every per-unit writer of the plugin runtime
  * takes (`apps/api-e2e/src/plugin/lock-order.ts`): household row, plugin row,
- * grant rows, the unit's advisory key, the unit enablement. `decide()` and
+ * the unit's advisory key, grant rows, the unit enablement. `decide()` and
  * `PluginUnitLifecycleService` explain each stage; the comments in `commit`
  * say only what is particular to an act.
  */
@@ -173,6 +189,19 @@ export class PluginConsentActService {
     const named = this.nameManifest(plugin, input.manifestSha256);
 
     await this.assertAuthority(unit, input.actorId);
+
+    // A user's switch-on accepts the plugin's user-scope requests. A plugin
+    // that makes none has nothing for it to accept, and the unit enablement
+    // it would create confers nothing, so it is refused before any lock
+    // (#381). Judged on the active manifest, the one a switch-on answers; the
+    // claim below pins its sha, so it cannot move before the write.
+    if (
+      !household &&
+      kind === 'SwitchOn' &&
+      !named.active.permissionChecks.some((check) => unitOwnsConsentScope(check.consentScope, unit))
+    ) {
+      throw new PluginConsentActNoUserScopeError(plugin.slug);
+    }
 
     const activeConfig = named.active.manifest.config;
 
@@ -250,24 +279,25 @@ export class PluginConsentActService {
           defaultLocale: this.options.defaultLocale,
         });
 
-        // An unlocked read, taken before anything is written, so an act that
+        // The unit's advisory key, before anything that judges or writes this
+        // unit. Every other writer of the unit takes it before the unit
+        // enablement (see unit-scope-lock.ts); an act takes it before its
+        // decisions as well, so two acts on one unit run one after the other.
+        // The later one reads the decisions and the switch the earlier one
+        // left: it records nothing when they already say what it asks, and it
+        // announces its own changes against those rows, never against rows
+        // the earlier act has since replaced (#1150).
+        if (household) {
+          await lockHouseholdUnitScope(tx, unit.householdId, plugin.id);
+        } else {
+          await lockUserUnitScope(tx, unit.userId, plugin.id);
+        }
+
+        // Read under the key, before anything is written, so an act that
         // would change nothing writes nothing: no act, no decision, no event.
         // A retried request then lands exactly where its first attempt left
         // the unit (ADR 0002, docs/adr/0002-retried-writes-use-client-request-ids.md).
-        // Unlocked because the advisory key is taken after the decisions, in
-        // the pinned order; the read under the key below judges the unit's
-        // switch again.
-        //
-        // Nothing judges the decisions again, so this read orders a retry
-        // against an attempt that has finished, not against one still in
-        // flight. Two acts on one unit that overlap can both pass it: both
-        // are then recorded, and each announces its decisions against the
-        // rows it read here, so the later announcement's `before` can be out
-        // of date. The decisions and the acts are right either way, and
-        // `decide()` accepts the same duplicate provenance. Ordering the two
-        // would take the unit's key ahead of the decisions, which the pinned
-        // order does not allow.
-        const enablementSeen = await this.readUnitEnablement(tx, unit, plugin.id);
+        const unitBefore = await this.readUnitEnablement(tx, unit, plugin.id);
         const standingRows = await tx.pluginGrant.findMany({
           where: {
             pluginId: plugin.id,
@@ -278,17 +308,10 @@ export class PluginConsentActService {
         });
         const standingBySlug = new Map(standingRows.map((row) => [row.permissionSlug, row]));
         const stand = decisionsStand(plan.decisions, standingBySlug);
-        const switchedOnSeen = enablementSeen !== null && enablementSeen.enabled;
 
         if (kind === 'SwitchOn') {
-          if (
-            stand &&
-            enablementSeen !== null &&
-            enablementSeen.enabled &&
-            !isDormant(enablementSeen) &&
-            config === undefined
-          ) {
-            return { changed: false, unit: enablementSeen, switchedOff: false };
+          if (stand && unitBefore !== null && unitBefore.enabled && !isDormant(unitBefore) && config === undefined) {
+            return { changed: false, unit: unitBefore, switchedOff: false };
           }
         } else {
           // A review that refuses a required permission asks for two things:
@@ -299,14 +322,13 @@ export class PluginConsentActService {
           // than refuses, because the unit is where the request wants it (a
           // state change already at its target answers 2xx, ADR 0002)
           // whichever request put it there.
-          if (plan.switchesOff && stand && enablementSeen !== null && !enablementSeen.enabled) {
-            return { changed: false, unit: enablementSeen, switchedOff: true };
+          if (plan.switchesOff && stand && unitBefore !== null && !unitBefore.enabled) {
+            return { changed: false, unit: unitBefore, switchedOff: true };
           }
 
-          // A toggle or review needs the unit switched on. Refused here, before
-          // anything is written, and again under the advisory key below,
-          // because this read took no lock and a switch-off can commit after it.
-          if (!switchedOnSeen) {
+          // A toggle or review needs the unit switched on. Judged under the
+          // key, so no switch-off can commit between this read and the act.
+          if (unitBefore === null || !unitBefore.enabled) {
             throw new PluginConsentActUnitOffError(plugin.slug, unit.scopeType);
           }
 
@@ -315,7 +337,7 @@ export class PluginConsentActService {
           // promoted by an update), so only an act that leaves the unit on can
           // change nothing (#1150).
           if (stand && !plan.switchesOff) {
-            return { changed: false, unit: enablementSeen, switchedOff: false };
+            return { changed: false, unit: unitBefore, switchedOff: false };
           }
         }
 
@@ -369,46 +391,30 @@ export class PluginConsentActService {
           }
         }
 
-        // The advisory key exists before the unit enablement does, so it
-        // orders this act against every other writer of the unit (see
-        // unit-scope-lock.ts).
-        if (household) {
-          await lockHouseholdUnitScope(tx, unit.householdId, plugin.id);
-        } else {
-          await lockUserUnitScope(tx, unit.userId, plugin.id);
-        }
-
-        const unitBefore = await this.readUnitEnablement(tx, unit, plugin.id);
-
         // Every written outcome differs only in the unit it leaves and what
         // happened to it.
-        const writtenOutcome = (
-          unitAfter: UnitEnablement,
-          { switchedOff = false, configWritten = false } = {},
-        ): ActOutcome => ({
+        const writtenOutcome = (unitAfter: UnitEnablement, effects: Partial<UnitEffects> = {}): ActOutcome => ({
           changed: true,
           act,
           changedDecisions,
           unitBefore,
           unit: unitAfter,
-          switchedOff,
-          configWritten,
+          switchedOff: effects.switchedOff ?? false,
+          configWritten: effects.configWritten ?? false,
+          clearedDormancy: effects.clearedDormancy ?? null,
         });
 
         if (kind !== 'SwitchOn') {
-          // The second half of the unit-off refusal, now that no switch-off can
-          // commit under this act.
-          if (unitBefore === null || !unitBefore.enabled) {
-            throw new PluginConsentActUnitOffError(plugin.slug, unit.scopeType);
-          }
+          // Switched on: a toggle or review over any other unit was refused above.
+          const switchedOn = unitBefore as UnitEnablement;
 
           if (!plan.switchesOff) {
-            return writtenOutcome(unitBefore);
+            return writtenOutcome(switchedOn);
           }
 
           const switchedOff = household
-            ? await tx.householdPlugin.update({ where: { id: unitBefore.id }, data: { enabled: false } })
-            : await tx.userPlugin.update({ where: { id: unitBefore.id }, data: { enabled: false } });
+            ? await tx.householdPlugin.update({ where: { id: switchedOn.id }, data: { enabled: false } })
+            : await tx.userPlugin.update({ where: { id: switchedOn.id }, data: { enabled: false } });
 
           return writtenOutcome(switchedOff, { switchedOff: true });
         }
@@ -449,7 +455,14 @@ export class PluginConsentActService {
                   },
                 });
 
-          return writtenOutcome(written, { configWritten: config !== undefined });
+          // The switch-on lifted a configuration dormancy, which no switch or
+          // config event would otherwise announce (#1150).
+          const clearedDormancy =
+            existing !== null && existing.dormantReason !== null && written.dormantReason === null
+              ? existing.dormantReason
+              : null;
+
+          return writtenOutcome(written, { configWritten: config !== undefined, clearedDormancy });
         }
 
         const written = await tx.userPlugin.upsert({
@@ -578,6 +591,11 @@ export class PluginConsentActService {
       : tx.userPlugin.findUnique({ where: { userId_pluginId: { userId: unit.userId, pluginId } } });
   }
 
+  /**
+   * Every event an act causes carries the act, so each lifecycle row it leaves
+   * names it, and every recorded act leaves at least one: a changed decision,
+   * a switch, a config write or a lifted dormancy (#1150).
+   */
   private emitEvents(
     outcome: Extract<ActOutcome, { changed: true }>,
     manifestVersion: string,
@@ -608,6 +626,7 @@ export class PluginConsentActService {
             before === null ? null : householdSwitchSnapshot(before),
             householdSwitchSnapshot(unit),
             initiatedAt,
+            context,
           ),
         );
       }
@@ -615,7 +634,26 @@ export class PluginConsentActService {
       if (outcome.switchedOff && before !== null) {
         this.emitter.emit(
           HouseholdPluginDisabledEvent.eventName,
-          new HouseholdPluginDisabledEvent(householdSwitchSnapshot(before), householdSwitchSnapshot(unit), initiatedAt),
+          new HouseholdPluginDisabledEvent(
+            householdSwitchSnapshot(before),
+            householdSwitchSnapshot(unit),
+            initiatedAt,
+            context,
+          ),
+        );
+      }
+
+      if (outcome.clearedDormancy !== null && before !== null) {
+        this.emitter.emit(
+          HouseholdPluginUnitRevivedEvent.eventName,
+          new HouseholdPluginUnitRevivedEvent(
+            householdDormancySnapshot(before),
+            householdDormancySnapshot(unit),
+            outcome.clearedDormancy,
+            manifestVersion,
+            initiatedAt,
+            outcome.act.id,
+          ),
         );
       }
 
@@ -632,7 +670,7 @@ export class PluginConsentActService {
 
         this.emitter.emit(
           HouseholdPluginConfigUpdatedEvent.eventName,
-          new HouseholdPluginConfigUpdatedEvent(configBefore, unit, initiatedAt),
+          new HouseholdPluginConfigUpdatedEvent(configBefore, unit, initiatedAt, context),
         );
       }
 
@@ -648,6 +686,7 @@ export class PluginConsentActService {
           before === null ? null : userSwitchSnapshot(before),
           userSwitchSnapshot(unit),
           initiatedAt,
+          context,
         ),
       );
     }
@@ -655,7 +694,7 @@ export class PluginConsentActService {
     if (outcome.switchedOff && before !== null) {
       this.emitter.emit(
         UserPluginDisabledEvent.eventName,
-        new UserPluginDisabledEvent(userSwitchSnapshot(before), userSwitchSnapshot(unit), initiatedAt),
+        new UserPluginDisabledEvent(userSwitchSnapshot(before), userSwitchSnapshot(unit), initiatedAt, context),
       );
     }
   }

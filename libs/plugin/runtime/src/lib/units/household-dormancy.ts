@@ -2,6 +2,7 @@ import { PluginScope, PluginUnitDormantReason, type HouseholdPlugin, type Prisma
 import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
+import { householdDormancySnapshot } from '../events/plugin-event-snapshots';
 import { HouseholdPluginUnitDormantEvent, HouseholdPluginUnitRevivedEvent } from '../events/plugin.events';
 import { MANIFEST_SCOPE_TO_PRISMA } from '../install/manifest-enum.maps';
 
@@ -38,7 +39,7 @@ export interface HouseholdDormancyTransition {
  * request-shaped unit writer takes (D-CO, extending the exception
  * `unit-scope-lock.ts` documents). Per-row locks here would acquire N advisory
  * keys AFTER the plugin row, against the total order
- * plugin row → grant row → advisory → unit row, closing the cycle that file
+ * plugin row → advisory → grant row → unit row, closing the cycle that file
  * warns about. They are also unnecessary: both callers claim the plugin row
  * exclusively before reaching this, and every household unit writer reads that
  * row `FOR SHARE` before touching a unit enablement — so a concurrent
@@ -145,8 +146,8 @@ export function emitHouseholdDormancy(
   initiatedAt: Date,
 ): void {
   for (const transition of transitions) {
-    const before = snapshot(transition.before);
-    const after = snapshot(transition.after);
+    const before = householdDormancySnapshot(transition.before);
+    const after = householdDormancySnapshot(transition.after);
 
     if (transition.kind === 'dormant') {
       emitter.emit(
@@ -161,13 +162,6 @@ export function emitHouseholdDormancy(
       new HouseholdPluginUnitRevivedEvent(before, after, transition.reason, manifestVersion, initiatedAt),
     );
   }
-}
-
-/** The dormancy events' snapshot: the switch fields plus the reason, so a diff shows what moved and what deliberately did not. */
-function snapshot(unit: HouseholdPlugin) {
-  const { id, householdId, pluginId, enabled, dormantReason } = unit;
-
-  return { id, householdId, pluginId, enabled, dormantReason };
 }
 
 /**

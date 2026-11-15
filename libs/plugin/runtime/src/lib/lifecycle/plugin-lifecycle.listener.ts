@@ -215,14 +215,19 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
       };
     }
 
+    // A unit's config write, switch or revival names the consent act that
+    // made it, as a consent decision's row does, so every recorded act leaves
+    // a lifecycle row naming it (#1150). `actId` is null, and the manifest
+    // version unknown, for a change no act caused: a switch-off or a config
+    // write through the unit lifecycle.
     if (event instanceof HouseholdPluginConfigUpdatedEvent) {
       return {
         pluginId: event.after.pluginId,
         pluginSlug: null,
         scopeType: PluginGrantScope.Household,
         scopeId: event.after.householdId,
-        manifestVersion: null,
-        payload: {},
+        manifestVersion: event.act?.manifestVersion ?? null,
+        payload: { actId: event.act?.actId ?? null },
       };
     }
 
@@ -237,8 +242,8 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
         pluginSlug: null,
         scopeType: PluginGrantScope.Household,
         scopeId: event.after.householdId,
-        manifestVersion: null,
-        payload: {},
+        manifestVersion: event.act?.manifestVersion ?? null,
+        payload: { actId: event.act?.actId ?? null },
       };
     }
 
@@ -248,8 +253,8 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
         pluginSlug: null,
         scopeType: PluginGrantScope.User,
         scopeId: event.after.userId,
-        manifestVersion: null,
-        payload: {},
+        manifestVersion: event.act?.manifestVersion ?? null,
+        payload: { actId: event.act?.actId ?? null },
       };
     }
 
@@ -300,7 +305,7 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
         scopeType: PluginGrantScope.Household,
         scopeId: event.after.householdId,
         manifestVersion: event.manifestVersion,
-        payload: { clearedReason: event.clearedReason },
+        payload: { clearedReason: event.clearedReason, actId: event.actId },
       };
     }
 

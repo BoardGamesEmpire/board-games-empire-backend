@@ -70,7 +70,7 @@ type LivingPluginRef = Pick<Plugin, 'id' | 'slug' | 'scope'>;
  *   way — the plugin row under `FOR SHARE`, then the `(scopeId, pluginId)`
  *   advisory lock, then the unit row (`openHouseholdUnit` /
  *   `openUserUnit`), a suffix of the total order
- *   (household row → plugin row → grant row → advisory → unit row). A
+ *   (household row → plugin row → advisory → grant row → unit row). A
  *   household transaction takes the household row's share lock ahead of
  *   all of it (#548), so a soft-deleted household refuses the write. The
  *   row-creating path, the consent act, cannot be serialized without the
@@ -78,13 +78,13 @@ type LivingPluginRef = Pick<Plugin, 'id' | 'slug' | 'scope'>;
  *   than by need — see the lock helper's contract before optimizing one away.
  *
  *   The plugin row comes before the advisory lock, and the order is not
- *   free: uninstall and activation both claim that row before touching
- *   grant rows, while a consent act holds grant rows (its upserts) while
- *   taking this advisory lock. Taking the advisory before the plugin row
- *   therefore closed a cycle — advisory → plugin → grant → advisory — that
- *   Postgres resolves by aborting a caller (PR #363 review). Reading the
- *   plugin row shared before the advisory is what orders this transaction
- *   against both of those writers.
+ *   free: uninstall and activation both claim that row exclusively, and
+ *   every other unit writer, the consent act among them, holds it shared
+ *   while taking this advisory lock. Taking the advisory before the plugin
+ *   row closed a cycle through those writers when #323's branch did it
+ *   (PR #363 review), which Postgres resolves by aborting a caller. Reading
+ *   the plugin row shared before the advisory is what orders this
+ *   transaction against all of them.
  *
  *   The `FOR SHARE` itself exists because uninstall's purge deletes unit
  *   rows without joining the advisory scheme: reading the plugin row

@@ -19,7 +19,7 @@ import type { Prisma } from '@bge/database';
  * where a row `FOR UPDATE` would technically suffice (locked on #59 for
  * #323). Do NOT remove the lock from such a site as an optimization:
  * uniformity is what keeps the total lock order
- * (plugin row → grant row → advisory → unit row) a rule instead of a
+ * (plugin row → advisory → grant row → unit row) a rule instead of a
  * per-site argument, and a writer that skips the advisory reopens the
  * pre-row race class for every creator it can overlap with.
  *
@@ -32,12 +32,18 @@ import type { Prisma } from '@bge/database';
  * only reads which units owe re-consent (#1149).
  *
  * The plugin row sorts BEFORE this lock, and that is a correctness
- * constraint rather than a convention: uninstall and activation both claim
- * the plugin row before touching grant rows, and a consent act holds grant
- * rows while acquiring this advisory lock (#1150). A caller that took this lock and
- * then read the plugin row would close the cycle
- * advisory → plugin → grant → advisory, which Postgres resolves by
- * aborting somebody (PR #363 review). Read the plugin row first.
+ * constraint rather than a convention: every per-unit writer holds the plugin
+ * row while it acquires this lock, and uninstall and activation take that row
+ * exclusively. A caller that took this lock and then read the plugin row could
+ * queue behind an uninstall or activation waiting for that row, while the
+ * per-unit writer the uninstall or activation waits on, holding the row shared,
+ * waits for this lock: a cycle Postgres resolves by aborting somebody (PR #363
+ * review). Read the plugin row first.
+ *
+ * A consent act takes this lock before its consent decisions, so two acts on
+ * one unit read and write those decisions one act at a time (#1150). No other
+ * writer takes both this lock and a grant row, so the order between the two
+ * closes no cycle.
  *
  * Postgres derives the 64-bit key itself (`hashtextextended`) —
  * deliberately NOT a cryptographic hash: nothing here is protected by the

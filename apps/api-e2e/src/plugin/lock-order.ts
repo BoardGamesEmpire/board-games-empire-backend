@@ -20,13 +20,22 @@ import { readShippedTree, workspaceRoot } from '../support/shipped-sql';
 /**
  * The claimed total lock order of the plugin consent path, in ONE place.
  *
- * `plugin row (FOR SHARE) -> grant row -> advisory key -> unit row`, as merged
- * in PR #363, with the household row ahead of all four since #548. Every writer
- * takes a prefix or a suffix of it, and taking two of these locks in a
- * different order than another writer is a deadlock cycle —
- * not hypothetically: the branch that became #323 opened advisory-first,
- * closing `advisory -> plugin -> grant -> advisory` against writers that
- * already existed, and it was inverted in review rather than in production.
+ * `plugin row (FOR SHARE) -> advisory key -> grant row -> unit row`, with the
+ * household row ahead of all four since #548. Every writer takes a subset of
+ * it in this order, and taking two of these locks in a different order than
+ * another writer is a deadlock cycle — not hypothetically: the branch that
+ * became #323 opened advisory-first, closing `advisory -> plugin -> grant ->
+ * advisory` against the writers of the day, and it was inverted in review
+ * rather than in production.
+ *
+ * PR #363 merged the key AFTER the grant rows, when the writer that held both
+ * was a household decision. The consent act took that over (#1150) and moved
+ * the key ahead of its decisions, so two acts on one unit run one after the
+ * other and the later reads what the earlier wrote. That was safe to move
+ * because the act is the only writer that takes both: the unit paths take the
+ * key and no grant row, and `decide()`, activation, a rejected update and
+ * uninstall take grant rows and no key. With nothing holding a grant row while
+ * it waits for a key, no cycle runs through the pair in either direction.
  *
  * Before this constant the order lived in prose, in three service doc comments
  * that had to be kept in agreement by hand. Pinning it in one place is what
@@ -142,6 +151,16 @@ export const CLAIMED_LOCK_ORDER = [
   },
   {
     /**
+     * The `(scopeId, pluginId)` key, which exists before the unit row does.
+     * Ahead of the grant rows since #1150: a consent act takes it before its
+     * decisions, so the decisions of two acts on one unit are read and written
+     * one act at a time.
+     */
+    name: 'advisory key',
+    pattern: /lock(?:Household|User)UnitScope\(|pg_advisory_xact_lock/,
+  },
+  {
+    /**
      * The upserts of `decide()` and of a consent act take it (#1150);
      * activation's `FOR UPDATE` takes it. The idempotency pre-reads — the
      * `findUnique` in `decide()`, the standing-decision `findMany` in a consent
@@ -151,11 +170,6 @@ export const CLAIMED_LOCK_ORDER = [
      */
     name: 'grant row',
     pattern: anyOf(/pluginGrant\.upsert\(/, relationLock('plugin_grants', 'FOR UPDATE')),
-  },
-  {
-    /** The `(scopeId, pluginId)` key, which exists before the unit row does. */
-    name: 'advisory key',
-    pattern: /lock(?:Household|User)UnitScope\(|pg_advisory_xact_lock/,
   },
   {
     /**
@@ -254,8 +268,9 @@ export const LOCK_SOURCES = {
  *
  * A path taking a single lock cannot be out of order with itself, so the list
  * is exactly the set where the claim has content. The consent act is the one
- * path that takes all five: it writes household and user decisions and creates
- * or switches the unit enablement in one transaction (#1150). `decide()` is now
+ * path that takes all five, and the only one that takes both the key and a
+ * grant row: it writes household and user decisions and creates or switches
+ * the unit enablement in one transaction (#1150). `decide()` is now
  * a server decision only, so it takes the plugin-row prefix and the grant row
  * and nothing after.
  */
@@ -282,7 +297,7 @@ export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
     label: 'consent act (every household and user act)',
     file: CONSENT_ACT_SERVICE,
     functionName: 'commit',
-    stages: ['household row', 'plugin row', 'grant row', 'advisory key', 'unit row'],
+    stages: ['household row', 'plugin row', 'advisory key', 'grant row', 'unit row'],
     because:
       'Every switch-on, toggle and review is one transaction through commit (#1150), so it is the one writer ' +
       'that takes all five. A household act opens with the household share lock, so a soft-deleted household ' +
@@ -290,10 +305,12 @@ export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
       'decoration: the grant upserts take FOR KEY SHARE on that row through the FK anyway, AFTER writing the ' +
       'grant tuple, so without the claim this path holds the plugin row LAST and deadlocks against activation. ' +
       'The claim also compares the sha the consent surface named, so nothing judged under it is judged against ' +
-      'a moved manifest (#361). Then the grant rows, in permission order, then the unit-scope key, which exists ' +
-      'before the unit enablement does, and only then the unit enablement write: the key before the row, so an ' +
-      'act waits out an uncommitted switch-off or config write on the same unit, which takes the same key ' +
-      'first (#323). Taking those two the other way round is a cycle against every unit writer.',
+      'a moved manifest (#361). Then the unit-scope key, before the act reads the unit or its decisions: two ' +
+      'acts on one unit, and an act and a switch-off or config write on it, then run one after the other, so ' +
+      'each judges what the one before it left (#323, #1150). Then the grant rows, in permission order, and ' +
+      'last the unit enablement write. The key comes after the plugin row because a writer that waits on the ' +
+      'plugin row while holding the key closes a cycle against any writer that holds the row and waits for the ' +
+      'key.',
   },
   {
     label: 'decide() — a server decision',

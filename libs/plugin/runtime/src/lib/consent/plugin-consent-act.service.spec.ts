@@ -21,6 +21,7 @@ import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginDisabledEvent,
   HouseholdPluginEnabledEvent,
+  HouseholdPluginUnitRevivedEvent,
   PluginGrantCreatedEvent,
   PluginGrantRejectedEvent,
   UserPluginEnabledEvent,
@@ -30,6 +31,7 @@ import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixtu
 import { PluginUnitAuthorityError, PluginUnitConfigRequiredError } from '../units/unit.errors';
 import type { ConsentCheckClassification } from './consent-classification.types';
 import {
+  PluginConsentActNoUserScopeError,
   PluginConsentActRequiredSetError,
   PluginConsentActStaleError,
   PluginConsentActUnitOffError,
@@ -290,7 +292,10 @@ describe('PluginConsentActService', () => {
       order.push('act');
       return Promise.resolve({ id: 'act-1', createdAt: new Date(0), ...data });
     }) as never);
-    db.pluginGrant.findMany.mockImplementation((() => Promise.resolve(standing)) as never);
+    db.pluginGrant.findMany.mockImplementation((() => {
+      order.push('standing read');
+      return Promise.resolve(standing);
+    }) as never);
     db.pluginGrant.upsert.mockImplementation((({
       create,
     }: {
@@ -305,7 +310,10 @@ describe('PluginConsentActService', () => {
       });
     }) as never);
 
-    db.householdPlugin.findUnique.mockImplementation((() => Promise.resolve(householdRow)) as never);
+    db.householdPlugin.findUnique.mockImplementation((() => {
+      order.push('unit read');
+      return Promise.resolve(householdRow);
+    }) as never);
     db.householdPlugin.create.mockImplementation((({ data }: { data: Partial<HouseholdPlugin> }) => {
       order.push('unit');
       return Promise.resolve(makeHouseholdRow(data));
@@ -314,7 +322,10 @@ describe('PluginConsentActService', () => {
       order.push('unit');
       return Promise.resolve({ ...(householdRow as HouseholdPlugin), ...data });
     }) as never);
-    db.userPlugin.findUnique.mockImplementation((() => Promise.resolve(userRow)) as never);
+    db.userPlugin.findUnique.mockImplementation((() => {
+      order.push('unit read');
+      return Promise.resolve(userRow);
+    }) as never);
     db.userPlugin.upsert.mockImplementation((({ create }: { create: Partial<UserPlugin> }) => {
       order.push('unit');
       return Promise.resolve(userRow === null ? makeUserRow(create) : { ...userRow, enabled: true });
@@ -352,16 +363,20 @@ describe('PluginConsentActService', () => {
   };
 
   describe('switchOn', () => {
-    it('a household switch-on writes one act, the decisions in permission order, then the unit enablement (#1150)', async () => {
+    it('a household switch-on reads the unit under its key, then writes one act, the decisions in permission order and the unit enablement (#1150)', async () => {
       const result = await service.switchOn(householdSwitchOn);
 
+      // The key comes before the reads that judge whether the act changes
+      // anything, so two acts on one unit are judged one after the other.
       expect(order).toEqual([
         'household lock',
         'plugin claim',
+        'advisory key',
+        'unit read',
+        'standing read',
         'act',
         `grant:${REQUIRED}`,
         `grant:${OPTIONAL}`,
-        'advisory key',
         'unit',
       ]);
 
@@ -439,7 +454,15 @@ describe('PluginConsentActService', () => {
         answers: [granted(USER_OPTIONAL)],
       });
 
-      expect(order).toEqual(['plugin claim', 'act', `grant:${USER_OPTIONAL}`, 'advisory key', 'unit']);
+      expect(order).toEqual([
+        'plugin claim',
+        'advisory key',
+        'unit read',
+        'standing read',
+        'act',
+        `grant:${USER_OPTIONAL}`,
+        'unit',
+      ]);
       expect(db.userPlugin.upsert).toHaveBeenCalledWith({
         where: { userId_pluginId: { userId: 'user-1', pluginId: 'plugin-1' } },
         create: { userId: 'user-1', pluginId: 'plugin-1', enabled: true },
@@ -455,6 +478,38 @@ describe('PluginConsentActService', () => {
       const enabled = emitted().filter(({ event }) => event instanceof UserPluginEnabledEvent);
       expect(enabled).toHaveLength(1);
       expect(enabled[0].event.before).toBeNull();
+    });
+
+    it('a user switch-on of a plugin that requests nothing at user scope is refused before any lock (#381, #1150)', async () => {
+      db.plugin.findUnique.mockResolvedValue(
+        makePlugin({
+          manifestJson: buildPluginManifest({
+            scope: 'household',
+            permissions: {
+              declares: ['manage:digest'],
+              checks: activeChecks.filter((check) => check.consentScope !== 'user'),
+            },
+          }) as unknown as Prisma.JsonValue,
+        }),
+      );
+
+      await expect(
+        service.switchOn({
+          slug: 'demo-sink',
+          unit: USER_UNIT,
+          actorId: 'user-1',
+          manifestSha256: ACTIVE_SHA,
+          answers: [],
+        }),
+      ).rejects.toEqual(
+        expect.objectContaining({ constructor: PluginConsentActNoUserScopeError, pluginSlug: 'demo-sink' }),
+      );
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expectNothingWritten();
+
+      // A household switch-on of the same plugin is unaffected: it requests
+      // something at household scope.
+      await expect(service.switchOn(householdSwitchOn)).resolves.toEqual(expect.objectContaining({ changed: true }));
     });
 
     it('a user cannot switch a plugin on for someone else (#1150)', async () => {
@@ -482,7 +537,7 @@ describe('PluginConsentActService', () => {
 
       expect(result).toEqual({ act: null, changed: false, unit: householdRow, switchedOff: false });
       expectNothingWritten();
-      expect(db.$executeRaw).not.toHaveBeenCalled();
+      expect(order).toEqual(['household lock', 'plugin claim', 'advisory key', 'unit read', 'standing read']);
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
@@ -502,7 +557,10 @@ describe('PluginConsentActService', () => {
       expect(db.householdPlugin.update).toHaveBeenCalledWith({ where: { id: 'hp-1' }, data: { enabled: true } });
       expect(result.changed).toBe(true);
       expect(result.unit).toEqual(expect.objectContaining({ enabled: true }));
+      // No consent decision changed, so the switch event is what names the
+      // act in the lifecycle table.
       expect(emitted().map(({ event }) => event.constructor)).toEqual([HouseholdPluginEnabledEvent]);
+      expect(emitted()[0].event.act).toEqual({ manifestVersion: '1.2.0', actId: 'act-1' });
     });
 
     it('a household switch-on without config is refused when the manifest requires one and none is retained (#1150)', async () => {
@@ -571,6 +629,17 @@ describe('PluginConsentActService', () => {
           data: { dormantReason: null, dormantAt: null },
         });
         expect(result.unit).toEqual(expect.objectContaining({ dormantReason: null, dormantAt: null }));
+        // Nothing switched and no config was written, so the lifted dormancy
+        // is the event that names the act.
+        expect(emitted().map(({ event }) => event.constructor)).toEqual([HouseholdPluginUnitRevivedEvent]);
+        expect(emitted()[0].event).toEqual(
+          expect.objectContaining({
+            clearedReason: PluginUnitDormantReason.NeedsConfiguration,
+            manifestVersion: '1.2.0',
+            actId: 'act-1',
+            after: expect.objectContaining({ dormantReason: null }),
+          }),
+        );
       });
 
       it('a switch-on over it with a stale retained document is refused with the violations, and the unit is not written (#1150)', async () => {
@@ -622,23 +691,14 @@ describe('PluginConsentActService', () => {
       expectNothingWritten();
     });
 
-    it('a toggle is refused under the advisory key when the unit was switched off after the first read (#1150)', async () => {
-      // On at the unlocked read, off at the read under the key: a switch-off
-      // committed in between.
-      db.householdPlugin.findUnique
-        .mockResolvedValueOnce(makeHouseholdRow())
-        .mockResolvedValueOnce(makeHouseholdRow({ enabled: false }));
+    it('a toggle reads the switch under the unit key, so a switch-off committed first refuses it before anything is written (#1150)', async () => {
+      householdRow = makeHouseholdRow({ enabled: false });
 
-      await expect(service.toggle(householdToggle)).rejects.toEqual(
-        expect.objectContaining({ constructor: PluginConsentActUnitOffError, scopeType: 'Household' }),
-      );
-      expect(order).toEqual(['household lock', 'plugin claim', 'act', `grant:${OPTIONAL}`, 'advisory key']);
-      // The act and the decision were written before the key was taken; the
-      // refusal is thrown inside the transaction, which rolls them back.
-      expect(db.pluginConsentAct.create).toHaveBeenCalledTimes(1);
-      expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(1);
-      expect(db.householdPlugin.update).not.toHaveBeenCalled();
-      expect(emitter.emit).not.toHaveBeenCalled();
+      await expect(service.toggle(householdToggle)).rejects.toBeInstanceOf(PluginConsentActUnitOffError);
+      // The read that refuses it waited on the key a switch-off holds until
+      // it commits, so it cannot miss one that committed ahead of it.
+      expect(order).toEqual(['household lock', 'plugin claim', 'advisory key', 'unit read', 'standing read']);
+      expectNothingWritten();
     });
 
     it('a toggle is allowed on a unit that is switched on but dormant (#1150)', async () => {
@@ -649,7 +709,15 @@ describe('PluginConsentActService', () => {
 
       const result = await service.toggle(householdToggle);
 
-      expect(order).toEqual(['household lock', 'plugin claim', 'act', `grant:${OPTIONAL}`, 'advisory key']);
+      expect(order).toEqual([
+        'household lock',
+        'plugin claim',
+        'advisory key',
+        'unit read',
+        'standing read',
+        'act',
+        `grant:${OPTIONAL}`,
+      ]);
       expect(db.householdPlugin.update).not.toHaveBeenCalled();
       expect(result).toEqual(expect.objectContaining({ changed: true, switchedOff: false, unit: householdRow }));
       expect(emitted().map(({ name }) => name)).toEqual([PluginGrantCreatedEvent.eventName]);
@@ -663,7 +731,16 @@ describe('PluginConsentActService', () => {
       const result = await service.review(requiredRefusingReview);
 
       expect(db.$transaction).toHaveBeenCalledTimes(1);
-      expect(order).toEqual(['household lock', 'plugin claim', 'act', `grant:${REQUIRED}`, 'advisory key', 'unit']);
+      expect(order).toEqual([
+        'household lock',
+        'plugin claim',
+        'advisory key',
+        'unit read',
+        'standing read',
+        'act',
+        `grant:${REQUIRED}`,
+        'unit',
+      ]);
       expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(1);
       expect(db.pluginGrant.upsert).toHaveBeenCalledWith(
         expect.objectContaining({ create: expect.objectContaining({ status: PluginGrantStatus.Denied }) }),
@@ -675,6 +752,7 @@ describe('PluginConsentActService', () => {
         PluginGrantRejectedEvent,
         HouseholdPluginDisabledEvent,
       ]);
+      expect(emitted()[1].event.act).toEqual({ manifestVersion: '1.2.0', actId: 'act-1' });
     });
 
     it('a review sent again after it switched the unit off changes nothing, and still says the unit is switched off (#1150)', async () => {
@@ -818,6 +896,17 @@ describe('PluginConsentActService', () => {
       ]);
       expect(grants.map((event) => event.after.permissionSlug)).toEqual([REQUIRED, OPTIONAL]);
       expect(grants.every((event) => event.before === null)).toBe(true);
+
+      // The unit's own event names the act too (#1150).
+      const switchedOn = emitted().find(({ event }) => event instanceof HouseholdPluginEnabledEvent);
+      expect(switchedOn?.event.act).toEqual({ manifestVersion: '1.2.0', actId: 'act-1' });
+    });
+
+    it('a household switch-on with config names the act on its config event (#1150)', async () => {
+      await service.switchOn({ ...householdSwitchOn, config: { webhookUrl: 'https://example.com' } });
+
+      const config = emitted().find(({ event }) => event instanceof HouseholdPluginConfigUpdatedEvent);
+      expect(config?.event.act).toEqual({ manifestVersion: '1.2.0', actId: 'act-1' });
     });
 
     it('a refused act emits nothing (#1150)', async () => {
