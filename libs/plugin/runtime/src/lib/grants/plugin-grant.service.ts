@@ -11,6 +11,7 @@ import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manif
 import { parsePluginPermissionSlug } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { grantSnapshot } from '../events/plugin-event-snapshots';
 import { PluginGrantCreatedEvent, PluginGrantRejectedEvent } from '../events/plugin.events';
 import { bindManifest, classifyManifestMove, type ClaimedPluginRow } from '../manifest/manifest-move';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
@@ -274,8 +275,8 @@ export class PluginGrantService {
 
     const EventClass = input.status === PluginGrantStatus.Granted ? PluginGrantCreatedEvent : PluginGrantRejectedEvent;
     const event = new EventClass(
-      outcome.before === null ? null : this.snapshot(outcome.before),
-      this.snapshot(outcome.after),
+      outcome.before === null ? null : grantSnapshot(outcome.before),
+      grantSnapshot(outcome.after),
       // The row no longer stores the manifest version, so the event states
       // the one this decision was made against (#1150).
       { manifestVersion: outcome.manifestVersion, actId: null },
@@ -436,11 +437,5 @@ export class PluginGrantService {
     if (!(await this.authority.isServerAdmin(deciderId))) {
       throw new PluginGrantAuthorityError(deciderId, 'Server-scope consent requires a server admin');
     }
-  }
-
-  private snapshot(row: PluginGrant) {
-    const { id, pluginId, scopeType, scopeId, permissionSlug, status, decidedRiskLevel } = row;
-
-    return { id, pluginId, scopeType, scopeId, permissionSlug, status, decidedRiskLevel };
   }
 }

@@ -119,7 +119,8 @@ class ConsentSurfacePermissionDto implements PluginCheckPresentation {
   @ApiProperty({
     description:
       'Staged consent surface only: the active manifest does not request this permission at this consent scope, ' +
-      'so no consent on record covers it yet. Always false on the active consent surface.',
+      'so the only consent it can have is a pre-consent to this staged update. Always false on the active ' +
+      'consent surface.',
   })
   stagedOnly!: boolean;
 

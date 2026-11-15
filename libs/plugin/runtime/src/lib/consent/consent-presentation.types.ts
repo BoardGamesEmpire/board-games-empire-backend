@@ -54,8 +54,8 @@ export interface PluginCheckPresentation {
   readonly grantable: boolean;
   /**
    * Staged surface only: the active manifest does not request this permission
-   * at this consent scope, so no consent on record covers it yet (#1150).
-   * Always `false` on the active surface.
+   * at this consent scope, so the only consent it can have is a pre-consent
+   * to this staged update (#1150). Always `false` on the active surface.
    */
   readonly stagedOnly: boolean;
   /** The author's justification, localized per the requested locale with fallback provenance. */

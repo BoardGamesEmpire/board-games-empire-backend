@@ -80,8 +80,9 @@ export class ConsentActResponseDto {
 
   @ApiProperty({
     description:
-      'True when a review refused a required permission, so the plugin was switched off here in the same ' +
-      'consent act. Always false for a switch-on or a toggle.',
+      'True when a review refuses a required permission, so the plugin is switched off here: by this consent ' +
+      'act, or already, when the review repeats a refusal that left it off (changed is then false). Always ' +
+      'false for a switch-on or a toggle.',
   })
   switchedOff!: boolean;
 

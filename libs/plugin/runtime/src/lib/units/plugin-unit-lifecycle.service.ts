@@ -1,10 +1,11 @@
-import type { HouseholdPlugin, Plugin, UserPlugin } from '@bge/database';
-import { DatabaseService, lockLiveHousehold, PluginScope, Prisma } from '@bge/database';
+import type { HouseholdPlugin, Plugin, PluginScope, UserPlugin } from '@bge/database';
+import { DatabaseService, lockLiveHousehold, Prisma } from '@bge/database';
 import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
+import { householdSwitchSnapshot, userSwitchSnapshot } from '../events/plugin-event-snapshots';
 import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginDisabledEvent,
@@ -22,6 +23,7 @@ import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { assertHouseholdAdmin } from './household-admin-assertion';
 import { configDormancyCleared } from './household-config-gate';
+import { assertHouseholdSurface, loadLivingPlugin } from './living-plugin';
 import {
   PluginUnitHouseholdNotFoundError,
   PluginUnitManifestError,
@@ -29,7 +31,6 @@ import {
   PluginUnitPluginChangedError,
   PluginUnitPluginNotFoundError,
   PluginUnitPluginTombstonedError,
-  PluginUnitScopeError,
 } from './unit.errors';
 
 export interface HouseholdUnitActionInput {
@@ -90,7 +91,8 @@ type LivingPluginRef = Pick<Plugin, 'id' | 'slug' | 'scope'>;
  *   shared blocks a concurrent tombstone until this transaction commits
  *   (so the purge sweeps the row it wrote), and a tombstone that committed
  *   first is seen and refused — without it, a write here could commit
- *   against a plugin whose purge had already promised its unit rows gone.
+ *   against a plugin whose purge had already promised its unit
+ *   enablements gone.
  *   It blocks a concurrent ACTIVATION the same way, which is why the
  *   re-read also returns `scope` and `version`: activation rewrites
  *   `version`/`scope`/`manifestJson` together, so every judgment a caller
@@ -157,8 +159,8 @@ export class PluginUnitLifecycleService {
       this.emitter.emit(
         HouseholdPluginDisabledEvent.eventName,
         new HouseholdPluginDisabledEvent(
-          this.householdSwitchSnapshot(outcome.before),
-          this.householdSwitchSnapshot(outcome.row),
+          householdSwitchSnapshot(outcome.before),
+          householdSwitchSnapshot(outcome.row),
           initiatedAt,
         ),
       );
@@ -175,8 +177,8 @@ export class PluginUnitLifecycleService {
    */
   async updateHouseholdConfig(input: HouseholdUnitConfigInput): Promise<HouseholdPlugin> {
     const initiatedAt = new Date();
-    const plugin = await this.loadLiving(input.slug);
-    this.assertHouseholdSurface(plugin);
+    const plugin = await loadLivingPlugin(this.db, input.slug);
+    assertHouseholdSurface(plugin.slug, plugin.scope);
     await assertHouseholdAdmin(this.authority, input.actorId, input.householdId);
 
     const validated = this.revalidate(plugin);
@@ -242,11 +244,7 @@ export class PluginUnitLifecycleService {
     if (outcome.before !== null) {
       this.emitter.emit(
         UserPluginDisabledEvent.eventName,
-        new UserPluginDisabledEvent(
-          this.userSwitchSnapshot(outcome.before),
-          this.userSwitchSnapshot(outcome.row),
-          initiatedAt,
-        ),
+        new UserPluginDisabledEvent(userSwitchSnapshot(outcome.before), userSwitchSnapshot(outcome.row), initiatedAt),
       );
     }
 
@@ -305,7 +303,7 @@ export class PluginUnitLifecycleService {
     const { scope } = await this.assertStillLiving(tx, plugin, options.expected);
 
     if (options.requireSurface !== false) {
-      this.assertHouseholdSurface({ ...plugin, scope });
+      assertHouseholdSurface(plugin.slug, scope);
     }
 
     await lockHouseholdUnitScope(tx, householdId, plugin.id);
@@ -385,32 +383,10 @@ export class PluginUnitLifecycleService {
     return { scope: row.scope, version: row.version };
   }
 
-  /** A server-scope plugin has no per-household enablement surface (the manifest gate's rule, enforced at the writer too). */
-  private assertHouseholdSurface(plugin: LivingPluginRef): void {
-    if (plugin.scope !== PluginScope.Household) {
-      throw new PluginUnitScopeError(plugin.slug, plugin.scope.toLowerCase());
-    }
-  }
-
-  /** Loads the full row for a living (non-tombstoned) plugin — the paths that read the manifest need it. */
-  private async loadLiving(slug: string): Promise<Plugin> {
-    const plugin = await this.db.plugin.findUnique({ where: { slug } });
-
-    if (plugin === null) {
-      throw new PluginUnitPluginNotFoundError(slug);
-    }
-
-    if (plugin.uninstalledAt !== null) {
-      throw new PluginUnitPluginTombstonedError(plugin.slug, plugin.uninstalledAt);
-    }
-
-    return plugin;
-  }
-
   /**
-   * The narrow variant for paths that never read the manifest (disable,
-   * the user's switch-off): fetching `manifestJson`/`pendingManifestJson`
-   * there is tens of KB of JSON per switch for nothing.
+   * The narrow variant of `loadLivingPlugin`, for paths that never read the
+   * manifest (disable, the user's switch-off): fetching `manifestJson` and
+   * `pendingManifestJson` there is tens of KB of JSON per switch for nothing.
    */
   private async loadLivingRef(slug: string): Promise<LivingPluginRef> {
     const plugin = await this.db.plugin.findUnique({
@@ -435,23 +411,5 @@ export class PluginUnitLifecycleService {
       this.options,
       (pluginSlug, detail, issues) => new PluginUnitManifestError(pluginSlug, detail, issues),
     );
-  }
-
-  private householdSwitchSnapshot(row: HouseholdPlugin) {
-    return {
-      id: row.id,
-      householdId: row.householdId,
-      pluginId: row.pluginId,
-      enabled: row.enabled,
-    };
-  }
-
-  private userSwitchSnapshot(row: UserPlugin) {
-    return {
-      id: row.id,
-      userId: row.userId,
-      pluginId: row.pluginId,
-      enabled: row.enabled,
-    };
   }
 }

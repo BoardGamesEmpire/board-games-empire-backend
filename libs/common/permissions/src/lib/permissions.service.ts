@@ -829,13 +829,13 @@ export class PermissionsService {
         return true;
       }
 
+      // Debug, not warn (#1150): a pre-consent recorded against a staged
+      // update, or a decision on a permission a later manifest dropped, is an
+      // ordinary state, not an anomaly.
       this.logger.debug(
         `Plugin ${plugin.id} decision on '${grant.permissionSlug}' at ${grant.scopeType} scope is not requested ` +
           'by the active manifest; conferring nothing',
       );
-      // Debug, not warn (#1150): a pre-consent recorded against a staged
-      // update, or a decision on a permission a later manifest dropped, is an
-      // ordinary state, not an anomaly.
 
       return false;
     });

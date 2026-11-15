@@ -1,12 +1,11 @@
 import { AuditContextService } from '@bge/actor-context';
-import type { HouseholdPlugin, Plugin, PluginConsentAct, PluginGrant, UserPlugin } from '@bge/database';
+import type { HouseholdPlugin, Plugin, PluginConsentAct, PluginGrant, PluginScope, UserPlugin } from '@bge/database';
 import {
   DatabaseService,
   lockLiveHousehold,
   PluginConsentActKind,
   PluginGrantScope,
   PluginGrantStatus,
-  PluginScope,
   PluginUnitDormantReason,
   Prisma,
   retryOnDeadlock,
@@ -16,6 +15,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
+import { grantSnapshot, householdSwitchSnapshot, userSwitchSnapshot } from '../events/plugin-event-snapshots';
 import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginDisabledEvent,
@@ -31,13 +31,13 @@ import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { assertHouseholdAdmin } from '../units/household-admin-assertion';
 import { assertRetainedConfigSatisfiesGate, configDormancyCleared } from '../units/household-config-gate';
+import { assertHouseholdSurface, loadLivingPlugin } from '../units/living-plugin';
 import {
   PluginUnitAuthorityError,
   PluginUnitHouseholdNotFoundError,
   PluginUnitManifestError,
   PluginUnitPluginNotFoundError,
   PluginUnitPluginTombstonedError,
-  PluginUnitScopeError,
 } from '../units/unit.errors';
 import { planConsentAct } from './consent-act-plan';
 import type { ConsentManifestSource } from './consent-classification.types';
@@ -65,7 +65,11 @@ export interface ConsentActResult {
   readonly act: PluginConsentAct | null;
   readonly changed: boolean;
   readonly unit: HouseholdPlugin | UserPlugin;
-  /** A review refused a required permission and switched the unit off. */
+  /**
+   * A review refuses a required permission, so the unit is switched off: by
+   * this act, or already, when the unit was off and the denial stood before
+   * the review arrived (`changed` is then false).
+   */
   readonly switchedOff: boolean;
 }
 
@@ -94,7 +98,7 @@ interface WrittenDecision {
 }
 
 type ActOutcome =
-  | { readonly changed: false; readonly unit: UnitEnablement }
+  | { readonly changed: false; readonly unit: UnitEnablement; readonly switchedOff: boolean }
   | {
       readonly changed: true;
       readonly act: PluginConsentAct;
@@ -165,7 +169,7 @@ export class PluginConsentActService {
     // consent against a manifest that moved mid-request with nothing telling
     // the client. Judged against the first read, the replay's claim sees the
     // move and refuses it with the same stale refusal.
-    const plugin = await this.loadPlugin(input.slug);
+    const plugin = await loadLivingPlugin(this.db, input.slug);
     const named = this.nameManifest(plugin, input.manifestSha256);
 
     await this.assertAuthority(unit, input.actorId);
@@ -173,7 +177,7 @@ export class PluginConsentActService {
     const activeConfig = named.active.manifest.config;
 
     if (household && kind === 'SwitchOn') {
-      this.assertHouseholdSurface(plugin.slug, plugin.scope);
+      assertHouseholdSurface(plugin.slug, plugin.scope);
 
       // A supplied document is judged against the ACTIVE schema before the
       // transaction, so an invalid one is refused before any lock is taken
@@ -251,7 +255,18 @@ export class PluginConsentActService {
         // A retried request then lands exactly where its first attempt left
         // the unit (ADR 0002, docs/adr/0002-retried-writes-use-client-request-ids.md).
         // Unlocked because the advisory key is taken after the decisions, in
-        // the pinned order; the read under the key below judges again.
+        // the pinned order; the read under the key below judges the unit's
+        // switch again.
+        //
+        // Nothing judges the decisions again, so this read orders a retry
+        // against an attempt that has finished, not against one still in
+        // flight. Two acts on one unit that overlap can both pass it: both
+        // are then recorded, and each announces its decisions against the
+        // rows it read here, so the later announcement's `before` can be out
+        // of date. The decisions and the acts are right either way, and
+        // `decide()` accepts the same duplicate provenance. Ordering the two
+        // would take the unit's key ahead of the decisions, which the pinned
+        // order does not allow.
         const enablementSeen = await this.readUnitEnablement(tx, unit, plugin.id);
         const standingRows = await tx.pluginGrant.findMany({
           where: {
@@ -273,13 +288,19 @@ export class PluginConsentActService {
             !isDormant(enablementSeen) &&
             config === undefined
           ) {
-            return { changed: false, unit: enablementSeen };
+            return { changed: false, unit: enablementSeen, switchedOff: false };
           }
         } else {
-          // The retry of a review that switched the unit off: its denial
-          // stands and the unit is off, which is what it asked for.
+          // A review that refuses a required permission asks for two things:
+          // the denial recorded and the unit off. Both already hold, so it
+          // changes nothing and answers as the review that left them so did,
+          // `switchedOff` included: this is that review sent again, most
+          // often. It is the one review a switched-off unit answers rather
+          // than refuses, because the unit is where the request wants it (a
+          // state change already at its target answers 2xx, ADR 0002)
+          // whichever request put it there.
           if (plan.switchesOff && stand && enablementSeen !== null && !enablementSeen.enabled) {
-            return { changed: false, unit: enablementSeen };
+            return { changed: false, unit: enablementSeen, switchedOff: true };
           }
 
           // A toggle or review needs the unit switched on. Refused here, before
@@ -294,7 +315,7 @@ export class PluginConsentActService {
           // promoted by an update), so only an act that leaves the unit on can
           // change nothing (#1150).
           if (stand && !plan.switchesOff) {
-            return { changed: false, unit: enablementSeen };
+            return { changed: false, unit: enablementSeen, switchedOff: false };
           }
         }
 
@@ -442,7 +463,7 @@ export class PluginConsentActService {
     );
 
     if (!outcome.changed) {
-      return { act: null, changed: false, unit: outcome.unit, switchedOff: false };
+      return { act: null, changed: false, unit: outcome.unit, switchedOff: outcome.switchedOff };
     }
 
     this.emitEvents(outcome, named.version, initiatedAt);
@@ -495,25 +516,8 @@ export class PluginConsentActService {
     }
 
     if (expected.householdSurface) {
-      this.assertHouseholdSurface(pluginSlug, row.scope);
+      assertHouseholdSurface(pluginSlug, row.scope);
     }
-  }
-
-  private async loadPlugin(slug: string): Promise<Plugin> {
-    const plugin = await this.db.plugin.findUnique({ where: { slug } });
-
-    if (plugin === null) {
-      throw new PluginUnitPluginNotFoundError(slug);
-    }
-
-    // `Plugin.enabled`, the server switch, does not gate consent, as
-    // it does not gate `decide()` (#225): consenting before the operator
-    // switches the plugin on is a legitimate order.
-    if (plugin.uninstalledAt !== null) {
-      throw new PluginUnitPluginTombstonedError(plugin.slug, plugin.uninstalledAt);
-    }
-
-    return plugin;
   }
 
   /**
@@ -560,13 +564,6 @@ export class PluginConsentActService {
     }
 
     await assertHouseholdAdmin(this.authority, actorId, unit.householdId);
-  }
-
-  /** A server-scope plugin has no per-household enablement surface. */
-  private assertHouseholdSurface(slug: string, scope: PluginScope): void {
-    if (scope !== PluginScope.Household) {
-      throw new PluginUnitScopeError(slug, scope.toLowerCase());
-    }
   }
 
   private readUnitEnablement(
@@ -683,18 +680,4 @@ function isDormant(row: UnitEnablement): boolean {
 
 function isHouseholdEnablement(row: UnitEnablement): row is HouseholdPlugin {
   return 'householdId' in row;
-}
-
-function grantSnapshot(row: PluginGrant) {
-  const { id, pluginId, scopeType, scopeId, permissionSlug, status, decidedRiskLevel } = row;
-
-  return { id, pluginId, scopeType, scopeId, permissionSlug, status, decidedRiskLevel };
-}
-
-function householdSwitchSnapshot(row: HouseholdPlugin) {
-  return { id: row.id, householdId: row.householdId, pluginId: row.pluginId, enabled: row.enabled };
-}
-
-function userSwitchSnapshot(row: UserPlugin) {
-  return { id: row.id, userId: row.userId, pluginId: row.pluginId, enabled: row.enabled };
 }

@@ -490,7 +490,8 @@ export class PluginGrantRejectedEvent extends MutationEvent<PluginGrant> {
  * lifecycle row payload — the grant row itself is DELETED
  * (delete-to-pending), so this is the only durable record of why.
  *
- * Every reason is a plugin manifest change. Losing authority revokes
+ * Every reason is a change to what the plugin requests: an update that was
+ * activated, or a staged one that was rejected. Losing authority revokes
  * nothing: a consent decision belongs to the unit and survives the person
  * who made it (#1150).
  */
@@ -504,7 +505,13 @@ export type PluginGrantRevocationReason =
    * decision recorded at the OLD scope no longer authorizes anything — the
    * principal that made it does not own the permission any more.
    */
-  | 'consent-scope-changed';
+  | 'consent-scope-changed'
+  /**
+   * The staged update was rejected, so the pre-consents households and users
+   * gave to it were deleted with it: a later update that requests the same
+   * permission starts from no decision (#1150).
+   */
+  | 'staged-update-rejected';
 
 /**
  * A grant was revoked because the authority that justified it lapsed

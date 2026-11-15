@@ -355,7 +355,9 @@ export class PluginsController {
   @ApiOperation({
     summary: 'Reject the staged pending update',
     description:
-      'Clears the staged-update columns and emits plugin.update_rejected. The staged plugin artifact stays on ' +
+      'Clears the staged-update columns and emits plugin.update_rejected. Consent that households and users ' +
+      'gave to this staged update ahead of time (pre-consent) is deleted with it, one plugin.grant_revoked ' +
+      'each, so a later update that requests the same permission asks again. The staged plugin artifact stays on ' +
       'disk until the planned artifact sweep (#1094) removes it: no living plugin names it, and no running plugin ' +
       'was loaded from it; ' +
       'this endpoint never touches the filesystem. The body names the staging it answers with the stagingId the ' +

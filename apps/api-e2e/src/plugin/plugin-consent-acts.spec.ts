@@ -10,6 +10,7 @@ import {
 } from '@bge/database';
 import { createActors, pollUntil, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { inspect } from 'node:util';
 import request from 'supertest';
 import { createMemberClient } from '../household/household-request';
 import { restoreShippedCatalog } from '../permission-catalog/shipped-catalog';
@@ -639,6 +640,20 @@ describe('consent acts (#1150)', () => {
       ]);
       expect(await householdUnit(householdId, plugin.id)).toMatchObject({ enabled: false });
 
+      // The same review sent again, as a client that lost the response sends
+      // it: nothing changes, and it answers as the first attempt did.
+      const retried = await sendReview(
+        baseUrl,
+        owner,
+        unit,
+        plugin.slug,
+        reviewBody(surface, { [HOUSEHOLD_REQUIRED.slug]: PluginGrantStatus.Denied }),
+      ).expect(200);
+
+      expect(retried.body).toMatchObject({ changed: false, switchedOff: true, act: null, unit: { enabled: false } });
+      expect(retried.body.message).toBe(reviewed.body.message);
+      expect(await actsAt(plugin.id, PluginGrantScope.Household, householdId)).toHaveLength(2);
+
       const again = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
       const switchedOn = await sendSwitchOn(
         baseUrl,
@@ -865,6 +880,83 @@ describe('consent acts (#1150)', () => {
       expect(await decisionsAt(plugin.id, PluginGrantScope.Household, householdId)).toEqual([]);
     });
 
+    it('rejecting a staged update deletes the pre-consents given to it and keeps the consent decisions in force, so a later update asks again (#1150)', async () => {
+      const admin = await actors.admin();
+      const { owner, householdId, unit } = await household();
+      const plugin = await arrangeStagedPlugin(
+        [MANAGE_DIGEST_CHECK, HOUSEHOLD_OPTIONAL],
+        [MANAGE_DIGEST_CHECK, HOUSEHOLD_OPTIONAL, HOUSEHOLD_REQUIRED],
+      );
+
+      await sendSwitchOn(
+        baseUrl,
+        owner,
+        unit,
+        plugin.slug,
+        switchOnBody(await readConsentSurface(baseUrl, owner, unit, plugin.slug), {
+          [HOUSEHOLD_OPTIONAL.slug]: PluginGrantStatus.Granted,
+        }),
+      ).expect(200);
+
+      const staged = await readConsentSurface(baseUrl, owner, unit, plugin.slug, { staged: true });
+      const reviewed = await sendReview(
+        baseUrl,
+        owner,
+        unit,
+        plugin.slug,
+        reviewBody(staged, { [HOUSEHOLD_REQUIRED.slug]: PluginGrantStatus.Granted }),
+      ).expect(200);
+
+      expect(await decisionsAt(plugin.id, PluginGrantScope.Household, householdId)).toEqual([
+        expect.objectContaining({ permissionSlug: HOUSEHOLD_REQUIRED.slug, actId: reviewed.body.act.id }),
+        expect.objectContaining({ permissionSlug: HOUSEHOLD_OPTIONAL.slug }),
+      ]);
+
+      await reject(admin, plugin.slug).expect(200);
+
+      // Only the pre-consent went. The decision on the permission the active
+      // manifest requests is in force, and both acts stay: an act is the
+      // record that the household agreed, whatever became of the update.
+      expect(await decisionsAt(plugin.id, PluginGrantScope.Household, householdId)).toEqual([
+        expect.objectContaining({ permissionSlug: HOUSEHOLD_OPTIONAL.slug, status: PluginGrantStatus.Granted }),
+      ]);
+      expect(await actsAt(plugin.id, PluginGrantScope.Household, householdId)).toHaveLength(2);
+
+      // The lifecycle listener writes after the response.
+      const revoked = await pollUntil(
+        async () =>
+          (await db.client.pluginLifecycleEvent.findFirst({
+            where: { pluginId: plugin.id, event: PluginLifecycleEventType.GrantRevoked, scopeId: householdId },
+          })) ?? undefined,
+        { description: `the pre-consent's revocation lifecycle row for '${plugin.slug}'`, timeoutMs: 5_000 },
+      );
+
+      expect(revoked).toMatchObject({
+        manifestVersion: '1.3.0',
+        payload: expect.objectContaining({
+          permissionSlug: HOUSEHOLD_REQUIRED.slug,
+          reason: 'staged-update-rejected',
+        }),
+      });
+
+      // A later update that requests the permission again, arranged on the
+      // row: the household is asked, with nothing left over to inherit.
+      await db.client.plugin.update({
+        where: { id: plugin.id },
+        data: stagedUpdateColumns({
+          manifest: manifestWith('1.4.0', [MANAGE_DIGEST_CHECK, HOUSEHOLD_OPTIONAL, HOUSEHOLD_REQUIRED]),
+          sha256: 'd'.repeat(64),
+        }),
+      });
+
+      const restaged = await readConsentSurface(baseUrl, owner, unit, plugin.slug, { staged: true });
+
+      expect(checkOf(restaged, HOUSEHOLD_REQUIRED.slug)).toMatchObject({ decision: 'pending', stagedOnly: true });
+      expect(await pluginAbilitySlugsForHousehold(db.client, plugin.id, householdId)).not.toContain(
+        HOUSEHOLD_REQUIRED.slug,
+      );
+    });
+
     it('a permission pre-consented at the consent scope the staged manifest moves it to survives activation and confers after (#1150)', async () => {
       const admin = await actors.admin();
       const { owner, householdId, unit } = await household();
@@ -993,6 +1085,42 @@ describe('consent acts (#1150)', () => {
       expect(await householdUnit(householdId, plugin.id)).toMatchObject({ enabled: false });
       expect(await decisionsAt(plugin.id, PluginGrantScope.Household, householdId)).toEqual(decisionsBefore);
       expect(await actsAt(plugin.id, PluginGrantScope.Household, householdId)).toHaveLength(1);
+    });
+  });
+
+  describe('the act table', () => {
+    // The rule lives in a hand-written migration, which Prisma cannot model,
+    // so only a real database can show it is there. Rows are written
+    // directly: the constraint has to hold whatever path inserts.
+    it('refuses a household or user act that names no unit, and takes a server act that names none (#1150)', async () => {
+      const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK]);
+      const actData = (scopeType: PluginGrantScope, scopeId: string) => ({
+        data: {
+          pluginId: plugin.id,
+          pluginSlug: plugin.slug,
+          scopeType,
+          scopeId,
+          kind: PluginConsentActKind.SwitchOn,
+          manifestVersion: plugin.version,
+          manifestSha256: plugin.installedSha256,
+          presentation: {},
+          decidedAt: new Date(),
+        },
+      });
+
+      for (const scopeType of [PluginGrantScope.Household, PluginGrantScope.User]) {
+        const refusal = await db.client.pluginConsentAct.create(actData(scopeType, '')).then(
+          () => 'nothing threw: the constraint is missing from the schema',
+          (error: unknown) => inspect(error, { depth: null, showHidden: true, getters: true }),
+        );
+
+        expect(refusal).toContain('plugin_consent_acts_non_server_scope_id_not_empty');
+      }
+
+      // The empty scope id is the Server sentinel, as on a consent decision.
+      await expect(db.client.pluginConsentAct.create(actData(PluginGrantScope.Server, ''))).resolves.toMatchObject({
+        scopeId: '',
+      });
     });
   });
 });

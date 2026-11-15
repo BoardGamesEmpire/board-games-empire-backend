@@ -1182,7 +1182,7 @@ A grant given when the permission carried a lower risk level than it does now. I
 _Avoid_: stale risk, risk-stale grant
 
 **Revocation**:
-A consent decision undone without anyone choosing to undo it. An update removed the permission, stopped requesting it, or moved it to another consent scope. A decision is never revoked because whoever gave it left or lost their role. The permission goes back to awaiting an answer, and the reason is kept.
+A consent decision undone without anyone choosing to undo it. An update removed the permission, stopped requesting it, or moved it to another consent scope, or the staged update a pre-consent was given to was rejected. A decision is never revoked because whoever gave it left or lost their role. The permission goes back to awaiting an answer, and the reason is kept.
 _Avoid_: invalidation; durable denial (a refusal someone chose)
 
 **Categorical exclusion**:
@@ -1210,7 +1210,7 @@ The state of a unit that is switched on and running while its consent standing l
 _Avoid_: suspension, suspended, suspended for consent, disabled, auto-disabled
 
 **Pre-consent**:
-Consent given ahead of an update, which takes effect when the update lands. It can only accept, and only permissions the current version does not already request.
+Consent given ahead of an update, which takes effect when the update lands. It can only accept, and only permissions the current version does not already request. It is deleted if the update is rejected.
 _Avoid_: dormant grant
 
 ### Plugin lifecycle and updates

@@ -380,7 +380,7 @@ describe('PluginUnitLifecycleService', () => {
     it('refuses inside the transaction when a concurrent uninstall tombstoned the plugin after the pre-read', async () => {
       // The pre-transaction load saw the plugin alive; the FOR SHARE
       // re-read is what keeps a write from committing against a plugin
-      // whose purge already promised its unit rows gone.
+      // whose purge already promised its unit enablements gone.
       db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow());
       db.$queryRaw.mockResolvedValue([livingRow({ uninstalled_at: new Date(7) })] as never);
 

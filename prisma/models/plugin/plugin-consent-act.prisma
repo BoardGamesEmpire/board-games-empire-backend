@@ -22,7 +22,10 @@ model PluginConsentAct {
   scopeType PluginGrantScope @map("scope_type")
 
   /// Consent-unit id: Household.id or User.id per scopeType; the
-  /// EMPTY-STRING SENTINEL for Server scope, as on PluginGrant.
+  /// EMPTY-STRING SENTINEL for Server scope, as on PluginGrant. The same
+  /// CHECK constraint as there, `(scope_type <> 'Server') => (scope_id <> '')`,
+  /// is hand-authored in the migration SQL, so an act that names no unit is
+  /// rejected by the database: an append-only row could never be corrected.
   scopeId String @default("") @map("scope_id")
 
   kind PluginConsentActKind

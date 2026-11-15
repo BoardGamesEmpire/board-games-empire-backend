@@ -32,3 +32,11 @@ CREATE TABLE "plugin_consent_acts" (
 
 -- CreateIndex
 CREATE INDEX "plugin_consent_acts_plugin_id_scope_type_scope_id_decided_a_idx" ON "plugin_consent_acts"("plugin_id", "scope_type", "scope_id", "decided_at");
+
+-- CheckConstraint
+-- A household or user act names its unit: only a Server act may carry the
+-- empty-string scope_id sentinel. The same rule plugin_grants enforces, added
+-- by hand because Prisma cannot express CHECK constraints in the schema (see
+-- prisma/models/plugin/plugin-consent-act.prisma). An act is never updated,
+-- so one stored without its unit could not be corrected.
+ALTER TABLE "plugin_consent_acts" ADD CONSTRAINT "plugin_consent_acts_non_server_scope_id_not_empty" CHECK ("scope_type" = 'Server' OR "scope_id" <> '');

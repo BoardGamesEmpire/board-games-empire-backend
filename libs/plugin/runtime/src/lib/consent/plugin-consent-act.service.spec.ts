@@ -677,13 +677,15 @@ describe('PluginConsentActService', () => {
       ]);
     });
 
-    it('a review sent again after it switched the unit off changes nothing (#1150)', async () => {
+    it('a review sent again after it switched the unit off changes nothing, and still says the unit is switched off (#1150)', async () => {
+      // The retry answers as its first attempt did, so a client that lost
+      // the first response tells the household the same thing.
       householdRow = makeHouseholdRow({ enabled: false });
       standing = [standingGrant(REQUIRED, PluginGrantStatus.Denied)];
 
       const result = await service.review(requiredRefusingReview);
 
-      expect(result).toEqual({ act: null, changed: false, unit: householdRow, switchedOff: false });
+      expect(result).toEqual({ act: null, changed: false, unit: householdRow, switchedOff: true });
       expectNothingWritten();
       expect(emitter.emit).not.toHaveBeenCalled();
     });

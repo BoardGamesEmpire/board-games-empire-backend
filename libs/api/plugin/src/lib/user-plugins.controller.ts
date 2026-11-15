@@ -217,7 +217,8 @@ export class UserPluginsController {
     description:
       'One consent act that answers the requested permissions the active manifest leaves outstanding for you, ' +
       'or, with the sha of a staged update, those the update adds (pre-consent). Refusing a required permission ' +
-      'switches the plugin off for you in the same consent act, and the response says so (switchedOff: true).',
+      'switches the plugin off for you in the same consent act, and the response says so (switchedOff: true). ' +
+      'Sending that review again changes nothing and answers the same way.',
   })
   @ApiResponse({ status: Http.Ok, type: ConsentActResponseDto })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })

@@ -291,7 +291,7 @@ export class HouseholdPluginsController {
       'One consent act that answers the requested permissions the active manifest leaves outstanding, or, ' +
       'with the sha of a staged update, those the update adds (pre-consent). Refusing a required permission ' +
       'switches the plugin off for this household in the same consent act, and the response says so ' +
-      '(switchedOff: true).',
+      '(switchedOff: true). Sending that review again changes nothing and answers the same way.',
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Ok, type: ConsentActResponseDto })
