@@ -327,6 +327,12 @@ interface ActivationOutcome {
   readonly unrequestedGrants: readonly PluginGrant[];
   /** Grants deleted because their permission moved consent scope. */
   readonly scopeMovedGrants: readonly PluginGrant[];
+  /**
+   * The manifest version each deleted decision's consent act answered, by act
+   * id (#1150). A decision can outlive the version it was made against, so
+   * its revocation names the act's version, not the one this update replaces.
+   */
+  readonly revokedActVersions: ReadonlyMap<string, string>;
   /** Server-scope grants whose `decidedRiskLevel` this approval refreshed (#59). */
   readonly reStampedGrants: readonly PluginGrant[];
   /** Enabled household units that owe re-consent — announced after commit, never written (#1149). */
@@ -1649,6 +1655,24 @@ export class PluginUpdateService {
         initiatedAt,
       });
 
+      // The acts behind the deleted decisions, for the version each revocation
+      // names. The act table is append-only, so every act a row names is still
+      // there to read.
+      const revokedActIds = [
+        ...new Set(
+          [...revokedGrants, ...unrequestedGrants, ...scopeMovedGrants].flatMap((grant) =>
+            grant.actId === null ? [] : [grant.actId],
+          ),
+        ),
+      ];
+      const revokedActs =
+        revokedActIds.length === 0
+          ? []
+          : await tx.pluginConsentAct.findMany({
+              where: { id: { in: revokedActIds } },
+              select: { id: true, manifestVersion: true },
+            });
+
       return {
         plugin: updated,
         seededChecks,
@@ -1656,6 +1680,7 @@ export class PluginUpdateService {
         revokedGrants,
         unrequestedGrants,
         scopeMovedGrants,
+        revokedActVersions: new Map(revokedActs.map((act) => [act.id, act.manifestVersion])),
         reStampedGrants,
         reconsentHouseholdUnits,
         reconsentUserUnits,
@@ -1707,9 +1732,15 @@ export class PluginUpdateService {
         new PluginGrantRevokedEvent(
           grantSnapshot(grant),
           reason,
-          // The row no longer stores the manifest version (#1150): the revoked
-          // decision belongs to the manifest this update replaces.
-          { manifestVersion: before.version, actId: grant.actId },
+          // The row no longer stores the manifest version (#1150), so a
+          // household or user decision names its act's: consent given at one
+          // version can outlive the next unchanged one. A server decision has
+          // no act until #1152 and names the manifest this update replaces.
+          {
+            manifestVersion:
+              (grant.actId === null ? undefined : outcome.revokedActVersions.get(grant.actId)) ?? before.version,
+            actId: grant.actId,
+          },
           initiatedAt,
         ),
       );

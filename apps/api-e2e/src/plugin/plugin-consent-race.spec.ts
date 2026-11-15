@@ -13,7 +13,16 @@ import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier } from '../support/lock-barrier';
 import { bindTemplate, readShippedSql, readShippedValue } from '../support/shipped-sql';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { readConsentSurface, sendSwitchOn, sendToggle, switchOnBody, toggleBody } from './consent-act-fixtures';
+import {
+  readConsentSurface,
+  reviewBody,
+  sendReview,
+  sendSwitchOn,
+  sendToggle,
+  switchOnBody,
+  toggleBody,
+  type ConsentAnswerStatus,
+} from './consent-act-fixtures';
 import { LOCK_SOURCES } from './lock-order';
 import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
 import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
@@ -373,6 +382,113 @@ describe('consent decisions under concurrency (#360)', () => {
       });
 
       expect(decision).toMatchObject({ status: PluginGrantStatus.Granted, actId: acts[0]?.id });
+    });
+  });
+
+  describe('two reviews with opposite answers on one outstanding required permission', () => {
+    it("queue at the unit key, so the later one is judged against the earlier one's answer: one review lands and the other is refused (#1150)", async () => {
+      // An act classifies the unit's decisions and plans its answers under
+      // the unit's key. Classified before the key, a refusing review queued
+      // behind a granting one still planned the permission as outstanding,
+      // then denied the fresh grant and switched the unit off: both answered
+      // 200. Under the key, the later review sees what the earlier one left.
+      // A refusal after the grant is refused as not outstanding; a grant
+      // after the refusal finds the unit switched off.
+      //
+      // The granting review is queued first, the order that showed the flaw,
+      // but the assertions hold for either order and name no winner.
+      const owner = await actors.user();
+      const { household } = await actors.householdWithMembers({ owner });
+      const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK, POLICY_READ_CHECK]);
+      const unit = { householdId: household.id };
+      const before = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
+
+      await sendSwitchOn(baseUrl, owner, unit, plugin.slug, switchOnBody(before)).expect(200);
+
+      // What an activation leaves behind, arranged on the row: a manifest
+      // that requires a household permission nobody has answered yet.
+      const next = manifestWith('1.3.0', [MANAGE_DIGEST_CHECK, POLICY_READ_CHECK, HOUSEHOLD_CHECK]);
+      await db.client.plugin.update({
+        where: { id: plugin.id },
+        data: { version: next.version, manifestJson: next as never, installedSha256: 'c'.repeat(64) },
+      });
+
+      const surface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
+      const answer = (status: ConsentAnswerStatus) =>
+        sendReview(baseUrl, owner, unit, plugin.slug, reviewBody(surface, { [HOUSEHOLD_CHECK.slug]: status }));
+
+      const responses = await withBarrier(async (barrier) => {
+        const { holder } = barrier;
+
+        await holder.begin();
+        await holder.query(unitKeyLock.text, [bindTemplate(unitKeyFormat, [household.id, plugin.id])]);
+
+        const granting = fire(() => answer(PluginGrantStatus.Granted));
+
+        await expectBackendsQueuedBehind(barrier, {
+          heldBy: holder.pid,
+          count: 1,
+          description: 'the granting review',
+          timeoutMs: REQUEST_REACHES_LOCK_MS,
+        });
+
+        const refusing = fire(() => answer(PluginGrantStatus.Denied));
+
+        await expectBackendsQueuedBehind(barrier, {
+          heldBy: holder.pid,
+          count: 2,
+          description: 'the granting and the refusing review',
+          timeoutMs: REQUEST_REACHES_LOCK_MS,
+        });
+
+        // Released at once: both requests wait inside an interactive
+        // transaction on its default budget.
+        await holder.commit();
+
+        return { granting: await granting.settled, refusing: await refusing.settled };
+      });
+
+      // One review lands; the other is refused with the code its order earns.
+      const statuses = [responses.granting.status, responses.refusing.status];
+
+      expect(statuses.filter((status) => status === 200)).toHaveLength(1);
+
+      if (responses.granting.status === 200) {
+        expect(responses.refusing.status).toBe(422);
+        expect(responses.refusing.body).toMatchObject({
+          code: 'PLUGIN_CONSENT_ACT_ANSWER',
+          rule: 'not-outstanding',
+          permissionSlugs: [HOUSEHOLD_CHECK.slug],
+        });
+      } else {
+        expect(responses.granting.status).toBe(409);
+        expect(responses.granting.body).toMatchObject({ code: 'PLUGIN_CONSENT_ACT_UNIT_OFF' });
+      }
+
+      const reviews = await db.client.pluginConsentAct.findMany({
+        where: {
+          pluginId: plugin.id,
+          scopeType: PluginGrantScope.Household,
+          scopeId: household.id,
+          kind: PluginConsentActKind.Review,
+        },
+      });
+
+      expect(reviews).toHaveLength(1);
+
+      const decision = await db.client.pluginGrant.findFirstOrThrow({
+        where: {
+          pluginId: plugin.id,
+          scopeType: PluginGrantScope.Household,
+          scopeId: household.id,
+          permissionSlug: HOUSEHOLD_CHECK.slug,
+        },
+      });
+
+      // The decision is the landed review's, and the switch follows it: on
+      // with the grant, off with the refusal.
+      expect(decision.actId).toBe(reviews[0]?.id);
+      expect((await unitRow(household.id, plugin.id)).enabled).toBe(decision.status === PluginGrantStatus.Granted);
     });
   });
 

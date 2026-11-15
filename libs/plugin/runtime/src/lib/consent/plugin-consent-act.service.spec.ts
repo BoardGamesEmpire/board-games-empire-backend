@@ -426,6 +426,20 @@ describe('PluginConsentActService', () => {
       );
     });
 
+    it("classifies the unit's decisions only once it holds the unit's key, so the plan judges what an earlier act left (#1150)", async () => {
+      // Classified before the key, a review queued behind an act that granted
+      // a required permission would still plan its refusal as outstanding,
+      // then deny the grant and switch the unit off once the key came free.
+      classifier.classify.mockImplementation((...args: Parameters<typeof pendingClassification>) => {
+        order.push('classify');
+        return pendingClassification(...args);
+      });
+
+      await service.switchOn(householdSwitchOn);
+
+      expect(order.slice(0, 4)).toEqual(['household lock', 'plugin claim', 'advisory key', 'classify']);
+    });
+
     it('a switch-on naming a sha the plugin has moved off is refused before anything is written (#1150)', async () => {
       await expect(service.switchOn({ ...householdSwitchOn, manifestSha256: 'sha-elsewhere' })).rejects.toEqual(
         expect.objectContaining({ constructor: PluginConsentActStaleError, kind: 'manifest' }),

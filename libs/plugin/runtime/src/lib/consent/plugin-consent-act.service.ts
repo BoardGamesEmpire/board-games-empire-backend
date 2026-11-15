@@ -257,8 +257,26 @@ export class PluginConsentActService {
           householdSurface: household && kind === 'SwitchOn',
         });
 
-        // The catalog and the unit's decisions are read under the claim, through
-        // this transaction, for the reason `decide()` reads the risk there (#361).
+        // The unit's advisory key, before anything that judges or writes this
+        // unit. Every other writer of the unit takes it before the unit
+        // enablement (see unit-scope-lock.ts); an act takes it before its
+        // decisions as well, so two acts on one unit run one after the other.
+        // The later one classifies and plans against the decisions and the
+        // switch the earlier one left: a review refusing a required
+        // permission the earlier act granted is refused as not outstanding
+        // rather than switching the unit off on a plan made before that grant;
+        // an act whose answers already stand records nothing; and each act
+        // announces its changes against the rows it found, never against rows
+        // the earlier act has since replaced (#1150).
+        if (household) {
+          await lockHouseholdUnitScope(tx, unit.householdId, plugin.id);
+        } else {
+          await lockUserUnitScope(tx, unit.userId, plugin.id);
+        }
+
+        // The catalog and the unit's decisions are read under the claim and
+        // the key, through this transaction, for the reason `decide()` reads
+        // the risk there (#361).
         const classification = await this.classifier.classify(plugin.id, unit, named.validated.permissionChecks, {
           source: named.source,
           client: tx,
@@ -278,20 +296,6 @@ export class PluginConsentActService {
           locale,
           defaultLocale: this.options.defaultLocale,
         });
-
-        // The unit's advisory key, before anything that judges or writes this
-        // unit. Every other writer of the unit takes it before the unit
-        // enablement (see unit-scope-lock.ts); an act takes it before its
-        // decisions as well, so two acts on one unit run one after the other.
-        // The later one reads the decisions and the switch the earlier one
-        // left: it records nothing when they already say what it asks, and it
-        // announces its own changes against those rows, never against rows
-        // the earlier act has since replaced (#1150).
-        if (household) {
-          await lockHouseholdUnitScope(tx, unit.householdId, plugin.id);
-        } else {
-          await lockUserUnitScope(tx, unit.userId, plugin.id);
-        }
 
         // Read under the key, before anything is written, so an act that
         // would change nothing writes nothing: no act, no decision, no event.
