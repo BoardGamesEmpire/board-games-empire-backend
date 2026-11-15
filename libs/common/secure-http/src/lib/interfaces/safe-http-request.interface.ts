@@ -51,6 +51,11 @@ export interface SafeHttpRequestOptions {
    * Headers forwarded verbatim. `Host` is set automatically by the service
    * to the URL's original hostname (for vhost routing on a pinned IP); any
    * `Host` entry the caller supplies is overwritten.
+   *
+   * A redirect to another origin (another host, another port, or https down
+   * to http) goes on without `authorization`, `cookie` and
+   * `proxy-authorization`, as fetch does. Any other header follows every
+   * redirect (#1083).
    */
   headers?: Record<string, string>;
 
@@ -83,7 +88,10 @@ export interface SafeHttpRequestOptions {
 
   /**
    * Caller-controlled cancellation. Composes with the request timeout —
-   * whichever fires first wins.
+   * whichever fires first wins. A request already cancelled when a hop
+   * begins starts neither that hop nor its address lookup; a lookup already
+   * under way runs to its end, bounded by the resolver's own timeouts, and
+   * the hop after it is not sent (#1083).
    */
   signal?: AbortSignal;
 
@@ -126,6 +134,7 @@ export interface SafeHttpDownloadOptions {
    */
   timeoutMs: number;
 
+  /** Forwarded as `SafeHttpRequestOptions.headers` are, credentials rule included. */
   headers?: Record<string, string>;
 
   /**

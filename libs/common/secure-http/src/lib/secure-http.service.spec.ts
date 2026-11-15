@@ -449,6 +449,147 @@ describe('SecureHttpService', () => {
         expect(response.finalUrl).toBe('http://elsewhere.com/final');
       });
     });
+
+    // The caller's headers ride along on every hop. A credential among them
+    // is meant for the origin the caller named, so a redirect that leaves
+    // that origin (another host, another port, or https down to http) goes
+    // on without it, as fetch does. A plugin's declared hosts are checked by
+    // name only, so without this its key would follow a redirect onto http
+    // or onto another declared host (#1083).
+    describe("the caller's credentials on a redirect (#1083)", () => {
+      const sent = {
+        Authorization: 'Bearer KEY',
+        Cookie: 'session=1',
+        'Proxy-Authorization': 'Basic cHJveHk=',
+        'x-trace': 't-1',
+      };
+
+      /** Follows one redirect from `from` to `to` and returns the headers the second hop carried. */
+      const headersAfterRedirect = async (from: string, to: string): Promise<Record<string, string>> => {
+        const dns = new FakeDnsResolver();
+        dns.set('example.com', [v4('8.8.8.8')]);
+        dns.set('elsewhere.com', [v4('1.1.1.1')]);
+        const first = new URL(from);
+        const second = new URL(to);
+        let seen: Record<string, string> = {};
+        mockAgent
+          .get(first.origin)
+          .intercept({ path: first.pathname })
+          .reply(Http.Found, '', { headers: { location: to } });
+        mockAgent
+          .get(second.origin)
+          .intercept({ path: second.pathname })
+          .reply(Http.Ok, (opts) => {
+            seen = opts.headers as Record<string, string>;
+            return { ok: true };
+          });
+        const { service } = buildService({ dns, mockAgent });
+
+        const response = await service.request(from, { headers: sent });
+
+        expect(response.redirectCount).toBe(1);
+        return seen;
+      };
+
+      it.each([
+        ['another host', 'https://example.com/a', 'https://elsewhere.com/b'],
+        ['http, from https', 'https://example.com/a', 'http://example.com/b'],
+        ['another port', 'https://example.com/a', 'https://example.com:8443/b'],
+      ])('drops them when the redirect goes to %s (#1083)', async (_label, from, to) => {
+        const seen = await headersAfterRedirect(from, to);
+
+        expect(seen).not.toHaveProperty('authorization');
+        expect(seen).not.toHaveProperty('cookie');
+        expect(seen).not.toHaveProperty('proxy-authorization');
+        expect(seen['x-trace']).toBe('t-1');
+      });
+
+      it('keeps them when the redirect stays on the same origin (#1083)', async () => {
+        const seen = await headersAfterRedirect('https://example.com/a', 'https://example.com/b');
+
+        expect(seen).toMatchObject({
+          authorization: 'Bearer KEY',
+          cookie: 'session=1',
+          'proxy-authorization': 'Basic cHJveHk=',
+          'x-trace': 't-1',
+        });
+      });
+
+      // Once dropped they stay dropped, as in fetch: a later hop back to the
+      // first origin was reached through the other one.
+      it('does not put them back when a later redirect returns to the first origin (#1083)', async () => {
+        const dns = new FakeDnsResolver();
+        dns.set('example.com', [v4('8.8.8.8')]);
+        dns.set('elsewhere.com', [v4('1.1.1.1')]);
+        let seen: Record<string, string> = {};
+        mockAgent
+          .get('https://example.com')
+          .intercept({ path: '/a' })
+          .reply(Http.Found, '', { headers: { location: 'https://elsewhere.com/b' } });
+        mockAgent
+          .get('https://elsewhere.com')
+          .intercept({ path: '/b' })
+          .reply(Http.Found, '', { headers: { location: 'https://example.com/c' } });
+        mockAgent
+          .get('https://example.com')
+          .intercept({ path: '/c' })
+          .reply(Http.Ok, (opts) => {
+            seen = opts.headers as Record<string, string>;
+            return { ok: true };
+          });
+        const { service } = buildService({ dns, mockAgent });
+
+        await service.request('https://example.com/a', { headers: sent });
+
+        expect(seen).not.toHaveProperty('authorization');
+        expect(seen['x-trace']).toBe('t-1');
+      });
+    });
+  });
+
+  // RFC 9110 lets a recipient join a repeated header's values with a comma,
+  // except Set-Cookie: a cookie's Expires date holds a comma, so the joined
+  // value can't be split again. The plugin HTTP client rebuilds a Response
+  // from this answer and needs each cookie by itself (#1083).
+  describe('Set-Cookie', () => {
+    it('hands back each Set-Cookie header by itself (#1083)', async () => {
+      const dns = new FakeDnsResolver();
+      dns.set('example.com', [v4('8.8.8.8')]);
+      const { service, pool } = buildService({ dns, mockAgent });
+      const cookies = ['a=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT', 'b=2'];
+      pool.intercept({ path: '/login' }).reply(Http.Ok, { ok: true }, { headers: { 'set-cookie': cookies } });
+
+      const response = await service.request('http://example.com/login');
+
+      expect(response.setCookie).toEqual(cookies);
+    });
+
+    it('hands back one cookie as a list of one, and none as an empty list (#1083)', async () => {
+      const dns = new FakeDnsResolver();
+      dns.set('example.com', [v4('8.8.8.8')]);
+      const { service, pool } = buildService({ dns, mockAgent });
+      pool.intercept({ path: '/one' }).reply(Http.Ok, { ok: true }, { headers: { 'set-cookie': 'a=1' } });
+      pool.intercept({ path: '/none' }).reply(Http.Ok, { ok: true });
+
+      expect((await service.request('http://example.com/one')).setCookie).toEqual(['a=1']);
+      expect((await service.request('http://example.com/none')).setCookie).toEqual([]);
+    });
+  });
+
+  describe("the caller's signal", () => {
+    // The outbound HTTP policy's address lookup takes no signal. A request
+    // cancelled before a hop begins must not start one (#1083).
+    it('looks no address up for a request that is already cancelled (#1083)', async () => {
+      const dns = new FakeDnsResolver();
+      dns.set('example.com', [v4('8.8.8.8')]);
+      const resolveAll = jest.spyOn(dns, 'resolveAll');
+      const { service } = buildService({ dns, mockAgent });
+
+      await expect(service.request('http://example.com/a', { signal: AbortSignal.abort() })).rejects.toBeInstanceOf(
+        OutboundNetworkError,
+      );
+      expect(resolveAll).not.toHaveBeenCalled();
+    });
   });
 
   describe('retry', () => {

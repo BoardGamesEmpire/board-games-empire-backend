@@ -39,6 +39,7 @@ describe('buildPluginHttp', () => {
     durationMs: 1,
     finalUrl: 'https://api.example.com/',
     redirectCount: 0,
+    setCookie: [],
     ...overrides,
   });
 
