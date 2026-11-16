@@ -21,6 +21,12 @@ export default {
   // tests. CI goes faster by splitting the files across jobs instead (`--shard`,
   // #684), each with its own containers and API child, so this model holds.
   maxWorkers: 1,
+  // With one worker, Jest would run every file inside its main process, which
+  // keeps what each file loads: about 47 MB a file, so an 85-file shard ran
+  // out of heap near 4 GB on its last file (#1083). A memory limit makes Jest
+  // run the files in one worker instead, and replace it, between files, once
+  // it holds more than this. Still one worker at a time, so the model holds.
+  workerIdleMemoryLimit: '1GB',
   // Applies to hooks too — first requests land while the server JIT-warms
   // against freshly started containers.
   testTimeout: 120_000,
