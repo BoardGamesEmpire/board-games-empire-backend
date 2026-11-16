@@ -147,6 +147,21 @@ export interface PluginInventoryIdentity {
 }
 
 /**
+ * A plugin running at server scope, as signed-in server discovery names it
+ * (#78): which plugin it is, its plugin category, and what it is called.
+ * Narrower than {@link PluginInventoryIdentity} on purpose. Every signed-in
+ * actor reads it, so it carries no row id, no scope and no unreadable marker:
+ * a plugin whose stored plugin manifest cannot be read is not running for
+ * anyone and is left out instead.
+ */
+export interface RunningServerPlugin {
+  readonly slug: string;
+  readonly category: PluginCategory;
+  /** The plugin manifest's `displayName` in the requested locale, else the default locale's. */
+  readonly displayName: string;
+}
+
+/**
  * The server viewpoint (`read:plugin`): identity plus the operational and
  * provenance picture an admin manages the install from.
  */
@@ -305,9 +320,10 @@ type UnitStateRow = { enabled: boolean; dormantReason?: PluginUnitDormantReason 
  * inventory covered every action and every per-unit read and nothing that
  * enumerates.
  *
- * Three list surfaces and one detail read, all built here rather than at the
- * edge, because the row set, the tombstone predicate, the per-row manifest
- * degradation, and the localization chain are domain rules that the three
+ * Three paged list surfaces, one detail read, and the unpaged list of plugins
+ * running at server scope (#78), all built here rather than at the edge,
+ * because the row set, the tombstone predicate, the per-row manifest
+ * degradation, and the localization chain are domain rules that the
  * controllers must not each re-derive.
  *
  * **Paging (D-CD).** Rows and `total` share ONE `RepeatableRead`
@@ -320,9 +336,11 @@ type UnitStateRow = { enabled: boolean; dormantReason?: PluginUnitDormantReason 
  * **No caching.** These bodies are read immediately after the lifecycle
  * writes that change them.
  *
- * **Ceilings (#517).** Each list takes the caller's ceiling as a required
- * function and runs the `where` it returns for both the rows and the count;
- * see {@link PluginInventoryCeiling}.
+ * **Ceilings (#517).** Each paged list takes the actor's ceiling as a
+ * required function and runs the `where` it returns for both the rows and the
+ * count; see {@link PluginInventoryCeiling}. The one exception is
+ * `listRunningOnServer`, which takes no ceiling by design: which plugins run on
+ * the server is a fact of the server that every signed-in actor reads (#78).
  */
 @Injectable()
 export class PluginInventoryService {
@@ -359,6 +377,44 @@ export class PluginInventoryService {
     );
 
     return { rows: rows.map((row) => this.toEntry(row, options.locale)), total };
+  }
+
+  /**
+   * The plugins running at server scope, for signed-in server discovery (#78):
+   * enabled, installed, not failed at load, and with a stored plugin manifest
+   * that still re-validates. A plugin whose plugin manifest no longer validates
+   * is left out rather than degraded, because the ability path refuses it too,
+   * so it is not running; one bad row never takes out the rest of the list.
+   *
+   * A failed load is checked apart from the switch. The loader quarantines a
+   * plugin by switching it off and marking the failure, and an admin who
+   * switches it back on leaves the failure marked until a restart loads it.
+   *
+   * Deliberately not composed under the actor's ceiling, unlike the lists
+   * above. Which plugins run on the server is a fact of the server that every
+   * signed-in actor reads, an anonymous user included, and an anonymous user
+   * holds no plugin read at all. What it reveals is bounded by the shape: slug,
+   * plugin category and display name, no unit state and nothing operational.
+   *
+   * One statement with no page and no count, so there is no transaction to
+   * hold two reads consistent.
+   */
+  async listRunningOnServer(locale?: string): Promise<RunningServerPlugin[]> {
+    const rows = await this.db.plugin.findMany({
+      where: { scope: PluginScope.Server, enabled: true, uninstalledAt: null, loadFailed: false },
+      select: IDENTITY_SELECT,
+      orderBy: { slug: 'asc' },
+    });
+
+    const resolveText = this.textResolver(locale);
+
+    return rows.flatMap((row) => {
+      const validated = this.validatedOrNull(row);
+
+      return validated === null
+        ? []
+        : [{ slug: row.slug, category: row.category, displayName: resolveText(validated.manifest.displayName) }];
+    });
   }
 
   /**
