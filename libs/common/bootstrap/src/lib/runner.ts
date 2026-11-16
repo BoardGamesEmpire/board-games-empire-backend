@@ -1,4 +1,5 @@
-import { classifyMigrationState, type MigrationState, type MigrationStateKind } from '@bge/database';
+import type { MigrationState, MigrationStateKind } from '@bge/database';
+import { classifyMigrationState, DEVELOPMENT_DATABASE_RESET_LINE, divergedFixLines } from '@bge/database';
 import { SpanStatusCode, trace, type Span, type Tracer } from '@opentelemetry/api';
 import { DATABASE_URL_VARIABLE, MIGRATION_URL_VARIABLE, type MigrationCredential } from './migration-credential';
 import {
@@ -49,6 +50,13 @@ export interface BootstrapSummary {
    */
   readonly migrationCredential?: MigrationCredential;
   readonly unknownMigrations: readonly string[];
+
+  /**
+   * The unknown migrations applied by a run before the last run that applied
+   * migrations this build knows, as the last read of the ledger found them:
+   * the history was rewritten (#1148). A subset of {@link unknownMigrations}.
+   */
+  readonly divergedMigrations: readonly string[];
   /** False for every process without a migrator, and for the api over a database that is ahead of it. */
   readonly seedsRun: boolean;
   /**
@@ -176,10 +184,62 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
     const deadlineAt = started + waitMs;
 
     let firstState: MigrationStateKind | undefined;
-    // What the ledger showed when the loop settled: `in-sync` or `ahead`.
+    // What the ledger showed when the loop settled: `in-sync`, `ahead` or `diverged`.
     let settledState: MigrationStateKind = 'in-sync';
     let unknownMigrations: readonly string[] = [];
-    let warnedUnknown: string | undefined;
+    let divergedMigrations: readonly string[] = [];
+
+    // Called once, on the read the boot settles on: a read while the schema is
+    // behind classifies the unknown migrations before the pending ones apply,
+    // and those can turn one that came in the last run into one before it, a
+    // rewritten history rather than a rollback (#1148).
+    const warnAboutUnknown = (state: MigrationState): void => {
+      const rewritten = new Set(state.diverged);
+      const newer = state.unknown.filter((name) => !rewritten.has(name));
+      if (newer.length > 0) {
+        logger.warn(
+          `The database holds ${newer.length} migration(s) this build does not know (${newer.join(', ')}). ` +
+            'Booting anyway: this is a rollback, or a newer build migrated first. Forward-only migrations must stay compatible with the previous build.',
+        );
+      }
+
+      if (state.diverged.length > 0) {
+        logger.warn(
+          `The database holds ${state.diverged.length} migration(s) this build does not know, applied before a later ` +
+            `run of migrations it does know (${state.diverged.join(', ')}): the migration history was rewritten. ` +
+            `${divergedFixLines(state.diverged).join(' ')} ${divergedOutcome(state)}`,
+        );
+      }
+    };
+
+    // What the boot does next, said where the fix is: deleting a diverged row
+    // does not run the seeds while a newer migration is also present.
+    const divergedOutcome = (state: MigrationState): string => {
+      if (!migrator) return 'Booting anyway.';
+      if (state.kind === 'diverged') return 'Running the seeds and the data migrations, as over a database in sync.';
+      return (
+        'Booting anyway, with the seeds and the data migrations skipped while the database is also ahead of this ' +
+        'build; deleting these rows does not change that.'
+      );
+    };
+
+    // The warning that would have come after migrating, when migrating fails
+    // instead: a pending migration that repeats a renamed one's changes fails
+    // on them, and the row left under the old name is the explanation (#1148).
+    // No DELETE here: while the pending migration stays failed, deleting the
+    // old row recovers nothing, and the failure may have another cause.
+    const warnAboutUnknownAfterFailedMigrate = (state: MigrationState): void => {
+      if (state.unknown.length === 0) return;
+      logger.warn(
+        `Applying this build's migrations failed over a database holding ${state.unknown.length} migration(s) it ` +
+          `does not know (${state.unknown.join(', ')}). A migration renamed or deleted after the database applied ` +
+          'it leaves its row behind, and a pending migration repeating its changes fails on them. ' +
+          'Resolve the failed migration first: the next boot names it and how to mark it. If one of these was ' +
+          "renamed or deleted, then, once this build's migrations hold its changes, delete its row from " +
+          `_prisma_migrations. ${DEVELOPMENT_DATABASE_RESET_LINE}`,
+      );
+    };
+
     let migrationsApplied: readonly string[] = [];
     let seedsRun = false;
     let reconcile: ReconcileSummary | undefined;
@@ -197,23 +257,14 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
         const state = await phase('schema.read', readState);
         firstState ??= state.kind;
         unknownMigrations = state.unknown;
+        divergedMigrations = state.diverged;
 
         if (state.kind === 'failed') {
           throw new FailedMigrationError(state.failed);
         }
 
-        // Once per distinct set: a waiting process re-reads every poll and
-        // would otherwise bury its own progress line under copies of this.
-        const unknownKey = state.unknown.join(',');
-        if (state.unknown.length > 0 && warnedUnknown !== unknownKey) {
-          warnedUnknown = unknownKey;
-          logger.warn(
-            `The database holds ${state.unknown.length} migration(s) this build does not know (${state.unknown.join(', ')}). ` +
-              'Booting anyway: this is a rollback, or a newer build migrated first. Forward-only migrations must stay compatible with the previous build.',
-          );
-        }
-
         if (state.kind !== 'behind') {
+          warnAboutUnknown(state);
           settledState = state.kind;
           // The wait ends with the read that found the schema up, not when the lock came back.
           if (waiting) waitedMs = clock.now() - started;
@@ -227,13 +278,23 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
           // The ledger is read on a connection of its own, so the read can succeed
           // while the lock's connection fails beside it.
           lock.assertHeld();
-          await phase('schema.migrate', () => migrator.apply(state.pending));
+          let after: MigrationState;
+          try {
+            await phase('schema.migrate', () => migrator.apply(state.pending));
 
-          const after = await phase('schema.read', readState);
-          if (after.kind === 'failed') throw new FailedMigrationError(after.failed);
-          if (after.pending.length > 0) {
-            throw new MigrationsStillPendingError(after.pending, options.migrationCredential);
+            after = await phase('schema.read', readState);
+            if (after.kind === 'failed') throw new FailedMigrationError(after.failed);
+            if (after.pending.length > 0) {
+              throw new MigrationsStillPendingError(after.pending, options.migrationCredential);
+            }
+          } catch (error) {
+            warnAboutUnknownAfterFailedMigrate(state);
+            throw error;
           }
+
+          unknownMigrations = after.unknown;
+          divergedMigrations = after.diverged;
+          warnAboutUnknown(after);
 
           migrationsApplied = state.pending;
           settledState = after.kind;
@@ -272,7 +333,9 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
         // reconcile, and this build's manifest would retire the permissions and
         // revoke the grants a newer build added; its data migrations would shape
         // data the newer build already shaped. That data belongs to the build
-        // that knows those migrations.
+        // that knows those migrations. A diverged database seeds: a run before
+        // the last one applied each of its unknown migrations, so this build's
+        // lineage owns the data and nothing newer is serving (#1148).
         if (settledState === 'ahead') {
           logger.log(
             'Seeds and data migrations skipped: the database is ahead of this build, so the newer build owns the data.',
@@ -321,6 +384,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
         ? { migrationCredential: options.migrationCredential }
         : {}),
       unknownMigrations,
+      divergedMigrations,
       seedsRun,
       reconcile,
       dataMigrations,

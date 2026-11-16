@@ -133,6 +133,27 @@ jobs:
       - name: Check formatting
         run: npx nx format:check --all
 
+      # No migration already on master may be removed or renamed (#1148). A
+      # database that applied one keeps its row in _prisma_migrations, and the
+      # next boot finds a migration no build knows. The replay below can't see
+      # it: renamed migrations still build the same schema. Exit 2 names each
+      # missing migration. Editing one in place stays allowed (pre-alpha).
+      #
+      # The base differs by event. A pull request compares with its merge base
+      # with origin/master, not with its own base branch, so a stacked pull
+      # request may still rename a migration that only the branch below it
+      # holds. A push to master compares with the commit before the push. The
+      # checkout's `fetch-depth: 0` is what makes origin/master and that commit
+      # readable; a base git can't read fails the step rather than passing it.
+      # A merge queue (#1314) would pass github.event.merge_group.base_sha.
+      #
+      # There is no bypass by design: a deliberate rewrite of the migration
+      # history removes this step in its own pull request.
+      - name: Check no migration on master was removed or renamed
+        env:
+          MIGRATION_HISTORY_BASE: ${{ github.event_name == 'push' && github.event.before || '' }}
+        run: npm run db:migrate:check-history
+
       # The migrations and the models must agree (#586). The check replays
       # prisma/migrations into the shadow database and compares the result with
       # prisma/models. Exit 2 means they differ, and the output names what. A

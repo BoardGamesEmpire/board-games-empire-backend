@@ -23,11 +23,19 @@ const CHAIN = ['20260109_init', '20260219_games', '20260301_permissions'];
 const at = new Date('2026-09-01T00:00:00Z');
 const finished = (name: string): AppliedMigrationRow => ({
   migration_name: name,
+  started_at: at,
   finished_at: at,
+  rolled_back_at: null,
+});
+const finishedAt = (name: string, iso: string): AppliedMigrationRow => ({
+  migration_name: name,
+  started_at: new Date(iso),
+  finished_at: new Date(iso),
   rolled_back_at: null,
 });
 const unfinished = (name: string): AppliedMigrationRow => ({
   migration_name: name,
+  started_at: at,
   finished_at: null,
   rolled_back_at: null,
 });
@@ -73,10 +81,15 @@ class FakeLock implements BootstrapLock {
 
 class FakeMigrator implements Migrator {
   calls: (readonly string[])[] = [];
-  constructor(private readonly ledger: FakeLedger) {}
+  /** `finishAt` stamps the rows it applies; by default the same instant as `finished`. */
+  constructor(
+    private readonly ledger: FakeLedger,
+    private readonly finishAt?: string,
+  ) {}
   async apply(pending: readonly string[]): Promise<void> {
     this.calls.push(pending);
-    this.ledger.rows.push(...pending.map(finished));
+    const finishAt = this.finishAt;
+    this.ledger.rows.push(...pending.map((name) => (finishAt ? finishedAt(name, finishAt) : finished(name))));
   }
 }
 
@@ -481,6 +494,248 @@ describe('the boot sequence', () => {
     expect(seeder.runs).toBe(0);
     expect(summary.seedsRun).toBe(false);
     expect(summary.reconcile).toBeUndefined();
+  });
+
+  // A migration renamed or deleted on master, or another branch's migration,
+  // was applied by a run before the last run of migrations this build knows:
+  // the history was rewritten,
+  // and nothing newer is serving. The boot warns, naming the fixes, and seeds
+  // as over a database in sync (#1148).
+  describe('a migration history that was rewritten (#1148)', () => {
+    const RENAMED = '20260215_renamed_away';
+    const EARLIER = '2026-09-01T00:00:00Z';
+    const LATER = '2026-09-02T00:00:00Z';
+    const warnings = () => logger.lines.filter((line) => line.startsWith('warn: '));
+
+    it('diverged: warns naming the migration and both fixes, then runs the seeds and the data migrations (#1148)', async () => {
+      const ledger = new FakeLedger([finishedAt(RENAMED, EARLIER), ...CHAIN.map((name) => finishedAt(name, LATER))]);
+      let dataMigrationRuns = 0;
+
+      const summary = await runBootstrapSequence({
+        expected: CHAIN,
+        ledger,
+        lock,
+        seeder,
+        dataMigrations: {
+          run: async () => {
+            dataMigrationRuns += 1;
+            return NO_DATA_MIGRATIONS;
+          },
+        },
+        logger,
+        clock,
+        migrator: new FakeMigrator(ledger),
+      });
+
+      expect(summary.state).toBe('diverged');
+      expect(summary.unknownMigrations).toEqual([RENAMED]);
+      expect(summary.divergedMigrations).toEqual([RENAMED]);
+      expect(seeder.runs).toBe(1);
+      expect(summary.seedsRun).toBe(true);
+      expect(dataMigrationRuns).toBe(1);
+      expect(warnings()).toHaveLength(1);
+      expect(warnings()[0]).toContain(RENAMED);
+      expect(warnings()[0]).toContain(`DELETE FROM _prisma_migrations WHERE migration_name = '${RENAMED}';`);
+      expect(warnings()[0]).toMatch(/On a development database, .*`npm run db:reset`/);
+      expect(warnings()[0]).toContain('Running the seeds and the data migrations');
+      expect(logger.lines.some((line) => /skipped/i.test(line))).toBe(false);
+    });
+
+    it('behind with a migrator over a renamed migration: applies the pending ones, then finds the history diverged and seeds, as the test server needed (#1148)', async () => {
+      const ledger = new FakeLedger([finishedAt('20260109_init', LATER), finishedAt(RENAMED, EARLIER)]);
+      const migrator = new FakeMigrator(ledger);
+
+      const summary = await runBootstrapSequence({
+        expected: CHAIN,
+        ledger,
+        lock,
+        seeder,
+        dataMigrations: noDataMigrations,
+        logger,
+        clock,
+        migrator,
+      });
+
+      expect(summary.state).toBe('behind');
+      expect(summary.migrationsApplied).toEqual(['20260219_games', '20260301_permissions']);
+      expect(summary.divergedMigrations).toEqual([RENAMED]);
+      expect(seeder.runs).toBe(1);
+    });
+
+    it('behind with a migrator, the renamed migration finishing last until its new name applies: warns once, after migrating, that the history diverged, and seeds (#1148)', async () => {
+      // The test server's own order: the old name was the last migration it
+      // ran, and the build that renamed it brings the new name as pending.
+      const ledger = new FakeLedger([
+        finishedAt('20260109_init', EARLIER),
+        finishedAt('20260219_games', EARLIER),
+        finishedAt(RENAMED, LATER),
+      ]);
+      const migrator = new FakeMigrator(ledger, '2026-09-03T00:00:00Z');
+
+      const summary = await runBootstrapSequence({
+        expected: CHAIN,
+        ledger,
+        lock,
+        seeder,
+        dataMigrations: noDataMigrations,
+        logger,
+        clock,
+        migrator,
+      });
+
+      expect(summary.state).toBe('behind');
+      expect(summary.migrationsApplied).toEqual(['20260301_permissions']);
+      expect(summary.divergedMigrations).toEqual([RENAMED]);
+      expect(seeder.runs).toBe(1);
+      // Not the rollback warning the read before migrating would give: the
+      // migrations this boot applied are what make the history diverged.
+      expect(warnings()).toHaveLength(1);
+      expect(warnings()[0]).toContain('the migration history was rewritten');
+      expect(warnings()[0]).toContain('Running the seeds and the data migrations');
+    });
+
+    it('behind with a migrator whose migrations fail over a renamed migration: names the old row, and puts resolving the failed migration before deleting any row (#1148)', async () => {
+      // The new name repeats the old one's changes, so applying it fails on
+      // them; the row under the old name is what explains the refusal. Deleting
+      // that row alone recovers nothing while the new name stays failed, and the
+      // failure may have nothing to do with it, so the warning prints no DELETE.
+      const ledger = new FakeLedger([
+        finishedAt('20260109_init', EARLIER),
+        finishedAt('20260219_games', EARLIER),
+        finishedAt(RENAMED, LATER),
+      ]);
+      const migrator: Migrator = {
+        apply: async () => {
+          throw new Error('relation "game_search" already exists');
+        },
+      };
+
+      const run = runBootstrapSequence({
+        expected: CHAIN,
+        ledger,
+        lock,
+        seeder,
+        dataMigrations: noDataMigrations,
+        logger,
+        clock,
+        migrator,
+      });
+
+      await expect(run).rejects.toThrow(/already exists/);
+      expect(seeder.runs).toBe(0);
+      expect(warnings()).toHaveLength(1);
+      expect(warnings()[0]).toContain(RENAMED);
+      expect(warnings()[0]).toMatch(/Resolve the failed migration first.*then.*delete its row/);
+      expect(warnings()[0]).not.toContain('DELETE FROM');
+      expect(warnings()[0]).toMatch(/On a development database, .*`npm run db:reset`/);
+      expect(warnings()[0]).not.toMatch(/rollback/);
+    });
+
+    it('behind without a migrator while the api migrates over a renamed migration that finished last: warns once, that the history diverged, never that it is a rollback (#1148)', async () => {
+      // Before the api applies the new name, the old one is in the last run
+      // and reads as newer; after, it reads as diverged. Only the settled read
+      // is warned about.
+      const ledger = new FakeLedger([
+        finishedAt('20260109_init', EARLIER),
+        finishedAt('20260219_games', EARLIER),
+        finishedAt(RENAMED, LATER),
+      ]);
+      const original = ledger.readApplied.bind(ledger);
+      ledger.readApplied = async () => {
+        const rows = await original();
+        if (ledger.reads === 2) ledger.rows.push(finishedAt('20260301_permissions', '2026-09-03T00:00:00Z'));
+        return rows;
+      };
+
+      const summary = await runBootstrapSequence({
+        expected: CHAIN,
+        ledger,
+        lock,
+        seeder,
+        dataMigrations: noDataMigrations,
+        logger,
+        clock,
+        waitMs: 60_000,
+        schemaPollMs: 5_000,
+      });
+
+      expect(summary.state).toBe('behind');
+      expect(summary.divergedMigrations).toEqual([RENAMED]);
+      expect(ledger.reads).toBe(3);
+      expect(warnings()).toHaveLength(1);
+      expect(warnings()[0]).toContain('the migration history was rewritten');
+      expect(warnings().some((line) => /rollback/.test(line))).toBe(false);
+    });
+
+    it('ahead and diverged together: ahead wins, the seeds are skipped, and both are warned about', async () => {
+      const ledger = new FakeLedger([
+        finishedAt(RENAMED, EARLIER),
+        ...CHAIN.map((name) => finishedAt(name, LATER)),
+        finishedAt('20260910_from_the_future', '2026-09-03T00:00:00Z'),
+      ]);
+
+      const summary = await runBootstrapSequence({
+        expected: CHAIN,
+        ledger,
+        lock,
+        seeder,
+        dataMigrations: noDataMigrations,
+        logger,
+        clock,
+        migrator: new FakeMigrator(ledger),
+      });
+
+      expect(summary.state).toBe('ahead');
+      expect(summary.unknownMigrations).toEqual([RENAMED, '20260910_from_the_future']);
+      expect(summary.divergedMigrations).toEqual([RENAMED]);
+      expect(seeder.runs).toBe(0);
+      expect(warnings().some((line) => line.includes('20260910_from_the_future') && /newer build/.test(line))).toBe(
+        true,
+      );
+      expect(warnings().some((line) => line.includes(RENAMED) && line.includes('DELETE FROM _prisma_migrations'))).toBe(
+        true,
+      );
+      // The rollback warning names only the newer migration.
+      expect(warnings().some((line) => /newer build/.test(line) && line.includes(RENAMED))).toBe(false);
+      expect(warnings().some((line) => line.includes('Running the seeds'))).toBe(false);
+      // Deleting the diverged row alone would not bring the seeds back, and the warning says so.
+      expect(
+        warnings().some((line) => line.includes(RENAMED) && /deleting these rows does not change that/.test(line)),
+      ).toBe(true);
+      expect(logger.lines.some((line) => line.startsWith('log: ') && /seeds.*skipped/i.test(line))).toBe(true);
+    });
+
+    it('warns about a diverged set once, not on every poll', async () => {
+      const ledger = new FakeLedger([finishedAt('20260109_init', LATER), finishedAt(RENAMED, EARLIER)]);
+      const original = ledger.readApplied.bind(ledger);
+      ledger.readApplied = async () => {
+        const rows = await original();
+        if (ledger.reads === 3) {
+          ledger.rows = [...CHAIN.map((name) => finishedAt(name, LATER)), finishedAt(RENAMED, EARLIER)];
+        }
+
+        return rows;
+      };
+
+      const summary = await runBootstrapSequence({
+        expected: CHAIN,
+        ledger,
+        lock,
+        seeder,
+        dataMigrations: noDataMigrations,
+        logger,
+        clock,
+        waitMs: 60_000,
+        schemaPollMs: 5_000,
+      });
+
+      expect(summary.state).toBe('behind');
+      expect(summary.divergedMigrations).toEqual([RENAMED]);
+      expect(ledger.reads).toBe(4);
+      expect(warnings()).toHaveLength(1);
+      // A process without a migrator runs no seeds, so the warning does not say it will.
+      expect(warnings()[0]).not.toContain('Running the seeds');
+    });
   });
 
   it('ends every span, the root included, when the lock itself cannot be acquired', async () => {

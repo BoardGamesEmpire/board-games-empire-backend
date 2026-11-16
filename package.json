@@ -16,6 +16,7 @@
     "compile": "nx run-many -t build --parallel",
     "db:generate": "nx run database:generate",
     "db:migrate:check": "node libs/scripts/src/bin/check-migrations.js",
+    "db:migrate:check-history": "node libs/scripts/src/bin/check-migration-history.js",
     "db:migrate:new": "prisma migrate dev --name",
     "db:migrate": "prisma migrate deploy",
     "db:plan": "tsx libs/database/src/plan-cli.ts",

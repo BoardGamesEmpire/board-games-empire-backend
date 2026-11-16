@@ -60,15 +60,20 @@ describe('db:plan against Postgres', () => {
     await db.close();
   });
 
-  /** A row as `migrate deploy` writes one: finished, or started and left. */
-  async function insertMigrationRow(name: string, finished: boolean): Promise<void> {
+  /**
+   * A row as `migrate deploy` writes one: finished, or started and left.
+   * `finishedAt` places a finished row before the harness's own migrations,
+   * as a migration renamed away would be (#1148).
+   */
+  async function insertMigrationRow(name: string, finished: boolean, finishedAt: Date = new Date()): Promise<void> {
     await db.client.$executeRawUnsafe(
       'INSERT INTO _prisma_migrations (id, checksum, migration_name, started_at, finished_at, applied_steps_count) ' +
-        'VALUES ($1, $2, $3, now(), $4, $5)',
+        'VALUES ($1, $2, $3, $4, $5, $6)',
       randomUUID(),
       'e2e',
       name,
-      finished ? new Date() : null,
+      finished ? finishedAt : new Date(),
+      finished ? finishedAt : null,
       finished ? 1 : 0,
     );
   }
@@ -135,6 +140,27 @@ describe('db:plan against Postgres', () => {
       'Data migrations: not planned; the boot skips them over a database ahead of this build, and no CLI applies them, so there is nothing to preview.',
     );
     expect(result.stdout).not.toContain('Data migrations: none pending');
+    expect(await db.client.rolePermission.count(readGameGrant)).toBe(0);
+  });
+
+  it('reports a diverged migration, plans the catalog and the data migrations as the boot would run them, and exits by what they would write (#1148)', async () => {
+    await insertMigrationRow(UNKNOWN_MIGRATION, true, new Date(0));
+    await db.client.rolePermission.deleteMany(readGameGrant);
+
+    const result = plan(requireDatabaseUrl());
+
+    expect(result.stdout).toContain(`  ${UNKNOWN_MIGRATION}`);
+    expect(result.stdout).toContain(`DELETE FROM _prisma_migrations WHERE migration_name = '${UNKNOWN_MIGRATION}';`);
+    expect(result.stdout).toContain(
+      'Schema: diverged by 1 migration(s); the boot runs the seeds and the data migrations.',
+    );
+    expect(result.stdout).toContain('grants +1 -0');
+    // Planned, as the boot would run them, not the "not planned" line an
+    // ahead database gets.
+    expect(result.stdout).toContain(`Data migrations: none pending, ${DATA_MIGRATIONS.length} applied.`);
+    expect(result.stdout).not.toContain('Data migrations: not planned');
+    // The catalog's write counts toward the exit code, as over a database in sync.
+    expect(result.status).toBe(1);
     expect(await db.client.rolePermission.count(readGameGrant)).toBe(0);
   });
 

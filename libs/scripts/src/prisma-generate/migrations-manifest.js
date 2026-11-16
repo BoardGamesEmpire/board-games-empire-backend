@@ -11,8 +11,9 @@
  * has.
  *
  * Names only. Prisma's own checksum column is left alone until its algorithm
- * is confirmed; a missing or extra NAME is what boot needs to decide between
- * "behind", "ahead" and "in sync".
+ * is confirmed; a missing or extra NAME, with the run of migrations that
+ * applied the extra one, is what boot needs to decide between "behind",
+ * "ahead", "diverged" and "in sync" (#1148).
  */
 const fs = require('node:fs');
 const path = require('node:path');
