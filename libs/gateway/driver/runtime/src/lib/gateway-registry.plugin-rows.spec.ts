@@ -659,6 +659,20 @@ describe("The gateway registry and a plugin DataGateway's row (#1083)", () => {
       expect(driver.dispose).not.toHaveBeenCalled();
       expect(service.isConnected(GW)).toBe(true);
     });
+
+    // A source or a driver may reject with anything; the warning still says what.
+    it('logs what the source or the read of the row rejected with when it is not an Error (#1083)', async () => {
+      await heldDriver();
+      const warned = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      source.isLoaded.mockRejectedValueOnce('the load records are offline');
+      await service.refreshInterview(GW);
+      jest.spyOn(table.delegate, 'findFirst').mockRejectedValueOnce('the connection was reset');
+      await service.refreshInterview(GW);
+
+      expect(warned).toHaveBeenCalledWith(expect.stringContaining('the load records are offline'));
+      expect(warned).toHaveBeenCalledWith(expect.stringContaining('the connection was reset'));
+    });
   });
 
   describe('GatewayRegistryBootstrapService', () => {
@@ -689,6 +703,21 @@ describe("The gateway registry and a plugin DataGateway's row (#1083)", () => {
 
       expect(logged).toHaveBeenCalledWith(expect.stringContaining("'Broken' (broken) has no connection fields"));
       expect(service.connectedGatewayIds()).toEqual(['remote']);
+    });
+
+    // The lazy connect's half of the same guard: it throws, naming the row,
+    // and dials nothing with the nulls.
+    it('names a remote row with no connection fields when a reconnect is requested, and dials nothing (#1083)', async () => {
+      table.seed({ id: 'broken', name: 'Broken', connectionPort: null });
+      const warned = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      await dispatch({ gatewayId: 'broken', configHash: '', changeType: 'reconnect-requested', timestamp: 0 });
+
+      expect(warned).toHaveBeenCalledWith(
+        expect.stringContaining('DataGateway broken has no connection fields; cannot connect.'),
+      );
+      expect(factory.create).not.toHaveBeenCalled();
+      expect(service.isConnected('broken')).toBe(false);
     });
   });
 

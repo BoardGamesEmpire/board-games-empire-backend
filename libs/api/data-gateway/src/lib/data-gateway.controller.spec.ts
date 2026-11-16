@@ -372,6 +372,27 @@ describe('DataGatewayController', () => {
     });
   });
 
+  // The database holds a remote row to all three connection fields, and the
+  // types can't (#1083). A row that reaches connect without them is answered
+  // with the generic copy, and the coordinator is never dialled with nulls.
+  it('answers a remote row with no connection fields with the generic copy, and asks the coordinator nothing (#1083)', async () => {
+    const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const fieldless = makeGateway({ connectionUrl: null, connectionPort: null, authType: null });
+    (service as unknown as jest.Mocked<DataGatewayService>).update.mockResolvedValue(fieldless);
+    service.getById.mockResolvedValue(fieldless);
+
+    const response = await firstValueFrom(controller.connect('gw-1'));
+
+    expect(coordinator.connectGateway).not.toHaveBeenCalled();
+    expect(coordinator.reinterviewGateway).not.toHaveBeenCalled();
+    expect(response.connection_response).toEqual({
+      success: false,
+      message: t('errors.data_gateway.connect_failed'),
+    });
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('gw-1'));
+    logged.mockRestore();
+  });
+
   describe("the coordinator's answer", () => {
     // What the coordinator reports when a Bearer gateway's credentials are
     // built: the refusal's key and args, meant for the server's logs.
