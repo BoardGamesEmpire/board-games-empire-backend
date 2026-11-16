@@ -975,7 +975,7 @@ const NOMINATION_INCLUDE = {
           platformGame: {
             select: {
               id: true,
-              game: { select: { id: true, title: true } },
+              game: { select: { id: true, title: true, subtitle: true } },
               platform: { select: { id: true, name: true } },
             },
           },

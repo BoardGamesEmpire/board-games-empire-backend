@@ -71,7 +71,7 @@ export interface ListEventsEnvelope {
 export type OccurrenceGameWire = Pick<EventGameWire, 'id' | 'platformGameId' | 'role'> & {
   readonly platformGame: {
     readonly id: string;
-    readonly game: Pick<Wire<Game>, 'id' | 'title' | 'thumbnail'>;
+    readonly game: Pick<Wire<Game>, 'id' | 'title' | 'subtitle' | 'thumbnail'>;
     readonly platform: Pick<Wire<Platform>, 'id' | 'name' | 'platformType'>;
   };
 };
