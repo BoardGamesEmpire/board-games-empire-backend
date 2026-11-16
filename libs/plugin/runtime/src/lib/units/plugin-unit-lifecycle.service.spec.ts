@@ -2,7 +2,6 @@ import {
   PluginCategory,
   PluginExecutionMode,
   PluginScope,
-  PluginUnitDormantReason,
   Prisma,
   type HouseholdPlugin,
   type Plugin,
@@ -133,8 +132,6 @@ describe('PluginUnitLifecycleService', () => {
     pluginId: 'plugin-1',
     enabled: true,
     config: {},
-    dormantReason: null,
-    dormantAt: null,
     createdAt: new Date(0),
     updatedAt: new Date(0),
     ...overrides,
@@ -494,14 +491,10 @@ describe('PluginUnitLifecycleService', () => {
       expect(event).toBeInstanceOf(HouseholdPluginConfigUpdatedEvent);
     });
 
-    it('writes the document and nothing else over a stale one: the next read works the state out from it (#1151)', async () => {
-      // The stored column says the unit is dormant; the write changes only the
-      // document, and the dormancy a reader reports follows from that.
-      const before = makeHouseholdRow({
-        config: { webhookUrl: 42 },
-        dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-        dormantAt: new Date(0),
-      });
+    it('writes the document and nothing else over one the schema rejects: the next read works the state out from it (#1151)', async () => {
+      // The held document reads as needs_configuration. The write changes only
+      // the document, and the dormancy a reader reports follows from that.
+      const before = makeHouseholdRow({ config: { webhookUrl: 42 } });
       db.householdPlugin.findUnique.mockResolvedValue(before);
       db.householdPlugin.update.mockResolvedValue({ ...before, config: { webhookUrl: 'https://z' } });
 

@@ -13,3 +13,10 @@ ALTER TYPE "PluginLifecycleEventType" RENAME TO "PluginLifecycleEventType_old";
 ALTER TYPE "PluginLifecycleEventType_new" RENAME TO "PluginLifecycleEventType";
 DROP TYPE "public"."PluginLifecycleEventType_old";
 COMMIT;
+
+-- AlterTable
+ALTER TABLE "household_plugins" DROP COLUMN "dormant_at",
+DROP COLUMN "dormant_reason";
+
+-- DropEnum
+DROP TYPE "PluginUnitDormantReason";

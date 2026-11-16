@@ -111,7 +111,7 @@ export class HouseholdPluginsController {
       'for which this household still holds a unit enablement is listed too, with `unit.dormancy` unavailable — a ' +
       'retained unit enablement that serves nothing is exactly what a household admin needs to see. ' +
       '`unit.dormancy` says what stands in the way apart from the switch and consent, whether or not the unit ' +
-      'is switched on: unavailable means only a server admin can revive it, needs_configuration that a ' +
+      'is switched on: unavailable means only a server admin can bring it back, needs_configuration that a ' +
       'conforming configuration would. A switched-on unit also reads unavailable while `serverEnabled` is ' +
       'false. Tombstoned plugins never ' +
       'appear — there is no path to participate in one again — and unlike `GET /plugins` this route accepts no ' +

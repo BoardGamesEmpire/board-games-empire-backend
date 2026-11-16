@@ -15,34 +15,27 @@ model HouseholdPlugin {
   plugin   Plugin @relation(fields: [pluginId], references: [id], onDelete: Cascade)
 
   /// Household-level switch, layered UNDER Plugin.enabled — the household
-  /// ADMIN's intent, and only theirs. A switch-on consent act creates the
+  /// admin's intent, and only theirs. A switch-on consent act creates the
   /// unit enablement switched on, and a review that refuses a required
   /// permission writes `enabled = false` in the same consent act (#1150).
   /// Any other consent decision leaves it alone: consent standing is derived
   /// at read time from the manifest's requirements and the recorded
   /// decisions (#1149), so it changes what the ability confers and the
-  /// unit's state code, not whether the unit is served. The serving
-  /// predicate is `enabled && dormantReason == null`.
+  /// unit's state code, not whether the unit is served.
+  ///
+  /// This model holds the household's own intent (this switch and the
+  /// configuration document below) and nothing else. Whether the unit can
+  /// run, its dormancy, is worked out when read from the active manifest
+  /// and this document (#1151): the unit is served when `enabled` is true
+  /// and it has no dormancy.
   enabled Boolean @default(true)
 
-  /// Household-scope plugin configuration (manifest config.schema governs
-  /// the shape; requiresHouseholdConfig gates first enable).
+  /// The household's configuration document. The active manifest's
+  /// `config.schema` governs its shape; a document the schema rejects reads
+  /// as dormant (`needs_configuration`) until the household supplies one
+  /// that conforms (#1151). The switch-on and configuration writes validate
+  /// the document they are given.
   config Json @default("{}")
-
-  /// Dormancy: the row is retained but cannot legitimately serve, and the
-  /// unit did not ask for that (#369, #370). `null` is the ordinary case.
-  /// Written ONLY by the transactions that replace a manifest — activation
-  /// and reinstall-over-tombstone — never by a unit's own writer, which is
-  /// what separates it from `enabled` (the admin's intent). The two are
-  /// independent: the serving predicate is
-  /// `enabled && dormantReason == null`.
-  dormantReason PluginUnitDormantReason? @map("dormant_reason")
-
-  /// When the CURRENT dormancy began. Carried for two reasons: an admin
-  /// surface needs a "since", and the writer needs to identify the rows its
-  /// own batched `updateMany` actually moved (the read-back in activation's
-  /// passes keys on it).
-  dormantAt DateTime? @map("dormant_at") @db.Timestamptz(3)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)

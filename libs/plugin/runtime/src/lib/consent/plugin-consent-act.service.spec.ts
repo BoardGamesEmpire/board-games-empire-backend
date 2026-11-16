@@ -5,7 +5,6 @@ import {
   PluginGrantScope,
   PluginGrantStatus,
   PluginScope,
-  PluginUnitDormantReason,
   RiskLevel,
   type HouseholdPlugin,
   type Plugin,
@@ -160,8 +159,6 @@ describe('PluginConsentActService', () => {
     pluginId: 'plugin-1',
     enabled: true,
     config: {},
-    dormantReason: null,
-    dormantAt: null,
     createdAt: new Date(0),
     updatedAt: new Date(0),
     ...overrides,
@@ -682,15 +679,10 @@ describe('PluginConsentActService', () => {
         );
       });
 
-      it('emits no dormancy event: a supplied document over a stale one announces the configuration and nothing else (#1151)', async () => {
-        // The stored column says the unit is dormant; the act reads the
-        // document, never the column, and announces only what it wrote.
-        householdRow = makeHouseholdRow({
-          enabled: true,
-          config: { webhookUrl: 42 },
-          dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-          dormantAt: new Date(0),
-        });
+      it('emits no dormancy event: a supplied document over one the schema rejects announces the configuration and nothing else (#1151)', async () => {
+        // The held document reads as needs_configuration. Dormancy is worked
+        // out when read, so the act announces only what it wrote.
+        householdRow = makeHouseholdRow({ enabled: true, config: { webhookUrl: 42 } });
 
         const result = await service.switchOn({ ...householdSwitchOn, config: { webhookUrl: 'https://new.test' } });
 

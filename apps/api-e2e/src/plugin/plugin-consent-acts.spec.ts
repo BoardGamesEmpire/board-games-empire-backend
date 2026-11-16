@@ -554,6 +554,27 @@ describe('consent acts (#1150)', () => {
       expect(await householdUnit(householdId, plugin.id)).toEqual(unitBefore);
     });
 
+    it('a switch-on response carries no stored dormancy (#1151)', async () => {
+      // A unit enablement holds the household's switch and its configuration
+      // document only. Whether the unit can run is worked out when read, so
+      // the unit a consent act answers with names no dormancy of its own.
+      const { owner, unit } = await household();
+      const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK, HOUSEHOLD_REQUIRED]);
+      const surface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
+
+      const response = await sendSwitchOn(
+        baseUrl,
+        owner,
+        unit,
+        plugin.slug,
+        switchOnBody(surface, { [HOUSEHOLD_REQUIRED.slug]: PluginGrantStatus.Granted }),
+      ).expect(200);
+
+      expect(response.body.unit).toMatchObject({ enabled: true });
+      expect(response.body.unit).not.toHaveProperty('dormantReason');
+      expect(response.body.unit).not.toHaveProperty('dormantAt');
+    });
+
     it('refuses a switch-on with no configuration when {} fails the schema, though the manifest does not require configuration (#1151)', async () => {
       // A household with no unit enablement holds `{}`, and the read works out
       // its dormancy from that document. A switch-on that left the unit

@@ -163,8 +163,6 @@ describe('PluginUpdateService', () => {
     pluginId: 'plugin-1',
     enabled: true,
     config: {},
-    dormantReason: null,
-    dormantAt: null,
     createdAt: new Date(0),
     updatedAt: new Date(0),
     ...overrides,

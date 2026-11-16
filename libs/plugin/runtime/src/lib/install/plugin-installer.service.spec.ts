@@ -95,8 +95,6 @@ describe('PluginInstallerService', () => {
     pluginId: 'plugin-1',
     enabled: true,
     config: { webhookUrl: 'https://example.test/hook' },
-    dormantReason: null,
-    dormantAt: null,
     createdAt: new Date(0),
     updatedAt: new Date(0),
     ...overrides,

@@ -22,8 +22,6 @@ describe('household config gate', () => {
     pluginId: 'plugin-1',
     enabled: false,
     config: {},
-    dormantReason: null,
-    dormantAt: null,
     createdAt: new Date(0),
     updatedAt: new Date(0),
     ...overrides,
