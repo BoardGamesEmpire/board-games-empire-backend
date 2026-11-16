@@ -383,6 +383,17 @@ describe('event occurrences', () => {
 
       expect(await statusOf(passedId)).toBe(OccurrenceStatus.Declined);
     });
+
+    it('can still be removed', async () => {
+      const { host, eventId, passedId } = await arrange();
+
+      await request(baseUrl)
+        .delete(`${occurrencesPath(eventId)}/${passedId}`)
+        .set(host.headers)
+        .expect(200);
+
+      expect(await db.client.eventOccurrence.count({ where: { id: passedId } })).toBe(0);
+    });
   });
 
   /**
