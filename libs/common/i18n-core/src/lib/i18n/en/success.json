@@ -78,6 +78,9 @@
     "rejected": "Nomination rejected",
     "game_added": "Game added to event"
   },
+  "lineup": {
+    "removed": "Game removed from the lineup."
+  },
   "media_object": {
     "deleted": "Media object {id} deleted successfully"
   },

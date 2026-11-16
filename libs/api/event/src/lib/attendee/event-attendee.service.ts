@@ -277,7 +277,7 @@ export class EventAttendeeService {
       );
 
       if (changes) {
-        emitSuppliedGameChanges(this.eventEmitter, eventId, changes, initiatedAt);
+        emitSuppliedGameChanges(this.eventEmitter, eventId, changes, invitedByUserId, initiatedAt);
       }
 
       // The added user's cached graph predates this row, so their role here
@@ -380,7 +380,7 @@ export class EventAttendeeService {
           initiatedAt,
         ),
       );
-      emitSuppliedGameChanges(this.eventEmitter, eventId, changes, initiatedAt);
+      emitSuppliedGameChanges(this.eventEmitter, eventId, changes, actingUserId, initiatedAt);
 
       // The event just left this user's ability surface. Without the eviction
       // a removed co-host keeps co-hosting until the cached graph expires.
@@ -466,7 +466,7 @@ export class EventAttendeeService {
           initiatedAt,
         ),
       );
-      emitSuppliedGameChanges(this.eventEmitter, eventId, changes, initiatedAt);
+      emitSuppliedGameChanges(this.eventEmitter, eventId, changes, actingUserId, initiatedAt);
       answered = updated;
     } catch (error) {
       this.logger.error(`Error updating status for attendee ${attendeeId} in event ${eventId}`, error);

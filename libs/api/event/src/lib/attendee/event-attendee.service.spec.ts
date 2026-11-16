@@ -11,6 +11,7 @@ import {
   SystemRole,
 } from '@bge/database';
 import { t } from '@bge/i18n';
+import { LineupRemovalReason } from '@bge/notifications-service';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
@@ -361,6 +362,17 @@ describe('EventAttendeeService', () => {
           expect.any(GameRemovedFromEventEvent),
         );
       });
+
+      it('reports the games it deleted as left with the supplier, by the host who removed them (#769)', async () => {
+        abilityService.getActingUserId.mockReturnValue('user-host');
+        db.eventGame.findMany.mockResolvedValue([{ id: 'eg-1' } as EventGame]);
+
+        await service.removeAttendee('event-1', 'att-1');
+
+        const removedGame = emitter.emit.mock.calls.find(([name]) => name === GameRemovedFromEventEvent.eventName)?.[1];
+        expect(removedGame.reason).toBe(LineupRemovalReason.SupplierLeft);
+        expect(removedGame.actingUserId).toBe('user-host');
+      });
     });
 
     it('updateStatus → update', async () => {
@@ -425,6 +437,39 @@ describe('EventAttendeeService', () => {
       expect(removedGame).toBeInstanceOf(GameRemovedFromEventEvent);
       expect(removedGame.action).toBe('delete');
       expect(removedGame.subjectId).toBe('eg-1');
+    });
+
+    // The notification tells the table why a game left and spares whoever
+    // acted, so the domain event names both (#769).
+    it('updateStatus to NotAttending reports its games as left with the supplier, by the user who answered', async () => {
+      abilityService.getActingUserId.mockReturnValue('user-1');
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+      lockedStatus(EventParticipationStatus.Attending);
+      db.eventAttendee.update.mockResolvedValue(attendeeRow({ status: EventParticipationStatus.NotAttending }));
+      db.eventGame.findMany.mockResolvedValue([{ id: 'eg-1', eventId: 'event-1' } as EventGame]);
+
+      await service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.NotAttending });
+
+      const removedGame = emitter.emit.mock.calls.find(([name]) => name === GameRemovedFromEventEvent.eventName)?.[1];
+      expect(removedGame.reason).toBe(LineupRemovalReason.SupplierLeft);
+      expect(removedGame.actingUserId).toBe('user-1');
+    });
+
+    it('updateStatus reports no acting user for an actor with no user behind it (#769)', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+      lockedStatus(EventParticipationStatus.Attending);
+      db.eventAttendee.update.mockResolvedValue(attendeeRow({ status: EventParticipationStatus.NotAttending }));
+      db.eventGame.findMany.mockResolvedValue([{ id: 'eg-1', eventId: 'event-1' } as EventGame]);
+
+      await service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.NotAttending });
+
+      const removedGame = emitter.emit.mock.calls.find(([name]) => name === GameRemovedFromEventEvent.eventName)?.[1];
+      expect(removedGame.actingUserId).toBeNull();
     });
 
     // A date write in flight finishes before the lineups are judged, and
@@ -807,6 +852,24 @@ describe('EventAttendeeService', () => {
           }),
         }),
       );
+    });
+
+    it('reports a game it took off as left with the supplier, by the user who added them back (#769)', async () => {
+      db.eventAttendee.update.mockResolvedValue(
+        makeEventAttendee({
+          id: 'att-2',
+          eventId: 'event-1',
+          userId: 'user-2',
+          status: EventParticipationStatus.NotAttending,
+        }),
+      );
+      db.eventGame.findMany.mockResolvedValue([{ id: 'eg-1' } as EventGame]);
+
+      await service.addAttendee('event-1', { userId: 'user-2', status: EventParticipationStatus.NotAttending });
+
+      const removedGame = emitter.emit.mock.calls.find(([name]) => name === GameRemovedFromEventEvent.eventName)?.[1];
+      expect(removedGame.reason).toBe(LineupRemovalReason.SupplierLeft);
+      expect(removedGame.actingUserId).toBe('user-actor');
     });
 
     it("evicts the revived user's cached permission graph", async () => {

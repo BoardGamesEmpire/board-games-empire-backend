@@ -134,6 +134,12 @@
     "forbidden_decide": "You don't have permission to decide on this nomination.",
     "direct_add_not_permitted": "Direct game addition is not permitted in \"{mode}\" mode."
   },
+  "lineup": {
+    "not_found": "Lineup game {lineupGameId} not found for event {eventId}",
+    "date_closed": "This game's date has already started or was called off, so the game stays in the lineup.",
+    "event_closed": "None of this event's dates is still to come, so its own games stay in the lineup.",
+    "event_cancelled": "This event was called off, so its games stay in the lineup."
+  },
   "media_object": {
     "not_found": "Media object {id} not found",
     "not_found_generic": "Media not found",

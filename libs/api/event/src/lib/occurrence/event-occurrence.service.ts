@@ -19,7 +19,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Http } from '@status/codes';
 import assert from 'node:assert';
 import { isDeepStrictEqual } from 'node:util';
-import { emitRemovedGames, writeEventDates } from '../attendee/attendance';
+import { emitGamesNobodyBrings, writeEventDates } from '../attendee/attendance';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
 import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
@@ -219,6 +219,7 @@ export class EventOccurrenceService {
 
   async addOccurrence(eventId: string, dto: AddOccurrenceDto): Promise<OccurrenceDetail> {
     const initiatedAt = new Date();
+    const actingUserId = resolveActingUserIdOrNull(this.abilityService);
     const event = await this.db.event.findUnique({
       where: { id: eventId, deletedAt: null },
       select: { id: true, householdId: true },
@@ -296,7 +297,7 @@ export class EventOccurrenceService {
         initiatedAt,
       ),
     );
-    emitRemovedGames(this.eventEmitter, eventId, removedGames, initiatedAt);
+    emitGamesNobodyBrings(this.eventEmitter, eventId, removedGames, actingUserId, initiatedAt);
 
     // A new occurrence has no votes or games yet, so it answers with none
     // rather than reading for them. That read would run after the row has
@@ -314,6 +315,7 @@ export class EventOccurrenceService {
     dto: UpdateEventOccurrenceDto,
   ): Promise<OccurrenceDetail> {
     const initiatedAt = new Date();
+    const actingUserId = resolveActingUserIdOrNull(this.abilityService);
     assert(Object.keys(dto).length > 0, new BadRequestException(t('common.at_least_one_field')));
 
     // Only the id: this read answers 404 and names the date whose votes and
@@ -380,7 +382,7 @@ export class EventOccurrenceService {
           new OccurrenceUpdatedEvent(pickSnapshot(existing, changed), pickSnapshot(updated, changed), initiatedAt),
         );
       }
-      emitRemovedGames(this.eventEmitter, eventId, removedGames, initiatedAt);
+      emitGamesNobodyBrings(this.eventEmitter, eventId, removedGames, actingUserId, initiatedAt);
 
       const removedIds = new Set(removedGames.map((game) => game.id));
       return {
@@ -400,6 +402,7 @@ export class EventOccurrenceService {
 
   async removeOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
     const initiatedAt = new Date();
+    const actingUserId = resolveActingUserIdOrNull(this.abilityService);
     this.logger.debug(`Attempting to remove occurrence ${occurrenceId} from event ${eventId}`);
 
     const existing = await this.db.eventOccurrence.findUnique({
@@ -482,7 +485,7 @@ export class EventOccurrenceService {
           initiatedAt,
         ),
       );
-      emitRemovedGames(this.eventEmitter, eventId, removedGames, initiatedAt);
+      emitGamesNobodyBrings(this.eventEmitter, eventId, removedGames, actingUserId, initiatedAt);
 
       return { ...removed, policy: serveOccurrencePolicy(removed.policy, canReadPolicy), availabilityVotes, games };
     } catch (error) {

@@ -586,13 +586,29 @@ export function attendeeEnvelope(response: HttpResponseLike, request: RequestDes
   return attendee ?? fail("it carried no 'attendee' object with a string id", request, response);
 }
 
-/** `POST /api/events/:eventId/nominations/direct-add`: `{ message, eventGame }`, the lineup game (#799). */
+/**
+ * `POST /api/events/:eventId/nominations/direct-add`: `{ message, eventGame }`,
+ * the lineup game added (#799).
+ */
 export function eventGameEnvelope(response: HttpResponseLike, request: RequestDescription): LineupGameWire {
-  const eventGame = isRecord(response.body) ? response.body['eventGame'] : undefined;
+  return lineupGameUnder('eventGame', response, request);
+}
 
-  return isLineupGame(eventGame)
-    ? eventGame
-    : fail("it carried no 'eventGame' that is a lineup game with its supplier", request, response);
+/**
+ * `DELETE /api/events/:eventId/lineup/:lineupGameId`: `{ message, lineupGame }`,
+ * the lineup game removed (#769).
+ */
+export function lineupGameEnvelope(response: HttpResponseLike, request: RequestDescription): LineupGameWire {
+  return lineupGameUnder('lineupGame', response, request);
+}
+
+/** The lineup game, with its supplier, under `key` in the response body. */
+function lineupGameUnder(key: string, response: HttpResponseLike, request: RequestDescription): LineupGameWire {
+  const lineupGame = isRecord(response.body) ? response.body[key] : undefined;
+
+  return isLineupGame(lineupGame)
+    ? lineupGame
+    : fail(`it carried no '${key}' that is a lineup game with its supplier`, request, response);
 }
 
 /** What a nomination must be for {@link isNomination}. */

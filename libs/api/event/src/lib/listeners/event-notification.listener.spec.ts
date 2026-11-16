@@ -5,9 +5,10 @@ import {
   NotificationType,
   OccurrenceStatus,
   PlatformGame,
+  ScheduledGameRole,
   SystemRole,
 } from '@bge/database';
-import { NotificationsService } from '@bge/notifications-service';
+import { LineupRemovalReason, NotificationsService } from '@bge/notifications-service';
 import {
   createTestingModuleWithDb,
   makeEvent,
@@ -16,6 +17,7 @@ import {
   makePlatformGame,
   MockDatabaseService,
 } from '@bge/testing';
+import { Logger } from '@nestjs/common';
 import {
   AttendeeAddedEvent,
   AttendeeRemovedEvent,
@@ -23,7 +25,11 @@ import {
 } from '../attendee/events/attendee.events';
 import { EventCreatedEvent, EventDeletedEvent } from '../events/event.events';
 import { EventCancelledEvent, EventReopenedEvent } from '../lifecycle/events/event-lifecycle.events';
-import { NominationCreatedEvent, NominationResolvedEvent } from '../nomination/events/nomination.events';
+import {
+  GameRemovedFromEventEvent,
+  NominationCreatedEvent,
+  NominationResolvedEvent,
+} from '../nomination/events/nomination.events';
 import { OccurrenceStatusChangedEvent } from '../occurrence/events/occurrence.events';
 import { EventNotificationListener } from './event-notification.listener';
 
@@ -835,6 +841,98 @@ describe('EventNotificationListener', () => {
       notifications.create.mockRejectedValue(new Error('db down'));
 
       await expect(listener.onAttendeeRemoved(removal('u-a', 'u-host'))).resolves.toBeUndefined();
+    });
+  });
+
+  describe('onGameRemoved', () => {
+    const removal = (reason: LineupRemovalReason, actingUserId: string | null, occurrenceId: string | null = null) =>
+      new GameRemovedFromEventEvent(
+        {
+          id: 'lg-1',
+          eventId: occurrenceId ? null : 'ev-1',
+          occurrenceId,
+          platformGameId: 'pg-1',
+          suppliedById: 'att-supplier',
+          nominationId: null,
+          addedById: 'att-host',
+          role: ScheduledGameRole.Primary,
+        },
+        'ev-1',
+        reason,
+        actingUserId,
+        new Date(),
+      );
+
+    beforeEach(() => {
+      db.event.findUnique.mockResolvedValue(makeEvent({ id: 'ev-1', title: 'Game Night' }));
+      db.platformGame.findUnique.mockResolvedValue(
+        stubPlatformGameWithGame({ id: 'pg-1' }, { id: 'game-1', title: 'Wingspan', subtitle: 'Asia' }) as never,
+      );
+    });
+
+    it.each([
+      [LineupRemovalReason.RemovedByHost, 'user-host', null],
+      [LineupRemovalReason.SupplierLeft, 'user-supplier', null],
+      [LineupRemovalReason.NobodyBringing, 'user-host', 'occ-1'],
+    ] as const)(
+      'tells the attendees still coming, minus whoever acted, that a game left the lineup, with its reason: %s (#769)',
+      async (reason, actingUserId, occurrenceId) => {
+        db.eventAttendee.findMany.mockResolvedValue([
+          { userId: 'user-a' },
+          { userId: actingUserId },
+          { userId: 'user-b' },
+        ] as never);
+
+        await listener.onGameRemoved(removal(reason, actingUserId, occurrenceId));
+
+        expect(db.eventAttendee.findMany).toHaveBeenCalledWith({
+          where: {
+            eventId: 'ev-1',
+            removedAt: null,
+            userId: { not: null },
+            status: { not: EventParticipationStatus.NotAttending },
+          },
+          select: { userId: true },
+        });
+        expect(notifications.createMany).toHaveBeenCalledWith(
+          ['user-a', 'user-b'].map((userId) => ({
+            userId,
+            type: NotificationType.GameRemovedFromEvent,
+            payload: {
+              eventId: 'ev-1',
+              eventTitle: 'Game Night',
+              lineupGameId: 'lg-1',
+              occurrenceId,
+              gameTitle: 'Wingspan',
+              // Two editions can share a title (#1271).
+              gameSubtitle: 'Asia',
+              reason,
+            },
+          })),
+        );
+      },
+    );
+
+    it('still tells everyone when the actor is not a user (#769)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'user-a' }, { userId: 'user-b' }] as never);
+
+      await listener.onGameRemoved(removal(LineupRemovalReason.NobodyBringing, null, 'occ-1'));
+
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        expect.objectContaining({ userId: 'user-a' }),
+        expect.objectContaining({ userId: 'user-b' }),
+      ]);
+    });
+
+    it("tells nobody when the event or the game can't be found, and logs it (#769)", async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      db.platformGame.findUnique.mockResolvedValue(null);
+
+      await listener.onGameRemoved(removal(LineupRemovalReason.RemovedByHost, 'user-host'));
+
+      expect(notifications.createMany).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('eventId=ev-1'));
+      warn.mockRestore();
     });
   });
 
