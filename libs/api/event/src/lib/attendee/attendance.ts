@@ -59,7 +59,7 @@ export function lineupStillAhead(now: Date): Prisma.EventGameWhereInput {
   };
 }
 
-const SCHEDULED_GAME_SNAPSHOT_SELECT = {
+export const LINEUP_GAME_SNAPSHOT_SELECT = {
   id: true,
   eventId: true,
   occurrenceId: true,
@@ -70,8 +70,8 @@ const SCHEDULED_GAME_SNAPSHOT_SELECT = {
   role: true,
 } as const satisfies Prisma.EventGameSelect;
 
-/** A lineup game as it stood when it was taken off, for the domain event that reports it. */
-export type RemovedLineupGame = Prisma.EventGameGetPayload<{ select: typeof SCHEDULED_GAME_SNAPSHOT_SELECT }>;
+/** A lineup game's own fields, as the domain events that report it joining or leaving the lineup carry them. */
+export type LineupGameSnapshot = Prisma.EventGameGetPayload<{ select: typeof LINEUP_GAME_SNAPSHOT_SELECT }>;
 
 interface NominationStatusChange {
   id: string;
@@ -83,7 +83,7 @@ interface NominationStatusChange {
 export interface SuppliedGameChanges {
   paused: NominationStatusChange[];
   resumed: NominationStatusChange[];
-  removedGames: RemovedLineupGame[];
+  removedGames: LineupGameSnapshot[];
 }
 
 /** A game-list entry as a supply check reads it: whose it is, which game, and whether either was removed. */
@@ -212,7 +212,7 @@ export async function syncSuppliedGames(
 
   changes.removedGames = await tx.eventGame.findMany({
     where: { suppliedBy: { is: { attendeeId: attendee.id } }, ...lineupStillAhead(now) },
-    select: SCHEDULED_GAME_SNAPSHOT_SELECT,
+    select: LINEUP_GAME_SNAPSHOT_SELECT,
   });
 
   if (changes.removedGames.length > 0) {
@@ -245,7 +245,7 @@ export async function writeEventDates<T>(
   eventId: string,
   now: Date,
   write: () => Promise<T>,
-): Promise<{ written: T; removedGames: RemovedLineupGame[] }> {
+): Promise<{ written: T; removedGames: LineupGameSnapshot[] }> {
   await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${eventId} FOR NO KEY UPDATE`);
 
   const written = await write();
@@ -260,7 +260,7 @@ export async function writeEventDates<T>(
       },
       ...lineupStillAhead(now),
     },
-    select: SCHEDULED_GAME_SNAPSHOT_SELECT,
+    select: LINEUP_GAME_SNAPSHOT_SELECT,
   });
 
   if (removedGames.length > 0) {
@@ -274,7 +274,7 @@ export async function writeEventDates<T>(
 export function emitRemovedGames(
   emitter: EventEmitter2,
   eventId: string,
-  games: RemovedLineupGame[],
+  games: LineupGameSnapshot[],
   initiatedAt: Date,
 ): void {
   for (const game of games) {

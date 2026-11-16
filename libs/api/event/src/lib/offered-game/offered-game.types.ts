@@ -1,5 +1,6 @@
 import type { ExpansionLink, Prisma } from '@bge/database';
-import type { OFFERED_GAME_ATTENDEE_SELECT, OFFERED_GAME_SELECT } from './offered-game.select';
+import type { AttendeeSummary } from '../attendee/attendee-summary';
+import type { OFFERED_GAME_SELECT } from './offered-game.select';
 
 /** An offered entry as {@link OFFERED_GAME_SELECT} reads it. */
 export type OfferedGameEntry = Prisma.EventAttendeeGameListGetPayload<{ select: typeof OFFERED_GAME_SELECT }>;
@@ -37,8 +38,8 @@ export type OfferedGame = Omit<OfferedGameEntry, 'collection'> & {
   onWishlist: boolean | null;
 };
 
-/** An offered game's attendee as {@link OFFERED_GAME_ATTENDEE_SELECT} reads them. */
-export type OfferedGameAttendee = Prisma.EventAttendeeGetPayload<{ select: typeof OFFERED_GAME_ATTENDEE_SELECT }>;
+/** An offered game's attendee: the one summary every record that names an attendee serves. */
+export type OfferedGameAttendee = AttendeeSummary;
 
 /**
  * A row of the offered-games read (#1187): the offered game and its attendee,

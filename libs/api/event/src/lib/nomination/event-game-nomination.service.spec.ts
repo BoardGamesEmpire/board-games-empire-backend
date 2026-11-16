@@ -35,7 +35,8 @@ import {
 } from '@bge/testing';
 import { BadRequestException, ConflictException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import type { LockedSupplier } from '../attendee/attendance';
+import { LINEUP_GAME_SNAPSHOT_SELECT, type LockedSupplier } from '../attendee/attendance';
+import { LINEUP_GAME_SELECT } from '../lineup/lineup-game';
 import { NominateGameDto } from './dto/nominate-game.dto';
 import { EventGameNominationService } from './event-game-nomination.service';
 import {
@@ -77,6 +78,9 @@ describe('EventGameNominationService', () => {
     compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
     db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1' } as EventAttendee);
     db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+    // The attendee read that names a lineup game's supplier; a test that
+    // asserts on a supplier mocks its own answer.
+    db.eventAttendee.findMany.mockResolvedValue([]);
 
     // The writes run on the transaction client, which the mock hands back as
     // the same delegates; the paginated read still settles its array form.
@@ -1070,7 +1074,11 @@ describe('EventGameNominationService', () => {
       votingWindowHours: null,
     } as EventPolicy);
     db.$queryRaw.mockResolvedValueOnce([lockedSupplier()] as never);
-    db.eventGame.create.mockResolvedValue({ id: 'eg-1', eventId: 'event-1' } as EventGame);
+    db.eventGame.create.mockResolvedValue({
+      id: 'eg-1',
+      eventId: 'event-1',
+      suppliedBy: { id: 'gl-1', attendeeId: 'att-2' },
+    } as never);
 
     await service.directAddGame('event-1', { platformGameId: 'pg-1', suppliedById: 'gl-1' } as never);
 
@@ -1093,7 +1101,11 @@ describe('EventGameNominationService', () => {
       votingWindowHours: null,
     } as EventPolicy);
     db.$queryRaw.mockResolvedValueOnce([lockedSupplier()] as never);
-    db.eventGame.create.mockResolvedValue({ id: 'eg-1', occurrenceId: 'occ-1' } as EventGame);
+    db.eventGame.create.mockResolvedValue({
+      id: 'eg-1',
+      occurrenceId: 'occ-1',
+      suppliedBy: { id: 'gl-1', attendeeId: 'att-2' },
+    } as never);
 
     await service.directAddGame('event-1', {
       platformGameId: 'pg-1',
@@ -1227,6 +1239,105 @@ describe('EventGameNominationService', () => {
     expect(gameEvent.addedByAttendeeId).toBe('att-1');
   });
 
+  // The direct add answers the one lineup-game shape the lineup and date reads
+  // serve, so a client renders an added game as it renders a read one (#799).
+  it('answers the added game in the lineup shape, its supplier named (#799)', async () => {
+    db.eventPolicy.findUnique.mockResolvedValue({
+      gameAdditionMode: GameAdditionMode.Direct,
+      votingWindowHours: null,
+    } as EventPolicy);
+    db.$queryRaw.mockResolvedValueOnce([lockedSupplier()] as never);
+    db.eventGame.create.mockResolvedValue({
+      id: 'eg-1',
+      eventId: 'event-1',
+      occurrenceId: null,
+      platformGameId: 'pg-1',
+      suppliedById: 'gl-1',
+      nominationId: null,
+      addedById: 'att-1',
+      role: ScheduledGameRole.Primary,
+      sortOrder: 0,
+      notes: null,
+      maxPlayTime: null,
+      platformGame: { id: 'pg-1' },
+      suppliedBy: { id: 'gl-1', attendeeId: 'att-2' },
+    } as never);
+    const supplier = { id: 'att-2', status: EventParticipationStatus.Attending, guestName: null, user: null };
+    db.eventAttendee.findMany.mockResolvedValue([supplier] as never);
+
+    const answer = await service.directAddGame('event-1', { platformGameId: 'pg-1', suppliedById: 'gl-1' } as never);
+
+    expect(db.eventGame.create).toHaveBeenCalledWith(
+      expect.objectContaining({ select: { ...LINEUP_GAME_SNAPSHOT_SELECT, ...LINEUP_GAME_SELECT } }),
+    );
+    expect(answer).toEqual({
+      id: 'eg-1',
+      occurrenceId: null,
+      platformGameId: 'pg-1',
+      nominationId: null,
+      addedById: 'att-1',
+      role: ScheduledGameRole.Primary,
+      sortOrder: 0,
+      notes: null,
+      maxPlayTime: null,
+      platformGame: { id: 'pg-1' },
+      suppliedBy: { id: 'gl-1', attendeeId: 'att-2', attendee: supplier },
+    });
+    expect(answer).not.toHaveProperty('eventId');
+    expect(answer).not.toHaveProperty('suppliedById');
+
+    const [, emitted] = emitter.emit.mock.calls[0];
+    expect(emitted.after).toEqual({
+      id: 'eg-1',
+      eventId: 'event-1',
+      occurrenceId: null,
+      platformGameId: 'pg-1',
+      suppliedById: 'gl-1',
+      nominationId: null,
+      addedById: 'att-1',
+      role: ScheduledGameRole.Primary,
+    });
+  });
+
+  it('answers a supplier the actor cannot read as attendee null (#799)', async () => {
+    db.eventPolicy.findUnique.mockResolvedValue({
+      gameAdditionMode: GameAdditionMode.Direct,
+      votingWindowHours: null,
+    } as EventPolicy);
+    db.$queryRaw.mockResolvedValueOnce([lockedSupplier()] as never);
+    db.eventGame.create.mockResolvedValue({
+      id: 'eg-1',
+      suppliedById: 'gl-1',
+      suppliedBy: { id: 'gl-1', attendeeId: 'att-2' },
+    } as never);
+    db.eventAttendee.findMany.mockResolvedValue([] as never);
+
+    const answer = await service.directAddGame('event-1', { platformGameId: 'pg-1', suppliedById: 'gl-1' } as never);
+
+    expect(answer.suppliedBy).toEqual({ id: 'gl-1', attendeeId: 'att-2', attendee: null });
+  });
+
+  // A read after the commit that failed would answer 500 for an add that
+  // happened, and the retry would add the game twice (#799).
+  it("reads the supplier's attendee before the commit: a failed read emits nothing (#799)", async () => {
+    db.eventPolicy.findUnique.mockResolvedValue({
+      gameAdditionMode: GameAdditionMode.Direct,
+      votingWindowHours: null,
+    } as EventPolicy);
+    db.$queryRaw.mockResolvedValueOnce([lockedSupplier()] as never);
+    db.eventGame.create.mockResolvedValue({
+      id: 'eg-1',
+      suppliedById: 'gl-1',
+      suppliedBy: { id: 'gl-1', attendeeId: 'att-2' },
+    } as never);
+    db.eventAttendee.findMany.mockRejectedValue(new Error('connection lost'));
+
+    await expect(
+      service.directAddGame('event-1', { platformGameId: 'pg-1', suppliedById: 'gl-1' } as never),
+    ).rejects.toThrow('connection lost');
+    expect(emitter.emit).not.toHaveBeenCalled();
+  });
+
   it('directAddGame emits a GameAddedToEventEvent with the acting attendee as context', async () => {
     db.eventPolicy.findUnique.mockResolvedValue({
       gameAdditionMode: GameAdditionMode.Direct,
@@ -1242,7 +1353,8 @@ describe('EventGameNominationService', () => {
       nominationId: null,
       addedById: 'att-1',
       role: ScheduledGameRole.Primary,
-    } as EventGame);
+      suppliedBy: { id: 'gl-1', attendeeId: 'att-2' },
+    } as never);
 
     await service.directAddGame('event-1', { platformGameId: 'pg-1', suppliedById: 'gl-1' } as never);
 

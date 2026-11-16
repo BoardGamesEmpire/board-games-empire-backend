@@ -27,12 +27,25 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
-import { lockEventDates, lockSupplier, type LockedSupplier } from '../attendee/attendance';
+import {
+  LINEUP_GAME_SNAPSHOT_SELECT,
+  lockEventDates,
+  lockSupplier,
+  type LineupGameSnapshot,
+  type LockedSupplier,
+} from '../attendee/attendance';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { CastVoteDto } from '../dto/cast-vote.dto';
 import { assertEventExists, requireEvent, resolveActingAttendeeId } from '../event-access.helpers';
 import { ResolutionResult, VotingPolicy } from '../interfaces/vote.interface';
+import {
+  LINEUP_GAME_SELECT,
+  lineupGameSubject,
+  toLineupGameRow,
+  withSuppliers,
+  type LineupGame,
+} from '../lineup/lineup-game';
 import { foldPolicy, type EffectivePolicy } from '../policy/effective-policy';
 import { GAME_VOTE_SLUG, voterGrantSelect } from '../vote/vote-grant';
 import { AttendeeStub, VoteResolver } from '../vote/vote-resolver';
@@ -575,7 +588,7 @@ export class EventGameNominationService {
     }
   }
 
-  async directAddGame(eventId: string, dto: DirectAddGameDto): Promise<EventGame> {
+  async directAddGame(eventId: string, dto: DirectAddGameDto): Promise<LineupGame> {
     const initiatedAt = new Date();
     const event = await requireEvent(this.db, eventId);
 
@@ -591,14 +604,7 @@ export class EventGameNominationService {
     this.abilityService.assertCurrentActorCan(
       Action.create,
       ResourceType.EventGame,
-      occurrence
-        ? {
-            eventId: null,
-            occurrenceId: occurrence.id,
-            event: null,
-            occurrence: { id: occurrence.id, eventId, event: { householdId: event.householdId } },
-          }
-        : { eventId, occurrenceId: null, event: { householdId: event.householdId }, occurrence: null },
+      lineupGameSubject(eventId, event.householdId, occurrence?.id ?? null),
     );
 
     const attendeeId = await resolveActingAttendeeId(this.db, this.abilityService, eventId);
@@ -608,10 +614,14 @@ export class EventGameNominationService {
       throw new ForbiddenException(t('errors.nomination.direct_add_not_permitted', { mode: policy.gameAdditionMode }));
     }
 
-    const eventGame = await this.db.$transaction(async (tx) => {
+    // The supplier's attendee is read under the attendee read ceiling, as the
+    // lineup read serves it (#799), and before the commit: read after it, a
+    // failed read would report an add that happened as one that didn't, and
+    // a retry would add the game twice.
+    const { eventGame, lineupGame } = await this.db.$transaction(async (tx) => {
       await this.assertCanSupply(tx, eventId, dto.suppliedById, dto.platformGameId);
 
-      return tx.eventGame.create({
+      const created = await tx.eventGame.create({
         data: {
           event: dto.occurrenceId ? undefined : { connect: { id: eventId } },
           occurrence: dto.occurrenceId ? { connect: { id: dto.occurrenceId } } : undefined,
@@ -623,7 +633,11 @@ export class EventGameNominationService {
           notes: dto.notes,
           maxPlayTime: dto.maxPlayTime,
         },
+        select: { ...LINEUP_GAME_SNAPSHOT_SELECT, ...LINEUP_GAME_SELECT },
       });
+      const [named] = await withSuppliers(tx, this.scopeComposer, [toLineupGameRow(created)]);
+
+      return { eventGame: created, lineupGame: named };
     });
 
     this.eventEmitter.emit(
@@ -631,7 +645,7 @@ export class EventGameNominationService {
       new GameAddedToEventEvent(this.toEventGameSnapshot(eventGame), eventId, attendeeId, initiatedAt),
     );
 
-    return eventGame;
+    return lineupGame;
   }
 
   /**
@@ -843,7 +857,7 @@ export class EventGameNominationService {
   }
 
   /** Scalar snapshot of a created EventGame row for {@link GameAddedToEventEvent}. */
-  private toEventGameSnapshot(eventGame: EventGame): GameAddedToEventEvent['after'] {
+  private toEventGameSnapshot(eventGame: LineupGameSnapshot): GameAddedToEventEvent['after'] {
     return {
       id: eventGame.id,
       eventId: eventGame.eventId,

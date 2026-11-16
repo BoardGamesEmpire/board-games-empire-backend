@@ -142,11 +142,26 @@ describe('event occurrences', () => {
     });
     // The fixture's game has no subtitle; the card must carry one when it has (#1271).
     await db.client.game.update({ where: { id: stored.gameId }, data: { subtitle: 'The Card Game' } });
+    const hostAttendee = await db.client.eventAttendee.findUniqueOrThrow({
+      where: { eventId_userId: { eventId, userId: host.user.id } },
+      select: { id: true },
+    });
     const expectedGames = [
       {
         id: eventGame.id,
+        occurrenceId: occurrence.id,
         platformGameId: entry.platformGameId,
         role: ScheduledGameRole.Primary,
+        sortOrder: 0,
+        notes: null,
+        maxPlayTime: null,
+        nominationId: null,
+        addedById: hostAttendee.id,
+        suppliedBy: {
+          id: entry.suppliedById,
+          attendeeId: hostAttendee.id,
+          attendee: expect.objectContaining({ id: hostAttendee.id }),
+        },
         platformGame: {
           id: entry.platformGameId,
           game: { id: stored.gameId, title: stored.game.title, subtitle: 'The Card Game', thumbnail: null },

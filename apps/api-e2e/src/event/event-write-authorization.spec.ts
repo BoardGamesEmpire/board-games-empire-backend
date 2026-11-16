@@ -413,7 +413,7 @@ describe('event write authorization', () => {
         await directAdd(host, eventId, own).expect(201),
         'POST /api/events/:eventId/nominations/direct-add',
       );
-      expect(added.suppliedById).toBe(own.suppliedById);
+      expect(added.suppliedBy.id).toBe(own.suppliedById);
     });
   });
 

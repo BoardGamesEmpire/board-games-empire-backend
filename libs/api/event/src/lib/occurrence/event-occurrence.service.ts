@@ -3,6 +3,7 @@ import {
   AvailabilityResponse,
   DatabaseService,
   EventAvailabilityVote,
+  EventOccurrence,
   EventParticipationStatus,
   EventSchedulingMode,
   isPrismaDependentRecordNotFoundError,
@@ -19,9 +20,9 @@ import assert from 'node:assert';
 import { emitRemovedGames, writeEventDates } from '../attendee/attendance';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
-import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
 import { assertEventNotCancelled } from '../lifecycle/event-lifecycle.helpers';
+import { LINEUP_GAME_SELECT, withSuppliers, type LineupGame } from '../lineup/lineup-game';
 import { canReadEventPolicy, eventPolicyReadArgs, serveOccurrencePolicy } from '../policy/policy-ceiling';
 import { POLICY_VIEW_INCLUDE, type OccurrencePolicyView } from '../policy/policy-view';
 import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
@@ -190,17 +191,22 @@ export class EventOccurrenceService {
       }),
       this.db.eventGame.findMany({
         where: this.scopeComposer.compose(ResourceType.EventGame, Action.read, { occurrenceId }),
-        select: { ...OCCURRENCE_GAME_SELECT, occurrenceId: true },
+        select: LINEUP_GAME_SELECT,
         orderBy: OCCURRENCE_GAME_ORDER,
       }),
     ]);
 
-    const votesByOccurrence = groupByOccurrence(votes.map(toOccurrenceVote));
-    const gamesByOccurrence = groupByOccurrence(games);
+    // The suppliers' attendees are read after the games, since the games say
+    // whose they are, and under the attendee ceiling, as the offered games'
+    // are (#799).
+    const namedGames = await withSuppliers(this.db, this.scopeComposer, games);
+
+    const votesByOccurrence = groupByOccurrence(votes);
+    const gamesByOccurrence = groupByOccurrence(namedGames);
 
     return occurrences.map((occurrence) => ({
       ...occurrence,
-      availabilityVotes: votesByOccurrence.get(occurrence.id) ?? [],
+      availabilityVotes: (votesByOccurrence.get(occurrence.id) ?? []).map(toOccurrenceVote),
       games: gamesByOccurrence.get(occurrence.id) ?? [],
     }));
   }
@@ -865,11 +871,9 @@ export type OccurrenceVote = Omit<OccurrenceVoteRow, 'attendee'> & {
   eligible: boolean;
 };
 
-function toOccurrenceVote<TRow extends OccurrenceVoteRow>({
-  attendee,
-  ...vote
-}: TRow): Omit<TRow, 'attendee'> & Pick<OccurrenceVote, 'attendee' | 'eligible'> {
-  return { ...vote, attendee: { userId: attendee.userId }, eligible: countsAsVoter(attendee) };
+/** The vote as served, from its row: the voter's state and the date it was grouped under are dropped. */
+function toOccurrenceVote({ id, attendeeId, response, attendee }: OccurrenceVoteRow): OccurrenceVote {
+  return { id, attendeeId, response, attendee: { userId: attendee.userId }, eligible: countsAsVoter(attendee) };
 }
 
 // In the order each attendee first voted. A changed vote keeps its place, and
@@ -878,14 +882,6 @@ const OCCURRENCE_VOTE_ORDER = [
   { createdAt: 'asc' },
   { id: 'asc' },
 ] satisfies Prisma.EventAvailabilityVoteOrderByWithRelationInput[];
-
-/** Each game on an occurrence: the lineup row and the platform game it schedules. */
-const OCCURRENCE_GAME_SELECT = {
-  id: true,
-  platformGameId: true,
-  role: true,
-  platformGame: { select: PLATFORM_GAME_SUMMARY_SELECT },
-} as const satisfies Prisma.EventGameSelect;
 
 // In the host's order. `id` breaks ties on `sortOrder`, which defaults to 0,
 // as it does for the occurrences themselves.
@@ -898,28 +894,30 @@ const OCCURRENCE_GAME_ORDER = [
  * An occurrence as every occurrence route serves it, reads and writes alike:
  * the shape it had when the votes and games were embedded in it.
  */
-export type OccurrenceDetail = Prisma.EventOccurrenceGetPayload<{
-  include: {
-    games: { select: typeof OCCURRENCE_GAME_SELECT };
-  };
-}> & { policy: OccurrencePolicyView | null; availabilityVotes: OccurrenceVote[] };
+export type OccurrenceDetail = EventOccurrence & {
+  policy: OccurrencePolicyView | null;
+  availabilityVotes: OccurrenceVote[];
+  games: LineupGame[];
+};
 
 type VotesAndGames = Pick<OccurrenceDetail, 'availabilityVotes' | 'games'>;
 
-/** Rows grouped under the occurrence each belongs to, without the key itself, in the order given. */
-function groupByOccurrence<TRow extends { occurrenceId: string | null }>(
-  rows: TRow[],
-): Map<string, Omit<TRow, 'occurrenceId'>[]> {
-  const groups = new Map<string, Omit<TRow, 'occurrenceId'>[]>();
+/**
+ * Rows grouped under the occurrence each belongs to, in the order given, each
+ * row whole: a lineup game carries its `occurrenceId` wherever it is served
+ * (#799), and a vote drops it as it is served ({@link toOccurrenceVote}).
+ */
+function groupByOccurrence<TRow extends { occurrenceId: string | null }>(rows: TRow[]): Map<string, TRow[]> {
+  const groups = new Map<string, TRow[]>();
 
-  for (const { occurrenceId, ...row } of rows) {
-    if (occurrenceId === null) {
+  for (const row of rows) {
+    if (row.occurrenceId === null) {
       continue;
     }
 
-    const group = groups.get(occurrenceId) ?? [];
+    const group = groups.get(row.occurrenceId) ?? [];
     group.push(row);
-    groups.set(occurrenceId, group);
+    groups.set(row.occurrenceId, group);
   }
 
   return groups;

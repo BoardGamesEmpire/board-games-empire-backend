@@ -9,6 +9,8 @@ import { EventService } from './event.service';
 import { HouseholdEventsController } from './household-events.controller';
 import { EventLifecycleController } from './lifecycle/event-lifecycle.controller';
 import { EventLifecycleService } from './lifecycle/event-lifecycle.service';
+import { LineupController } from './lineup/lineup.controller';
+import { LineupService } from './lineup/lineup.service';
 import { EventNotificationListener } from './listeners/event-notification.listener';
 import { EventGameNominationController } from './nomination/event-game-nomination.controller';
 import { EventGameNominationService } from './nomination/event-game-nomination.service';
@@ -29,6 +31,7 @@ import { EventPolicyService } from './policy/event-policy.service';
     EventGameNominationController,
     EventOccurrenceController,
     OfferedGameController,
+    LineupController,
     EventPolicyController,
   ],
   providers: [
@@ -39,6 +42,7 @@ import { EventPolicyService } from './policy/event-policy.service';
     EventOccurrenceService,
     EventNotificationListener,
     OfferedGameService,
+    LineupService,
     EventPolicyService,
   ],
   exports: [EventService, EventAttendeeService, EventGameNominationService, EventOccurrenceService],
