@@ -129,6 +129,10 @@ export const PLUGIN_MANIFEST_JSON_SCHEMA_ID = 'https://boardgamesempire.dev/sche
  * Prefix helpers keep the namespacing rules in one place. Permission slugs
  * are deliberately absent: their envelope is GENERATED, never author-written
  * — see `plugin-permission-slug.ts`.
+ *
+ * Nothing registers plugin queues with BullMQ yet. Whatever wires them must
+ * register the full name wrapped in braces (`{plugin:<slug>:<queue>}`) so it
+ * carries a hash tag; the queue hash-tag check fails it otherwise (#462).
  */
 export const pluginQueuePrefix = (slug: string): string => `plugin:${slug}:`;
 export const pluginEmitPrefix = (slug: string): string => `plugin.${slug}.`;

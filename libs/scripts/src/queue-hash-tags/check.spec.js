@@ -215,29 +215,10 @@ describe('findQueueNames (#462)', () => {
 
 describe('checkQueueHashTags (#462)', () => {
   describe('on the repository tree (#462)', () => {
-    // Rewritten when the three queues are renamed (#462).
-    it('flags exactly the three unbraced queues, each naming its constants file', () => {
+    it('reports no problems, so every queue name on the tree carries a hash tag (#462)', () => {
       const { problems } = checkQueueHashTags(REPO_ROOT);
 
-      expect(problems).toHaveLength(3);
-      for (const name of ['mail-delivery', 'webhook-delivery', 'feedback-delivery']) {
-        expect(problems.filter((message) => message.includes(`"${name}"`))).toHaveLength(1);
-      }
-    });
-
-    it('names the constants file that declares each unbraced queue', () => {
-      const { problems } = checkQueueHashTags(REPO_ROOT);
-      const declaredAt = {
-        'mail-delivery': 'libs/queue/mail/src/lib/constants/mail-queue.constants.ts',
-        'webhook-delivery': 'libs/queue/webhooks/src/lib/constants/webhook-queue.constants.ts',
-        'feedback-delivery': 'libs/queue/feedback/src/lib/constants/feedback-queue.constants.ts',
-      };
-
-      for (const [name, constants] of Object.entries(declaredAt)) {
-        const problem = problems.find((message) => message.includes(`"${name}"`));
-
-        expect(problem).toContain(constants);
-      }
+      expect(problems).toEqual([]);
     });
 
     it('finds the braced queues, so the check cannot pass over nothing', () => {
@@ -250,6 +231,9 @@ describe('checkQueueHashTags (#462)', () => {
         '{bge.media.contribution-sweep}',
         '{bge.friendship.extended-network}',
         '{bge.gateway.vocabulary}',
+        '{bge.mail.delivery}',
+        '{bge.webhooks.delivery}',
+        '{bge.feedback.delivery}',
       ]) {
         expect(names).toContain(name);
       }

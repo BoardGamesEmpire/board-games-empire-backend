@@ -4,8 +4,12 @@
  * stay in `@bge/feedback`.
  */
 
-/** BullMQ queue carrying one job per (report, sink) delivery. */
-export const FEEDBACK_QUEUE_NAME = 'feedback-delivery';
+/**
+ * BullMQ queue carrying one job per (report, sink) delivery.
+ * Braces are a Redis hash tag: Dragonfly places a queue's keys on one thread by it,
+ * and `--lock_on_hashtags` needs it (#462; see docs/REDIS.md).
+ */
+export const FEEDBACK_QUEUE_NAME = '{bge.feedback.delivery}';
 
 /** Single job name on the delivery queue. */
 export const FEEDBACK_DELIVERY_JOB = 'deliver';
