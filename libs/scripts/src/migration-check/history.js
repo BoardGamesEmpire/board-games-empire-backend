@@ -47,12 +47,17 @@ function git(cwd, args, ref) {
   return result.stdout;
 }
 
-/** The name of every directory under prisma/migrations that holds a migration.sql, sorted. */
+/**
+ * The name of every directory under prisma/migrations that holds a
+ * migration.sql, sorted. The paths are NUL-delimited, as `ls-tree -z` prints
+ * them: without `-z`, git quotes a non-ASCII path, and a quoted path matches no
+ * migration, so deleting one would pass.
+ */
 function migrationNames(lsTreeOutput) {
   const names = [];
 
-  for (const line of lsTreeOutput.split('\n')) {
-    const match = MIGRATION_FILE.exec(line.trim());
+  for (const filePath of lsTreeOutput.split('\0')) {
+    const match = MIGRATION_FILE.exec(filePath);
 
     if (match) {
       names.push(match[1]);
@@ -70,7 +75,7 @@ function removedMigrations(base, head) {
 }
 
 function migrationsAt(cwd, ref) {
-  return migrationNames(git(cwd, ['ls-tree', '-r', '--name-only', `${ref}^{commit}`, '--', MIGRATIONS_DIR], ref));
+  return migrationNames(git(cwd, ['ls-tree', '-r', '-z', '--name-only', `${ref}^{commit}`, '--', MIGRATIONS_DIR], ref));
 }
 
 /** The migrations in the working tree, read as `migrationsAt` reads a commit. */
@@ -82,7 +87,7 @@ function migrationsInWorkingTree(cwd) {
     entries
       .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(dir, entry.name, 'migration.sql')))
       .map((entry) => `${MIGRATIONS_DIR}/${entry.name}/migration.sql`)
-      .join('\n'),
+      .join('\0'),
   );
 }
 

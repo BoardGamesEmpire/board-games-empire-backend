@@ -53,7 +53,7 @@ describe('migration history check (#1148)', () => {
         'prisma/migrations/20260110_notes/README.md',
         'prisma/migrations/20260101000000_first/migration.sql',
         '',
-      ].join('\n');
+      ].join('\0');
 
       expect(migrationNames(output)).toEqual(['20260101000000_first', '20260109085042_init']);
     });
@@ -122,6 +122,15 @@ describe('migration history check (#1148)', () => {
       commitAll(repo, 'delete a');
 
       expect(checkMigrationHistory({ cwd: repo }).removed).toEqual(['20260101_a']);
+    });
+
+    it('fails a branch that deletes a migration whose name git would quote, as it quotes non-ASCII paths', () => {
+      writeMigration(repo, '20260103_café');
+      git(repo, 'update-ref', 'refs/remotes/origin/master', commitAll(repo, 'add café'));
+      fs.rmSync(path.join(repo, 'prisma', 'migrations', '20260103_café'), { recursive: true });
+      commitAll(repo, 'delete café');
+
+      expect(checkMigrationHistory({ cwd: repo }).removed).toEqual(['20260103_café']);
     });
 
     it('fails a branch whose last migration.sql leaves a directory, though the directory keeps other files', () => {
