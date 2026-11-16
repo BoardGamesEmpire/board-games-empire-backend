@@ -545,7 +545,6 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'create:event_availability_vote',
     'create:event_game_nomination',
     'create:event_game_vote',
-    'create:event_game',
     'create:event_invite',
     'create:game_play_session',
     'create:media:upload',
