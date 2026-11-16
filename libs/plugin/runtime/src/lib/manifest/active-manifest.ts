@@ -17,7 +17,9 @@ import { isPlainJsonObject } from '../is-plain-json-object';
  * that whatever the document is. A document that is not a plain object
  * fails with one root issue before the schema is consulted: a Json column
  * admits arrays, `null` and scalars, and a permissive schema such as `{}`
- * would accept every one of them.
+ * would accept every one of them. A document the validator throws on is an
+ * issue too (`PluginConfigSchemaService.validate`), so a stored document
+ * never makes this throw.
  */
 export function configDocumentIssues(
   configSchema: PluginConfigSchemaService,

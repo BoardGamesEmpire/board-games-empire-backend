@@ -31,7 +31,8 @@ const GRANT_SCOPE: Readonly<Record<PluginConsentScopeValue, PluginGrantScope>> =
  * project does not depend on `@bge/plugin`: the same ajv build and options,
  * `ajv-formats` registered, an asynchronous schema refused, and the schema's
  * usability settled before the document's shape, so an unusable schema
- * answers `'schema-unusable'` whatever the document is.
+ * answers `'schema-unusable'` whatever the document is, and a document the
+ * validator throws on answers `'rejected'`.
  */
 function judgeConfig(schema: Record<string, unknown>, document: unknown): PluginConfigVerdict {
   let validate: ValidateFunction;
@@ -53,7 +54,11 @@ function judgeConfig(schema: Record<string, unknown>, document: unknown): Plugin
     return 'rejected';
   }
 
-  return validate(document) ? 'conforms' : 'rejected';
+  try {
+    return validate(document) ? 'conforms' : 'rejected';
+  } catch {
+    return 'rejected';
+  }
 }
 
 /**

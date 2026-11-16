@@ -639,12 +639,14 @@ export class PermissionsService {
       return notServable;
     }
 
-    // One reading of the stored manifest per resolution, shared by the
-    // dormancy rule and the manifest bound below; a local, never a field, so
-    // the next resolution reads the manifest again.
-    const activeManifest = this.activeManifestReadingOf(plugin, unit);
+    // One reading of the stored manifest per resolution. A household's is
+    // taken here, because the dormancy rule judges the unit by it, and the
+    // manifest bound below uses the same one. A Server or User unit's is taken
+    // at the bound, once the unit is known to hold consent decisions. A local,
+    // never a field, so the next resolution reads the manifest again.
+    const householdManifest = unit.scopeType === 'Household' ? this.readActiveManifest(plugin, unit) : undefined;
 
-    if (!this.isUnitServed(plugin.id, unit, unitEnablement, activeManifest)) {
+    if (!this.isUnitServed(plugin.id, unit, unitEnablement, householdManifest ?? null)) {
       return notServable;
     }
 
@@ -698,7 +700,10 @@ export class PermissionsService {
       }
     }
 
-    const requestedGrants = this.grantsRequestedByActiveManifest(plugin.id, activeManifest(), grants);
+    // A household that is served holds its manifest already: with no reader
+    // it was refused above, so `null` here is a Server or User unit's.
+    const activeManifest = householdManifest ?? this.readActiveManifest(plugin, unit);
+    const requestedGrants = this.grantsRequestedByActiveManifest(plugin.id, activeManifest, grants);
     const ownSlugs = new Set(requestedGrants.map((grant) => grant.permissionSlug).filter(isPluginPermissionSlug));
     const coreSlugs = requestedGrants.map((grant) => grant.permissionSlug).filter((slug) => !ownSlugs.has(slug));
 
@@ -806,26 +811,10 @@ export class PermissionsService {
   }
 
   /**
-   * Reads the plugin's active manifest at most once for one resolution (#577,
-   * #1151): the returned function reads it on its first call and answers that
-   * same reading on every later call. It throws the typed rejection when the
-   * stored manifest fails re-validation, and answers `null` when this process
-   * registers no reader. `getPluginGrantSnapshot` holds it in a local, so every
-   * resolution reads the stored manifest again.
+   * Reads the plugin's active manifest (#577, #1151). It throws the typed
+   * rejection when the stored manifest fails re-validation, and answers
+   * `null` when this process registers no reader.
    */
-  private activeManifestReadingOf(
-    plugin: { id: string; slug: string; version: string; manifestJson: unknown },
-    unit: PluginUnit,
-  ): () => PluginActiveManifest | null {
-    let reading: { readonly manifest: PluginActiveManifest | null } | undefined;
-
-    return () => {
-      reading ??= { manifest: this.readActiveManifest(plugin, unit) };
-
-      return reading.manifest;
-    };
-  }
-
   private readActiveManifest(
     plugin: { id: string; slug: string; version: string; manifestJson: unknown },
     unit: PluginUnit,
@@ -909,7 +898,7 @@ export class PermissionsService {
    * Server and User units are not judged on configuration: the server axis has
    * no unit enablement (#697), and per-user configuration belongs to #228.
    * Their manifest is read only when they hold consent decisions, for the
-   * manifest bound.
+   * manifest bound, so `householdManifest` is `null` for them.
    *
    * Consent is deliberately absent (#1149; removes #1061, #1063): an unmet
    * required permission is the ability's to deny, grant by grant, not a reason
@@ -920,15 +909,13 @@ export class PermissionsService {
     pluginId: string,
     unit: PluginUnit,
     unitEnablement: PluginUnitEnablement,
-    activeManifest: () => PluginActiveManifest | null,
+    householdManifest: PluginActiveManifest | null,
   ): boolean {
     if (unit.scopeType !== 'Household') {
       return isPluginUnitServed(unitEnablement, null);
     }
 
-    const manifest = activeManifest();
-
-    if (manifest === null) {
+    if (householdManifest === null) {
       this.logger.warn(
         `Plugin ${pluginId}: this process registers no reader for its active manifest, so it cannot work out ` +
           `whether household ${unit.householdId} can run the plugin; not serving it (#1151)`,
@@ -939,7 +926,7 @@ export class PermissionsService {
 
     const dormancy = derivePluginUnitDormancy({
       scopeType: unit.scopeType,
-      manifest,
+      manifest: householdManifest,
       retainedConfig: unitEnablement.retainedConfig,
     });
 

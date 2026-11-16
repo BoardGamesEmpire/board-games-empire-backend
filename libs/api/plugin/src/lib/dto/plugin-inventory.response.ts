@@ -251,6 +251,9 @@ class UnitStateDto implements PluginInventoryUnitState {
     description:
       'What keeps the unit from running apart from the two switches, its own and the Server switch. It is ' +
       'present whether or not the unit is switched on, so a client can say what switching it on would meet. ' +
+      'It leaves one refusal out: the first switch-on of a plugin whose manifest requires household ' +
+      'configuration must bring a document, even where an empty one fits the schema, and is refused with ' +
+      'PLUGIN_UNIT_CONFIG_REQUIRED and no issues when it brings none. ' +
       'unavailable: the server cannot run it for this unit, because the stored manifest cannot be read ' +
       "(manifestUnreadable true), this version has no surface at the unit's scope, or its settings schema " +
       'cannot be used; only a server admin restores it. ' +

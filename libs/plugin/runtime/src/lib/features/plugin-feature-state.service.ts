@@ -95,8 +95,11 @@ export interface PluginFeatureUnitState {
    * household's settings do not fit the active schema, `null` when nothing
    * does. Worked out on every read from the active manifest and the unit's
    * document, and reported whether or not the unit is switched on, so a
-   * client can say what a switch-on would meet. `null` for an uninstalled
-   * plugin, for which nothing is worked out.
+   * client can say what a switch-on would meet. It leaves one refusal out:
+   * a first switch-on the manifest requires a document for
+   * (`requiresHouseholdConfig`) is refused when it brings none, whatever the
+   * rule says about `{}`. `null` for an uninstalled plugin, for which nothing
+   * is worked out.
    */
   readonly dormancy: PluginUnitDormancy | null;
   /** Required permissions the unit still owes and optional ones switched off. */

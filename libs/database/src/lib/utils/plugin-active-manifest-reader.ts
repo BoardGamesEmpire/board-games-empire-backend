@@ -37,9 +37,10 @@ export interface PluginActiveManifest {
   /**
    * Judges a document against the manifest's `config.schema`. A schema that
    * cannot be used is `'schema-unusable'` whatever the document is; otherwise
-   * a document that is not a plain object is `'rejected'`. Neither the
-   * document nor an unusable schema makes it throw, since both are answers;
-   * an unexpected error from the validator propagates.
+   * a document that is not a plain object is `'rejected'`, and so is one the
+   * schema's validator cannot get through (a document nested deeper than a
+   * recursive schema can follow). Neither the document nor an unusable schema
+   * makes it throw, since both are answers, and every read of the unit asks.
    */
   judgeConfig(document: unknown): PluginConfigVerdict;
 }

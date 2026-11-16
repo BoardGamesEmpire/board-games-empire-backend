@@ -36,6 +36,15 @@ describe('installed-plugin inventory (#354)', () => {
   const arrangePlugin = (row: Record<string, unknown> = {}): Promise<Plugin> =>
     arrangeInventoryPlugin(db.client, { row });
 
+  /**
+   * A plugin a household can hold a unit enablement under. The scope is the
+   * manifest's, which the row's column follows: a row saying Household over a
+   * manifest saying server describes no plugin an install can produce, and
+   * its household units read `unavailable` (#1151).
+   */
+  const arrangeHouseholdPlugin = (): Promise<Plugin> =>
+    arrangeInventoryPlugin(db.client, { manifest: { scope: 'household' } });
+
   const listServer = (actor: Caller, query = '') => request(baseUrl).get(`/api/plugins${query}`).set(actor.headers);
   const readOne = (actor: Caller, slug: string) => request(baseUrl).get(`/api/plugins/${slug}`).set(actor.headers);
   const listHousehold = (actor: Caller, householdId: string, query = '') =>
@@ -514,7 +523,7 @@ describe('installed-plugin inventory (#354)', () => {
     it('serves no provenance, version or install history, and accepts no tombstone flag', async () => {
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner });
-      const plugin = await arrangePlugin({ scope: PluginScope.Household });
+      const plugin = await arrangeHouseholdPlugin();
 
       const response = await listHousehold(owner, fixture.household.id, '?limit=100').expect(200);
       const entry = entryFor(response.body, plugin.slug);
@@ -565,10 +574,7 @@ describe('installed-plugin inventory (#354)', () => {
       it('narrows the list to the one plugin its scope names, and refuses it once the household is deleted', async () => {
         const admin = await actors.admin();
         const { household } = await actors.householdWithMembers({ owner: await actors.user() });
-        const [scoped, other] = await Promise.all([
-          arrangePlugin({ scope: PluginScope.Household }),
-          arrangePlugin({ scope: PluginScope.Household }),
-        ]);
+        const [scoped, other] = await Promise.all([arrangeHouseholdPlugin(), arrangeHouseholdPlugin()]);
 
         // The control: unpinned, the key lists both.
         const unpinned = await listHousehold(await keyOf(admin), household.id, '?limit=100').expect(200);
@@ -589,7 +595,7 @@ describe('installed-plugin inventory (#354)', () => {
       it('refuses the consent and feature-state reads once the household is deleted (#790)', async () => {
         const admin = await actors.admin();
         const { household } = await actors.householdWithMembers({ owner: await actors.user() });
-        const plugin = await arrangePlugin({ scope: PluginScope.Household });
+        const plugin = await arrangeHouseholdPlugin();
         const key = await keyOf(admin);
         const reads = (path: string) =>
           request(baseUrl).get(`/api/households/${household.id}/plugins/${plugin.slug}/${path}`).set(key.headers);

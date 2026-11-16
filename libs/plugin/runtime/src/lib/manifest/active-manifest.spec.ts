@@ -99,6 +99,26 @@ describe('activeManifestOf (#1151)', () => {
       },
     );
 
+    it('reads a document the validator cannot get through as rejected, not as a throw', () => {
+      // A recursive schema over a document nested deep enough overflows the
+      // stack inside the validator. Every read of the unit judges its stored
+      // document, so the throw would fail each of them.
+      const recursive = {
+        $ref: '#/$defs/node',
+        $defs: { node: { type: 'object', properties: { child: { $ref: '#/$defs/node' } } } },
+      };
+      let document: Record<string, unknown> = {};
+
+      for (let level = 0; level < 200_000; level++) {
+        document = { child: document };
+      }
+
+      const manifest = householdUnder(recursive);
+
+      expect(manifest.judgeConfig(document)).toBe('rejected');
+      expect(manifest.judgeConfig({ child: {} })).toBe('conforms');
+    });
+
     it('rethrows an error from the validator that is not about the schema', () => {
       const manifest = householdUnder({});
       jest.spyOn(configSchema, 'validate').mockImplementation(() => {
