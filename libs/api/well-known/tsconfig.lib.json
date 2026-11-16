@@ -33,6 +33,12 @@
       "path": "../../common/testing/tsconfig.lib.json"
     },
     {
+      "path": "../../plugin/runtime/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/actor-context/tsconfig.lib.json"
+    },
+    {
       "path": "../../database/tsconfig.lib.json"
     },
     {

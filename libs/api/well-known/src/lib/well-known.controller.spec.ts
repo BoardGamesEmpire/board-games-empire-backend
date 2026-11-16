@@ -5,7 +5,7 @@ import { NotFoundException } from '@nestjs/common';
 import { HEADERS_METADATA } from '@nestjs/common/constants';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'node:crypto';
-import { AuthStrategyType } from './constants';
+import { AuthStrategyType, SERVER_DISCOVERY_PATH } from './constants';
 import { BgeDiscoveryDto } from './dto/bge-discovery.dto';
 import { EmailAndPasswordStrategyDto } from './dto/email-and-password-strategy.dto';
 import { SecurityTxtService } from './security-txt.service';
@@ -28,6 +28,7 @@ function makeFullDiscovery(overrides: Partial<BgeDiscoveryDto> = {}): BgeDiscove
   dto.bgeAuthBasePath = AUTH_BASE;
   dto.bgeSessionEndpoint = `${AUTH_BASE}/get-session`;
   dto.bgeSignOutEndpoint = `${AUTH_BASE}/sign-out`;
+  dto.bgeServerDiscoveryEndpoint = SERVER_DISCOVERY_PATH;
   dto.bgePasskeySupported = true;
   dto.bgeTwoFactorSupported = true;
   dto.bgeAnonymousAuthSupported = true;

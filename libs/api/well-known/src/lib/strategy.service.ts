@@ -4,7 +4,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import assert from 'node:assert';
 import type { BgeIdentityConfig } from './configuration/bge-identity.config';
-import { AUTH_BASE_PATH, authPath, WELL_KNOWN_SCHEMA_VERSION } from './constants';
+import { AUTH_BASE_PATH, authPath, SERVER_DISCOVERY_PATH, WELL_KNOWN_SCHEMA_VERSION } from './constants';
 import { AuthStrategyDto, BgeDiscoveryDto } from './dto/bge-discovery.dto';
 import { EmailAndPasswordStrategyDto } from './dto/email-and-password-strategy.dto';
 import { OidcStrategyDto } from './dto/oidc-strategy.dto';
@@ -74,6 +74,10 @@ export class StrategyService {
     dto.bgeAuthBasePath = AUTH_BASE_PATH;
     dto.bgeSessionEndpoint = authPath('/get-session');
     dto.bgeSignOutEndpoint = authPath('/sign-out');
+
+    // Where a signed-in client learns the rest (#78). The same constant a
+    // controller test pins the route to; an e2e test follows the pointer.
+    dto.bgeServerDiscoveryEndpoint = SERVER_DISCOVERY_PATH;
 
     // capability flags — always-on plugins (see auth-factory.ts)
     dto.bgePasskeySupported = true;

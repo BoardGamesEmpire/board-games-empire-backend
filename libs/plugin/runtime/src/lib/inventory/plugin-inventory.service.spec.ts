@@ -333,6 +333,50 @@ describe('PluginInventoryService', () => {
     });
   });
 
+  describe('listRunningOnServer (#78)', () => {
+    /** The fixture plugin manifest's display name in one locale, read rather than restated. */
+    const nameIn = (locale: string) => (manifest.displayName as Record<string, string>)[locale];
+
+    it('reads only enabled, installed, loaded server-scope plugins, by slug, with no ceiling', async () => {
+      db.plugin.findMany.mockResolvedValue([row()] as never);
+
+      await service.listRunningOnServer();
+
+      expect(db.plugin.findMany).toHaveBeenCalledWith({
+        where: { scope: PluginScope.Server, enabled: true, uninstalledAt: null, loadFailed: false },
+        select: expect.objectContaining({ slug: true, category: true, version: true, manifestJson: true }),
+        orderBy: { slug: 'asc' },
+      });
+      // One statement, so there is no total to keep consistent with it.
+      expect(db.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('returns slug, plugin category and the display name in the requested locale', async () => {
+      db.plugin.findMany.mockResolvedValue([row()] as never);
+
+      await expect(service.listRunningOnServer('de')).resolves.toEqual([
+        { slug: 'demo-sink', category: PluginCategory.FeedbackSink, displayName: nameIn('de') },
+      ]);
+    });
+
+    it('falls back to the default-locale name for a locale the plugin manifest lacks', async () => {
+      db.plugin.findMany.mockResolvedValue([row()] as never);
+
+      const [plugin] = await service.listRunningOnServer('xx');
+
+      expect(plugin.displayName).toBe(nameIn(options.defaultLocale));
+    });
+
+    it('leaves out a plugin whose stored plugin manifest no longer validates, and still returns the rest', async () => {
+      db.plugin.findMany.mockResolvedValue([
+        row({ id: 'plugin-2', slug: 'broken', manifestJson: { nonsense: true } }),
+        row(),
+      ] as never);
+
+      await expect(service.listRunningOnServer()).resolves.toEqual([expect.objectContaining({ slug: 'demo-sink' })]);
+    });
+  });
+
   describe('getBySlug', () => {
     it('throws NotFound for an unknown slug', async () => {
       db.plugin.findUnique.mockResolvedValue(null as never);
