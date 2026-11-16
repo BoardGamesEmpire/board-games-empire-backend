@@ -38,6 +38,15 @@ export const authPath = (segment: string): string => {
 export const WELL_KNOWN_SCHEMA_VERSION = 1;
 
 /**
+ * Where signed-in server discovery is served (#78), root-relative like every
+ * BGE endpoint the bge-identity document lists, which points at it. A
+ * controller test pins the controller's route to it under the api's `api`
+ * prefix, and an e2e test follows the pointer to the route, which also
+ * catches a change of prefix.
+ */
+export const SERVER_DISCOVERY_PATH = '/api/discovery/server';
+
+/**
  * Schema version of signed-in server discovery (#78), versioned apart from the
  * bge-identity document. Clients parse known fields and ignore unknown ones;
  * this is bumped only on a breaking change to the document's shape.

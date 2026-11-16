@@ -101,7 +101,7 @@ _Avoid_: onboarding on its own
 The permanent, unique identifier a server gives itself when it is first set up, so that clients can tell servers apart.
 
 **Server discovery**:
-What a server tells a client about itself before anyone signs in: its identity, its name and the ways to sign in. A fuller view for signed-in users is planned.
+What a server tells a client about itself. Before anyone signs in: its identity, its name and the ways to sign in. Once signed in, a fuller view adds which core areas the server offers, such as households and events, and the plugins running on it.
 _Avoid_: tier 1 and tier 2 discovery
 
 ### People

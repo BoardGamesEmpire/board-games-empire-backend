@@ -112,6 +112,19 @@ export class BgeDiscoveryDto {
   bgeSignOutEndpoint!: string;
 
   /**
+   * Where signed-in server discovery is served (#78), relative path. It needs
+   * a signed-in actor, and adds the core areas the server offers, such as
+   * households and events, and the plugins running on it.
+   */
+  @ApiProperty({
+    description:
+      'Signed-in server discovery endpoint, relative path. Needs a signed-in user or an API key; ' +
+      'lists the core areas this server offers and the plugins running on it. (bge_ extension)',
+    example: '/api/discovery/server',
+  })
+  bgeServerDiscoveryEndpoint!: string;
+
+  /**
    * Passkey (WebAuthn) authentication is always available.
    * Clients should offer passkey registration/sign-in flows.
    */

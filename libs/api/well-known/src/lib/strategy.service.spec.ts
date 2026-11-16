@@ -1,7 +1,7 @@
 import { ProviderLinkingPolicy, type SystemSetting } from '@bge/database';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { ConfigService } from '@nestjs/config';
-import { AUTH_BASE_PATH, authPath, AuthStrategyType } from './constants';
+import { AUTH_BASE_PATH, authPath, AuthStrategyType, SERVER_DISCOVERY_PATH } from './constants';
 import { EmailAndPasswordStrategyDto } from './dto/email-and-password-strategy.dto';
 import { OidcStrategyDto } from './dto/oidc-strategy.dto';
 import { transformKeysToSnakeCase } from './interceptors/snakecase.interceptor';
@@ -25,6 +25,7 @@ const DOCUMENTED_WIRE_KEYS = [
   'bge_auth_base_path',
   'bge_session_endpoint',
   'bge_sign_out_endpoint',
+  'bge_server_discovery_endpoint',
   'bge_passkey_supported',
   'bge_two_factor_supported',
   'bge_anonymous_auth_supported',
@@ -178,6 +179,15 @@ describe('StrategyService', () => {
         expect(discovery.bgeSessionEndpoint).toBe(`${AUTH_BASE_PATH}/get-session`);
         expect(discovery.bgeSignOutEndpoint).toBe(`${AUTH_BASE_PATH}/sign-out`);
         expect(discovery.deviceAuthorizationEndpoint).toBe(`${AUTH_BASE_PATH}/device`);
+      });
+
+      it('points at signed-in server discovery with a root-relative path (#78)', async () => {
+        const service = await createService({ url: 'https://bge.myserver.io' });
+
+        const discovery = await service.getDiscovery();
+
+        expect(discovery.bgeServerDiscoveryEndpoint).toBe(SERVER_DISCOVERY_PATH);
+        expect(discovery.bgeServerDiscoveryEndpoint.startsWith('/')).toBe(true);
       });
     });
 
