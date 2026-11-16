@@ -16,6 +16,4 @@ enum PluginLifecycleEventType {
   GrantRejected
   GrantRevoked
   ReconsentRequested
-  UnitDormant
-  UnitRevived
 }

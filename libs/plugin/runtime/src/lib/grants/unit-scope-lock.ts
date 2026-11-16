@@ -23,13 +23,13 @@ import type { Prisma } from '@bge/database';
  * per-site argument, and a writer that skips the advisory reopens the
  * pre-row race class for every creator it can overlap with.
  *
- * Plugin-wide passes are the exception, and only because they hold the
- * plugin row exclusively first: uninstall's purge, and the dormancy
- * reconciliation a version activation or reinstall runs
- * (`household-dormancy.ts`). Every per-unit writer locks the plugin row
- * `FOR SHARE` before this lock, so its write either committed before the claim or waits
- * behind it. Activation no longer writes a unit's enablement at all: it
- * only reads which units owe re-consent (#1149).
+ * Uninstall's purge is the exception, and only because it holds the plugin
+ * row exclusively first. Every per-unit writer locks the plugin row
+ * `FOR SHARE` before this lock, so its write either committed before the claim
+ * or waits behind it. Activation and reinstall write no unit enablement:
+ * activation only reads which units owe re-consent (#1149), and whether a
+ * unit can run under the manifest either one promotes is worked out when read
+ * (#1151).
  *
  * The plugin row sorts BEFORE this lock, and that is a correctness
  * constraint rather than a convention: every per-unit writer holds the plugin

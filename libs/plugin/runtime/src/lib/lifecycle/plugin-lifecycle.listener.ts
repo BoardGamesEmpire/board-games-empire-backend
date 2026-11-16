@@ -15,8 +15,6 @@ import {
   HouseholdPluginDisabledEvent,
   HouseholdPluginEnabledEvent,
   HouseholdPluginReconsentRequestedEvent,
-  HouseholdPluginUnitDormantEvent,
-  HouseholdPluginUnitRevivedEvent,
   PluginConfigUpdatedEvent,
   PluginGrantCreatedEvent,
   PluginGrantRejectedEvent,
@@ -215,7 +213,7 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
       };
     }
 
-    // A unit's config write, switch or revival names the consent act that
+    // A unit's config write or switch names the consent act that
     // made it, as a consent decision's row does, so every recorded act leaves
     // a lifecycle row naming it (#1150). `actId` is null, and the manifest
     // version unknown, for a change no act caused: a switch-off or a config
@@ -281,31 +279,6 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
         scopeId: event.after.userId,
         manifestVersion: event.manifestVersion,
         payload: { outstandingPermissionSlugs: event.outstandingPermissionSlugs },
-      };
-    }
-
-    // Dormancy (#369, #370) is household-only: the user axis has no orphan
-    // state, since user consent is legal at any plugin scope (#225), and
-    // per-user config is #228's. The reason is the durable "why" here.
-    if (event instanceof HouseholdPluginUnitDormantEvent) {
-      return {
-        pluginId: event.after.pluginId,
-        pluginSlug: null,
-        scopeType: PluginGrantScope.Household,
-        scopeId: event.after.householdId,
-        manifestVersion: event.manifestVersion,
-        payload: { reason: event.reason },
-      };
-    }
-
-    if (event instanceof HouseholdPluginUnitRevivedEvent) {
-      return {
-        pluginId: event.after.pluginId,
-        pluginSlug: null,
-        scopeType: PluginGrantScope.Household,
-        scopeId: event.after.householdId,
-        manifestVersion: event.manifestVersion,
-        payload: { clearedReason: event.clearedReason, actId: event.actId },
       };
     }
 

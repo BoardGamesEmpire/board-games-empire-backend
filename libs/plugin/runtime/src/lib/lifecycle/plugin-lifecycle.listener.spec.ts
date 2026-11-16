@@ -6,7 +6,6 @@ import {
   PluginGrantStatus,
   PluginLifecycleEvent,
   PluginLifecycleEventType,
-  PluginUnitDormantReason,
   ResourceType,
   RiskLevel,
 } from '@bge/database';
@@ -19,8 +18,6 @@ import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginEnabledEvent,
   HouseholdPluginReconsentRequestedEvent,
-  HouseholdPluginUnitDormantEvent,
-  HouseholdPluginUnitRevivedEvent,
   PluginConfigUpdatedEvent,
   PluginDisabledEvent,
   PluginGrantCreatedEvent,
@@ -594,35 +591,6 @@ describe('PluginLifecycleListener', () => {
       },
     );
 
-    it('persists a UnitRevived row a consent act caused with the act id (#1150)', async () => {
-      const event = new HouseholdPluginUnitRevivedEvent(
-        {
-          id: 'hp-1',
-          householdId: 'household-1',
-          pluginId: 'plugin-1',
-          enabled: true,
-          dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-        },
-        { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true, dormantReason: null },
-        PluginUnitDormantReason.NeedsConfiguration,
-        '1.2.0',
-        initiatedAt,
-        'act-1',
-      );
-      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
-
-      emitter.emit(PluginEvent.UnitRevived, event);
-      await flush();
-
-      expect(createdRow()).toEqual(
-        expect.objectContaining({
-          event: PluginLifecycleEventType.UnitRevived,
-          manifestVersion: '1.2.0',
-          payload: { clearedReason: PluginUnitDormantReason.NeedsConfiguration, actId: 'act-1' },
-        }),
-      );
-    });
-
     it('persists a ReconsentRequested row with the outstanding slugs and manifest version (#1149)', async () => {
       const event = new HouseholdPluginReconsentRequestedEvent(
         { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true },
@@ -666,80 +634,6 @@ describe('PluginLifecycleListener', () => {
           scopeId: 'user-1',
           manifestVersion: '1.3.0',
           payload: { outstandingPermissionSlugs: ['read:user_digest'] },
-        }),
-      );
-    });
-
-    it('persists a UnitDormant row carrying the reason as its durable why (#369)', async () => {
-      const event = new HouseholdPluginUnitDormantEvent(
-        {
-          id: 'hp-1',
-          householdId: 'household-1',
-          pluginId: 'plugin-1',
-          enabled: true,
-          dormantReason: null,
-        },
-        {
-          id: 'hp-1',
-          householdId: 'household-1',
-          pluginId: 'plugin-1',
-          enabled: true,
-          dormantReason: PluginUnitDormantReason.ScopeOrphaned,
-        },
-        PluginUnitDormantReason.ScopeOrphaned,
-        '1.3.0',
-        initiatedAt,
-      );
-      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
-
-      emitter.emit(PluginEvent.UnitDormant, event);
-      await flush();
-
-      // Its OWN kind: dormancy has no outstanding slugs and a different cure
-      // than re-consent, so recording it under ReconsentRequested would make
-      // the provenance table lie about both.
-      expect(createdRow()).toEqual(
-        expect.objectContaining({
-          event: PluginLifecycleEventType.UnitDormant,
-          scopeType: PluginGrantScope.Household,
-          scopeId: 'household-1',
-          manifestVersion: '1.3.0',
-          payload: { reason: PluginUnitDormantReason.ScopeOrphaned },
-        }),
-      );
-    });
-
-    it('persists a UnitRevived row naming the dormancy that was lifted', async () => {
-      const event = new HouseholdPluginUnitRevivedEvent(
-        {
-          id: 'hp-1',
-          householdId: 'household-1',
-          pluginId: 'plugin-1',
-          enabled: true,
-          dormantReason: PluginUnitDormantReason.ScopeOrphaned,
-        },
-        {
-          id: 'hp-1',
-          householdId: 'household-1',
-          pluginId: 'plugin-1',
-          enabled: true,
-          dormantReason: null,
-        },
-        PluginUnitDormantReason.ScopeOrphaned,
-        '1.4.0',
-        initiatedAt,
-      );
-      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
-
-      emitter.emit(PluginEvent.UnitRevived, event);
-      await flush();
-
-      expect(createdRow()).toEqual(
-        expect.objectContaining({
-          event: PluginLifecycleEventType.UnitRevived,
-          scopeId: 'household-1',
-          manifestVersion: '1.4.0',
-          payload: { clearedReason: PluginUnitDormantReason.ScopeOrphaned, actId: null },
         }),
       );
     });

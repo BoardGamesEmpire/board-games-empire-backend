@@ -176,18 +176,16 @@ export const CLAIMED_LOCK_ORDER = [
   {
     /**
      * The unit enablement WRITTEN through Prisma, which locks it as surely as a
-     * `FOR UPDATE` would, or written by the dormancy pass activation delegates
-     * to (`reconcileHouseholdDormancy`, whose `updateMany` is the write). No
-     * shipped statement locks the unit enablement by raw SQL any more: the consent
-     * passes that did went when consent standing became a read-time
-     * derivation (#1149). The raw-SQL alternative stays for the replayed
-     * statement and for any raw lock someone writes later. Reads are excluded:
-     * see the note above.
+     * `FOR UPDATE` would. No shipped statement locks the unit enablement by raw
+     * SQL, and no plugin-wide pass writes one except uninstall's purge: a
+     * unit's consent standing (#1149) and its dormancy (#1151) are worked out
+     * when read, so activation and reinstall have nothing to write. The raw-SQL
+     * alternative stays for the replayed statement and for any raw lock someone
+     * writes later. Reads are excluded: see the note above.
      */
     name: 'unit row',
     pattern: anyOf(
       /tx\.(?:householdPlugin|userPlugin)\.(?:create|update|updateMany|upsert|delete|deleteMany)/,
-      /reconcileHouseholdDormancy\(/,
       relationLock(['household_plugins', 'user_plugins'], 'FOR UPDATE'),
     ),
   },
@@ -359,16 +357,16 @@ export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
     label: 'activateInTransaction (approval)',
     file: UPDATE_SERVICE,
     functionName: 'activateInTransaction',
-    stages: ['plugin row', 'grant row', 'unit row'],
+    stages: ['plugin row', 'grant row'],
     because:
-      "Activation takes the plugin row first via D-CN's `FOR UPDATE` config read, ahead of the claiming write " +
-      'that used to be this stage on its own (#370) — both are the plugin row, and either dates it. Then it ' +
-      'locks server grants (#356), then WRITES household units through the dormancy pass. Its re-consent ' +
-      'unit-set reads come earlier, write nothing (#1149) and are deliberately not the stage, because they ' +
-      'take no lock at all. The unlocked reads are safe because every unit-enablement writer claims the plugin row ' +
-      "before the advisory key, so a unit write either committed before activation's claim or waits behind " +
-      "it (#361). It never takes the advisory key, which is exactly why the unit paths need the plugin row's " +
-      'share lock to order against it.',
+      'Activation takes the plugin row first via the `FOR UPDATE` server-config read (#370), ahead of the ' +
+      'claiming write — both are the plugin row, and either dates it. Then it locks server grants (#356). It ' +
+      'writes no unit enablement: whether a unit can run under the manifest it promotes is worked out when ' +
+      'read (#1151), and so is the consent standing it announces (#1149). Its re-consent reads of the unit ' +
+      'enablements write nothing and take no lock, so they are not a stage. Those unlocked reads are safe ' +
+      'because every unit-enablement writer claims the plugin row before the advisory key, so a unit write ' +
+      "either committed before activation's claim or waits behind it (#361). It never takes the advisory key, " +
+      "which is exactly why the unit paths need the plugin row's share lock to order against it.",
   },
   {
     label: 'uninstall (the purge)',
@@ -530,8 +528,8 @@ const FK_CHILD_INSERT_METHODS = ['create', 'createMany', 'createManyAndReturn', 
  *
  * Postgres skips the referential-integrity check on an UPDATE whose key columns
  * are unchanged, so these count only when the payload names the FK field — the
- * `withArguments` guard below. Without it every dormancy write and every
- * `updateMany({ enabled })` in the tree reports as an FK-child write and wants
+ * `withArguments` guard below. Without it every unit config write and every
+ * `enabled` flip in the tree reports as an FK-child write and wants
  * an exemption saying it takes no parent lock, which is noise standing exactly
  * where a real finding would appear.
  *
