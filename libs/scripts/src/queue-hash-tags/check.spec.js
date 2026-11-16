@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { checkQueueHashTags, findQueueNames, hasHashTag } = require('./check');
+const { checkQueueHashTags, findQueueNames, hasHashTag, hashTagOf } = require('./check');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
 
@@ -25,6 +25,17 @@ describe('hasHashTag (#462)', () => {
     ['}{a', false],
   ])("%s: has a hash tag is %s, by Redis Cluster's braces rule (#462)", (name, expected) => {
     expect(hasHashTag(name)).toBe(expected);
+  });
+});
+
+describe('hashTagOf (#462)', () => {
+  it.each([
+    ['{bge.games}.import', 'bge.games'],
+    ['{bge.mail.delivery}', 'bge.mail.delivery'],
+    ['mail-delivery', null],
+    ['{}', null],
+  ])('%s has hash tag %s', (name, expected) => {
+    expect(hashTagOf(name)).toBe(expected);
   });
 });
 
@@ -49,20 +60,20 @@ describe('findQueueNames (#462)', () => {
   it('resolves a string enum member used by @Processor', () => {
     const { sites, unresolved } = findQueueNames([
       file('libs/a/p.ts', `@Processor(QueueNames.GamesImport)\nexport class P {}`),
-      file('libs/a/q.ts', `export enum QueueNames {\n  GamesImport = '{bge.games.import}',\n}`),
+      file('libs/a/q.ts', `export enum QueueNames {\n  GamesImport = '{bge.games}.import',\n}`),
     ]);
 
     expect(unresolved).toEqual([]);
-    expect(sites).toEqual([expect.objectContaining({ name: '{bge.games.import}', line: 1 })]);
+    expect(sites).toEqual([expect.objectContaining({ name: '{bge.games}.import', line: 1 })]);
   });
 
   it('resolves a flow child queueName that is an enum member', () => {
     const { sites } = findQueueNames([
       file('libs/a/flow.ts', `const f = { queueName: QueueNames.GatewayFetch };`),
-      file('libs/a/q.ts', `export enum QueueNames { GatewayFetch = '{bge.gateway.fetch}' }`),
+      file('libs/a/q.ts', `export enum QueueNames { GatewayFetch = '{bge.games}.fetch' }`),
     ]);
 
-    expect(sites).toEqual([expect.objectContaining({ name: '{bge.gateway.fetch}' })]);
+    expect(sites).toEqual([expect.objectContaining({ name: '{bge.games}.fetch' })]);
   });
 
   it('resolves a member of a const object, @InjectQueue and constructors', () => {
@@ -154,6 +165,102 @@ describe('findQueueNames (#462)', () => {
     expect(unresolved).toHaveLength(1);
   });
 
+  it('reads an enum whose members have no initializer, which are numeric, without failing', () => {
+    const { sites, unresolved } = findQueueNames([
+      file('libs/a/direction.ts', `export enum Direction { Up, Down }`),
+      file('libs/a/use.ts', `@Processor(Direction.Up)\nclass P {}`),
+    ]);
+
+    expect(sites).toEqual([]);
+    expect(unresolved).toEqual([expect.objectContaining({ expression: 'Direction.Up' })]);
+  });
+
+  it.each([
+    ['an aliased import', `import { Queue as BullQueue } from 'bullmq';\nnew BullQueue('plain');`],
+    ['a namespace import', `import * as bullmq from 'bullmq';\nnew bullmq.Queue('plain');`],
+    ['an aliased decorator', `import { Processor as Consumes } from '@nestjs/bullmq';\n@Consumes('plain')\nclass P {}`],
+  ])("counts BullMQ's constructor or decorator through %s", (_label, text) => {
+    const { sites } = findQueueNames([file('libs/a/use.ts', text)]);
+
+    expect(sites).toEqual([expect.objectContaining({ name: 'plain', line: 2 })]);
+  });
+
+  it('leaves a Worker imported from node:worker_threads alone', () => {
+    const { sites, unresolved } = findQueueNames([
+      file(
+        'libs/a/thread.ts',
+        `import { Worker } from 'node:worker_threads';\nnew Worker(new URL('./w.js', import.meta.url));`,
+      ),
+    ]);
+
+    expect(sites).toEqual([]);
+    expect(unresolved).toEqual([]);
+  });
+
+  it("reports a re-export of BullMQ's constructors, whose importers the check can't follow", () => {
+    const { reExports } = findQueueNames([
+      file('libs/a/index.ts', `export { Queue, Job } from 'bullmq';\nexport * from '@nestjs/bullmq';`),
+    ]);
+
+    expect(reExports).toEqual([
+      { file: 'libs/a/index.ts', line: 1, name: 'Queue' },
+      { file: 'libs/a/index.ts', line: 2, name: '*' },
+    ]);
+  });
+
+  describe("a flow's queues (#462)", () => {
+    const names = file(
+      'libs/a/q.ts',
+      `export enum Q { Import = '{bge.games}.import', Fetch = '{bge.games}.fetch', Other = '{bge.other}' }`,
+    );
+
+    it("accepts children that share their parent's hash tag", () => {
+      const { splitFlows, unfollowedFlows } = findQueueNames([
+        names,
+        file('libs/a/flow.ts', `const f = { queueName: Q.Import, children: [{ queueName: Q.Fetch }] };`),
+      ]);
+
+      expect(splitFlows).toEqual([]);
+      expect(unfollowedFlows).toEqual([]);
+    });
+
+    it("reports a child whose hash tag differs from its parent's", () => {
+      const { splitFlows } = findQueueNames([
+        names,
+        file(
+          'libs/a/flow.ts',
+          `const f = {\n  queueName: Q.Import,\n  children: [{ queueName: Q.Fetch }, { queueName: Q.Other }],\n};`,
+        ),
+      ]);
+
+      expect(splitFlows).toEqual([
+        { file: 'libs/a/flow.ts', line: 3, parent: '{bge.games}.import', child: '{bge.other}' },
+      ]);
+    });
+
+    it('checks a grandchild against its own parent', () => {
+      const { splitFlows } = findQueueNames([
+        names,
+        file(
+          'libs/a/flow.ts',
+          `const f = { queueName: Q.Import, children: [{ queueName: Q.Fetch, children: [{ queueName: Q.Other }] }] };`,
+        ),
+      ]);
+
+      expect(splitFlows).toEqual([expect.objectContaining({ parent: '{bge.games}.fetch', child: '{bge.other}' })]);
+    });
+
+    it.each([
+      ['children built elsewhere', `const f = { queueName: Q.Import, children: makeChildren() };`, 'makeChildren()'],
+      ['a child built elsewhere', `const f = { queueName: Q.Import, children: [makeChild()] };`, 'makeChild()'],
+      ['a spread child', `const f = { queueName: Q.Import, children: [...more] };`, '...more'],
+    ])('reports %s as a flow it cannot follow', (_label, text, expression) => {
+      const { unfollowedFlows } = findQueueNames([names, file('libs/a/flow.ts', text)]);
+
+      expect(unfollowedFlows).toEqual([expect.objectContaining({ expression })]);
+    });
+  });
+
   it('reports @Processor() with no argument as unresolved', () => {
     const { unresolved } = findQueueNames([file('libs/a/use.ts', `@Processor()\nclass P {}`)]);
 
@@ -226,8 +333,8 @@ describe('checkQueueHashTags (#462)', () => {
       const names = new Set(sites.map(({ name }) => name));
 
       for (const name of [
-        '{bge.games.import}',
-        '{bge.gateway.fetch}',
+        '{bge.games}.import',
+        '{bge.games}.fetch',
         '{bge.media.contribution-sweep}',
         '{bge.friendship.extended-network}',
         '{bge.gateway.vocabulary}',
@@ -305,6 +412,28 @@ describe('checkQueueHashTags (#462)', () => {
       fs.writeFileSync(path.join(root, 'libs/a/fresh.ts'), `new Queue('fresh');`);
 
       expect(checkQueueHashTags(root).problems).toEqual([expect.stringContaining('"fresh"')]);
+    });
+
+    it('checks .mts, .cts and .tsx source, and skips their specs and typings', () => {
+      track('libs/a/m.mts', `new Queue('in-mts');`);
+      track('libs/a/m.cts', `new Queue('in-cts');`);
+      track('libs/a/m.tsx', `new Queue('in-tsx');`);
+      track('libs/a/m.spec.mts', `new Queue('plain');`);
+      track('libs/a/m.d.mts', `new Queue('plain');`);
+
+      expect(checkQueueHashTags(root).problems).toEqual([
+        expect.stringContaining('"in-cts"'),
+        expect.stringContaining('"in-mts"'),
+        expect.stringContaining('"in-tsx"'),
+      ]);
+    });
+
+    it('fails a flow whose child carries another hash tag', () => {
+      track('libs/a/flow.ts', `const f = { queueName: '{bge.a}.parent', children: [{ queueName: '{bge.b}.child' }] };`);
+
+      expect(checkQueueHashTags(root).problems).toEqual([
+        expect.stringMatching(/libs\/a\/flow\.ts:1: flow child queue "\{bge\.b\}\.child".*"\{bge\.a\}\.parent"/),
+      ]);
     });
 
     it('skips a tracked file deleted from the working tree', () => {

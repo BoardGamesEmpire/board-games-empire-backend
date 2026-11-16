@@ -1,24 +1,26 @@
 /**
  * BullMQ queue names.
  *
- * Wrapped in `{braces}`, which are Redis Cluster hash tags: only the bracketed
- * substring is hashed, so all of a queue's internal keys (`bull:{name}:wait`,
- * `bull:{name}:active`, ...) resolve to one slot. Dragonfly reuses the same
- * substring for thread placement, landing those keys on one CPU core.
+ * Each starts with a `{braces}` hash tag: only the bracketed substring is
+ * hashed, so all of a queue's internal keys (`bull:{bge.games}.import:wait`,
+ * ...) resolve to one slot. Dragonfly reuses the same substring for thread
+ * placement and, with `--lock_on_hashtags`, for locking.
+ *
+ * The two queues share ONE tag because the game-import flow spans both: a
+ * parent on the import queue with its fetch child on the fetch queue. The
+ * script that adds the child reaches the parent's job key, and on Dragonfly
+ * with `--lock_on_hashtags` a child under another tag is refused, BullMQ drops
+ * the error, and the import waits forever (#462). The queue hash-tag check in
+ * CI fails a flow whose child's tag differs from its parent's.
  *
  * On a standalone server — which is every deployment BGE documents — braces are
  * ordinary key characters, so the convention is applied unconditionally.
  *
- * The two names below carry DIFFERENT tags, and the game-import flow spans both
- * through one `FlowProducer.add`. On a cluster that is a multi-key operation
- * across two slots and raises `CROSSSLOT`; bringing the flow's queues under a
- * single tag is a prerequisite for running BGE clustered.
- *
  * @see docs/REDIS.md — "BullMQ queue naming — the curly braces".
  */
 export enum QueueNames {
-  GamesImport = '{bge.games.import}',
-  GatewayFetch = '{bge.gateway.fetch}',
+  GamesImport = '{bge.games}.import',
+  GatewayFetch = '{bge.games}.fetch',
 }
 
 export enum JobNames {

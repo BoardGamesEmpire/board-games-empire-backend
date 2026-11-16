@@ -1,5 +1,5 @@
 import { PERMISSIONS_CACHE_NAMESPACE } from '@bge/permissions';
-import { cacheStoreKey } from '@bge/redis';
+import { cacheStoreKey, SCAN_PAGE } from '@bge/redis';
 import { connectToHarnessRedis, requireDisposableRedis } from './redis-reset';
 
 /**
@@ -144,8 +144,8 @@ export async function cacheIndexSizes(env: NodeJS.ProcessEnv = process.env): Pro
   const sizes: Record<string, number> = {};
 
   try {
-    // Under 100: KeyDB 6.3 holds a command sent behind a larger SCAN (#462), the same reason as SCAN_PAGE.
-    for await (const page of client.scanStream({ match: 'namespace:*', type: 'set', count: 99 })) {
+    // SCAN_PAGE, under 100: KeyDB 6.3 holds a command sent behind a larger SCAN (#462).
+    for await (const page of client.scanStream({ match: 'namespace:*', type: 'set', count: SCAN_PAGE })) {
       for (const key of page as string[]) {
         sizes[key] = await client.scard(key);
       }

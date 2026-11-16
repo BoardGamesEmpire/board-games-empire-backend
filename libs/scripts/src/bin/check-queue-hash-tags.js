@@ -16,14 +16,16 @@ try {
   const { sites, problems } = checkQueueHashTags(workspaceRoot);
 
   if (problems.length === 0) {
-    console.log(`queue-hash-tags: all ${sites.length} queue-name sites carry a hash tag`);
+    console.log(
+      `queue-hash-tags: all ${sites.length} queue-name sites carry a hash tag, and every flow's queues share one`,
+    );
   } else {
     for (const problem of problems) {
       console.error(`queue-hash-tags: ${problem}`);
     }
 
     console.error(
-      'queue-hash-tags: a Redis-compatible server that locks on hash tags rejects an unbraced queue; see libs/scripts/src/queue-hash-tags/check.js',
+      'queue-hash-tags: a Redis-compatible server that locks on hash tags rejects an unbraced queue, and a flow whose queues have different tags; see libs/scripts/src/queue-hash-tags/check.js',
     );
     process.exitCode = 1;
   }

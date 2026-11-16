@@ -28,7 +28,7 @@ const READINESS_POLL_MS = 100;
 
 /**
  * Every queue `apps/worker` consumes: one per `@Processor` in the consumer
- * modules `worker.module.ts` imports. `{bge.gateway.fetch}` is not here,
+ * modules `worker.module.ts` imports. `{bge.games}.fetch` is not here,
  * because `apps/gateway-worker` consumes it. Nothing empties it, then, and a
  * worker suite that ran a game import would leave its fetch jobs there.
  *

@@ -11,21 +11,23 @@ import { hasDrainToRun, openIsolatedQueue, registerDrain, requireNoLeftoverJobs 
  */
 describe('openIsolatedQueue', () => {
   it('refuses a Redis the harness published as not its own', () => {
-    expect(() => openIsolatedQueue('feedback-delivery', { [E2E_OWNS_REDIS_VAR]: 'false' })).toThrow(
-      /Refusing to obliterate the 'feedback-delivery' queue.*BGE_E2E_REDIS_FLUSH_OK=true/s,
+    expect(() => openIsolatedQueue('{bge.feedback.delivery}', { [E2E_OWNS_REDIS_VAR]: 'false' })).toThrow(
+      /Refusing to obliterate the '\{bge\.feedback\.delivery\}' queue.*BGE_E2E_REDIS_FLUSH_OK=true/s,
     );
   });
 
   it('refuses when globalSetup never published ownership at all', () => {
-    expect(() => openIsolatedQueue('feedback-delivery', {})).toThrow(/Refusing to obliterate/);
+    expect(() => openIsolatedQueue('{bge.feedback.delivery}', {})).toThrow(/Refusing to obliterate/);
   });
 
   it('lets an owned server through to the connection', () => {
-    expect(() => openIsolatedQueue('feedback-delivery', { [E2E_OWNS_REDIS_VAR]: 'true' })).toThrow(/REDIS_BULLMQ_HOST/);
+    expect(() => openIsolatedQueue('{bge.feedback.delivery}', { [E2E_OWNS_REDIS_VAR]: 'true' })).toThrow(
+      /REDIS_BULLMQ_HOST/,
+    );
   });
 
   it('lets an acknowledged escape-hatch server through to the connection', () => {
-    expect(() => openIsolatedQueue('feedback-delivery', { [E2E_REDIS_FLUSH_OK_VAR]: 'true' })).toThrow(
+    expect(() => openIsolatedQueue('{bge.feedback.delivery}', { [E2E_REDIS_FLUSH_OK_VAR]: 'true' })).toThrow(
       /REDIS_BULLMQ_HOST/,
     );
   });
@@ -39,16 +41,16 @@ describe('openIsolatedQueue', () => {
  */
 describe('requireNoLeftoverJobs', () => {
   it('passes a file that finished with as many pending jobs as it started with', () => {
-    expect(() => requireNoLeftoverJobs('feedback-delivery', 2, 2)).not.toThrow();
+    expect(() => requireNoLeftoverJobs('{bge.feedback.delivery}', 2, 2)).not.toThrow();
   });
 
   it('passes a file that finished with fewer, having cleared leftovers from an earlier file', () => {
-    expect(() => requireNoLeftoverJobs('feedback-delivery', 3, 0)).not.toThrow();
+    expect(() => requireNoLeftoverJobs('{bge.feedback.delivery}', 3, 0)).not.toThrow();
   });
 
   it('fails a file that left jobs behind, naming the queue, the count and the fix', () => {
-    expect(() => requireNoLeftoverJobs('feedback-delivery', 1, 3)).toThrow(
-      /left 2 job\(s\) pending on the 'feedback-delivery' queue \(1 when it started, 3 when it finished\).*isolateQueue\('feedback-delivery'\)/s,
+    expect(() => requireNoLeftoverJobs('{bge.feedback.delivery}', 1, 3)).toThrow(
+      /left 2 job\(s\) pending on the '\{bge\.feedback\.delivery\}' queue \(1 when it started, 3 when it finished\).*isolateQueue\('\{bge\.feedback\.delivery\}'\)/s,
     );
   });
 });

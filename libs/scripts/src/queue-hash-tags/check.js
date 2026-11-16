@@ -11,12 +11,26 @@
  * works on plain Redis and breaks only on a Redis-compatible server that cares. So every
  * registration is checked here, at the point a new queue is added.
  *
+ * A BullMQ flow adds its parent and children through one script call per job,
+ * and a child's script reaches its parent's keys. So the queues of one flow
+ * must share one hash tag, not just carry one each: on Dragonfly with
+ * `--lock_on_hashtags`, a child under another tag is refused, BullMQ drops the
+ * error, and the parent waits forever. The check compares the tag of every
+ * `children` entry of a flow object with its parent's.
+ *
  * Names are read from the TypeScript syntax tree, one file at a time, with no
  * type checker. A name that comes from a `const`, a string enum member or a
  * `const` object member is followed to its literal. Anything that can't be
  * followed is reported as a problem rather than skipped, and finding no sites at
  * all is a problem too, so a refactor that moves registrations out of the
  * scanned patterns can't turn the check into a pass over nothing.
+ *
+ * A constructor or decorator counts by the name it has in BullMQ's packages,
+ * so `new BullQueue(...)` from `import { Queue as BullQueue } from 'bullmq'` and
+ * `new bullmq.Queue(...)` from a namespace import are sites, and a `Worker`
+ * imported from anywhere else (`node:worker_threads`) is not. A file that
+ * re-exports one of those names from BullMQ's packages is a problem, since the
+ * check would not see what its importers construct.
  *
  * It is a script run over the whole tree, not a jest spec in each lib: a spec
  * is served from the Nx cache when its own project is untouched, and a queue
@@ -43,9 +57,15 @@ const LIST_FILES_ARGS = ['ls-files', '-z', '--cached', '--others', '--exclude-st
 /** A flow child names its queue with this property. */
 const FLOW_QUEUE_PROPERTY = 'queueName';
 
+/** A flow job lists its child jobs under this property. */
+const FLOW_CHILDREN_PROPERTY = 'children';
+
 const REGISTER_CALLS = new Set(['registerQueue', 'registerQueueAsync']);
 const DECORATORS = new Set(['Processor', 'InjectQueue']);
 const CONSTRUCTORS = new Set(['Queue', 'Worker', 'QueueEvents']);
+
+/** The packages whose exports the decorators and constructors above are. */
+const BULLMQ_MODULES = new Set(['bullmq', '@nestjs/bullmq']);
 
 /**
  * Redis Cluster's hash-tag rule: a `{` followed later by a `}` with at least one
@@ -65,13 +85,32 @@ function hasHashTag(name) {
   return close > open + 1;
 }
 
-/** Whether a path is one the check scans: source in `apps/` or `libs/`, not tests, typings or e2e apps. */
+/**
+ * The hash tag of a name by the same rule, without its braces, or null.
+ *
+ * @param {string} name
+ * @returns {string | null}
+ */
+function hashTagOf(name) {
+  if (!hasHashTag(name)) {
+    return null;
+  }
+
+  const open = name.indexOf('{');
+
+  return name.slice(open + 1, name.indexOf('}', open + 1));
+}
+
+/**
+ * Whether a path is one the check scans: TypeScript source in `apps/` or `libs/`
+ * (`.ts`, `.mts`, `.cts` or `.tsx`), not tests, typings or e2e apps.
+ */
 function isScanned(file) {
-  if (!/^(apps|libs)\/.*\.ts$/.test(file)) {
+  if (!/^(apps|libs)\/.*\.(ts|mts|cts|tsx)$/.test(file)) {
     return false;
   }
 
-  if (/\.(spec|e2e-spec|d)\.ts$/.test(file)) {
+  if (/\.(spec|e2e-spec|d)\.(ts|mts|cts|tsx)$/.test(file)) {
     return false;
   }
 
@@ -231,7 +270,8 @@ function buildDeclarations(parsed) {
           recordMember(
             node.name.text,
             propertyKey(member.name),
-            member.initializer && unwrap(member.initializer),
+            // A member with no initializer is numeric.
+            member.initializer ? unwrap(member.initializer) : null,
             member,
           );
         }
@@ -337,10 +377,80 @@ function calleeName(expression) {
 }
 
 /**
+ * A file's import bindings: local name to the module and the name it was
+ * imported as (`*` for a namespace import, `default` for a default import).
+ *
+ * @returns {Map<string, { module: string, imported: string }>}
+ */
+function importsOf(sourceFile) {
+  const imports = new Map();
+
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      !statement.importClause ||
+      !ts.isStringLiteral(statement.moduleSpecifier)
+    ) {
+      continue;
+    }
+
+    const module = statement.moduleSpecifier.text;
+    const { name, namedBindings } = statement.importClause;
+
+    if (name) {
+      imports.set(name.text, { module, imported: 'default' });
+    }
+
+    if (namedBindings && ts.isNamespaceImport(namedBindings)) {
+      imports.set(namedBindings.name.text, { module, imported: '*' });
+    } else if (namedBindings) {
+      for (const element of namedBindings.elements) {
+        imports.set(element.name.text, { module, imported: (element.propertyName ?? element.name).text });
+      }
+    }
+  }
+
+  return imports;
+}
+
+/**
+ * The name a decorator or constructor expression has in BullMQ's packages, or
+ * null when it is not one of theirs. An identifier imported from BullMQ's
+ * packages has the name it was imported as; one imported from any other module
+ * is that module's, so null. One not imported at all (a local or a global) is
+ * taken at its own name, so a site is never skipped for want of an import. A
+ * member of a namespace or default import of BullMQ's packages has its member
+ * name.
+ */
+function bullmqName(expression, imports) {
+  if (ts.isIdentifier(expression)) {
+    const binding = imports.get(expression.text);
+
+    if (!binding) {
+      return expression.text;
+    }
+
+    return BULLMQ_MODULES.has(binding.module) && binding.imported !== '*' && binding.imported !== 'default'
+      ? binding.imported
+      : null;
+  }
+
+  if (ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.expression)) {
+    const binding = imports.get(expression.expression.text);
+
+    return binding && BULLMQ_MODULES.has(binding.module) && (binding.imported === '*' || binding.imported === 'default')
+      ? expression.name.text
+      : null;
+  }
+
+  return null;
+}
+
+/**
  * The expressions a node uses as a queue name. A `null` entry is a site whose
  * name could not be located at all, such as `@Processor()` or a spread argument.
  */
-function queueNameExpressions(node) {
+function queueNameExpressions(node, imports) {
   if (ts.isCallExpression(node)) {
     const callee = calleeName(node.expression);
 
@@ -348,12 +458,12 @@ function queueNameExpressions(node) {
       return node.arguments.map(nameFromArgument);
     }
 
-    if (callee !== null && ts.isIdentifier(node.expression) && DECORATORS.has(callee)) {
+    if (DECORATORS.has(bullmqName(node.expression, imports))) {
       return [node.arguments.length > 0 ? nameFromArgument(node.arguments[0]) : null];
     }
   }
 
-  if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && CONSTRUCTORS.has(node.expression.text)) {
+  if (ts.isNewExpression(node) && CONSTRUCTORS.has(bullmqName(node.expression, imports))) {
     return [node.arguments && node.arguments.length > 0 ? nameFromArgument(node.arguments[0]) : null];
   }
 
@@ -368,12 +478,67 @@ function queueNameExpressions(node) {
   return [];
 }
 
+/** The initializer of an object literal's property, or its name for a shorthand, or null when absent. */
+function propertyValue(objectLiteral, key) {
+  for (const property of objectLiteral.properties) {
+    if (ts.isPropertyAssignment(property) && propertyKey(property.name) === key) {
+      return property.initializer;
+    }
+
+    if (ts.isShorthandPropertyAssignment(property) && property.name.text === key) {
+      return property.name;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * The names a file re-exports from BullMQ's packages that the check counts as
+ * decorators or constructors, `*` for an `export *`.
+ */
+function bullmqReExports(sourceFile) {
+  const found = [];
+
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isExportDeclaration(statement) ||
+      !statement.moduleSpecifier ||
+      !ts.isStringLiteral(statement.moduleSpecifier) ||
+      !BULLMQ_MODULES.has(statement.moduleSpecifier.text)
+    ) {
+      continue;
+    }
+
+    if (!statement.exportClause || ts.isNamespaceExport(statement.exportClause)) {
+      found.push({ node: statement, name: '*' });
+      continue;
+    }
+
+    for (const element of statement.exportClause.elements) {
+      const exported = (element.propertyName ?? element.name).text;
+
+      if (DECORATORS.has(exported) || CONSTRUCTORS.has(exported)) {
+        found.push({ node: element, name: exported });
+      }
+    }
+  }
+
+  return found;
+}
+
 /**
  * @param {Array<{ path: string, text: string }>} files
  * @returns {{
  *   sites: Array<{ file: string, line: number, name: string, definedAt?: { file: string, line: number } }>,
  *   unresolved: Array<{ file: string, line: number, expression: string }>,
- * }}
+ *   reExports: Array<{ file: string, line: number, name: string }>,
+ *   splitFlows: Array<{ file: string, line: number, parent: string, child: string }>,
+ *   unfollowedFlows: Array<{ file: string, line: number, expression: string }>,
+ * }} every queue-name site, every site whose name can't be resolved, every
+ *   re-export of BullMQ's decorators or constructors, every flow child whose
+ *   queue's hash tag differs from its parent's, and every flow whose children
+ *   can't be followed.
  */
 function findQueueNames(files) {
   const parsed = files.map(({ path: file, text }) => ({
@@ -384,10 +549,57 @@ function findQueueNames(files) {
 
   const sites = [];
   const unresolved = [];
+  const reExports = [];
+  const splitFlows = [];
+  const unfollowedFlows = [];
 
   for (const { file, sourceFile } of parsed) {
+    const imports = importsOf(sourceFile);
+
+    for (const { node, name } of bullmqReExports(sourceFile)) {
+      reExports.push({ file, line: lineOf(sourceFile, node), name });
+    }
+
+    /** The resolved name of a flow job's queue, or null; an unresolved one is reported as a site already. */
+    const flowQueueOf = (job) => {
+      const expression = propertyValue(job, FLOW_QUEUE_PROPERTY);
+      const resolved = expression === null ? null : resolve(expression, declarations);
+
+      return resolved === null ? null : resolved.name;
+    };
+
+    const checkFlow = (parent) => {
+      const childrenExpression = propertyValue(parent, FLOW_CHILDREN_PROPERTY);
+      if (childrenExpression === null || propertyValue(parent, FLOW_QUEUE_PROPERTY) === null) {
+        return;
+      }
+
+      const children = unwrap(childrenExpression);
+      const jobs = ts.isArrayLiteralExpression(children) ? children.elements.map(unwrap) : [children];
+
+      const parentQueue = flowQueueOf(parent);
+      for (const job of jobs) {
+        if (!ts.isObjectLiteralExpression(job) || propertyValue(job, FLOW_QUEUE_PROPERTY) === null) {
+          unfollowedFlows.push({ file, line: lineOf(sourceFile, job), expression: job.getText(sourceFile) });
+          continue;
+        }
+
+        const childQueue = flowQueueOf(job);
+        if (parentQueue === null || childQueue === null) {
+          continue;
+        }
+
+        const parentTag = hashTagOf(parentQueue);
+        const childTag = hashTagOf(childQueue);
+        // An untagged queue is reported as unbraced on its own.
+        if (parentTag !== null && childTag !== null && parentTag !== childTag) {
+          splitFlows.push({ file, line: lineOf(sourceFile, job), parent: parentQueue, child: childQueue });
+        }
+      }
+    };
+
     const visit = (node) => {
-      for (const expression of queueNameExpressions(node)) {
+      for (const expression of queueNameExpressions(node, imports)) {
         const line = lineOf(sourceFile, expression ?? node);
         const resolved = expression === null ? null : resolve(expression, declarations);
 
@@ -398,20 +610,26 @@ function findQueueNames(files) {
         }
       }
 
+      if (ts.isObjectLiteralExpression(node)) {
+        checkFlow(node);
+      }
+
       ts.forEachChild(node, visit);
     };
 
     visit(sourceFile);
   }
 
-  return { sites, unresolved };
+  return { sites, unresolved, reExports, splitFlows, unfollowedFlows };
 }
 
 /**
  * One problem per distinct unbraced name, listing where it is declared and every
- * place it is used, and one per site the check could not resolve.
+ * place it is used, one per site the check could not resolve, one per re-export
+ * of BullMQ's decorators or constructors, and one per flow child that doesn't
+ * share its parent's hash tag or can't be followed.
  */
-function problemsFor({ sites, unresolved }) {
+function problemsFor({ sites, unresolved, reExports, splitFlows, unfollowedFlows }) {
   const problems = [];
 
   const unbraced = new Map();
@@ -436,6 +654,24 @@ function problemsFor({ sites, unresolved }) {
   for (const { file, line, expression } of unresolved) {
     problems.push(
       `${file}:${line}: cannot resolve the queue name \`${expression}\` to one string literal, so its hash tag can't be checked. Name the queue with a const, a string enum member or a literal (#462)`,
+    );
+  }
+
+  for (const { file, line, name } of reExports) {
+    problems.push(
+      `${file}:${line}: re-exports ${name === '*' ? 'everything' : `\`${name}\``} from BullMQ, so the check can't tell which queues its importers name. Import it from 'bullmq' or '@nestjs/bullmq' where it is used (#462)`,
+    );
+  }
+
+  for (const { file, line, parent, child } of splitFlows) {
+    problems.push(
+      `${file}:${line}: flow child queue "${child}" has hash tag {${hashTagOf(child)}}, but its parent's queue "${parent}" has {${hashTagOf(parent)}}. A flow's queues must share one tag, as in "{bge.<area>}.<name>" (#462)`,
+    );
+  }
+
+  for (const { file, line, expression } of unfollowedFlows) {
+    problems.push(
+      `${file}:${line}: cannot follow the flow child \`${expression}\`, so whether its queue shares its parent's hash tag can't be checked. Write each child as an object literal with a queueName (#462)`,
     );
   }
 
@@ -467,4 +703,4 @@ function checkQueueHashTags(workspaceRoot) {
   return { sites: found.sites, problems: problemsFor(found) };
 }
 
-module.exports = { checkQueueHashTags, findQueueNames, hasHashTag };
+module.exports = { checkQueueHashTags, findQueueNames, hasHashTag, hashTagOf };

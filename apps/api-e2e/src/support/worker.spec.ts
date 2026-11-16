@@ -36,7 +36,9 @@ describe('consumersOf', () => {
     // name would never see a consumer.
     const queue = {
       getWorkers: () =>
-        Promise.resolve([{ name: 'feedback-delivery', rawname: 'bull:ZmVlZGJhY2stZGVsaXZlcnk=', cmd: 'bzpopmin' }]),
+        Promise.resolve([
+          { name: '{bge.feedback.delivery}', rawname: 'bull:e2JnZS5mZWVkYmFjay5kZWxpdmVyeX0=', cmd: 'bzpopmin' },
+        ]),
     };
 
     await expect(consumersOf(queue)).resolves.toBe(1);
