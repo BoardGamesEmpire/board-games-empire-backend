@@ -582,7 +582,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
     const slugFields = (slug: string): Parameters<typeof buildPluginManifest>[0] => ({
       slug,
       events: { emits: [`plugin.${slug}.digest-sent`], subscribes: ['feedback.created'] },
-      jobs: { queues: [`plugin:${slug}:digest`] },
+      jobs: { queues: [`plugin.${slug}.digest`] },
       storage: { ownTables: [`plugin_${slug.replace(/-/g, '_')}_digests`] },
     });
 

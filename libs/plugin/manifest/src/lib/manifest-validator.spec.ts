@@ -459,9 +459,32 @@ describe('validatePluginManifest', () => {
       expectRejection(manifest({ jobs: { queues: ['digest'], schedules: [] } }), ManifestErrorCode.QUEUE_NAMESPACE);
     });
 
+    // BullMQ refuses a queue name containing `:`, so the colon form can never
+    // be registered (#462).
+    it('rejects the colon form, which BullMQ cannot register', () => {
+      expectRejection(
+        manifest({ jobs: { queues: ['plugin:demo-sink:digest'], schedules: [] } }),
+        ManifestErrorCode.QUEUE_NAMESPACE,
+      );
+    });
+
+    it.each([
+      ['a colon', 'plugin.demo-sink.digest:weekly'],
+      ['braces, which would move the hash tag', 'plugin.demo-sink.{digest}'],
+      ['a dot', 'plugin.demo-sink.digest.weekly'],
+      ['uppercase', 'plugin.demo-sink.Digest'],
+    ])('rejects a queue name after the prefix with %s', (_label, queue) => {
+      const error = expectRejection(
+        manifest({ jobs: { queues: [queue], schedules: [] } }),
+        ManifestErrorCode.QUEUE_NAME_INVALID,
+      );
+
+      expect(error.issues).toEqual([expect.objectContaining({ path: 'jobs.queues[0]' })]);
+    });
+
     it('rejects duplicate queues', () => {
       expectRejection(
-        manifest({ jobs: { queues: ['plugin:demo-sink:digest', 'plugin:demo-sink:digest'], schedules: [] } }),
+        manifest({ jobs: { queues: ['plugin.demo-sink.digest', 'plugin.demo-sink.digest'], schedules: [] } }),
         ManifestErrorCode.QUEUE_DUPLICATE,
       );
     });
@@ -663,7 +686,7 @@ describe('validatePluginManifest', () => {
           ],
         },
         events: { subscribes: [], emits: [`plugin.${slug}.digest-sent`] },
-        jobs: { queues: [`plugin:${slug}:digest`], schedules: [] },
+        jobs: { queues: [`plugin.${slug}.digest`], schedules: [] },
         storage: {
           ownTables: [`plugin_${slug.replace(/-/g, '_')}_digests`],
           readsCore: [],

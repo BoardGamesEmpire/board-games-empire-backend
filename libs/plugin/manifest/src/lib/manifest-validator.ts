@@ -465,6 +465,14 @@ export const validatePluginManifest = (
         `jobs.queues[${index}]`,
         `Queue names must be namespaced under '${queuePrefix}'`,
       );
+    } else if (!IDENTIFIER_PATTERN.test(queue.slice(queuePrefix.length))) {
+      // Kebab-case keeps out `:`, which BullMQ refuses in a queue name, and
+      // braces, which would move the hash tag the wiring adds (#462).
+      push(
+        ManifestErrorCode.QUEUE_NAME_INVALID,
+        `jobs.queues[${index}]`,
+        `'${queue}' must be '${queuePrefix}' followed by a kebab-case name`,
+      );
     }
   });
 

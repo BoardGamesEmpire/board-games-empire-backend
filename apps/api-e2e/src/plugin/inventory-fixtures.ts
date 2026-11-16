@@ -39,7 +39,7 @@ export const arrangeInventoryPlugin = async (
     displayName: { en: 'Inventory Fixture', de: 'Bestandsvorrichtung' },
     description: { en: 'Fixture for the inventory reads.' },
     events: { emits: [`plugin.${slug}.digest-sent`], subscribes: ['feedback.created'] },
-    jobs: { queues: [`plugin:${slug}:digest`] },
+    jobs: { queues: [`plugin.${slug}.digest`] },
     storage: { ownTables: [`plugin_${slug.replace(/-/g, '_')}_digests`] },
     permissions: {
       declares: ['manage:digest'],
