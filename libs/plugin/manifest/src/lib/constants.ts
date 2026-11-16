@@ -131,8 +131,10 @@ export const PLUGIN_MANIFEST_JSON_SCHEMA_ID = 'https://boardgamesempire.dev/sche
  * — see `plugin-permission-slug.ts`.
  *
  * Nothing registers plugin queues with BullMQ yet. Whatever wires them must
- * register each queue's full name in braces (`{plugin:<slug>:<queue>}`) so its
- * keys share one hash tag (#462). Braces alone won't pass the queue hash-tag
+ * register each queue's full name in braces (`{plugin.<slug>.<queue>}`) so its
+ * keys share one hash tag (#462). The name must hold no `:`, which BullMQ
+ * refuses in a queue name, so the manifest's `plugin:<slug>:` form can't be
+ * registered as written. Braces alone won't pass the queue hash-tag
  * check: it reads only names it can follow to a string literal, and reports a
  * name built from the slug as unresolved. The wiring must teach the check that
  * form too, for example through one helper that builds every braced plugin

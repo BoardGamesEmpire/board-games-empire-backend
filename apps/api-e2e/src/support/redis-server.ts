@@ -132,7 +132,10 @@ export interface StartedRedisServer {
  * `pollUntil` to try again, since a rejected probe would end the poll at once.
  * One attempt per call, each bounded: the client neither retries nor
  * reconnects, so none is left reconnecting in the background, and a listener
- * that accepts the connection and then says nothing times out.
+ * that accepts the connection and then says nothing times out. The client's
+ * ready check is off: while a server reports it is loading, that check repeats
+ * INFO with no deadline, and `connect()` would never settle. PING answers a
+ * loading server with an error instead, which is a "not yet" (#462).
  */
 async function answersPing(host: string, port: number): Promise<true | undefined> {
   const client = new Redis({
@@ -143,6 +146,7 @@ async function answersPing(host: string, port: number): Promise<true | undefined
     commandTimeout: PING_ATTEMPT_TIMEOUT_MS,
     maxRetriesPerRequest: 0,
     retryStrategy: () => null,
+    enableReadyCheck: false,
   });
 
   // A refused or reset connection is a "not yet", which the catch below

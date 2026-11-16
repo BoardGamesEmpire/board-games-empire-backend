@@ -29,8 +29,9 @@
  * so `new BullQueue(...)` from `import { Queue as BullQueue } from 'bullmq'` and
  * `new bullmq.Queue(...)` from a namespace import are sites, and a `Worker`
  * imported from anywhere else (`node:worker_threads`) is not. A file that
- * re-exports one of those names from BullMQ's packages is a problem, since the
- * check would not see what its importers construct.
+ * re-exports one of those names from BullMQ's packages, or exports one it
+ * imported from them, is a problem, since the check would not see what its
+ * importers construct.
  *
  * It is a script run over the whole tree, not a jest spec in each lib: a spec
  * is served from the Nx cache when its own project is untouched, and a queue
@@ -66,6 +67,9 @@ const CONSTRUCTORS = new Set(['Queue', 'Worker', 'QueueEvents']);
 
 /** The packages whose exports the decorators and constructors above are. */
 const BULLMQ_MODULES = new Set(['bullmq', '@nestjs/bullmq']);
+
+/** `propertyValue`'s answer for a property that a later spread could replace. */
+const SPREAD_AFTER = Symbol('spread after');
 
 /**
  * Redis Cluster's hash-tag rule: a `{` followed later by a `}` with at least one
@@ -200,7 +204,9 @@ function bindingIdentifiers(name) {
  *   unaliased import is the same binding as its declaration, so it adds nothing.
  * - An owner is opaque, and `Owner.*` never resolves, once any definition of it
  *   is not an enum or an object literal, or an object literal or enum has a
- *   spread or computed key that could add members the scan can't see.
+ *   spread or computed key that could add members the scan can't see. It is
+ *   opaque too once any file assigns to one of its members (`Owner.member = ...`):
+ *   `const` stops a rebinding, not a member write (#462).
  *
  * @returns {{
  *   declarations: Map<string, Array<{ value: string | null, file: string, line: number }>>,
@@ -303,6 +309,21 @@ function buildDeclarations(parsed) {
         block(node.name.text, node);
       }
 
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+      ) {
+        const target = unwrap(node.left);
+
+        if (
+          (ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target)) &&
+          ts.isIdentifier(target.expression)
+        ) {
+          opaque.add(target.expression.text);
+        }
+      }
+
       ts.forEachChild(node, visit);
     };
 
@@ -343,7 +364,11 @@ function resolve(expression, { declarations, opaque }) {
   return { name: entries[0].value, definedAt: { file: entries[0].file, line: entries[0].line } };
 }
 
-/** The expression holding the queue name in an argument that is a name or an options object. */
+/**
+ * The expression holding the queue name in an argument that is a name or an
+ * options object, or null when it can't be located, including when a spread
+ * after the `name` property could replace it.
+ */
 function nameFromArgument(argument) {
   const node = unwrap(argument);
 
@@ -351,17 +376,9 @@ function nameFromArgument(argument) {
     return node;
   }
 
-  for (const property of node.properties) {
-    if (ts.isPropertyAssignment(property) && propertyKey(property.name) === 'name') {
-      return property.initializer;
-    }
+  const value = propertyValue(node, 'name');
 
-    if (ts.isShorthandPropertyAssignment(property) && property.name.text === 'name') {
-      return property.name;
-    }
-  }
-
-  return null;
+  return value === SPREAD_AFTER ? null : value;
 }
 
 function calleeName(expression) {
@@ -468,39 +485,115 @@ function queueNameExpressions(node, imports) {
   }
 
   if (ts.isPropertyAssignment(node) && propertyKey(node.name) === FLOW_QUEUE_PROPERTY) {
-    return [node.initializer];
+    return [spreadFollows(node) ? null : node.initializer];
   }
 
   if (ts.isShorthandPropertyAssignment(node) && node.name.text === FLOW_QUEUE_PROPERTY) {
-    return [node.name];
+    return [spreadFollows(node) ? null : node.name];
   }
 
   return [];
 }
 
-/** The initializer of an object literal's property, or its name for a shorthand, or null when absent. */
-function propertyValue(objectLiteral, key) {
-  for (const property of objectLiteral.properties) {
-    if (ts.isPropertyAssignment(property) && propertyKey(property.name) === key) {
-      return property.initializer;
-    }
+/**
+ * Whether a spread follows `property` in its object literal. The spread may
+ * then replace the property's value at run time, so the written value is not
+ * known to be the one used (#462).
+ */
+function spreadFollows(property) {
+  const { properties } = property.parent;
 
-    if (ts.isShorthandPropertyAssignment(property) && property.name.text === key) {
-      return property.name;
+  return properties.slice(properties.indexOf(property) + 1).some(ts.isSpreadAssignment);
+}
+
+/**
+ * The initializer of an object literal's property, or its name for a
+ * shorthand; null when absent, and `SPREAD_AFTER` when a later spread could
+ * replace it. The last property for `key` wins, as at run time.
+ */
+function propertyValue(objectLiteral, key) {
+  let found = null;
+
+  for (const property of objectLiteral.properties) {
+    if (
+      (ts.isPropertyAssignment(property) && propertyKey(property.name) === key) ||
+      (ts.isShorthandPropertyAssignment(property) && property.name.text === key)
+    ) {
+      found = property;
     }
   }
 
-  return null;
+  if (found === null) {
+    return null;
+  }
+
+  if (spreadFollows(found)) {
+    return SPREAD_AFTER;
+  }
+
+  return ts.isPropertyAssignment(found) ? found.initializer : found.name;
+}
+
+/**
+ * The BullMQ name a file exports under a binding it imported, as in
+ * `import { Queue } from 'bullmq'; export { Queue };`: the imported name when
+ * the check counts it as a decorator or constructor, `*` for a namespace or
+ * default import of BullMQ's packages, else null.
+ */
+function importedBullmqName(local, imports) {
+  const binding = imports.get(local);
+
+  if (!binding || !BULLMQ_MODULES.has(binding.module)) {
+    return null;
+  }
+
+  if (binding.imported === '*' || binding.imported === 'default') {
+    return '*';
+  }
+
+  return DECORATORS.has(binding.imported) || CONSTRUCTORS.has(binding.imported) ? binding.imported : null;
 }
 
 /**
  * The names a file re-exports from BullMQ's packages that the check counts as
- * decorators or constructors, `*` for an `export *`.
+ * decorators or constructors, `*` for an `export *` or for a whole namespace.
+ * Exporting a binding imported from them counts too, whether by
+ * `export { Queue }` or `export default Queue` (#462).
  */
-function bullmqReExports(sourceFile) {
+function bullmqReExports(sourceFile, imports) {
   const found = [];
 
   for (const statement of sourceFile.statements) {
+    if (ts.isExportAssignment(statement) && ts.isIdentifier(unwrap(statement.expression))) {
+      const name = importedBullmqName(unwrap(statement.expression).text, imports);
+
+      if (name !== null) {
+        found.push({ node: statement, name });
+      }
+
+      continue;
+    }
+
+    if (
+      ts.isExportDeclaration(statement) &&
+      !statement.moduleSpecifier &&
+      statement.exportClause &&
+      ts.isNamedExports(statement.exportClause)
+    ) {
+      // A type-only export can't be constructed or applied as a decorator.
+      for (const element of statement.isTypeOnly ? [] : statement.exportClause.elements) {
+        const name = element.isTypeOnly
+          ? null
+          : importedBullmqName((element.propertyName ?? element.name).text, imports);
+
+        if (name !== null) {
+          found.push({ node: element, name });
+        }
+      }
+
+      continue;
+    }
+
     if (
       !ts.isExportDeclaration(statement) ||
       !statement.moduleSpecifier ||
@@ -556,14 +649,14 @@ function findQueueNames(files) {
   for (const { file, sourceFile } of parsed) {
     const imports = importsOf(sourceFile);
 
-    for (const { node, name } of bullmqReExports(sourceFile)) {
+    for (const { node, name } of bullmqReExports(sourceFile, imports)) {
       reExports.push({ file, line: lineOf(sourceFile, node), name });
     }
 
     /** The resolved name of a flow job's queue, or null; an unresolved one is reported as a site already. */
     const flowQueueOf = (job) => {
       const expression = propertyValue(job, FLOW_QUEUE_PROPERTY);
-      const resolved = expression === null ? null : resolve(expression, declarations);
+      const resolved = expression === null || expression === SPREAD_AFTER ? null : resolve(expression, declarations);
 
       return resolved === null ? null : resolved.name;
     };
@@ -571,6 +664,11 @@ function findQueueNames(files) {
     const checkFlow = (parent) => {
       const childrenExpression = propertyValue(parent, FLOW_CHILDREN_PROPERTY);
       if (childrenExpression === null || propertyValue(parent, FLOW_QUEUE_PROPERTY) === null) {
+        return;
+      }
+
+      if (childrenExpression === SPREAD_AFTER) {
+        unfollowedFlows.push({ file, line: lineOf(sourceFile, parent), expression: parent.getText(sourceFile) });
         return;
       }
 
@@ -653,7 +751,7 @@ function problemsFor({ sites, unresolved, reExports, splitFlows, unfollowedFlows
 
   for (const { file, line, expression } of unresolved) {
     problems.push(
-      `${file}:${line}: cannot resolve the queue name \`${expression}\` to one string literal, so its hash tag can't be checked. Name the queue with a const, a string enum member or a literal (#462)`,
+      `${file}:${line}: cannot resolve the queue name \`${expression}\` to one string literal, so its hash tag can't be checked. Name the queue with a const, a string enum member or a literal, with no spread after it (#462)`,
     );
   }
 
@@ -671,7 +769,7 @@ function problemsFor({ sites, unresolved, reExports, splitFlows, unfollowedFlows
 
   for (const { file, line, expression } of unfollowedFlows) {
     problems.push(
-      `${file}:${line}: cannot follow the flow child \`${expression}\`, so whether its queue shares its parent's hash tag can't be checked. Write each child as an object literal with a queueName (#462)`,
+      `${file}:${line}: cannot follow the flow child \`${expression}\`, so whether its queue shares its parent's hash tag can't be checked. Write each child as an object literal with a queueName, and put no spread after a queueName or children (#462)`,
     );
   }
 

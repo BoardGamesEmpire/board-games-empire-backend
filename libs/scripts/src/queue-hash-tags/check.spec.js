@@ -208,6 +208,66 @@ describe('findQueueNames (#462)', () => {
     ]);
   });
 
+  it("reports an export of a binding imported from BullMQ, whose importers the check can't follow", () => {
+    const { reExports } = findQueueNames([
+      file(
+        'libs/a/index.ts',
+        [
+          `import { Queue as BullQueue, Job } from 'bullmq';`,
+          `import * as bull from '@nestjs/bullmq';`,
+          `import { Worker } from 'node:worker_threads';`,
+          `export { BullQueue, Job, Worker };`,
+          `export { bull };`,
+          `export type { BullQueue as QueueType };`,
+          `export default BullQueue;`,
+        ].join('\n'),
+      ),
+    ]);
+
+    expect(reExports).toEqual([
+      { file: 'libs/a/index.ts', line: 4, name: 'Queue' },
+      { file: 'libs/a/index.ts', line: 5, name: '*' },
+      { file: 'libs/a/index.ts', line: 7, name: 'Queue' },
+    ]);
+  });
+
+  describe('a property a later spread could replace (#462)', () => {
+    it('reports a name followed by a spread as unresolved', () => {
+      const { sites, unresolved } = findQueueNames([
+        file('libs/a/use.ts', `BullModule.registerQueue({ name: '{bge.safe}', ...options });`),
+      ]);
+
+      expect(sites).toEqual([]);
+      expect(unresolved).toHaveLength(1);
+    });
+
+    it('resolves a name written after the spread, which it overrides', () => {
+      const { sites, unresolved } = findQueueNames([
+        file('libs/a/use.ts', `BullModule.registerQueue({ ...options, name: '{bge.safe}' });`),
+      ]);
+
+      expect(unresolved).toEqual([]);
+      expect(sites).toEqual([expect.objectContaining({ name: '{bge.safe}' })]);
+    });
+
+    it("reports a flow job's queueName followed by a spread as unresolved", () => {
+      const { sites, unresolved } = findQueueNames([
+        file('libs/a/flow.ts', `const f = { queueName: '{bge.a}.p', ...job, children: [{ queueName: '{bge.a}.c' }] };`),
+      ]);
+
+      expect(sites).toEqual([expect.objectContaining({ name: '{bge.a}.c' })]);
+      expect(unresolved).toEqual([expect.objectContaining({ expression: "queueName: '{bge.a}.p'" })]);
+    });
+
+    it("reports a flow's children followed by a spread as a flow it cannot follow", () => {
+      const { unfollowedFlows } = findQueueNames([
+        file('libs/a/flow.ts', `const f = { queueName: '{bge.a}.p', children: [{ queueName: '{bge.a}.c' }], ...job };`),
+      ]);
+
+      expect(unfollowedFlows).toHaveLength(1);
+    });
+  });
+
   describe("a flow's queues (#462)", () => {
     const names = file(
       'libs/a/q.ts',
@@ -281,6 +341,10 @@ describe('findQueueNames (#462)', () => {
       ['an owner that is not an object', `export const Q = buildQueues();`],
       ['a string enum member that is a template', 'export enum Q { mail = `${P}.mail` }'],
       ['an enum with a computed member', `export enum Q { ['mail'] = 'plain', [key] = 'x' }`],
+      // `const` stops a rebinding, not a member write.
+      ['a write to the member', `Q.mail = 'plain';`],
+      ['a write to the member by element', `Q['mail'] = 'plain';`],
+      ['a compound write to the member', `Q.mail += '.plain';`],
     ])('reports %s as unresolved', (_label, text) => {
       const { sites, unresolved } = findQueueNames([file('libs/a/other.ts', text), braced, use]);
 

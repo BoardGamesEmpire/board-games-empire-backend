@@ -353,7 +353,8 @@ a flow child whose queue's tag differs from its parent's.
 
 Plugin queues follow the same rule. Nothing registers a plugin's queues with
 BullMQ yet; whatever does must register each one's full name in braces,
-`{plugin:<slug>:<queue>}`, so its keys share one tag.
+`{plugin.<slug>.<queue>}`, so its keys share one tag. The name can't contain a
+`:`, because BullMQ refuses a queue name that has one, braced or not.
 
 This document describes standalone Redis-compatible servers only, not
 clusters. On a **standalone** Redis, Valkey or KeyDB, braces are ordinary
