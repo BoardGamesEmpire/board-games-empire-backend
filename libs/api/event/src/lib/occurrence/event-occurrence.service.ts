@@ -9,13 +9,16 @@ import {
   OccurrenceStatus,
   Prisma,
   ResourceType,
+  type EventOccurrence,
 } from '@bge/database';
-import { t } from '@bge/i18n';
+import { CodedHttpException, t } from '@bge/i18n';
 import { AbilityService, resolveActingUserIdOrNull, ScopeComposer } from '@bge/permissions';
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Http } from '@status/codes';
 import assert from 'node:assert';
+import { isDeepStrictEqual } from 'node:util';
 import { emitRemovedGames, writeEventDates } from '../attendee/attendance';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
@@ -24,9 +27,12 @@ import { assertEventExists, resolveActingAttendeeId } from '../event-access.help
 import { assertEventNotCancelled } from '../lifecycle/event-lifecycle.helpers';
 import { canReadEventPolicy, eventPolicyReadArgs, serveOccurrencePolicy } from '../policy/policy-ceiling';
 import { POLICY_VIEW_INCLUDE, type OccurrencePolicyView } from '../policy/policy-view';
+import { hasDatePassed, type DateWindow } from '../utils/date-end.util';
+import { EVENT_STATUS_DATE_SELECT } from '../utils/event-status.util';
 import { changedKeys, pickSnapshot } from '../utils/pick-snapshot.util';
 import { AVAILABILITY_VOTE_SLUG, countsAsVoter, voterGrantSelect } from '../vote/vote-grant';
 import { OccurrenceEvents } from './constants';
+import { OCCURRENCE_EDIT_FIELDS } from './constants/occurrence-edit-fields.constant';
 import { AddOccurrenceDto } from './dto/add-occurrence.dto';
 import { SubmitAvailabilityDto } from './dto/submit-availability.dto';
 import { UpdateEventOccurrenceDto } from './dto/update-event-occurrence.dto';
@@ -38,6 +44,7 @@ import {
   OccurrenceUpdatedEvent,
 } from './events/occurrence.events';
 import type { AvailabilitySummary, AvailabilitySummaryEntry } from './interfaces';
+import { countLiveDates } from './live-dates.util';
 
 @Injectable()
 export class EventOccurrenceService {
@@ -239,12 +246,14 @@ export class EventOccurrenceService {
         assert(locked, new NotFoundException(t('errors.event.not_found', { id: eventId })));
 
         if (locked.schedulingMode === EventSchedulingMode.Fixed) {
-          // Every date counts here, declined and cancelled ones too. Counting
-          // only live dates is #966's change.
-          const existingCount = await tx.eventOccurrence.count({ where: { eventId } });
-
-          if (existingCount >= 1) {
-            throw new BadRequestException(t('errors.occurrence.fixed_mode_single'));
+          // A cancelled or declined date no longer holds the event's one
+          // date, so it can be given a new one (#966).
+          if ((await countLiveDates(tx, eventId)) >= 1) {
+            throw new CodedHttpException(
+              Http.BadRequest,
+              'OCCURRENCE_FIXED_MODE_HAS_DATE',
+              t('errors.occurrence.fixed_mode_single'),
+            );
           }
         }
 
@@ -341,8 +350,7 @@ export class EventOccurrenceService {
           const updated = await tx.eventOccurrence.update({
             where: {
               id: occurrenceId,
-              // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-              AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
+              AND: this.editCeiling(dto),
             },
             data: {
               label: dto.label,
@@ -360,7 +368,7 @@ export class EventOccurrenceService {
 
       // Only the columns whose values changed are audited; a patch that
       // re-sends stored values emits nothing (#728).
-      const changed = changedKeys(existing, updated, ['label', 'startDate', 'endDate', 'location', 'sortOrder']);
+      const changed = changedKeys(existing, updated, OCCURRENCE_EDIT_FIELDS);
       if (changed.length > 0) {
         this.eventEmitter.emit(
           OccurrenceUpdatedEvent.eventName,
@@ -489,14 +497,19 @@ export class EventOccurrenceService {
       [OccurrenceStatus.Proposed],
       OccurrenceStatus.Confirmed,
       { confirmedAt: new Date() },
-      { refuseOnCancelledEvent: true },
+      { field: 'confirmedAt', refuseOnCancelledEvent: true, refuseOncePassed: true },
     );
   }
 
   async declineOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
-    return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Proposed], OccurrenceStatus.Declined, {
-      declinedAt: new Date(),
-    });
+    return this.transitionStatus(
+      eventId,
+      occurrenceId,
+      [OccurrenceStatus.Proposed],
+      OccurrenceStatus.Declined,
+      { declinedAt: new Date() },
+      { field: 'declinedAt' },
+    );
   }
 
   /**
@@ -505,11 +518,38 @@ export class EventOccurrenceService {
    * of its dates are cancelled.
    */
   async cancelOccurrence(eventId: string, occurrenceId: string, reason?: string): Promise<OccurrenceDetail> {
-    return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Confirmed], OccurrenceStatus.Cancelled, {
-      cancelledAt: new Date(),
-      cancelledById: this.abilityService.getActingUserId(),
-      cancelReason: reason ?? null,
-    });
+    return this.transitionStatus(
+      eventId,
+      occurrenceId,
+      [OccurrenceStatus.Confirmed],
+      OccurrenceStatus.Cancelled,
+      {
+        cancelledAt: new Date(),
+        cancelledById: this.abilityService.getActingUserId(),
+        cancelReason: reason ?? null,
+      },
+      { field: 'cancelledAt' },
+    );
+  }
+
+  /**
+   * The write ceiling of an edit: each field the request sends adds the
+   * conditions of the permissions that cover it. A field no permission covers yields
+   * the deny-all, which the CASL extension keeps, so the update finds no row
+   * and answers 403 (#979). The keys are never empty, since
+   * {@link updateOccurrence} refuses an empty patch first.
+   *
+   * The catalog binds every edit field to the same permissions, so the fields
+   * mostly yield the same clauses. Each is kept once: repeating a clause in an
+   * AND changes nothing but the size of the write's WHERE.
+   */
+  private editCeiling(dto: UpdateEventOccurrenceDto): Prisma.EventOccurrenceWhereInput[] {
+    const clauses = Object.keys(dto).flatMap((field) =>
+      // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+      this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update, field),
+    );
+
+    return clauses.filter((clause, index) => clauses.findIndex((kept) => isDeepStrictEqual(kept, clause)) === index);
   }
 
   /**
@@ -524,9 +564,20 @@ export class EventOccurrenceService {
    * event is reopened, rather than reviving the date (#795). The write
    * repeats the status it read.
    *
+   * `field` is the timestamp column this change writes. The write's ceiling
+   * is built from it, as `status` is in all three permissions' lists and can't
+   * tell them apart (#979).
+   *
    * With `refuseOnCancelledEvent`, it also reads the event's cancel under
    * the lock ({@link assertEventNotCancelled}), so a confirm on a cancelled
    * event answers 400.
+   *
+   * With `refuseOncePassed`, a date that has passed answers 400, so a
+   * confirm can't record a past date as one that is still ahead (#1005). The
+   * status check comes first, so a date in the wrong status keeps its own
+   * answer. The early read judges the date at `initiatedAt`; the one under
+   * the lock judges it at the time of that read, since the lock may have
+   * waited.
    */
   private async transitionStatus(
     eventId: string,
@@ -534,19 +585,27 @@ export class EventOccurrenceService {
     allowedFrom: OccurrenceStatus[],
     newStatus: OccurrenceStatus,
     extraData: Record<string, unknown> = {},
-    { refuseOnCancelledEvent = false }: { refuseOnCancelledEvent?: boolean } = {},
+    {
+      field,
+      refuseOnCancelledEvent = false,
+      refuseOncePassed = false,
+    }: { field: OccurrenceStatusField; refuseOnCancelledEvent?: boolean; refuseOncePassed?: boolean },
   ): Promise<OccurrenceDetail> {
     const initiatedAt = new Date();
     const actingUserId = resolveActingUserIdOrNull(this.abilityService);
     const readStatus = (client: Prisma.TransactionClient) =>
       client.eventOccurrence.findUnique({
         where: { id: occurrenceId, eventId },
-        select: { id: true, status: true },
+        select: { id: true, ...EVENT_STATUS_DATE_SELECT },
       });
 
     const transition = { eventId, occurrenceId, allowedFrom, newStatus };
     const existing = await readStatus(this.db);
     assertTransitionAllowed(existing, transition);
+
+    if (refuseOncePassed) {
+      assertDateNotPassed(existing, initiatedAt, 'confirm_date_passed');
+    }
 
     // Read before the write, which changes neither, so a failed read leaves
     // the occurrence as it was.
@@ -563,6 +622,10 @@ export class EventOccurrenceService {
         const current = await readStatus(tx);
         assertTransitionAllowed(current, transition);
 
+        if (refuseOncePassed) {
+          assertDateNotPassed(current, new Date(), 'confirm_date_passed');
+        }
+
         // Under the lock, as updateOccurrence reads it (#1211).
         const canReadPolicy = await canReadEventPolicy(tx, this.abilityService, eventId);
 
@@ -570,9 +633,11 @@ export class EventOccurrenceService {
           where: {
             id: occurrenceId,
             status: current.status,
-            // Status transitions are mutations → filter by `update`, not `read`.
+            // Status transitions are mutations → filter by `update`, not `read`,
+            // and by the column this change writes, so a grant bound to
+            // another status column doesn't pass it (#979).
             // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update, field),
           },
           data: { status: newStatus, ...extraData },
           include: { policy: { include: POLICY_VIEW_INCLUDE } },
@@ -629,39 +694,51 @@ export class EventOccurrenceService {
 
     const occurrence = await this.db.eventOccurrence.findUnique({
       where: { id: occurrenceId, eventId },
-      select: { id: true, status: true },
+      select: { id: true, ...EVENT_STATUS_DATE_SELECT },
     });
 
-    if (!occurrence) {
-      throw new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId }));
-    }
+    assert(occurrence, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
+    assertTakesVotes(occurrence, initiatedAt);
 
-    if (occurrence.status !== OccurrenceStatus.Proposed) {
-      throw new BadRequestException(t('errors.occurrence.availability_proposed_only', { status: occurrence.status }));
-    }
+    const { vote, existingVote } = await this.db.$transaction(async (tx) => {
+      // The checks above can be overtaken: a confirm, or an edit moving the
+      // date into the past, commits between them and the write (#1005).
+      // Under the share lock, which those writes' row locks conflict with,
+      // the vote waits for them and then sees the date as they left it. Votes
+      // share the lock, so they don't wait on each other.
+      const [current] = await tx.$queryRaw<OccurrenceVoteState[]>(Prisma.sql`
+        SELECT status, start_date AS "startDate", end_date AS "endDate"
+        FROM event_occurrences WHERE id = ${occurrenceId} FOR SHARE
+      `);
 
-    // Pre-read classifies create vs update for the audit before-snapshot.
-    // Best-effort, not transactional: the unique (occurrence, attendee) key
-    // means only the same attendee can race this row (double-submit / retry),
-    // and in that narrow window the event may label a re-vote as a create or
-    // carry a slightly stale before. The upsert itself is always correct.
-    const existingVote = await this.db.eventAvailabilityVote.findUnique({
-      where: { occurrenceId_attendeeId: { occurrenceId, attendeeId } },
-      select: { id: true, response: true },
-    });
+      assert(current, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
+      assertTakesVotes(current, new Date());
 
-    const vote = await this.db.eventAvailabilityVote.upsert({
-      where: {
-        occurrenceId_attendeeId: { occurrenceId, attendeeId },
-      },
-      create: {
-        occurrence: { connect: { id: occurrenceId } },
-        attendee: { connect: { id: attendeeId } },
-        response: dto.response,
-      },
-      update: {
-        response: dto.response,
-      },
+      // Pre-read classifies create vs update for the audit before-snapshot.
+      // Best-effort: the unique (occurrence, attendee) key means only the
+      // same attendee can race this row (double-submit / retry), and in that
+      // narrow window the event may label a re-vote as a create or carry a
+      // slightly stale before. The upsert itself is always correct.
+      const existingVote = await tx.eventAvailabilityVote.findUnique({
+        where: { occurrenceId_attendeeId: { occurrenceId, attendeeId } },
+        select: { id: true, response: true },
+      });
+
+      const vote = await tx.eventAvailabilityVote.upsert({
+        where: {
+          occurrenceId_attendeeId: { occurrenceId, attendeeId },
+        },
+        create: {
+          occurrence: { connect: { id: occurrenceId } },
+          attendee: { connect: { id: attendeeId } },
+          response: dto.response,
+        },
+        update: {
+          response: dto.response,
+        },
+      });
+
+      return { vote, existingVote };
     });
 
     this.eventEmitter.emit(
@@ -925,12 +1002,41 @@ function groupByOccurrence<TRow extends { occurrenceId: string | null }>(
   return groups;
 }
 
+/** The timestamp column each status change writes, which its permission is bound to (#979). */
+type OccurrenceStatusField = 'confirmedAt' | 'declinedAt' | 'cancelledAt';
+
 /** A date status transition: the date, the statuses it may start from, and the one it moves to. */
 interface StatusTransition {
   eventId: string;
   occurrenceId: string;
   allowedFrom: OccurrenceStatus[];
   newStatus: OccurrenceStatus;
+}
+
+/**
+ * 400 with its own code for a date that has passed (#1005). Edit and remove
+ * stay open, so a host can move the date later and it takes votes and
+ * confirms again.
+ */
+function assertDateNotPassed(date: DateWindow, now: Date, key: 'vote_date_passed' | 'confirm_date_passed'): void {
+  if (hasDatePassed(date, now)) {
+    throw new CodedHttpException(Http.BadRequest, 'OCCURRENCE_DATE_PASSED', t(`errors.occurrence.${key}`));
+  }
+}
+
+/** The columns a vote's checks read from its date. */
+type OccurrenceVoteState = Pick<EventOccurrence, 'status' | 'startDate' | 'endDate'>;
+
+/**
+ * 400 for a date that takes no votes: one that isn't Proposed, or one that
+ * has passed at `now` (#1005).
+ */
+function assertTakesVotes(date: OccurrenceVoteState, now: Date): void {
+  if (date.status !== OccurrenceStatus.Proposed) {
+    throw new BadRequestException(t('errors.occurrence.availability_proposed_only', { status: date.status }));
+  }
+
+  assertDateNotPassed(date, now, 'vote_date_passed');
 }
 
 /** 404 for a date not in the event, 400 for one whose status the transition can't start from. */

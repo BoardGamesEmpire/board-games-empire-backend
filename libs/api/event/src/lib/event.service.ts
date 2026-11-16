@@ -817,8 +817,14 @@ export class EventService {
   }
 
   private validateOccurrencesForMode(mode: EventSchedulingMode, occurrences?: CreateEventDto['occurrences']): void {
+    // The same rule, and code, as a switch to Fixed with more than one live
+    // date, worded for a create (#966).
     if (mode === EventSchedulingMode.Fixed && occurrences && occurrences.length > 1) {
-      throw new BadRequestException(t('errors.event.fixed_mode_single'));
+      throw new CodedHttpException(
+        Http.BadRequest,
+        'EVENT_FIXED_MODE_TOO_MANY_DATES',
+        t('errors.event.fixed_mode_single'),
+      );
     }
   }
 }

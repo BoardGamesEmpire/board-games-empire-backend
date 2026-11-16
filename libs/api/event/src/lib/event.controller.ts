@@ -117,6 +117,10 @@ export class EventController {
 
   @ApiOperation({ summary: 'Create an event' })
   @ApiResponse({ status: Http.Created, description: 'Event created successfully' })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description: 'Invalid body, or a Fixed event sent with more than one date (code EVENT_FIXED_MODE_TOO_MANY_DATES)',
+  })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.Event))

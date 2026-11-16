@@ -13,7 +13,7 @@ import { unreadWhen } from '../notification/unread-poll';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { arrangeListEntry } from './event-fixtures';
+import { arrangeListEntry, hoursFromNow } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import { nominationEnvelope } from './event-wire';
 
@@ -39,9 +39,6 @@ describe('status changes racing on one date or nomination (#621)', () => {
 
   /** Generous for the reason `household-write-tombstone.spec.ts` gives: a cold request clears several guards first. */
   const REQUEST_REACHES_LOCK_MS = 20_000;
-
-  const HOUR = 60 * 60 * 1000;
-  const hoursFromNow = (hours: number) => new Date(Date.now() + hours * HOUR).toISOString();
 
   /** The event's row, which a date's status change locks first (#795). */
   const EVENT_ROW = {

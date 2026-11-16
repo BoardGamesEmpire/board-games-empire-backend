@@ -7,6 +7,7 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTag
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
+import { OCCURRENCE_EDIT_FIELDS } from './constants/occurrence-edit-fields.constant';
 import { AddOccurrenceDto } from './dto/add-occurrence.dto';
 import { CancelOccurrenceDto } from './dto/cancel-occurrence.dto';
 import { SubmitAvailabilityDto } from './dto/submit-availability.dto';
@@ -73,6 +74,12 @@ export class EventOccurrenceController {
       'takes everything from the event’s (#796, #1211).',
   })
   @ApiResponse({ status: Http.Created, description: 'Occurrence added' })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description:
+      'The event is cancelled, or it takes one date and already has one that is proposed or confirmed ' +
+      '(code OCCURRENCE_FIXED_MODE_HAS_DATE)',
+  })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.EventOccurrence))
   @Post()
   addOccurrence(@Param('eventId') eventId: string, @Body() dto: AddOccurrenceDto) {
@@ -82,10 +89,21 @@ export class EventOccurrenceController {
     );
   }
 
-  @ApiOperation({ summary: 'Update an occurrence', description: OCCURRENCE_POLICY_DESCRIPTION })
+  @ApiOperation({
+    summary: 'Update an occurrence',
+    description:
+      'Each field the request sends needs a permission that covers it: label, startDate, endDate, location and ' +
+      "sortOrder are covered by `update:event_occurrence`, or its `:household` variant on a household's event " +
+      '(#979). ' +
+      OCCURRENCE_POLICY_DESCRIPTION,
+  })
   @ApiParam({ name: 'occurrenceId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Occurrence updated' })
-  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence))
+  // A permission bound only to status columns can edit none of these, so it
+  // is refused here rather than by the write's ceiling (#979).
+  @CheckPolicies((ability) =>
+    OCCURRENCE_EDIT_FIELDS.some((field) => ability.can(Action.update, ResourceType.EventOccurrence, field)),
+  )
   @Patch(':occurrenceId')
   updateOccurrence(
     @Param('eventId') eventId: string,
@@ -111,11 +129,19 @@ export class EventOccurrenceController {
 
   @ApiOperation({
     summary: 'Confirm a proposed occurrence (Poll mode → Confirmed)',
-    description: OCCURRENCE_POLICY_DESCRIPTION,
+    description:
+      `Needs the \`update:event_occurrence:confirm\` permission, or its \`:household\` variant on a household's event ` +
+      '(#979). ' +
+      OCCURRENCE_POLICY_DESCRIPTION,
   })
   @ApiParam({ name: 'occurrenceId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Occurrence confirmed' })
-  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence))
+  @ApiResponse({
+    status: Http.BadRequest,
+    description:
+      'The date is not proposed, its event is cancelled, or the date has passed (code OCCURRENCE_DATE_PASSED)',
+  })
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence, 'confirmedAt'))
   @Post(':occurrenceId/confirm')
   confirm(@Param('eventId') eventId: string, @Param('occurrenceId') occurrenceId: string) {
     return from(this.occurrenceService.confirmOccurrence(eventId, occurrenceId)).pipe(
@@ -125,11 +151,14 @@ export class EventOccurrenceController {
 
   @ApiOperation({
     summary: 'Decline a proposed occurrence (Poll mode → Declined)',
-    description: OCCURRENCE_POLICY_DESCRIPTION,
+    description:
+      `Needs the \`update:event_occurrence:decline\` permission, or its \`:household\` variant on a household's event ` +
+      '(#979). ' +
+      OCCURRENCE_POLICY_DESCRIPTION,
   })
   @ApiParam({ name: 'occurrenceId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Occurrence declined' })
-  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence))
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence, 'declinedAt'))
   @Post(':occurrenceId/decline')
   decline(@Param('eventId') eventId: string, @Param('occurrenceId') occurrenceId: string) {
     return from(this.occurrenceService.declineOccurrence(eventId, occurrenceId)).pipe(
@@ -137,10 +166,16 @@ export class EventOccurrenceController {
     );
   }
 
-  @ApiOperation({ summary: 'Cancel a confirmed occurrence', description: OCCURRENCE_POLICY_DESCRIPTION })
+  @ApiOperation({
+    summary: 'Cancel a confirmed occurrence',
+    description:
+      `Needs the \`update:event_occurrence:cancel\` permission, or its \`:household\` variant on a household's event ` +
+      '(#979). ' +
+      OCCURRENCE_POLICY_DESCRIPTION,
+  })
   @ApiParam({ name: 'occurrenceId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Occurrence cancelled' })
-  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence))
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence, 'cancelledAt'))
   @Post(':occurrenceId/cancel')
   cancel(
     @Param('eventId') eventId: string,
@@ -155,7 +190,10 @@ export class EventOccurrenceController {
   @ApiOperation({ summary: 'Submit or update your availability for a proposed occurrence' })
   @ApiParam({ name: 'occurrenceId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Availability recorded' })
-  @ApiResponse({ status: Http.BadRequest, description: 'Occurrence is not in Proposed status' })
+  @ApiResponse({
+    status: Http.BadRequest,
+    description: 'Occurrence is not in Proposed status, or the date has passed (code OCCURRENCE_DATE_PASSED)',
+  })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.EventAvailabilityVote))
   @Post(':occurrenceId/availability')
   submitAvailability(

@@ -1414,10 +1414,15 @@ describe('EventService', () => {
       expect(written().occurrences).toBeUndefined();
     });
 
-    it('refuses a fixed event with more than one occurrence before writing', async () => {
+    // The same code as a switch to Fixed with more than one live date, so a
+    // client announces one rule one way (#966).
+    it('refuses a fixed event with more than one occurrence before writing, with EVENT_FIXED_MODE_TOO_MANY_DATES', async () => {
       await expect(
         service.createEvent({ title: 'X', occurrences: [{ startDate }, { startDate: endDate }] } as CreateEventDto),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { code: 'EVENT_FIXED_MODE_TOO_MANY_DATES', message: t('errors.event.fixed_mode_single') },
+      });
       expect(db.event.create).not.toHaveBeenCalled();
     });
 

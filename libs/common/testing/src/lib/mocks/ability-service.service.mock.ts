@@ -5,7 +5,7 @@ import * as jest from 'jest-mock';
  * Redeclaring here to avoid a circular dependency on the real AbilityService in permissions lib
  */
 declare class AbilityService {
-  getCurrentResourceConditions(resourceType: string, action: string): unknown[];
+  getCurrentResourceConditions(resourceType: string, action: string, field?: string): unknown[];
   getResourceConditionsForAbilities(abilities: unknown[], resourceType: string, action: string): unknown[];
   getCurrentAbilities(): unknown[];
   getCurrentAccess(resourceTypes: readonly string[]): Record<string, Record<string, string>>;
