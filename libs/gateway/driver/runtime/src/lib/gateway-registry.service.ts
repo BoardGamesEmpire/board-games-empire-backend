@@ -384,7 +384,10 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     gatewayId: string,
     driver: DataGatewayDriver,
     configHash = '',
-    origin: DriverOrigin = 'registered',
+    // Not 'plugin': only connectPlugin() records the install a plugin's
+    // driver was built from, and a 'plugin' entry without it is dropped at the
+    // next routing decision (#1083).
+    origin: Exclude<DriverOrigin, 'plugin'> = 'registered',
   ): Promise<void> {
     await this.interviewAndCache({ gatewayId, driver, configHash, origin }, this.connectGeneration.get(gatewayId) ?? 0);
   }
