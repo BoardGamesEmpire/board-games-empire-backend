@@ -576,6 +576,20 @@ describe('SecureHttpService', () => {
     });
   });
 
+  // fetch's Response carries the status line's reason phrase, and a
+  // DataGateway driver reports it when a request fails. The plugin HTTP
+  // client builds its Response from this answer (#1083).
+  it("hands back the final response's reason phrase (#1083)", async () => {
+    const dns = new FakeDnsResolver();
+    dns.set('example.com', [v4('8.8.8.8')]);
+    const { service, pool } = buildService({ dns, mockAgent });
+    pool.intercept({ path: '/busy' }).reply(Http.ServiceUnavailable, 'busy');
+
+    const response = await service.request('http://example.com/busy', { responseType: 'text' });
+
+    expect([response.status, response.statusText]).toEqual([Http.ServiceUnavailable, 'Service Unavailable']);
+  });
+
   describe("the caller's signal", () => {
     // The outbound HTTP policy's address lookup takes no signal. A request
     // cancelled before a hop begins must not start one (#1083).

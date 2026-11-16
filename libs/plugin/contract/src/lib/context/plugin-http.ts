@@ -20,7 +20,7 @@ export interface PluginHttpRequest {
  *
  * The client never asks for compression: the `Response` is built from the
  * bytes as they arrived. It carries what `fetch`'s own would: the status as
- * it arrived, the `url` that answered, `redirected`, and each `Set-Cookie`
+ * it arrived with its `statusText`, the `url` that answered, `redirected`, and each `Set-Cookie`
  * header by itself.
  *
  * A redirect to another origin (another declared host, another port, or

@@ -121,6 +121,8 @@ interface TerminalHop {
 
 interface HopResult {
   status: number;
+  /** The status line's reason phrase; empty over HTTP/2. */
+  statusText: string;
   headers: Record<string, string>;
   /** Each Set-Cookie header by itself; `headers` holds them joined. */
   setCookie: string[];
@@ -483,6 +485,7 @@ export class SecureHttpService {
       });
 
       const status = result.statusCode;
+      const { statusText } = result;
       const responseHeaders = this.normalizeHeaders(result.headers);
       const setCookie = this.setCookieHeaders(result.headers);
 
@@ -494,15 +497,15 @@ export class SecureHttpService {
       if (sink) {
         if (redirecting || status < 200 || status > 299) {
           discardBody(result.body);
-          return { status, headers: responseHeaders, setCookie, bodyBytes: Buffer.alloc(0) };
+          return { status, statusText, headers: responseHeaders, setCookie, bodyBytes: Buffer.alloc(0) };
         }
 
         const written = await this.streamToFile(result.body, responseHeaders, url, sink);
-        return { status, headers: responseHeaders, setCookie, bodyBytes: Buffer.alloc(0), written };
+        return { status, statusText, headers: responseHeaders, setCookie, bodyBytes: Buffer.alloc(0), written };
       }
 
       const bodyBytes = await this.readBodyCapped(result.body, url);
-      return { status, headers: responseHeaders, setCookie, bodyBytes };
+      return { status, statusText, headers: responseHeaders, setCookie, bodyBytes };
     } catch (err) {
       // Distinguish timeout from generic network failure for clean error mapping.
       // A destination or cap failure is already specific, so it wins over a
@@ -605,6 +608,7 @@ export class SecureHttpService {
 
     return {
       status: hop.status,
+      statusText: hop.statusText,
       headers: Object.freeze({ ...hop.headers }),
       setCookie: Object.freeze([...hop.setCookie]),
       body,

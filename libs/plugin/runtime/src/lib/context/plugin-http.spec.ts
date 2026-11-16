@@ -33,6 +33,7 @@ describe('buildPluginHttp', () => {
 
   const answer = (overrides: Partial<SafeHttpResponse<ArrayBuffer>> = {}): SafeHttpResponse<ArrayBuffer> => ({
     status: 200,
+    statusText: 'OK',
     headers: {},
     body: new ArrayBuffer(0),
     raw: new ArrayBuffer(0),
@@ -379,6 +380,22 @@ describe('buildPluginHttp', () => {
       const response = await get();
 
       expect([response.url, response.redirected]).toEqual(['https://api.example.com/', false]);
+    });
+
+    // A driver reports the reason phrase when a request fails, as the IGDB
+    // driver's token request does. The constructor throws on a character
+    // outside Latin-1, which a UTF-8 status line can hold (#1083).
+    it.each([
+      [503, 'Service Unavailable'],
+      [999, 'Request denied ✓'],
+      [204, ''],
+    ])('carries the reason phrase of a %d, a copy too (#1083)', async (status, statusText) => {
+      request.mockResolvedValueOnce(answer({ status, statusText }));
+
+      const response = await get();
+
+      expect([response.status, response.statusText]).toEqual([status, statusText]);
+      expect(response.clone().clone().statusText).toBe(statusText);
     });
   });
 

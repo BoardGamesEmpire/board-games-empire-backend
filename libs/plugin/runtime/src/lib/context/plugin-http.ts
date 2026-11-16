@@ -148,6 +148,7 @@ function refusedHostname(err: unknown): string | undefined {
 /** What fetch reports of an answer and the Response constructor can't be given. */
 interface FetchedFields {
   readonly status: number;
+  readonly statusText: string;
   readonly url: string;
   readonly redirected: boolean;
 }
@@ -170,6 +171,7 @@ function toResponse(answer: SafeHttpResponse<ArrayBuffer>): Response {
 
   return asFetched(response, {
     status: answer.status,
+    statusText: answer.statusText,
     url: answer.finalUrl,
     redirected: answer.redirectCount > 0,
   });
@@ -180,13 +182,17 @@ function toResponse(answer: SafeHttpResponse<ArrayBuffer>): Response {
  * arrived, whatever its range, the URL that answered and whether a redirect
  * led there. The constructor takes none of these, and a DataGateway driver
  * written against fetch reads them, to branch on a status or to resolve a
- * relative link against `response.url`. They are set on the object itself,
+ * relative link against `response.url`. The reason phrase goes with them:
+ * the constructor would take it, but throws on one it finds malformed, and
+ * a driver reports it when a request fails (the IGDB driver's token request
+ * does). They are set on the object itself,
  * over the prototype's getters, and `clone` is wrapped so a copy keeps them
  * (#1083).
  */
 function asFetched(response: Response, fields: FetchedFields): Response {
   return Object.defineProperties(response, {
     status: { value: fields.status, enumerable: true },
+    statusText: { value: fields.statusText, enumerable: true },
     ok: { value: fields.status >= 200 && fields.status <= 299, enumerable: true },
     url: { value: fields.url, enumerable: true },
     redirected: { value: fields.redirected, enumerable: true },

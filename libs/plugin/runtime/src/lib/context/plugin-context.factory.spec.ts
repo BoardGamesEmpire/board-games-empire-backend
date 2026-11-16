@@ -35,6 +35,7 @@ describe('PluginContextFactory', () => {
     secureHttp = {
       request: jest.fn().mockResolvedValue({
         status: 200,
+        statusText: 'OK',
         headers: {},
         setCookie: [],
         body: new ArrayBuffer(0),
