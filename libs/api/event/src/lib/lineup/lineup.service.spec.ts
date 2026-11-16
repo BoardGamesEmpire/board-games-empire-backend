@@ -418,7 +418,7 @@ describe('LineupService (#799)', () => {
       expect(emitted.before).toEqual(snapshotRow('eg-1', 'att-1'));
       expect(emitted.after).toBeNull();
       expect(emitted.eventId).toBe('event-1');
-      expect(emitted.reason).toBe(LineupRemovalReason.RemovedByHost);
+      expect(emitted.reason).toBe(LineupRemovalReason.TakenOut);
       expect(emitted.actingUserId).toBe(MOCK_ACTING_USER_ID);
 
       expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, { id: { in: ['att-1'] } });

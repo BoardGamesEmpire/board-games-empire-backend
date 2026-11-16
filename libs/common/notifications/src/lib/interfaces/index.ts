@@ -178,7 +178,7 @@ export const LineupRemovalReason = {
    * co-host, an event moderator, or a household owner or admin on a
    * household event.
    */
-  RemovedByHost: 'RemovedByHost',
+  TakenOut: 'TakenOut',
   /** The attendee supplying it left the event: removed, or not attending. */
   SupplierLeft: 'SupplierLeft',
   /** A write to the event's dates put its lineup ahead again, with nobody bringing the game. */

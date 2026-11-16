@@ -180,14 +180,7 @@ export class LineupService {
       return ahead;
     });
 
-    emitRemovedGames(
-      this.eventEmitter,
-      eventId,
-      [snapshot],
-      LineupRemovalReason.RemovedByHost,
-      actingUserId,
-      initiatedAt,
-    );
+    emitRemovedGames(this.eventEmitter, eventId, [snapshot], LineupRemovalReason.TakenOut, actingUserId, initiatedAt);
 
     return removed;
   }

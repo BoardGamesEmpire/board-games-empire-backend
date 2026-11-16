@@ -635,8 +635,8 @@ describe('/api/events/:eventId/lineup (#799, #769)', () => {
       expect(all).toHaveLength(5);
       expect(all).toEqual(
         expect.arrayContaining([
-          told(participant, hostsGame, LineupRemovalReason.RemovedByHost),
-          told(stayer, hostsGame, LineupRemovalReason.RemovedByHost),
+          told(participant, hostsGame, LineupRemovalReason.TakenOut),
+          told(stayer, hostsGame, LineupRemovalReason.TakenOut),
           told(host, participantsGame, LineupRemovalReason.SupplierLeft),
           told(stayer, participantsGame, LineupRemovalReason.SupplierLeft),
           told(stayer, sundaysGame, LineupRemovalReason.NobodyBringing),

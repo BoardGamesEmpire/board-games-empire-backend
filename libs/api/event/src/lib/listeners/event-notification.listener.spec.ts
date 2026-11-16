@@ -872,7 +872,7 @@ describe('EventNotificationListener', () => {
     });
 
     it.each([
-      [LineupRemovalReason.RemovedByHost, 'user-host', null],
+      [LineupRemovalReason.TakenOut, 'user-host', null],
       [LineupRemovalReason.SupplierLeft, 'user-supplier', null],
       [LineupRemovalReason.NobodyBringing, 'user-host', 'occ-1'],
     ] as const)(
@@ -929,7 +929,7 @@ describe('EventNotificationListener', () => {
       const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
       db.platformGame.findUnique.mockResolvedValue(null);
 
-      await listener.onGameRemoved(removal(LineupRemovalReason.RemovedByHost, 'user-host'));
+      await listener.onGameRemoved(removal(LineupRemovalReason.TakenOut, 'user-host'));
 
       expect(notifications.createMany).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('eventId=ev-1'));
@@ -939,7 +939,7 @@ describe('EventNotificationListener', () => {
     it('tells nobody when the person acting is the only one still coming (#769)', async () => {
       db.eventAttendee.findMany.mockResolvedValue([{ userId: 'user-host' }] as never);
 
-      await listener.onGameRemoved(removal(LineupRemovalReason.RemovedByHost, 'user-host'));
+      await listener.onGameRemoved(removal(LineupRemovalReason.TakenOut, 'user-host'));
 
       expect(notifications.createMany).not.toHaveBeenCalled();
     });
@@ -951,9 +951,7 @@ describe('EventNotificationListener', () => {
       db.eventAttendee.findMany.mockResolvedValue([{ userId: 'user-a' }] as never);
       notifications.createMany.mockRejectedValue(new Error('db down'));
 
-      await expect(
-        listener.onGameRemoved(removal(LineupRemovalReason.RemovedByHost, 'user-host')),
-      ).resolves.toBeUndefined();
+      await expect(listener.onGameRemoved(removal(LineupRemovalReason.TakenOut, 'user-host'))).resolves.toBeUndefined();
       expect(error).toHaveBeenCalledWith(expect.stringContaining('lineupGameId=lg-1'), expect.any(String));
       error.mockRestore();
     });
