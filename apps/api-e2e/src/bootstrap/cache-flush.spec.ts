@@ -18,10 +18,10 @@ import {
 import { PERMISSIONS_CACHE_NAMESPACE, PermissionsService } from '@bge/permissions';
 import { createCacheStore, RedisKeyFlush } from '@bge/redis';
 import type { Logger } from '@nestjs/common';
-import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
 import Redis from 'iovalkey';
 import { API_CACHE_NAMESPACE, apiCacheKey, permissionsCacheKey } from '../support/api-cache';
-import { REDIS_IMAGE } from '../support/e2e-env';
+import type { StartedRedisServer } from '../support/redis-server';
+import { selectRedisServer, startRedisServer } from '../support/redis-server';
 import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../support/test-db';
 
 /**
@@ -38,7 +38,7 @@ import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../su
  * store stands by untouched. DB-only on the harness database, which is in
  * sync and seeded, so removing one grant is what makes the next reconcile
  * write. The DB-only runner provisions no Redis, so this spec starts its own
- * container.
+ * container, of the server the run selected (#462).
  */
 
 const silent: BootstrapLogger = { log: () => undefined, warn: () => undefined };
@@ -80,13 +80,13 @@ const SHIPPED = DATA_MIGRATIONS.map((shipped) => shipped.name);
 
 describe('the cache flush after a reconcile that wrote rows or a data migration that applied', () => {
   let db: TestDatabase;
-  let container: StartedRedisContainer;
+  let server: StartedRedisServer;
   let redis: Redis;
 
   beforeAll(async () => {
     db = createTestDatabase();
-    container = await new RedisContainer(REDIS_IMAGE).start();
-    redis = new Redis(container.getConnectionUrl());
+    server = await startRedisServer(selectRedisServer(process.env));
+    redis = new Redis(server.connectionUrl);
   }, 120_000);
 
   afterEach(async () => {
@@ -96,7 +96,7 @@ describe('the cache flush after a reconcile that wrote rows or a data migration 
 
   afterAll(async () => {
     await redis.quit();
-    await container.stop();
+    await server.stop();
     await db.close();
   });
 

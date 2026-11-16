@@ -9,7 +9,6 @@ import {
   WORKSPACE_ROOT,
 } from '@bge/testing-e2e/child-process';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
 import { spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -26,7 +25,6 @@ import {
   MAILPIT_IMAGE,
   parseRedisUrl,
   POSTGRES_IMAGE,
-  REDIS_IMAGE,
   redisEnvOverrides,
   redisOwnershipOverride,
   type RedisEndpoint,
@@ -35,6 +33,8 @@ import { startFakeSignInProvider, type FakeSignInProvider } from './fake-sign-in
 import { setE2EGlobalState } from './global-state';
 import { startMailpit, type StartedMailpit } from './mailpit';
 import { sweepThrottleBuckets } from './redis-reset';
+import type { StartedRedisServer } from './redis-server';
+import { selectRedisServer, startRedisServer } from './redis-server';
 
 /** The deployable artifact under test — built by the e2e target's `api:build` dependency. */
 const API_BUNDLE = path.join(WORKSPACE_ROOT, 'apps', 'api', 'dist', 'main.js');
@@ -128,7 +128,9 @@ async function launchApi(env: NodeJS.ProcessEnv, pluginsRoot: string): Promise<L
  *
  *  1. Postgres and Redis testcontainers (or the `BGE_E2E_*` escape-hatch
  *     endpoints — treated as DISPOSABLE: they are migrated, seeded, and
- *     swept exactly like a container).
+ *     swept exactly like a container). The Redis container is the
+ *     Redis-compatible server `BGE_E2E_REDIS_SERVER` names, stock Redis
+ *     when it names none (#462).
  *  2. A Mailpit container, the SMTP server outgoing mail reaches (#654); its
  *     ports are published via `BGE_E2E_MAILPIT`. Always a container, with no
  *     escape hatch: nothing reaches it until a spec points the mail settings
@@ -161,9 +163,13 @@ async function launchApi(env: NodeJS.ProcessEnv, pluginsRoot: string): Promise<L
  */
 export default async function globalSetup(): Promise<void> {
   const decision = decideProvisioning(process.env);
+  // The Redis-compatible server `BGE_E2E_REDIS_SERVER` names, Redis when it
+  // names none (#462); the spec-owned containers start the same one. Chosen
+  // before anything starts, so a misspelled name fails at once.
+  const redisProfile = selectRedisServer(process.env);
 
   let postgres: StartedPostgreSqlContainer | undefined;
-  let redis: StartedRedisContainer | undefined;
+  let redis: StartedRedisServer | undefined;
   let mailpit: StartedMailpit | undefined;
   let api: ChildProcess | undefined;
   let signInProvider: FakeSignInProvider | undefined;
@@ -187,11 +193,11 @@ export default async function globalSetup(): Promise<void> {
 
     let redisEndpoint: RedisEndpoint;
     if (decision.redis.mode === 'container') {
-      console.log(`[e2e] starting ${REDIS_IMAGE} (testcontainers)...`);
-      redis = await new RedisContainer(REDIS_IMAGE).start();
+      console.log(`[e2e] starting ${redisProfile.image} as ${redisProfile.name} (testcontainers)...`);
+      redis = await startRedisServer(redisProfile);
       redisEndpoint = {
-        host: redis.getHost(),
-        port: redis.getPort(),
+        host: redis.host,
+        port: redis.port,
         username: '',
         password: '',
         tls: false,

@@ -2,11 +2,11 @@ import { DatabaseModule, DatabaseService } from '@bge/database';
 import { PermissionsModule, PermissionsService } from '@bge/permissions';
 import { CACHE_REDIS_CLIENT } from '@bge/redis';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
 import Redis from 'iovalkey';
 import { ClsModule } from 'nestjs-cls';
 import { permissionsCacheKey } from '../support/api-cache';
-import { REDIS_IMAGE } from '../support/e2e-env';
+import type { StartedRedisServer } from '../support/redis-server';
+import { selectRedisServer, startRedisServer } from '../support/redis-server';
 
 /**
  * Permission graphs live in one store that every process reads (#786). Each
@@ -15,17 +15,17 @@ import { REDIS_IMAGE } from '../support/e2e-env';
  * worker had cached, which kept serving it until its TTL ended.
  *
  * Two compiles of the real `PermissionsModule`, each over its own client of
- * one real Redis server (`REDIS_IMAGE`), stand in for the api and the worker,
- * so the module's own wiring decides where each writes. The database is a stub
- * that counts loads, so a load is the only way to see a miss. This spec starts
- * its own container, as `bootstrap/cache-flush` does, so it plants nothing in
- * the Redis the api uses.
+ * one real Redis-compatible server (the server the run selected, #462), stand
+ * in for the api and the worker, so the module's own wiring decides where each
+ * writes. The database is a stub that counts loads, so a load is the only way
+ * to see a miss. This spec starts its own container, as `bootstrap/cache-flush`
+ * does, so it plants nothing in the Redis the api uses.
  */
 describe('permission graphs shared by every process (#786)', () => {
   const findUnique = jest.fn();
   const stubDb = { user: { findUnique } };
 
-  let container: StartedRedisContainer;
+  let server: StartedRedisServer;
   let redisA: Redis;
   let redisB: Redis;
   let modules: TestingModule[] = [];
@@ -59,9 +59,9 @@ describe('permission graphs shared by every process (#786)', () => {
   }
 
   beforeAll(async () => {
-    container = await new RedisContainer(REDIS_IMAGE).start();
-    redisA = new Redis(container.getConnectionUrl());
-    redisB = new Redis(container.getConnectionUrl());
+    server = await startRedisServer(selectRedisServer(process.env));
+    redisA = new Redis(server.connectionUrl);
+    redisB = new Redis(server.connectionUrl);
   }, 120_000);
 
   beforeEach(async () => {
@@ -80,7 +80,7 @@ describe('permission graphs shared by every process (#786)', () => {
   afterAll(async () => {
     await redisA.quit();
     await redisB.quit();
-    await container.stop();
+    await server.stop();
   });
 
   it('an eviction made in one process is seen by the next read in another (#786)', async () => {
