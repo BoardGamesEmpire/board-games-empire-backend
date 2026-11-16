@@ -4,16 +4,17 @@ Build-path and CI scripts that run under bare `node`, plus the modules behind th
 
 Nothing imports this library. Its entrypoints are invoked by path, from Nx targets, from CI or from the image build:
 
-| Entrypoint                          | Invoked by                                                       |
-| ----------------------------------- | ---------------------------------------------------------------- |
-| `src/bin/prisma-generate.js`        | `@bge/database:generate`                                         |
-| `src/bin/buf-export.js`             | `@boardgamesempire/proto-gateway:buf-export`                     |
-| `src/bin/generate-bge-version.js`   | `@board-games-empire/version:generate`                           |
-| `src/bin/check-spec-swcrc.js`       | the "Check spec swcrc source maps" step in `ci.yml`'s `main` job |
-| `src/bin/check-migrations.js`       | `npm run db:migrate:check`, which `ci.yml`'s `main` job runs     |
-| `src/bin/check-bundle-externals.js` | the root `Dockerfile`, after its production-only install         |
-| `src/bin/find-published-images.js`  | `ci.yml`'s `build-push` job, on `master`                         |
-| `src/bin/publish-images.js`         | `ci.yml`'s `publish` job, on `master`                            |
+| Entrypoint                           | Invoked by                                                           |
+| ------------------------------------ | -------------------------------------------------------------------- |
+| `src/bin/prisma-generate.js`         | `@bge/database:generate`                                             |
+| `src/bin/buf-export.js`              | `@boardgamesempire/proto-gateway:buf-export`                         |
+| `src/bin/generate-bge-version.js`    | `@board-games-empire/version:generate`                               |
+| `src/bin/check-spec-swcrc.js`        | the "Check spec swcrc source maps" step in `ci.yml`'s `main` job     |
+| `src/bin/check-migrations.js`        | `npm run db:migrate:check`, which `ci.yml`'s `main` job runs         |
+| `src/bin/check-migration-history.js` | `npm run db:migrate:check-history`, which `ci.yml`'s `main` job runs |
+| `src/bin/check-bundle-externals.js`  | the root `Dockerfile`, after its production-only install             |
+| `src/bin/find-published-images.js`   | `ci.yml`'s `build-push` job, on `master`                             |
+| `src/bin/publish-images.js`          | `ci.yml`'s `publish` job, on `master`                                |
 
 Because the call sites are command strings rather than imports, Nx cannot infer
 the dependency. Each consuming target declares these files in its own `inputs`.
@@ -81,6 +82,16 @@ PGUSER included. It also covers a URL it can't read, which it
 refuses rather than guess at, and the schema the comparison runs in: the shadow
 URL's, whatever `DATABASE_URL` names. The header of
 `src/migration-check/shadow-database.js` explains why Prisma 7.8 needs it (#586).
+
+`src/migration-check/history.spec.js` runs the migration history check
+against throwaway git repositories. It covers a change that adds a migration
+or edits one in place (both pass), one that renames or deletes a migration on
+master, or leaves its directory without a `migration.sql` (each fails, naming
+it), and a stacked branch renaming a migration only its base branch holds
+(passes, since the base is the merge base with `origin/master`). It also
+covers an explicit base, as a push to master passes, and a base git can't
+read, which fails rather than passes. The header of
+`src/migration-check/history.js` explains why the boot needs it (#1148).
 
 `src/eslint-rules/no-nested-ceiling.spec.js` tests a rule that lives in the
 root `eslint.config.mjs`, not in this library. Every project's lint target
