@@ -1,6 +1,7 @@
 import type { HouseholdPlugin, Plugin, Prisma } from '@bge/database';
 import { PluginUnitDormantReason } from '@bge/database';
 import type { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
+import { isPlainJsonObject } from '../is-plain-json-object';
 import { PluginUnitConfigRequiredError } from './unit.errors';
 
 /**
@@ -38,7 +39,7 @@ export function assertRetainedConfigSatisfiesGate(
   // what puts it back into service.
   const retained = existing.config;
 
-  if (typeof retained !== 'object' || retained === null || Array.isArray(retained)) {
+  if (!isPlainJsonObject(retained)) {
     throw new PluginUnitConfigRequiredError(plugin.slug, [
       { path: '', keyword: 'type', message: 'retained configuration is not a JSON object' },
     ]);

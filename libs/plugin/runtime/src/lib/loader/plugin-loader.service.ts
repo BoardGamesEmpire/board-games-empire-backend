@@ -12,6 +12,7 @@ import { readFile } from 'node:fs/promises';
 import { PluginConfigService } from '../config/plugin-config.service';
 import { PluginContextFactory } from '../context/plugin-context.factory';
 import { PluginDisabledEvent, PluginLoadFailedEvent } from '../events/plugin.events';
+import { isPlainJsonObject } from '../is-plain-json-object';
 import type { PluginModuleOptions } from '../plugin-module.options';
 import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import type { PluginPackageDescriptor } from './entrypoint-resolver';
@@ -229,7 +230,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
     const raw = await readFile(packageJsonPath, 'utf8');
     const parsed: unknown = JSON.parse(raw);
 
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    if (!isPlainJsonObject(parsed)) {
       throw new PluginEntrypointError(slug, 'package.json is not a JSON object');
     }
 
