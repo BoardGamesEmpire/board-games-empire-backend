@@ -6,6 +6,7 @@ import {
   PluginExecutionMode,
   PluginScope,
   Prisma,
+  retainedConfigOf,
   type PluginUnitDormancy,
 } from '@bge/database';
 import { parsePluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
@@ -204,14 +205,15 @@ export interface PluginInventoryUnitState {
    */
   readonly state: PluginUnitStateCode;
   /**
-   * What keeps the unit from running apart from its own switch and its
-   * consent (#1151): `unavailable` when the server cannot run it for this
-   * unit whatever its settings say (the stored manifest cannot be read, the
-   * manifest has no surface at the unit's scope, or its config schema cannot
-   * be used), `needs_configuration` when the household's settings do not fit
-   * the active schema, `null` when nothing does. Worked out on every read from
-   * the active manifest and the unit's document, and reported whether or not
-   * the unit is switched on, so a client can say what a switch-on would meet.
+   * What keeps the unit from running apart from the two switches, its own
+   * and the Server switch (#1151): `unavailable` when the server cannot run
+   * it for this unit whatever its settings say (the stored manifest cannot be
+   * read, the manifest has no surface at the unit's scope, or its config
+   * schema cannot be used), `needs_configuration` when the household's
+   * settings do not fit the active schema, `null` when nothing does. Worked
+   * out on every read from the active manifest and the unit's document, and
+   * reported whether or not the unit is switched on, so a client can say what
+   * a switch-on would meet.
    */
   readonly dormancy: PluginUnitDormancy | null;
   /**
@@ -439,10 +441,10 @@ export class PluginInventoryService {
   }
 
   /**
-   * The household viewpoint (D-CE): every plugin the household axis admits,
-   * with this household's unit enablement joined on — PLUS any plugin this
-   * household already holds a row for, whatever its current scope says
-   * (D-CF). Driven from the plugin table, never from `HouseholdPlugin`
+   * The household viewpoint: every plugin the household axis admits, with
+   * this household's unit enablement joined on — PLUS any plugin this
+   * household already holds a row for, whatever its current scope says.
+   * Driven from the plugin table, never from `HouseholdPlugin`
    * rows, so a household that has enabled nothing still sees what it could
    * enable.
    *
@@ -495,12 +497,8 @@ export class PluginInventoryService {
           // `@@unique([householdId, pluginId])` makes the filtered relation at
           // most one row, so the first element is the whole answer.
           const unitRow: HouseholdUnitStateRow | undefined = row.householdPlugins[0];
-          // The document the household holds: `{}` with no unit enablement.
-          // Not `unitRow?.config ?? {}`: a stored JSON `null` is a document the
-          // rule rejects, and `??` would read it as the empty one (#1151).
-          const retainedConfig = unitRow === undefined ? {} : unitRow.config;
 
-          return this.toUnitInventoryEntry(row, unitRow, unit, retainedConfig, options.locale);
+          return this.toUnitInventoryEntry(row, unitRow, unit, retainedConfigOf(unitRow), options.locale);
         }),
       ),
       total,
@@ -508,7 +506,7 @@ export class PluginInventoryService {
   }
 
   /**
-   * The acting user's own viewpoint (D-CE). Row set is EVERY installed
+   * The acting user's own viewpoint. Row set is EVERY installed
    * plugin, with no scope narrowing: user-scope consent is legal at any
    * plugin scope (#225), so unlike the household axis there is no such thing
    * as a plugin whose SCOPE a user cannot be anchored under — and therefore
@@ -526,9 +524,9 @@ export class PluginInventoryService {
    * Each row reports `unit.state`, `unit.dormancy` and `unit.consent` (#1149,
    * #1151). The dormancy rule never judges a user's configuration and admits
    * a user at any plugin scope, so a user row reads dormancy `null` unless its
-   * manifest cannot be read. An unanchored or switched-off row reads `off`,
-   * and any other reads `review_pending` while a required user-scope check is
-   * owed.
+   * manifest cannot be read. A row with no unit enablement, or a switched-off
+   * one, reads `off`, and any other reads `review_pending` while a required
+   * user-scope check is owed.
    */
   async listForUser(
     userId: string,
@@ -803,7 +801,7 @@ export class PluginInventoryService {
   }
 
   /**
-   * A missing unit enablement is an unanchored unit, not a disabled one.
+   * A missing unit enablement reads `anchored: false`, not a disabled unit.
    * Built field by field: the household's document is selected for the
    * dormancy rule and must never reach a response (#1151).
    */

@@ -450,6 +450,45 @@ describe('the Owner edits the permission catalog (#772)', () => {
         blockingSlugs: ['read:game:public'],
       });
     });
+
+    it('counts a household whose configuration conforms and leaves out one whose configuration the active schema rejects (#1151)', async () => {
+      const [owner, conformingOwner, rejectedOwner] = await Promise.all([actors.owner(), actors.user(), actors.user()]);
+      const conforming = await actors.householdWithMembers({ owner: conformingOwner });
+      const rejected = await actors.householdWithMembers({ owner: rejectedOwner });
+      const plugin = await arrangePlugin();
+
+      await grantForHousehold(conformingOwner, conforming.household.id, plugin);
+      await grantForHousehold(rejectedOwner, rejected.household.id, plugin);
+      // The fixture's schema types `webhookUrl` as a string. Written on the
+      // row, as a schema tightened by an update would leave it: the server's
+      // own manifest reader judges the document when the edit counts.
+      await db.client.householdPlugin.update({
+        where: { householdId_pluginId: { householdId: rejected.household.id, pluginId: plugin.id } },
+        data: { config: { webhookUrl: 42 } },
+      });
+
+      // The two households differ only in the document: both switched on,
+      // both decisions Granted at Low.
+      const units = await db.client.householdPlugin.findMany({
+        where: { pluginId: plugin.id },
+        select: { enabled: true },
+      });
+      expect(units).toEqual([{ enabled: true }, { enabled: true }]);
+      const decisions = await db.client.pluginGrant.findMany({
+        where: { pluginId: plugin.id },
+        select: { status: true, decidedRiskLevel: true },
+      });
+      expect(decisions).toEqual([
+        { status: PluginGrantStatus.Granted, decidedRiskLevel: RiskLevel.Low },
+        { status: PluginGrantStatus.Granted, decidedRiskLevel: RiskLevel.Low },
+      ]);
+
+      const raised = await editPermission(owner, 'read:game:public', { riskLevel: RiskLevel.Medium }).expect(200);
+
+      // One, not two: the household whose document fails the schema is not
+      // served, so its decision is not in force.
+      expect(raised.body.consentDecisionsAffected).toBe(1);
+    });
   });
 
   // Postgres refuses a NUL in a query's text, which surfaced as a bare 500;

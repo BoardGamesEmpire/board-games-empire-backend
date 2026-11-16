@@ -89,6 +89,20 @@ export function derivePluginUnitDormancy(input: {
 }
 
 /**
+ * The document a household unit holds, which {@link derivePluginUnitDormancy}
+ * judges as `retainedConfig` (#1151): the unit enablement's `config` exactly
+ * as stored, and `{}` when the household has no unit enablement, since a new
+ * one is created holding `{}`.
+ *
+ * Never write it as `row?.config ?? {}`: `config` is a Json column, and a
+ * stored JSON `null` is a document the rule rejects, which `??` would read as
+ * the empty one.
+ */
+export function retainedConfigOf(row: { readonly config: Prisma.JsonValue } | null | undefined): Prisma.JsonValue {
+  return row === null || row === undefined ? {} : row.config;
+}
+
+/**
  * The plugin half of the serving predicate: the plugin is enabled and not
  * uninstalled. Shared by the plugin ability read (#60) and the permission
  * catalog's count of the consent decisions an edit affects (#772), so the two
@@ -118,7 +132,7 @@ export function isPluginUnitServed(
  * `HouseholdPlugin`/`UserPlugin` enablement for `(unit, pluginId)`, with a
  * missing one reading as not anchored and not enabled — for these scopes the
  * enablement IS the unit's participation. Server units have no unit
- * enablement; the plugin-level predicate (enabled, not tombstoned) is the
+ * enablement; the plugin-level predicate (enabled, not uninstalled) is the
  * caller's half.
  *
  * Shared between the ability read path's serving predicate (#60,
@@ -147,9 +161,7 @@ export async function loadPluginUnitEnablement(
       return {
         anchored: row !== null,
         enabled: row?.enabled ?? false,
-        // Not `row?.config ?? {}`: a stored JSON `null` is a document the rule
-        // rejects, and `??` would read it as the empty one (#1151).
-        retainedConfig: row === null ? {} : row.config,
+        retainedConfig: retainedConfigOf(row),
       };
     }
 

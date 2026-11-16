@@ -677,7 +677,7 @@ describe('PluginFeatureStateService', () => {
       expect(result).toMatchObject({ served: false });
     });
 
-    it('the tombstone short-circuit returns served false, state off, no dormancy and empty consent lists (#1149, #1151)', async () => {
+    it('an uninstalled plugin short-circuits: served false, state off, no dormancy and empty consent lists (#1149, #1151)', async () => {
       db.plugin.findUnique.mockResolvedValue(pluginRow({ uninstalledAt: new Date('2026-08-01T00:00:00Z') }) as never);
 
       const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);

@@ -235,6 +235,18 @@ describe('loadConsentDecisionsInForce (#772)', () => {
       expect(reader.read).toHaveBeenCalledTimes(1);
     });
 
+    it('judges a stored JSON null as itself, not as the empty document', async () => {
+      // `config` is a Json column: a stored `null` is a document the rule
+      // rejects, never one read as `{}`.
+      const judgeConfig = jest.fn((document: unknown) => (document === null ? 'rejected' : 'conforms'));
+      reader.read.mockReturnValue(householdManifest({ judgeConfig }));
+      db.pluginGrant.findMany.mockResolvedValue([household('stored-null')] as never);
+      db.householdPlugin.findMany.mockResolvedValue([row('stored-null', { config: null })] as never);
+
+      await expect(inForce()).resolves.toEqual([]);
+      expect(judgeConfig).toHaveBeenCalledWith(null);
+    });
+
     it('drops a household decision under a manifest with no household surface', async () => {
       reader.read.mockReturnValue(householdManifest({ householdSurface: false }));
       db.pluginGrant.findMany.mockResolvedValue(['h1', 'h2'].map((id) => household(id)) as never);
@@ -249,11 +261,21 @@ describe('loadConsentDecisionsInForce (#772)', () => {
         householdManifest({ judgeConfig: () => (slug === 'broken-schema' ? 'schema-unusable' : 'conforms') }),
       );
       const broken = { ...stored().plugin, slug: 'broken-schema' };
+      // A decision carries no plugin id, so the two plugins' decisions differ
+      // in their risk level to tell which survive.
+      const brokenDecision = (householdId: string) =>
+        stored({
+          pluginId: 'plugin-2',
+          scopeType: PluginGrantScope.Household,
+          scopeId: householdId,
+          decidedRiskLevel: RiskLevel.High,
+          plugin: broken,
+        });
       db.pluginGrant.findMany.mockResolvedValue([
         household('h1', 'plugin-1'),
         household('h2', 'plugin-1'),
-        stored({ pluginId: 'plugin-2', scopeType: PluginGrantScope.Household, scopeId: 'h1', plugin: broken }),
-        stored({ pluginId: 'plugin-2', scopeType: PluginGrantScope.Household, scopeId: 'h2', plugin: broken }),
+        brokenDecision('h1'),
+        brokenDecision('h2'),
       ] as never);
       db.householdPlugin.findMany.mockResolvedValue([
         row('h1'),
@@ -264,7 +286,12 @@ describe('loadConsentDecisionsInForce (#772)', () => {
 
       const kept = await inForce();
 
-      expect(kept).toHaveLength(2);
+      const usable = {
+        scopeType: PluginGrantScope.Household,
+        decidedRiskLevel: RiskLevel.Low,
+        status: PluginGrantStatus.Granted,
+      };
+      expect(kept).toEqual([usable, usable]);
       // Each plugin's manifest is read once, however many decisions it holds.
       expect(reader.read).toHaveBeenCalledTimes(2);
     });

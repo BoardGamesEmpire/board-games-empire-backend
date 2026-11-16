@@ -2,6 +2,7 @@ import { assertPluginUnit, type PluginUnit } from '@bge/actor-context';
 import {
   DatabaseService,
   derivePluginUnitDormancy,
+  isPluginUnitServed,
   loadPluginUnitEnablement,
   PluginScope,
   type PluginUnitDormancy,
@@ -88,14 +89,14 @@ export interface PluginFeatureUnitState {
    */
   readonly state: PluginUnitStateCode;
   /**
-   * What keeps the unit from running apart from its own switch and its
-   * consent (#1151): `unavailable` when the server cannot run it for this
-   * unit whatever its settings say, `needs_configuration` when the household's
-   * settings do not fit the active schema, `null` when nothing does. Worked out
-   * on every read from the active manifest and the unit's document, and
-   * reported whether or not the unit is switched on, so a client can say what a
-   * switch-on would meet. `null` for an uninstalled plugin, for which nothing
-   * is worked out.
+   * What keeps the unit from running apart from the two switches, its own
+   * and the Server switch (#1151): `unavailable` when the server cannot run it
+   * for this unit whatever its settings say, `needs_configuration` when the
+   * household's settings do not fit the active schema, `null` when nothing
+   * does. Worked out on every read from the active manifest and the unit's
+   * document, and reported whether or not the unit is switched on, so a
+   * client can say what a switch-on would meet. `null` for an uninstalled
+   * plugin, for which nothing is worked out.
    */
   readonly dormancy: PluginUnitDormancy | null;
   /** Required permissions the unit still owes and optional ones switched off. */
@@ -301,7 +302,7 @@ export class PluginFeatureStateService {
     // switch survives a scope narrowing or a schema tightening, so a unit can
     // be switched on and still serve nothing. Consent is deliberately absent
     // (#1149).
-    const served = plugin.enabled && unitState.enabled && dormancy === null;
+    const served = plugin.enabled && isPluginUnitServed(unitState, dormancy);
 
     const { standing: consent, refusedSlugs } = await this.standing.resolveDetailed(
       plugin.id,

@@ -1220,7 +1220,7 @@ The on/off control for a plugin across the whole server. Nothing runs for anyone
 _Avoid_: kill switch, server-level switch; enabled on its own
 
 **Dormancy**:
-What keeps a plugin unit from running apart from its own switch and its consent, until something is fixed. It is worked out each time it is read, from the plugin's active version and the unit's settings, and never stored. `unavailable` means the server cannot run the plugin for this unit: its stored manifest cannot be read, this version has no surface at the unit's scope, or its settings schema cannot be used. `needs_configuration` means a household's settings do not fit this version's schema, and supplying settings that fit cures it. Nobody chooses it; switching a plugin off on purpose is disabling it.
+What keeps a plugin unit from running apart from the two switches, its own and the Server switch, until something is fixed. It is worked out each time it is read, from the plugin's active version and the unit's settings, and never stored. `unavailable` means the server cannot run the plugin for this unit: its stored manifest cannot be read, this version has no surface at the unit's scope, or its settings schema cannot be used. `needs_configuration` means a household's settings do not fit this version's schema, and supplying settings that fit cures it. Nobody chooses it; switching a plugin off on purpose is disabling it.
 _Avoid_: dormant for consent given ahead of an update (say pre-consent)
 
 **Restart required**:

@@ -566,7 +566,7 @@ describe('PluginInventoryService', () => {
       });
     });
 
-    it('an anchored row carries its enablement, state code, dormancy and consent standing (#1149, #1151)', async () => {
+    it('a row with a unit enablement carries its enablement, state code, dormancy and consent standing (#1149, #1151)', async () => {
       db.plugin.findMany.mockResolvedValue([householdRow({}, [{ enabled: true, config: {} }])] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
@@ -581,7 +581,7 @@ describe('PluginInventoryService', () => {
       });
     });
 
-    it('selects only enabled and the document from the household unit enablement, no stored suspension or reason (#1149, #1151)', async () => {
+    it('selects only enabled and the document from the household unit enablement, and no stored consent or dormancy state (#1149, #1151)', async () => {
       db.plugin.findMany.mockResolvedValue([] as never);
       db.plugin.count.mockResolvedValue(0 as never);
 

@@ -1352,7 +1352,24 @@ describe('PermissionsService', () => {
 
         expect(snapshot).toMatchObject({ servable: false, corePermissions: [], ownGrantSlugs: [] });
         expect(warn).toHaveBeenCalledTimes(1);
+        // The warning names the household it could not judge, not only the plugin.
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringMatching(/household hh-1 can run the plugin; not serving it \(#1151\)/),
+        );
         expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
+      });
+
+      it('does not warn for a server unit with no consent decisions in a process with no manifest reader', async () => {
+        // A Server unit is not judged on configuration, and with no decision
+        // to confer it never needs the manifest at all.
+        const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+        const withoutReader = new PermissionsService(db as never, cache, redis as never);
+        db.pluginGrant.findMany.mockResolvedValue([] as never);
+
+        const snapshot = await withoutReader.getPluginGrantSnapshot('plugin-1', { scopeType: 'Server' });
+
+        expect(snapshot).toMatchObject({ servable: true, corePermissions: [], ownGrantSlugs: [] });
+        expect(warn).not.toHaveBeenCalled();
       });
 
       it.each<[string, () => void]>([

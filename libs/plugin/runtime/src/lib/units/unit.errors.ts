@@ -110,13 +110,13 @@ export class PluginUnitNotEnrolledError extends Error {
 }
 
 /**
- * The enable-time config gate (#323): the active manifest declares
- * `requiresHouseholdConfig` and neither the enable request nor a retained
- * row supplied a config document satisfying `config.schema`. `issues`
- * carries the retained document's violations when one existed (a stale
- * config left by an update or reinstall) — empty when there was nothing
- * to validate — so the client's schema-driven form can render what to fix
- * without a second request.
+ * The switch-on config gate (#323, #1151): a household switch-on that
+ * supplies no configuration is refused when the document the unit would hold
+ * (its retained one, or an empty one for a household with no unit
+ * enablement) fails the active `config.schema`, with or without
+ * `requiresHouseholdConfig`. `issues` lists the violations, so the client's
+ * schema-driven form can render what to fix without a second request; it is
+ * empty only for a first switch-on the manifest requires a document for.
  */
 export class PluginUnitConfigRequiredError extends Error {
   override readonly name = 'PluginUnitConfigRequiredError';

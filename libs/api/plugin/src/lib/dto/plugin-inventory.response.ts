@@ -249,10 +249,11 @@ class UnitStateDto implements PluginInventoryUnitState {
     enumName: 'PluginUnitDormancy',
     nullable: true,
     description:
-      'What keeps the unit from running apart from its own switch and its consent. It is present whether or not ' +
-      'the unit is switched on, so a client can say what switching it on would meet. unavailable: the server ' +
-      'cannot run it for this unit, because the stored manifest cannot be read (manifestUnreadable true), the ' +
-      'plugin no longer has this axis, or its settings schema cannot be used; only a server admin restores it. ' +
+      'What keeps the unit from running apart from the two switches, its own and the Server switch. It is ' +
+      'present whether or not the unit is switched on, so a client can say what switching it on would meet. ' +
+      'unavailable: the server cannot run it for this unit, because the stored manifest cannot be read ' +
+      "(manifestUnreadable true), this version has no surface at the unit's scope, or its settings schema " +
+      'cannot be used; only a server admin restores it. ' +
       'needs_configuration: the household settings do not fit the active schema; supplying a conforming ' +
       'document heals it. null: nothing stands in the way. Worked out on every read, never stored.',
   })

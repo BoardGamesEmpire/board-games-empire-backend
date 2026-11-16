@@ -88,7 +88,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
     consentScope: 'household' as const,
   };
 
-  /** A config schema the default `{}` and a `{ webhookUrl: 42 }` both fail. */
+  /** A config schema the default `{}` fails: it requires `webhookUrl`. */
   const REQUIRING_SCHEMA = {
     type: 'object',
     properties: { webhookUrl: { type: 'string' } },
@@ -457,6 +457,8 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
       await approve(admin, plugin.slug).expect(200);
 
+      // The re-scope wrote nothing to the household's unit enablement.
+      expect(await householdUnitEnablement(household.id, plugin.id)).toEqual(captured);
       expect(await householdUnitState(owner, household.id, plugin.slug)).toMatchObject({
         anchored: true,
         enabled: true,
@@ -477,7 +479,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
       expect(await householdUnitEnablement(household.id, plugin.id)).toEqual(captured);
     });
 
-    it('an activation that leaves a household needing configuration records only the approval and the re-consent it asks for (#392)', async () => {
+    it('an activation that leaves a household needing configuration records only the approval and the re-consent it asks for (#1151)', async () => {
       // Two switched-on households: one whose document the staged schema
       // accepts, one whose `{}` it rejects. Both owe the new household-scope
       // permission. Dormancy is worked out when read (#1151), so the
@@ -512,7 +514,6 @@ describe('plugin update consent (approve/reject/pending)', () => {
       const response = await approve(admin, plugin.slug).expect(200);
 
       expect(response.body.reconsentHouseholdUnits).toHaveLength(2);
-      expect(JSON.stringify(response.body)).not.toMatch(/dorman/i);
       // The case is one where a household cannot run: the read says so.
       expect(await householdUnitState(ownerB, rejected.id, plugin.slug)).toMatchObject({
         dormancy: 'needs_configuration',

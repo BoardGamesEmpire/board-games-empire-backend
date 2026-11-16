@@ -626,15 +626,8 @@ export class PluginInstallerService {
 
         plugin = await tx.plugin.findUniqueOrThrow({ where: { id: existing.id } });
 
-        // A reinstall reads and writes no household unit enablement.
-        // `sharedColumns` above rewrites `scope` from the new manifest, and an
-        // uninstall with `purgeData: false` retained every household unit
-        // enablement as it stood. Whether one of them can run under this
-        // manifest is worked out when read, from the active manifest's scope
-        // and the unit's retained `config` (#1151), so a household enabled
-        // under the old scope does not serve a plugin whose new scope has no
-        // household surface, and its settings are there again if a later
-        // manifest restores one.
+        // A reinstall reads and writes no household unit enablement: whether a
+        // retained one can run under this manifest is worked out when read (#1151).
       }
 
       // A data-gateway plugin's DataGateway row, created or (on a reinstall)

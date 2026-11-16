@@ -4,6 +4,7 @@ import {
   isPluginServing,
   isPluginUnitServed,
   loadPluginUnitEnablement,
+  retainedConfigOf,
 } from './plugin-unit-enablement';
 
 describe('loadPluginUnitEnablement', () => {
@@ -116,6 +117,24 @@ describe('loadPluginUnitEnablement', () => {
         expect.objectContaining({ retainedConfig: null }),
       );
     });
+  });
+});
+
+describe('retainedConfigOf (#1151)', () => {
+  it('reads a household with no unit enablement as holding the empty document', () => {
+    expect(retainedConfigOf(null)).toEqual({});
+    expect(retainedConfigOf(undefined)).toEqual({});
+  });
+
+  it('returns a stored JSON null as itself, not as the empty document, so the rule can reject it', () => {
+    expect(retainedConfigOf({ config: null })).toBeNull();
+  });
+
+  it('returns a stored document exactly as stored', () => {
+    const config = { webhookUrl: 'https://x.test' };
+
+    expect(retainedConfigOf({ config })).toBe(config);
+    expect(retainedConfigOf({ config: [] })).toEqual([]);
   });
 });
 

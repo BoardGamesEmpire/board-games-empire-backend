@@ -4,7 +4,7 @@ import { PluginConfigSchemaUnusableError } from '../config/config-schema.errors'
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { activeManifestOf } from '../manifest/active-manifest';
 import { assertHeldConfigSatisfiesGate } from './household-config-gate';
-import { PluginUnitConfigRequiredError } from './unit.errors';
+import { PluginUnitConfigRequiredError, PluginUnitScopeError } from './unit.errors';
 
 describe('household config gate', () => {
   const plugin = { slug: 'demo-sink', version: '1.2.0' };
@@ -27,6 +27,31 @@ describe('household config gate', () => {
     ...overrides,
   });
 
+  interface ActiveConfig {
+    readonly schema?: Record<string, unknown>;
+    readonly requiresHouseholdConfig?: boolean;
+  }
+
+  /** The re-validated active manifest a consent act hands the gate. */
+  const validatedWith = (
+    activeConfig: ActiveConfig = {},
+    scope: 'household' | 'server' = 'household',
+  ): PluginManifestValidationResult => ({
+    manifest: buildPluginManifest({
+      slug: plugin.slug,
+      version: plugin.version,
+      scope,
+      config: {
+        schema: activeConfig.schema ?? requiringSchema,
+        requiresHouseholdConfig: activeConfig.requiresHouseholdConfig ?? false,
+      },
+    }),
+    permissionChecks: [],
+    declaredPermissions: [],
+    externalPermissionChecks: [],
+    warnings: [],
+  });
+
   let configSchema: PluginConfigSchemaService;
 
   beforeEach(() => {
@@ -34,20 +59,9 @@ describe('household config gate', () => {
   });
 
   const gate =
-    (
-      existing: HouseholdPlugin | null,
-      activeConfig: { schema?: Record<string, unknown>; requiresHouseholdConfig?: boolean } = {},
-    ) =>
+    (existing: HouseholdPlugin | null, activeConfig: ActiveConfig = {}, scope: 'household' | 'server' = 'household') =>
     () =>
-      assertHeldConfigSatisfiesGate(
-        configSchema,
-        plugin,
-        {
-          schema: activeConfig.schema ?? requiringSchema,
-          requiresHouseholdConfig: activeConfig.requiresHouseholdConfig ?? false,
-        },
-        existing,
-      );
+      assertHeldConfigSatisfiesGate(configSchema, validatedWith(activeConfig, scope), existing);
 
   const violations = (keyword: string) =>
     expect.objectContaining({
@@ -66,7 +80,11 @@ describe('household config gate', () => {
     // The unit would hold `{}`, which the read calls needs_configuration, so
     // switching it on would put it straight into a state it cannot serve in.
     expect(gate(null, { requiresHouseholdConfig: false })).toThrow(violations('required'));
-    expect(gate(null, { requiresHouseholdConfig: true })).toThrow(PluginUnitConfigRequiredError);
+    // A first switch-on the manifest requires a document for is refused with
+    // no violations, ahead of the ones `{}` would have.
+    expect(gate(null, { requiresHouseholdConfig: true })).toThrow(
+      expect.objectContaining({ constructor: PluginUnitConfigRequiredError, issues: [] }),
+    );
   });
 
   it('accepts a first switch-on with no document when {} conforms and none is required (#1151)', () => {
@@ -113,16 +131,33 @@ describe('household config gate', () => {
     expect(switchOn).not.toThrow(PluginUnitConfigRequiredError);
   });
 
+  it('refuses a manifest with no household surface as a scope refusal, without judging the document (#1151)', () => {
+    // The rule reads such a unit `unavailable` before it looks at the
+    // document, so no schema is compiled and no document is validated.
+    const assertUsable = jest.spyOn(configSchema, 'assertUsable');
+    const validate = jest.spyOn(configSchema, 'validate');
+
+    for (const existing of [null, makeHouseholdRow({ enabled: true, config: { webhookUrl: 42 } })]) {
+      expect(gate(existing, { schema: unusableSchema, requiresHouseholdConfig: true }, 'server')).toThrow(
+        expect.objectContaining({ constructor: PluginUnitScopeError, pluginSlug: 'demo-sink', scope: 'server' }),
+      );
+    }
+
+    expect(assertUsable).not.toHaveBeenCalled();
+    expect(validate).not.toHaveBeenCalled();
+  });
+
   /**
    * The read works a household unit's dormancy out from the document it holds
-   * through `judgeConfig`; this gate decides whether a switch-on may leave the
-   * unit holding that document. If the two disagreed about one document, a
-   * switch-on could put a unit straight into needs_configuration, or refuse
-   * one the read would serve. Run under a permissive schema as well, where a
-   * stored JSON `null` is the document a gate reading `null` as `{}` would let
-   * through, and under a schema that cannot be used, which the read calls
-   * `unavailable` whatever the document is: no configuration cures that, so
-   * the gate must never ask for one.
+   * through `judgeConfig`; this gate asks the same rule whether a switch-on
+   * may leave the unit holding that document. The table pins that the two
+   * cannot disagree about one document: a switch-on must never put a unit
+   * straight into needs_configuration, nor refuse one the read would serve.
+   * Run under a permissive schema as well, where a stored JSON `null` is the
+   * document a gate reading `null` as `{}` would let through, and under a
+   * schema that cannot be used, which the read calls `unavailable` whatever
+   * the document is: no configuration cures that, so the gate must never ask
+   * for one.
    */
   describe('refuses exactly the documents the rule reads as needs_configuration (#1151)', () => {
     const schemas: readonly [string, Record<string, unknown>][] = [
@@ -141,21 +176,8 @@ describe('household config gate', () => {
       documents.map(([documentName, document]) => [schemaName, documentName, schema, document] as const),
     );
 
-    const validatedWith = (schema: Record<string, unknown>): PluginManifestValidationResult => ({
-      manifest: buildPluginManifest({
-        slug: plugin.slug,
-        version: plugin.version,
-        scope: 'household',
-        config: { schema, requiresHouseholdConfig: false },
-      }),
-      permissionChecks: [],
-      declaredPermissions: [],
-      externalPermissionChecks: [],
-      warnings: [],
-    });
-
     it.each(cases)('under %s, holding %s', (_schemaName, _documentName, schema, document) => {
-      const verdict = activeManifestOf(validatedWith(schema), configSchema).judgeConfig(document);
+      const verdict = activeManifestOf(validatedWith({ schema }), configSchema).judgeConfig(document);
       const retained = makeHouseholdRow({ enabled: true, config: document as Prisma.JsonValue });
       const switchOn = gate(retained, { schema, requiresHouseholdConfig: false });
 

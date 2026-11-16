@@ -426,7 +426,7 @@ describe('installed-plugin inventory (#354)', () => {
       await listHousehold(ownerB, fixtureA.household.id).expect(403);
     });
 
-    it('lists a household-scope plugin unanchored, with no dormancy: the row set is plugin-driven (#1151)', async () => {
+    it('lists a household-scope plugin with no unit enablement, with no dormancy: the row set is plugin-driven (#1151)', async () => {
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner });
       // A household with no unit enablement is judged on `{}`, which the

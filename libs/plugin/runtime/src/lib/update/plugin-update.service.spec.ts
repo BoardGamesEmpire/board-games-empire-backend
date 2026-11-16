@@ -1556,10 +1556,54 @@ describe('PluginUpdateService', () => {
       },
     );
 
+    it('reads household unit enablements once, for the re-consent, and writes none, when the new manifest adds a household-scope permission (#392, #1151)', async () => {
+      const next = nextManifest({
+        scope: 'household',
+        config: {
+          schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+          requiresHouseholdConfig: true,
+        },
+        permissions: {
+          ...activeManifest.permissions,
+          checks: [
+            ...activeManifest.permissions.checks,
+            {
+              slug: 'calendar:read',
+              required: true,
+              reason: { en: 'Schedules digests around events.' },
+              consentScope: 'household' as const,
+            },
+          ],
+        },
+      });
+      db.plugin.findUnique.mockResolvedValue(pendingPlugin(next, { scope: PluginScope.Household }));
+      db.plugin.findUniqueOrThrow.mockResolvedValue(pendingPlugin(next, { scope: PluginScope.Household }));
+      db.permission.findMany.mockResolvedValue([
+        feedbackRead,
+        { slug: 'calendar:read', ...UNIT_BOUND_RULES.Household, riskLevel: RiskLevel.Low } as unknown as Permission,
+      ]);
+      db.householdPlugin.findMany.mockResolvedValue([
+        makeUnit({ config: { webhookUrl: 42 } }),
+        makeUnit({ id: 'hp-2', householdId: 'household-2', config: { webhookUrl: 'https://example.test/hook' } }),
+      ]);
+
+      const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
+
+      // The re-consent read ran: both households owe the new permission.
+      expect(result.reconsentHouseholdUnits).toHaveLength(2);
+      expect(db.householdPlugin.findMany).toHaveBeenCalledTimes(1);
+
+      for (const [name, method] of Object.entries(db.householdPlugin)) {
+        if (name !== 'findMany') {
+          expect(method).not.toHaveBeenCalled();
+        }
+      }
+    });
+
     /**
-     * Activation applies the retained-config rule a reinstall-over-tombstone
-     * applies via `retainedServerConfig` (#370), so neither manifest-replacing
-     * path leaves `Plugin.config` unchecked. The household axis needs no such
+     * Activation applies the retained-config rule a reinstall of an
+     * uninstalled plugin applies via `retainedServerConfig` (#370), so neither
+     * manifest-replacing path leaves `Plugin.config` unchecked. The household axis needs no such
      * rule: a household unit's retained document is judged against the active
      * schema when read (#1151).
      */

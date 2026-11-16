@@ -15,6 +15,7 @@ import {
 import { deadlock } from '@bge/database/testing';
 import { createMockDatabaseService, rawQueryText, type MockDatabaseService } from '@bge/testing';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { PluginConfigSchemaUnusableError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import {
   HouseholdPluginConfigUpdatedEvent,
@@ -653,6 +654,22 @@ describe('PluginConsentActService', () => {
             issues: [expect.objectContaining({ keyword: 'required' })],
           }),
         );
+        expectNothingWritten();
+      });
+
+      it('refuses a switch-on with no document under a schema that cannot be used before any lock is taken (#1151)', async () => {
+        // The read calls such a unit `unavailable`, and no configuration
+        // cures it, so the act refuses it before the transaction opens.
+        db.plugin.findUnique.mockResolvedValue(
+          makePlugin({
+            manifestJson: householdManifest({ schema: { type: 'no-such-type' } }) as unknown as Prisma.JsonValue,
+          }),
+        );
+        householdRow = makeHouseholdRow({ enabled: true, config: { webhookUrl: 'https://retained.test' } });
+
+        await expect(service.switchOn(householdSwitchOn)).rejects.toBeInstanceOf(PluginConfigSchemaUnusableError);
+        expect(db.$transaction).not.toHaveBeenCalled();
+        expect(order).toEqual([]);
         expectNothingWritten();
       });
 

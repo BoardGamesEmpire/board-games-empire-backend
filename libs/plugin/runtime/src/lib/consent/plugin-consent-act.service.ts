@@ -201,9 +201,10 @@ export class PluginConsentActService {
 
       // A supplied document is judged against the ACTIVE schema before the
       // transaction, so an invalid one is refused before any lock is taken
-      // (#323); otherwise the schema is warmed, so the config gate under the
-      // advisory key, which judges the document the unit would hold, does not
-      // compile it inside the lock window (#1151).
+      // (#323). Otherwise the schema is established usable and compiled
+      // here: an unusable one is refused before any lock, and the config gate
+      // under the advisory key, which asks the rule about the document the
+      // unit would hold, compiles nothing inside the lock window (#1151).
       if (config !== undefined) {
         const issues = this.configSchema.validate({
           slug: plugin.slug,
@@ -216,7 +217,7 @@ export class PluginConsentActService {
           throw new PluginConfigValidationError(plugin.slug, issues);
         }
       } else {
-        this.configSchema.warm({ slug: plugin.slug, version: plugin.version, schema: activeConfig.schema });
+        this.configSchema.assertUsable({ slug: plugin.slug, version: plugin.version, schema: activeConfig.schema });
       }
     }
 
@@ -294,16 +295,16 @@ export class PluginConsentActService {
         // the unit (ADR 0002, docs/adr/0002-retried-writes-use-client-request-ids.md).
         const unitBefore = await this.readUnitEnablement(tx, unit, plugin.id);
 
-        // A household unit's dormancy is worked out when read from the
-        // document its unit enablement holds, so a household switch-on that
-        // supplies no document is judged on the one it would leave the unit
-        // holding: the retained one, or `{}` for a new unit enablement. Judged
+        // A household switch-on that supplies no document asks the dormancy
+        // rule, with the active manifest, about the document it would leave
+        // the unit holding: the retained one, or `{}` for a new unit
+        // enablement. The gate refuses whatever the rule finds dormant. Asked
         // here, before the answer that changes nothing and before any write,
-        // so a document that fails is refused rather than answered or
-        // half-recorded, whether or not the unit is already switched on (#323,
-        // #1151). A supplied document was judged before the transaction.
+        // so a unit the read would call dormant is refused rather than
+        // answered or half-recorded, whether or not it is already switched on
+        // (#323, #1151). A supplied document was judged before the transaction.
         if (household && kind === 'SwitchOn' && config === undefined) {
-          assertHeldConfigSatisfiesGate(this.configSchema, plugin, activeConfig, unitBefore as HouseholdPlugin | null);
+          assertHeldConfigSatisfiesGate(this.configSchema, named.active, unitBefore as HouseholdPlugin | null);
         }
 
         const standingRows = await tx.pluginGrant.findMany({

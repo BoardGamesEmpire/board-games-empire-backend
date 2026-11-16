@@ -5,6 +5,7 @@ import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { readConsentSurface, sendSwitchOn, switchOnBody } from './consent-act-fixtures';
+import { pluginAbilitySlugsForHousehold } from './plugin-ability-fixtures';
 import { pluginRowData } from './plugin-row-fixtures';
 
 /**
@@ -568,6 +569,92 @@ describe('plugin unit enablement + feature state (#323)', () => {
       await db.client.plugin.update({ where: { id: plugin.id }, data: { uninstalledAt: new Date() } });
       const gone = await readHouseholdFeatures(owner, household.id, plugin.slug).expect(410);
       expect(gone.body.code).toBe('PLUGIN_FEATURE_STATE_TOMBSTONED');
+    });
+  });
+
+  /**
+   * A household unit's dormancy is worked out when read, from the active
+   * manifest and the document its unit enablement holds (#1151). These read
+   * it where a client does: the household inventory and feature state.
+   */
+  describe('dormancy on the wire (#1151)', () => {
+    /** The manifest fields that carry the slug, for a second plugin beside the fixture's `demo-sink`. */
+    const slugFields = (slug: string): Parameters<typeof buildPluginManifest>[0] => ({
+      slug,
+      events: { emits: [`plugin.${slug}.digest-sent`], subscribes: ['feedback.created'] },
+      jobs: { queues: [`plugin:${slug}:digest`] },
+      storage: { ownTables: [`plugin_${slug.replace(/-/g, '_')}_digests`] },
+    });
+
+    const readInventoryUnit = async (actor: SessionActor, householdId: string, slug: string) => {
+      const listed = await request(baseUrl)
+        .get(`/api/households/${householdId}/plugins?limit=100`)
+        .set(actor.headers)
+        .expect(200);
+
+      return listed.body.plugins.find((entry: { slug: string }) => entry.slug === slug)?.unit;
+    };
+
+    it('a household unit under a config schema that cannot be used reads unavailable and gets no abilities, while the page and its other plugin are unaffected (#1151)', async () => {
+      const owner = await actors.user();
+      const { household } = await actors.householdWithMembers({ owner });
+      // The same arrangement twice, differing only in the schema: switched on,
+      // the required household decision Granted, holding `{}`.
+      const broken = await arrangePlugin({
+        ...slugFields('demo-sink-broken'),
+        config: { schema: { type: 'no-such-type' }, requiresHouseholdConfig: false },
+      });
+      const usable = await arrangePlugin(slugFields('demo-sink-usable'));
+
+      for (const plugin of [broken, usable]) {
+        await arrangeHouseholdDecision(household.id, plugin.id, HOUSEHOLD_CHECK.slug, PluginGrantStatus.Granted);
+        await db.client.householdPlugin.create({
+          data: { householdId: household.id, pluginId: plugin.id, enabled: true, config: {} },
+        });
+      }
+
+      expect(await readInventoryUnit(owner, household.id, broken.slug)).toMatchObject({
+        anchored: true,
+        enabled: true,
+        state: 'unavailable',
+        dormancy: 'unavailable',
+      });
+      expect(await pluginAbilitySlugsForHousehold(db.client, broken.id, household.id)).toEqual([]);
+
+      // The control: the plugin whose schema can be used serves on the same
+      // page, so the empty ability above is the schema's. Its state reports
+      // consent standing (`review_pending` here), which is not dormancy.
+      const usableUnit = await readInventoryUnit(owner, household.id, usable.slug);
+      expect(usableUnit).toMatchObject({ enabled: true, dormancy: null });
+      expect(usableUnit.state).not.toBe('unavailable');
+      expect(await pluginAbilitySlugsForHousehold(db.client, usable.id, household.id)).toEqual([HOUSEHOLD_CHECK.slug]);
+    });
+
+    it('feature state carries the dormancy: needs_configuration while switched on, and still after a switch-off (#1151)', async () => {
+      const owner = await actors.user();
+      const { household } = await actors.householdWithMembers({ owner });
+      const plugin = await arrangePlugin({ config: { schema: CONFIG_SCHEMA, requiresHouseholdConfig: false } });
+      await arrangeHouseholdDecision(household.id, plugin.id, HOUSEHOLD_CHECK.slug, PluginGrantStatus.Granted);
+      // A document the active schema rejects: `webhookUrl` must be a string.
+      await db.client.householdPlugin.create({
+        data: { householdId: household.id, pluginId: plugin.id, enabled: true, config: { webhookUrl: 42 } },
+      });
+
+      const on = await readHouseholdFeatures(owner, household.id, plugin.slug).expect(200);
+      expect(on.body.featureState).toMatchObject({
+        served: false,
+        state: 'needs_configuration',
+        dormancy: 'needs_configuration',
+      });
+
+      await disableHousehold(owner, household.id, plugin.slug).expect(200);
+
+      const off = await readHouseholdFeatures(owner, household.id, plugin.slug).expect(200);
+      expect(off.body.featureState).toMatchObject({
+        served: false,
+        state: 'off',
+        dormancy: 'needs_configuration',
+      });
     });
   });
 });

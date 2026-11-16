@@ -1,64 +1,68 @@
-import type { HouseholdPlugin, Plugin } from '@bge/database';
+import { derivePluginUnitDormancy, retainedConfigOf, type HouseholdPlugin } from '@bge/database';
+import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
+import { PluginConfigSchemaUnusableError } from '../config/config-schema.errors';
 import type { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
-import { isPlainJsonObject } from '../is-plain-json-object';
-import { PluginUnitConfigRequiredError } from './unit.errors';
+import { MANIFEST_SCOPE_TO_PRISMA } from '../install/manifest-enum.maps';
+import { activeManifestOf, configDocumentIssues } from '../manifest/active-manifest';
+import { PluginUnitConfigRequiredError, PluginUnitScopeError } from './unit.errors';
 
 /**
  * The household configuration gate (#323, #1151). A household unit's dormancy
- * is worked out when read, from the document its unit enablement holds, and a
- * document the active config schema rejects reads as `needs_configuration`. A
- * consent act's switch-on that supplies no document runs this gate, so a
- * switch-on never leaves a unit switched on over a document the read would
- * call `needs_configuration`.
+ * is worked out when read, by `derivePluginUnitDormancy`, from the active
+ * manifest and the document its unit enablement holds. A consent act's
+ * switch-on that supplies no document asks the same rule about the document
+ * it would leave the unit holding, so a switch-on never leaves a unit switched
+ * on in a state the read calls dormant.
  */
 
 /**
- * The document a household unit would hold after a switch-on that supplies
- * none must satisfy the active schema. Throws PluginUnitConfigRequiredError.
+ * Refuses a household switch-on that supplies no document when the rule finds
+ * the unit dormant, with the typed error for the rule's cause. Never returns
+ * normally when the rule answers non-null.
  *
- * That document is the unit enablement's `config`, or `{}` when the household
- * has none, since a new unit enablement is created holding `{}`.
+ * The document is the unit enablement's `config`, or `{}` when the household
+ * has none. Where two refusals apply, the order is:
  *
- * The schema's usability is established first, as `judgeConfig` does, because
- * a schema that cannot be used reads `unavailable`, which outranks
- * `needs_configuration` and which no configuration the admin supplies cures,
- * so it throws PluginConfigSchemaUnusableError whatever the document is.
+ * 1. `unavailable`, which no configuration cures: PluginUnitScopeError when
+ *    the manifest has no household surface, PluginConfigSchemaUnusableError
+ *    when its config schema cannot be used.
+ * 2. A first switch-on the manifest requires a document for
+ *    (`requiresHouseholdConfig`): PluginUnitConfigRequiredError with no
+ *    issues, whatever the rule says about `{}`.
+ * 3. `needs_configuration`: PluginUnitConfigRequiredError with the
+ *    violations.
  */
 export function assertHeldConfigSatisfiesGate(
   configSchema: PluginConfigSchemaService,
-  plugin: Pick<Plugin, 'slug' | 'version'>,
-  activeConfig: { readonly schema: Record<string, unknown>; readonly requiresHouseholdConfig: boolean },
+  active: PluginManifestValidationResult,
   existing: HouseholdPlugin | null,
 ): void {
-  configSchema.assertUsable({ slug: plugin.slug, version: plugin.version, schema: activeConfig.schema });
+  const { manifest } = active;
+  const target = { slug: manifest.slug, version: manifest.version, schema: manifest.config.schema };
+  const retainedConfig = retainedConfigOf(existing);
+  const activeManifest = activeManifestOf(active, configSchema);
+  const dormancy = derivePluginUnitDormancy({ scopeType: 'Household', manifest: activeManifest, retainedConfig });
 
-  if (existing === null && activeConfig.requiresHouseholdConfig) {
-    throw new PluginUnitConfigRequiredError(plugin.slug, []);
+  if (dormancy === 'unavailable') {
+    // Built as `assertHouseholdSurface` builds it from the plugin's `scope`
+    // column, so the refusal reads the same from either source.
+    if (!activeManifest.householdSurface) {
+      throw new PluginUnitScopeError(manifest.slug, MANIFEST_SCOPE_TO_PRISMA[manifest.scope].toLowerCase());
+    }
+
+    // With a household surface, the rule reads `unavailable` only for a
+    // config schema that cannot be used; establishing it again throws the
+    // typed error with the compiler's reason.
+    configSchema.assertUsable(target);
+
+    throw new PluginConfigSchemaUnusableError(manifest.slug, manifest.version, 'the config schema cannot be used');
   }
 
-  // Not `existing?.config ?? {}`: `config` is a Json column, and a stored JSON
-  // `null` is a document the read rejects, which `??` would judge as `{}`.
-  const held: unknown = existing === null ? {} : existing.config;
-
-  // A Json column admits arrays, `null` and scalars, and a permissive schema
-  // such as `{}` accepts every one of them. The read's `judgeConfig` rejects
-  // any document that is not a plain object before it consults the schema;
-  // this gate makes the same judgment, so the two cannot disagree about which
-  // documents a switched-on unit can serve with.
-  if (!isPlainJsonObject(held)) {
-    throw new PluginUnitConfigRequiredError(plugin.slug, [
-      { path: '', keyword: 'type', message: 'retained configuration is not a JSON object' },
-    ]);
+  if (existing === null && manifest.config.requiresHouseholdConfig) {
+    throw new PluginUnitConfigRequiredError(manifest.slug, []);
   }
 
-  const issues = configSchema.validate({
-    slug: plugin.slug,
-    version: plugin.version,
-    schema: activeConfig.schema,
-    config: held,
-  });
-
-  if (issues.length > 0) {
-    throw new PluginUnitConfigRequiredError(plugin.slug, issues);
+  if (dormancy === 'needs_configuration') {
+    throw new PluginUnitConfigRequiredError(manifest.slug, configDocumentIssues(configSchema, target, retainedConfig));
   }
 }

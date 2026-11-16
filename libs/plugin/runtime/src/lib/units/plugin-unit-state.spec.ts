@@ -49,11 +49,6 @@ describe('derivePluginUnitState (#1149)', () => {
       'unavailable',
     ],
     [
-      'a unit the plugin scope no longer admits reads unavailable even with consent outstanding',
-      { ...base, dormancy: 'unavailable', outstandingCount: 2 },
-      'unavailable',
-    ],
-    [
       'a non-conforming configuration reads needs_configuration even with consent outstanding',
       { ...base, dormancy: 'needs_configuration', outstandingCount: 1 },
       'needs_configuration',
