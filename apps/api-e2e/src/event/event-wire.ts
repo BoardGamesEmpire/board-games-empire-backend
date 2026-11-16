@@ -122,10 +122,30 @@ export type NominationVoteWire = Pick<Wire<EventGameVote>, 'id' | 'attendeeId' |
   readonly eligible: boolean;
 };
 
-/** A nomination as its routes serve it: who made it, whose list supplies it, and its votes. */
+/**
+ * A nomination as its routes serve it: its game card, the one a lineup game
+ * carries (#1271); who made it and whose offered game supplies it, each
+ * `null` for an actor who can't read that attendee, the ids kept beside them
+ * (#1213), and the supplied entry's game; the lineup game it became, `null`
+ * when its game isn't in the lineup, or the actor can't read the lineup or
+ * the game's date (#799); and its votes.
+ */
 export type NominationWire = Wire<EventGameNomination> & {
-  readonly nominatedBy: { readonly id: string; readonly user: { readonly id: string } | null };
-  readonly suppliedFrom: { readonly id: string };
+  readonly platformGame: LineupGameWire['platformGame'];
+  readonly nominatedBy: AttendeeSummaryWire | null;
+  readonly suppliedFrom: {
+    readonly id: string;
+    readonly attendeeId: string;
+    readonly attendee: AttendeeSummaryWire | null;
+    readonly collection: {
+      readonly platformGame: {
+        readonly id: string;
+        readonly game: Pick<Wire<Game>, 'id' | 'title' | 'subtitle'>;
+        readonly platform: Pick<Wire<Platform>, 'id' | 'name'>;
+      };
+    };
+  };
+  readonly elevatedTo: { readonly id: string; readonly occurrenceId: string | null } | null;
   readonly votes: readonly NominationVoteWire[];
 };
 
@@ -256,6 +276,11 @@ export interface ListOfferedGamesEnvelope {
 
 export interface ListLineupEnvelope {
   readonly lineup: readonly LineupGameWire[];
+  readonly total: number;
+}
+
+export interface ListNominationsEnvelope {
+  readonly nominations: readonly NominationWire[];
   readonly total: number;
 }
 
@@ -570,15 +595,58 @@ export function eventGameEnvelope(response: HttpResponseLike, request: RequestDe
     : fail("it carried no 'eventGame' that is a lineup game with its supplier", request, response);
 }
 
-/** The nomination routes, the list excepted: `{ nomination }`, beside a `message` on the writes. */
-export function nominationEnvelope(response: HttpResponseLike, request: RequestDescription): NominationWire {
-  const nomination = isRecord(response.body) ? withId<NominationWire>(response.body['nomination']) : undefined;
+/** What a nomination must be for {@link isNomination}. */
+const NOMINATION =
+  "an object with a string id, a 'votes' array, a 'nominatedBy' object or null, a 'suppliedFrom' with a " +
+  "string attendeeId and an 'attendee' object or null, and an 'elevatedTo' object or null";
 
-  if (!nomination || !Array.isArray(nomination.votes)) {
-    return fail("it carried no 'nomination' object with a string id and a 'votes' array", request, response);
+/**
+ * A nomination: an id, its votes, its two attendees, each an object or `null`
+ * beside the supplier's `attendeeId`, and `elevatedTo`, an object or `null`.
+ * Those are what a dropped read or a renamed key breaks (#1213, #799); the
+ * other fields are compared against definite values.
+ */
+function isNomination(value: unknown): value is NominationWire {
+  const nomination = withId<Record<string, unknown>>(value);
+  if (nomination === undefined) {
+    return false;
   }
 
-  return nomination;
+  const { votes, nominatedBy, suppliedFrom, elevatedTo } = nomination;
+
+  return (
+    Array.isArray(votes) &&
+    (nominatedBy === null || isRecord(nominatedBy)) &&
+    isRecord(suppliedFrom) &&
+    typeof suppliedFrom['attendeeId'] === 'string' &&
+    (suppliedFrom['attendee'] === null || isRecord(suppliedFrom['attendee'])) &&
+    (elevatedTo === null || isRecord(elevatedTo))
+  );
+}
+
+/** The nomination routes, the list excepted: `{ nomination }`, beside a `message` on the writes. */
+export function nominationEnvelope(response: HttpResponseLike, request: RequestDescription): NominationWire {
+  const nomination = isRecord(response.body) ? response.body['nomination'] : undefined;
+
+  return isNomination(nomination)
+    ? nomination
+    : fail(`it carried no 'nomination' that is ${NOMINATION}`, request, response);
+}
+
+/** `GET /api/events/:eventId/nominations`: `{ nominations: [...], pagination }`, paged since #372. */
+export function listNominationsEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): ListNominationsEnvelope {
+  const { rows, total } = paginatedEnvelope(
+    'nominations',
+    (value) => (isNomination(value) ? value : undefined),
+    NOMINATION,
+    response,
+    request,
+  );
+
+  return { nominations: rows, total };
 }
 
 /** `POST /api/events/:eventId/nominations/:nominationId/resolve`: `{ message, nomination, resolution }`. */

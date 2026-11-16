@@ -117,12 +117,19 @@ describe('LineupService (#799)', () => {
   });
 
   // ANDed beside the readable dates rather than put in their place, so naming
-  // a date the actor can't read lists nothing.
+  // a date the actor can't read lists nothing. Only that date is read for
+  // whether the actor can read it, not every date of the event.
   it('narrows to one date with occurrenceId (#799)', async () => {
+    db.eventOccurrence.findMany.mockResolvedValue([{ id: 'occ-1' }] as never);
+
     await service.listLineup('event-1', query({ occurrenceId: 'occ-1' }));
 
+    expect(db.eventOccurrence.findMany).toHaveBeenCalledWith({
+      where: { eventId: 'event-1', id: { in: ['occ-1'] }, AND: [COND] },
+      select: { id: true },
+    });
     const where = {
-      OR: [{ eventId: 'event-1' }, { occurrenceId: { in: ['occ-1', 'occ-2'] } }],
+      OR: [{ eventId: 'event-1' }, { occurrenceId: { in: ['occ-1'] } }],
       occurrenceId: 'occ-1',
       AND: [COND],
     };

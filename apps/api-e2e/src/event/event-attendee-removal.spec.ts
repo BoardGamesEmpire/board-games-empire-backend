@@ -252,7 +252,7 @@ describe('leaving an event', () => {
 
       const nomination = await readNomination(host, eventId, ofOthersGame.id);
       expect(nomination.status).toBe(NominationStatus.Open);
-      expect(nomination.nominatedBy.id).toBe(leaverId);
+      expect(nomination.nominatedBy?.id).toBe(leaverId);
     });
 
     it('pauses the nominations of a game they offered, keeping the votes on them', async () => {
@@ -278,6 +278,43 @@ describe('leaving an event', () => {
       await removeAttendee(host, eventId, leaverId).expect(200);
 
       expect(await scheduledGameExists(scheduledGameId)).toBe(false);
+    });
+
+    // A nomination outlives its supplier's leaving and still names them. One
+    // that passed keeps its outcome, though its game left the lineup with them.
+    it('still names the supplier of a paused nomination, and its elevatedTo is null once its game left the lineup (#1213, #799)', async () => {
+      const { host, leaver, eventId, leaverId, ofLeaversGame } = await arrangeEvent();
+      // The stayer's vote passes it, and its game joins the lineup.
+      const { nomination: passed } = resolutionEnvelope(
+        await request(baseUrl)
+          .post(`${EVENTS_PATH}/${eventId}/nominations/${ofLeaversGame.id}/resolve`)
+          .set(host.headers)
+          .expect(201),
+        'POST /api/events/:eventId/nominations/:nominationId/resolve',
+      );
+      const { id: lineupGameId } = await db.client.eventGame.findUniqueOrThrow({
+        where: { nominationId: ofLeaversGame.id },
+        select: { id: true },
+      });
+      expect(passed.status).toBe(NominationStatus.Passed);
+      expect(passed.elevatedTo).toEqual({ id: lineupGameId, occurrenceId: null });
+      // A game the leaver offers, still open to the vote, so it pauses when they leave.
+      const open = nominationEnvelope(
+        await nominate(host, eventId, await arrangeListEntry(db.client, eventId, leaver.user.id)).expect(201),
+        'POST /api/events/:eventId/nominations',
+      );
+
+      await removeAttendee(host, eventId, leaverId).expect(200);
+
+      const paused = await readNomination(host, eventId, open.id);
+      expect(paused.status).toBe(NominationStatus.Paused);
+      expect(paused.suppliedFrom.attendeeId).toBe(leaverId);
+      expect(paused.suppliedFrom.attendee?.id).toBe(leaverId);
+
+      const left = await readNomination(host, eventId, ofLeaversGame.id);
+      expect(left.status).toBe(NominationStatus.Passed);
+      expect(await scheduledGameExists(lineupGameId)).toBe(false);
+      expect(left.elevatedTo).toBeNull();
     });
 
     it('takes every grant on the event, and their place in its lists, from their very next request', async () => {

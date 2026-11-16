@@ -5,6 +5,7 @@ import { Injectable } from '@nestjs/common';
 import { assertEventExists } from '../event-access.helpers';
 import type { ListLineupQueryDto } from './dto/list-lineup.query.dto';
 import { LINEUP_GAME_SELECT, withSuppliers, type LineupGame } from './lineup-game';
+import { readableLineupWhere } from './lineup-scope';
 
 /**
  * The lineup's order (#799): each date's games, the dates in their own order,
@@ -31,12 +32,10 @@ export class LineupService {
    * One page of the event's lineup, as far as the actor may read it (#799).
    *
    * - The rows are the event's own games and the games of each date the
-   *   actor can read. The lineup's read ceiling names a date's games through
-   *   the date's event, so it can't keep them from an actor who reads the
-   *   lineup but not the date: the dates are read first, under their own
-   *   ceiling, and only their games are read.
-   * - `occurrenceId` narrows the page to that date's games. It is ANDed beside
-   *   the readable dates, so a date the actor can't read lists nothing.
+   *   actor can read ({@link readableLineupWhere}).
+   * - `occurrenceId` narrows the page to that date's games. Only that date is
+   *   read for whether the actor can read it, and it is ANDed beside it, so
+   *   a date the actor can't read lists nothing.
    * - The rows and the count share one REPEATABLE READ snapshot, so `total`
    *   agrees with the rows. The order is {@link LINEUP_ORDER}.
    * - Each row's supplier is read once for the page, under the attendee read
@@ -49,13 +48,13 @@ export class LineupService {
   async listLineup(eventId: string, query: ListLineupQueryDto): Promise<PaginatedRows<LineupGame>> {
     await assertEventExists(this.db, eventId);
 
-    const dates = await this.db.eventOccurrence.findMany({
-      where: this.scopeComposer.compose(ResourceType.EventOccurrence, Action.read, { eventId }),
-      select: { id: true },
-    });
-
     const where = this.scopeComposer.compose(ResourceType.EventGame, Action.read, {
-      OR: [{ eventId }, { occurrenceId: { in: dates.map(({ id }) => id) } }],
+      ...(await readableLineupWhere(
+        this.db,
+        this.scopeComposer,
+        eventId,
+        query.occurrenceId ? [query.occurrenceId] : undefined,
+      )),
       occurrenceId: query.occurrenceId,
     });
 

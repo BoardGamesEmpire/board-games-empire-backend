@@ -34,6 +34,7 @@ import {
   type LineupGameSnapshot,
   type LockedSupplier,
 } from '../attendee/attendance';
+import { readableAttendees, type AttendeeSummary } from '../attendee/attendee-summary';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { CastVoteDto } from '../dto/cast-vote.dto';
@@ -46,6 +47,7 @@ import {
   withSuppliers,
   type LineupGame,
 } from '../lineup/lineup-game';
+import { readableLineupGamesByNomination } from '../lineup/lineup-scope';
 import { foldPolicy, type EffectivePolicy } from '../policy/effective-policy';
 import { GAME_VOTE_SLUG, voterGrantSelect } from '../vote/vote-grant';
 import { AttendeeStub, VoteResolver } from '../vote/vote-resolver';
@@ -112,7 +114,7 @@ export class EventGameNominationService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    return { rows: await this.withVoteEligibility(eventId, rows), total };
+    return { rows: await this.toNominationDetails(eventId, rows), total };
   }
 
   async getNomination(eventId: string, nominationId: string): Promise<NominationDetail> {
@@ -129,7 +131,7 @@ export class EventGameNominationService {
     });
 
     assert(nomination, new NotFoundException(t('errors.nomination.not_found', { nominationId, eventId })));
-    return this.withVoteEligibilityOf(eventId, nomination);
+    return this.toNominationDetail(eventId, nomination);
   }
 
   async nominate(eventId: string, dto: NominateGameDto): Promise<NominationDetail> {
@@ -193,7 +195,7 @@ export class EventGameNominationService {
     // A Direct-mode nomination's game joins the lineup in the same
     // transaction, so the supplier the lock vouched for is the one the lineup
     // names.
-    const { nomination, elevated } = await this.db.$transaction(async (tx) => {
+    const { nomination, elevated, detail } = await this.db.$transaction(async (tx) => {
       await this.assertCanSupply(tx, eventId, dto.suppliedFromId, dto.platformGameId);
 
       const nomination = await tx.eventGameNomination.create({
@@ -213,8 +215,9 @@ export class EventGameNominationService {
         policy.gameAdditionMode === GameAdditionMode.Direct
           ? await this.elevateToEventGame(tx, nomination, eventId, dto.occurrenceId)
           : null;
+      const detail = await this.toNominationDetail(eventId, nomination, policy.voteEligibility, tx);
 
-      return { nomination, elevated };
+      return { nomination, elevated, detail };
     });
 
     this.eventEmitter.emit(
@@ -238,7 +241,7 @@ export class EventGameNominationService {
       this.emitGameAdded(elevated, eventId, nomination.nominatedById);
     }
 
-    return this.withVoteEligibilityOf(eventId, nomination, policy.voteEligibility);
+    return detail;
   }
 
   /**
@@ -288,7 +291,7 @@ export class EventGameNominationService {
     assertWithdrawable(nomination.status);
 
     try {
-      const { before, updated } = await this.db.$transaction(async (tx) => {
+      const { before, updated, detail } = await this.db.$transaction(async (tx) => {
         const [current] = await tx.$queryRaw<{ status: NominationStatus }[]>(
           Prisma.sql`SELECT status FROM event_game_nominations WHERE id = ${nominationId} FOR NO KEY UPDATE`,
         );
@@ -306,7 +309,11 @@ export class EventGameNominationService {
           include: NOMINATION_INCLUDE,
         });
 
-        return { before: current.status, updated: written };
+        return {
+          before: current.status,
+          updated: written,
+          detail: await this.toNominationDetail(eventId, written, undefined, tx),
+        };
       });
 
       this.eventEmitter.emit(
@@ -318,7 +325,7 @@ export class EventGameNominationService {
         ),
       );
 
-      return this.withVoteEligibilityOf(eventId, updated);
+      return detail;
     } catch (error) {
       // A refusal under the lock is the answer to a lost race, as the same
       // refusal from the first read is, not a server error.
@@ -477,7 +484,7 @@ export class EventGameNominationService {
     );
 
     try {
-      const { updated, elevated, decision } = await this.settle(
+      const { updated, elevated, decision, detail } = await this.settle(
         eventId,
         nomination,
         NominationStatus.Open,
@@ -508,10 +515,7 @@ export class EventGameNominationService {
         this.emitGameAdded(elevated, eventId, updated.nominatedById);
       }
 
-      return {
-        nomination: await this.withVoteEligibilityOf(eventId, updated, decision.voteEligibility),
-        resolution: decision.resolution,
-      };
+      return { nomination: detail, resolution: decision.resolution };
     } catch (error) {
       this.logger.error(`Error resolving nomination ${nominationId} for event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -557,7 +561,7 @@ export class EventGameNominationService {
     );
 
     try {
-      const { updated, elevated } = await this.settle(
+      const { updated, elevated, detail } = await this.settle(
         eventId,
         nomination,
         NominationStatus.AwaitingApproval,
@@ -578,7 +582,7 @@ export class EventGameNominationService {
         this.emitGameAdded(elevated, eventId, updated.nominatedById);
       }
 
-      return this.withVoteEligibilityOf(eventId, updated);
+      return detail;
     } catch (error) {
       this.logger.error(`Error applying host decision ${decision} for nomination ${nominationId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -718,14 +722,23 @@ export class EventGameNominationService {
    *
    * `decide` runs under the nomination's lock and is given that date, so an
    * outcome it reads from the votes is the one the nomination settles on
-   * ({@link countVotes}), under the rule of the date it names.
+   * ({@link countVotes}), under the rule of the date it names. A decision that
+   * carries the vote rule it read spares the answer reading it again.
+   *
+   * The answer, `detail`, is read in the same transaction
+   * ({@link toNominationDetails}), so a failed read rolls the outcome back.
    */
-  private async settle<Decision extends { outcome: NominationStatus }>(
+  private async settle<Decision extends { outcome: NominationStatus; voteEligibility?: VoteEligibility }>(
     eventId: string,
     nomination: Pick<NominationRow, 'id' | 'platformGameId' | 'suppliedFromId'>,
     expected: NominationStatus,
     decide: (tx: Prisma.TransactionClient, occurrenceId: string | null) => Promise<Decision>,
-  ): Promise<{ updated: NominationRow; elevated: LineupAddition | null; decision: Decision }> {
+  ): Promise<{
+    updated: NominationRow;
+    elevated: LineupAddition | null;
+    decision: Decision;
+    detail: NominationDetail;
+  }> {
     return this.db.$transaction(async (tx) => {
       const supplier = await lockSupplier(tx, nomination.suppliedFromId);
       await lockEventDates(tx, eventId);
@@ -743,7 +756,7 @@ export class EventGameNominationService {
       }
 
       const decision = await decide(tx, current.occurrenceId);
-      const elevates = decision.outcome === NominationStatus.Passed || decision.outcome === NominationStatus.Approved;
+      const elevates = LINEUP_STATUSES.includes(decision.outcome);
 
       if (elevates) {
         this.assertSupplies(supplier, eventId, nomination.suppliedFromId, nomination.platformGameId);
@@ -762,8 +775,9 @@ export class EventGameNominationService {
       const elevated = elevates
         ? await this.elevateToEventGame(tx, nomination, eventId, current.occurrenceId ?? undefined)
         : null;
+      const detail = await this.toNominationDetail(eventId, updated, decision.voteEligibility, tx);
 
-      return { updated, elevated, decision };
+      return { updated, elevated, decision, detail };
     });
   }
 
@@ -889,46 +903,97 @@ export class EventGameNominationService {
   }
 
   /**
-   * Each vote on the nominations, marked with whether it counts: whether its
-   * voter is eligible now, under the rule of the nomination's own date or
-   * the event's (#551). A vote that does not count is still served, so
-   * everyone sees how its voter voted, and that it does not count.
+   * The nominations as every route serves them:
+   *
+   * - Each vote is marked with whether it counts: whether its voter is
+   *   eligible now, under the rule of the nomination's own date or the
+   *   event's (#551). A vote that does not count is still served, so everyone
+   *   sees how its voter voted, and that it does not count.
+   * - Who made each nomination, and whose offered game supplies it, are read
+   *   once for all of them under the attendee read ceiling (#1213). An
+   *   attendee the actor can't read is `null`, its id kept beside it. One who
+   *   left is still named.
+   * - The lineup game each nomination became, `elevatedTo`, is read as the
+   *   lineup read reads it (#799). It is `null` when the game isn't in the
+   *   lineup, or the actor can't read the lineup or the game's date. Only a
+   *   nomination whose outcome added its game ({@link LINEUP_STATUSES}) can
+   *   have one, so no other is read for.
+   *
+   * A write already holding the nominations' policy passes its eligibility
+   * rule, and the policy isn't read again. The reads run side by side.
+   *
+   * A write passes its transaction as `db`, so the reads run before its
+   * commit and find a lineup game it added. Read after the commit, a failed
+   * read would report a write that happened as one that didn't, and a retry
+   * would make it again.
    */
-  private async withVoteEligibility(eventId: string, nominations: NominationRow[]): Promise<NominationDetail[]> {
-    const occurrenceIds = [
-      ...new Set(nominations.flatMap(({ occurrenceId }) => (occurrenceId === null ? [] : [occurrenceId]))),
+  private async toNominationDetails(
+    eventId: string,
+    nominations: readonly NominationRow[],
+    voteEligibility?: VoteEligibility,
+    db: Prisma.TransactionClient = this.db,
+  ): Promise<NominationDetail[]> {
+    const datesOf = (rows: readonly NominationRow[]) => [
+      ...new Set(rows.flatMap(({ occurrenceId }) => (occurrenceId === null ? [] : [occurrenceId]))),
     ];
+    const inLineup = nominations.filter(({ status }) => LINEUP_STATUSES.includes(status));
 
+    const [eligibilityOf, attendees, lineupGames] = await Promise.all([
+      voteEligibility === undefined
+        ? this.voteEligibilityRule(db, eventId, datesOf(nominations))
+        : () => voteEligibility,
+      readableAttendees(
+        db,
+        this.scopeComposer,
+        nominations.flatMap(({ nominatedById, suppliedFrom }) => [nominatedById, suppliedFrom.attendeeId]),
+      ),
+      readableLineupGamesByNomination(db, this.scopeComposer, eventId, {
+        nominationIds: inLineup.map(({ id }) => id),
+        dateIds: datesOf(inLineup),
+      }),
+    ]);
+
+    return nominations.map(({ votes, suppliedFrom, ...nomination }) => ({
+      ...nomination,
+      votes: markVotes(votes, eligibilityOf(nomination)),
+      nominatedBy: attendees.get(nomination.nominatedById) ?? null,
+      suppliedFrom: { ...suppliedFrom, attendee: attendees.get(suppliedFrom.attendeeId) ?? null },
+      elevatedTo: lineupGames.get(nomination.id) ?? null,
+    }));
+  }
+
+  /** {@link toNominationDetails} for one nomination. */
+  private async toNominationDetail(
+    eventId: string,
+    nomination: NominationRow,
+    voteEligibility?: VoteEligibility,
+    db: Prisma.TransactionClient = this.db,
+  ): Promise<NominationDetail> {
+    const [detail] = await this.toNominationDetails(eventId, [nomination], voteEligibility, db);
+    return detail;
+  }
+
+  /**
+   * The rule that marks a nomination's votes: its own date's, where the date
+   * sets one, or the event's (#551). `dateIds` are the dates the nominations
+   * name, and each policy is read once.
+   */
+  private async voteEligibilityRule(
+    db: Prisma.TransactionClient,
+    eventId: string,
+    dateIds: string[],
+  ): Promise<(nomination: Pick<NominationRow, 'occurrenceId'>) => VoteEligibility> {
     const [eventPolicy, occPolicies] = await Promise.all([
-      this.db.eventPolicy.findUnique({ where: { eventId } }),
-      occurrenceIds.length > 0
-        ? this.db.eventOccurrencePolicy.findMany({ where: { occurrenceId: { in: occurrenceIds } } })
-        : [],
+      db.eventPolicy.findUnique({ where: { eventId } }),
+      dateIds.length > 0 ? db.eventOccurrencePolicy.findMany({ where: { occurrenceId: { in: dateIds } } }) : [],
     ]);
 
     const occPolicyById = new Map(occPolicies.map((occPolicy) => [occPolicy.occurrenceId, occPolicy]));
 
-    return nominations.map((nomination) => {
-      const occPolicy = nomination.occurrenceId === null ? null : (occPolicyById.get(nomination.occurrenceId) ?? null);
-      return markVotes(nomination, foldPolicy(eventPolicy, occPolicy).voteEligibility);
-    });
-  }
-
-  /**
-   * {@link withVoteEligibility} for one nomination. A caller already holding
-   * the nomination's policy passes its eligibility rule, and nothing is read.
-   */
-  private async withVoteEligibilityOf(
-    eventId: string,
-    nomination: NominationRow,
-    voteEligibility?: VoteEligibility,
-  ): Promise<NominationDetail> {
-    if (voteEligibility !== undefined) {
-      return markVotes(nomination, voteEligibility);
-    }
-
-    const [detail] = await this.withVoteEligibility(eventId, [nomination]);
-    return detail;
+    return ({ occurrenceId }) => {
+      const occPolicy = occurrenceId === null ? null : (occPolicyById.get(occurrenceId) ?? null);
+      return foldPolicy(eventPolicy, occPolicy).voteEligibility;
+    };
   }
 
   /** The event's attendees, as the resolver counts its pool. Removed attendees are no part of it. */
@@ -949,15 +1014,20 @@ interface LineupAddition {
   initiatedAt: Date;
 }
 
-/** A nomination with each vote marked with whether it counts under the rule given, its voter's state dropped. */
-function markVotes({ votes, ...nomination }: NominationRow, voteEligibility: VoteEligibility): NominationDetail {
-  return {
-    ...nomination,
-    votes: votes.map(({ attendee, ...vote }) => ({
-      ...vote,
-      eligible: VoteResolver.isEligibleVoter(attendee, voteEligibility),
-    })),
-  };
+/**
+ * The outcomes that add a nomination's game to the lineup: a vote that
+ * passed, or a host's approval ({@link EventGameNominationService.settle}),
+ * and a Direct-mode nomination, which is made Passed. Only a nomination in
+ * one of them can have a lineup game.
+ */
+const LINEUP_STATUSES: readonly NominationStatus[] = [NominationStatus.Passed, NominationStatus.Approved];
+
+/** Each vote marked with whether it counts under the rule given, its voter's state dropped. */
+function markVotes(votes: NominationRow['votes'], voteEligibility: VoteEligibility): NominationDetail['votes'] {
+  return votes.map(({ attendee, ...vote }) => ({
+    ...vote,
+    eligible: VoteResolver.isEligibleVoter(attendee, voteEligibility),
+  }));
 }
 
 /**
@@ -973,17 +1043,18 @@ const VOTER_SELECT = {
   ...voterGrantSelect(GAME_VOTE_SLUG),
 } as const satisfies Prisma.EventAttendeeSelect;
 
+/**
+ * A nomination as every route reads it. Who made it and whose offered game
+ * supplies it are attendees, read on their own under the attendee read
+ * ceiling (`toNominationDetails`): a nested select carries no read ceiling
+ * (#1213).
+ */
 const NOMINATION_INCLUDE = {
   platformGame: { select: PLATFORM_GAME_SUMMARY_SELECT },
-  nominatedBy: {
-    select: {
-      id: true,
-      user: { select: { id: true, username: true } },
-    },
-  },
   suppliedFrom: {
     select: {
       id: true,
+      attendeeId: true,
       collection: {
         select: {
           platformGame: {
@@ -1007,7 +1078,7 @@ const NOMINATION_INCLUDE = {
       voteType: true,
       priority: true,
       comment: true,
-      // Read to mark the vote, then dropped (`withVoteEligibility`).
+      // Read to mark the vote, then dropped (`toNominationDetails`).
       attendee: { select: VOTER_SELECT },
     },
   },
@@ -1015,7 +1086,15 @@ const NOMINATION_INCLUDE = {
 
 type NominationRow = Prisma.EventGameNominationGetPayload<{ include: typeof NOMINATION_INCLUDE }>;
 
-/** A nomination as every route serves it: each vote marked with whether it counts (#551). */
-export type NominationDetail = Omit<NominationRow, 'votes'> & {
+/**
+ * A nomination as every route serves it: each vote marked with whether it
+ * counts (#551), who made it and who supplies it, each `null` for an actor who
+ * can't read that attendee (#1213), and the lineup game it became, `null` when
+ * there is none the actor can read (#799).
+ */
+export type NominationDetail = Omit<NominationRow, 'votes' | 'suppliedFrom'> & {
   votes: (Omit<NominationRow['votes'][number], 'attendee'> & { eligible: boolean })[];
+  nominatedBy: AttendeeSummary | null;
+  suppliedFrom: NominationRow['suppliedFrom'] & { attendee: AttendeeSummary | null };
+  elevatedTo: { id: string; occurrenceId: string | null } | null;
 };

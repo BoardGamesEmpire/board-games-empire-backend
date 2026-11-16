@@ -36,6 +36,7 @@ import {
 import { BadRequestException, ConflictException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { LINEUP_GAME_SNAPSHOT_SELECT, type LockedSupplier } from '../attendee/attendance';
+import { ATTENDEE_SUMMARY_SELECT } from '../attendee/attendee-summary';
 import { LINEUP_GAME_SELECT } from '../lineup/lineup-game';
 import { NominateGameDto } from './dto/nominate-game.dto';
 import { EventGameNominationService } from './event-game-nomination.service';
@@ -78,9 +79,14 @@ describe('EventGameNominationService', () => {
     compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
     db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1' } as EventAttendee);
     db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
-    // The attendee read that names a lineup game's supplier; a test that
-    // asserts on a supplier mocks its own answer.
+    // The attendee read that names a lineup game's supplier, and a
+    // nomination's nominator and supplier; a test that asserts on one mocks
+    // its own answer.
     db.eventAttendee.findMany.mockResolvedValue([]);
+    // The read of the lineup game each nomination became, and of the dates it
+    // reads them through; none unless a test says otherwise.
+    db.eventGame.findMany.mockResolvedValue([]);
+    db.eventOccurrence.findMany.mockResolvedValue([]);
 
     // The writes run on the transaction client, which the mock hands back as
     // the same delegates; the paginated read still settles its array form.
@@ -214,6 +220,108 @@ describe('EventGameNominationService', () => {
 
       expect(nomination.votes).toEqual([expect.objectContaining({ id: 'vote-spectator', eligible: false })]);
     });
+  });
+
+  // In the nomination's include, an attendee's name and avatar would reach an
+  // actor holding read on nominations alone (#559): who made each nomination
+  // and whose offered game supplies it are read once for the page, under the
+  // attendee read ceiling.
+  describe('who made each nomination, and whose offered game supplies it (#1213)', () => {
+    beforeEach(() => db.event.count.mockResolvedValue(1));
+
+    it('names the nominator and the supplier from one attendee read under its ceiling (#1213)', async () => {
+      db.eventGameNomination.findMany.mockResolvedValue([
+        nominationRow({ id: 'nom-1', nominatedById: 'att-1', suppliedFrom: { id: 'gl-1', attendeeId: 'att-2' } }),
+        nominationRow({ id: 'nom-2', nominatedById: 'att-2', suppliedFrom: { id: 'gl-3', attendeeId: 'att-3' } }),
+      ]);
+      db.eventGameNomination.count.mockResolvedValue(2);
+      db.eventAttendee.findMany.mockResolvedValue([attendee('att-1'), attendee('att-2'), attendee('att-3')] as never);
+
+      const { rows } = await service.getNominations('event-1', paginationQuery({ limit: 10 }));
+
+      expect(db.eventAttendee.findMany).toHaveBeenCalledTimes(1);
+      expect(db.eventAttendee.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['att-1', 'att-2', 'att-3'] }, AND: [COND] },
+        select: ATTENDEE_SUMMARY_SELECT,
+      });
+      expect(rows.map(({ id, nominatedBy, suppliedFrom }) => [id, nominatedBy, suppliedFrom])).toEqual([
+        ['nom-1', attendee('att-1'), { id: 'gl-1', attendeeId: 'att-2', attendee: attendee('att-2') }],
+        ['nom-2', attendee('att-2'), { id: 'gl-3', attendeeId: 'att-3', attendee: attendee('att-3') }],
+      ]);
+    });
+
+    // Such as an API key holding read on nominations alone. The ids stay, so
+    // the actor still tells two nominations by one attendee from two by two.
+    it("serves nominatedBy and suppliedFrom.attendee null, ids kept, for an actor who can't read attendees (#1213)", async () => {
+      db.eventGameNomination.findUnique.mockResolvedValue(nominationRow());
+      db.eventAttendee.findMany.mockResolvedValue([]);
+
+      const nomination = await service.getNomination('event-1', 'nom-1');
+
+      expect(nomination.nominatedById).toBe('att-1');
+      expect(nomination.nominatedBy).toBeNull();
+      expect(nomination.suppliedFrom).toEqual({ id: 'gl-1', attendeeId: 'att-2', attendee: null });
+    });
+  });
+
+  // The read itself, under the lineup and date read ceilings, is
+  // `readableLineupGamesByNomination`'s, and its spec covers it.
+  describe('the lineup game each nomination became (#799)', () => {
+    beforeEach(() => {
+      db.event.count.mockResolvedValue(1);
+      db.eventGameNomination.count.mockResolvedValue(3);
+      db.eventOccurrencePolicy.findMany.mockResolvedValue([]);
+    });
+
+    // A lineup game is on its nomination's date, so only the dates the page's
+    // nominations name are read, each once. Only a nomination whose outcome
+    // added its game can have one, so the others aren't read for.
+    it("serves each nomination's lineup game as elevatedTo, read for the page's nominations and their dates (#799)", async () => {
+      db.eventGameNomination.findMany.mockResolvedValue([
+        nominationRow({ id: 'nom-1', occurrenceId: 'occ-1', status: NominationStatus.Passed }),
+        nominationRow({ id: 'nom-2', occurrenceId: 'occ-1' }),
+        nominationRow({ id: 'nom-3' }),
+      ]);
+      db.eventOccurrence.findMany.mockResolvedValue([{ id: 'occ-1' }] as never);
+      db.eventGame.findMany.mockResolvedValue([{ id: 'eg-1', occurrenceId: 'occ-1', nominationId: 'nom-1' }] as never);
+
+      const { rows } = await service.getNominations('event-1', paginationQuery({ limit: 10 }));
+
+      expect(db.eventOccurrence.findMany).toHaveBeenCalledWith({
+        where: { eventId: 'event-1', id: { in: ['occ-1'] }, AND: [COND] },
+        select: { id: true },
+      });
+      expect(db.eventGame.findMany).toHaveBeenCalledWith({
+        where: {
+          nominationId: { in: ['nom-1'] },
+          OR: [{ eventId: 'event-1' }, { occurrenceId: { in: ['occ-1'] } }],
+          AND: [COND],
+        },
+        select: { id: true, occurrenceId: true, nominationId: true },
+      });
+      expect(rows.map(({ id, elevatedTo }) => [id, elevatedTo])).toEqual([
+        ['nom-1', { id: 'eg-1', occurrenceId: 'occ-1' }],
+        ['nom-2', null],
+        ['nom-3', null],
+      ]);
+    });
+
+    // An open, withdrawn or rejected nomination has no lineup game, so a page
+    // of them reads neither the dates nor the lineup for one (#799).
+    it.each([NominationStatus.Open, NominationStatus.Withdrawn, NominationStatus.Rejected])(
+      'reads no lineup game for a page of %s nominations (#799)',
+      async (status) => {
+        db.eventGameNomination.findMany.mockResolvedValue([
+          nominationRow({ id: 'nom-1', occurrenceId: 'occ-1', status }),
+        ]);
+
+        const { rows } = await service.getNominations('event-1', paginationQuery({ limit: 10 }));
+
+        expect(db.eventOccurrence.findMany).not.toHaveBeenCalled();
+        expect(db.eventGame.findMany).not.toHaveBeenCalled();
+        expect(rows[0].elevatedTo).toBeNull();
+      },
+    );
   });
 
   // #759: whether a voter counts follows their event role's grant of the game
@@ -448,6 +556,17 @@ describe('EventGameNominationService', () => {
       },
     );
 
+    // The answer is read in the settle's transaction. Read after the commit, a
+    // failed read would answer an error for an outcome that was settled, and
+    // the retry would answer 400 for a nomination no longer awaiting one (#799).
+    it.each(settles)('$caller emits nothing when its answer fails to read (#799)', async ({ status, settle }) => {
+      arrange(status, 'occ-1');
+      db.eventGame.findMany.mockRejectedValue(new Error('connection lost'));
+
+      await expect(settle()).rejects.toThrow('connection lost');
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
     it.each(settles)(
       'adds the game to the lineup of the date the nomination names under its lock, through $caller',
       async ({ status, settle }) => {
@@ -524,6 +643,20 @@ describe('EventGameNominationService', () => {
       }) as never);
 
       tx.eventGameNomination.update.mockResolvedValue(nominationRow({ status: NominationStatus.Withdrawn }));
+      tx.eventAttendee.findMany.mockResolvedValue([]);
+    });
+
+    // Read after the commit, a failed read would answer 500 for a withdraw
+    // that happened (#799).
+    it('reads its answer in the transaction, before the commit (#799)', async () => {
+      arrangeWithdraw(NominationStatus.Open);
+
+      await service.withdraw('event-1', 'nom-1');
+
+      expect(tx.eventAttendee.findMany).toHaveBeenCalled();
+      expect(tx.eventPolicy.findUnique).toHaveBeenCalled();
+      expect(db.eventAttendee.findMany).not.toHaveBeenCalled();
+      expect(db.eventPolicy.findUnique).not.toHaveBeenCalled();
     });
 
     /**
@@ -955,7 +1088,10 @@ describe('EventGameNominationService', () => {
     expect(db.eventGameVote.upsert).not.toHaveBeenCalled();
   });
 
-  it('nominate does not filter by abilities', async () => {
+  // The write is checked against the row it creates, not filtered. The
+  // answer's reads, after the commit, compose under their own ceilings: who
+  // made it and who supplies it (#1213), and the lineup game it became (#799).
+  it("nominate fetches no ability condition before it writes; only its answer's reads compose (#1213)", async () => {
     db.eventPolicy.findUnique.mockResolvedValue({
       gameAdditionMode: 'RequiresVote',
       votingWindowHours: null,
@@ -966,7 +1102,12 @@ describe('EventGameNominationService', () => {
 
     await service.nominate('event-1', { platformGameId: 'pg-1', suppliedFromId: 'gl-1' } as NominateGameDto);
 
-    expect(abilityService.getCurrentResourceConditions).not.toHaveBeenCalled();
+    const [written] = db.eventGameNomination.create.mock.invocationCallOrder;
+    const fetchedBefore = abilityService.getCurrentResourceConditions.mock.invocationCallOrder.filter(
+      (order) => order < written,
+    );
+    expect(written).toBeDefined();
+    expect(fetchedBefore).toEqual([]);
   });
 
   // The route's policy check judges a create by type alone, so each create
@@ -1239,6 +1380,52 @@ describe('EventGameNominationService', () => {
     expect(gameEvent.addedByAttendeeId).toBe('att-1');
   });
 
+  // The lineup game is read in the transaction that added it, after the add,
+  // so the answer finds it. Read after the commit instead, a failed read
+  // would answer 500 for a nomination that was made, and a retry would make
+  // it, and add its game, twice.
+  describe('a Direct-mode nomination reads its answer before the commit (#799)', () => {
+    let tx: MockDatabaseService;
+
+    beforeEach(() => {
+      tx = createMockDatabaseService();
+      db.$transaction.mockImplementation(((callback: (client: MockDatabaseService) => Promise<unknown>) =>
+        callback(tx)) as never);
+      db.eventPolicy.findUnique.mockResolvedValue({
+        gameAdditionMode: GameAdditionMode.Direct,
+        votingWindowHours: null,
+      } as EventPolicy);
+      tx.$queryRaw.mockResolvedValueOnce([lockedSupplier()] as never);
+      tx.eventGameNomination.create.mockResolvedValue(nominationRow({ status: NominationStatus.Passed }));
+      tx.eventGame.create.mockResolvedValue({ id: 'eg-1', nominationId: 'nom-1' } as EventGame);
+      tx.eventAttendee.findMany.mockResolvedValue([]);
+    });
+
+    it('answers with elevatedTo set when its game joined the lineup (#799)', async () => {
+      tx.eventGame.findMany.mockResolvedValue([{ id: 'eg-1', occurrenceId: null, nominationId: 'nom-1' }] as never);
+
+      const answer = await service.nominate('event-1', {
+        platformGameId: 'pg-1',
+        suppliedFromId: 'gl-1',
+      } as NominateGameDto);
+
+      expect(answer.elevatedTo).toEqual({ id: 'eg-1', occurrenceId: null });
+      expect(db.eventGame.findMany).not.toHaveBeenCalled();
+      expect(tx.eventGame.findMany.mock.invocationCallOrder[0]).toBeGreaterThan(
+        tx.eventGame.create.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('emits nothing when the read fails (#799)', async () => {
+      tx.eventGame.findMany.mockRejectedValue(new Error('connection lost'));
+
+      await expect(
+        service.nominate('event-1', { platformGameId: 'pg-1', suppliedFromId: 'gl-1' } as NominateGameDto),
+      ).rejects.toThrow('connection lost');
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+  });
+
   // The direct add answers the one lineup-game shape the lineup and date reads
   // serve, so a client renders an added game as it renders a read one (#799).
   it('answers the added game in the lineup shape, its supplier named (#799)', async () => {
@@ -1441,9 +1628,15 @@ function openNomination() {
   } as never;
 }
 
-/** A nomination row as the include reads it, on event-1 and no date, with no votes unless given. */
+/**
+ * A nomination row as the include reads it, on event-1 and no date, made by
+ * att-1 of a game from att-2's offered games, with no votes unless given.
+ */
 function nominationRow(
-  overrides: Partial<EventGameNomination> & { votes?: ReturnType<typeof voteRow>[] } = {},
+  overrides: Partial<EventGameNomination> & {
+    votes?: ReturnType<typeof voteRow>[];
+    suppliedFrom?: { id: string; attendeeId: string };
+  } = {},
 ): EventGameNomination {
   return {
     id: 'nom-1',
@@ -1452,10 +1645,21 @@ function nominationRow(
     platformGameId: 'pg-1',
     nominatedById: 'att-1',
     suppliedFromId: 'gl-1',
+    suppliedFrom: { id: 'gl-1', attendeeId: 'att-2' },
     status: NominationStatus.Open,
     pausedFrom: null,
     votingDeadline: null,
     votes: [],
     ...overrides,
   } as EventGameNomination;
+}
+
+/** An attendee as the attendee read names them (`ATTENDEE_SUMMARY_SELECT`). */
+function attendee(id: string) {
+  return {
+    id,
+    status: EventParticipationStatus.Attending,
+    guestName: null,
+    user: { id: `user-${id}`, username: `name-${id}`, profile: { displayName: null, avatarUrl: null } },
+  };
 }

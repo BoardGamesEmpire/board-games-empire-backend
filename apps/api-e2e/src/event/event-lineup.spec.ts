@@ -10,6 +10,7 @@ import {
   eventGameEnvelope,
   eventReplayEnvelope,
   listLineupEnvelope,
+  listNominationsEnvelope,
   nominationEnvelope,
   type ListLineupEnvelope,
 } from './event-wire';
@@ -61,13 +62,19 @@ describe('GET /api/events/:eventId/lineup (#799)', () => {
 
   /**
    * The event `host` creates, with one date per label, and the dates' ids.
-   * Several dates take MultiDay mode, since a Fixed event holds one.
+   * Several dates take MultiDay mode, since a Fixed event holds one. `body`
+   * is merged into the create request, such as a `policy`.
    */
-  const createdWithDates = async (host: AuthenticatedActor, labels: readonly string[]) => {
+  const createdWithDates = async (
+    host: AuthenticatedActor,
+    labels: readonly string[],
+    body: Record<string, unknown> = {},
+  ) => {
     const created = eventReplayEnvelope(
       await createEvent(host, {
         ...(labels.length > 1 ? { schedulingMode: EventSchedulingMode.MultiDay } : {}),
         occurrences: labels.map((label) => ({ label })),
+        ...body,
       }).expect(201),
       'POST /api/events with dates',
     );
@@ -85,6 +92,40 @@ describe('GET /api/events/:eventId/lineup (#799)', () => {
         .expect(201),
       'POST /api/events/:eventId/nominations/direct-add as the host',
     ).id;
+
+  /**
+   * The host's nomination of a game they offer, for the event or the date
+   * named, and the entry it comes from. Under Direct mode its game joins the
+   * lineup as it is made.
+   */
+  const nominated = async (host: AuthenticatedActor, eventId: string, occurrenceId?: string) => {
+    const entry = await arrangeListEntry(db.client, eventId, host.user.id);
+    const nomination = nominationEnvelope(
+      await request(baseUrl)
+        .post(`${EVENTS_PATH}/${eventId}/nominations`)
+        .set(host.headers)
+        .send({ platformGameId: entry.platformGameId, suppliedFromId: entry.suppliedById, occurrenceId })
+        .expect(201),
+      'POST /api/events/:eventId/nominations as the host',
+    );
+
+    return { entry, nomination };
+  };
+
+  const readNomination = async (actor: Caller, eventId: string, nominationId: string) =>
+    nominationEnvelope(
+      await request(baseUrl)
+        .get(`${EVENTS_PATH}/${eventId}/nominations/${nominationId}`)
+        .set(actor.headers)
+        .expect(200),
+      'GET /api/events/:eventId/nominations/:nominationId',
+    );
+
+  const listNominations = async (actor: Caller, eventId: string) =>
+    listNominationsEnvelope(
+      await request(baseUrl).get(`${EVENTS_PATH}/${eventId}/nominations`).set(actor.headers).expect(200),
+      'GET /api/events/:eventId/nominations',
+    );
 
   // An event's own game has no date, and Postgres sorts a null last on an
   // ascending key, so the dates come first.
@@ -140,6 +181,101 @@ describe('GET /api/events/:eventId/lineup (#799)', () => {
       }),
     ]);
     expect(total).toBe(1);
+  });
+
+  // The write answers the link as the read serves it: the lineup game is read
+  // once the nomination's transaction has committed. It names its attendees
+  // too, as every read and write answer does (#1213).
+  it('links a passed nomination to its lineup game, both ways (#799)', async () => {
+    const host = await actors.user();
+    const {
+      eventId,
+      dateIds: [dateId],
+    } = await createdWithDates(host, ['Saturday'], { policy: { gameAdditionMode: GameAdditionMode.Direct } });
+    const hostAttendee = await db.client.eventAttendee.findUniqueOrThrow({
+      where: { eventId_userId: { eventId, userId: host.user.id } },
+      select: { id: true },
+    });
+
+    const { nomination: written } = await nominated(host, eventId, dateId);
+    const {
+      lineup: [lineupGame],
+      total,
+    } = await lineupOf(host, eventId);
+    const read = await readNomination(host, eventId, written.id);
+
+    expect(total).toBe(1);
+    expect(lineupGame.nominationId).toBe(written.id);
+    expect(written.elevatedTo).toEqual({ id: lineupGame.id, occurrenceId: dateId });
+    expect(read.elevatedTo).toEqual({ id: lineupGame.id, occurrenceId: dateId });
+    expect(written.nominatedBy?.id).toBe(hostAttendee.id);
+    expect(written.suppliedFrom.attendee?.id).toBe(hostAttendee.id);
+  });
+
+  // The list and the single read serve a nomination through the same reads,
+  // so the two agree (#1213). Its game card names the game's subtitle, on the
+  // nomination and on the entry that supplies it (#1271).
+  it('serves a nomination alike in the list and the single read, its attendees named and its subtitle on both games (#1213, #1271)', async () => {
+    const host = await actors.user();
+    const eventId = await createdEventId(host, { policy: { gameAdditionMode: GameAdditionMode.Direct } });
+    const {
+      entry,
+      nomination: { id: nominationId },
+    } = await nominated(host, eventId);
+    // The fixture's game has no subtitle; the card must carry one when it has.
+    const { gameId } = await db.client.platformGame.findUniqueOrThrow({
+      where: { id: entry.platformGameId },
+      select: { gameId: true },
+    });
+    await db.client.game.update({ where: { id: gameId }, data: { subtitle: 'The Card Game' } });
+    const hostAttendee = await db.client.eventAttendee.findUniqueOrThrow({
+      where: { eventId_userId: { eventId, userId: host.user.id } },
+      select: { id: true },
+    });
+
+    const listed = await listNominations(host, eventId);
+    const read = await readNomination(host, eventId, nominationId);
+
+    expect(listed.total).toBe(1);
+    expect(listed.nominations).toEqual([read]);
+    expect(read.nominatedBy?.id).toBe(hostAttendee.id);
+    expect(read.suppliedFrom.attendee?.id).toBe(hostAttendee.id);
+    expect(read.platformGame.game.subtitle).toBe('The Card Game');
+    expect(read.suppliedFrom.collection.platformGame.game.subtitle).toBe('The Card Game');
+  });
+
+  // The key's owner, the host, reads both attendees and the lineup; the key
+  // holds read on nominations alone, so it gets neither, and keeps the ids.
+  it('serves both attendees null, ids kept, to an API key that reads nominations but not attendees (#1213)', async () => {
+    const host = await actors.user();
+    const eventId = await createdEventId(host, { policy: { gameAdditionMode: GameAdditionMode.Direct } });
+    const {
+      entry,
+      nomination: { id: nominationId },
+    } = await nominated(host, eventId);
+    const hostAttendee = await db.client.eventAttendee.findUniqueOrThrow({
+      where: { eventId_userId: { eventId, userId: host.user.id } },
+      select: { id: true },
+    });
+    const key = await mintApiKey(baseUrl, db.client, host, {
+      slugs: ['read:event_game_nomination'],
+      resourceType: ResourceType.EventGameNomination,
+    });
+    // The control: the host is named twice, and the game is in the lineup.
+    const asHost = await readNomination(host, eventId, nominationId);
+    expect(asHost.nominatedBy?.id).toBe(hostAttendee.id);
+    expect(asHost.suppliedFrom.attendee?.id).toBe(hostAttendee.id);
+    expect(asHost.elevatedTo).not.toBeNull();
+
+    const asKey = await readNomination(key, eventId, nominationId);
+
+    expect(asKey.nominatedById).toBe(hostAttendee.id);
+    expect(asKey.nominatedBy).toBeNull();
+    expect(asKey.suppliedFrom).toEqual(
+      expect.objectContaining({ id: entry.suppliedById, attendeeId: hostAttendee.id, attendee: null }),
+    );
+    // Nor does it read the lineup (#799).
+    expect(asKey.elevatedTo).toBeNull();
   });
 
   it('narrows to one date with occurrenceId (#799)', async () => {
@@ -211,5 +347,33 @@ describe('GET /api/events/:eventId/lineup (#799)', () => {
     expect(placesOf(page)).toEqual([{ id: eventsGame, occurrenceId: null }]);
     expect(page.total).toBe(1);
     expect(page.lineup[0].suppliedBy.attendee).toBeNull();
+  });
+
+  // The same rule on the nominations' side: a nomination's lineup game is
+  // read with its date under the date's own ceiling, so the link serves this
+  // key no game the lineup read withholds from it.
+  it("serves elevatedTo for the event's own lineup game and null for a date's to an API key that reads nominations and the lineup but no date (#799)", async () => {
+    const host = await actors.user();
+    const {
+      eventId,
+      dateIds: [dateId],
+    } = await createdWithDates(host, ['Saturday'], { policy: { gameAdditionMode: GameAdditionMode.Direct } });
+    const { nomination: ofEvent } = await nominated(host, eventId);
+    const { nomination: ofDate } = await nominated(host, eventId, dateId);
+    const key = await mintApiKey(baseUrl, db.client, host, [
+      { slugs: ['read:event_game'], resourceType: ResourceType.EventGame },
+      { slugs: ['read:event_game_nomination'], resourceType: ResourceType.EventGameNomination },
+    ]);
+
+    // The control: the key's owner reads both links.
+    const eventsLink = (await readNomination(host, eventId, ofEvent.id)).elevatedTo;
+    expect(eventsLink).toEqual({ id: expect.any(String), occurrenceId: null });
+    expect((await readNomination(host, eventId, ofDate.id)).elevatedTo).toEqual({
+      id: expect.any(String),
+      occurrenceId: dateId,
+    });
+
+    expect((await readNomination(key, eventId, ofEvent.id)).elevatedTo).toEqual(eventsLink);
+    expect((await readNomination(key, eventId, ofDate.id)).elevatedTo).toBeNull();
   });
 });
