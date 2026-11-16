@@ -2,8 +2,13 @@ import { PluginGrantStatus } from '@bge/database';
 import { randomUUID } from 'node:crypto';
 import { expectBlocked, withBarrier } from '../support/lock-barrier';
 import { childRelationsOf } from '../support/schema-relations';
-import { orderMismatch, readShippedBranch, readShippedFunction } from '../support/shipped-function';
-import { bindTemplate, readShippedSql, readShippedValue } from '../support/shipped-sql';
+import {
+  claimsIncludingDelegates,
+  orderMismatch,
+  readShippedBranch,
+  readShippedFunction,
+} from '../support/shipped-function';
+import { bindTemplate, readShippedSource, readShippedSql, readShippedValue } from '../support/shipped-sql';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import {
   ACTIVATION_VERSION_BUMP,
@@ -301,12 +306,6 @@ describe('the plugin consent path is one lock order (#360)', () => {
       // own claim, `claimPluginForAct` (#1150).
       { file: CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'pluginGrant.upsert', claimed: true },
       { file: CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'householdPlugin.create', claimed: true },
-      // The two updates are here because their `data` SPREADS, which makes the
-      // key set unreadable — so the re-parent guard cannot rule them out and
-      // reports them rather than skipping them. Both are claimed anyway, which
-      // is why neither needs an exemption; they are the audit saying what it
-      // could not settle, not a finding.
-      { file: CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'householdPlugin.update', claimed: true },
       { file: CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'userPlugin.upsert', claimed: true },
       { file: GRANT_SERVICE, enclosing: 'attempt', write: 'pluginGrant.upsert', claimed: true },
       // The one write that sets `data_gateways.plugin_id` (#1083). Unclaimed
@@ -315,7 +314,6 @@ describe('the plugin consent path is one lock order (#360)', () => {
       { file: DATA_GATEWAY_ROW, enclosing: 'placePluginDataGatewayRow', write: 'dataGateway.create', claimed: false },
       { file: INSTALLER_SERVICE, enclosing: 'persist', write: 'pluginPermission.create', claimed: false },
       { file: INSTALLER_SERVICE, enclosing: 'persist', write: 'pluginGrant.create', claimed: false },
-      { file: UNIT_LIFECYCLE, enclosing: 'updateHouseholdConfig', write: 'householdPlugin.update', claimed: true },
       { file: UPDATE_SERVICE, enclosing: 'activateInTransaction', write: 'pluginPermission.create', claimed: true },
       { file: UPDATE_SERVICE, enclosing: 'activateInTransaction', write: 'pluginGrant.create', claimed: true },
       // The FK-child writes outside the plugin runtime (#1083). Most
@@ -444,13 +442,16 @@ describe('the plugin consent path is one lock order (#360)', () => {
       // `updateHouseholdConfig` holds the plugin row and nothing in its own
       // text says so — the lock is two calls away, in `assertStillLiving`.
       // Asserted here because it is the difference between this check being
-      // usable and it reporting a compliant unit path as a violation. It stands
-      // in for the household switch-on, which moved to the consent act (#1150).
-      const configWrite = fkChildWriteAudit().find((site) => site.enclosing === 'updateHouseholdConfig');
+      // usable and it reporting a compliant unit path as a violation. Its
+      // write names every key it sets and no foreign key, so the audit reports
+      // no site there (#1151); the claim the audit would credit it with is
+      // asserted against the delegates the audit resolves instead.
+      const pluginRow = stageNamed('plugin row').pattern;
+      const configWrite = readShippedFunction(UNIT_LIFECYCLE, 'updateHouseholdConfig').body;
 
-      expect(configWrite).toMatchObject({ claimed: true, exemption: undefined });
-      expect(readShippedFunction(UNIT_LIFECYCLE, 'updateHouseholdConfig').body).not.toMatch(
-        stageNamed('plugin row').pattern,
+      expect(configWrite).not.toMatch(pluginRow);
+      expect(configWrite).toMatch(
+        claimsIncludingDelegates(readShippedSource(UNIT_LIFECYCLE), UNIT_LIFECYCLE, pluginRow),
       );
     });
 

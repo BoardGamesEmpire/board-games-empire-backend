@@ -1,4 +1,4 @@
-import { PluginUnitDormantReason, type PluginConsentAct } from '@bge/database';
+import type { PluginConsentAct } from '@bge/database';
 import type { ConsentActKind, ConsentActResult } from '@bge/plugin';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -43,22 +43,6 @@ class ConsentActUnitDto {
 
   @ApiProperty({ type: 'object', additionalProperties: true, description: 'The unit configuration' })
   config!: Record<string, unknown>;
-
-  @ApiPropertyOptional({
-    enum: PluginUnitDormantReason,
-    nullable: true,
-    description:
-      'Household unit only. Why the unit is switched on but serves nothing until it is cured; null when it serves.',
-  })
-  dormantReason?: PluginUnitDormantReason | null;
-
-  @ApiPropertyOptional({
-    type: String,
-    format: 'date-time',
-    nullable: true,
-    description: 'Household unit only. When the unit became dormant; null when it serves.',
-  })
-  dormantAt?: Date | null;
 
   @ApiProperty({ type: String, format: 'date-time' })
   createdAt!: Date;

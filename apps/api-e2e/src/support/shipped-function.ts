@@ -495,12 +495,13 @@ export interface WriteShape {
    * when it can see the whole set of keys and the FK is not among them.
    *
    * A spread counts as unreadable, so `data: { ...payload, enabled: true }` is
-   * REPORTED. That is the two config/dormancy updates this tree already makes,
-   * and both are pinned in the audit — they carry a dominating claim, so
-   * reporting them costs an enumeration entry rather than an exemption. The
-   * cheaper reading, judging such a literal on its visible text, cannot see
-   * what `...payload` contributes, and the point of a narrowing guard is that
-   * it clears a site only when it has seen every key.
+   * REPORTED. No unit-enablement update in this tree spreads its `data` (each
+   * names every key it writes, #1151), so none is reported; one that did, and
+   * carried a dominating claim, would cost an enumeration entry in the audit
+   * rather than an exemption. The cheaper reading, judging such a literal on
+   * its visible text, cannot see what `...payload` contributes, and the point
+   * of a narrowing guard is that it clears a site only when it has seen every
+   * key.
    *
    * The barrier cases remain what actually holds the order.
    */

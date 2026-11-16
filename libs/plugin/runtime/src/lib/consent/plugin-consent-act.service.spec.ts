@@ -21,7 +21,6 @@ import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginDisabledEvent,
   HouseholdPluginEnabledEvent,
-  HouseholdPluginUnitRevivedEvent,
   PluginGrantCreatedEvent,
   PluginGrantRejectedEvent,
   UserPluginEnabledEvent,
@@ -320,7 +319,9 @@ describe('PluginConsentActService', () => {
     }) as never);
     db.householdPlugin.update.mockImplementation((({ data }: { data: Partial<HouseholdPlugin> }) => {
       order.push('unit');
-      return Promise.resolve({ ...(householdRow as HouseholdPlugin), ...data });
+      // Prisma leaves a column whose value is `undefined` as it is.
+      const written = Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));
+      return Promise.resolve({ ...(householdRow as HouseholdPlugin), ...written });
     }) as never);
     db.userPlugin.findUnique.mockImplementation((() => {
       order.push('unit read');
@@ -585,7 +586,7 @@ describe('PluginConsentActService', () => {
       );
 
       await expect(service.switchOn(householdSwitchOn)).rejects.toBeInstanceOf(PluginUnitConfigRequiredError);
-      expect(db.householdPlugin.create).not.toHaveBeenCalled();
+      expectNothingWritten();
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
@@ -596,8 +597,8 @@ describe('PluginConsentActService', () => {
 
       expect(db.pluginConsentAct.create).toHaveBeenCalledTimes(1);
       expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(2);
-      // A unit already in service needs no write; the config gate guards only
-      // the transition into service (#323).
+      // A unit already switched on, with no document supplied, needs no
+      // write: the document it holds passed the config gate (#323, #1151).
       expect(db.householdPlugin.create).not.toHaveBeenCalled();
       expect(db.householdPlugin.update).not.toHaveBeenCalled();
       expect(result).toEqual(expect.objectContaining({ changed: true, switchedOff: false, unit: householdRow }));
@@ -607,57 +608,47 @@ describe('PluginConsentActService', () => {
       ]);
     });
 
-    describe('a unit dormant for configuration (#369, #370)', () => {
-      const requiringManifest = () =>
+    /**
+     * A household unit's dormancy is worked out when read from the document
+     * its unit enablement holds, so a switch-on that supplies no document is
+     * judged on the one it would leave the unit holding, whether or not the
+     * manifest requires configuration (#1151).
+     */
+    describe('the document a household unit would hold (#1151)', () => {
+      /** A schema `{}` and `{ webhookUrl: 42 }` both fail; the manifest does not require configuration. */
+      const schemaRequiringWebhook = () =>
         makePlugin({
           manifestJson: householdManifest({
             schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-            requiresHouseholdConfig: true,
+            requiresHouseholdConfig: false,
           }) as unknown as Prisma.JsonValue,
         });
 
-      const dormant = (config: Prisma.JsonValue) =>
-        makeHouseholdRow({
-          config,
-          dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-          dormantAt: new Date(0),
-        });
-
       beforeEach(() => {
-        db.plugin.findUnique.mockResolvedValue(requiringManifest());
+        db.plugin.findUnique.mockResolvedValue(schemaRequiringWebhook());
         standing = [
           standingGrant(REQUIRED, PluginGrantStatus.Granted),
           standingGrant(OPTIONAL, PluginGrantStatus.Granted),
         ];
       });
 
-      it('a switch-on over it with a conforming retained document clears the dormancy (#1150)', async () => {
-        householdRow = dormant({ webhookUrl: 'https://retained' });
+      it('refuses a switch-on sent again for a unit already on whose retained document no longer conforms (#1151)', async () => {
+        householdRow = makeHouseholdRow({ enabled: true, config: { webhookUrl: 42 } });
 
-        const result = await service.switchOn(householdSwitchOn);
-
-        // `enabled` is absent from the write: it was already true, and the
-        // dormancy was the only thing in the way of service.
-        expect(db.householdPlugin.update).toHaveBeenCalledWith({
-          where: { id: 'hp-1' },
-          data: { dormantReason: null, dormantAt: null },
-        });
-        expect(result.unit).toEqual(expect.objectContaining({ dormantReason: null, dormantAt: null }));
-        // Nothing switched and no config was written, so the lifted dormancy
-        // is the event that names the act.
-        expect(emitted().map(({ event }) => event.constructor)).toEqual([HouseholdPluginUnitRevivedEvent]);
-        expect(emitted()[0].event).toEqual(
+        await expect(service.switchOn(householdSwitchOn)).rejects.toEqual(
           expect.objectContaining({
-            clearedReason: PluginUnitDormantReason.NeedsConfiguration,
-            manifestVersion: '1.2.0',
-            actId: 'act-1',
-            after: expect.objectContaining({ dormantReason: null }),
+            constructor: PluginUnitConfigRequiredError,
+            issues: [expect.objectContaining({ keyword: 'type' })],
           }),
         );
+        // Refused before the act: the document is judged as soon as the unit
+        // enablement is read, so no act, decision or unit write is made.
+        expectNothingWritten();
+        expect(emitter.emit).not.toHaveBeenCalled();
       });
 
-      it('a switch-on over it with a stale retained document is refused with the violations, and the unit is not written (#1150)', async () => {
-        householdRow = dormant({});
+      it('refuses a first switch-on when {} fails the schema, though the manifest does not require configuration (#1151)', async () => {
+        standing = [];
 
         await expect(service.switchOn(householdSwitchOn)).rejects.toEqual(
           expect.objectContaining({
@@ -665,11 +656,53 @@ describe('PluginConsentActService', () => {
             issues: [expect.objectContaining({ keyword: 'required' })],
           }),
         );
-        // The refusal is thrown inside the transaction, which rolls back the
-        // act and the decisions written before the gate.
-        expect(db.householdPlugin.create).not.toHaveBeenCalled();
-        expect(db.householdPlugin.update).not.toHaveBeenCalled();
+        expectNothingWritten();
+      });
+
+      it('answers changed: false for a switch-on sent again when the retained document conforms (#1151)', async () => {
+        householdRow = makeHouseholdRow({ enabled: true, config: { webhookUrl: 'https://retained.test' } });
+
+        const result = await service.switchOn(householdSwitchOn);
+
+        expect(result).toEqual({ act: null, changed: false, unit: householdRow, switchedOff: false });
+        expectNothingWritten();
         expect(emitter.emit).not.toHaveBeenCalled();
+      });
+
+      it('switches on with a supplied document and writes only the switch and the document (#1151)', async () => {
+        householdRow = makeHouseholdRow({ enabled: false, config: { webhookUrl: 42 } });
+
+        const result = await service.switchOn({ ...householdSwitchOn, config: { webhookUrl: 'https://new.test' } });
+
+        const [[{ data }]] = db.householdPlugin.update.mock.calls as unknown as [[{ data: Record<string, unknown> }]];
+        expect(Object.keys(data).sort()).toEqual(['config', 'enabled']);
+        expect(data).toEqual({ enabled: true, config: { webhookUrl: 'https://new.test' } });
+        expect(result.unit).toEqual(
+          expect.objectContaining({ enabled: true, config: { webhookUrl: 'https://new.test' } }),
+        );
+      });
+
+      it('emits no dormancy event: a supplied document over a stale one announces the configuration and nothing else (#1151)', async () => {
+        // The stored column says the unit is dormant; the act reads the
+        // document, never the column, and announces only what it wrote.
+        householdRow = makeHouseholdRow({
+          enabled: true,
+          config: { webhookUrl: 42 },
+          dormantReason: PluginUnitDormantReason.NeedsConfiguration,
+          dormantAt: new Date(0),
+        });
+
+        const result = await service.switchOn({ ...householdSwitchOn, config: { webhookUrl: 'https://new.test' } });
+
+        expect(result.changed).toBe(true);
+        expect(db.householdPlugin.update).toHaveBeenCalledWith({
+          where: { id: 'hp-1' },
+          data: { enabled: true, config: { webhookUrl: 'https://new.test' } },
+        });
+        // The decisions stood and the switch was already on, so the
+        // configuration event is the one that names the act.
+        expect(emitted().map(({ event }) => event.constructor)).toEqual([HouseholdPluginConfigUpdatedEvent]);
+        expect(emitted()[0].event.act).toEqual({ manifestVersion: '1.2.0', actId: 'act-1' });
       });
     });
 
@@ -715,11 +748,18 @@ describe('PluginConsentActService', () => {
       expectNothingWritten();
     });
 
-    it('a toggle is allowed on a unit that is switched on but dormant (#1150)', async () => {
-      householdRow = makeHouseholdRow({
-        dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-        dormantAt: new Date(0),
-      });
+    it('lets a toggle through for a switched-on unit whose configuration no longer conforms (#1150, #1151)', async () => {
+      // A toggle needs the unit's switch on, not a unit that serves: the
+      // household can settle its consent decisions before it fixes the
+      // configuration.
+      db.plugin.findUnique.mockResolvedValue(
+        makePlugin({
+          manifestJson: householdManifest({
+            schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+          }) as unknown as Prisma.JsonValue,
+        }),
+      );
+      householdRow = makeHouseholdRow({ config: { webhookUrl: 42 } });
 
       const result = await service.toggle(householdToggle);
 

@@ -453,24 +453,22 @@ describe('PluginUnitLifecycleService', () => {
     });
 
     /**
-     * D-CL. The row is dormant, on the household admin's screen with a reason
-     * attached (#354's list), and disable is the only operation that could act
-     * on it — so this path does not require the household surface the config
-     * PATCH does.
+     * A household unit enablement on a plugin re-scoped to server reads
+     * `unavailable`, on the household admin's screen with that state, and
+     * switching it off is the one operation that can act on it, so this path
+     * does not require the household surface the config PATCH does (#369,
+     * #1151).
      */
-    it('switches off a row the plugin scope no longer admits, where config PATCH refuses', async () => {
+    it('switches off a household unit on a plugin re-scoped to server, writing only the switch, where config PATCH refuses (#1151)', async () => {
       db.plugin.findUnique.mockResolvedValue(makePlugin({ scope: PluginScope.Server }));
       db.$queryRaw.mockResolvedValue([livingRow({ scope: PluginScope.Server })] as never);
-      const before = makeHouseholdRow({ dormantReason: PluginUnitDormantReason.ScopeOrphaned });
+      const before = makeHouseholdRow();
       db.householdPlugin.findUnique.mockResolvedValue(before);
       db.householdPlugin.update.mockResolvedValue({ ...before, enabled: false });
 
       const row = await service.disableHousehold(enableInput);
 
       expect(row.enabled).toBe(false);
-      // The dormancy is NOT cleared by switching the row off: the two are
-      // independent, and a re-scope back must restore the admin's own intent
-      // rather than one this path invented.
       expect(db.householdPlugin.update).toHaveBeenCalledWith({ where: { id: 'hp-1' }, data: { enabled: false } });
 
       await expect(
@@ -496,30 +494,14 @@ describe('PluginUnitLifecycleService', () => {
       expect(event).toBeInstanceOf(HouseholdPluginConfigUpdatedEvent);
     });
 
-    it('clears a config dormancy — the document that caused it has just been replaced (#370)', async () => {
+    it('writes the document and nothing else over a stale one: the next read works the state out from it (#1151)', async () => {
+      // The stored column says the unit is dormant; the write changes only the
+      // document, and the dormancy a reader reports follows from that.
       const before = makeHouseholdRow({
         config: { webhookUrl: 42 },
         dormantReason: PluginUnitDormantReason.NeedsConfiguration,
         dormantAt: new Date(0),
       });
-      db.householdPlugin.findUnique.mockResolvedValue(before);
-      db.householdPlugin.update.mockResolvedValue({
-        ...before,
-        config: { webhookUrl: 'https://z' },
-        dormantReason: null,
-        dormantAt: null,
-      });
-
-      await service.updateHouseholdConfig({ ...enableInput, config: { webhookUrl: 'https://z' } });
-
-      expect(db.householdPlugin.update).toHaveBeenCalledWith({
-        where: { id: 'hp-1' },
-        data: { config: { webhookUrl: 'https://z' }, dormantReason: null, dormantAt: null },
-      });
-    });
-
-    it('leaves the dormancy fields out of an ordinary write entirely', async () => {
-      const before = makeHouseholdRow();
       db.householdPlugin.findUnique.mockResolvedValue(before);
       db.householdPlugin.update.mockResolvedValue({ ...before, config: { webhookUrl: 'https://z' } });
 
@@ -529,6 +511,7 @@ describe('PluginUnitLifecycleService', () => {
         where: { id: 'hp-1' },
         data: { config: { webhookUrl: 'https://z' } },
       });
+      expect(emittedEvents().map(({ event }) => event.constructor)).toEqual([HouseholdPluginConfigUpdatedEvent]);
     });
 
     it('rejects a schema violation with issues[] before any transaction', async () => {

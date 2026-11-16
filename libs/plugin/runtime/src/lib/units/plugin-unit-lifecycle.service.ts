@@ -22,7 +22,6 @@ import {
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { assertHouseholdAdmin } from './household-admin-assertion';
-import { configDormancyCleared } from './household-config-gate';
 import { assertHouseholdSurface, loadLivingPlugin } from './living-plugin';
 import {
   PluginUnitHouseholdNotFoundError,
@@ -124,15 +123,15 @@ export class PluginUnitLifecycleService {
 
   /**
    * Disable the plugin for a household. 404 on a never-enabled household —
-   * the household's switch-on, a consent act, is the row creator (#1150).
+   * the household's switch-on, a consent act, is the creator of the unit
+   * enablement (#1150).
    *
-   * The one household operation that does NOT require the household surface to
-   * exist (D-CL): a row left dormant by a scope narrowing (#369) is visible to
-   * the household's admin, and switching it off is the only thing they could
-   * sensibly want to do with it. Disabling does not clear the dormancy — the
-   * two are independent, the row serves nothing either way, and a re-scope back
-   * must restore the admin's own intent rather than an intent this path
-   * invented.
+   * The one household operation that does NOT require the household surface
+   * to exist. A household unit on a plugin re-scoped to server reads
+   * `unavailable` and is still on the household admin's screen (#369, #1151),
+   * and switching it off is the one thing they can do with it. The switch is
+   * the admin's own intent, so it is all this writes: a re-scope back finds
+   * the unit as the admin left it.
    */
   async disableHousehold(input: HouseholdUnitActionInput): Promise<HouseholdPlugin> {
     const initiatedAt = new Date();
@@ -171,9 +170,10 @@ export class PluginUnitLifecycleService {
 
   /**
    * Replace a household's plugin configuration. Validates against the
-   * ACTIVE manifest's `config.schema` — which is also what heals a stale
-   * retained document: the next write is judged against today's schema,
-   * no migration pass required. 404 on a never-enabled household.
+   * ACTIVE manifest's `config.schema` and writes the document and nothing
+   * else: a household unit's dormancy is worked out when read from the
+   * document it holds, so the next read reports the state that follows from
+   * this one (#1151). 404 on a never-enabled household.
    */
   async updateHouseholdConfig(input: HouseholdUnitConfigInput): Promise<HouseholdPlugin> {
     const initiatedAt = new Date();
@@ -202,7 +202,7 @@ export class PluginUnitLifecycleService {
 
       const updated = await tx.householdPlugin.update({
         where: { id: existing.id },
-        data: { config: input.config as Prisma.InputJsonValue, ...configDormancyCleared(existing) },
+        data: { config: input.config as Prisma.InputJsonValue },
       });
 
       return { before: existing, row: updated };
@@ -276,13 +276,14 @@ export class PluginUnitLifecycleService {
    * changes nothing about flipping a switch, and refusing one would be a
    * failure invented for no reader's benefit.
    *
-   * `requireSurface: false` exists for disable, its only caller. A row
-   * whose plugin has been re-scoped to server is dormant, not absent (#369),
-   * and it is on the household's screen with a reason attached — so refusing
-   * the one operation that could act on it would leave an admin looking at a
-   * unit with no lever at all. Config PATCH keeps refusing: it would have to
-   * write a surface the scope rule says cannot exist, while disable only
-   * records an intent about a row that already does.
+   * `requireSurface: false` exists for disable, its only caller. A household
+   * unit enablement whose plugin has been re-scoped to server still exists
+   * and reads `unavailable` (#369, #1151), on the household's screen with
+   * that state, so refusing the one operation that can act on it would leave
+   * an admin looking at a unit with no lever at all. Config PATCH keeps
+   * refusing: it would have to write a surface the scope rule says cannot
+   * exist, while disable only records an intent about a unit enablement that
+   * already does.
    */
   private async openHouseholdUnit(
     tx: Prisma.TransactionClient,

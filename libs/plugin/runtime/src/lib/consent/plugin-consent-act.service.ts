@@ -6,7 +6,6 @@ import {
   PluginConsentActKind,
   PluginGrantScope,
   PluginGrantStatus,
-  PluginUnitDormantReason,
   Prisma,
   retryOnDeadlock,
 } from '@bge/database';
@@ -15,17 +14,11 @@ import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
-import {
-  grantSnapshot,
-  householdDormancySnapshot,
-  householdSwitchSnapshot,
-  userSwitchSnapshot,
-} from '../events/plugin-event-snapshots';
+import { grantSnapshot, householdSwitchSnapshot, userSwitchSnapshot } from '../events/plugin-event-snapshots';
 import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginDisabledEvent,
   HouseholdPluginEnabledEvent,
-  HouseholdPluginUnitRevivedEvent,
   PluginGrantCreatedEvent,
   PluginGrantRejectedEvent,
   UserPluginDisabledEvent,
@@ -36,7 +29,7 @@ import { lockHouseholdUnitScope, lockUserUnitScope } from '../grants/unit-scope-
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { assertHouseholdAdmin } from '../units/household-admin-assertion';
-import { assertRetainedConfigSatisfiesGate, configDormancyCleared } from '../units/household-config-gate';
+import { assertHeldConfigSatisfiesGate } from '../units/household-config-gate';
 import { assertHouseholdSurface, loadLivingPlugin } from '../units/living-plugin';
 import {
   PluginUnitAuthorityError,
@@ -111,8 +104,6 @@ interface WrittenDecision {
 interface UnitEffects {
   readonly switchedOff: boolean;
   readonly configWritten: boolean;
-  /** The dormancy the act lifted from a household unit, if any. */
-  readonly clearedDormancy: PluginUnitDormantReason | null;
 }
 
 type ActOutcome =
@@ -210,9 +201,9 @@ export class PluginConsentActService {
 
       // A supplied document is judged against the ACTIVE schema before the
       // transaction, so an invalid one is refused before any lock is taken
-      // (#323); otherwise the schema is warmed, so the
-      // retained-config gate under the advisory key does not compile it
-      // inside the lock window.
+      // (#323); otherwise the schema is warmed, so the config gate under the
+      // advisory key, which judges the document the unit would hold, does not
+      // compile it inside the lock window (#1151).
       if (config !== undefined) {
         const issues = this.configSchema.validate({
           slug: plugin.slug,
@@ -302,6 +293,19 @@ export class PluginConsentActService {
         // A retried request then lands exactly where its first attempt left
         // the unit (ADR 0002, docs/adr/0002-retried-writes-use-client-request-ids.md).
         const unitBefore = await this.readUnitEnablement(tx, unit, plugin.id);
+
+        // A household unit's dormancy is worked out when read from the
+        // document its unit enablement holds, so a household switch-on that
+        // supplies no document is judged on the one it would leave the unit
+        // holding: the retained one, or `{}` for a new unit enablement. Judged
+        // here, before the answer that changes nothing and before any write,
+        // so a document that fails is refused rather than answered or
+        // half-recorded, whether or not the unit is already switched on (#323,
+        // #1151). A supplied document was judged before the transaction.
+        if (household && kind === 'SwitchOn' && config === undefined) {
+          assertHeldConfigSatisfiesGate(this.configSchema, plugin, activeConfig, unitBefore as HouseholdPlugin | null);
+        }
+
         const standingRows = await tx.pluginGrant.findMany({
           where: {
             pluginId: plugin.id,
@@ -314,7 +318,7 @@ export class PluginConsentActService {
         const stand = decisionsStand(plan.decisions, standingBySlug);
 
         if (kind === 'SwitchOn') {
-          if (stand && unitBefore !== null && unitBefore.enabled && !isDormant(unitBefore) && config === undefined) {
+          if (stand && unitBefore !== null && unitBefore.enabled && config === undefined) {
             return { changed: false, unit: unitBefore, switchedOff: false };
           }
         } else {
@@ -405,7 +409,6 @@ export class PluginConsentActService {
           unit: unitAfter,
           switchedOff: effects.switchedOff ?? false,
           configWritten: effects.configWritten ?? false,
-          clearedDormancy: effects.clearedDormancy ?? null,
         });
 
         if (kind !== 'SwitchOn') {
@@ -426,20 +429,14 @@ export class PluginConsentActService {
         if (household) {
           const existing = unitBefore as HouseholdPlugin | null;
 
-          // A unit already in service needs no write, and the config gate
-          // guards only the transition into service (#323).
-          if (existing !== null && existing.enabled && existing.dormantReason === null && config === undefined) {
+          // A unit already switched on, with no document supplied, needs no
+          // write: the gate above has judged the document it holds.
+          if (existing !== null && existing.enabled && config === undefined) {
             return writtenOutcome(existing);
           }
 
-          if (
-            config === undefined &&
-            (activeConfig.requiresHouseholdConfig ||
-              existing?.dormantReason === PluginUnitDormantReason.NeedsConfiguration)
-          ) {
-            assertRetainedConfigSatisfiesGate(this.configSchema, plugin, activeConfig.schema, existing);
-          }
-
+          // `config` undefined leaves the retained document as it is: Prisma
+          // writes no column whose value is undefined.
           const written =
             existing === null
               ? await tx.householdPlugin.create({
@@ -452,21 +449,10 @@ export class PluginConsentActService {
                 })
               : await tx.householdPlugin.update({
                   where: { id: existing.id },
-                  data: {
-                    ...(existing.enabled ? {} : { enabled: true }),
-                    ...(config !== undefined ? { config: config as Prisma.InputJsonValue } : {}),
-                    ...configDormancyCleared(existing),
-                  },
+                  data: { enabled: true, config: config as Prisma.InputJsonValue | undefined },
                 });
 
-          // The switch-on lifted a configuration dormancy, which no switch or
-          // config event would otherwise announce (#1150).
-          const clearedDormancy =
-            existing !== null && existing.dormantReason !== null && written.dormantReason === null
-              ? existing.dormantReason
-              : null;
-
-          return writtenOutcome(written, { configWritten: config !== undefined, clearedDormancy });
+          return writtenOutcome(written, { configWritten: config !== undefined });
         }
 
         const written = await tx.userPlugin.upsert({
@@ -598,7 +584,9 @@ export class PluginConsentActService {
   /**
    * Every event an act causes carries the act, so each lifecycle row it leaves
    * names it, and every recorded act leaves at least one: a changed decision,
-   * a switch, a config write or a lifted dormancy (#1150).
+   * a switch or a config write (#1150). An act is recorded only when one of
+   * those changes: a switch-on whose decisions stand over a unit already on,
+   * with no document supplied, answers `changed: false` and writes nothing.
    */
   private emitEvents(
     outcome: Extract<ActOutcome, { changed: true }>,
@@ -643,20 +631,6 @@ export class PluginConsentActService {
             householdSwitchSnapshot(unit),
             initiatedAt,
             context,
-          ),
-        );
-      }
-
-      if (outcome.clearedDormancy !== null && before !== null) {
-        this.emitter.emit(
-          HouseholdPluginUnitRevivedEvent.eventName,
-          new HouseholdPluginUnitRevivedEvent(
-            householdDormancySnapshot(before),
-            householdDormancySnapshot(unit),
-            outcome.clearedDormancy,
-            manifestVersion,
-            initiatedAt,
-            outcome.act.id,
           ),
         );
       }
@@ -715,10 +689,6 @@ function decisionsStand(
   standingBySlug: ReadonlyMap<string, PluginGrant>,
 ): boolean {
   return decisions.every((decision) => decisionStands(decision, standingBySlug.get(decision.permissionSlug)));
-}
-
-function isDormant(row: UnitEnablement): boolean {
-  return 'dormantReason' in row && row.dormantReason !== null;
 }
 
 function isHouseholdEnablement(row: UnitEnablement): row is HouseholdPlugin {
