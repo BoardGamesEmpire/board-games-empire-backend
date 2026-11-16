@@ -20,6 +20,14 @@ const RESOLVED_MESSAGES = {
   [NominationStatus.QuorumNotMet]: 'success.nomination.quorum_not_met',
 } as const satisfies Readonly<Record<ResolvedStatus, I18nPath>>;
 
+/** What the reads say of the attendees and the lineup game a nomination names (#1213, #799). */
+const NOMINATION_LINKS =
+  '`nominatedBy` is the attendee who made the nomination, and `suppliedFrom.attendee` the attendee whose ' +
+  'offered game supplies it. Each is `null` when you cannot read that attendee; `nominatedById` and ' +
+  '`suppliedFrom.attendeeId` are always served. `elevatedTo` is the lineup game the nomination became, ' +
+  "`{ id, occurrenceId }`, and is `null` when its game isn't in the lineup, or you cannot read the lineup or " +
+  "the game's date.";
+
 @ApiBearerAuth()
 @ApiSecurity('api_key')
 @ApiTags('event-game-nominations')
@@ -37,7 +45,8 @@ export class EventGameNominationController {
       'Newest first. **Paginated since #372** — this read used to return every nomination on the event, a ' +
       'set that grows with the attendees: `?page=` (1-based) and `?limit=`, with a `pagination` envelope ' +
       'carrying `total`, `totalPages` and `hasMore`. A client that assumed one complete list must now page. ' +
-      'See #230; the row shape is modelled in #402.',
+      'See #230; the row shape is modelled in #402.\n\n' +
+      NOMINATION_LINKS,
   })
   @ApiPaginatedEnvelope('nominations')
   @ApiResponse({ status: Http.NotFound, description: 'Event not found' })
@@ -49,7 +58,7 @@ export class EventGameNominationController {
     );
   }
 
-  @ApiOperation({ summary: 'Get a single nomination' })
+  @ApiOperation({ summary: 'Get a single nomination', description: NOMINATION_LINKS })
   @ApiParam({ name: 'nominationId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Nomination retrieved' })
   @ApiResponse({ status: Http.NotFound, description: 'Nomination not found' })

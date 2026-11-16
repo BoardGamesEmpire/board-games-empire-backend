@@ -11,11 +11,12 @@ import { AbilityService, resolveActingUserIdOrNull, ScopeComposer } from '@bge/p
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { Injectable } from '@nestjs/common';
 import { ACTIVE_NOMINATION_STATUSES, lineupStillAhead } from '../attendee/attendance';
+import { readableAttendees } from '../attendee/attendee-summary';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { assertEventExists } from '../event-access.helpers';
 import type { ListOfferedGamesQueryDto } from './dto/list-offered-games.query.dto';
-import { OFFERED_GAME_ATTENDEE_SELECT, OFFERED_GAME_ORDER, OFFERED_GAME_SELECT } from './offered-game.select';
-import type { OfferedGame, OfferedGameAttendee, OfferedGameEntry, OfferedGameRow } from './offered-game.types';
+import { OFFERED_GAME_ORDER, OFFERED_GAME_SELECT } from './offered-game.select';
+import type { OfferedGame, OfferedGameEntry, OfferedGameRow } from './offered-game.types';
 import { offeredGamesFilter } from './offered-games.filter';
 
 /**
@@ -55,7 +56,11 @@ export class OfferedGameService {
       query,
       new Date(),
     );
-    const attendees = await this.attendeesFor(rows);
+    const attendees = await readableAttendees(
+      this.db,
+      this.scopeComposer,
+      rows.map((row) => row.attendeeId),
+    );
 
     return { rows: rows.map((row) => ({ ...row, attendee: attendees.get(row.attendeeId) ?? null })), total };
   }
@@ -178,27 +183,6 @@ export class OfferedGameService {
       },
       onWishlist: wishlisted === null ? null : wishlisted.has(platformGame.id),
     }));
-  }
-
-  /**
-   * The attendees of `games`, keyed by id, as far as the caller may read
-   * them: a top-level read under the attendee read ceiling. In the entry's
-   * select, a key holding only read on offered games would see the names and
-   * avatars it can't read on the attendee routes (#404, #559).
-   */
-  private async attendeesFor(games: readonly OfferedGame[]): Promise<ReadonlyMap<string, OfferedGameAttendee>> {
-    const attendeeIds = [...new Set(games.map((game) => game.attendeeId))];
-
-    if (attendeeIds.length === 0) {
-      return new Map();
-    }
-
-    const attendees = await this.db.eventAttendee.findMany({
-      where: this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { id: { in: attendeeIds } }),
-      select: OFFERED_GAME_ATTENDEE_SELECT,
-    });
-
-    return new Map(attendees.map((attendee) => [attendee.id, attendee]));
   }
 
   /**

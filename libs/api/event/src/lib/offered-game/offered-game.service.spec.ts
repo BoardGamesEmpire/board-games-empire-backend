@@ -13,9 +13,10 @@ import {
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { ACTIVE_NOMINATION_STATUSES, lineupStillAhead } from '../attendee/attendance';
+import { ATTENDEE_SUMMARY_SELECT } from '../attendee/attendee-summary';
 import { ListOfferedGamesQueryDto } from './dto/list-offered-games.query.dto';
 import { makeOfferedGameEntry } from './offered-game.fixture';
-import { OFFERED_GAME_ATTENDEE_SELECT, OFFERED_GAME_ORDER, OFFERED_GAME_SELECT } from './offered-game.select';
+import { OFFERED_GAME_ORDER, OFFERED_GAME_SELECT } from './offered-game.select';
 import { OfferedGameService } from './offered-game.service';
 import { offeredGamesFilter } from './offered-games.filter';
 
@@ -269,7 +270,7 @@ describe('OfferedGameService (#1185, #1187)', () => {
     const query = (init: Record<string, unknown> = {}) =>
       plainToInstance(ListOfferedGamesQueryDto, { limit: 10, ...init }, { enableImplicitConversion: true });
 
-    /** The attendee read's row, as `OFFERED_GAME_ATTENDEE_SELECT` reads it. */
+    /** The attendee read's row, as `ATTENDEE_SUMMARY_SELECT` reads it. */
     const attendee = (id: string, overrides: Record<string, unknown> = {}) => ({
       id,
       status: EventParticipationStatus.Attending,
@@ -327,7 +328,7 @@ describe('OfferedGameService (#1185, #1187)', () => {
       expect(db.eventAttendee.findMany).toHaveBeenCalledTimes(1);
       expect(db.eventAttendee.findMany).toHaveBeenCalledWith({
         where: { id: { in: ['att-1', 'att-2'] }, AND: [COND] },
-        select: OFFERED_GAME_ATTENDEE_SELECT,
+        select: ATTENDEE_SUMMARY_SELECT,
       });
       expect(listed.total).toBe(3);
       expect(listed.rows.map((row) => [row.id, row.attendeeId, row.attendee?.id ?? null])).toEqual([

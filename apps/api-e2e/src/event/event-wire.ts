@@ -63,16 +63,48 @@ export interface ListEventsEnvelope {
 }
 
 /**
- * One game on an occurrence, as the occurrence routes embed it: the lineup
- * row's key fields, and the platform game it schedules with its game and
- * platform. The columns are picked from the models, so renaming one fails
- * typecheck here. The relation keys and `platformGame.id` are written out.
+ * An attendee as a record that names them serves them (#1187, #1213): `user`
+ * is `null` for a guest added by name only.
  */
-export type OccurrenceGameWire = Pick<EventGameWire, 'id' | 'platformGameId' | 'role'> & {
+export interface AttendeeSummaryWire {
+  readonly id: string;
+  readonly status: EventParticipationStatus;
+  readonly guestName: string | null;
+  readonly user:
+    | (Pick<Wire<User>, 'id' | 'username'> & {
+        readonly profile: Pick<Wire<UserProfile>, 'displayName' | 'avatarUrl'> | null;
+      })
+    | null;
+}
+
+/**
+ * A lineup game in the one shape every route that serves one uses (#799): the
+ * row's columns, picked from the model so renaming one fails typecheck here,
+ * the platform game it schedules with its game and platform, and its supplier.
+ * The relation keys and `platformGame.id` are written out. `attendee` is
+ * `null` for an actor who can't read the supplier.
+ */
+export type LineupGameWire = Pick<
+  EventGameWire,
+  | 'id'
+  | 'occurrenceId'
+  | 'platformGameId'
+  | 'role'
+  | 'sortOrder'
+  | 'notes'
+  | 'maxPlayTime'
+  | 'nominationId'
+  | 'addedById'
+> & {
   readonly platformGame: {
     readonly id: string;
-    readonly game: Pick<Wire<Game>, 'id' | 'title' | 'thumbnail'>;
+    readonly game: Pick<Wire<Game>, 'id' | 'title' | 'subtitle' | 'thumbnail'>;
     readonly platform: Pick<Wire<Platform>, 'id' | 'name' | 'platformType'>;
+  };
+  readonly suppliedBy: {
+    readonly id: string;
+    readonly attendeeId: string;
+    readonly attendee: AttendeeSummaryWire | null;
   };
 };
 
@@ -90,10 +122,30 @@ export type NominationVoteWire = Pick<Wire<EventGameVote>, 'id' | 'attendeeId' |
   readonly eligible: boolean;
 };
 
-/** A nomination as its routes serve it: who made it, whose list supplies it, and its votes. */
+/**
+ * A nomination as its routes serve it: its game card, the one a lineup game
+ * carries (#1271); who made it and whose offered game supplies it, each
+ * `null` for an actor who can't read that attendee, the ids kept beside them
+ * (#1213), and the supplied entry's game; the lineup game it became, `null`
+ * when its game isn't in the lineup, or the actor can't read the lineup or
+ * the game's date (#799); and its votes.
+ */
 export type NominationWire = Wire<EventGameNomination> & {
-  readonly nominatedBy: { readonly id: string; readonly user: { readonly id: string } | null };
-  readonly suppliedFrom: { readonly id: string };
+  readonly platformGame: LineupGameWire['platformGame'];
+  readonly nominatedBy: AttendeeSummaryWire | null;
+  readonly suppliedFrom: {
+    readonly id: string;
+    readonly attendeeId: string;
+    readonly attendee: AttendeeSummaryWire | null;
+    readonly collection: {
+      readonly platformGame: {
+        readonly id: string;
+        readonly game: Pick<Wire<Game>, 'id' | 'title' | 'subtitle'>;
+        readonly platform: Pick<Wire<Platform>, 'id' | 'name'>;
+      };
+    };
+  };
+  readonly elevatedTo: { readonly id: string; readonly occurrenceId: string | null } | null;
   readonly votes: readonly NominationVoteWire[];
 };
 
@@ -136,7 +188,7 @@ export type OccurrencePolicyWire = Wire<EventOccurrencePolicy> & PolicyListsWire
  */
 export type EventOccurrenceWire = Wire<EventOccurrence> & {
   readonly availabilityVotes: readonly OccurrenceVoteWire[];
-  readonly games: readonly OccurrenceGameWire[];
+  readonly games: readonly LineupGameWire[];
   readonly policy: OccurrencePolicyWire | null;
 };
 
@@ -214,20 +266,21 @@ export interface OfferedGameWire {
 
 /** A row of `GET /api/events/:eventId/offered-games`: the offered game and its attendee, or null (#1187). */
 export type OfferedGameRowWire = OfferedGameWire & {
-  readonly attendee: {
-    readonly id: string;
-    readonly status: EventParticipationStatus;
-    readonly guestName: string | null;
-    readonly user:
-      | (Pick<Wire<User>, 'id' | 'username'> & {
-          readonly profile: Pick<Wire<UserProfile>, 'displayName' | 'avatarUrl'> | null;
-        })
-      | null;
-  } | null;
+  readonly attendee: AttendeeSummaryWire | null;
 };
 
 export interface ListOfferedGamesEnvelope {
   readonly offeredGames: readonly OfferedGameRowWire[];
+  readonly total: number;
+}
+
+export interface ListLineupEnvelope {
+  readonly lineup: readonly LineupGameWire[];
+  readonly total: number;
+}
+
+export interface ListNominationsEnvelope {
+  readonly nominations: readonly NominationWire[];
   readonly total: number;
 }
 
@@ -390,7 +443,7 @@ function eventRow(value: unknown): EventReadWire | undefined {
 }
 
 /** What a row must be for {@link occurrenceRow}. */
-const OCCURRENCE_ROW = "an object with a string id, an 'availabilityVotes' array and a 'games' array";
+const OCCURRENCE_ROW = "an object with a string id, an 'availabilityVotes' array and a 'games' array of lineup games";
 
 /**
  * A paginated list's rows under `key`, and its `pagination.total`. The total
@@ -449,7 +502,31 @@ export function listEventsEnvelope(response: HttpResponseLike, request: RequestD
 function occurrenceRow(value: unknown): EventOccurrenceWire | undefined {
   const row = withId<EventOccurrenceWire>(value);
 
-  return row !== undefined && Array.isArray(row.availabilityVotes) && Array.isArray(row.games) ? row : undefined;
+  return row !== undefined &&
+    Array.isArray(row.availabilityVotes) &&
+    Array.isArray(row.games) &&
+    row.games.every(isLineupGame)
+    ? row
+    : undefined;
+}
+
+/**
+ * A lineup game: an id, its `suppliedBy` and, in it, an `attendee` that is an
+ * object or `null`. The supplier is what a dropped read or a renamed key
+ * breaks (#799); the other fields are compared against definite values.
+ */
+function isLineupGame(value: unknown): value is LineupGameWire {
+  if (withId<LineupGameWire>(value) === undefined) {
+    return false;
+  }
+
+  const suppliedBy = (value as { readonly suppliedBy?: unknown }).suppliedBy;
+
+  return (
+    isRecord(suppliedBy) &&
+    typeof suppliedBy['id'] === 'string' &&
+    (suppliedBy['attendee'] === null || isRecord(suppliedBy['attendee']))
+  );
 }
 
 /**
@@ -509,22 +586,67 @@ export function attendeeEnvelope(response: HttpResponseLike, request: RequestDes
   return attendee ?? fail("it carried no 'attendee' object with a string id", request, response);
 }
 
-/** `POST /api/events/:eventId/nominations/direct-add`: `{ message, eventGame }`. */
-export function eventGameEnvelope(response: HttpResponseLike, request: RequestDescription): EventGameWire {
-  const eventGame = isRecord(response.body) ? withId<EventGameWire>(response.body['eventGame']) : undefined;
+/** `POST /api/events/:eventId/nominations/direct-add`: `{ message, eventGame }`, the lineup game (#799). */
+export function eventGameEnvelope(response: HttpResponseLike, request: RequestDescription): LineupGameWire {
+  const eventGame = isRecord(response.body) ? response.body['eventGame'] : undefined;
 
-  return eventGame ?? fail("it carried no 'eventGame' object with a string id", request, response);
+  return isLineupGame(eventGame)
+    ? eventGame
+    : fail("it carried no 'eventGame' that is a lineup game with its supplier", request, response);
+}
+
+/** What a nomination must be for {@link isNomination}. */
+const NOMINATION =
+  "an object with a string id, a 'votes' array, a 'nominatedBy' object or null, a 'suppliedFrom' with a " +
+  "string attendeeId and an 'attendee' object or null, and an 'elevatedTo' object or null";
+
+/**
+ * A nomination: an id, its votes, its two attendees, each an object or `null`
+ * beside the supplier's `attendeeId`, and `elevatedTo`, an object or `null`.
+ * Those are what a dropped read or a renamed key breaks (#1213, #799); the
+ * other fields are compared against definite values.
+ */
+function isNomination(value: unknown): value is NominationWire {
+  const nomination = withId<Record<string, unknown>>(value);
+  if (nomination === undefined) {
+    return false;
+  }
+
+  const { votes, nominatedBy, suppliedFrom, elevatedTo } = nomination;
+
+  return (
+    Array.isArray(votes) &&
+    (nominatedBy === null || isRecord(nominatedBy)) &&
+    isRecord(suppliedFrom) &&
+    typeof suppliedFrom['attendeeId'] === 'string' &&
+    (suppliedFrom['attendee'] === null || isRecord(suppliedFrom['attendee'])) &&
+    (elevatedTo === null || isRecord(elevatedTo))
+  );
 }
 
 /** The nomination routes, the list excepted: `{ nomination }`, beside a `message` on the writes. */
 export function nominationEnvelope(response: HttpResponseLike, request: RequestDescription): NominationWire {
-  const nomination = isRecord(response.body) ? withId<NominationWire>(response.body['nomination']) : undefined;
+  const nomination = isRecord(response.body) ? response.body['nomination'] : undefined;
 
-  if (!nomination || !Array.isArray(nomination.votes)) {
-    return fail("it carried no 'nomination' object with a string id and a 'votes' array", request, response);
-  }
+  return isNomination(nomination)
+    ? nomination
+    : fail(`it carried no 'nomination' that is ${NOMINATION}`, request, response);
+}
 
-  return nomination;
+/** `GET /api/events/:eventId/nominations`: `{ nominations: [...], pagination }`, paged since #372. */
+export function listNominationsEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): ListNominationsEnvelope {
+  const { rows, total } = paginatedEnvelope(
+    'nominations',
+    (value) => (isNomination(value) ? value : undefined),
+    NOMINATION,
+    response,
+    request,
+  );
+
+  return { nominations: rows, total };
 }
 
 /** `POST /api/events/:eventId/nominations/:nominationId/resolve`: `{ message, nomination, resolution }`. */
@@ -581,6 +703,23 @@ export function listOfferedGamesEnvelope(
   );
 
   return { offeredGames: rows, total };
+}
+
+/** What a row must be for {@link isLineupGame}. */
+const LINEUP_GAME_ROW =
+  "an object with a string id, and a 'suppliedBy' with a string id and an 'attendee' object or null";
+
+/** `GET /api/events/:eventId/lineup`: `{ lineup: [...], pagination }` (#799). */
+export function listLineupEnvelope(response: HttpResponseLike, request: RequestDescription): ListLineupEnvelope {
+  const { rows, total } = paginatedEnvelope(
+    'lineup',
+    (value) => (isLineupGame(value) ? value : undefined),
+    LINEUP_GAME_ROW,
+    response,
+    request,
+  );
+
+  return { lineup: rows, total };
 }
 
 /** `GET /api/events/:eventId/attendees/:attendeeId/games`: `{ games: [...], pagination }`, paged since #1001. */

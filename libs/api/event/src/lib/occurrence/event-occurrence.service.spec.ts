@@ -31,6 +31,7 @@ import {
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { lineupStillAhead } from '../attendee/attendance';
+import { LINEUP_GAME_SELECT } from '../lineup/lineup-game';
 import { GameRemovedFromEventEvent } from '../nomination/events/nomination.events';
 import { POLICY_VIEW_INCLUDE } from '../policy/policy-view';
 import { OccurrenceEvents } from './constants';
@@ -115,7 +116,22 @@ const game = (id: string, occurrenceId: string) => ({
   occurrenceId,
   platformGameId: `pg-${id}`,
   role: ScheduledGameRole.Primary,
+  sortOrder: 0,
+  notes: null,
+  maxPlayTime: null,
+  nominationId: null,
+  addedById: 'att-host',
   platformGame: { id: `pg-${id}` },
+  suppliedBy: { id: `list-${id}`, attendeeId: 'att-host' },
+});
+
+/** The attendee the supplier read names for every game above. */
+const SUPPLIER = { id: 'att-host', status: EventParticipationStatus.Attending, guestName: null, user: null };
+
+/** A game as the occurrence routes serve it (#799): the lineup shape, its occurrence kept and its supplier named. */
+const servedGame = (id: string, occurrenceId: string) => ({
+  ...game(id, occurrenceId),
+  suppliedBy: { id: `list-${id}`, attendeeId: 'att-host', attendee: SUPPLIER },
 });
 
 describe('EventOccurrenceService', () => {
@@ -148,6 +164,7 @@ describe('EventOccurrenceService', () => {
 
     db.eventAvailabilityVote.findMany.mockResolvedValue([]);
     db.eventGame.findMany.mockResolvedValue([]);
+    db.eventAttendee.findMany.mockResolvedValue([SUPPLIER] as never);
     // The row locks find their row, and the event is not cancelled (#795).
     db.$queryRaw.mockImplementation(((query: unknown) =>
       Promise.resolve(isCancelRead(query) ? [{ cancelledAt: null }] : [])) as never);
@@ -347,11 +364,31 @@ describe('EventOccurrenceService', () => {
         {
           id: 'occ-2',
           availabilityVotes: [],
-          games: [
-            { id: 'g1', platformGameId: 'pg-g1', role: ScheduledGameRole.Primary, platformGame: { id: 'pg-g1' } },
-          ],
+          games: [servedGame('g1', 'occ-2')],
         },
       ]);
+    });
+
+    it("serves each date's games in the lineup shape, occurrenceId kept, suppliers named (#799)", async () => {
+      db.eventAvailabilityVote.findMany.mockResolvedValue([vote('v1', 'occ-1')] as never);
+      db.eventGame.findMany.mockResolvedValue([game('g1', 'occ-1')] as never);
+
+      const { rows } = await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
+
+      expect(db.eventGame.findMany).toHaveBeenCalledWith(expect.objectContaining({ select: LINEUP_GAME_SELECT }));
+      expect(rows[0].games).toEqual([servedGame('g1', 'occ-1')]);
+      expect(rows[0].games[0].suppliedBy.attendee).toEqual(SUPPLIER);
+      // The votes keep today's shape.
+      expect(rows[0].availabilityVotes[0]).not.toHaveProperty('occurrenceId');
+    });
+
+    it("names the games' suppliers from one attendee read under the attendee ceiling (#799)", async () => {
+      db.eventGame.findMany.mockResolvedValue([game('g1', 'occ-1'), game('g2', 'occ-2')] as never);
+
+      await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, { id: { in: ['att-host'] } });
+      expect(db.eventAttendee.findMany).toHaveBeenCalledTimes(1);
     });
 
     // A voter who left keeps their vote. It is served, marked as not
@@ -492,9 +529,7 @@ describe('EventOccurrenceService', () => {
           expect.objectContaining({
             id: 'occ-1',
             availabilityVotes: [servedVote('v1')],
-            games: [
-              { id: 'g1', platformGameId: 'pg-g1', role: ScheduledGameRole.Primary, platformGame: { id: 'pg-g1' } },
-            ],
+            games: [servedGame('g1', 'occ-1')],
           }),
         );
       },
@@ -1136,6 +1171,15 @@ describe('EventOccurrenceService', () => {
       role: ScheduledGameRole.Primary,
     };
 
+    /**
+     * The read for games nobody is bringing finds the one game. The date's own
+     * games, read for the answer, are none: they name a supplier the row above
+     * doesn't carry.
+     */
+    const gamesTakenOff = () =>
+      db.eventGame.findMany.mockImplementation(((args: { where: object }) =>
+        Promise.resolve('suppliedBy' in args.where ? [takenOff] : [])) as never);
+
     beforeEach(() => {
       // Undated, so a confirm isn't refused as a passed date (#1005).
       const row = makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', startDate: null, endDate: null });
@@ -1169,7 +1213,7 @@ describe('EventOccurrenceService', () => {
     it.each(dateWrites)(
       '$name takes off each game still ahead whose supplier is out of the event, or whose entry came off their offered games',
       async ({ name, op }) => {
-        db.eventGame.findMany.mockResolvedValue([takenOff] as never);
+        gamesTakenOff();
 
         await run(name);
 
@@ -1205,7 +1249,7 @@ describe('EventOccurrenceService', () => {
     );
 
     it.each(dateWrites)('$name reports each game it took off, after the date itself', async ({ name }) => {
-      db.eventGame.findMany.mockResolvedValue([takenOff] as never);
+      gamesTakenOff();
 
       await run(name);
 
@@ -1226,7 +1270,7 @@ describe('EventOccurrenceService', () => {
     });
 
     it.each(dateWrites)('$name reports nothing when its transaction fails', async ({ name }) => {
-      db.eventGame.findMany.mockResolvedValue([takenOff] as never);
+      gamesTakenOff();
       db.eventGame.deleteMany.mockRejectedValue(new Error('deadlock detected'));
 
       await expect(run(name)).rejects.toThrow('deadlock detected');
