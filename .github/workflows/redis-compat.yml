@@ -1,0 +1,102 @@
+name: redis-compat
+
+# Runs the api e2e suite against each Redis-compatible server an operator might
+# put behind the API, so a regression in one of them shows up here instead of
+# on an operator's server (#462). `ci.yml` already covers Redis itself;
+# this covers the others.
+#
+# Never a PR gate. Each run is every setup's full suite, split in two shards,
+# and CI runtime is already a cost (#1313). A pull request's author also can't act
+# on a regression in an upstream Redis-compatible server, so a red check there
+# would only block work it can't fix. It runs weekly, and on demand through
+# `workflow_dispatch`.
+#
+# A setup joins the matrix only once the full suite has passed on it locally.
+# One that fails stays out and is recorded in `docs/REDIS.md` instead, so this
+# workflow stays green when nothing regressed and red when something did.
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      server:
+        description: Which Redis-compatible server setup to run, or all of them.
+        type: choice
+        default: all
+        # Static YAML, so it can't be generated from the matrix. Keep this list
+        # in step with the `server` axis in the matrix below.
+        options:
+          - all
+          - valkey
+          - keydb
+          - dragonfly-undeclared-keys
+          - dragonfly-hashtags
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: e2e (${{ matrix.server }} ${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep this list in step with the dispatch input's `options` above.
+        #
+        # Built with `fromJSON`, not an `if` on the job: a job's `if` can't
+        # read the `matrix` context, so it couldn't skip the other setups. A
+        # dispatch that names one setup gets a one-entry axis. A scheduled run
+        # has no `inputs.server` (an empty string), and a dispatch of `all`
+        # takes the same full list.
+        server: ${{ fromJSON((inputs.server && inputs.server != 'all') && format('["{0}"]', inputs.server) || '["valkey","keydb","dragonfly-undeclared-keys","dragonfly-hashtags"]') }}
+        # The literal 2, not `strategy.job-total`: that counts every server
+        # times every shard here, and Jest's `--shard` wants only the shards.
+        shard: [1, 2]
+    # Hard stop for the whole job, setup included. Same budget as `ci.yml`'s
+    # e2e job: npm ci, generation and the build land before the suite starts,
+    # and the suite step below has its own 20-minute cap inside this one.
+    timeout-minutes: 30
+    env:
+      # Off Nx Cloud, for the reasons on `ci.yml`'s e2e job (#259, #684): its
+      # self-healing shouldn't act on e2e failures against real containers.
+      NX_NO_CLOUD: 'true'
+      # Same value and reasoning as `ci.yml`'s e2e job: it covers the Jest
+      # process, prisma migrate and prisma db seed.
+      NODE_ENV: test
+      # Stream every child's full output into the job log so a failure is
+      # diagnosable without a local repro (#259).
+      BGE_E2E_VERBOSE: 'true'
+      # The harness starts this setup's container in place of stock Redis, and
+      # refuses an unknown name instead of falling back to Redis (#462).
+      BGE_E2E_REDIS_SERVER: ${{ matrix.server }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          filter: tree:0
+          fetch-depth: 0
+
+      # `set-shas: 'false'`: nothing here runs `affected`, and on a scheduled
+      # run nx-set-shas would need `actions: read`, which this workflow doesn't
+      # ask for.
+      - uses: ./.github/actions/setup-workspace
+        with:
+          set-shas: 'false'
+
+      # The api bundle externalizes its workspace libraries, so the suite needs
+      # the api and the worker built, with their dependencies. `run-many` on
+      # named projects, not `affected`: a schedule has no base commit to
+      # compare against.
+      - name: Build the api and the worker
+        run: npx nx run-many -t build --projects=@boardgamesempire/api,@boardgamesempire/worker --parallel --maxParallel=3
+
+      # `--outputStyle=stream-without-prefixes` prints the suite's output as it
+      # comes. Otherwise Nx holds it until the task ends, and off Nx Cloud only
+      # about the first 64 KB reached the log (#684).
+      - name: Run e2e suite
+        timeout-minutes: 20
+        run: >-
+          npx nx run @boardgamesempire/api-e2e:e2e
+          --shard=${{ matrix.shard }}/2
+          --outputStyle=stream-without-prefixes

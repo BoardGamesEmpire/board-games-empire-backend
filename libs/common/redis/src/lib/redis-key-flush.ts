@@ -1,3 +1,5 @@
+import { SCAN_PAGE } from './scan-page';
+
 /**
  * A flush that could not finish: the pattern it stopped on and how many keys
  * had already gone, so the log can say which half of the cache is still there
@@ -23,9 +25,6 @@ export interface FlushClient {
   unlink(...keys: string[]): Promise<number>;
   disconnect(): void;
 }
-
-/** Keys per SCAN page: a hint to the server, not a bound. Each page of matches is one UNLINK. */
-const SCAN_PAGE = 500;
 
 /**
  * Removes every key matching each pattern: SCAN the pattern and UNLINK what it

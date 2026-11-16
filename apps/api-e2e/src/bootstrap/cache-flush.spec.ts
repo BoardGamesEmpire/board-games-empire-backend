@@ -18,10 +18,10 @@ import {
 import { PERMISSIONS_CACHE_NAMESPACE, PermissionsService } from '@bge/permissions';
 import { createCacheStore, RedisKeyFlush } from '@bge/redis';
 import type { Logger } from '@nestjs/common';
-import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
 import Redis from 'iovalkey';
 import { API_CACHE_NAMESPACE, apiCacheKey, permissionsCacheKey } from '../support/api-cache';
-import { REDIS_IMAGE } from '../support/e2e-env';
+import type { StartedRedisServer } from '../support/redis-server';
+import { selectRedisServer, startRedisServer } from '../support/redis-server';
 import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../support/test-db';
 
 /**
@@ -38,7 +38,7 @@ import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../su
  * store stands by untouched. DB-only on the harness database, which is in
  * sync and seeded, so removing one grant is what makes the next reconcile
  * write. The DB-only runner provisions no Redis, so this spec starts its own
- * container.
+ * container, of the Redis-compatible server the run selected (#462).
  */
 
 const silent: BootstrapLogger = { log: () => undefined, warn: () => undefined };
@@ -80,13 +80,13 @@ const SHIPPED = DATA_MIGRATIONS.map((shipped) => shipped.name);
 
 describe('the cache flush after a reconcile that wrote rows or a data migration that applied', () => {
   let db: TestDatabase;
-  let container: StartedRedisContainer;
+  let server: StartedRedisServer;
   let redis: Redis;
 
   beforeAll(async () => {
     db = createTestDatabase();
-    container = await new RedisContainer(REDIS_IMAGE).start();
-    redis = new Redis(container.getConnectionUrl());
+    server = await startRedisServer(selectRedisServer(process.env));
+    redis = new Redis(server.connectionUrl);
   }, 120_000);
 
   afterEach(async () => {
@@ -96,7 +96,7 @@ describe('the cache flush after a reconcile that wrote rows or a data migration 
 
   afterAll(async () => {
     await redis.quit();
-    await container.stop();
+    await server.stop();
     await db.close();
   });
 
@@ -194,4 +194,48 @@ describe('the cache flush after a reconcile that wrote rows or a data migration 
     expect(summary.dataMigrations).toEqual({ applied: [], unknown: SHIPPED, cachesFlushed: false });
     expect(await present(CACHED)).toEqual([1, 1, 1, 1, 1, 1]);
   });
+
+  // KeyDB 6.3 serves a SCAN of COUNT 100 or more asynchronously and holds the
+  // next command on that connection until the connection sends again. The scan
+  // stream reads ahead, so at COUNT 500 about two flushes in three left the last
+  // page's UNLINK held and the flush never resolved (#462). Ten rounds over a
+  // keyspace of several pages make a recurrence all but certain; the 2 s command
+  // timeout turns a held UNLINK into a failure, not a hung suite.
+  it('resolves every flush of a keyspace of several scan pages, with no matching key left (#462)', async () => {
+    const client = new Redis(server.connectionUrl, { commandTimeout: 2000 });
+    const matching = Array.from({ length: 1000 }, (_, index) =>
+      permissionsCacheKey(PermissionsService.userGraphCacheKey(`flood-${index}`)),
+    );
+    const others = Array.from({ length: 2000 }, (_, index) => `bge:flush-flood:other-${index}`);
+
+    async function seed(): Promise<void> {
+      const pipeline = client.pipeline();
+
+      for (const key of [...matching, ...others]) {
+        pipeline.set(key, '1');
+      }
+
+      await pipeline.exec();
+    }
+
+    try {
+      // The test before leaves its primed graphs under the patterns; the counts below are the seeded keys alone.
+      await client.del(...CACHED);
+
+      for (let round = 0; round < 10; round++) {
+        await seed();
+
+        await expect(new RedisKeyFlush(client, PATTERNS).flush()).resolves.toBe(matching.length);
+
+        expect(await client.exists(...matching)).toBe(0);
+        expect(await client.exists(...others)).toBe(others.length);
+      }
+    } finally {
+      try {
+        await client.del(...others);
+      } finally {
+        client.disconnect();
+      }
+    }
+  }, 60_000);
 });

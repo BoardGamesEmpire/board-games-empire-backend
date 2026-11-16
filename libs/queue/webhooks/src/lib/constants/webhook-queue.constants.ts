@@ -5,8 +5,12 @@
  * `@bge/webhooks`.
  */
 
-/** BullMQ queue carrying one job per (event, subscription) delivery. */
-export const WEBHOOK_QUEUE_NAME = 'webhook-delivery';
+/**
+ * BullMQ queue carrying one job per (event, subscription) delivery.
+ * Braces are a Redis hash tag: Dragonfly places a queue's keys on one thread by it,
+ * and `--lock_on_hashtags` needs it (#462; see docs/REDIS.md).
+ */
+export const WEBHOOK_QUEUE_NAME = '{bge.webhooks.delivery}';
 
 /** Single job name on the delivery queue. */
 export const WEBHOOK_DELIVERY_JOB = 'deliver';

@@ -1,8 +1,8 @@
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import type { StartedRedisContainer } from '@testcontainers/redis';
 import type { ChildProcess } from 'node:child_process';
 import type { FakeSignInProvider } from './fake-sign-in-provider';
 import type { StartedMailpit } from './mailpit';
+import type { StartedRedisServer } from './redis-server';
 
 /**
  * Handles started by `global-setup` and stopped by `global-teardown`:
@@ -16,7 +16,7 @@ import type { StartedMailpit } from './mailpit';
  */
 export interface E2EGlobalState {
   readonly postgres?: StartedPostgreSqlContainer;
-  readonly redis?: StartedRedisContainer;
+  readonly redis?: StartedRedisServer;
   readonly mailpit?: StartedMailpit;
   readonly api?: ChildProcess;
   readonly signInProvider?: FakeSignInProvider;

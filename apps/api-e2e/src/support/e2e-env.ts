@@ -25,6 +25,9 @@ export const E2E_DATABASE_CONTAINER_ADDRESS_VAR = 'BGE_E2E_DATABASE_CONTAINER_AD
 /** Escape hatch: point the suite at an existing Redis instead of a container. */
 export const E2E_REDIS_URL_VAR = 'BGE_E2E_REDIS_URL';
 
+/** Names the Redis-compatible server a run starts (#462): one of the names in `redis-server.ts`. */
+export const E2E_REDIS_SERVER_VAR = 'BGE_E2E_REDIS_SERVER';
+
 /**
  * Whether the harness provisioned the Redis server itself. Published by
  * `global-setup` for BOTH provisioning modes (see
@@ -65,7 +68,6 @@ export const API_PORT_VAR = 'PORT';
 export const E2E_PLUGINS_ROOT_VAR = 'BGE_E2E_PLUGINS_ROOT';
 
 export const POSTGRES_IMAGE = 'postgres:17-alpine';
-export const REDIS_IMAGE = 'redis:7-alpine';
 
 /**
  * The SMTP server outgoing mail reaches in the suite (#654). Mailpit keeps
@@ -333,10 +335,22 @@ export interface ProvisioningDecision {
  * escape hatch). External endpoints are treated as DISPOSABLE: migrations,
  * seeds, and the truncate sweep all run against them, and the bootstrap spec
  * creates and drops a sibling database in the same cluster (CREATEDB).
+ *
+ * Naming a Redis-compatible server (`BGE_E2E_REDIS_SERVER`) beside an external
+ * Redis is refused (#462): the harness starts the named one only as a
+ * container, so the run would report it while testing whatever the URL points
+ * at.
  */
 export function decideProvisioning(env: Readonly<Record<string, string | undefined>>): ProvisioningDecision {
   const databaseUrl = env[E2E_DATABASE_URL_VAR]?.trim();
   const redisUrl = env[E2E_REDIS_URL_VAR]?.trim();
+
+  if (redisUrl && env[E2E_REDIS_SERVER_VAR]?.trim()) {
+    throw new Error(
+      `${E2E_REDIS_SERVER_VAR} and ${E2E_REDIS_URL_VAR} are both set. ${E2E_REDIS_SERVER_VAR} names the ` +
+        `Redis-compatible server the harness starts, and ${E2E_REDIS_URL_VAR} skips starting one; unset one of them.`,
+    );
+  }
 
   return {
     database: databaseUrl ? { mode: 'external', url: databaseUrl } : { mode: 'container' },

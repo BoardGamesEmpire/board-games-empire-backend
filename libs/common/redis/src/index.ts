@@ -6,3 +6,4 @@ export * from './lib/redis-connection.config';
 export * from './lib/redis-key-flush';
 export * from './lib/redis.module';
 export * from './lib/redis.tokens';
+export * from './lib/scan-page';

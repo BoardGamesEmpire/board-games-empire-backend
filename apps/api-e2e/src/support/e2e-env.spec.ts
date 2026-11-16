@@ -11,6 +11,7 @@ import {
   E2E_DATABASE_URL_VAR,
   E2E_MAILPIT_VAR,
   E2E_OWNS_REDIS_VAR,
+  E2E_REDIS_SERVER_VAR,
   E2E_REDIS_URL_VAR,
   fakeProviderEnv,
   parseRedisUrl,
@@ -48,6 +49,16 @@ describe('e2e-env (pure logic)', () => {
 
       expect(decision.database).toEqual({ mode: 'external', url: 'postgresql://bge:pw@localhost:5433/e2e' });
       expect(decision.redis).toEqual({ mode: 'container' });
+    });
+
+    it('refuses a Redis-compatible server name beside an external Redis, naming both variables (#462)', () => {
+      // The URL sends the suite to a Redis-compatible server the harness did
+      // not start, so the run would report the named one while testing
+      // whatever the URL is.
+      const both = { [E2E_REDIS_URL_VAR]: 'redis://h:1', [E2E_REDIS_SERVER_VAR]: 'valkey' };
+
+      expect(() => decideProvisioning(both)).toThrow(new RegExp(E2E_REDIS_URL_VAR));
+      expect(() => decideProvisioning(both)).toThrow(new RegExp(E2E_REDIS_SERVER_VAR));
     });
   });
 

@@ -70,7 +70,7 @@ describe('plugin install ingress (#1094)', () => {
           readsCore: ['Feedback'],
           writesCore: [],
         },
-        jobs: { queues: [`plugin:${slug}:digest`], schedules: [{ name: 'weekly-digest', cron: '0 9 * * 1' }] },
+        jobs: { queues: [`plugin.${slug}.digest`], schedules: [{ name: 'weekly-digest', cron: '0 9 * * 1' }] },
       }),
     };
     const entries: PluginTarballEntry[] = [

@@ -74,7 +74,7 @@ describe('a data-gateway plugin’s DataGateway row (#1083)', () => {
         readsCore: ['Feedback'],
         writesCore: [],
       },
-      jobs: { queues: [`plugin:${slug}:digest`], schedules: [{ name: 'weekly-digest', cron: '0 9 * * 1' }] },
+      jobs: { queues: [`plugin.${slug}.digest`], schedules: [{ name: 'weekly-digest', cron: '0 9 * * 1' }] },
       ...overrides,
     });
   };

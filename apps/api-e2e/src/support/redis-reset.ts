@@ -1,3 +1,4 @@
+import { SCAN_PAGE } from '@bge/redis/scan-page';
 import Redis, { type RedisOptions } from 'iovalkey';
 import { E2E_OWNS_REDIS_VAR, E2E_REDIS_FLUSH_OK_VAR, E2E_REDIS_URL_VAR, type RedisEnvPrefix } from './e2e-env';
 
@@ -97,7 +98,9 @@ export async function sweepThrottleBuckets(env: NodeJS.ProcessEnv = process.env)
 
   try {
     do {
-      const [next, keys] = await client.scan(cursor, 'MATCH', THROTTLE_KEY_PATTERN, 'COUNT', 500);
+      // Each SCAN is awaited before the DEL is sent, so KeyDB 6.3 would not hold
+      // the DEL even at a larger COUNT; SCAN_PAGE keeps every SCAN on one value (#462).
+      const [next, keys] = await client.scan(cursor, 'MATCH', THROTTLE_KEY_PATTERN, 'COUNT', SCAN_PAGE);
       cursor = next;
 
       if (keys.length > 0) {

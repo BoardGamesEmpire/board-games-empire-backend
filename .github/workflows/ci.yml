@@ -101,6 +101,16 @@ jobs:
 
       - uses: ./.github/actions/setup-workspace
 
+      # Every BullMQ queue name must carry a Redis hash tag, as in
+      # `{bge.mail.delivery}`: a Redis-compatible server that locks on hash tags
+      # (Dragonfly with `--lock_on_hashtags`) rejects BullMQ's multi-key scripts
+      # on an unbraced queue (#462). Whole-tree and uncached for the same reason
+      # as the spec swcrc check above: a queue registered in another project is
+      # not an input of this one's `test` target. It sits after the install
+      # because it parses with `typescript` from `node_modules`.
+      - name: Check BullMQ queue hash tags
+        run: node libs/scripts/src/bin/check-queue-hash-tags.js
+
       - name: Clean stale dist directories
         run: find libs apps -name "dist" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 

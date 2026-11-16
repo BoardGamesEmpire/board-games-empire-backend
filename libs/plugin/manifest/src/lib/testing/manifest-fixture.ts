@@ -77,7 +77,7 @@ export const buildPluginManifest = (overrides: PluginManifestOverrides = {}): Pl
       writesCore: [],
     },
     jobs: {
-      queues: ['plugin:demo-sink:digest'],
+      queues: ['plugin.demo-sink.digest'],
       schedules: [{ name: 'weekly-digest', cron: '0 9 * * 1' }],
     },
     config: {

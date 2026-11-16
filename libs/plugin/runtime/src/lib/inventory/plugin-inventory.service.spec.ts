@@ -757,7 +757,7 @@ describe('PluginInventoryService', () => {
         slug: 'broken-schema',
         events: { emits: ['plugin.broken-schema.digest-sent'] },
         storage: { ownTables: ['plugin_broken_schema_digests'] },
-        jobs: { queues: ['plugin:broken-schema:digest'] },
+        jobs: { queues: ['plugin.broken-schema.digest'] },
         config: { schema: { type: 'no-such-type' } },
       });
       db.plugin.findMany.mockResolvedValue([

@@ -4,8 +4,12 @@
  * only process that connects to an SMTP server.
  */
 
-/** BullMQ queue carrying one job per outgoing mail. */
-export const MAIL_QUEUE_NAME = 'mail-delivery';
+/**
+ * BullMQ queue carrying one job per outgoing mail.
+ * Braces are a Redis hash tag: Dragonfly places a queue's keys on one thread by it,
+ * and `--lock_on_hashtags` needs it (#462; see docs/REDIS.md).
+ */
+export const MAIL_QUEUE_NAME = '{bge.mail.delivery}';
 
 /** Single job name on the mail queue. */
 export const MAIL_DELIVERY_JOB = 'deliver';

@@ -44,7 +44,7 @@ wrong-sink delivery).
    `feedback.report.submitted`.
 2. **Producer** (`FeedbackDispatcherService`, API process): resolves the sinks
    that accept the report's category and enqueues one BullMQ job per sink on the
-   `feedback-delivery` queue. Fan-out is isolated per sink and never throws back
+   `{bge.feedback.delivery}` queue. Fan-out is isolated per sink and never throws back
    into the emitter. Deterministic `jobId` (`feedback:<reportId>:<sinkSlug>`)
    dedups a re-emitted event to one delivery. Actor + correlation ride the
    `__meta` envelope (`wrapJobData`).

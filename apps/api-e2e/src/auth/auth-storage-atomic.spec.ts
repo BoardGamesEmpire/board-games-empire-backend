@@ -1,10 +1,10 @@
 import { AUTH_CLIENT_IP_HEADER, authFactory, createRedisAuthStorage, type CompleteAuthStorage } from '@bge/auth';
 import type { PrismaClient } from '@bge/database';
 import { ConfigService } from '@nestjs/config';
-import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
 import Redis from 'iovalkey';
 import { apiCacheKey } from '../support/api-cache';
-import { REDIS_IMAGE } from '../support/e2e-env';
+import type { StartedRedisServer } from '../support/redis-server';
+import { selectRedisServer, startRedisServer } from '../support/redis-server';
 
 /**
  * better-auth's storage over a real Redis, doing in one step each what
@@ -17,7 +17,9 @@ import { REDIS_IMAGE } from '../support/e2e-env';
  * each step is a Redis command, which an in-memory store can't stand in for.
  * Each instance here is one api process, so two instances over two clients are
  * two processes sharing one Redis. Like `bootstrap/cache-flush.spec.ts`, this
- * spec starts its own container.
+ * spec starts its own container, of the Redis-compatible server the run selected
+ * (#462), so the single steps are shown on that server rather than on stock
+ * Redis.
  */
 
 /** The configuration an instance needs to build, with email and password sign-in on. */
@@ -66,21 +68,21 @@ async function signIn(auth: ReturnType<typeof authFactory>, clientIp: string): P
 }
 
 describe("better-auth's storage over Redis", () => {
-  let container: StartedRedisContainer;
+  let server: StartedRedisServer;
   let redisA: Redis;
   let redisB: Redis;
 
   beforeAll(async () => {
-    container = await new RedisContainer(REDIS_IMAGE).start();
-    redisA = new Redis(container.getConnectionUrl());
-    redisB = new Redis(container.getConnectionUrl());
+    server = await startRedisServer(selectRedisServer(process.env));
+    redisA = new Redis(server.connectionUrl);
+    redisB = new Redis(server.connectionUrl);
   }, 120_000);
 
   afterEach(() => jest.restoreAllMocks());
 
   afterAll(async () => {
     await Promise.all([redisA.quit(), redisB.quit()]);
-    await container.stop();
+    await server.stop();
   });
 
   describe('rate-limit counts', () => {

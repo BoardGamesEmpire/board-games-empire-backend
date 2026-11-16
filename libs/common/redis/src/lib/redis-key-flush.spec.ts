@@ -62,6 +62,19 @@ describe('RedisKeyFlush', () => {
     ]);
   });
 
+  it('scans in pages under 100, since KeyDB 6.3 holds a command sent behind a SCAN of COUNT 100 or more (#462)', async () => {
+    const client = fakeClient({ [USERS]: [['namespace:permissions:cache:bge:user:permissions:u1']] });
+
+    await new RedisKeyFlush(client, [USERS, KEYS]).flush();
+
+    expect(client.scans).toHaveLength(2);
+
+    for (const scan of client.scans) {
+      expect(scan.count).toBeDefined();
+      expect(scan.count).toBeLessThan(100);
+    }
+  });
+
   it('sends no UNLINK for a pattern that yields only empty pages, and reports zero', async () => {
     const client = fakeClient({ [USERS]: [[], []] });
 

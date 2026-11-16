@@ -10,6 +10,11 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./scan-page": {
+      "types": "./src/lib/scan-page.ts",
+      "import": "./src/lib/scan-page.ts",
+      "default": "./src/lib/scan-page.ts"
+    },
     "./package.json": "./package.json"
   },
   "nx": {

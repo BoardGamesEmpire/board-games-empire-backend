@@ -161,12 +161,20 @@ describe('createRedisAuthStorage', () => {
     expect(commands).toEqual([
       [
         'eval',
-        expect.stringMatching(/INCR[\s\S]*PEXPIRE[\s\S]*'NX'/),
+        expect.stringMatching(/INCR[\s\S]*PTTL[\s\S]*== -1[\s\S]*PEXPIRE/),
         1,
         'namespace:api:cache:auth_198.51.100.4/sign-in/email',
         10_000,
       ],
     ]);
+  });
+
+  it("sets the expiry without PEXPIRE's NX option, which needs Redis 7.0 and fails on KeyDB 6.3 (#462)", async () => {
+    const { client, commands } = recordingClient();
+
+    await createRedisAuthStorage(client).increment('198.51.100.4/sign-in/email', 10);
+
+    expect(commands[0][1]).not.toMatch(/'NX'/);
   });
 
   it('rounds a window that is not whole milliseconds up, as PEXPIRE takes whole ones (#832)', async () => {
