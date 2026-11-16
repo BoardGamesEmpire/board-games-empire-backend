@@ -8,9 +8,12 @@ import { AttendeeEvents } from '../constants';
  *
  * Payloads carry ROW STATE (before/after snapshots) plus listener-facing
  * context fields; the acting actor, source, and correlationId live in CLS and
- * are read at handle time — never on the payload. All events here are audited
- * by default (opt out per class with `@Auditable(false)`); only before/after
- * reach the audit row, so context fields stay out of persistence.
+ * are read at handle time. The one exception is the acting user's id on
+ * {@link AttendeeRemovedEvent} and {@link AttendeeStatusUpdatedEvent}, a
+ * context field for the listener that spares them the notification (#802).
+ * All events here are audited by default (opt out per class with
+ * `@Auditable(false)`); only before/after reach the audit row, so context
+ * fields stay out of persistence.
  */
 
 type AttendeeAddedSnapshot = Readonly<
