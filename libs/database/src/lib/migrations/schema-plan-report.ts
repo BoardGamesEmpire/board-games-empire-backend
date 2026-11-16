@@ -122,12 +122,15 @@ function divergedHeadLines(diverged: readonly string[]): string[] {
  * database: rebuild the database from this build's migrations. The boot's
  * warning reaches production logs too, so the rebuild says it is for a
  * development database: the image has no npm scripts, and the rebuild deletes
- * the data.
+ * the data. A quote in a name is doubled, so the DELETE runs as printed:
+ * `migrate deploy` applies a hand-named directory as it is.
  */
 export function divergedFixLines(names: readonly string[]): string[] {
   return [
     "For one renamed or deleted, whose changes this build's migrations already made, delete its ledger row: " +
-      names.map((name) => `DELETE FROM _prisma_migrations WHERE migration_name = '${name}';`).join(' '),
+      names
+        .map((name) => `DELETE FROM _prisma_migrations WHERE migration_name = '${name.replaceAll("'", "''")}';`)
+        .join(' '),
     DEVELOPMENT_DATABASE_RESET_LINE,
   ];
 }

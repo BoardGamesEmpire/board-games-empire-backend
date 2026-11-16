@@ -121,5 +121,17 @@ describe('describeSchemaReport', () => {
         'Schema: ahead by 1 migration(s); the boot skips the seeds and the data migrations.',
       );
     });
+
+    it('doubles a quote in a migration name, so the DELETE it prints runs as written', () => {
+      // `migrate deploy` applies a hand-named directory as it is; the
+      // manifest generator escapes the same quote for the same reason.
+      const report = describeSchemaReport(
+        state({ kind: 'diverged', unknown: ["20260215_owner's_fix"], diverged: ["20260215_owner's_fix"] }),
+      );
+
+      expect(report.lines.join('\n')).toContain(
+        "DELETE FROM _prisma_migrations WHERE migration_name = '20260215_owner''s_fix';",
+      );
+    });
   });
 });
