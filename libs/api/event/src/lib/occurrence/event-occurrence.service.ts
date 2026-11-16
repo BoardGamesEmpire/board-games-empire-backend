@@ -3,6 +3,7 @@ import {
   AvailabilityResponse,
   DatabaseService,
   EventAvailabilityVote,
+  EventOccurrence,
   EventParticipationStatus,
   EventSchedulingMode,
   isPrismaDependentRecordNotFoundError,
