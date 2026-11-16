@@ -1,11 +1,4 @@
-import {
-  PluginGrantScope,
-  PluginGrantStatus,
-  PluginScope,
-  PluginUnitDormantReason,
-  RiskLevel,
-  type Plugin,
-} from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel, type Plugin } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import request from 'supertest';
@@ -271,32 +264,32 @@ describe('plugin unit enablement + feature state (#323)', () => {
     });
 
     /**
-     * D-CL over the wire. The row a scope narrowing left behind is dormant, and
-     * #354's list puts it in front of the household admin — so the one lever
+     * A unit enablement a re-scope to server left behind is dormant, and
+     * #354's list puts it in front of the household admin, so the one lever
      * they could sensibly pull has to work, while the two writers that would
-     * have to invent a surface keep refusing.
+     * have to invent a surface keep refusing. The plugin's manifest is the
+     * cause; nothing about dormancy is written to the unit enablement (#1151).
      */
-    it('lets an admin switch OFF a dormant row on a re-scoped plugin, while enable and config still refuse', async () => {
+    it('lets an admin switch off a unit on a re-scoped plugin, and nothing else (#1151)', async () => {
       const owner = await actors.user();
       const { household } = await actors.householdWithMembers({ owner });
       const plugin = await arrangePlugin({ scope: 'server', permissions: { checks: [MANAGE_DIGEST_CHECK] } });
       await db.client.householdPlugin.create({
-        data: {
-          householdId: household.id,
-          pluginId: plugin.id,
-          enabled: true,
-          dormantReason: PluginUnitDormantReason.ScopeOrphaned,
-          dormantAt: new Date(),
-        },
+        data: { householdId: household.id, pluginId: plugin.id, enabled: true },
       });
 
       const disabled = await disableHousehold(owner, household.id, plugin.slug).expect(200);
       expect(disabled.body.unit).toMatchObject({ enabled: false });
+      expect(await unitRow(household.id, plugin.id)).toMatchObject({ enabled: false, config: {} });
 
-      // The dormancy survives the switch: the two are independent, and a
-      // re-scope back must restore the admin's own intent.
-      const row = await unitRow(household.id, plugin.id);
-      expect(row).toMatchObject({ enabled: false, dormantReason: PluginUnitDormantReason.ScopeOrphaned });
+      // The dormancy survives the switch: the two are independent, so the
+      // list still says why switching on again would not help.
+      const listed = await request(baseUrl)
+        .get(`/api/households/${household.id}/plugins?limit=100`)
+        .set(owner.headers)
+        .expect(200);
+      const entry = listed.body.plugins.find((candidate: { slug: string }) => candidate.slug === plugin.slug);
+      expect(entry).toMatchObject({ unit: { anchored: true, enabled: false, state: 'off', dormancy: 'unavailable' } });
 
       const enabled = await enableHousehold(owner, household.id, plugin.slug).expect(422);
       expect(enabled.body.code).toBe('PLUGIN_UNIT_SCOPE');
@@ -377,19 +370,33 @@ describe('plugin unit enablement + feature state (#323)', () => {
       expect((await unitRow(household.id, plugin.id))?.enabled).toBe(false);
     });
 
-    it('idempotency outranks the gate: re-enabling an ALREADY-ENABLED unit with stale retained config stays 200', async () => {
+    it('a switch-on sent again for a unit already on whose retained document no longer conforms is refused with the violations, not answered as changing nothing (#1151)', async () => {
       const owner = await actors.user();
       const { household } = await actors.householdWithMembers({ owner });
       const plugin = await arrangePlugin(requiringConfig);
-      // An enabled, serving unit whose config predates the schema
-      // requirement — a retry of a previously successful enable must not
-      // 409 a unit that never left service.
+      // Switched on, its decision standing, holding a document that predates
+      // the schema's requirement: the read reports it needs_configuration, so
+      // a switch-on answering "nothing to change" would tell the admin the
+      // unit runs when it does not (#1151).
+      await arrangeHouseholdDecision(household.id, plugin.id, HOUSEHOLD_CHECK.slug, PluginGrantStatus.Granted);
       await db.client.householdPlugin.create({
         data: { householdId: household.id, pluginId: plugin.id, enabled: true, config: {} },
       });
+      const before = await unitRow(household.id, plugin.id);
 
-      const response = await enableHousehold(owner, household.id, plugin.slug).expect(200);
-      expect(response.body.unit).toMatchObject({ enabled: true });
+      const refused = await enableHousehold(owner, household.id, plugin.slug).expect(409);
+      expect(refused.body.code).toBe('PLUGIN_UNIT_CONFIG_REQUIRED');
+      expect(refused.body.issues).toEqual([expect.objectContaining({ keyword: 'required' })]);
+      expect(await unitRow(household.id, plugin.id)).toEqual(before);
+      expect(await db.client.pluginConsentAct.count({ where: { pluginId: plugin.id } })).toBe(0);
+
+      // The control: once the household writes a conforming document, the
+      // same switch-on is the one that changes nothing again.
+      await patchHouseholdConfig(owner, household.id, plugin.slug, { webhookUrl: 'https://example.test/hook' }).expect(
+        200,
+      );
+      const again = await enableHousehold(owner, household.id, plugin.slug).expect(200);
+      expect(again.body).toMatchObject({ changed: false, unit: { enabled: true } });
     });
 
     it('config PATCH validates, persists last-writer-wins, and 404s a never-enabled household', async () => {

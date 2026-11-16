@@ -553,6 +553,45 @@ describe('consent acts (#1150)', () => {
       expect(await decisionsAt(plugin.id, PluginGrantScope.Household, householdId)).toEqual(decisionsBefore);
       expect(await householdUnit(householdId, plugin.id)).toEqual(unitBefore);
     });
+
+    it('refuses a switch-on with no configuration when {} fails the schema, though the manifest does not require configuration (#1151)', async () => {
+      // A household with no unit enablement holds `{}`, and the read works out
+      // its dormancy from that document. A switch-on that left the unit
+      // switched on over a document the schema rejects would read
+      // needs_configuration at once, so the gate judges the document whether
+      // or not the manifest sets requiresHouseholdConfig.
+      const { owner, householdId, unit } = await household();
+      const checks = [MANAGE_DIGEST_CHECK, HOUSEHOLD_REQUIRED];
+      const active = manifestWith('1.2.0', checks);
+      const plugin = await arrangePlugin(checks, {
+        manifestJson: {
+          ...active,
+          config: {
+            schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+            requiresHouseholdConfig: false,
+          },
+        },
+      });
+      const surface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
+      const body = switchOnBody(surface, { [HOUSEHOLD_REQUIRED.slug]: PluginGrantStatus.Granted });
+
+      const refused = await sendSwitchOn(baseUrl, owner, unit, plugin.slug, body).expect(409);
+
+      expect(refused.body).toMatchObject({
+        code: 'PLUGIN_UNIT_CONFIG_REQUIRED',
+        slug: plugin.slug,
+        issues: [expect.objectContaining({ keyword: 'required' })],
+      });
+      expect(await db.client.pluginConsentAct.count({ where: { pluginId: plugin.id } })).toBe(0);
+      await expectNothingWritten(plugin.id, householdId);
+
+      // The control: the same switch-on supplying a conforming document is
+      // accepted, so the refusal above is the configuration gate's.
+      const config = { webhookUrl: 'https://example.test/hook' };
+
+      await sendSwitchOn(baseUrl, owner, unit, plugin.slug, { ...body, config }).expect(200);
+      expect(await householdUnit(householdId, plugin.id)).toMatchObject({ enabled: true, config });
+    });
   });
 
   describe('toggle', () => {

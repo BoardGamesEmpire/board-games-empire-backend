@@ -1,5 +1,5 @@
 import { PluginCategory, PluginScope, RiskLevel, type Plugin, type PrismaClient } from '@bge/database';
-import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
@@ -9,6 +9,13 @@ export { INVENTORY_STAGING_ID };
 export interface InventoryPluginOptions {
   /** Columns written over the installed defaults: `uninstalledAt`, `scope`, and so on. */
   readonly row?: Record<string, unknown>;
+  /**
+   * The manifest's scope and config section. A household unit's dormancy is
+   * worked out from these, not from the row's `scope` column (#1151), so a
+   * test that reads a household unit's state sets them here. The row's
+   * `scope` follows the manifest's unless `row` names one.
+   */
+  readonly manifest?: { readonly scope?: PluginManifest['scope']; readonly config?: PluginManifest['config'] };
   /** Stages an update to this version: the same manifest, pending approval. */
   readonly stagedVersion?: string;
 }
@@ -46,6 +53,7 @@ export const arrangeInventoryPlugin = async (
         },
       ],
     },
+    ...options.manifest,
   });
 
   const staged =
