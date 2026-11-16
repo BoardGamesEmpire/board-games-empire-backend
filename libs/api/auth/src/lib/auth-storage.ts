@@ -38,11 +38,16 @@ const STORE_NAMESPACE = 'api:cache';
  * Lua script, which Redis runs (not Node), so the count and its expiry are one
  * command. Concurrent requests each get a count of their own, and a failed
  * script rejects `EVAL`, where a MULTI's `exec()` would resolve with the error
- * beside its reply. `NX` sets the expiry only on a count that has none, so a
- * later request in the window doesn't push it out.
+ * beside its reply. The `PTTL` check sets the expiry only on a count that has
+ * none (`PTTL` is -1 only for a key with no expiry, and the key always exists
+ * after `INCR`), so a later request in the window doesn't push it out. It is
+ * not `PEXPIRE ... NX`: `NX` needs Redis 7.0, and KeyDB 6.3 is a Redis 6 fork
+ * that rejects it (#462).
  */
 const INCREMENT_SCRIPT = `local count = redis.call('INCR', KEYS[1])
-redis.call('PEXPIRE', KEYS[1], ARGV[1], 'NX')
+if redis.call('PTTL', KEYS[1]) == -1 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
 return count`;
 
 /**
