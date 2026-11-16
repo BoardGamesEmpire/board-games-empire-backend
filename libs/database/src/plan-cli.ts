@@ -36,8 +36,10 @@ import { classifyMigrationState, describeSchemaReport, MIGRATION_NAMES, readAppl
  * of this build the boot skips both, so neither decides the exit code: the
  * catalog is still planned, as `db:seed`'s preview, and the data migrations
  * are not, since no CLI applies them and this build's registry is not the one
- * a newer build's ledger answers to. Nothing here takes the bootstrap lock, so
- * the answer is a reading, not a promise. Exits 0 when the boot would write
+ * a newer build's ledger answers to. Over a diverged database, one whose
+ * unknown migrations a run before the last applied, the boot runs both as
+ * over one in sync, so both are planned and count (#1148). Nothing here takes
+ * the bootstrap lock, so the answer is a reading, not a promise. Exits 0 when the boot would write
  * nothing, 1 when it would (migrations, catalog rows or data migrations), 2
  * when it would refuse (a half-applied migration, a plugin-owned row the
  * manifest claims, an applied data migration at a revision above the ledger's

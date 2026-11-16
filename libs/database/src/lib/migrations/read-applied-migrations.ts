@@ -19,7 +19,7 @@ type Queryable = Pick<PrismaClient, '$queryRaw'> | Pick<Prisma.TransactionClient
 export async function readAppliedMigrations(client: Queryable): Promise<AppliedMigrationRow[]> {
   try {
     return await client.$queryRaw<AppliedMigrationRow[]>`
-      SELECT migration_name, finished_at, rolled_back_at
+      SELECT migration_name, started_at, finished_at, rolled_back_at
       FROM _prisma_migrations
       ORDER BY migration_name`;
   } catch (error) {

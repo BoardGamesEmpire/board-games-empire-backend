@@ -686,6 +686,43 @@ describe('the boot sequence against Postgres', () => {
       }
     });
 
+    it('warns about a migration renamed away and boots, running the seeds: a known migration finished after it (#1148)', async () => {
+      const name = '20261104120000_renamed_away';
+      await sandboxAdmin.query(
+        "INSERT INTO _prisma_migrations (id, checksum, migration_name, started_at, finished_at, applied_steps_count) VALUES ($1, $2, $3, '2000-01-01', '2000-01-01', 1)",
+        [randomUUID(), 'a'.repeat(64), name],
+      );
+      const logger = recordingLogger();
+      const seeder = new CountingSeeder();
+      const lock = lockOn(sandboxUrl(), 'diverged', logger);
+
+      try {
+        const summary = await runBootstrapSequence({
+          expected: MIGRATION_NAMES,
+          ledger: new PrismaSchemaLedger(sandbox.client),
+          lock,
+          seeder,
+          dataMigrations: noDataMigrations,
+          migrator: new CountingMigrator(),
+          logger,
+        });
+
+        expect(summary.state).toBe('diverged');
+        expect(summary.divergedMigrations).toEqual([name]);
+        expect(summary.seedsRun).toBe(true);
+        expect(seeder.spans).toHaveLength(1);
+        expect(
+          logger.lines.some(
+            (line) =>
+              line.startsWith('warn: ') && line.includes(name) && line.includes('DELETE FROM _prisma_migrations'),
+          ),
+        ).toBe(true);
+      } finally {
+        await lock.close();
+        await sandboxAdmin.query('DELETE FROM _prisma_migrations WHERE migration_name = $1', [name]);
+      }
+    });
+
     it('names only holders in its own database: the same key held in another database is not the blocker', async () => {
       // Advisory keys are per database, but `pg_locks` lists the whole cluster.
       const sandboxPid = (await sandboxAdmin.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
