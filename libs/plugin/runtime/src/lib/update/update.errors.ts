@@ -135,6 +135,27 @@ export class PluginUpdatePendingConflictError extends Error {
   }
 }
 
+/**
+ * The update makes the plugin a data-gateway plugin, so activating it places
+ * the plugin's DataGateway row, and another DataGateway holds the name the
+ * row would take (#1083). Renaming the holder is the only way on, because
+ * `DataGateway.name` is unique across every row, a deleted one included
+ * (#754). Nothing of the update is activated, and a staged one stays staged.
+ */
+export class PluginUpdateDataGatewayNameConflictError extends Error {
+  override readonly name = 'PluginUpdateDataGatewayNameConflictError';
+
+  constructor(
+    public readonly slug: string,
+    /** The DataGateway name the update would have taken. */
+    public readonly dataGatewayName: string,
+  ) {
+    super(
+      `Plugin '${slug}' cannot be updated into a data-gateway plugin: a DataGateway named '${dataGatewayName}' already exists`,
+    );
+  }
+}
+
 /** `approve`/`reject` addressed a plugin with no staged pending update. */
 export class PluginUpdateNoPendingError extends Error {
   override readonly name = 'PluginUpdateNoPendingError';

@@ -40,6 +40,7 @@ import {
   PluginInstallAuthorityError,
   PluginInstallConflictError,
   PluginInstallCriticalConfirmationError,
+  PluginInstallDataGatewayNameConflictError,
   PluginInstallForbiddenPermissionError,
   PluginInstallManifestError,
   PluginInstallPermissionCollisionError,
@@ -67,6 +68,7 @@ import {
   PluginUpdateAuthorityError,
   PluginUpdateBlockedByDenialError,
   PluginUpdateCriticalConfirmationError,
+  PluginUpdateDataGatewayNameConflictError,
   PluginUpdateForbiddenPermissionError,
   PluginUpdateManifestError,
   PluginUpdateNoPendingError,
@@ -440,6 +442,16 @@ function buildRenderers(): RendererMap {
     fields: { slug: exception.slug },
   }));
 
+  // The DataGateway name a data-gateway plugin's row would take is held by
+  // another row (#1083). The body names the DataGateway, so the server admin
+  // knows which one to rename (deleting it keeps the name); the artifact step
+  // reported it ahead.
+  renders(PluginInstallDataGatewayNameConflictError, (exception) => ({
+    status: Http.Conflict,
+    message: t('errors.plugin.data_gateway_name_conflict', { slug: exception.slug, name: exception.dataGatewayName }),
+    fields: { slug: exception.slug, dataGatewayName: exception.dataGatewayName },
+  }));
+
   renders(PluginInstallPermissionCollisionError, (exception) => ({
     status: Http.Conflict,
     message: t('errors.plugin.install_permission_collision', { slug: exception.slug }),
@@ -464,6 +476,18 @@ function buildRenderers(): RendererMap {
       pendingVersion: exception.pendingVersion,
       incomingVersion: exception.incomingVersion,
     },
+  }));
+
+  // An update that makes the plugin a data-gateway plugin needs a DataGateway
+  // name another row holds (#1083). Its own copy, because the next step is to
+  // try the update again, where the install's says to install again.
+  renders(PluginUpdateDataGatewayNameConflictError, (exception) => ({
+    status: Http.Conflict,
+    message: t('errors.plugin.update_data_gateway_name_conflict', {
+      slug: exception.slug,
+      name: exception.dataGatewayName,
+    }),
+    fields: { slug: exception.slug, dataGatewayName: exception.dataGatewayName },
   }));
 
   renders(PluginUpdateNoPendingError, (exception) => ({

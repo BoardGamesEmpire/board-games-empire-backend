@@ -129,6 +129,7 @@ const assessmentOf = async (directory: PluginArtifactDirectory): Promise<PluginI
     criticalSlugsToReenter: [],
     analysis: { findings: [], scannedFileCount: 1, deepScannedFileCount: 0, truncated: false },
     forbiddenImportsToAccept: [],
+    dataGatewayNameConflict: null,
   }) as unknown as PluginInstallAssessment;
 
 const artifactRow = (input: RecordReceivedArtifactInput, now: Date): PluginArtifact => ({
@@ -932,6 +933,32 @@ describe('PluginArtifactReceiver (#1094)', () => {
       await expect(byUpload()).rejects.toBe(lost);
 
       expect(store.recordReceived).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a DataGateway name the install would find taken (#1083)', () => {
+    const conflicted = async (directory: PluginArtifactDirectory): Promise<PluginInstallAssessment> => ({
+      ...(await assessmentOf(directory)),
+      dataGatewayNameConflict: 'Demo Gateway',
+    });
+
+    it('the artifact step reports it ahead of the install, and still records the artifact (#1083)', async () => {
+      installer.assess.mockImplementation(conflicted);
+
+      const receipt = await byUpload();
+
+      expect(receipt.assessment.dataGatewayNameConflict).toBe('Demo Gateway');
+      expect(store.recordReceived).toHaveBeenCalled();
+    });
+
+    it('reading the artifact back reports it too (#1083)', async () => {
+      const received = await byUpload();
+      store.findLive.mockResolvedValue(received.artifact);
+      installer.assess.mockImplementation(conflicted);
+
+      const receipt = await receiver.read(sha256, ADMIN);
+
+      expect(receipt.assessment.dataGatewayNameConflict).toBe('Demo Gateway');
     });
   });
 });

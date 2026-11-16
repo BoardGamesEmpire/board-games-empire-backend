@@ -1,5 +1,6 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, ResourceType } from '@bge/database';
+import { remoteConnectionOptions } from '@bge/gateway-registry';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
@@ -92,6 +93,12 @@ export class DataGatewayController {
     );
   }
 
+  @ApiOperation({
+    summary: 'Add a remote DataGateway',
+    description:
+      'Creates a remote DataGateway, reached through its connection fields, and connects it unless created ' +
+      "disabled. A plugin DataGateway's row comes from installing its plugin, never from this route (#1083).",
+  })
   @ApiResponse({ status: Http.Created, type: DataGatewayConnectAnswerDto })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -112,6 +119,13 @@ export class DataGatewayController {
     );
   }
 
+  @ApiOperation({
+    summary: 'Change a DataGateway',
+    description:
+      "A plugin DataGateway's row may be renamed, described, enabled and disabled, but has no connection fields " +
+      'to set: `connectionUrl`, `connectionPort`, `authType` and `authParameters` are refused on it, null ' +
+      "included. A remote DataGateway's address, port and authentication type can't be cleared (#1083).",
+  })
   @ApiExtraModels(DataGatewayConnectAnswerDto, DataGatewayDisconnectAnswerDto)
   @ApiResponse({
     status: Http.Ok,
@@ -126,6 +140,12 @@ export class DataGatewayController {
   })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({
+    status: Http.UnprocessableEntity,
+    description:
+      "A connection field on a plugin DataGateway's row (code DATA_GATEWAY_PLUGIN_CONNECTION_FIELDS), or null " +
+      "for a remote DataGateway's address, port or authentication type (code DATA_GATEWAY_CONNECTION_FIELD_REQUIRED)",
+  })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.DataGateway))
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateDataGatewayDto: UpdateDataGatewayDto) {
@@ -147,9 +167,19 @@ export class DataGatewayController {
     );
   }
 
+  @ApiOperation({
+    summary: 'Delete a remote DataGateway',
+    description:
+      "A plugin DataGateway's row is refused, before and after its plugin is uninstalled: uninstalling disables " +
+      'the row and keeps it, so the games imported through it keep their source (#1083).',
+  })
   @ApiResponse({ status: Http.Ok, type: DataGatewayDisconnectAnswerDto })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description: "A plugin DataGateway's row, which can't be deleted (code DATA_GATEWAY_PLUGIN_ROW_DELETE)",
+  })
   @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.DataGateway))
   @Delete(':id')
   delete(@Param('id') id: string) {
@@ -167,6 +197,14 @@ export class DataGatewayController {
     );
   }
 
+  @ApiOperation({
+    summary: 'Enable and connect a DataGateway',
+    description:
+      'Enables the DataGateway, then asks the coordinator for it: a remote DataGateway is connected through its ' +
+      'connection fields, and a plugin DataGateway, whose driver the coordinator builds itself, is interviewed. ' +
+      'Either way the answer carries the row read again and the outcome as `connection_response`, with generic ' +
+      "copy on a failure, never the coordinator's error (#1083).",
+  })
   @ApiResponse({ status: Http.Created, type: DataGatewayConnectAnswerDto })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -241,18 +279,44 @@ export class DataGatewayController {
   }
 
   private connectToGateway(gateway: DataGatewayWithSections, write: Action) {
-    const request: ConnectGatewayRequest = {
-      gatewayId: gateway.id,
-      connectionUrl: gateway.connectionUrl,
-      connectionPort: gateway.connectionPort,
-      authType: gateway.authType,
-      authParametersJson: JSON.stringify(gateway.authParameters || {}),
-    };
+    // A plugin DataGateway's row has no connection fields to send: the
+    // coordinator builds its driver itself, so it is only asked to interview
+    // it (#1083).
+    const attempt = gateway.pluginId === null ? this.connectRemote(gateway) : this.reinterviewGateway(gateway.id);
 
+    return attempt.pipe(
+      // Connecting waits for a first interview, and the row records how it
+      // went, so it's read again whatever the outcome. It's read under the
+      // write that came before, so a key that may write but not read sees it.
+      concatMap((connection_response) =>
+        from(this.dataGatewayService.getById(gateway.id, write)).pipe(
+          map((row) => ({ dataGateway: toDataGatewayView(row), connection_response, connection_attempt: true })),
+        ),
+      ),
+    );
+  }
+
+  /** Asks the coordinator to connect the remote DataGateway its row describes. */
+  private connectRemote(gateway: DataGatewayWithSections) {
     // Log the coordinator's error server-side, whether it answers with one or
     // the call itself fails, but never surface it to the client — return a
     // generic, translated message instead (§6).
     const failed = () => ({ success: false, message: t('errors.data_gateway.connect_failed') });
+
+    // The database holds a remote row to all three (#1083); the types can't.
+    const options = remoteConnectionOptions(gateway);
+    if (!options) {
+      this.logger.error(`Remote DataGateway ${gateway.id} has no connection settings to connect with`);
+      return of(failed());
+    }
+
+    const request: ConnectGatewayRequest = {
+      gatewayId: options.gatewayId,
+      connectionUrl: options.connectionUrl,
+      connectionPort: options.connectionPort,
+      authType: options.authType,
+      authParametersJson: JSON.stringify(options.authParameters || {}),
+    };
 
     return this.coordinator.connectGateway(request).pipe(
       map((response) => {
@@ -270,14 +334,6 @@ export class DataGatewayController {
         this.logger.error(`Error connecting to gateway ${gateway.id}`, error);
         return of(failed());
       }),
-      // Connecting waits for a first interview, and the row records how it
-      // went, so it's read again whatever the outcome. It's read under the
-      // write that came before, so a key that may write but not read sees it.
-      concatMap((connection_response) =>
-        from(this.dataGatewayService.getById(gateway.id, write)).pipe(
-          map((row) => ({ dataGateway: toDataGatewayView(row), connection_response, connection_attempt: true })),
-        ),
-      ),
     );
   }
 

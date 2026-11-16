@@ -4,15 +4,30 @@ import type { DataGatewayCapability } from '@bge/database';
  * Why the gateway registry won't use a DataGateway:
  * - `unknown`: there's no such DataGateway, or it was deleted;
  * - `disabled`: an admin disabled it, or repeated failures auto-disabled it;
+ * - `plugin_not_served`: it's a plugin DataGateway whose plugin is disabled,
+ *   uninstalled, failed to load, or was updated into another category
+ *   (#1083);
+ * - `plugin_not_loaded`: this process can't reach a running copy of this
+ *   install of its plugin, until the coordinator restarts (#1083);
  * - `not_interviewed`: its first interview hasn't succeeded yet;
  * - `not_declared`: it doesn't declare the capability;
  * - `switched_off`: an admin switched the capability off for it.
  */
-export type GatewayRefusalReason = 'unknown' | 'disabled' | 'not_interviewed' | 'not_declared' | 'switched_off';
+export type GatewayRefusalReason =
+  | 'unknown'
+  | 'disabled'
+  | 'plugin_not_served'
+  | 'plugin_not_loaded'
+  | 'not_interviewed'
+  | 'not_declared'
+  | 'switched_off';
 
 const MESSAGES: Readonly<Record<GatewayRefusalReason, (gatewayId: string, capability?: string) => string>> = {
   unknown: (gatewayId) => `DataGateway ${gatewayId} doesn't exist, or was deleted`,
   disabled: (gatewayId) => `DataGateway ${gatewayId} is disabled`,
+  plugin_not_served: (gatewayId) =>
+    `DataGateway ${gatewayId}'s plugin is disabled, uninstalled, failed to load or is no longer a data-gateway plugin`,
+  plugin_not_loaded: (gatewayId) => `DataGateway ${gatewayId}'s plugin isn't loaded: restart the coordinator`,
   not_interviewed: (gatewayId) => `DataGateway ${gatewayId} hasn't passed its first interview`,
   not_declared: (gatewayId, capability) => `DataGateway ${gatewayId} doesn't declare ${capability}`,
   switched_off: (gatewayId, capability) => `An admin switched ${capability} off for DataGateway ${gatewayId}`,

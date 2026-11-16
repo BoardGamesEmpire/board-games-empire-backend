@@ -37,6 +37,7 @@ import {
   PluginInstallAuthorityError,
   PluginInstallConflictError,
   PluginInstallCriticalConfirmationError,
+  PluginInstallDataGatewayNameConflictError,
   PluginInstallForbiddenPermissionError,
   PluginInstallManifestError,
   PluginInstallPermissionCollisionError,
@@ -1040,6 +1041,196 @@ describe('PluginInstallerService', () => {
       await service.install(input()).catch(() => undefined);
 
       expect(emitter.emit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the DataGateway row of a data-gateway plugin', () => {
+    /** The rows the unique lookups find: by the plugin that owns one, and by the name one holds. */
+    const dataGatewayRows = (found: { readonly byPluginId?: string; readonly byName?: string }): void => {
+      db.dataGateway.findUnique.mockImplementation(((args: { where: { pluginId?: string; name?: string } }) => {
+        const id = args.where.pluginId !== undefined ? found.byPluginId : found.byName;
+
+        return Promise.resolve(id === undefined ? null : { id });
+      }) as never);
+    };
+
+    const uninstalled = (): Plugin =>
+      makePlugin({
+        id: 'existing',
+        category: PluginCategory.DataGateway,
+        uninstalledAt: new Date('2026-08-01T00:00:00Z'),
+        restartRequired: true,
+      });
+
+    /** Puts an uninstalled data-gateway plugin in place, the row it kept still on it. */
+    const uninstalledWithItsRow = (): void => {
+      db.plugin.findUnique.mockResolvedValue(uninstalled());
+      db.plugin.updateMany.mockResolvedValue({ count: 1 });
+      db.plugin.findUniqueOrThrow.mockResolvedValue(makePlugin({ id: 'existing', uninstalledAt: null }));
+      db.dataGateway.updateMany.mockResolvedValue({ count: 1 });
+    };
+
+    beforeEach(async () => {
+      await writeManifest(
+        buildPluginManifest({ category: 'data-gateway', displayName: { en: 'Demo Gateway', de: 'Demo-Gateway' } }),
+      );
+      db.plugin.create.mockResolvedValue(makePlugin({ category: PluginCategory.DataGateway }));
+      dataGatewayRows({});
+      db.dataGateway.updateMany.mockResolvedValue({ count: 0 });
+      db.dataGateway.create.mockResolvedValue({ id: 'gw-1' } as never);
+    });
+
+    it('creates the DataGateway row for a data-gateway plugin (#1083)', async () => {
+      await service.install(input());
+
+      // Named from the display name in the server default locale (`en` here),
+      // with none of a remote DataGateway's connection fields.
+      expect(db.dataGateway.create).toHaveBeenCalledWith({
+        data: { name: 'Demo Gateway', pluginId: 'plugin-1', enabled: true, createdById: 'admin-1' },
+      });
+      // In the install's transaction, once the plugin row it names exists.
+      expect(db.plugin.create.mock.invocationCallOrder[0]).toBeLessThan(
+        db.dataGateway.create.mock.invocationCallOrder[0],
+      );
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('creates none for another category (#1083)', async () => {
+      await writeManifest(buildPluginManifest());
+      db.plugin.create.mockResolvedValue(makePlugin());
+
+      await service.install(input());
+
+      expect(db.dataGateway.create).not.toHaveBeenCalled();
+      expect(db.dataGateway.updateMany).not.toHaveBeenCalled();
+      expect(db.dataGateway.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('a reinstall enables the row it kept (#1083)', async () => {
+      uninstalledWithItsRow();
+      dataGatewayRows({ byPluginId: 'gw-kept' });
+
+      await service.install(input());
+
+      expect(db.dataGateway.updateMany).toHaveBeenCalledWith({
+        where: { pluginId: 'existing' },
+        data: { enabled: true },
+      });
+      expect(db.dataGateway.create).not.toHaveBeenCalled();
+    });
+
+    // installedAt names the install. A reinstall keeps the plugin's id, so
+    // without a new installedAt the copy of the plugin loaded before the
+    // uninstall would still count as this install's, and its DataGateway would
+    // be routed to it. An update keeps installedAt (#1083).
+    it("a reinstall writes a new installedAt, so the copy loaded before the uninstall isn't taken for this install (#1083)", async () => {
+      uninstalledWithItsRow();
+      dataGatewayRows({ byPluginId: 'gw-kept' });
+      const before = Date.now();
+
+      await service.install(input());
+
+      const [claim] = db.plugin.updateMany.mock.calls[0];
+      expect(claim.where).toEqual({ id: 'existing', uninstalledAt: { not: null } });
+      expect(claim.data.installedAt).toBeInstanceOf(Date);
+      expect((claim.data.installedAt as Date).getTime()).toBeGreaterThanOrEqual(before);
+    });
+
+    it('a name in use refuses the install and writes nothing (#1083)', async () => {
+      dataGatewayRows({ byName: 'gw-other' });
+
+      const failure = await service.install(input()).catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(PluginInstallDataGatewayNameConflictError);
+      expect(failure).toMatchObject({ slug: 'demo-sink', dataGatewayName: 'Demo Gateway' });
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(db.plugin.create).not.toHaveBeenCalled();
+      expect(db.dataGateway.create).not.toHaveBeenCalled();
+      expect(db.pluginGrant.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('a name taken after the assessment still refuses the install, inside its transaction (#1083)', async () => {
+      // The assessment's read found the name free; a row took it before the
+      // install's transaction ran.
+      db.dataGateway.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'gw-other' } as never)
+        .mockResolvedValue(null);
+      db.plugin.findUnique.mockResolvedValue(null);
+
+      await expect(service.install(input())).rejects.toBeInstanceOf(PluginInstallDataGatewayNameConflictError);
+      // Thrown inside the transaction, so the plugin row written before it rolls back.
+      await expect(db.$transaction.mock.results[0]?.value).rejects.toBeInstanceOf(
+        PluginInstallDataGatewayNameConflictError,
+      );
+      expect(db.dataGateway.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('assess reports a name in use and still returns the assessment (#1083)', async () => {
+      dataGatewayRows({ byName: 'gw-other' });
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment.dataGatewayNameConflict).toBe('Demo Gateway');
+      expect(assessment.validated.manifest.slug).toBe('demo-sink');
+      expect(assessment.serverChecks).toHaveLength(2);
+      expect(db.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('a live plugin of another category under the slug is refused as already installed, not as a taken name (#1083)', async () => {
+      // The install would never get as far as creating a row: the slug is
+      // installed and live, so the true refusal is the update flow's.
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ id: 'existing', category: PluginCategory.FeedbackSink }));
+      dataGatewayRows({ byName: 'gw-other' });
+
+      const assessment = await service.assess(directory());
+      const failure = await service.install(input()).catch((error: unknown) => error);
+
+      expect(assessment.dataGatewayNameConflict).toBeNull();
+      expect(failure).toBeInstanceOf(PluginInstallConflictError);
+      expect((failure as Error).name).toBe('PluginInstallConflictError');
+      expect(db.dataGateway.create).not.toHaveBeenCalled();
+    });
+
+    it('assess reports no conflict when the name is free (#1083)', async () => {
+      const assessment = await service.assess(directory());
+
+      expect(assessment.dataGatewayNameConflict).toBeNull();
+    });
+
+    it('a reinstall under the same name as its own row reports no conflict (#1083)', async () => {
+      uninstalledWithItsRow();
+      dataGatewayRows({ byPluginId: 'gw-kept', byName: 'gw-kept' });
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment.dataGatewayNameConflict).toBeNull();
+      await expect(service.install(input())).resolves.toBeDefined();
+    });
+
+    it("a reinstall reports no conflict when its kept row was renamed and another row took the manifest's name since (#1083)", async () => {
+      // The reinstall creates no row, so it never meets the name, and the
+      // artifact step must not report a conflict the install would not hit.
+      uninstalledWithItsRow();
+      dataGatewayRows({ byPluginId: 'gw-kept', byName: 'gw-other' });
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment.dataGatewayNameConflict).toBeNull();
+      await expect(service.install(input())).resolves.toBeDefined();
+      expect(db.dataGateway.create).not.toHaveBeenCalled();
+    });
+
+    it('assess reports no conflict for another category, and reads no DataGateway row (#1083)', async () => {
+      await writeManifest(buildPluginManifest());
+      dataGatewayRows({ byName: 'gw-other' });
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment.dataGatewayNameConflict).toBeNull();
+      expect(db.dataGateway.findUnique).not.toHaveBeenCalled();
     });
   });
 

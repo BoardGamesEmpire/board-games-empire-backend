@@ -102,6 +102,8 @@ model Plugin {
   householdPlugins    HouseholdPlugin[]
   userPlugins         UserPlugin[]
   declaredPermissions PluginPermission[]
+  /// A data-gateway plugin's DataGateway row (#1083); other categories have none.
+  dataGateway         DataGateway?
 
   /// Category registries list/serve by category and enablement.
   @@index([category, enabled])

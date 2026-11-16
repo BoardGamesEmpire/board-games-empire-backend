@@ -63,7 +63,10 @@
     "connect_failed": "Failed to connect to the DataGateway.",
     "disconnect_failed": "Failed to disconnect from the DataGateway.",
     "disabled": "DataGateway with ID {id} is disabled. Enable it before asking for an interview.",
-    "interview_failed": "The DataGateway's interview failed."
+    "interview_failed": "The DataGateway's interview failed.",
+    "plugin_connection_fields": "This DataGateway comes from a plugin, so it has no connection address, port, authentication type or credentials to change. Leave those fields out.",
+    "connection_field_required": "A remote DataGateway needs its connection address, port and authentication type. Enter a value instead of clearing it.",
+    "plugin_row_delete": "This DataGateway comes from a plugin, so it can't be deleted. Uninstalling the plugin disables it and keeps it, so the games imported through it keep their source."
   },
   "event": {
     "not_found": "Event with ID {id} not found",
@@ -370,6 +373,7 @@
     "grant_tombstoned": "Plugin '{slug}' was uninstalled and cannot accept consent decisions",
     "install_conflict": "Plugin '{slug}' is already installed — updates go through the pending/approve flow",
     "reinstall_conflict": "Plugin '{slug}' was reinstalled by someone else at the same moment — check the plugin list before trying again",
+    "data_gateway_name_conflict": "A DataGateway named '{name}' already exists. Rename it, then install '{slug}' again. Deleting it doesn't free the name, and a deleted DataGateway can't be renamed.",
     "artifact_checksum_mismatch": "The plugin artifact does not have the checksum you gave, so it was not kept. Check that you copied the whole 64-character SHA-256 checksum, and that you chose the right link or file.",
     "artifact_too_large": "The plugin artifact is larger than a plugin artifact may be, so it was not kept. The limit is 100 MiB before it is unpacked.",
     "artifact_link_refused_invalid_link": "This link cannot be used. It must be an http or https address with no username or password in it, and any address it redirects to must be one the server can use too.",
@@ -398,6 +402,7 @@
     "update_version_conflict": "Version '{version}' of plugin '{slug}' is already active",
     "update_pending_conflict": "Plugin '{slug}' already has version '{pendingVersion}' staged — resolve it before staging '{incomingVersion}'",
     "update_no_pending": "Plugin '{slug}' has no staged pending update to resolve",
+    "update_data_gateway_name_conflict": "This update makes '{slug}' a data-gateway plugin, and a DataGateway named '{name}' already exists. Rename that DataGateway, then try the update again. Deleting it doesn't free the name, and a deleted DataGateway can't be renamed.",
     "update_staging_replaced": "The staged update for plugin '{slug}' changed since it was shown — review it again before approving or rejecting it",
     "install_critical_confirmation": "This install grants Critical permissions that must be explicitly confirmed — re-enter each listed permission exactly",
     "update_critical_confirmation": "This update grants Critical permissions that must be explicitly confirmed — re-enter each listed permission exactly",

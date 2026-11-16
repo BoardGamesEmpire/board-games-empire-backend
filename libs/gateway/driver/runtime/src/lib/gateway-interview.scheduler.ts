@@ -11,10 +11,13 @@ export const INTERVIEW_BACKSTOP_TICK_MS = 60 * 60 * 1000;
 /**
  * The hourly backstop for the interview (#712). A connect runs the same
  * check, but a long-lived connection may never reconnect, and a DataGateway
- * upgraded in place keeps its connection. So every tick pings each
- * DataGateway its process has connected, and interviews it again when it
- * reports a different version or its answers are a day old. Only connected
- * DataGateways are touched: no connection is made just to check.
+ * upgraded in place keeps its connection. So every tick takes each
+ * DataGateway its process has connected, pings it if the registry would
+ * still use it, and interviews it again when it reports a different version
+ * or its answers are a day old. A DataGateway the registry would refuse, such
+ * as a plugin DataGateway whose plugin was disabled, isn't pinged (#1083).
+ * Only connected DataGateways are touched: no connection is made just to
+ * check.
  *
  * Uses a plain interval rather than @nestjs/schedule so it runs in every app
  * that hosts the gateway registry (coordinator, gateway-worker) without requiring

@@ -2,13 +2,22 @@ import { SystemActorScope } from '@bge/actor-context';
 import {
   DatabaseService,
   DataGatewayCapability,
+  PluginCategory,
   type ContentFormat,
   type ContentType,
   type PlatformType,
   type SearchFilterAxis,
 } from '@bge/database';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
-import { Injectable, Logger, OnApplicationShutdown, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnApplicationShutdown,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FAILURE_THRESHOLD, FAILURE_WINDOW_MS } from './constants/gateway-registry.constants';
 import { RemoteGatewayDriverFactory } from './drivers/remote-gateway-driver.factory';
@@ -17,23 +26,40 @@ import { GatewayDisabledEvent, type GatewayAutoDisableReason } from './events/ga
 import { GatewayConfigEventsService } from './gateway-config-events.service';
 import { GatewayInterviewService } from './gateway-interview.service';
 import type { GatewayConfigEvent, GatewayConnectionOptions } from './interfaces';
+import {
+  PLUGIN_DRIVER_SOURCE,
+  ROUTED_PLUGIN_FIELDS,
+  type PluginDriverSource,
+  type RoutedPlugin,
+} from './plugin-driver-source';
 import type { CoverageFilter } from './utils/coverage-filter';
 import { hashGatewayConfig } from './utils/hash-config';
+import { remoteConnectionOptions } from './utils/remote-connection-options';
 
 /**
- * How a cached driver entered the routing table. Config-update events from
- * Redis describe remote DataGateway rows; an in-process driver placed via
- * `register()` ('registered') has its own lifecycle and must not be torn
- * down by those events (see handleConfigUpdate). 'remote' drivers came from
- * `connect()` and do react to config changes.
+ * How a cached driver entered the routing table, which decides what a
+ * config-update event from Redis does to it (see handleConfigUpdate):
+ * - 'remote': `connect()` built it from a remote DataGateway's connection
+ *   fields, so it reacts to every change of them.
+ * - 'plugin': the plugin driver source built it for a plugin DataGateway
+ *   (#1083). No connection fields went into it, and the registry can build
+ *   it again.
+ * - 'registered': it was handed in whole to `register()`. The registry
+ *   can't rebuild it, so only 'disabled' and 'deleted' take it down.
  */
-type DriverOrigin = 'remote' | 'registered';
+type DriverOrigin = 'remote' | 'registered' | 'plugin';
 
 interface CachedDriver {
   gatewayId: string;
   driver: DataGatewayDriver;
   configHash: string;
   origin: DriverOrigin;
+
+  /**
+   * For a driver the plugin driver source built, the install of the plugin
+   * it was built from: its `installedAt`, which a reinstall rewrites (#1083).
+   */
+  installedAt?: Date;
 }
 
 interface FailureTrack {
@@ -43,9 +69,14 @@ interface FailureTrack {
   lastError: string;
 }
 
-/** What a routing decision reads from a DataGateway's row. */
+/**
+ * What a routing decision reads from a DataGateway's row, and, for a plugin
+ * DataGateway, of its plugin beside it (#1083).
+ */
 interface RoutingRow {
   enabled: boolean;
+  pluginId: string | null;
+  plugin: RoutedPlugin | null;
   firstInterviewedAt: Date | null;
   capabilities: DataGatewayCapability[];
   disabledCapabilities: DataGatewayCapability[];
@@ -57,6 +88,8 @@ interface RoutingRow {
 
 const ROUTING_FIELDS = {
   enabled: true,
+  pluginId: true,
+  plugin: { select: ROUTED_PLUGIN_FIELDS },
   firstInterviewedAt: true,
   capabilities: true,
   disabledCapabilities: true,
@@ -110,10 +143,26 @@ export interface SearchResolution extends GatewayResolution {
 }
 
 /**
+ * Whether the server serves a plugin DataGateway's plugin: still a
+ * data-gateway plugin, switched on, installed, and not quarantined by a failed
+ * load (#1083). An update can move a plugin to another category, and the row
+ * it leaves behind is then no plugin's to serve.
+ */
+const isServed = (plugin: RoutedPlugin): boolean =>
+  plugin.category === PluginCategory.DataGateway &&
+  plugin.enabled &&
+  plugin.uninstalledAt === null &&
+  !plugin.loadFailed;
+
+/**
  * The routing rule, the one place it's written: why a DataGateway may not
  * serve `capability` now, or null when it may. `row` is its routing row,
  * null when it's absent or deleted. Without a capability, only whether the
  * DataGateway may be used at all.
+ *
+ * It goes by the row alone, with the plugin read beside it. Whether this
+ * process has a plugin DataGateway's plugin loaded isn't on the row: the
+ * registry's `refusalFor` asks that, between the two halves of this rule.
  */
 function routingRefusal(row: RoutingRow | null, capability?: DataGatewayCapability): GatewayRefusalReason | null {
   if (!row) {
@@ -122,6 +171,11 @@ function routingRefusal(row: RoutingRow | null, capability?: DataGatewayCapabili
 
   if (!row.enabled) {
     return 'disabled';
+  }
+
+  // A plugin DataGateway is its plugin's to serve, whatever its own row says (#1083).
+  if (row.pluginId !== null && !(row.plugin && isServed(row.plugin))) {
+    return 'plugin_not_served';
   }
 
   if (capability === undefined) {
@@ -167,12 +221,15 @@ export const DRIVER_DISPOSE_TIMEOUT_MS = 5_000;
  * Used by both the coordinator (for synchronous RPC routing) and the
  * gateway-worker (for async fetch processing).
  *
- * Transport lives behind the driver port: remote gateways resolve lazily
- * through `RemoteGatewayDriverFactory` (ping-verified gRPC), and in-process
- * drivers arrive via {@link register} — the seam #59's DataGateway plugin
- * registrations use. Everything below the port is transport-agnostic:
- * the interview, failure tracking, auto-disable, and config-event
- * invalidation treat an in-process driver exactly like a remote one.
+ * Transport lives behind the driver port. A remote DataGateway's driver
+ * comes lazily from `RemoteGatewayDriverFactory` (ping-verified gRPC). A
+ * plugin DataGateway's comes lazily from the process's
+ * {@link PluginDriverSource}, which the registry asks again whenever it
+ * needs a new one, so it can rebuild a plugin's driver as it can dial a
+ * remote DataGateway again (#1083). {@link register} stays for a driver
+ * handed in whole, which the registry can't rebuild. Everything below the
+ * port is transport-agnostic: the interview, failure tracking and
+ * auto-disable treat every driver alike, whichever way it arrived.
  *
  * A DataGateway is routed only by its answers to the interview (#712). Its
  * first interview runs before its driver is cached, whichever way the driver
@@ -181,6 +238,15 @@ export const DRIVER_DISPOSE_TIMEOUT_MS = 5_000;
  * both processes route by the answers whichever of them interviewed, and by
  * an admin's latest word on `enabled` and on the capabilities switched off
  * ({@link resolve}, {@link routableGatewayIds}).
+ *
+ * A plugin DataGateway's row is read with its plugin, and is routed only
+ * while the server serves the plugin (it's a data-gateway plugin, switched
+ * on, installed and not quarantined) and this process can reach a running
+ * copy of that install. A process with no plugin driver source refuses every
+ * plugin DataGateway. No config event tells of a plugin's state, so the
+ * routing decision that finds a plugin's row disabled, as an uninstall
+ * leaves it, or its plugin no longer loaded, also disposes the driver held
+ * for it (#1083).
  *
  * State authority for DataGateway rows lives in the coordinator. Other
  * processes treat this service as a read-side: they react to config-update
@@ -203,10 +269,13 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
   // same gateway share one connect attempt instead of stampeding the gateway.
   private readonly connecting = new Map<string, Promise<void>>();
   // Per-gateway invalidation counter. connect() captures this before its async
-  // ping and refuses to cache the freshly-built driver if it changed meanwhile
+  // ping, as connectPlugin() does before a plugin DataGateway's build, and
+  // refuses to cache the freshly-built driver if it changed meanwhile
   // — closing the race where a 'disabled'/'deleted' event arrives mid-connect,
   // finds nothing cached to tear down, and connect() then caches a driver for a
   // gateway that is no longer valid (served indefinitely until the next event).
+  // A routing decision that drops a plugin DataGateway's driver advances it
+  // too, for the same race with a build under way (#1083).
   private readonly connectGeneration = new Map<string, number>();
   // DataGateways whose connection config changed since this process cached a
   // driver for them. Their stored answers came through the old connection,
@@ -226,6 +295,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     private readonly eventEmitter: EventEmitter2,
     private readonly systemActorScope: SystemActorScope,
     private readonly interviews: GatewayInterviewService,
+    @Optional() @Inject(PLUGIN_DRIVER_SOURCE) private readonly pluginDrivers?: PluginDriverSource,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -297,23 +367,27 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
   }
 
   /**
-   * Places an in-process driver into the routing table under the given
-   * gateway id and resets its failure history: the seam DataGateway plugin
-   * registrations (#59) will call. connect() caches a remote driver the same
-   * way after its ping, and from then on the interview, routing, failure
-   * tracking, and auto-disable are identical for both.
+   * Places a driver handed in whole into the routing table under the given
+   * gateway id and resets its failure history. connect() caches a remote
+   * driver the same way after its ping, as a plugin DataGateway's is cached
+   * after its build, and from then on the interview, routing, failure
+   * tracking, and auto-disable are identical for all of them.
    *
    * A DataGateway never interviewed is interviewed first, and its driver is
    * cached only if that succeeds. Otherwise the driver is disposed and this
-   * throws, so nothing is routed. A remote DataGateway is connected and
-   * interviewed again when next reached, but the gateway registry can't
-   * rebuild a driver handed in here: whoever handed it in registers it again.
+   * throws, so nothing is routed. A remote DataGateway is connected, or a
+   * plugin DataGateway's driver built (#1083), and interviewed again when
+   * next reached, but the gateway registry can't rebuild a driver handed in
+   * here: whoever handed it in registers it again.
    */
   async register(
     gatewayId: string,
     driver: DataGatewayDriver,
     configHash = '',
-    origin: DriverOrigin = 'registered',
+    // Not 'plugin': only connectPlugin() records the install a plugin's
+    // driver was built from, and a 'plugin' entry without it is dropped at the
+    // next routing decision (#1083).
+    origin: Exclude<DriverOrigin, 'plugin'> = 'registered',
   ): Promise<void> {
     await this.interviewAndCache({ gatewayId, driver, configHash, origin }, this.connectGeneration.get(gatewayId) ?? 0);
   }
@@ -362,7 +436,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
 
     this.clients.set(gatewayId, entry);
 
-    // A freshly-registered driver starts with a clean failure slate.
+    // A freshly-cached driver starts with a clean failure slate.
     this.reportSuccess(gatewayId);
 
     // Answers from an earlier connect, perhaps another process's, may have
@@ -378,10 +452,11 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
   /**
    * Disposes a driver that mustn't be cached: a 'disabled'/'deleted' or
    * config-change event arrived while it was connecting or being
-   * interviewed, or shutdown already disposed the cached drivers. Returns
-   * true rather than throwing, so the invalidation isn't counted as a
-   * connection failure; the caller (resolve) then finds no cached driver and
-   * treats the DataGateway as unavailable, which is correct.
+   * interviewed, a routing decision dropped what this process holds for a
+   * plugin DataGateway meanwhile (#1083), or shutdown already disposed the
+   * cached drivers. Returns true rather than throwing, so the invalidation
+   * isn't counted as a connection failure; the caller (resolve) then finds no
+   * cached driver and treats the DataGateway as unavailable, which is correct.
    */
   private discardIfInvalidated(gatewayId: string, driver: DataGatewayDriver, generation: number): boolean {
     if ((this.connectGeneration.get(gatewayId) ?? 0) !== generation) {
@@ -422,8 +497,8 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
 
   /**
    * Best-effort driver teardown. Never throws and never rejects: dispose() is
-   * `void | Promise<void>` on the port, so async teardown — e.g. a #59
-   * in-process plugin closing handles — is awaited internally and its failure
+   * `void | Promise<void>` on the port, so async teardown — e.g. a plugin
+   * DataGateway's driver closing handles — is awaited internally and its failure
    * logged rather than surfacing as an unhandledRejection. The returned
    * promise always resolves once teardown settles, so an async caller
    * (onApplicationShutdown) can await it while sync callers fire-and-forget safely.
@@ -443,21 +518,24 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
    * Resolves a DataGateway's driver for one operation, the capability that
    * names it. Reads the DataGateway's row first, and refuses, with a
    * {@link GatewayRoutingRefusedError}, a DataGateway that's absent, deleted
-   * or disabled, one whose first interview hasn't succeeded, and a capability
-   * it doesn't declare or that an admin switched off. A refusal holds even
-   * while this process caches the driver, and never counts toward
-   * auto-disable.
+   * or disabled, a plugin DataGateway whose plugin the server doesn't serve
+   * or this process can't reach (#1083), one whose first interview hasn't
+   * succeeded, and a capability it doesn't declare or that an admin switched
+   * off. A refusal holds even while this process caches the driver, and
+   * never counts toward auto-disable.
    *
    * On a cache miss the remote connection is established lazily from the
-   * DB config (the source of truth), and concurrent callers for the same
+   * DB config (the source of truth), or a plugin DataGateway's driver built
+   * by the plugin driver source, and concurrent callers for the same
    * DataGateway share a single in-flight connect, so a burst of jobs for a
    * newly added DataGateway triggers one connect — not a ping stampede.
    * Reaching a DataGateway never interviewed connects it, which interviews
-   * it, before the capability is checked.
+   * it, before the capability is checked. One refused for any other reason
+   * isn't connected first.
    *
-   * Also throws when the connection (ping) or the first interview fails.
-   * Connection failures feed the same auto-disable tracking as any other
-   * failed interaction.
+   * Also throws when the connection (a remote DataGateway's ping, a plugin
+   * DataGateway's build) or the first interview fails. Connection failures
+   * feed the same auto-disable tracking as any other failed interaction.
    */
   async resolve(gatewayId: string, capability: DataGatewayCapability): Promise<DataGatewayDriver> {
     return (await this.resolveWithContentFormat(gatewayId, capability)).driver;
@@ -497,16 +575,35 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
   }
 
   /**
+   * A plugin DataGateway's driver, for the process that hosts the plugin
+   * and answers for it over the gateway protocol (#1083). Refuses as
+   * {@link resolve} does, and refuses a remote DataGateway as unknown: to
+   * whoever asks for a plugin's driver, it isn't there.
+   *
+   * Without a capability, for a call that names none, such as a ping, it
+   * refuses only a DataGateway that may not be used at all. It still
+   * answers with the driver, so it builds one this process doesn't hold,
+   * which interviews a DataGateway never interviewed.
+   */
+  async pluginDriver(gatewayId: string, capability?: DataGatewayCapability): Promise<DataGatewayDriver> {
+    await this.routedRow(gatewayId, capability, true);
+
+    return this.driverFor(gatewayId);
+  }
+
+  /**
    * How a search narrowed by `filter` reaches the DataGateway now, by one
    * read of its row, without connecting it: for a caller that may answer
    * without the driver, such as a search served from its cache, or one the
    * DataGateway's coverage can't match. One that must ask it after all takes
-   * the route's driver.
+   * the route's driver. It connects nothing, though it drops the driver held
+   * for a plugin DataGateway whose row is disabled or whose plugin is no
+   * longer loaded (#1083).
    */
   async searchRoute(gatewayId: string, filter: CoverageFilter): Promise<SearchRoute> {
     const row = await this.routingRow(gatewayId);
 
-    if (!row || routingRefusal(row, DataGatewayCapability.Search)) {
+    if (!row || (await this.refusalFor(gatewayId, row, DataGatewayCapability.Search))) {
       return { routable: false };
     }
 
@@ -521,11 +618,13 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
 
   /**
    * The DataGateways this process has connected that may serve the
-   * capability now: enabled, past their first interview, declaring it, and
-   * without an admin's switch-off. A search that names no DataGateway goes
+   * capability now: enabled, past their first interview, declaring it,
+   * without an admin's switch-off, and, for a plugin DataGateway, with its
+   * plugin served and loaded (#1083). A search that names no DataGateway goes
    * to these; one this process hasn't connected yet isn't reached that way
    * (#722). A search narrowed by `filter` goes only to those whose coverage
-   * overlaps it.
+   * overlaps it. A plugin DataGateway left out because its row is disabled
+   * or its plugin is no longer loaded has its driver dropped as well (#1083).
    */
   async routableGatewayIds(capability: DataGatewayCapability, filter: CoverageFilter = {}): Promise<string[]> {
     const connected = this.connectedGatewayIds();
@@ -538,10 +637,12 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       select: { id: true, ...ROUTING_FIELDS },
     });
 
+    // The rows come from one read. Whether its plugin is loaded is then
+    // asked for each plugin DataGateway among them (#1083).
+    const refusals = await Promise.all(rows.map((row) => this.refusalFor(row.id, row, capability)));
+
     const routable = new Set(
-      rows
-        .filter((row) => routingRefusal(row, capability) === null && coverageOverlaps(row, filter))
-        .map((row) => row.id),
+      rows.filter((row, index) => refusals[index] === null && coverageOverlaps(row, filter)).map((row) => row.id),
     );
     return connected.filter((gatewayId) => routable.has(gatewayId));
   }
@@ -550,12 +651,13 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
    * Interviews a DataGateway now, however recent its answers: for an admin
    * who asks (#715 adds the route). Connects it first if this process hasn't,
    * and for a DataGateway never interviewed, that connect is the interview.
-   * Throws when it's absent, deleted or disabled, or when the interview
-   * fails, which the row records.
+   * Throws when it's absent, deleted or disabled, when its plugin isn't
+   * served or loaded (#1083), or when the interview fails, which the row
+   * records.
    */
   async reinterview(gatewayId: string): Promise<void> {
     const row = await this.routingRow(gatewayId);
-    const refusal = routingRefusal(row);
+    const refusal = await this.refusalFor(gatewayId, row);
     if (refusal) {
       throw new GatewayRoutingRefusedError(gatewayId, refusal);
     }
@@ -576,9 +678,39 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
 
   /**
    * Interviews a DataGateway this process has connected again if its answers
-   * have gone stale: the hourly backstop's job. Never throws.
+   * have gone stale: the hourly backstop's job.
+   *
+   * It makes the routing decision first, and asks nothing of a DataGateway
+   * the decision refuses. Holding a driver isn't leave to use it: no config
+   * event tells of a plugin's state, so this process can still hold the
+   * driver of a plugin that was disabled, uninstalled or quarantined since,
+   * and a plugin behind its server switch must not be called. The decision
+   * also disposes the driver of a plugin that was uninstalled or is no
+   * longer loaded, so that one is held for at most an hour after its last
+   * use (#1083).
+   *
+   * Never throws. When the decision can't be made, because the row can't be
+   * read, the check is skipped and logged.
    */
   async refreshInterview(gatewayId: string): Promise<void> {
+    if (!this.clients.has(gatewayId)) {
+      return;
+    }
+
+    try {
+      if (await this.refusalFor(gatewayId, await this.routingRow(gatewayId))) {
+        return;
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Skipping the check of DataGateway ${gatewayId}'s interview: couldn't decide whether it may be used: ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+      return;
+    }
+
+    // The decision waited, and may itself have dropped the driver.
     const cached = this.clients.get(gatewayId);
     if (cached) {
       await this.interviews.refreshIfStale(gatewayId, cached.driver);
@@ -587,18 +719,29 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
 
   /**
    * The row of a DataGateway that may serve the capability now, connecting
-   * and so interviewing it first when it never was. Throws a
-   * {@link GatewayRoutingRefusedError} when it may not.
+   * and so interviewing it first when it never was. Without a capability,
+   * the row of one that may be used at all, which connects nothing. Throws a
+   * {@link GatewayRoutingRefusedError} when it may not. With `pluginOnly`, a
+   * remote DataGateway is refused as unknown.
    */
-  private async routedRow(gatewayId: string, capability: DataGatewayCapability): Promise<RoutingRow> {
-    let row = await this.routingRow(gatewayId);
+  private async routedRow(
+    gatewayId: string,
+    capability?: DataGatewayCapability,
+    pluginOnly = false,
+  ): Promise<RoutingRow> {
+    let row = await this.routingRow(gatewayId, pluginOnly);
+    let refusal = await this.refusalFor(gatewayId, row, capability);
 
-    if (row?.enabled && !row.firstInterviewedAt) {
+    // A connect can lift this refusal alone, since connecting interviews.
+    // Every refusal that comes before it stands whatever a connect would
+    // find, so a DataGateway that may not be used is never connected, nor
+    // its plugin's driver built, to learn that (#1083).
+    if (refusal === 'not_interviewed') {
       await this.ensureConnected(gatewayId);
-      row = await this.routingRow(gatewayId);
+      row = await this.routingRow(gatewayId, pluginOnly);
+      refusal = await this.refusalFor(gatewayId, row, capability);
     }
 
-    const refusal = routingRefusal(row, capability);
     if (refusal) {
       throw new GatewayRoutingRefusedError(gatewayId, refusal, capability);
     }
@@ -607,9 +750,130 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     return row as RoutingRow;
   }
 
-  private routingRow(gatewayId: string): Promise<RoutingRow | null> {
+  /**
+   * The routing decision every caller makes: {@link routingRefusal}, with
+   * the one reason a row can't give, that this process can't reach a plugin
+   * DataGateway's plugin (#1083). In order: whether the DataGateway may be
+   * used at all, by its row and its plugin's; whether the plugin is loaded;
+   * then, with a capability, the interview's and the capability's reasons.
+   * So a plugin the server doesn't serve is never asked after, and the
+   * plugin's reasons hold with or without a capability.
+   *
+   * It is more than a question. When it finds a plugin DataGateway's row
+   * disabled, its plugin not loaded, or its driver built from an earlier
+   * install of the plugin, it also drops what this process holds for it
+   * ({@link dropPluginDriver}). Nothing else would. Uninstalling a plugin
+   * disables its row, as does an update that moves it out of the
+   * data-gateway category, and neither publishes a config event. A driver
+   * that isn't disposed keeps the plugin's handles and timers until the
+   * process restarts. One whose plugin isn't loaded reaches a copy that is
+   * gone, and one built from an earlier install reaches that install's copy.
+   * The next use builds a driver from the copy loaded then.
+   *
+   * No other answer touches the cache. A plugin that is only switched off
+   * keeps its driver, unused, for when it is switched on again: disposing it
+   * would fail the calls still under way, and those failures would count
+   * toward disabling a DataGateway that did nothing wrong. A remote
+   * DataGateway's driver is the config events' to take down.
+   */
+  private async refusalFor(
+    gatewayId: string,
+    row: RoutingRow | null,
+    capability?: DataGatewayCapability,
+  ): Promise<GatewayRefusalReason | null> {
+    const unusable = routingRefusal(row);
+    if (unusable || !row) {
+      if (unusable === 'disabled' && row && row.pluginId !== null) {
+        this.dropPluginDriver(gatewayId);
+      }
+
+      return unusable;
+    }
+
+    if (row.plugin) {
+      const loaded = await this.isLoaded(row.plugin);
+
+      if (loaded !== true) {
+        // A source that couldn't say leaves the driver: nothing says its copy is gone.
+        if (loaded === false) {
+          this.dropPluginDriver(gatewayId);
+        }
+
+        return 'plugin_not_loaded';
+      }
+
+      // `isLoaded` answers for the install the row names now. A reinstall
+      // between two uses that no decision saw, the row disabled and enabled
+      // again, leaves the earlier install's driver cached, so it is dropped
+      // here and the next use builds one from this install.
+      if (this.heldForAnotherInstall(gatewayId, row.plugin)) {
+        this.dropPluginDriver(gatewayId);
+      }
+    }
+
+    return capability === undefined ? null : routingRefusal(row, capability);
+  }
+
+  /**
+   * Whether this process can reach a running copy of this install of the
+   * plugin: false with no plugin driver source, and null when the source
+   * failed to say. One plugin's failed lookup must not fail a listing of
+   * every DataGateway, so it is logged here and read by the caller as not
+   * loaded, for that decision alone.
+   */
+  private async isLoaded(plugin: RoutedPlugin): Promise<boolean | null> {
+    if (!this.pluginDrivers) {
+      return false;
+    }
+
+    try {
+      return await this.pluginDrivers.isLoaded(plugin);
+    } catch (err) {
+      this.logger.warn(
+        `Couldn't tell whether plugin '${plugin.slug}' is loaded, so its DataGateway is refused for now: ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+
+      return null;
+    }
+  }
+
+  /**
+   * Whether the driver cached for a plugin DataGateway was built from an
+   * install of its plugin other than `plugin`'s. Switching the plugin off and
+   * on keeps its install, and so its driver (#1083).
+   */
+  private heldForAnotherInstall(gatewayId: string, plugin: RoutedPlugin): boolean {
+    const cached = this.clients.get(gatewayId);
+
+    return cached?.origin === 'plugin' && cached.installedAt?.getTime() !== plugin.installedAt.getTime();
+  }
+
+  /**
+   * Drops what this process holds for a plugin DataGateway whose row is
+   * disabled, whose plugin isn't loaded, or whose driver was built from an
+   * earlier install of its plugin: the cached driver, which is
+   * disposed, and a driver still being built or interviewed, which is
+   * discarded when done instead of cached. That one was built from a copy of
+   * the plugin this decision found gone, and cached, it would be served once
+   * the plugin reads as loaded again.
+   */
+  private dropPluginDriver(gatewayId: string): void {
+    this.bumpConnectGeneration(gatewayId);
+
+    if (this.clients.has(gatewayId)) {
+      this.disconnect(gatewayId);
+    }
+  }
+
+  /**
+   * The DataGateway's routing row, null when it's absent or deleted. With
+   * `pluginOnly`, a remote DataGateway's row reads as absent too.
+   */
+  private routingRow(gatewayId: string, pluginOnly = false): Promise<RoutingRow | null> {
     return this.db.dataGateway.findFirst({
-      where: { id: gatewayId, deletedAt: null },
+      where: { id: gatewayId, deletedAt: null, ...(pluginOnly && { pluginId: { not: null } }) },
       select: ROUTING_FIELDS,
     });
   }
@@ -653,26 +917,90 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
 
   /**
    * Loads an enabled, non-deleted gateway from the DB and establishes its
-   * connection. Throws if the gateway no longer qualifies for connection —
-   * callers should treat that as "gateway unavailable".
+   * connection: a remote DataGateway is dialled, and a plugin DataGateway's
+   * driver is built ({@link connectPlugin}). Throws if the gateway no longer
+   * qualifies for connection — callers should treat that as "gateway
+   * unavailable".
    */
   private async connectFromDb(gatewayId: string): Promise<void> {
     const gateway = await this.db.dataGateway.findFirst({
       where: { id: gatewayId, enabled: true, deletedAt: null },
+      include: { plugin: { select: ROUTED_PLUGIN_FIELDS } },
     });
 
     if (!gateway) {
       throw new Error(`Gateway ${gatewayId} is not available (absent, disabled, or deleted); cannot connect.`);
     }
 
+    // A plugin DataGateway has nothing to dial: its driver comes from the plugin driver source (#1083).
+    if (gateway.pluginId !== null) {
+      await this.connectPlugin(gateway);
+      return;
+    }
+
+    // A remote DataGateway's row always has its connection fields, so this
+    // only narrows the nullable columns.
+    const options = remoteConnectionOptions(gateway);
+    if (!options) {
+      throw new Error(`DataGateway ${gatewayId} has no connection fields; cannot connect.`);
+    }
+
     this.logger.log(`Lazily connecting to gateway '${gateway.name}' (${gatewayId}) on demand`);
-    await this.connect({
-      gatewayId: gateway.id,
-      connectionUrl: gateway.connectionUrl,
-      connectionPort: gateway.connectionPort,
-      authType: gateway.authType,
-      authParameters: gateway.authParameters ?? undefined,
-    });
+    await this.connect(options);
+  }
+
+  /**
+   * Builds a plugin DataGateway's driver from the plugin driver source, and
+   * caches it once the DataGateway has passed its first interview: what
+   * {@link connect} is to a remote DataGateway (#1083). `gateway` is the
+   * DataGateway's row, with its plugin as read beside it.
+   */
+  private async connectPlugin(gateway: RoutingRow & { id: string; name: string }): Promise<void> {
+    const { id: gatewayId, plugin } = gateway;
+
+    // Snapshot the invalidation counter before the first wait, as connect()
+    // does before its ping: a 'disabled' or 'deleted' event that arrives
+    // while the driver is being built finds nothing cached to tear down.
+    const generation = this.connectGeneration.get(gatewayId) ?? 0;
+
+    // Not every connect follows a routing decision: a 'reconnect-requested'
+    // event doesn't, and a search takes its route's driver after the route
+    // was read. So the same decision is made here, on the row just read, and
+    // no path builds a driver for a plugin the server doesn't serve or this
+    // process can't reach. A refusal counts as no failure, here as anywhere.
+    const refusal = await this.refusalFor(gatewayId, gateway);
+    const source = this.pluginDrivers;
+
+    // The decision passes a plugin's row only with its plugin read and a
+    // source that has it loaded, so the last two only narrow the types.
+    if (refusal || !plugin || !source) {
+      throw new GatewayRoutingRefusedError(gatewayId, refusal ?? 'plugin_not_loaded');
+    }
+
+    this.logger.log(`Lazily building the driver of plugin DataGateway '${gateway.name}' (${gatewayId}) on demand`);
+
+    let driver: DataGatewayDriver;
+    try {
+      driver = await source.build(gatewayId, plugin);
+    } catch (err) {
+      // A build that fails is a DataGateway that can't be reached, as a
+      // remote one's failed ping is. A source that refuses instead found the
+      // plugin's copy gone since it was asked, which is nothing the
+      // DataGateway did.
+      if (!(err instanceof GatewayRoutingRefusedError)) {
+        await this.reportFailure(gatewayId, err, 'repeated_connection_failure');
+      }
+
+      throw err;
+    }
+
+    // No config hash: no connection fields went into the driver, so no
+    // 'updated' event can outdate it. A reinstall can, so the install it was
+    // built from is kept with it.
+    await this.interviewAndCache(
+      { gatewayId, driver, configHash: '', origin: 'plugin', installedAt: plugin.installedAt },
+      generation,
+    );
   }
 
   /**
@@ -711,8 +1039,8 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
    * Reports a failed interaction with a gateway. Failures within the rolling
    * window accumulate; reaching FAILURE_THRESHOLD triggers auto-disable.
    * Callers in processors and other consumers should invoke this on failed
-   * calls — the tracking is transport-agnostic, so an in-process driver
-   * throwing repeatedly auto-disables exactly like a dead remote.
+   * calls — the tracking is transport-agnostic, so a plugin DataGateway's
+   * driver throwing repeatedly auto-disables exactly like a dead remote.
    *
    * The `reason` argument distinguishes connection-time failures from
    * call-time failures for the admin notification — same threshold logic,
@@ -836,19 +1164,24 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
   private async handleConfigUpdate(event: GatewayConfigEvent): Promise<void> {
     const cached = this.clients.get(event.gatewayId);
 
-    // In-process drivers (registered via register(), e.g. #59 DataGateway
-    // plugins) own their own config lifecycle. A DataGateway 'updated' or
-    // 'reconnect-requested' event describes a REMOTE connection row; acting on
-    // it here would disconnect the plugin driver and send the next resolve()
-    // to connectFromDb, which can only build a RemoteGatewayDriver — silently
-    // swapping the plugin out with no way back. Admin intent still wins:
-    // 'disabled'/'deleted' fall through and tear down any origin.
-    if (
-      cached?.origin === 'registered' &&
-      (event.changeType === 'updated' || event.changeType === 'reconnect-requested')
-    ) {
+    // An 'updated' event tells of a change to a remote DataGateway's
+    // connection fields. A driver handed to register() and a plugin
+    // DataGateway's were built from none, so each stays as it is.
+    // 'reconnect-requested' is ignored only for a driver handed to
+    // register(): the registry can't rebuild it, and dropping it would send
+    // the next resolve() to connectFromDb, which would dial the row as a
+    // remote DataGateway, with no way back. A plugin DataGateway's driver it
+    // can rebuild from the plugin driver source, so that one is dropped and
+    // built again below (#1083). Admin intent still wins: 'disabled' and
+    // 'deleted' fall through and tear down any origin.
+    const keepsItsDriver =
+      cached !== undefined &&
+      ((event.changeType === 'updated' && cached.origin !== 'remote') ||
+        (event.changeType === 'reconnect-requested' && cached.origin === 'registered'));
+
+    if (keepsItsDriver) {
       this.logger.debug(
-        `Ignoring '${event.changeType}' config event for registered in-process driver ${event.gatewayId}`,
+        `Ignoring '${event.changeType}' config event for DataGateway ${event.gatewayId}, whose driver's origin is '${cached.origin}'`,
       );
       return;
     }

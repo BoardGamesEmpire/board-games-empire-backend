@@ -221,7 +221,7 @@ describe('GatewayRegistryService', () => {
       expect(table.row('bgg')?.lastInterviewedAt?.getTime()).toBeGreaterThan(stale.getTime());
     });
 
-    it('runs for a driver handed to register(), as a plugin DataGateway’s will be', async () => {
+    it('runs for a driver handed to register()', async () => {
       table.seed({ id: 'plugin-bgg' });
       const driver = makeDriver({ capabilities: [proto.Capability.CAPABILITY_FETCH] });
 
@@ -631,7 +631,7 @@ describe('GatewayRegistryService', () => {
       expect(service.isConnected('plugin-bgg')).toBe(true);
     });
 
-    it('disconnect disposes a registered driver', async () => {
+    it('disconnect disposes a driver handed to register()', async () => {
       table.seed({ id: 'plugin-bgg' });
       const driver = makeDriver();
       await service.register('plugin-bgg', driver);
@@ -879,8 +879,8 @@ describe('GatewayRegistryService', () => {
     it('reconnect-requested drops the existing REMOTE driver and eagerly reconnects', async () => {
       // Seed a remote-origin cached driver by driving a real connect() first.
       // register() would tag it 'registered', which handleConfigUpdate now
-      // intentionally exempts from reconnect events (see the in-process test
-      // below) — reconnect only applies to remote connections.
+      // intentionally exempts from reconnect events (see the register() test
+      // below) — reconnect only applies to a driver the registry can rebuild.
       interviewedRow('bgg');
       const oldDriver = stubFactory(makeDriver());
       await service.connect(connectOpts); // origin: 'remote'
@@ -911,7 +911,7 @@ describe('GatewayRegistryService', () => {
       expect(table.row('bgg')?.capabilities).toEqual(EVERY_CAPABILITY);
     });
 
-    it('ignores updated/reconnect-requested for registered in-process drivers', async () => {
+    it('ignores updated/reconnect-requested for a driver handed to register()', async () => {
       interviewedRow('plugin-bgg');
       const driver = makeDriver();
       await service.register('plugin-bgg', driver);
@@ -919,14 +919,15 @@ describe('GatewayRegistryService', () => {
       await dispatch({ gatewayId: 'plugin-bgg', configHash: 'h', changeType: 'updated', timestamp: 0 });
       await dispatch({ gatewayId: 'plugin-bgg', configHash: 'h', changeType: 'reconnect-requested', timestamp: 0 });
 
-      // The plugin driver survives and connectFromDb is never consulted — an
-      // in-process driver must not be silently swapped for a remote one.
+      // The driver survives and connectFromDb is never consulted — one handed
+      // in whole can't be rebuilt, and must not be silently swapped for a
+      // remote one. A plugin DataGateway's driver is rebuilt instead (#1083).
       expect(driver.disposed).toBe(false);
       expect(service.isConnected('plugin-bgg')).toBe(true);
       expect(factory.create).not.toHaveBeenCalled();
     });
 
-    it('still tears down a registered driver on disabled (admin intent wins)', async () => {
+    it('still tears down a driver handed to register() on disabled (admin intent wins)', async () => {
       interviewedRow('plugin-bgg');
       const driver = makeDriver();
       await service.register('plugin-bgg', driver);
@@ -1015,7 +1016,7 @@ describe('GatewayRegistryService', () => {
       );
     });
 
-    it('is transport-agnostic: a registered in-process driver trips the same threshold and is disposed on disable', async () => {
+    it('is transport-agnostic: a driver handed to register() trips the same threshold and is disposed on disable', async () => {
       interviewedRow('plugin-bgg');
       const driver = makeDriver();
       await service.register('plugin-bgg', driver);

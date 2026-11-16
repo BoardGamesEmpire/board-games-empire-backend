@@ -180,6 +180,26 @@ export class PluginReinstallConflictError extends PluginInstallConflictError {
 }
 
 /**
+ * Installing a data-gateway plugin would create its DataGateway row under a
+ * name another row already holds (#1083). The row takes the plugin's display
+ * name, and `DataGateway.name` is unique across every row, a deleted one
+ * included. The server admin renames the other row, then installs again:
+ * deleting it keeps the name, and a deleted row can't be renamed. A reinstall
+ * of a plugin that already has its row creates none, so it never raises this.
+ */
+export class PluginInstallDataGatewayNameConflictError extends Error {
+  override readonly name = 'PluginInstallDataGatewayNameConflictError';
+
+  constructor(
+    public readonly slug: string,
+    /** The DataGateway name the install would have taken. */
+    public readonly dataGatewayName: string,
+  ) {
+    super(`Plugin '${slug}' cannot be installed: a DataGateway named '${dataGatewayName}' already exists`);
+  }
+}
+
+/**
  * A declared permission's canonical slug already exists in the catalog
  * (validation step 4). Structurally near-unreachable — the canonical form
  * embeds the `@unique` plugin slug and rows cascade-delete with their plugin

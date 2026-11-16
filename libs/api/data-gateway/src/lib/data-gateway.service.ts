@@ -25,6 +25,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { connectionFieldRequired, pluginConnectionFields, pluginRowDelete } from './data-gateway.errors';
 import { WITH_SECTIONS, type DataGatewayWithSections } from './data-gateway.view';
 import { CreateDataGatewayDto, UpdateDataGatewayDto } from './dto';
 
@@ -137,11 +138,13 @@ export class DataGatewayService {
     try {
       const before = await this.db.dataGateway.findFirst({
         where: { id: gatewayId, deletedAt: null },
-        select: { disabledCapabilities: true },
+        select: { disabledCapabilities: true, pluginId: true },
       });
       if (!before) {
         throw new NotFoundException(t('errors.data_gateway.not_found', { id: gatewayId }));
       }
+
+      refuseConnectionChange(before.pluginId, updateDataGatewayDTO);
 
       const update: Prisma.DataGatewayUpdateInput = {
         ...updateDataGatewayDTO,
@@ -197,9 +200,19 @@ export class DataGatewayService {
    */
   async delete(gatewayId: string): Promise<DataGatewayWithSections> {
     try {
-      const existingGateway = await this.db.dataGateway.count({ where: { id: gatewayId, deletedAt: null } });
-      if (existingGateway === 0) {
+      const existing = await this.db.dataGateway.findFirst({
+        where: { id: gatewayId, deletedAt: null },
+        select: { pluginId: true },
+      });
+      if (!existing) {
         throw new NotFoundException(t('errors.data_gateway.not_found', { id: gatewayId }));
+      }
+
+      // A plugin DataGateway's row is never deleted: alone, the plugin would
+      // have no row to answer through, and uninstalling it disables the row
+      // and keeps it, for the game sources that hang on it (#1083).
+      if (existing.pluginId !== null) {
+        throw pluginRowDelete();
       }
 
       const gateway = await this.db.dataGateway.update({
@@ -264,6 +277,39 @@ export class DataGatewayService {
         `Failed to publish ${changeType} event for gateway ${gateway.id}: ${error instanceof Error ? error.message : error}`,
       );
     }
+  }
+}
+
+/** The fields that say how a remote DataGateway is reached. */
+const CONNECTION_FIELDS = ['connectionUrl', 'connectionPort', 'authType', 'authParameters'] as const;
+
+/**
+ * Refuses a change to how the DataGateway is reached that its kind of row
+ * can't hold, before anything is written or announced (#1083). The database
+ * refuses most of them too, but as a 500.
+ *
+ * A plugin DataGateway is reached through its plugin, so a body that names a
+ * connection field at all is refused, null included. A remote DataGateway
+ * needs its address, port and authentication type, so none can be cleared.
+ * Null `authParameters` still leaves its credentials as they are.
+ *
+ * The values are `unknown` because the DTO's optional fields let null through,
+ * whatever their declared types say.
+ */
+function refuseConnectionChange(
+  pluginId: string | null,
+  update: Partial<Record<(typeof CONNECTION_FIELDS)[number], unknown>>,
+): void {
+  if (pluginId !== null) {
+    // A JSON body has no undefined, so a field set to anything was named.
+    if (CONNECTION_FIELDS.some((field) => update[field] !== undefined)) {
+      throw pluginConnectionFields();
+    }
+    return;
+  }
+
+  if (update.connectionUrl === null || update.connectionPort === null || update.authType === null) {
+    throw connectionFieldRequired();
   }
 }
 

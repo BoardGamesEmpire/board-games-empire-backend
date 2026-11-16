@@ -189,6 +189,10 @@ describe('launchOnFreePort', () => {
    * A child that counts its launches in `marker`, reports a lost port on every
    * launch before `bindsOn`, and otherwise writes the PORT it was given to
    * `boundTo` and stays up. Each call gets its own files.
+   *
+   * `boundTo` appears by rename, whole. The readiness probe asks only whether
+   * it exists, and a file written in place exists, empty, before its port is
+   * in it, so the probe could pass and the test read `''`.
    */
   const losesItsPortUntil = (name: string, bindsOn: number) => {
     const marker = path.join(scripts, `${name}.launches`);
@@ -204,7 +208,8 @@ describe('launchOnFreePort', () => {
         `  console.error('Error: listen EADDRINUSE: address already in use 127.0.0.1:' + process.env.PORT);`,
         `  process.exit(1);`,
         `}`,
-        `fs.writeFileSync(${JSON.stringify(boundTo)}, process.env.PORT);`,
+        `fs.writeFileSync(${JSON.stringify(`${boundTo}.tmp`)}, process.env.PORT);`,
+        `fs.renameSync(${JSON.stringify(`${boundTo}.tmp`)}, ${JSON.stringify(boundTo)});`,
         `setInterval(() => undefined, 1_000);`,
       ].join('\n'),
     );

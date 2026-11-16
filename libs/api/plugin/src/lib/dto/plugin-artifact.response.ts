@@ -229,6 +229,18 @@ export class PluginArtifactResponseDto {
   })
   forbiddenImportsToAccept!: string[];
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      "For a data-gateway plugin: the name its DataGateway would take, from the plugin's display name in the " +
+      'server default locale, when another DataGateway already has it. Installing is refused until that ' +
+      "DataGateway is renamed. Deleting it doesn't free the name, and a deleted DataGateway can't be renamed. " +
+      'Null when the install would not create a DataGateway under a taken name: for a plugin of another ' +
+      'category, for a plugin already installed, and for a reinstall of a plugin that already has its DataGateway',
+  })
+  dataGatewayNameConflict!: string | null;
+
   @ApiProperty({ type: ArtifactAnalysisDto })
   analysis!: ArtifactAnalysisDto;
 

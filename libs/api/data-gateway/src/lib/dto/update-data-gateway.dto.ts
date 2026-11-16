@@ -4,6 +4,12 @@ import { ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { IsArray, IsIn, ValidateIf } from 'class-validator';
 import { CreateDataGatewayDto } from './create-data-gateway.dto';
 
+/**
+ * The DTO lets null through each inherited field. The service, which knows
+ * the row's kind, refuses any connection field on a plugin DataGateway's row,
+ * and null for a remote DataGateway's address, port or authentication type
+ * (#1083).
+ */
 export class UpdateDataGatewayDto extends PartialType(CreateDataGatewayDto) {
   @ApiPropertyOptional({
     enum: DataGatewayCapability,

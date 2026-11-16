@@ -119,17 +119,24 @@ export class DataGatewayResponseDto implements DataGatewayView {
   @ApiProperty({ type: String, nullable: true })
   apiVersion!: string | null;
 
-  @ApiProperty()
-  connectionUrl!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'The plugin a plugin DataGateway belongs to. Null for a remote DataGateway (#1083).',
+  })
+  pluginId!: string | null;
 
-  @ApiProperty()
-  connectionPort!: number;
+  @ApiProperty({ type: String, nullable: true, description: 'Null for a plugin DataGateway.' })
+  connectionUrl!: string | null;
+
+  @ApiProperty({ type: Number, nullable: true, description: 'Null for a plugin DataGateway.' })
+  connectionPort!: number | null;
 
   @ApiProperty()
   enabled!: boolean;
 
-  @ApiProperty({ enum: AuthType, enumName: 'AuthType' })
-  authType!: AuthType;
+  @ApiProperty({ enum: AuthType, enumName: 'AuthType', nullable: true, description: 'Null for a plugin DataGateway.' })
+  authType!: AuthType | null;
 
   @ApiProperty({
     description: 'Whether credentials are stored. The credentials themselves are never returned (#753).',
@@ -259,12 +266,22 @@ export class GatewayCallAnswerDto {
   message?: string;
 }
 
-/** Create, update with `enabled: true`, and connect: the row plus the coordinator's connect answer. */
+/**
+ * Create, update with `enabled: true`, and connect: the row plus the
+ * coordinator's answer. A remote DataGateway is connected; a plugin
+ * DataGateway, which the coordinator builds itself, is interviewed (#1083).
+ */
 export class DataGatewayConnectAnswerDto extends DataGatewayEnvelopeDto {
   @ApiProperty({ description: 'False when no connect was asked for, such as a DataGateway created disabled' })
   connection_attempt!: boolean;
 
-  @ApiProperty({ type: GatewayCallAnswerDto, nullable: true })
+  @ApiProperty({
+    type: GatewayCallAnswerDto,
+    nullable: true,
+    description:
+      "For a remote DataGateway, the connect's answer. For a plugin DataGateway, which has no connection to " +
+      "make, the interview's answer, with the interview's generic copy on a failure (#1083).",
+  })
   connection_response!: GatewayCallAnswerDto | null;
 }
 

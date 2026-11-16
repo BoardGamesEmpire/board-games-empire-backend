@@ -3,6 +3,7 @@ import {
   DatabaseService,
   identifiesConstraint,
   isDeadlockError,
+  PluginCategory,
   PluginGrantScope,
   PluginGrantStatus,
   Prisma,
@@ -60,6 +61,11 @@ import {
   resolveForbiddenSpecifierAcknowledgement,
 } from '../install/consent-gates';
 import { MANIFEST_SCOPE_TO_PRISMA } from '../install/manifest-enum.maps';
+import {
+  disablePluginDataGatewayRow,
+  placePluginDataGatewayRow,
+  pluginDataGatewayName,
+} from '../install/plugin-data-gateway-row';
 import { PluginStaticAnalysisService } from '../install/plugin-static-analysis.service';
 import { gatingFindings, type StaticAnalysisReport } from '../install/static-analysis.types';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
@@ -78,6 +84,7 @@ import {
   PluginUpdateAuthorityError,
   PluginUpdateBlockedByDenialError,
   PluginUpdateCriticalConfirmationError,
+  PluginUpdateDataGatewayNameConflictError,
   PluginUpdateForbiddenPermissionError,
   PluginUpdateManifestError,
   PluginUpdateManifestSource,
@@ -1271,8 +1278,8 @@ export class PluginUpdateService {
       // grant lock below, matching the plugin row → advisory → grant row →
       // unit row total order `household-dormancy.ts` and `unit-scope-lock.ts`
       // already document.
-      const [current] = await tx.$queryRaw<{ config: Prisma.JsonValue }[]>`
-        SELECT config FROM plugins WHERE id = ${plugin.id} FOR UPDATE`;
+      const [current] = await tx.$queryRaw<{ config: Prisma.JsonValue; category: PluginCategory }[]>`
+        SELECT config, category FROM plugins WHERE id = ${plugin.id} FOR UPDATE`;
 
       if (current === undefined) {
         throw new Error(`Plugin '${plugin.slug}' row vanished mid-activation`);
@@ -1365,6 +1372,35 @@ export class PluginUpdateService {
           current?.pendingVersion ?? 'unknown',
           next.manifest.version,
         );
+      }
+
+      // The plugin's DataGateway row follows a move into or out of the
+      // data-gateway category, which the claim just wrote (#1083). Into it,
+      // the row is placed as an install places it: created, or enabled when
+      // the plugin kept one from an earlier time in the category. Out of it,
+      // the row is disabled and kept, as an uninstall leaves it, with the
+      // game sources that hang on it. An update that stays on one side of
+      // that edge touches no row, so a DataGateway an admin disabled stays
+      // disabled through its plugin's updates. Under the claim, the insert's
+      // foreign key locks a plugin row this transaction already holds, and a
+      // name that is taken takes the whole activation back.
+      //
+      // The category it leaves is the one read under the lock above, not the
+      // one on the row loaded before it. With nothing staged, the claim only
+      // holds that nothing is staged still, so another activation can have
+      // moved the plugin since that load, and the row with it.
+      const wasDataGateway = current.category === PluginCategory.DataGateway;
+      const becomesDataGateway = MANIFEST_CATEGORY_TO_PRISMA[next.manifest.category] === PluginCategory.DataGateway;
+
+      if (becomesDataGateway && !wasDataGateway) {
+        await placePluginDataGatewayRow(tx, {
+          pluginId: plugin.id,
+          name: pluginDataGatewayName(next.manifest, this.options.defaultLocale),
+          installerId: actorId,
+          nameTaken: (name) => new PluginUpdateDataGatewayNameConflictError(plugin.slug, name),
+        });
+      } else if (wasDataGateway && !becomesDataGateway) {
+        await disablePluginDataGatewayRow(tx, plugin.id);
       }
 
       // The server-scope decisions re-read under the SAME transaction as

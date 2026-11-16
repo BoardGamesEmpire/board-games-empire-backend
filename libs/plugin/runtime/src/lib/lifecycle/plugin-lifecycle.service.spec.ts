@@ -480,6 +480,47 @@ describe('PluginLifecycleService', () => {
       expect(db.pluginPermission.deleteMany).toHaveBeenCalledWith({ where: { pluginId: 'plugin-1' } });
     });
 
+    it("uninstall disables the plugin's DataGateway row and keeps it (#1083)", async () => {
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ enabled: true, category: PluginCategory.DataGateway }));
+      db.dataGateway.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.uninstall({ slug: 'demo-sink', actorId: 'admin-1' });
+
+      // Only the flag moves: the row keeps its id and everything on it,
+      // because the game sources imported through it hang on it.
+      expect(db.dataGateway.updateMany).toHaveBeenCalledWith({
+        where: { pluginId: 'plugin-1' },
+        data: { enabled: false },
+      });
+      expect(db.dataGateway.delete).not.toHaveBeenCalled();
+      expect(db.dataGateway.deleteMany).not.toHaveBeenCalled();
+      // Inside the transaction, after the claim: a lost uninstall race moves no row.
+      expect(db.plugin.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+        db.dataGateway.updateMany.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('a concurrent uninstall leaves the DataGateway row alone (#1083)', async () => {
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin({ enabled: true, category: PluginCategory.DataGateway }))
+        .mockResolvedValueOnce(makePlugin({ uninstalledAt: new Date('2026-08-16T01:00:00Z') }));
+
+      await expect(service.uninstall({ slug: 'demo-sink', actorId: 'admin-1' })).rejects.toThrow(
+        PluginLifecycleTombstonedError,
+      );
+      expect(db.dataGateway.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('asks the same of a plugin of another category, which has no row to match (#1083)', async () => {
+      await service.uninstall({ slug: 'demo-sink', actorId: 'admin-1' });
+
+      expect(db.dataGateway.updateMany).toHaveBeenCalledWith({
+        where: { pluginId: 'plugin-1' },
+        data: { enabled: false },
+      });
+    });
+
     it('retains household/user config rows by default — they are what the tombstone preserves', async () => {
       await service.uninstall({ slug: 'demo-sink', actorId: 'admin-1' });
 

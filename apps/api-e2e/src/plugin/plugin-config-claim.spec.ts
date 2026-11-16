@@ -56,13 +56,15 @@ describe('the server config PATCH claims the plugin row (FOR NO KEY UPDATE, #578
 
   /**
    * Activation's read of `config`, the first lock its transaction takes on the
-   * plugin row, lifted rather than stood in for. The anchor is the one the
-   * lock-order spec uses: the file ships a second `FOR UPDATE` (the grant
-   * rows), so the shape alone does not name one statement.
+   * plugin row, lifted rather than stood in for. It reads `category` beside
+   * it, which decides whether the plugin's DataGateway row follows the update
+   * (#1083). The anchor is the one the lock-order spec uses: the file ships a
+   * second `FOR UPDATE` (the grant rows), so the shape alone does not name one
+   * statement.
    */
   const activationConfigClaim = readShippedSql(UPDATE_SERVICE, ['plugin.id'], {
     after: 'const [current] = await tx.$queryRaw',
-    matching: /SELECT config FROM plugins/,
+    matching: /SELECT config, category FROM plugins/,
   });
 
   /**

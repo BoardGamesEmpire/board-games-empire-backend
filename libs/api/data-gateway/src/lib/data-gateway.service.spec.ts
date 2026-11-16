@@ -1,5 +1,5 @@
 import type { DataGateway } from '@bge/database';
-import { Action, DataGatewayCapability, Prisma, ResourceType } from '@bge/database';
+import { Action, AuthType, DataGatewayCapability, Prisma, ResourceType } from '@bge/database';
 import { GatewayConfigEventsService, hashGatewayConfig, VocabularySectionQueue } from '@bge/gateway-registry';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
@@ -17,8 +17,8 @@ import { WITH_SECTIONS } from './data-gateway.view';
 import type { CreateDataGatewayDto, UpdateDataGatewayDto } from './dto';
 
 const COND = { id: 'sentinel-condition' };
-/** The live row update reads before it writes. */
-const LIVE = { disabledCapabilities: [] } as unknown as DataGateway;
+/** The live row update and delete read before they write: a remote DataGateway's. */
+const LIVE = { disabledCapabilities: [], pluginId: null } as unknown as DataGateway;
 const COMPOSED_LIST_WHERE = { AND: [{ AND: [COND] }, { deletedAt: null }] };
 
 /** Prisma's answer when a statement's `where` matches no row. */
@@ -244,6 +244,7 @@ describe('DataGatewayService', () => {
 
       beforeEach(() => {
         db.dataGateway.findFirst.mockResolvedValue({
+          ...LIVE,
           disabledCapabilities: [ListPlatforms, ListCategories, Search],
         } as unknown as DataGateway);
       });
@@ -302,8 +303,96 @@ describe('DataGatewayService', () => {
     await expect(service.update('gw-1', {} as UpdateDataGatewayDto)).rejects.toThrow(BadRequestException);
   });
 
+  // A plugin DataGateway's row comes from installing its plugin, and the
+  // coordinator builds its driver itself, so the row has no connection
+  // settings for an admin to change. The database refuses them on that row,
+  // which would otherwise answer a 500 (#1083).
+  describe("a plugin's row", () => {
+    const PLUGIN_ROW = { disabledCapabilities: [], pluginId: 'plugin-1' } as unknown as DataGateway;
+
+    beforeEach(() => {
+      db.dataGateway.findFirst.mockResolvedValue(PLUGIN_ROW);
+      db.dataGateway.update.mockResolvedValue({ ...PLUGIN_ROW, id: 'gw-1' } as DataGateway);
+    });
+
+    // Null too: it's a value sent for a field the row doesn't have.
+    it.each([
+      ['connectionUrl', 'localhost'],
+      ['connectionUrl', null],
+      ['connectionPort', 50051],
+      ['connectionPort', null],
+      ['authType', AuthType.None],
+      ['authType', null],
+      ['authParameters', { apiKey: 'secret' }],
+      ['authParameters', null],
+    ] as const)("refuses a connection field on a plugin's row (#1083): %s set to %p", async (field, value) => {
+      const refusal = service.update('gw-1', { [field]: value } as unknown as UpdateDataGatewayDto);
+
+      await expect(refusal).rejects.toMatchObject({
+        status: 422,
+        response: {
+          code: 'DATA_GATEWAY_PLUGIN_CONNECTION_FIELDS',
+          message: expect.objectContaining({ key: 'errors.data_gateway.plugin_connection_fields' }),
+        },
+      });
+      expect(db.dataGateway.update).not.toHaveBeenCalled();
+      expect(configEvents.publish).not.toHaveBeenCalled();
+    });
+
+    // What an admin may still change: everything but how it is reached (#1083).
+    it("renames and disables a plugin's row (#1083)", async () => {
+      const patch = { name: 'Renamed', description: 'Described', enabled: false };
+
+      await service.update('gw-1', patch);
+
+      expect(db.dataGateway.update).toHaveBeenCalledWith(expect.objectContaining({ data: patch }));
+      expect(configEvents.publish).toHaveBeenCalledWith(expect.objectContaining({ changeType: 'updated' }));
+    });
+  });
+
+  // The DTO lets null through every optional field, and the database refuses
+  // a remote row without its connection settings, as a 500 (#1083).
+  describe("a remote row's connection fields", () => {
+    beforeEach(() => {
+      db.dataGateway.findFirst.mockResolvedValue(LIVE);
+      db.dataGateway.update.mockResolvedValue({ ...LIVE, id: 'gw-1' } as DataGateway);
+    });
+
+    it.each(['connectionUrl', 'connectionPort', 'authType'] as const)(
+      "refuses null for a remote row's connection field (#1083): %s",
+      async (field) => {
+        const refusal = service.update('gw-1', { [field]: null } as unknown as UpdateDataGatewayDto);
+
+        await expect(refusal).rejects.toMatchObject({
+          status: 422,
+          response: {
+            code: 'DATA_GATEWAY_CONNECTION_FIELD_REQUIRED',
+            message: expect.objectContaining({ key: 'errors.data_gateway.connection_field_required' }),
+          },
+        });
+        expect(db.dataGateway.update).not.toHaveBeenCalled();
+        expect(configEvents.publish).not.toHaveBeenCalled();
+      },
+    );
+
+    // As before: null credentials mean "leave them", like leaving the field out.
+    it('leaves the stored credentials alone when authParameters is null (#1083)', async () => {
+      await service.update('gw-1', { name: 'x', authParameters: null });
+
+      expect(db.dataGateway.update.mock.calls[0][0].data).not.toHaveProperty('authParameters');
+    });
+
+    it('still changes where a remote row is reached (#1083)', async () => {
+      const patch = { connectionUrl: 'bgg.local', connectionPort: 50052, authType: AuthType.Bearer };
+
+      await service.update('gw-1', patch);
+
+      expect(db.dataGateway.update).toHaveBeenCalledWith(expect.objectContaining({ data: patch }));
+    });
+  });
+
   it('delete → delete (soft) and publishes a deleted event', async () => {
-    db.dataGateway.count.mockResolvedValue(1);
+    db.dataGateway.findFirst.mockResolvedValue(LIVE);
     db.dataGateway.update.mockResolvedValue({ id: 'gw-1' } as DataGateway);
 
     await service.delete('gw-1');
@@ -318,22 +407,41 @@ describe('DataGatewayService', () => {
     expect(configEvents.publish).toHaveBeenCalledWith(expect.objectContaining({ changeType: 'deleted' }));
   });
 
-  it('delete throws NotFound for a missing gateway', async () => {
-    db.dataGateway.count.mockResolvedValue(0);
-    await expect(service.delete('gw-1')).rejects.toThrow(NotFoundException);
-  });
+  // Deleting the row alone would leave the plugin with no DataGateway to
+  // answer through, and uninstalling keeps it for its game sources (#1083).
+  it("refuses to delete a plugin's row, which even uninstalling keeps (#1083)", async () => {
+    db.dataGateway.findFirst.mockResolvedValue({ ...LIVE, pluginId: 'plugin-1' } as DataGateway);
+    db.dataGateway.update.mockResolvedValue({ id: 'gw-1' } as DataGateway);
 
-  it('delete treats an already soft-deleted gateway as not found', async () => {
-    db.dataGateway.count.mockResolvedValue(0);
-
-    await expect(service.delete('gw-1')).rejects.toThrow(NotFoundException);
-
-    expect(db.dataGateway.count).toHaveBeenCalledWith({ where: { id: 'gw-1', deletedAt: null } });
+    await expect(service.delete('gw-1')).rejects.toMatchObject({
+      status: 409,
+      response: {
+        code: 'DATA_GATEWAY_PLUGIN_ROW_DELETE',
+        message: expect.objectContaining({ key: 'errors.data_gateway.plugin_row_delete' }),
+      },
+    });
     expect(db.dataGateway.update).not.toHaveBeenCalled();
     expect(configEvents.publish).not.toHaveBeenCalled();
   });
 
-  // The count saw a live row, but the write, which carries the caller's
+  it('delete throws NotFound for a missing gateway', async () => {
+    db.dataGateway.findFirst.mockResolvedValue(null);
+    await expect(service.delete('gw-1')).rejects.toThrow(NotFoundException);
+  });
+
+  it('delete treats an already soft-deleted gateway as not found', async () => {
+    db.dataGateway.findFirst.mockResolvedValue(null);
+
+    await expect(service.delete('gw-1')).rejects.toThrow(NotFoundException);
+
+    expect(db.dataGateway.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'gw-1', deletedAt: null } }),
+    );
+    expect(db.dataGateway.update).not.toHaveBeenCalled();
+    expect(configEvents.publish).not.toHaveBeenCalled();
+  });
+
+  // The read saw a live row, but the write, which carries the caller's
   // ceiling, matched none: the ceiling excludes that gateway, or a delete
   // landed between the two statements. Either way it is a refusal naming the
   // action, and nothing is published.
@@ -351,7 +459,7 @@ describe('DataGatewayService', () => {
   });
 
   it('delete refuses a live gateway its scoped write does not reach', async () => {
-    db.dataGateway.count.mockResolvedValue(1);
+    db.dataGateway.findFirst.mockResolvedValue(LIVE);
     db.dataGateway.update.mockRejectedValue(noRowMatched());
 
     const refusal = service.delete('gw-1');
@@ -389,7 +497,7 @@ describe('DataGatewayService', () => {
     });
 
     it('delete answers an unknown id with a 404 and no error log', async () => {
-      db.dataGateway.count.mockResolvedValue(0);
+      db.dataGateway.findFirst.mockResolvedValue(null);
 
       await expect(service.delete('gw-1')).rejects.toThrow(NotFoundException);
       expect(errorLog).not.toHaveBeenCalled();
