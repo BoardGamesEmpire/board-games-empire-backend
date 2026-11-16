@@ -4,7 +4,6 @@ import {
   PluginGrantScope,
   PluginGrantStatus,
   PluginScope,
-  PluginUnitDormantReason,
   RiskLevel,
   SERVER_SCOPE_SENTINEL,
   type DatabaseService,
@@ -24,11 +23,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
-import {
-  HouseholdPluginUnitDormantEvent,
-  HouseholdPluginUnitRevivedEvent,
-  PluginInstalledEvent,
-} from '../events/plugin.events';
+import { PluginInstalledEvent } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
@@ -100,8 +95,6 @@ describe('PluginInstallerService', () => {
     pluginId: 'plugin-1',
     enabled: true,
     config: { webhookUrl: 'https://example.test/hook' },
-    dormantReason: null,
-    dormantAt: null,
     createdAt: new Date(0),
     updatedAt: new Date(0),
     ...overrides,
@@ -920,72 +913,24 @@ describe('PluginInstallerService', () => {
         await service.install(input());
 
         expect(db.householdPlugin.deleteMany).not.toHaveBeenCalled();
+        expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
         expect(db.userPlugin.deleteMany).not.toHaveBeenCalled();
         expect(db.userPlugin.updateMany).not.toHaveBeenCalled();
-        // Dormancy is the ONLY household column a reinstall may write (#369):
-        // re-validating every retained document at a manifest replacement is
-        // #370's pass, and destroying one was never on the table.
-        for (const [call] of db.householdPlugin.updateMany.mock.calls) {
-          expect(Object.keys(call.data as Record<string, unknown>).sort()).toEqual(['dormantAt', 'dormantReason']);
-        }
       });
 
       /**
-       * The reinstall half of #369. `sharedColumns` rewrites `scope` from the
-       * new manifest exactly as activation does, and `purgeData: false` retained
-       * the household rows — so without this pass a household enabled under the
-       * old scope comes back serving a plugin with no household surface, and the
-       * serving predicate has no live scope check to catch it.
+       * A reinstall rewrites `scope` and `config.schema` from the new manifest,
+       * and an uninstall with `purgeData: false` retained every household unit
+       * enablement as it stood. Whether such a unit can run under the new
+       * manifest is worked out when read, from the active manifest and the
+       * unit's retained `config` (#1151), so the reinstall has nothing to read
+       * or write on that axis — whichever way the manifest moved.
        */
-      it('makes retained household rows dormant when the new manifest is server-scope', async () => {
-        db.householdPlugin.findMany.mockResolvedValue([householdRow()]);
-        db.householdPlugin.updateMany.mockResolvedValue({ count: 1 });
-        await writeManifest(buildPluginManifest({ scope: 'server' }));
-
-        await service.install(input());
-
-        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
-          where: { id: { in: ['hp-1'] } },
-          data: { dormantReason: PluginUnitDormantReason.ScopeOrphaned, dormantAt: expect.any(Date) },
-        });
-        expect(emitter.emit).toHaveBeenCalledWith(
-          HouseholdPluginUnitDormantEvent.eventName,
-          expect.objectContaining({ reason: PluginUnitDormantReason.ScopeOrphaned }),
-        );
-      });
-
-      it('revives a scope-dormant row when the new manifest admits households again', async () => {
-        db.householdPlugin.findMany.mockResolvedValue([
-          householdRow({ dormantReason: PluginUnitDormantReason.ScopeOrphaned, dormantAt: new Date(0) }),
-        ]);
-        db.householdPlugin.updateMany.mockResolvedValue({ count: 1 });
-        await writeManifest(buildPluginManifest({ scope: 'household' }));
-
-        await service.install(input());
-
-        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
-          where: { id: { in: ['hp-1'] } },
-          data: { dormantReason: null, dormantAt: null },
-        });
-        expect(emitter.emit).toHaveBeenCalledWith(
-          HouseholdPluginUnitRevivedEvent.eventName,
-          expect.objectContaining({ clearedReason: PluginUnitDormantReason.ScopeOrphaned }),
-        );
-      });
-
-      /**
-       * The general pass' household half of #370, exercised through the
-       * OTHER manifest-replacing transaction. The two tests above only ever
-       * revalidate a row already dormant for scope (#369); this is the case
-       * #370 added — a row still SERVING loses to a schema the reinstalled
-       * manifest tightens underneath it. The pass itself lives once in
-       * `reconcileHouseholdDormancy` and is proven there via activation; this
-       * is the reinstall caller's wiring into that same pass.
-       */
-      it('marks a serving household row NeedsConfiguration when reinstall tightens the schema underneath it (#370)', async () => {
-        db.householdPlugin.findMany.mockResolvedValue([householdRow()]);
-        db.householdPlugin.updateMany.mockResolvedValue({ count: 1 });
-        await writeManifest(
+      it.each([
+        ['a server-scope manifest', buildPluginManifest({ scope: 'server' })],
+        ['a household-scope manifest', buildPluginManifest({ scope: 'household' })],
+        [
+          'a household-scope manifest whose schema rejects the retained document',
           buildPluginManifest({
             scope: 'household',
             config: {
@@ -996,18 +941,16 @@ describe('PluginInstallerService', () => {
               },
             },
           }),
-        );
+        ],
+      ])('a reinstall reads and writes no household unit enablement under %s (#1151)', async (_, manifest) => {
+        db.householdPlugin.findMany.mockResolvedValue([householdRow()]);
+        await writeManifest(manifest);
 
         await service.install(input());
 
-        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
-          where: { id: { in: ['hp-1'] } },
-          data: { dormantReason: PluginUnitDormantReason.NeedsConfiguration, dormantAt: expect.any(Date) },
-        });
-        expect(emitter.emit).toHaveBeenCalledWith(
-          HouseholdPluginUnitDormantEvent.eventName,
-          expect.objectContaining({ reason: PluginUnitDormantReason.NeedsConfiguration }),
-        );
+        for (const method of Object.values(db.householdPlugin)) {
+          expect(method).not.toHaveBeenCalled();
+        }
       });
 
       it('leaves household rows alone on a FRESH install — there is no plugin row for one to reference', async () => {

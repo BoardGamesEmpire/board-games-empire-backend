@@ -1,4 +1,4 @@
-import { PluginScope, PluginUnitDormantReason, ResourceType, type Plugin } from '@bge/database';
+import { PluginScope, ResourceType, type Plugin } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -35,6 +35,15 @@ describe('installed-plugin inventory (#354)', () => {
 
   const arrangePlugin = (row: Record<string, unknown> = {}): Promise<Plugin> =>
     arrangeInventoryPlugin(db.client, { row });
+
+  /**
+   * A plugin a household can hold a unit enablement under. The scope is the
+   * manifest's, which the row's column follows: a row saying Household over a
+   * manifest saying server describes no plugin an install can produce, and
+   * its household units read `unavailable` (#1151).
+   */
+  const arrangeHouseholdPlugin = (): Promise<Plugin> =>
+    arrangeInventoryPlugin(db.client, { manifest: { scope: 'household' } });
 
   const listServer = (actor: Caller, query = '') => request(baseUrl).get(`/api/plugins${query}`).set(actor.headers);
   const readOne = (actor: Caller, slug: string) => request(baseUrl).get(`/api/plugins/${slug}`).set(actor.headers);
@@ -426,10 +435,12 @@ describe('installed-plugin inventory (#354)', () => {
       await listHousehold(ownerB, fixtureA.household.id).expect(403);
     });
 
-    it('lists a household-scope plugin unanchored — the row set is plugin-driven (D-CE)', async () => {
+    it('lists a household-scope plugin with no unit enablement, with no dormancy: the row set is plugin-driven (#1151)', async () => {
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner });
-      const plugin = await arrangePlugin({ scope: PluginScope.Household });
+      // A household with no unit enablement is judged on `{}`, which the
+      // fixture's schema accepts, so nothing stands in the way but the switch.
+      const plugin = await arrangeInventoryPlugin(db.client, { manifest: { scope: 'household' } });
 
       const response = await listHousehold(owner, fixture.household.id, '?limit=100').expect(200);
 
@@ -439,59 +450,80 @@ describe('installed-plugin inventory (#354)', () => {
           anchored: false,
           enabled: false,
           state: 'off',
+          dormancy: null,
           consent: { outstanding: expect.any(Array), optionalOff: expect.any(Array) },
         },
       });
-      // Dormancy is reported through `unit.state` now (#1149).
+      // Dormancy is reported through `unit.state` and `unit.dormancy`, never
+      // as a stored reason (#1149, #1151).
       expect(entryFor(response.body, plugin.slug)).not.toHaveProperty('dormantReason');
     });
 
-    it('reports the dormancy a row carries, and the reason distinguishes the two causes (D-CF, D-CM)', async () => {
+    /**
+     * The two causes of dormancy, each arranged as the cause itself: a unit
+     * enablement on a plugin whose manifest has no household surface, and one
+     * holding a document the active schema rejects. Nothing about dormancy is
+     * written to the unit enablement; the read works it out (#1151).
+     */
+    const REQUIRING_SCHEMA = {
+      type: 'object',
+      properties: { webhookUrl: { type: 'string' } },
+      required: ['webhookUrl'],
+    };
+
+    const arrangeDormantUnits = async (householdId: string, enabled: boolean) => {
+      const serverScoped = await arrangeInventoryPlugin(db.client);
+      const rejectedConfig = await arrangeInventoryPlugin(db.client, {
+        manifest: { scope: 'household', config: { schema: REQUIRING_SCHEMA, requiresHouseholdConfig: false } },
+      });
+
+      await db.client.householdPlugin.create({ data: { householdId, pluginId: serverScoped.id, enabled } });
+      await db.client.householdPlugin.create({
+        data: { householdId, pluginId: rejectedConfig.id, enabled, config: { webhookUrl: 42 } },
+      });
+
+      return { serverScoped, rejectedConfig };
+    };
+
+    it('reports unavailable for a unit enablement on a server-scope plugin and needs_configuration for one whose document the schema rejects (#1151)', async () => {
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner });
-      // The state a narrowing activation leaves behind, arranged directly:
-      // a server-scope plugin the household nonetheless holds a row for.
-      const orphaned = await arrangePlugin({ scope: PluginScope.Server });
-      await db.client.householdPlugin.create({
-        data: {
-          householdId: fixture.household.id,
-          pluginId: orphaned.id,
-          enabled: true,
-          dormantReason: PluginUnitDormantReason.ScopeOrphaned,
-          dormantAt: new Date(),
-        },
-      });
-      // And the other cause, under a plugin whose scope is perfectly fine —
-      // which the replaced boolean could not have expressed at all.
-      const stale = await arrangePlugin({ scope: PluginScope.Household });
-      await db.client.householdPlugin.create({
-        data: {
-          householdId: fixture.household.id,
-          pluginId: stale.id,
-          enabled: true,
-          dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-          dormantAt: new Date(),
-        },
-      });
+      const { serverScoped, rejectedConfig } = await arrangeDormantUnits(fixture.household.id, true);
 
       const response = await listHousehold(owner, fixture.household.id, '?limit=100').expect(200);
 
-      // The unit state carries the cause (#1149): `unavailable` for the scope
-      // orphan, `needs_configuration` for the retained document.
-      expect(entryFor(response.body, orphaned.slug)).toMatchObject({
-        // Retained with the admin's own switch intact, so a re-scope back
-        // restores their choice rather than a default (#369, D-CK).
-        unit: { anchored: true, enabled: true, state: 'unavailable' },
+      expect(entryFor(response.body, serverScoped.slug)).toMatchObject({
+        // The admin's own switch stays as they left it, so a re-scope back
+        // restores their choice rather than a default (#369).
+        unit: { anchored: true, enabled: true, state: 'unavailable', dormancy: 'unavailable' },
       });
-      expect(entryFor(response.body, stale.slug)).toMatchObject({
-        unit: { anchored: true, enabled: true, state: 'needs_configuration' },
+      expect(entryFor(response.body, rejectedConfig.slug)).toMatchObject({
+        unit: { anchored: true, enabled: true, state: 'needs_configuration', dormancy: 'needs_configuration' },
+      });
+    });
+
+    it('reports off with the dormancy that would refuse a switch-on (#1151)', async () => {
+      // `off` outranks dormancy in `state`, and `dormancy` ignores the switch,
+      // so a client can say why switching on would not help before the admin
+      // tries it.
+      const owner = await actors.user();
+      const fixture = await actors.householdWithMembers({ owner });
+      const { serverScoped, rejectedConfig } = await arrangeDormantUnits(fixture.household.id, false);
+
+      const response = await listHousehold(owner, fixture.household.id, '?limit=100').expect(200);
+
+      expect(entryFor(response.body, serverScoped.slug)).toMatchObject({
+        unit: { anchored: true, enabled: false, state: 'off', dormancy: 'unavailable' },
+      });
+      expect(entryFor(response.body, rejectedConfig.slug)).toMatchObject({
+        unit: { anchored: true, enabled: false, state: 'off', dormancy: 'needs_configuration' },
       });
     });
 
     it('serves no provenance, version or install history, and accepts no tombstone flag', async () => {
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner });
-      const plugin = await arrangePlugin({ scope: PluginScope.Household });
+      const plugin = await arrangeHouseholdPlugin();
 
       const response = await listHousehold(owner, fixture.household.id, '?limit=100').expect(200);
       const entry = entryFor(response.body, plugin.slug);
@@ -542,10 +574,7 @@ describe('installed-plugin inventory (#354)', () => {
       it('narrows the list to the one plugin its scope names, and refuses it once the household is deleted', async () => {
         const admin = await actors.admin();
         const { household } = await actors.householdWithMembers({ owner: await actors.user() });
-        const [scoped, other] = await Promise.all([
-          arrangePlugin({ scope: PluginScope.Household }),
-          arrangePlugin({ scope: PluginScope.Household }),
-        ]);
+        const [scoped, other] = await Promise.all([arrangeHouseholdPlugin(), arrangeHouseholdPlugin()]);
 
         // The control: unpinned, the key lists both.
         const unpinned = await listHousehold(await keyOf(admin), household.id, '?limit=100').expect(200);
@@ -566,7 +595,7 @@ describe('installed-plugin inventory (#354)', () => {
       it('refuses the consent and feature-state reads once the household is deleted (#790)', async () => {
         const admin = await actors.admin();
         const { household } = await actors.householdWithMembers({ owner: await actors.user() });
-        const plugin = await arrangePlugin({ scope: PluginScope.Household });
+        const plugin = await arrangeHouseholdPlugin();
         const key = await keyOf(admin);
         const reads = (path: string) =>
           request(baseUrl).get(`/api/households/${household.id}/plugins/${plugin.slug}/${path}`).set(key.headers);
@@ -604,10 +633,11 @@ describe('installed-plugin inventory (#354)', () => {
       const response = await listUser(user, '?limit=100').expect(200);
 
       // Server-scope plugins are addressable on this axis: user consent is
-      // legal at any plugin scope, so there is no orphan state to report.
+      // legal at any plugin scope, so a user unit on one has no dormancy
+      // (#1151).
       expect(entryFor(response.body, serverScoped.slug)).toMatchObject({
         serverEnabled: true,
-        unit: { anchored: false },
+        unit: { anchored: false, dormancy: null },
       });
       expect(entryFor(response.body, serverScoped.slug)).not.toHaveProperty('dormantReason');
     });

@@ -23,11 +23,13 @@ export interface PluginGrantSnapshot {
   readonly unit: PluginUnit;
   /**
    * The serving predicate at resolution time: the plugin is enabled and not
-   * tombstoned, AND the unit's enablement (Household/User scopes) exists with
-   * `enabled && dormantReason === null`. Server units need only the
-   * plugin-level half. Consent is not part of it (#1149): a unit still owing a
-   * required permission stays servable, and `corePermissions` simply omits the
-   * slug it has not granted.
+   * uninstalled, AND the unit's enablement (Household/User scopes) exists and
+   * is switched on, AND, for a Household unit, the dormancy rule
+   * (`derivePluginUnitDormancy`, #1151) finds no dormancy in it, worked out
+   * from the active manifest and the household's retained configuration.
+   * Server units need only the plugin-level half. Consent is not part of it
+   * (#1149): a unit still owing a required permission stays servable, and
+   * `corePermissions` simply omits the slug it has not granted.
    */
   readonly servable: boolean;
   /** Core `Permission` rows whose grants survived the guards, in full (conditions/fields/inverted). */

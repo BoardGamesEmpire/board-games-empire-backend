@@ -31,11 +31,6 @@ import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.se
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
-import {
-  emitHouseholdDormancy,
-  reconcileHouseholdDormancy,
-  type HouseholdDormancyTransition,
-} from '../units/household-dormancy';
 import { CLEARED_STAGED_UPDATE } from '../update/staged-update.columns';
 import {
   collectForbiddenPermissionViolations,
@@ -238,7 +233,7 @@ export class PluginInstallerService {
       initiatedAt,
     );
 
-    const { retainedConfigReset, dormancyTransitions, ...persistedResult } = persisted;
+    const { retainedConfigReset, ...persistedResult } = persisted;
 
     this.emitInstalled(
       persisted.plugin,
@@ -249,14 +244,10 @@ export class PluginInstallerService {
       retainedConfigReset,
       initiatedAt,
     );
-    emitHouseholdDormancy(this.emitter, dormancyTransitions, validated.manifest.version, initiatedAt);
     this.logger.log(
       `Installed plugin '${persisted.plugin.slug}'@${persisted.plugin.version}: ` +
         `${persisted.declaredPermissions.length} declared permission(s), ${persisted.seededGrants.length} server grant(s) seeded` +
-        (retainedConfigReset ? '; retained server config was schema-invalid and reset' : '') +
-        (dormancyTransitions.length === 0
-          ? ''
-          : `; ${dormancyTransitions.length} household row(s) reconciled against the new manifest`),
+        (retainedConfigReset ? '; retained server config was schema-invalid and reset' : ''),
     );
 
     return { ...persistedResult, analysis, warnings: validated.warnings, acknowledgedForbiddenImports };
@@ -521,8 +512,6 @@ export class PluginInstallerService {
   ): Promise<
     Pick<PluginInstallResult, 'plugin' | 'declaredPermissions' | 'seededGrants'> & {
       retainedConfigReset: boolean;
-      /** Household rows a reinstall's manifest made dormant or revived (#369) — always empty for a fresh install. */
-      dormancyTransitions: readonly HouseholdDormancyTransition[];
     }
   > {
     const manifest = validated.manifest;
@@ -575,7 +564,6 @@ export class PluginInstallerService {
 
       let plugin: Plugin;
       let retainedConfigReset = false;
-      let dormancyTransitions: readonly HouseholdDormancyTransition[] = [];
 
       if (existing === null) {
         plugin = await tx.plugin.create({
@@ -638,23 +626,8 @@ export class PluginInstallerService {
 
         plugin = await tx.plugin.findUniqueOrThrow({ where: { id: existing.id } });
 
-        // A reinstall replaces a manifest, so it owns the same household-row
-        // reconciliation activation does (#369, D-CK). `sharedColumns` above
-        // rewrites `scope` from the new manifest, and an uninstall with
-        // `purgeData: false` retained every household row as it stood — so
-        // without this a household enabled under the old scope comes back
-        // serving a plugin whose scope has no household surface, and the
-        // serving predicate has no live scope check to catch it.
-        //
-        // Only in this branch: a FRESH install has no plugin row, so no
-        // household row can reference one.
-        dormancyTransitions = await reconcileHouseholdDormancy({
-          tx,
-          pluginId: plugin.id,
-          manifest,
-          configSchema: this.configSchema,
-          initiatedAt,
-        });
+        // A reinstall reads and writes no household unit enablement: whether a
+        // retained one can run under this manifest is worked out when read (#1151).
       }
 
       // A data-gateway plugin's DataGateway row, created or (on a reinstall)
@@ -704,7 +677,7 @@ export class PluginInstallerService {
         );
       }
 
-      return { plugin, declaredPermissions, seededGrants, retainedConfigReset, dormancyTransitions };
+      return { plugin, declaredPermissions, seededGrants, retainedConfigReset };
     });
   }
 

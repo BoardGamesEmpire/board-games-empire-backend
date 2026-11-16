@@ -40,8 +40,6 @@ export const RESERVED_PLUGIN_SLUGS: ReadonlySet<string> = new Set([
   'grant-rejected',
   'grant-revoked',
   're-consent-requested',
-  'unit-dormant',
-  'unit-revived',
 ]);
 
 /** Manifest categories — mirrors the Prisma `PluginCategory` enum (bijection spec in `@bge/plugin`). */

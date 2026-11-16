@@ -43,7 +43,13 @@ const INVENTORY_PAGE = {
       id: 'plugin-1',
       slug: 'demo-sink',
       serverEnabled: true,
-      unit: { anchored: false, enabled: false, state: 'off', consent: { outstanding: [], optionalOff: [] } },
+      unit: {
+        anchored: false,
+        enabled: false,
+        state: 'off',
+        dormancy: null,
+        consent: { outstanding: [], optionalOff: [] },
+      },
     },
   ],
   total: 1,
@@ -54,6 +60,7 @@ const FEATURE_STATE = {
   served: true,
   serverEnabled: true,
   state: 'on',
+  dormancy: null,
   consent: { outstanding: [], optionalOff: [] },
   features: [],
 } as unknown as PluginFeatureUnitState;

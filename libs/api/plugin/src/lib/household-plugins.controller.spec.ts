@@ -53,6 +53,7 @@ const INVENTORY_PAGE = {
         anchored: true,
         enabled: true,
         state: 'review_pending',
+        dormancy: null,
         consent: {
           outstanding: [
             {
@@ -77,6 +78,7 @@ const FEATURE_STATE = {
   served: true,
   serverEnabled: true,
   state: 'review_pending',
+  dormancy: null,
   consent: {
     outstanding: [
       {

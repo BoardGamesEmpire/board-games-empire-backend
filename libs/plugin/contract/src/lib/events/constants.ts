@@ -14,10 +14,9 @@
  * consent for the new manifest's re-consent slugs, and changes no unit
  * enablement.
  *
- * `plugin.unit_dormant` / `plugin.unit_revived` are deliberately NOT folded
- * into `re_consent_requested`: its payload is permission slugs, and dormancy
- * is a different cause with no slugs (#369, #370), so a listener filtering
- * for re-consent must not have to inspect a payload to tell them apart.
+ * No event announces dormancy. Whether a household's unit can run is worked
+ * out when read, from the active manifest's scope and the unit's retained
+ * configuration (#1151), so there is no stored transition to announce.
  */
 export enum PluginEvent {
   Installed = 'plugin.installed',
@@ -34,8 +33,6 @@ export enum PluginEvent {
   GrantRejected = 'plugin.grant_rejected',
   GrantRevoked = 'plugin.grant_revoked',
   ReconsentRequested = 'plugin.re_consent_requested',
-  UnitDormant = 'plugin.unit_dormant',
-  UnitRevived = 'plugin.unit_revived',
 }
 
 /**

@@ -4,7 +4,6 @@ import {
   PluginGrantScope,
   PluginGrantStatus,
   PluginScope,
-  PluginUnitDormantReason,
   Prisma,
   RiskLevel,
   type HouseholdPlugin,
@@ -32,8 +31,6 @@ import { join } from 'node:path';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import {
   HouseholdPluginReconsentRequestedEvent,
-  HouseholdPluginUnitDormantEvent,
-  HouseholdPluginUnitRevivedEvent,
   PluginGrantRevokedEvent,
   PluginUpdateApprovedEvent,
   PluginUpdatePendingEvent,
@@ -166,8 +163,6 @@ describe('PluginUpdateService', () => {
     pluginId: 'plugin-1',
     enabled: true,
     config: {},
-    dormantReason: null,
-    dormantAt: null,
     createdAt: new Date(0),
     updatedAt: new Date(0),
     ...overrides,
@@ -1524,316 +1519,93 @@ describe('PluginUpdateService', () => {
     });
 
     /**
-     * Activation reconciles the household rows it used to leave behind
-     * (#369, D-CK–D-CP): a scope that no longer admits households makes every
-     * row dormant, a scope that admits them again revives one — subject to the
-     * document it still holds.
+     * Whether a household's unit can run under the manifest this activation
+     * promotes is worked out when read, from the active manifest's scope and
+     * the unit's retained `config` (#1151). Activation therefore has nothing to
+     * write to any household unit enablement, whichever way the scope or the
+     * schema moved, and its one read of them is the re-consent read (#392).
      */
-    describe('household dormancy', () => {
-      /** A conforming document under the fixture's schema, so config is not what is under test. */
-      const conforming = { webhookUrl: 'https://example.test/hook' };
-
-      const activateWith = async (manifest: PluginManifest): Promise<void> => {
-        db.plugin.findUnique.mockResolvedValue(pendingPlugin(manifest, { scope: PluginScope.Household }));
-        db.plugin.findUniqueOrThrow.mockResolvedValue(pendingPlugin(manifest, { scope: PluginScope.Household }));
-        db.householdPlugin.updateMany.mockResolvedValue({ count: 1 });
+    it.each([
+      ['a household → server re-scope', nextManifest({ scope: 'server' })],
+      ['a household-scope manifest', nextManifest({ scope: 'household' })],
+      [
+        'a household-scope manifest whose schema rejects a retained document',
+        nextManifest({
+          scope: 'household',
+          config: {
+            schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+            requiresHouseholdConfig: true,
+          },
+        }),
+      ],
+    ])(
+      "activation writes no household unit enablement, whatever the new manifest's scope or schema: %s (#1151, #392)",
+      async (_, next) => {
+        db.plugin.findUnique.mockResolvedValue(pendingPlugin(next, { scope: PluginScope.Household }));
+        db.plugin.findUniqueOrThrow.mockResolvedValue(pendingPlugin(next, { scope: PluginScope.Household }));
+        db.householdPlugin.findMany.mockResolvedValue([
+          makeUnit({ config: { webhookUrl: 42 } }),
+          makeUnit({ id: 'hp-2', householdId: 'household-2', config: { webhookUrl: 'https://example.test/hook' } }),
+        ]);
 
         await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
-      };
-
-      it('a server-scope manifest makes every household row dormant, leaving the admin switch alone', async () => {
-        db.householdPlugin.findMany.mockResolvedValue([makeUnit({ config: conforming })]);
-
-        await activateWith(nextManifest({ scope: 'server' }));
-
-        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
-          where: { id: { in: ['hp-1'] } },
-          data: { dormantReason: PluginUnitDormantReason.ScopeOrphaned, dormantAt: expect.any(Date) },
-        });
-        // The row survives with the household's own intent intact — that is
-        // what makes a re-scope back restore their settings rather than a
-        // default (D-CK, following the uninstall tombstone's argument).
-        expect(db.householdPlugin.updateMany).not.toHaveBeenCalledWith(
-          expect.objectContaining({ data: expect.objectContaining({ enabled: false }) }),
-        );
-        expect(emitter.emit).toHaveBeenCalledWith(
-          HouseholdPluginUnitDormantEvent.eventName,
-          expect.objectContaining({
-            reason: PluginUnitDormantReason.ScopeOrphaned,
-            manifestVersion: '1.3.0',
-            after: expect.objectContaining({ enabled: true, dormantReason: PluginUnitDormantReason.ScopeOrphaned }),
-          }),
-        );
-      });
-
-      it('promotes a config dormancy to scope dormancy — config cannot cure a missing surface (D-CP)', async () => {
-        db.householdPlugin.findMany.mockResolvedValue([
-          makeUnit({ dormantReason: PluginUnitDormantReason.NeedsConfiguration, dormantAt: new Date(0) }),
-        ]);
-
-        await activateWith(nextManifest({ scope: 'server' }));
-
-        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
-          where: { id: { in: ['hp-1'] } },
-          data: { dormantReason: PluginUnitDormantReason.ScopeOrphaned, dormantAt: expect.any(Date) },
-        });
-      });
-
-      it('writes nothing for a row already dormant for scope — the pass is idempotent', async () => {
-        db.householdPlugin.findMany.mockResolvedValue([
-          makeUnit({ dormantReason: PluginUnitDormantReason.ScopeOrphaned, dormantAt: new Date(0) }),
-        ]);
-
-        await activateWith(nextManifest({ scope: 'server' }));
 
         expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
-        expect(emitter.emit).not.toHaveBeenCalledWith(HouseholdPluginUnitDormantEvent.eventName, expect.anything());
-      });
+        expect(db.householdPlugin.update).not.toHaveBeenCalled();
+        expect(db.householdPlugin.findMany.mock.calls.length).toBeLessThanOrEqual(1);
+      },
+    );
 
-      it('revives a scope-dormant row when the manifest admits households again', async () => {
-        db.householdPlugin.findMany.mockResolvedValue([
-          makeUnit({
-            config: conforming,
-            dormantReason: PluginUnitDormantReason.ScopeOrphaned,
-            dormantAt: new Date(0),
-          }),
-        ]);
-
-        await activateWith(nextManifest({ scope: 'household' }));
-
-        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
-          where: { id: { in: ['hp-1'] } },
-          data: { dormantReason: null, dormantAt: null },
-        });
-        expect(emitter.emit).toHaveBeenCalledWith(
-          HouseholdPluginUnitRevivedEvent.eventName,
-          expect.objectContaining({
-            clearedReason: PluginUnitDormantReason.ScopeOrphaned,
-            after: expect.objectContaining({ dormantReason: null }),
-          }),
-        );
-      });
-
-      /**
-       * D-CP's accepted cost: a single-valued reason cannot be nulled blindly.
-       * Reviving this row would put it back into service holding a document the
-       * manifest now in force rejects — the exact state #370 describes.
-       */
-      it('re-derives the config reason instead of reviving a row whose document the new schema rejects', async () => {
-        db.householdPlugin.findMany.mockResolvedValue([
-          makeUnit({
-            config: { webhookUrl: 42 },
-            dormantReason: PluginUnitDormantReason.ScopeOrphaned,
-            dormantAt: new Date(0),
-          }),
-        ]);
-
-        await activateWith(
-          nextManifest({
-            scope: 'household',
-            config: {
-              schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-              requiresHouseholdConfig: true,
+    it('reads household unit enablements once, for the re-consent, and writes none, when the new manifest adds a household-scope permission (#392, #1151)', async () => {
+      const next = nextManifest({
+        scope: 'household',
+        config: {
+          schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+          requiresHouseholdConfig: true,
+        },
+        permissions: {
+          ...activeManifest.permissions,
+          checks: [
+            ...activeManifest.permissions.checks,
+            {
+              slug: 'calendar:read',
+              required: true,
+              reason: { en: 'Schedules digests around events.' },
+              consentScope: 'household' as const,
             },
-          }),
-        );
-
-        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
-          where: { id: { in: ['hp-1'] } },
-          data: { dormantReason: PluginUnitDormantReason.NeedsConfiguration, dormantAt: expect.any(Date) },
-        });
-        expect(emitter.emit).not.toHaveBeenCalledWith(HouseholdPluginUnitRevivedEvent.eventName, expect.anything());
+          ],
+        },
       });
+      db.plugin.findUnique.mockResolvedValue(pendingPlugin(next, { scope: PluginScope.Household }));
+      db.plugin.findUniqueOrThrow.mockResolvedValue(pendingPlugin(next, { scope: PluginScope.Household }));
+      db.permission.findMany.mockResolvedValue([
+        feedbackRead,
+        { slug: 'calendar:read', ...UNIT_BOUND_RULES.Household, riskLevel: RiskLevel.Low } as unknown as Permission,
+      ]);
+      db.householdPlugin.findMany.mockResolvedValue([
+        makeUnit({ config: { webhookUrl: 42 } }),
+        makeUnit({ id: 'hp-2', householdId: 'household-2', config: { webhookUrl: 'https://example.test/hook' } }),
+      ]);
 
-      /**
-       * The same re-derivation, with `requiresHouseholdConfig` FALSE. That flag
-       * decides whether a document is mandatory, not whether the schema binds the
-       * one a row already holds — `updateHouseholdConfig` validates every write
-       * against `config.schema` unconditionally, so this document is one no
-       * config write could have produced. Gating the check on the flag would
-       * revive the row holding exactly it.
-       */
-      it('re-derives the config reason even when the new manifest makes household config optional', async () => {
-        db.householdPlugin.findMany.mockResolvedValue([
-          makeUnit({
-            config: { webhookUrl: 42 },
-            dormantReason: PluginUnitDormantReason.ScopeOrphaned,
-            dormantAt: new Date(0),
-          }),
-        ]);
+      const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
 
-        await activateWith(
-          nextManifest({
-            scope: 'household',
-            config: {
-              schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-              requiresHouseholdConfig: false,
-            },
-          }),
-        );
+      // The re-consent read ran: both households owe the new permission.
+      expect(result.reconsentHouseholdUnits).toHaveLength(2);
+      expect(db.householdPlugin.findMany).toHaveBeenCalledTimes(1);
 
-        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
-          where: { id: { in: ['hp-1'] } },
-          data: { dormantReason: PluginUnitDormantReason.NeedsConfiguration, dormantAt: expect.any(Date) },
-        });
-        expect(emitter.emit).not.toHaveBeenCalledWith(HouseholdPluginUnitRevivedEvent.eventName, expect.anything());
-      });
-
-      it('revives under an optional-config manifest when the retained document does conform', async () => {
-        db.householdPlugin.findMany.mockResolvedValue([
-          makeUnit({
-            config: conforming,
-            dormantReason: PluginUnitDormantReason.ScopeOrphaned,
-            dormantAt: new Date(0),
-          }),
-        ]);
-
-        await activateWith(
-          nextManifest({
-            scope: 'household',
-            config: {
-              schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-              requiresHouseholdConfig: false,
-            },
-          }),
-        );
-
-        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
-          where: { id: { in: ['hp-1'] } },
-          data: { dormantReason: null, dormantAt: null },
-        });
-      });
-
-      it('leaves a household-scope activation with no dormant rows completely alone', async () => {
-        db.householdPlugin.findMany.mockResolvedValue([makeUnit({ config: conforming })]);
-
-        await activateWith(nextManifest({ scope: 'household' }));
-
-        expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
-      });
-
-      /**
-       * The general pass folded into this branch (#370, D-CR on #59): #369
-       * only re-validated rows already dormant for scope, so an
-       * already-serving row's config never faced a manifest that came after
-       * it. A household-scope activation that tightens `config.schema` must
-       * not leave such a row serving a document the new schema rejects.
-       */
-      it('marks an already-serving row NeedsConfiguration when the activation tightens the schema underneath it', async () => {
-        db.householdPlugin.findMany.mockResolvedValue([makeUnit({ config: { webhookUrl: 42 } })]);
-
-        await activateWith(
-          nextManifest({
-            scope: 'household',
-            config: {
-              schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-              requiresHouseholdConfig: true,
-            },
-          }),
-        );
-
-        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
-          where: { id: { in: ['hp-1'] } },
-          data: { dormantReason: PluginUnitDormantReason.NeedsConfiguration, dormantAt: expect.any(Date) },
-        });
-        // The admin switch survives, same discipline as the scope pass.
-        expect(db.householdPlugin.updateMany).not.toHaveBeenCalledWith(
-          expect.objectContaining({ data: expect.objectContaining({ enabled: false }) }),
-        );
-        expect(emitter.emit).toHaveBeenCalledWith(
-          HouseholdPluginUnitDormantEvent.eventName,
-          expect.objectContaining({ reason: PluginUnitDormantReason.NeedsConfiguration }),
-        );
-      });
-
-      it('leaves an already-serving row alone when its retained document still conforms to a tightened schema', async () => {
-        db.householdPlugin.findMany.mockResolvedValue([makeUnit({ config: conforming })]);
-
-        await activateWith(
-          nextManifest({
-            scope: 'household',
-            config: {
-              schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-              requiresHouseholdConfig: true,
-            },
-          }),
-        );
-
-        expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
-      });
-
-      /**
-       * A row already `NeedsConfiguration` is out of scope for this pass —
-       * its cure is an admin write (config PATCH or enable), not a later
-       * manifest happening to loosen the schema back on its own
-       * (`plugin-unit-lifecycle.service.ts`).
-       */
-      it('does not re-derive a row already dormant for config, even when its retained document would now conform', async () => {
-        db.householdPlugin.findMany.mockResolvedValue([
-          makeUnit({
-            config: conforming,
-            dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-            dormantAt: new Date(0),
-          }),
-        ]);
-
-        await activateWith(nextManifest({ scope: 'household' }));
-
-        expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
-        expect(emitter.emit).not.toHaveBeenCalledWith(HouseholdPluginUnitRevivedEvent.eventName, expect.anything());
-      });
-
-      it('combines a re-derived scope-dormant row and a newly non-conforming serving row into one write', async () => {
-        db.householdPlugin.findMany.mockResolvedValue([
-          makeUnit({
-            config: { webhookUrl: 42 },
-            dormantReason: PluginUnitDormantReason.ScopeOrphaned,
-            dormantAt: new Date(0),
-          }),
-          makeUnit({ id: 'hp-2', householdId: 'household-2', config: { webhookUrl: 42 } }),
-        ]);
-
-        await activateWith(
-          nextManifest({
-            scope: 'household',
-            config: {
-              schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-              requiresHouseholdConfig: true,
-            },
-          }),
-        );
-
-        expect(db.householdPlugin.updateMany).toHaveBeenCalledTimes(1);
-        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
-          where: { id: { in: ['hp-1', 'hp-2'] } },
-          data: { dormantReason: PluginUnitDormantReason.NeedsConfiguration, dormantAt: expect.any(Date) },
-        });
-      });
-
-      it('reads the rows once, whatever the household count — the transaction must not scale with installs', async () => {
-        db.householdPlugin.findMany.mockResolvedValue([
-          makeUnit({ config: conforming }),
-          makeUnit({ id: 'hp-2', householdId: 'household-2', config: conforming }),
-          makeUnit({ id: 'hp-3', householdId: 'household-3', config: conforming }),
-        ]);
-
-        await activateWith(nextManifest({ scope: 'server' }));
-
-        expect(db.householdPlugin.findMany).toHaveBeenCalledTimes(1);
-        expect(db.householdPlugin.updateMany).toHaveBeenCalledTimes(1);
-        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
-          where: { id: { in: ['hp-1', 'hp-2', 'hp-3'] } },
-          data: { dormantReason: PluginUnitDormantReason.ScopeOrphaned, dormantAt: expect.any(Date) },
-        });
-      });
+      for (const [name, method] of Object.entries(db.householdPlugin)) {
+        if (name !== 'findMany') {
+          expect(method).not.toHaveBeenCalled();
+        }
+      }
     });
 
     /**
-     * D-CN on #59/#370: activation rides the same retained-config rule a
-     * reinstall-over-tombstone applies via `retainedServerConfig` — the
-     * household dormancy pass above closes the household axis, and this
-     * closes the server one, so activation is not the last manifest-replacing
-     * path that leaves `Plugin.config` unchecked.
+     * Activation applies the retained-config rule a reinstall of an
+     * uninstalled plugin applies via `retainedServerConfig` (#370), so neither
+     * manifest-replacing path leaves `Plugin.config` unchecked. The household axis needs no such
+     * rule: a household unit's retained document is judged against the active
+     * schema when read (#1151).
      */
     describe('server config retained-value rule (D-CN)', () => {
       const activateWith = async (manifest: PluginManifest, existingConfig: Prisma.JsonValue): Promise<void> => {

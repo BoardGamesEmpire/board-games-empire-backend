@@ -1,5 +1,5 @@
 import { AuditContextModule } from '@bge/actor-context';
-import { DatabaseModule, PLUGIN_REQUESTED_PERMISSIONS_READER } from '@bge/database';
+import { DatabaseModule, PLUGIN_ACTIVE_MANIFEST_READER } from '@bge/database';
 import { Global, Module } from '@nestjs/common';
 import { PluginConfigEventsService } from './config/plugin-config-events.service';
 import { PluginConfigSchemaService } from './config/plugin-config-schema.service';
@@ -22,7 +22,7 @@ import { PluginInstanceRegistry } from './loader/plugin-instance-registry';
 import { PluginLoadRecorder } from './loader/plugin-load-recorder.service';
 import { PluginLoaderService } from './loader/plugin-loader.service';
 import { DynamicImportPluginModuleImporter, PLUGIN_MODULE_IMPORTER } from './loader/plugin-module-importer';
-import { StoredManifestRequestedPermissionsReader } from './manifest/stored-manifest-requested-permissions.reader';
+import { StoredActiveManifestReader } from './manifest/stored-active-manifest.reader';
 import { ConfigurableModuleClass, MODULE_OPTIONS_TOKEN } from './plugin-module.options';
 import { PluginUnitLifecycleService } from './units/plugin-unit-lifecycle.service';
 import { PluginUpdateService } from './update/plugin-update.service';
@@ -59,7 +59,7 @@ import { PluginUpdateService } from './update/plugin-update.service';
   imports: [AuditContextModule, DatabaseModule],
   providers: [
     { provide: PLUGIN_MODULE_IMPORTER, useClass: DynamicImportPluginModuleImporter },
-    { provide: PLUGIN_REQUESTED_PERMISSIONS_READER, useClass: StoredManifestRequestedPermissionsReader },
+    { provide: PLUGIN_ACTIVE_MANIFEST_READER, useClass: StoredActiveManifestReader },
     PluginConsentActService,
     PluginConsentCheckClassifier,
     PluginConsentPresentationService,
@@ -109,10 +109,10 @@ import { PluginUpdateService } from './update/plugin-update.service';
     PluginUnitLifecycleService,
     PluginUpdateService,
     // The permissions lib's snapshot read bounds a plugin's consent
-    // decisions by what its active manifest requests. A process without
-    // the runtime registers no reader, and confers nothing on plugin
-    // actors (#577).
-    PLUGIN_REQUESTED_PERMISSIONS_READER,
+    // decisions by what its active manifest requests, and the dormancy rule
+    // takes the same manifest (#1151). A process without the runtime
+    // registers no reader, and confers nothing on plugin actors (#577).
+    PLUGIN_ACTIVE_MANIFEST_READER,
     // The plugin artifacts lib (#1094) places a received artifact under the
     // plugins root, which these options name, and confirms the directory
     // with the resolver before it assesses it. It refuses anyone but a server

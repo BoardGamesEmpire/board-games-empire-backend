@@ -3,7 +3,6 @@ import {
   PluginGrantStatus,
   PluginLifecycleEventType,
   PluginScope,
-  PluginUnitDormantReason,
   RiskLevel,
   type Plugin,
 } from '@bge/database';
@@ -14,6 +13,7 @@ import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { errorText } from '../support/error-text';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { pluginAbilitySlugsForHousehold } from './plugin-ability-fixtures';
 import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
 /**
@@ -80,6 +80,21 @@ describe('plugin update consent (approve/reject/pending)', () => {
     consentScope: 'user' as const,
   };
 
+  /** REQUIRED at household scope. An allowlisted public read, which a household-scope consent may hold (#591). */
+  const HOUSEHOLD_CHECK = {
+    slug: 'read:game:public',
+    required: true,
+    reason: { en: 'Lists the public games the household digest features.' },
+    consentScope: 'household' as const,
+  };
+
+  /** A config schema the default `{}` fails: it requires `webhookUrl`. */
+  const REQUIRING_SCHEMA = {
+    type: 'object',
+    properties: { webhookUrl: { type: 'string' } },
+    required: ['webhookUrl'],
+  };
+
   type Check = PluginManifest['permissions']['checks'][number];
 
   /**
@@ -110,6 +125,8 @@ describe('plugin update consent (approve/reject/pending)', () => {
     overrides: {
       /** Defaults to 'server' — every existing caller's plugin. */
       readonly scope?: PluginManifest['scope'];
+      /** The PENDING manifest's scope, for a re-scope (#1151). Defaults to `scope`. */
+      readonly pendingScope?: PluginManifest['scope'];
       /** The ACTIVE manifest's requested permissions. Defaults to `[MANAGE_DIGEST_CHECK]`. */
       readonly activeChecks?: readonly Check[];
       /** The ACTIVE row's retained config, pre-activation. Defaults to `{}`. */
@@ -123,7 +140,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
     const pendingBase = manifestWithChecks('1.3.0', pendingChecks, pendingDeclares);
     const pending: PluginManifest = {
       ...pendingBase,
-      scope,
+      scope: overrides.pendingScope ?? scope,
       ...(overrides.pendingConfig === undefined
         ? {}
         : { config: { ...pendingBase.config, ...overrides.pendingConfig } }),
@@ -186,6 +203,69 @@ describe('plugin update consent (approve/reject/pending)', () => {
       },
       { description: `the ${event} lifecycle row for '${plugin.slug}'`, timeoutMs: 5_000 },
     );
+
+  /**
+   * The server consent decisions an earlier approval would have left, both
+   * Granted: the plugin's own declared permission, so a household owes
+   * nothing at server scope and can read `on`, and the policy read, a core
+   * permission that confers in every household's ability while the household
+   * is served (#1151).
+   */
+  const arrangeServerDecisions = async (plugin: Plugin) => {
+    const ownSlug = `plugin|${plugin.slug}|manage:digest`;
+
+    await db.client.pluginPermission.create({ data: { pluginId: plugin.id, slug: ownSlug, riskLevel: RiskLevel.Low } });
+    await db.client.pluginGrant.create({
+      data: {
+        pluginId: plugin.id,
+        scopeType: PluginGrantScope.Server,
+        scopeId: '',
+        permissionSlug: ownSlug,
+        status: PluginGrantStatus.Granted,
+        decidedAt: new Date(),
+        decidedRiskLevel: RiskLevel.Low,
+      },
+    });
+    await seedPolicyGrant(plugin, { status: PluginGrantStatus.Granted });
+  };
+
+  /** A household's Granted consent decision on `HOUSEHOLD_CHECK`, as its switch-on would have recorded it. */
+  const arrangeHouseholdGrant = (plugin: Plugin, householdId: string) =>
+    db.client.pluginGrant.create({
+      data: {
+        pluginId: plugin.id,
+        scopeType: PluginGrantScope.Household,
+        scopeId: householdId,
+        permissionSlug: HOUSEHOLD_CHECK.slug,
+        status: PluginGrantStatus.Granted,
+        decidedAt: new Date(),
+        decidedRiskLevel: RiskLevel.Low,
+      },
+    });
+
+  /** The household's unit enablement for the plugin, every column, read straight from the database. */
+  const householdUnitEnablement = (householdId: string, pluginId: string) =>
+    db.client.householdPlugin.findUniqueOrThrow({ where: { householdId_pluginId: { householdId, pluginId } } });
+
+  /** The unit state the household inventory reports for the plugin, as its admin reads it. */
+  const householdUnitState = async (actor: SessionActor, householdId: string, slug: string) => {
+    const response = await request(baseUrl)
+      .get(`/api/households/${householdId}/plugins?limit=100`)
+      .set(actor.headers)
+      .expect(200);
+
+    return response.body.plugins.find((entry: { slug: string }) => entry.slug === slug)?.unit;
+  };
+
+  const patchHouseholdConfig = (actor: SessionActor, householdId: string, slug: string, config: unknown) =>
+    request(baseUrl).patch(`/api/households/${householdId}/plugins/${slug}/config`).set(actor.headers).send({ config });
+
+  /** Stages a further update on a plugin an earlier approval already updated: a new version, checksum and staging id. */
+  const stageAnotherUpdate = (plugin: Plugin, manifest: PluginManifest, stagingId: string) =>
+    db.client.plugin.update({
+      where: { id: plugin.id },
+      data: stagedUpdateColumns({ manifest, sha256: 'c'.repeat(64), since: STAGED_AT, stagingId }),
+    });
 
   describe('authorization', () => {
     it('refuses a non-admin at the policy gate on all three routes', async () => {
@@ -301,28 +381,168 @@ describe('plugin update consent (approve/reject/pending)', () => {
     });
 
     /**
-     * The household half of #370's general pass: #369 only re-validated rows
-     * already dormant for scope, so an already-serving household row never
-     * faced a manifest replacement that came after it.
+     * A household's dormancy is worked out when read, from the active manifest
+     * and the document its unit enablement holds (#1151). So an activation
+     * that tightens the schema writes nothing to the household: the read sees
+     * the new schema, the ability confers nothing, and the household's own
+     * conforming configuration write is the whole cure.
      */
-    it('marks an already-serving household row NeedsConfiguration when activation tightens the schema underneath it (#370)', async () => {
+    it('a household whose configuration a new version rejects reads needs_configuration, gets no abilities, and reads on again after a conforming configuration write (#1151)', async () => {
       const admin = await actors.admin();
       const owner = await actors.user();
       const { household } = await actors.householdWithMembers({ owner });
-      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK], undefined, {
+      const checks = [MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK, HOUSEHOLD_CHECK];
+      const { plugin } = await arrangeStagedPlugin(checks, undefined, {
         scope: 'household',
-        pendingConfig: {
-          schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
-        },
+        activeChecks: checks,
+        pendingConfig: { schema: REQUIRING_SCHEMA },
       });
-      const unit = await db.client.householdPlugin.create({
-        data: { householdId: household.id, pluginId: plugin.id, enabled: true, config: { webhookUrl: 42 } },
+      await arrangeServerDecisions(plugin);
+      await arrangeHouseholdGrant(plugin, household.id);
+      // `{}` satisfies the active schema and fails the staged one.
+      await db.client.householdPlugin.create({
+        data: { householdId: household.id, pluginId: plugin.id, enabled: true, config: {} },
       });
+      const servedSlugs = [HOUSEHOLD_CHECK.slug, 'read:safe_http_policy'].sort();
+
+      // The control: before the update the household is served and its
+      // ability holds both decisions, so the empty ability below is dormancy's.
+      expect(await householdUnitState(owner, household.id, plugin.slug)).toMatchObject({ state: 'on', dormancy: null });
+      expect(await pluginAbilitySlugsForHousehold(db.client, plugin.id, household.id)).toEqual(servedSlugs);
+      const captured = await householdUnitEnablement(household.id, plugin.id);
 
       await approve(admin, plugin.slug).expect(200);
 
-      const row = await db.client.householdPlugin.findUniqueOrThrow({ where: { id: unit.id } });
-      expect(row).toMatchObject({ enabled: true, dormantReason: PluginUnitDormantReason.NeedsConfiguration });
+      // Activation wrote nothing to the household's unit enablement.
+      expect(await householdUnitEnablement(household.id, plugin.id)).toEqual(captured);
+      expect(await householdUnitState(owner, household.id, plugin.slug)).toMatchObject({
+        enabled: true,
+        state: 'needs_configuration',
+        dormancy: 'needs_configuration',
+      });
+      expect(await pluginAbilitySlugsForHousehold(db.client, plugin.id, household.id)).toEqual([]);
+
+      await patchHouseholdConfig(owner, household.id, plugin.slug, { webhookUrl: 'https://example.test/hook' }).expect(
+        200,
+      );
+
+      expect(await householdUnitState(owner, household.id, plugin.slug)).toMatchObject({ state: 'on', dormancy: null });
+      expect(await pluginAbilitySlugsForHousehold(db.client, plugin.id, household.id)).toEqual(servedSlugs);
+    });
+
+    it('a household unit enablement on a plugin re-scoped to server reads unavailable and reads on again after a re-scope back, with no write in between (#1151)', async () => {
+      // A server-scope manifest may not request a permission at household
+      // scope, so the household's ability is the server decision on the
+      // policy read alone, which stands through both activations.
+      const admin = await actors.admin();
+      const owner = await actors.user();
+      const { household } = await actors.householdWithMembers({ owner });
+      const checks = [MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK];
+      const { plugin } = await arrangeStagedPlugin(checks, undefined, {
+        scope: 'household',
+        pendingScope: 'server',
+        activeChecks: checks,
+      });
+      await arrangeServerDecisions(plugin);
+      await db.client.householdPlugin.create({
+        data: { householdId: household.id, pluginId: plugin.id, enabled: true, config: {} },
+      });
+
+      // The control: served before the re-scope, so the empty ability below is dormancy's.
+      expect(await householdUnitState(owner, household.id, plugin.slug)).toMatchObject({ state: 'on', dormancy: null });
+      expect(await pluginAbilitySlugsForHousehold(db.client, plugin.id, household.id)).toEqual([
+        'read:safe_http_policy',
+      ]);
+      const captured = await householdUnitEnablement(household.id, plugin.id);
+
+      await approve(admin, plugin.slug).expect(200);
+
+      // The re-scope wrote nothing to the household's unit enablement.
+      expect(await householdUnitEnablement(household.id, plugin.id)).toEqual(captured);
+      expect(await householdUnitState(owner, household.id, plugin.slug)).toMatchObject({
+        anchored: true,
+        enabled: true,
+        state: 'unavailable',
+        dormancy: 'unavailable',
+      });
+      expect(await pluginAbilitySlugsForHousehold(db.client, plugin.id, household.id)).toEqual([]);
+
+      const stagingId = 'e2e-staging-2';
+      await stageAnotherUpdate(plugin, { ...manifestWithChecks('1.4.0', checks), scope: 'household' }, stagingId);
+      await approve(admin, plugin.slug, { stagingId }).expect(200);
+
+      expect(await householdUnitState(owner, household.id, plugin.slug)).toMatchObject({ state: 'on', dormancy: null });
+      expect(await pluginAbilitySlugsForHousehold(db.client, plugin.id, household.id)).toEqual([
+        'read:safe_http_policy',
+      ]);
+      // Neither activation wrote to the household's unit enablement.
+      expect(await householdUnitEnablement(household.id, plugin.id)).toEqual(captured);
+    });
+
+    it('an activation that leaves a household needing configuration records only the approval and the re-consent it asks for (#1151)', async () => {
+      // Two switched-on households: one whose document the staged schema
+      // accepts, one whose `{}` it rejects. Both owe the new household-scope
+      // permission. Dormancy is worked out when read (#1151), so the
+      // activation announces none.
+      const admin = await actors.admin();
+      const [ownerA, ownerB] = await Promise.all([actors.user(), actors.user()]);
+      const [{ household: conforming }, { household: rejected }] = await Promise.all([
+        actors.householdWithMembers({ owner: ownerA }),
+        actors.householdWithMembers({ owner: ownerB }),
+      ]);
+      const { plugin } = await arrangeStagedPlugin(
+        [MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK, HOUSEHOLD_CHECK],
+        undefined,
+        {
+          scope: 'household',
+          activeChecks: [MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK],
+          pendingConfig: { schema: REQUIRING_SCHEMA },
+        },
+      );
+      await db.client.householdPlugin.create({
+        data: {
+          householdId: conforming.id,
+          pluginId: plugin.id,
+          enabled: true,
+          config: { webhookUrl: 'https://example.test/hook' },
+        },
+      });
+      await db.client.householdPlugin.create({
+        data: { householdId: rejected.id, pluginId: plugin.id, enabled: true, config: {} },
+      });
+
+      const response = await approve(admin, plugin.slug).expect(200);
+
+      expect(response.body.reconsentHouseholdUnits).toHaveLength(2);
+      // The case is one where a household cannot run: the read says so.
+      expect(await householdUnitState(ownerB, rejected.id, plugin.slug)).toMatchObject({
+        dormancy: 'needs_configuration',
+      });
+
+      // The listener writes after the response: wait for every row the
+      // approval is known to write, then read all of the plugin's rows.
+      await awaitLifecycleRow(plugin, PluginLifecycleEventType.UpdateApproved);
+      await pollUntil(
+        async () => {
+          const found = await db.client.pluginLifecycleEvent.count({
+            where: { pluginId: plugin.id, event: PluginLifecycleEventType.ReconsentRequested },
+          });
+
+          return found >= 2 ? found : undefined;
+        },
+        { description: `both re-consent lifecycle rows for '${plugin.slug}'`, timeoutMs: 5_000 },
+      );
+
+      const kinds = (await db.client.pluginLifecycleEvent.findMany({ where: { pluginId: plugin.id } }))
+        .map((row) => row.event)
+        .sort();
+      expect(kinds).toEqual(
+        [
+          PluginLifecycleEventType.ReconsentRequested,
+          PluginLifecycleEventType.ReconsentRequested,
+          PluginLifecycleEventType.UpdateApproved,
+        ].sort(),
+      );
     });
 
     it('re-stamps a risk-escalated server grant at today’s risk', async () => {

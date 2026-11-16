@@ -74,7 +74,8 @@ export class UserPluginsController {
       '(#225), so unlike the household axis there is no plugin you cannot be anchored on. `unit.anchored` is ' +
       'false until you switch the plugin on, which creates your unit enablement — which is why an empty enablement ' +
       'history shows a populated list of not-yet-enabled plugins rather than nothing. `unit.state` is the stable ' +
-      'unit state code and `unit.consent` the consent standing behind it. Carries no version, provenance or ' +
+      'unit state code and `unit.consent` the consent standing behind it. `unit.dormancy` is null unless the ' +
+      "plugin's stored manifest cannot be read, when it is unavailable. Carries no version, provenance or " +
       'install history, and never tombstones: this surface exists to decide your own participation, not to ' +
       'inspect the server.',
   })
@@ -278,8 +279,8 @@ export class UserPluginsController {
     summary: 'Per-feature activation state for your own unit (#60)',
     description:
       'Why a feature is or is not running for you: per-feature active|disabled with a denied|pending ' +
-      'reason paired with the blocking permission slugs, plus the unit-level served, the unit state code and ' +
-      'consent standing.',
+      'reason paired with the blocking permission slugs, plus the unit-level served, the unit state code, its ' +
+      'dormancy and consent standing.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not a session user (API keys cannot exercise this axis)' })

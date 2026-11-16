@@ -1,10 +1,19 @@
 import { assertPluginUnit, type PluginUnit } from '@bge/actor-context';
-import { DatabaseService, loadPluginUnitEnablement, PluginScope } from '@bge/database';
+import {
+  DatabaseService,
+  derivePluginUnitDormancy,
+  isPluginUnitServed,
+  loadPluginUnitEnablement,
+  PluginScope,
+  type PluginUnitDormancy,
+} from '@bge/database';
 import { resolveLocalizedString } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
+import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { unitConsumesConsentScope } from '../consent/consent-classification.types';
 import { PluginConsentStandingService } from '../consent/plugin-consent-standing.service';
 import type { ConsentOutstandingCheck, PluginConsentStanding } from '../consent/plugin-consent-standing.types';
+import { activeManifestOf } from '../manifest/active-manifest';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { derivePluginUnitState, type PluginUnitStateCode } from '../units/plugin-unit-state';
@@ -61,24 +70,38 @@ export interface PluginFeatureUnitState {
   readonly unit: PluginUnit;
   /**
    * The full operational predicate: plugin enabled and not tombstoned, AND
-   * the unit's enablement is on with no dormant reason. Consent never enters
-   * it: a unit owing a required permission keeps running on the grants it gave
-   * (the ability denies what it has not granted), so served is not what says a
+   * the unit's enablement is on with no dormancy. Consent never enters it: a
+   * unit owing a required permission keeps running on the grants it gave (the
+   * ability denies what it has not granted), so served is not what says a
    * review is waiting (#1149).
    */
   readonly served: boolean;
   /**
    * The plugin's server switch. Reported beside `state` so a client can say
-   * why a switched-on unit reads `unavailable`: this, or a scope that no
-   * longer admits the unit (#1149).
+   * why a switched-on unit reads `unavailable`: this, or its `dormancy`
+   * (#1149, #1151).
    */
   readonly serverEnabled: boolean;
   /**
    * The stable code for the unit's state: off, on, review_pending,
    * needs_configuration or unavailable. Carries what the server switch,
-   * dormancy and consent each add, so none is reported separately.
+   * dormancy and consent each add.
    */
   readonly state: PluginUnitStateCode;
+  /**
+   * What keeps the unit from running apart from the two switches, its own
+   * and the Server switch (#1151): `unavailable` when the server cannot run it
+   * for this unit whatever its settings say, `needs_configuration` when the
+   * household's settings do not fit the active schema, `null` when nothing
+   * does. Worked out on every read from the active manifest and the unit's
+   * document, and reported whether or not the unit is switched on, so a
+   * client can say what a switch-on would meet. It leaves one refusal out:
+   * a first switch-on the manifest requires a document for
+   * (`requiresHouseholdConfig`) is refused when it brings none, whatever the
+   * rule says about `{}`. `null` for an uninstalled plugin, for which nothing
+   * is worked out.
+   */
+  readonly dormancy: PluginUnitDormancy | null;
   /** Required permissions the unit still owes and optional ones switched off. */
   readonly consent: PluginConsentStanding;
   readonly features: readonly PluginFeatureState[];
@@ -124,6 +147,7 @@ export class PluginFeatureStateService {
   constructor(
     private readonly db: DatabaseService,
     private readonly standing: PluginConsentStandingService,
+    private readonly configSchema: PluginConfigSchemaService,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
   ) {}
 
@@ -150,10 +174,12 @@ export class PluginFeatureStateService {
    * are vouching for, and the failure is not symmetric: an uninstall landing
    * in the gap renders `served: false` where this entry point promises 410 —
    * differently true of an unserved unit — but a household→server activation
-   * landing there produces `served: true` for a surface the scope rule says
-   * cannot exist, because activation retires no unit rows (#369) and the
-   * derivation never re-reads `scope`. That one is simply wrong, so a body
-   * now reaches the client only if the plugin was still living and still
+   * landing there describes a surface the scope rule says cannot exist: a
+   * narrowing activation rewrites the plugin's scope and retires no unit
+   * enablement, so the derivation answers `served: true` if it read the old
+   * manifest, or dormancy `unavailable` if it read the new one, where this
+   * entry point promises the refusal (#1151). That one is simply wrong, so a
+   * body reaches the client only if the plugin was still living and still
    * addressable on a read taken AFTER the derivation.
    *
    * A second small read rather than one transaction: the derivation is
@@ -255,6 +281,8 @@ export class PluginFeatureStateService {
         served: false,
         serverEnabled: false,
         state: 'off',
+        // Nothing is worked out for an uninstalled plugin (#1151).
+        dormancy: null,
         consent: { outstanding: [], optionalOff: [] },
         features: [],
       };
@@ -265,11 +293,19 @@ export class PluginFeatureStateService {
       this.options,
       (pluginSlug, detail, issues) => new PluginFeatureStateManifestError(pluginSlug, detail, issues),
     );
+    // Worked out on this read from the active manifest and the unit's
+    // document, never stored (#1151). `revalidateStoredManifest` above threw
+    // for an unreadable manifest, so the rule always receives one here.
+    const dormancy = derivePluginUnitDormancy({
+      scopeType: unit.scopeType,
+      manifest: activeManifestOf(validated, this.configSchema),
+      retainedConfig: unitState.retainedConfig,
+    });
     // Dormancy is an independent component of the predicate: the household's
-    // `enabled` intent survives a scope narrowing or a schema tightening, so
-    // a unit can be switched on and still serve nothing (#369). Consent is
-    // deliberately absent (#1149).
-    const served = plugin.enabled && unitState.enabled && unitState.dormantReason === null;
+    // switch survives a scope narrowing or a schema tightening, so a unit can
+    // be switched on and still serve nothing. Consent is deliberately absent
+    // (#1149).
+    const served = plugin.enabled && isPluginUnitServed(unitState, dormancy);
 
     const { standing: consent, refusedSlugs } = await this.standing.resolveDetailed(
       plugin.id,
@@ -284,10 +320,7 @@ export class PluginFeatureStateService {
       // since the switch is not theirs to flip (#1149).
       enabled: unit.scopeType === 'Server' ? plugin.enabled : unitState.enabled,
       serverEnabled: plugin.enabled,
-      // `revalidateStoredManifest` above threw for an unreadable manifest, so
-      // a read that reaches this point has a readable one.
-      manifestUnreadable: false,
-      dormantReason: unitState.dormantReason,
+      dormancy,
       outstandingCount: consent.outstanding.length,
     });
 
@@ -326,6 +359,7 @@ export class PluginFeatureStateService {
       served,
       serverEnabled: plugin.enabled,
       state,
+      dormancy,
       consent,
       features,
     };

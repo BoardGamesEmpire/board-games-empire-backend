@@ -64,17 +64,19 @@ export class PluginUnitPluginTombstonedError extends Error {
  * too, so this surface never CREATES a row the rule says cannot exist and
  * never presents one as a real degraded unit.
  *
- * It does not retire one, either — activation does that. A household→server
- * version marks every row for the plugin DORMANT (#369, D-CK): the rows
- * survive, so a re-scope back restores the household's settings, and nothing
- * serves them meanwhile. This error is what keeps the two write paths that
- * would have to invent a surface — enable and config PATCH — from acting on
- * such a row.
+ * It does not retire one, either. A household→server version leaves every
+ * household unit enablement for the plugin in place, and a unit whose plugin
+ * scope has no household surface is dormant, worked out when read (#1151):
+ * the unit enablement survives, so a re-scope back restores the household's
+ * settings, and nothing serves it meanwhile. This error is what keeps the two
+ * write paths that would have to invent a surface — enable and config PATCH —
+ * from acting on such a unit.
  *
- * DISABLE is deliberately exempt (D-CL). A dormant row is on the household
- * admin's screen with its reason attached, and refusing the only operation that
- * could act on it would leave them looking at a unit with no lever; disabling
- * records an intent about a row that already exists rather than creating one.
+ * DISABLE is deliberately exempt (#369). A dormant unit is on the household
+ * admin's screen with its dormancy reported, and refusing the only operation
+ * that could act on it would leave them looking at a unit with no lever;
+ * disabling records an intent about a unit enablement that already exists
+ * rather than creating one.
  *
  * The user axis is NOT covered by this rule: `UserPlugin` is a real
  * surface at any plugin scope (#225), so this error never describes it.
@@ -108,13 +110,13 @@ export class PluginUnitNotEnrolledError extends Error {
 }
 
 /**
- * The enable-time config gate (#323): the active manifest declares
- * `requiresHouseholdConfig` and neither the enable request nor a retained
- * row supplied a config document satisfying `config.schema`. `issues`
- * carries the retained document's violations when one existed (a stale
- * config left by an update or reinstall) — empty when there was nothing
- * to validate — so the client's schema-driven form can render what to fix
- * without a second request.
+ * The switch-on config gate (#323, #1151): a household switch-on that
+ * supplies no configuration is refused when the document the unit would hold
+ * (its retained one, or an empty one for a household with no unit
+ * enablement) fails the active `config.schema`, with or without
+ * `requiresHouseholdConfig`. `issues` lists the violations, so the client's
+ * schema-driven form can render what to fix without a second request; it is
+ * empty only for a first switch-on the manifest requires a document for.
  */
 export class PluginUnitConfigRequiredError extends Error {
   override readonly name = 'PluginUnitConfigRequiredError';

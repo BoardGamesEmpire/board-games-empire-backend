@@ -1,12 +1,4 @@
-import {
-  Action,
-  PluginGrantScope,
-  PluginGrantStatus,
-  PluginUnitDormantReason,
-  ResourceType,
-  RiskLevel,
-  type Prisma,
-} from '@bge/database';
+import { Action, PluginGrantScope, PluginGrantStatus, ResourceType, RiskLevel, type Prisma } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import {
   countConsentDecisionsLost,
@@ -126,7 +118,11 @@ describe('loadConsentDecisionsInForce (#772)', () => {
 
   const requestedAt = (...scopes: PluginGrantScope[]) => ({
     valid: true,
-    requested: scopes.map((scopeType) => ({ slug: SLUG, scopeType })),
+    manifest: {
+      requested: scopes.map((scopeType) => ({ slug: SLUG, scopeType })),
+      householdSurface: true,
+      judgeConfig: () => 'conforms',
+    },
   });
 
   // The mock carries every delegate the loader reads; its jest types are not Prisma's.
@@ -187,27 +183,118 @@ describe('loadConsentDecisionsInForce (#772)', () => {
     await expect(loadConsentDecisionsInForce(tx(), SLUG, undefined)).resolves.toEqual([]);
   });
 
-  it("keeps a household decision only while the household's enablement row serves the plugin", async () => {
-    const household = (householdId: string) => stored({ scopeType: PluginGrantScope.Household, scopeId: householdId });
-    db.pluginGrant.findMany.mockResolvedValue(['served', 'disabled', 'dormant', 'no-row'].map(household) as never);
+  describe('a household decision is in force only while its unit is served (#1151)', () => {
+    const household = (householdId: string, pluginId = 'plugin-1') =>
+      stored({ pluginId, scopeType: PluginGrantScope.Household, scopeId: householdId });
     const row = (householdId: string, overrides: Record<string, unknown> = {}) => ({
       householdId,
       pluginId: 'plugin-1',
       enabled: true,
-      dormantReason: null,
+      config: {},
       ...overrides,
     });
-    db.householdPlugin.findMany.mockResolvedValue([
-      row('served'),
-      row('disabled', { enabled: false }),
-      row('dormant', { dormantReason: PluginUnitDormantReason.ScopeOrphaned }),
-    ] as never);
+    /** A reading that requests the slug at household scope, with the rest of the manifest as `overrides` has it. */
+    const householdManifest = (overrides: Record<string, unknown>) => {
+      const reading = requestedAt(PluginGrantScope.Household);
 
-    const kept = await inForce();
+      return { ...reading, manifest: { ...reading.manifest, ...overrides } };
+    };
 
-    expect(kept).toHaveLength(1);
-    expect(kept[0]).toMatchObject({ scopeType: PluginGrantScope.Household });
-    expect(db.householdPlugin.findMany).toHaveBeenCalledTimes(1);
+    it("keeps a household decision only while the household's unit enablement is switched on", async () => {
+      db.pluginGrant.findMany.mockResolvedValue(
+        ['served', 'disabled', 'no-unit-enablement'].map((id) => household(id)) as never,
+      );
+      db.householdPlugin.findMany.mockResolvedValue([row('served'), row('disabled', { enabled: false })] as never);
+
+      const kept = await inForce();
+
+      expect(kept).toHaveLength(1);
+      expect(kept[0]).toMatchObject({ scopeType: PluginGrantScope.Household });
+      expect(db.householdPlugin.findMany).toHaveBeenCalledTimes(1);
+      expect(db.householdPlugin.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ select: { householdId: true, pluginId: true, enabled: true, config: true } }),
+      );
+    });
+
+    it('drops a household decision whose retained configuration the active schema rejects', async () => {
+      const judgeConfig = jest.fn((document: unknown) =>
+        (document as { webhookUrl?: unknown }).webhookUrl === 42 ? 'rejected' : 'conforms',
+      );
+      reader.read.mockReturnValue(householdManifest({ judgeConfig }));
+      db.pluginGrant.findMany.mockResolvedValue(['conforms', 'rejected'].map((id) => household(id)) as never);
+      db.householdPlugin.findMany.mockResolvedValue([
+        row('conforms', { config: { webhookUrl: 'https://x.test' } }),
+        row('rejected', { config: { webhookUrl: 42 } }),
+      ] as never);
+
+      const kept = await inForce();
+
+      expect(kept).toHaveLength(1);
+      expect(judgeConfig).toHaveBeenCalledWith({ webhookUrl: 42 });
+      // One plugin, two decisions: its manifest is read once.
+      expect(reader.read).toHaveBeenCalledTimes(1);
+    });
+
+    it('judges a stored JSON null as itself, not as the empty document', async () => {
+      // `config` is a Json column: a stored `null` is a document the rule
+      // rejects, never one read as `{}`.
+      const judgeConfig = jest.fn((document: unknown) => (document === null ? 'rejected' : 'conforms'));
+      reader.read.mockReturnValue(householdManifest({ judgeConfig }));
+      db.pluginGrant.findMany.mockResolvedValue([household('stored-null')] as never);
+      db.householdPlugin.findMany.mockResolvedValue([row('stored-null', { config: null })] as never);
+
+      await expect(inForce()).resolves.toEqual([]);
+      expect(judgeConfig).toHaveBeenCalledWith(null);
+    });
+
+    it('drops a household decision under a manifest with no household surface', async () => {
+      reader.read.mockReturnValue(householdManifest({ householdSurface: false }));
+      db.pluginGrant.findMany.mockResolvedValue(['h1', 'h2'].map((id) => household(id)) as never);
+      db.householdPlugin.findMany.mockResolvedValue([row('h1'), row('h2')] as never);
+
+      await expect(inForce()).resolves.toEqual([]);
+      expect(reader.read).toHaveBeenCalledTimes(1);
+    });
+
+    it('drops only the household decisions of a plugin whose config schema cannot be used, and resolves', async () => {
+      reader.read.mockImplementation(({ slug }: { slug: string }) =>
+        householdManifest({ judgeConfig: () => (slug === 'broken-schema' ? 'schema-unusable' : 'conforms') }),
+      );
+      const broken = { ...stored().plugin, slug: 'broken-schema' };
+      // A decision carries no plugin id, so the two plugins' decisions differ
+      // in their risk level to tell which survive.
+      const brokenDecision = (householdId: string) =>
+        stored({
+          pluginId: 'plugin-2',
+          scopeType: PluginGrantScope.Household,
+          scopeId: householdId,
+          decidedRiskLevel: RiskLevel.High,
+          plugin: broken,
+        });
+      db.pluginGrant.findMany.mockResolvedValue([
+        household('h1', 'plugin-1'),
+        household('h2', 'plugin-1'),
+        brokenDecision('h1'),
+        brokenDecision('h2'),
+      ] as never);
+      db.householdPlugin.findMany.mockResolvedValue([
+        row('h1'),
+        row('h2'),
+        row('h1', { pluginId: 'plugin-2' }),
+        row('h2', { pluginId: 'plugin-2' }),
+      ] as never);
+
+      const kept = await inForce();
+
+      const usable = {
+        scopeType: PluginGrantScope.Household,
+        decidedRiskLevel: RiskLevel.Low,
+        status: PluginGrantStatus.Granted,
+      };
+      expect(kept).toEqual([usable, usable]);
+      // Each plugin's manifest is read once, however many decisions it holds.
+      expect(reader.read).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("keeps a user decision only while the user's enablement row serves the plugin", async () => {
@@ -230,7 +317,7 @@ describe('loadConsentDecisionsInForce (#772)', () => {
       stored({ pluginId: 'plugin-2', scopeType: PluginGrantScope.Household, scopeId: 'h1' }),
     ] as never);
     db.householdPlugin.findMany.mockResolvedValue([
-      { householdId: 'h1', pluginId: 'plugin-1', enabled: true, dormantReason: null },
+      { householdId: 'h1', pluginId: 'plugin-1', enabled: true, config: {} },
     ] as never);
 
     await expect(inForce()).resolves.toEqual([]);

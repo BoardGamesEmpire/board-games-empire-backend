@@ -72,11 +72,6 @@ import { PluginDirectoryLayoutError } from '../loader/loader.errors';
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
-import {
-  emitHouseholdDormancy,
-  reconcileHouseholdDormancy,
-  type HouseholdDormancyTransition,
-} from '../units/household-dormancy';
 import { compareForEscalations } from './escalation-comparator';
 import { CLEARED_STAGED_UPDATE } from './staged-update.columns';
 import type { ManifestComparisonView, UpdateEscalation, UpdateEscalationComparison } from './update-escalation.types';
@@ -346,8 +341,6 @@ interface ActivationOutcome {
   readonly reconsentHouseholdUnits: readonly ReconsentCandidate<HouseholdPlugin>[];
   /** The user-scope mirror (#225). */
   readonly reconsentUserUnits: readonly ReconsentCandidate<UserPlugin>[];
-  /** Household rows whose dormancy this activation wrote or lifted (#369, D-CK). */
-  readonly dormancyTransitions: readonly HouseholdDormancyTransition[];
   /**
    * Server config found invalid under the manifest this activation is
    * promoting and reset to `{}` (D-CN on #59/#370) — the same rule a
@@ -1170,10 +1163,10 @@ export class PluginUpdateService {
       readonly riskEscalatedChecks: readonly NormalizedPermissionRequest[];
     },
   ): Promise<ActivationOutcome> {
-    // Compiled here rather than inside the transaction: the retained-config
-    // validation below (D-CN) runs holding the claimed row, and ajv's codegen
+    // Compiled here rather than inside the transaction: the retained server
+    // config validation below runs holding the claimed row, and ajv's codegen
     // has no business inside that window (mirrors `install()`'s own warm
-    // call, and `reconcileHouseholdDormancy`'s for the household axis).
+    // call).
     this.configSchema.warm({
       slug: next.manifest.slug,
       version: next.manifest.version,
@@ -1276,8 +1269,7 @@ export class PluginUpdateService {
       // UPDATE; unqualified table name so the search_path (per-worker test
       // schemas) resolves it. Placed first in the transaction, ahead of the
       // grant lock below, matching the plugin row → advisory → grant row →
-      // unit row total order `household-dormancy.ts` and `unit-scope-lock.ts`
-      // already document.
+      // unit row total order `unit-scope-lock.ts` documents.
       const [current] = await tx.$queryRaw<{ config: Prisma.JsonValue; category: PluginCategory }[]>`
         SELECT config, category FROM plugins WHERE id = ${plugin.id} FOR UPDATE`;
 
@@ -1603,15 +1595,18 @@ export class PluginUpdateService {
       // the consent surface read, applied to the rows read below, so a unit
       // the standing reads as owing is the unit announced here.
       //
-      // Switched-on units only, dormant ones included. A switched-off unit
-      // accepts the whole required set afresh when it switches on again, so
-      // the announcement would tell it nothing it is not asked then; a dormant
-      // unit stays switched on, is asked nothing when its configuration or
-      // the plugin's scope is cured, and would otherwise read review_pending
-      // without ever having been told. Nothing is judged at switch-on: the
-      // standing is read whenever feature state, the inventory or the ability
-      // read it, so a unit switched on after activation shows review_pending
-      // but is never announced (#1149).
+      // Switched-on units only, whether or not they can currently run. A
+      // switched-off unit accepts the whole required set afresh when it
+      // switches on again, so the announcement would tell it nothing it is
+      // not asked then. A switched-on unit that cannot run under this
+      // manifest (its scope has no household surface, or its retained
+      // configuration fails the schema) is still switched on: whether it can
+      // run is worked out when read (#1151), it is asked nothing when that
+      // is cured, and it would otherwise read review_pending without ever
+      // having been told. Nothing is judged at switch-on: the standing is
+      // read whenever feature state, the inventory or the ability read it,
+      // so a unit switched on after activation shows review_pending but is
+      // never announced (#1149).
       //
       // Fixed query count regardless of how many units run the plugin: one
       // unit read and one grant read per scope. A per-unit loop put this
@@ -1683,14 +1678,6 @@ export class PluginUpdateService {
         }
       }
 
-      const dormancyTransitions = await reconcileHouseholdDormancy({
-        tx,
-        pluginId: plugin.id,
-        manifest: next.manifest,
-        configSchema: this.configSchema,
-        initiatedAt,
-      });
-
       // The acts behind the deleted decisions, for the version each revocation
       // names. The act table is append-only, so every act a row names is still
       // there to read.
@@ -1720,7 +1707,6 @@ export class PluginUpdateService {
         reStampedGrants,
         reconsentHouseholdUnits,
         reconsentUserUnits,
-        dormancyTransitions,
         retainedConfigReset: retainedConfig.reset,
       };
     });
@@ -1808,8 +1794,6 @@ export class PluginUpdateService {
         ),
       );
     }
-
-    emitHouseholdDormancy(this.emitter, outcome.dormancyTransitions, next.manifest.version, initiatedAt);
   }
 
   /**

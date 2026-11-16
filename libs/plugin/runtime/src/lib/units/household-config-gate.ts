@@ -1,75 +1,73 @@
-import type { HouseholdPlugin, Plugin, Prisma } from '@bge/database';
-import { PluginUnitDormantReason } from '@bge/database';
+import { derivePluginUnitDormancy, retainedConfigOf, type HouseholdPlugin } from '@bge/database';
+import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
+import { PluginConfigSchemaUnusableError } from '../config/config-schema.errors';
 import type { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
-import { PluginUnitConfigRequiredError } from './unit.errors';
+import { MANIFEST_SCOPE_TO_PRISMA } from '../install/manifest-enum.maps';
+import { activeManifestOf, configDocumentIssues } from '../manifest/active-manifest';
+import { PluginUnitConfigRequiredError, PluginUnitScopeError } from './unit.errors';
 
 /**
- * The household configuration gate. A consent act's switch-on runs the
- * retained-config gate before it puts a household unit into service (#323,
- * #1150), and shares the dormancy clearing with the config PATCH, so the two
- * cannot disagree about which write cures a config dormancy (#370).
+ * The household configuration gate (#323, #1151). A household unit's dormancy
+ * is worked out when read, by `derivePluginUnitDormancy`, from the active
+ * manifest and the document its unit enablement holds. A consent act's
+ * switch-on that supplies no document asks the same rule about the document
+ * it would leave the unit holding, so a switch-on never leaves a unit switched
+ * on in a state the read calls dormant.
  */
 
 /**
- * The unsupplied-config half of the enable gate: a retained row config
- * must satisfy the ACTIVE schema, or the enable is refused with the
- * retained document's violations — never silently enabled over config
- * an update or reinstall left stale.
+ * Refuses a household switch-on that supplies no document when the rule finds
+ * the unit dormant, with the typed error for the rule's cause. Never returns
+ * normally when the rule answers non-null.
+ *
+ * The document is the unit enablement's `config`, or `{}` when the household
+ * has none. Where two refusals apply, the order is:
+ *
+ * 1. `unavailable`, which no configuration cures: PluginUnitScopeError when
+ *    the manifest has no household surface, PluginConfigSchemaUnusableError
+ *    when its config schema cannot be used.
+ * 2. A first switch-on the manifest requires a document for
+ *    (`requiresHouseholdConfig`): PluginUnitConfigRequiredError with no
+ *    issues, whatever the rule says about `{}`.
+ * 3. `needs_configuration`: PluginUnitConfigRequiredError with the
+ *    violations.
  */
-export function assertRetainedConfigSatisfiesGate(
+export function assertHeldConfigSatisfiesGate(
   configSchema: PluginConfigSchemaService,
-  plugin: Pick<Plugin, 'slug' | 'version'>,
-  schema: Record<string, unknown>,
+  active: PluginManifestValidationResult,
   existing: HouseholdPlugin | null,
 ): void {
-  if (existing === null) {
-    throw new PluginUnitConfigRequiredError(plugin.slug, []);
+  const { manifest } = active;
+  const target = { slug: manifest.slug, version: manifest.version, schema: manifest.config.schema };
+  const retainedConfig = retainedConfigOf(existing);
+  const activeManifest = activeManifestOf(active, configSchema);
+  const dormancy = derivePluginUnitDormancy({ scopeType: 'Household', manifest: activeManifest, retainedConfig });
+
+  if (dormancy === 'unavailable') {
+    // Built as `assertHouseholdSurface` builds it from the plugin's `scope`
+    // column, so the refusal reads the same from either source.
+    if (!activeManifest.householdSurface) {
+      throw new PluginUnitScopeError(manifest.slug, MANIFEST_SCOPE_TO_PRISMA[manifest.scope].toLowerCase());
+    }
+
+    // With a household surface, the rule reads `unavailable` only for a
+    // config schema that cannot be used; establishing it again throws the
+    // typed error with the compiler's reason.
+    configSchema.assertUsable(target);
+
+    throw new PluginConfigSchemaUnusableError(manifest.slug, manifest.version, 'the config schema cannot be used');
   }
 
-  // `config` is a Json column, so its Prisma type admits arrays, `null` and
-  // scalars — shapes a permissive schema like `{}` accepts and that a bare
-  // `as Record<string, unknown>` would wave through as an object. No API path
-  // can store one today (both config DTOs are `@IsObject`, which rejects
-  // arrays and null, and every writer of this column takes its value from
-  // them), so this guards the cast rather than a reachable state. It is here
-  // because it is the same judgment `configConforms` makes during
-  // reconciliation, and the two cannot be allowed to disagree about what a
-  // valid retained document is: that pass condemns the row, and this gate is
-  // what puts it back into service.
-  const retained = existing.config;
-
-  if (typeof retained !== 'object' || retained === null || Array.isArray(retained)) {
-    throw new PluginUnitConfigRequiredError(plugin.slug, [
-      { path: '', keyword: 'type', message: 'retained configuration is not a JSON object' },
-    ]);
+  if (existing === null && manifest.config.requiresHouseholdConfig) {
+    throw new PluginUnitConfigRequiredError(manifest.slug, []);
   }
 
-  const issues = configSchema.validate({
-    slug: plugin.slug,
-    version: plugin.version,
-    schema,
-    config: retained,
-  });
-
-  if (issues.length > 0) {
-    throw new PluginUnitConfigRequiredError(plugin.slug, issues);
+  if (dormancy === 'needs_configuration') {
+    throw new PluginUnitConfigRequiredError(manifest.slug, configDocumentIssues(configSchema, target, retainedConfig));
   }
-}
 
-/**
- * The dormancy half of a household write that has just validated a document
- * against the ACTIVE schema: the document that made the row dormant is gone,
- * so the dormancy is over (#370).
- *
- * Narrowed to `NeedsConfiguration` — the only reason a config write can cure.
- * A `ScopeOrphaned` row never reaches either caller anyway (both require the
- * household surface), and clearing it here would put a row back into service
- * on a scope that has no household axis.
- */
-export function configDormancyCleared(
-  existing: HouseholdPlugin,
-): Pick<Prisma.HouseholdPluginUpdateInput, 'dormantReason' | 'dormantAt'> {
-  return existing.dormantReason === PluginUnitDormantReason.NeedsConfiguration
-    ? { dormantReason: null, dormantAt: null }
-    : {};
+  // Every dormancy refuses above, so only null reaches here. A new dormancy
+  // value fails to compile on this line until the gate decides how to refuse
+  // it (#1151).
+  dormancy satisfies null;
 }

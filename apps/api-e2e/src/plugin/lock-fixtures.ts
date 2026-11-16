@@ -98,11 +98,11 @@ export const SERVER_GRANT_INSERT =
  * The `unit row` stage of the claimed lock order, as a statement a barrier can
  * hold open.
  *
- * No shipped statement locks a unit enablement by raw SQL since consent standing
- * became a read-time derivation (#1149): the unit writers that remain take the
- * row through a Prisma write (`tx.householdPlugin.update`, a consent act's
- * create or `upsert` (#1150), the dormancy pass's `updateMany`), which Prisma cannot
- * express as a held lock. So this states the stage in the form the `unit row`
+ * No shipped statement locks a unit enablement by raw SQL: a unit's consent
+ * standing (#1149) and its dormancy (#1151) are worked out when read, and the
+ * unit writers take the row through a Prisma write (`tx.householdPlugin.update`,
+ * a consent act's create or `upsert` (#1150), uninstall's purge), which Prisma
+ * cannot express as a held lock. So this states the stage in the form the `unit row`
  * pattern recognises. `FOR UPDATE` is the strongest row mode, at least as
  * strong as the `FOR NO KEY UPDATE` an UPDATE of non-key columns takes, so a
  * barrier holding it waits out every unit writer the real write would.

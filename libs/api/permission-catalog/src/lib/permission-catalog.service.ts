@@ -8,7 +8,7 @@ import {
   lockCatalogEdits,
   PermissionOwner,
   planReconcile,
-  PLUGIN_REQUESTED_PERMISSIONS_READER,
+  PLUGIN_ACTIVE_MANIFEST_READER,
   probeConditions,
   RECONCILE_TRANSACTION_TIMEOUT_MS,
   ROLE_SCOPE,
@@ -19,7 +19,7 @@ import {
   type FieldChange,
   type PermissionSeedDefinition,
   type PermissionSnapshotRow,
-  type PluginRequestedPermissionsReader,
+  type PluginActiveManifestReader,
   type Prisma,
   type RolePermissionSnapshotRow,
   type RoleSnapshotRow,
@@ -147,8 +147,8 @@ export class PermissionCatalogService {
      * is counted.
      */
     @Optional()
-    @Inject(PLUGIN_REQUESTED_PERMISSIONS_READER)
-    private readonly requestedPermissionsReader?: PluginRequestedPermissionsReader,
+    @Inject(PLUGIN_ACTIVE_MANIFEST_READER)
+    private readonly activeManifestReader?: PluginActiveManifestReader,
   ) {}
 
   /**
@@ -232,7 +232,7 @@ export class PermissionCatalogService {
         : countConsentDecisionsLost(
             before,
             after,
-            await loadConsentDecisionsInForce(tx, slug, this.requestedPermissionsReader),
+            await loadConsentDecisionsInForce(tx, slug, this.activeManifestReader),
           );
 
       return {

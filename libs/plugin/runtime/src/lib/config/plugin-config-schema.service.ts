@@ -35,10 +35,19 @@ export interface PluginConfigValidationInput {
  * stays bounded by the distinct schemas a process actually sees. Each
  * compilation gets a fresh Ajv instance so one plugin's `$id`/`$ref`
  * registrations can never collide with another's.
+ *
+ * A schema that cannot be used is remembered under the same key, with the
+ * compiler's reason (#1151). A unit's dormancy is worked out from the schema
+ * on every read, so without it each ability resolution, inventory row and
+ * catalog count for that plugin would pay a failed compile to learn the same
+ * answer again. The digest keeps that safe as it keeps the validators safe:
+ * another document under the same version is another key.
  */
 @Injectable()
 export class PluginConfigSchemaService {
   private readonly validators = new Map<string, ValidateFunction>();
+  /** Why each schema that cannot be used was refused, by the validators' key. */
+  private readonly unusable = new Map<string, string>();
 
   /**
    * Compiles and caches a schema ahead of the site that will validate against
@@ -57,11 +66,37 @@ export class PluginConfigSchemaService {
     }
   }
 
-  /** Returns every violation (empty when the payload conforms); throws `PluginConfigSchemaUnusableError` when the schema cannot compile. */
+  /**
+   * Compiles and caches a schema, throwing `PluginConfigSchemaUnusableError`
+   * when it cannot be used. `warm` without the silence: for a caller that has
+   * to know the schema is usable before it looks at any document, because an
+   * unusable schema outranks the document's own shape (#1151).
+   */
+  assertUsable(input: Omit<PluginConfigValidationInput, 'config'>): void {
+    this.compiledValidator(input);
+  }
+
+  /**
+   * Returns every violation (empty when the payload conforms); throws
+   * `PluginConfigSchemaUnusableError` when the schema cannot compile.
+   *
+   * A validator that throws on a payload answers one root issue, not the
+   * throw (#1151). A recursive schema run over a payload nested deep enough
+   * overflows the stack, which says the payload cannot be checked and nothing
+   * about the schema: another payload still validates. Stored documents are
+   * judged on every read, so the throw would otherwise fail each of them.
+   */
   validate(input: PluginConfigValidationInput): readonly PluginConfigIssue[] {
     const validator = this.compiledValidator(input);
+    let conforms: boolean;
 
-    if (validator(input.config)) {
+    try {
+      conforms = validator(input.config);
+    } catch {
+      return [UNCHECKABLE_PAYLOAD];
+    }
+
+    if (conforms) {
       return [];
     }
 
@@ -73,53 +108,82 @@ export class PluginConfigSchemaService {
   }
 
   private compiledValidator(input: Omit<PluginConfigValidationInput, 'config'>): ValidateFunction {
+    const { slug, version, schema } = input;
     let key: string;
-    let compiled: ValidateFunction;
 
-    // The digest shares the compile's guard rather than sitting outside it:
-    // `JSON.stringify` throws on a document ajv cannot compile either (a
-    // circular one blows ajv's stack), and both answers belong to the
-    // operator as the same typed "this stored schema is unusable" — not as a
-    // bare TypeError surfacing an unclassified 500.
+    // The digest answers as the compile does: `JSON.stringify` throws on a
+    // document ajv cannot compile either (a circular one blows ajv's stack),
+    // and both answers belong to the operator as the same typed "this stored
+    // schema is unusable", not as a bare TypeError surfacing an unclassified
+    // 500. Such a document has no key to be remembered under; none can come
+    // out of a JSON column.
     try {
-      key = `${input.slug}:${input.version}:${digest(input.schema)}`;
-      const cached = this.validators.get(key);
-
-      if (cached !== undefined) {
-        return cached;
-      }
-
-      const ajv = new Ajv2020({ allErrors: true, strict: false });
-      addFormats(ajv);
-      compiled = ajv.compile(input.schema);
+      key = `${slug}:${version}:${digest(schema)}`;
     } catch (err) {
-      throw new PluginConfigSchemaUnusableError(
-        input.slug,
-        input.version,
-        err instanceof Error ? err.message : String(err),
-      );
+      throw new PluginConfigSchemaUnusableError(slug, version, reasonOf(err));
     }
 
-    // `$async: true` compiles to a validator that RETURNS A PROMISE and
-    // signals violations by rejecting. Called synchronously that promise is
-    // simply truthy, so every payload — including a violating one — would
-    // read as conforming, and its unhandled rejection would take the process
-    // down. Refused as unusable rather than special-cased: a config document
-    // has nothing to await, and supporting it would push an await into every
-    // caller for a capability no plugin needs. (Nested `$async` never reaches
-    // here — ajv refuses to compile it at all.)
-    if (isAsync(compiled)) {
-      throw new PluginConfigSchemaUnusableError(
-        input.slug,
-        input.version,
-        'the config schema declares "$async": true; asynchronous config validation is not supported',
-      );
+    const cached = this.validators.get(key);
+
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const refused = this.unusable.get(key);
+
+    if (refused !== undefined) {
+      throw new PluginConfigSchemaUnusableError(slug, version, refused);
+    }
+
+    let compiled: ValidateFunction;
+
+    try {
+      compiled = compile(schema);
+    } catch (err) {
+      const reason = reasonOf(err);
+      this.unusable.set(key, reason);
+
+      throw new PluginConfigSchemaUnusableError(slug, version, reason);
     }
 
     this.validators.set(key, compiled);
 
     return compiled;
   }
+}
+
+/** What `validate` answers for a payload its validator threw on. */
+const UNCHECKABLE_PAYLOAD: PluginConfigIssue = {
+  path: '',
+  keyword: 'uncheckable',
+  message: 'the configuration could not be checked against the schema',
+};
+
+const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/**
+ * Compiles one schema on a fresh Ajv instance, throwing when it cannot be
+ * used.
+ *
+ * `$async: true` compiles to a validator that RETURNS A PROMISE and signals
+ * violations by rejecting. Called synchronously that promise is simply
+ * truthy, so every payload, including a violating one, would read as
+ * conforming, and its unhandled rejection would take the process down.
+ * Refused as unusable rather than special-cased: a config document has
+ * nothing to await, and supporting it would push an await into every caller
+ * for a capability no plugin needs. (Nested `$async` never reaches the test:
+ * ajv refuses to compile it at all.)
+ */
+function compile(schema: Record<string, unknown>): ValidateFunction {
+  const ajv = new Ajv2020({ allErrors: true, strict: false });
+  addFormats(ajv);
+  const compiled = ajv.compile(schema);
+
+  if (isAsync(compiled)) {
+    throw new Error('the config schema declares "$async": true; asynchronous config validation is not supported');
+  }
+
+  return compiled;
 }
 
 /** ajv types the async form as a separate interface, so the flag needs the widened view. */

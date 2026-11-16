@@ -5,6 +5,7 @@ import { init, parse as parseEsm } from 'es-module-lexer';
 import { parse as parseAst, type ESTree } from 'meriyah';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import { isPlainJsonObject } from '../is-plain-json-object';
 import { PluginStaticAnalysisUnavailableError } from './install.errors';
 import {
   MODULE_PARSE_OPTIONS,
@@ -80,9 +81,6 @@ interface CollectedFiles {
 
 const isEstreeNode = (value: unknown): value is EstreeNode =>
   typeof value === 'object' && value !== null && typeof (value as { type?: unknown }).type === 'string';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const errorCode = (err: unknown): string | undefined =>
   typeof err === 'object' && err !== null && typeof (err as { code?: unknown }).code === 'string'
@@ -519,7 +517,7 @@ export class PluginStaticAnalysisService {
       const screenField = (field: string, severity: StaticAnalysisSeverity): void => {
         const entries = packageJson[field];
 
-        if (!isRecord(entries)) {
+        if (!isPlainJsonObject(entries)) {
           return;
         }
 
@@ -568,7 +566,7 @@ export class PluginStaticAnalysisService {
     try {
       const parsed: unknown = JSON.parse(await readFile(path, 'utf-8'));
 
-      return isRecord(parsed) ? parsed : null;
+      return isPlainJsonObject(parsed) ? parsed : null;
     } catch {
       return null;
     }
@@ -607,7 +605,7 @@ export class PluginStaticAnalysisService {
 
     const packages = lockfile['packages'];
 
-    if (isRecord(packages)) {
+    if (isPlainJsonObject(packages)) {
       const marker = `${NODE_MODULES}/`;
 
       for (const [key, entry] of Object.entries(packages)) {
@@ -617,7 +615,7 @@ export class PluginStaticAnalysisService {
           names.add(key.slice(index + marker.length));
         }
 
-        if (isRecord(entry) && typeof entry['name'] === 'string') {
+        if (isPlainJsonObject(entry) && typeof entry['name'] === 'string') {
           names.add(entry['name']);
         }
       }
@@ -630,14 +628,14 @@ export class PluginStaticAnalysisService {
 
   /** v1 lockfiles nest transitive packages, so the whole tree has to be walked. */
   private collectV1LockfileNames(dependencies: unknown, names: Set<string>): void {
-    if (!isRecord(dependencies)) {
+    if (!isPlainJsonObject(dependencies)) {
       return;
     }
 
     for (const [name, entry] of Object.entries(dependencies)) {
       names.add(name);
 
-      if (!isRecord(entry)) {
+      if (!isPlainJsonObject(entry)) {
         continue;
       }
 

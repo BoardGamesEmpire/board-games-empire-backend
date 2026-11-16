@@ -1,6 +1,7 @@
 import { DatabaseService } from '@bge/database';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
+import { isPlainJsonObject } from '../is-plain-json-object';
 import { PluginConfigEventsService } from './plugin-config-events.service';
 import { PLUGIN_CONFIG_REFRESH_INTERVAL_MS, PLUGIN_CONFIG_REFRESH_INTERVAL_NAME } from './plugin-config.constants';
 
@@ -112,7 +113,7 @@ export class PluginConfigService implements OnModuleInit {
    * they expect a record.
    */
   private normalize(slug: string, config: unknown): Readonly<Record<string, unknown>> {
-    if (typeof config !== 'object' || config === null || Array.isArray(config)) {
+    if (!isPlainJsonObject(config)) {
       this.logger.error(
         `Plugin '${slug}' config is not an object (got ${describeType(config)}) — serving empty config`,
       );

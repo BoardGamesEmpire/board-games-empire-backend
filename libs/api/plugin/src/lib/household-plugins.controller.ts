@@ -108,10 +108,12 @@ export class HouseholdPluginsController {
       "Driven from the installed set, not from this household's enablement rows: every plugin the household axis " +
       'admits appears, with `unit.anchored` false where no row exists yet — so a household that has enabled ' +
       'nothing still sees what it could enable. A plugin whose scope no longer admits household enablement but ' +
-      'which this household still holds a row for is listed too, with `unit.state` unavailable or needs_configuration — a ' +
-      'retained unit enablement that serves nothing is exactly what a household admin needs to see, and the ' +
-      'state code says whether a server admin (re-scoping the plugin, or switching it back on: `serverEnabled`) ' +
-      'or a fresh configuration is what would revive it. Tombstoned plugins never ' +
+      'for which this household still holds a unit enablement is listed too, with `unit.dormancy` unavailable — a ' +
+      'retained unit enablement that serves nothing is exactly what a household admin needs to see. ' +
+      "`unit.dormancy` says what stands in the way apart from the two switches, the unit's own and the Server " +
+      'switch, whether or not the unit is switched on: unavailable means only a server admin can bring it back, ' +
+      'needs_configuration that a conforming configuration would. A switched-on unit also reads unavailable ' +
+      'while `serverEnabled` is false. Uninstalled plugins never ' +
       'appear — there is no path to participate in one again — and unlike `GET /plugins` this route accepts no ' +
       'flag to admit them.',
   })
@@ -200,8 +202,11 @@ export class HouseholdPluginsController {
       '(POST …/consent/review) against the manifest=staged consent surface. Every required permission must be Granted; optional ones may be ' +
       'answered either way or left for later. manifestSha256 names the consent surface the answers were read ' +
       "from. Optional config is validated against the manifest's config.schema and written with the switch-on. " +
-      'Switching on again without config, when nothing would change, answers changed: false; a switch-on that ' +
-      'sends config always records a consent act and writes the config.',
+      'Without config, the configuration the unit would hold (its retained one, or an empty one for a first ' +
+      "switch-on) must fit the manifest's config.schema, with or without requiresHouseholdConfig. Switching on " +
+      'again without config, when nothing would change, answers changed: false; a unit already on whose ' +
+      'retained configuration no longer fits the plugin is answered 409 with the violations instead. A ' +
+      'switch-on that sends config always records a consent act and writes the config.',
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Ok, type: ConsentActResponseDto })
@@ -217,8 +222,10 @@ export class HouseholdPluginsController {
     description:
       'PLUGIN_CONSENT_ACT_STALE: the plugin or a permission risk changed since the consent surface was read; ' +
       'read it again and answer again. PLUGIN_CONSENT_ACT_UNGRANTABLE: a required permission cannot be granted ' +
-      'here, which only a server admin can fix. PLUGIN_UNIT_CONFIG_REQUIRED: the plugin needs household ' +
-      'configuration and none valid was sent or kept (issues[] names what to fix).',
+      'here, which only a server admin can fix. PLUGIN_UNIT_CONFIG_REQUIRED: no config was sent, and the ' +
+      "configuration the unit would hold (its retained one, or an empty one) does not fit the manifest's " +
+      'config.schema, or this is a first switch-on of a plugin that sets requiresHouseholdConfig ' +
+      '(issues[] names what to fix, and is empty in that last case).',
   })
   @ApiResponse({
     status: Http.UnprocessableEntity,
@@ -341,8 +348,8 @@ export class HouseholdPluginsController {
       'record, and re-enabling restores exactly the consent standing the unit had. Unlike enable and the config ' +
       'write, this route accepts a unit enablement whose plugin scope no longer admits household enablement ' +
       '(state unavailable): it is listed for this household, and switching it off is the only action left that ' +
-      'makes sense. The unavailable state itself is not cleared — it is not the switch, and lifting it is an ' +
-      "activation's business.",
+      'makes sense. After it the unit reads state off, and its dormancy stays unavailable: dormancy is not the ' +
+      "switch, and lifting it is an activation's business.",
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
@@ -414,7 +421,9 @@ export class HouseholdPluginsController {
     description:
       'Why a feature is or is not running here: per-feature active|disabled with a denied|pending ' +
       'reason paired with the blocking permission slugs (the client renders actionable "why is this missing" ' +
-      'feedback from the pairing), plus the unit-level served, the unit state code and consent standing.',
+      'feedback from the pairing), plus the unit-level served, the unit state code, its dormancy (what stands in ' +
+      "the way apart from the two switches, the unit's own and the Server switch, whether or not the unit is " +
+      'switched on) and consent standing.',
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })

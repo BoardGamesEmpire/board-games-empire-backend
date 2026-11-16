@@ -5,7 +5,6 @@ import {
   PluginGrantScope,
   PluginGrantStatus,
   PluginScope,
-  PluginUnitDormantReason,
   Prisma,
   RiskLevel,
 } from '@bge/database';
@@ -16,6 +15,7 @@ import {
   type MockDatabaseService,
 } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
+import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { PluginConsentCheckClassifier } from '../consent/plugin-consent-check-classifier.service';
 import { PluginConsentStandingService } from '../consent/plugin-consent-standing.service';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
@@ -120,7 +120,12 @@ describe('PluginInventoryService', () => {
       new PluginConsentCheckClassifier(db as unknown as DatabaseService),
       options,
     );
-    service = new PluginInventoryService(db as unknown as DatabaseService, standing, options);
+    service = new PluginInventoryService(
+      db as unknown as DatabaseService,
+      standing,
+      new PluginConfigSchemaService(),
+      options,
+    );
     unitCeiling = jest.fn((scope: Prisma.PluginWhereInput) => ({ AND: [scope, CEILING] }));
     serverCeiling = jest.fn(() => CEILING);
   });
@@ -467,10 +472,23 @@ describe('PluginInventoryService', () => {
   });
 
   describe('listForHousehold', () => {
+    /**
+     * A household-scope plugin row by default: dormancy is worked out from the
+     * manifest's own scope (#1151), so a household row needs a manifest with a
+     * household surface unless a test arranges otherwise.
+     */
     const householdRow = (overrides: Record<string, unknown> = {}, unit: unknown[] = []) => ({
-      ...row(overrides),
+      ...row({ scope: PluginScope.Household, manifestJson: buildPluginManifest({ scope: 'household' }), ...overrides }),
       householdPlugins: unit,
     });
+
+    /** A household-scope manifest whose schema requires `webhookUrl`, so `{}` does not conform. */
+    const requiringManifest = () => {
+      const requiring = buildPluginManifest({ scope: 'household' });
+      requiring.config = { ...requiring.config, schema: { ...requiring.config.schema, required: ['webhookUrl'] } };
+
+      return requiring;
+    };
 
     it('is driven from the plugin table, admitting the household axis OR an existing row (D-CE, D-CF)', async () => {
       db.plugin.findMany.mockResolvedValue([] as never);
@@ -543,14 +561,13 @@ describe('PluginInventoryService', () => {
         anchored: false,
         enabled: false,
         state: 'off',
+        dormancy: null,
         consent: { outstanding: [], optionalOff: [] },
       });
     });
 
-    it('an anchored row carries its enablement, state code and consent standing (#1149)', async () => {
-      db.plugin.findMany.mockResolvedValue([
-        householdRow({ scope: PluginScope.Household }, [{ enabled: true, dormantReason: null }]),
-      ] as never);
+    it('a row with a unit enablement carries its enablement, state code, dormancy and consent standing (#1149, #1151)', async () => {
+      db.plugin.findMany.mockResolvedValue([householdRow({}, [{ enabled: true, config: {} }])] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
       const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
@@ -559,11 +576,12 @@ describe('PluginInventoryService', () => {
         anchored: true,
         enabled: true,
         state: 'on',
+        dormancy: null,
         consent: { outstanding: [], optionalOff: [] },
       });
     });
 
-    it('selects only enabled and dormantReason from the household row, no stored suspension (#1149)', async () => {
+    it('selects only enabled and the document from the household unit enablement, and no stored consent or dormancy state (#1149, #1151)', async () => {
       db.plugin.findMany.mockResolvedValue([] as never);
       db.plugin.count.mockResolvedValue(0 as never);
 
@@ -572,10 +590,24 @@ describe('PluginInventoryService', () => {
       expect(db.plugin.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           select: expect.objectContaining({
-            householdPlugins: { where: { householdId: 'hh-1' }, select: { enabled: true, dormantReason: true } },
+            householdPlugins: { where: { householdId: 'hh-1' }, select: { enabled: true, config: true } },
           }),
         }),
       );
+    });
+
+    it("never serves the household's document: the unit carries exactly its five fields (#1151)", async () => {
+      // `config` is selected only so the rule can judge it; a household's
+      // settings belong to the config routes, not to the list.
+      db.plugin.findMany.mockResolvedValue([
+        householdRow({}, [{ enabled: true, config: { webhookUrl: 'https://hooks.example/secret' } }]),
+      ] as never);
+      db.plugin.count.mockResolvedValue(1 as never);
+
+      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
+
+      expect(Object.keys(rows[0].unit).sort()).toEqual(['anchored', 'consent', 'dormancy', 'enabled', 'state']);
+      expect(JSON.stringify(rows[0])).not.toContain('hooks.example');
     });
 
     it('a household row owing re-consent reads state review_pending (#1149)', async () => {
@@ -590,9 +622,7 @@ describe('PluginInventoryService', () => {
         { slug: 'update:calendar', riskLevel: RiskLevel.High, ...UNIT_BOUND_RULES.Household },
       ] as never);
       db.plugin.findMany.mockResolvedValue([
-        householdRow({ scope: PluginScope.Household, manifestJson: manifestWithUnitChecks() }, [
-          { enabled: true, dormantReason: null },
-        ]),
+        householdRow({ manifestJson: manifestWithUnitChecks() }, [{ enabled: true, config: {} }]),
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
@@ -609,11 +639,9 @@ describe('PluginInventoryService', () => {
       ]);
     });
 
-    it('a row whose manifest cannot be read keeps its marker, reads unavailable and reports an empty standing (#1149)', async () => {
+    it('a row whose manifest cannot be read keeps its marker, reads unavailable with dormancy unavailable and reports an empty standing (#1149, #1151)', async () => {
       db.plugin.findMany.mockResolvedValue([
-        householdRow({ scope: PluginScope.Household, manifestJson: { nonsense: true } }, [
-          { enabled: true, dormantReason: null },
-        ]),
+        householdRow({ manifestJson: { nonsense: true } }, [{ enabled: true, config: {} }]),
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
@@ -626,6 +654,7 @@ describe('PluginInventoryService', () => {
         anchored: true,
         enabled: true,
         state: 'unavailable',
+        dormancy: 'unavailable',
         consent: { outstanding: [], optionalOff: [] },
       });
       expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
@@ -641,9 +670,7 @@ describe('PluginInventoryService', () => {
         },
       };
       db.plugin.findMany.mockResolvedValue([
-        householdRow({ scope: PluginScope.Household, manifestJson: withChecks }, [
-          { enabled: true, dormantReason: null },
-        ]),
+        householdRow({ manifestJson: withChecks }, [{ enabled: true, config: {} }]),
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
@@ -654,17 +681,18 @@ describe('PluginInventoryService', () => {
       expect(rows[0].unit.consent.outstanding[0]?.reason).toBe('Schreibt Erinnerungen in den Haushaltskalender.');
     });
 
-    it('a ScopeOrphaned household row reads state unavailable and no dormantReason field (#1149)', async () => {
+    it('a switched-on unit enablement under a server-scope manifest reads unavailable for state and dormancy (#1151)', async () => {
+      // A narrowing activation rewrites the plugin's scope and retires no unit
+      // enablement, so the household still holds one the manifest has no
+      // surface for.
       db.plugin.findMany.mockResolvedValue([
-        householdRow({ scope: PluginScope.Server }, [
-          { enabled: true, dormantReason: PluginUnitDormantReason.ScopeOrphaned },
-        ]),
+        householdRow({ scope: PluginScope.Server, manifestJson: manifest }, [{ enabled: true, config: {} }]),
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
       const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
-      expect(rows[0].unit.state).toBe('unavailable');
+      expect(rows[0].unit).toMatchObject({ state: 'unavailable', dormancy: 'unavailable' });
       expect(rows[0]).not.toHaveProperty('dormantReason');
       expect(rows[0].unit).not.toHaveProperty('dormantReason');
       // Dormancy is not a disable: the admin's own switch is untouched, which
@@ -674,7 +702,7 @@ describe('PluginInventoryService', () => {
 
     it('a switched-on household row under a plugin a server admin switched off reads unavailable, with serverEnabled false (#1149)', async () => {
       db.plugin.findMany.mockResolvedValue([
-        householdRow({ scope: PluginScope.Household, enabled: false }, [{ enabled: true, dormantReason: null }]),
+        householdRow({ enabled: false }, [{ enabled: true, config: {} }]),
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
@@ -682,31 +710,82 @@ describe('PluginInventoryService', () => {
 
       // Nothing runs while the server switch is off, so the code never says
       // on; the household's own switch is untouched and still reads true.
-      expect(rows[0]).toMatchObject({ serverEnabled: false, unit: { enabled: true, state: 'unavailable' } });
+      // The server switch is not dormancy: serverEnabled already says it.
+      expect(rows[0]).toMatchObject({
+        serverEnabled: false,
+        unit: { enabled: true, state: 'unavailable', dormancy: null },
+      });
     });
 
-    it('reports a config dormancy under a household-scope plugin — the reason is read, not inferred from scope', async () => {
+    it('a switched-on row whose document the schema rejects reads needs_configuration for state and dormancy (#1151)', async () => {
+      // The schema types webhookUrl as a string.
       db.plugin.findMany.mockResolvedValue([
-        householdRow({ scope: PluginScope.Household }, [
-          { enabled: true, dormantReason: PluginUnitDormantReason.NeedsConfiguration },
-        ]),
+        householdRow({}, [{ enabled: true, config: { webhookUrl: 42 } }]),
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
       const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
-      // The replaced boolean could not have said this: the scope admits
-      // households, so `scope === Server && anchored` was false here.
-      expect(rows[0].unit.state).toBe('needs_configuration');
+      expect(rows[0].unit).toMatchObject({ state: 'needs_configuration', dormancy: 'needs_configuration' });
     });
 
-    it('a server-scope plugin with NO household row is not dormant — there is no row to be dormant', async () => {
-      db.plugin.findMany.mockResolvedValue([householdRow({ scope: PluginScope.Server })] as never);
+    it('a stored JSON null is a document the schema rejects, not an empty one (#1151)', async () => {
+      db.plugin.findMany.mockResolvedValue([householdRow({}, [{ enabled: true, config: null }])] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
       const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
-      expect(rows[0].unit.state).toBe('off');
+      expect(rows[0].unit).toMatchObject({ state: 'needs_configuration', dormancy: 'needs_configuration' });
+    });
+
+    it('reports off with dormancy needs_configuration for a household that never switched on, when {} fails the schema (#1151)', async () => {
+      db.plugin.findMany.mockResolvedValue([householdRow({ manifestJson: requiringManifest() })] as never);
+      db.plugin.count.mockResolvedValue(1 as never);
+
+      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
+
+      // A household with no unit enablement holds the empty document, so a
+      // client can say before the switch-on that settings will be needed.
+      expect(rows[0].unit).toMatchObject({ anchored: false, state: 'off', dormancy: 'needs_configuration' });
+    });
+
+    it('a config schema the server cannot use makes its own row unavailable and leaves the page to resolve (#1151)', async () => {
+      // A readable manifest of its own: the slug namespaces its events, tables
+      // and queues, so those follow it.
+      const unusable = buildPluginManifest({
+        scope: 'household',
+        slug: 'broken-schema',
+        events: { emits: ['plugin.broken-schema.digest-sent'] },
+        storage: { ownTables: ['plugin_broken_schema_digests'] },
+        jobs: { queues: ['plugin:broken-schema:digest'] },
+        config: { schema: { type: 'no-such-type' } },
+      });
+      db.plugin.findMany.mockResolvedValue([
+        householdRow({ id: 'plugin-2', slug: 'broken-schema', manifestJson: unusable }, [
+          { enabled: true, config: {} },
+        ]),
+        householdRow({}, [{ enabled: true, config: {} }]),
+      ] as never);
+      db.plugin.count.mockResolvedValue(2 as never);
+
+      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
+
+      expect(rows.map((entry) => [entry.slug, entry.unit.state, entry.unit.dormancy])).toEqual([
+        ['broken-schema', 'unavailable', 'unavailable'],
+        ['demo-sink', 'on', null],
+      ]);
+      expect(rows[0].manifestUnreadable).toBe(false);
+    });
+
+    it('a server-scope plugin with NO household row reads off, and dormancy unavailable says a switch-on could not run (#1151)', async () => {
+      db.plugin.findMany.mockResolvedValue([
+        householdRow({ scope: PluginScope.Server, manifestJson: manifest }),
+      ] as never);
+      db.plugin.count.mockResolvedValue(1 as never);
+
+      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
+
+      expect(rows[0].unit).toMatchObject({ anchored: false, state: 'off', dormancy: 'unavailable' });
     });
   });
 
@@ -801,8 +880,32 @@ describe('PluginInventoryService', () => {
         anchored: true,
         enabled: false,
         state: 'off',
+        dormancy: null,
         consent: { outstanding: [], optionalOff: [] },
       });
+    });
+
+    it('a switched-on user row under a server-scope manifest reads dormancy null and runs (#225, #1151)', async () => {
+      // The baseline manifest is server-scope: user consent is legal at any
+      // plugin scope, and per-user configuration is never judged here.
+      db.plugin.findMany.mockResolvedValue([userRow({}, [{ enabled: true }])] as never);
+      db.plugin.count.mockResolvedValue(1 as never);
+
+      const { rows } = await service.listForUser('user-1', { skip: 0, pageSize: 25 }, unitCeiling);
+
+      expect(rows[0].unit).toMatchObject({ state: 'on', dormancy: null });
+    });
+
+    it('a user row whose manifest cannot be read reads dormancy unavailable and keeps its marker (#1151)', async () => {
+      db.plugin.findMany.mockResolvedValue([
+        userRow({ manifestJson: { nonsense: true } }, [{ enabled: true }]),
+      ] as never);
+      db.plugin.count.mockResolvedValue(1 as never);
+
+      const { rows } = await service.listForUser('user-1', { skip: 0, pageSize: 25 }, unitCeiling);
+
+      expect(rows[0].manifestUnreadable).toBe(true);
+      expect(rows[0].unit).toMatchObject({ state: 'unavailable', dormancy: 'unavailable' });
     });
   });
 

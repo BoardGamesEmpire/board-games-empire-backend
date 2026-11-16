@@ -1,5 +1,6 @@
 import type { Prisma } from '@bge/database';
 import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
+import { isPlainJsonObject } from '../is-plain-json-object';
 import type { PluginConfigSchemaService } from './plugin-config-schema.service';
 
 type ActiveManifest = PluginManifestValidationResult['manifest'];
@@ -27,9 +28,7 @@ export function retainedServerConfig(
   manifest: ActiveManifest,
   retained: Prisma.JsonValue,
 ): RetainedServerConfig {
-  const isPlainObject = typeof retained === 'object' && retained !== null && !Array.isArray(retained);
-
-  if (!isPlainObject) {
+  if (!isPlainJsonObject(retained)) {
     return { config: {}, reset: true };
   }
 

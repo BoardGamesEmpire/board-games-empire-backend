@@ -831,9 +831,9 @@ describe('shipped-function', () => {
     it('applies an argument guard, so an update counts only when it writes the key', () => {
       // Postgres skips the RI check on an UPDATE whose key columns are
       // unchanged, so only a re-parenting update takes the implied lock.
-      // Matching every child update instead would report the dormancy writes
-      // and every `updateMany({ enabled })` in the tree — noise standing where
-      // a real finding would appear.
+      // Matching every child update instead would report every unit config
+      // write and every `enabled` flip in the tree — noise standing where a
+      // real finding would appear.
       const shapes = [
         { pattern: /pluginGrant\.updateMany$/, withArguments: fieldNamed(['pluginId']), argumentProperty: 'data' },
       ];

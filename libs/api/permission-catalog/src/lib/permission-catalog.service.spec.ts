@@ -3,7 +3,7 @@ import {
   CATALOG_MANIFEST,
   loadCatalogSnapshot,
   PermissionOwner,
-  PLUGIN_REQUESTED_PERMISSIONS_READER,
+  PLUGIN_ACTIVE_MANIFEST_READER,
   PluginGrantScope,
   PluginGrantStatus,
   probeConditions,
@@ -163,12 +163,16 @@ describe('PermissionCatalogService (#772)', () => {
         PermissionCatalogService,
         { provide: PermissionsService, useValue: permissions },
         { provide: EventEmitter2, useValue: emitter },
-        { provide: PLUGIN_REQUESTED_PERMISSIONS_READER, useValue: reader },
+        { provide: PLUGIN_ACTIVE_MANIFEST_READER, useValue: reader },
       ],
     });
     reader.read.mockReset().mockReturnValue({
       valid: true,
-      requested: Object.values(PluginGrantScope).map((scopeType) => ({ slug: SLUG, scopeType })),
+      manifest: {
+        requested: Object.values(PluginGrantScope).map((scopeType) => ({ slug: SLUG, scopeType })),
+        householdSurface: true,
+        judgeConfig: () => 'conforms',
+      },
     });
 
     db = ctx.db;

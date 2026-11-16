@@ -1,4 +1,4 @@
-import { PluginUnitDormantReason } from '@bge/database';
+import { PLUGIN_UNIT_DORMANCY_CODES } from '@bge/database';
 import { derivePluginUnitState, PLUGIN_UNIT_STATE_CODES, type PluginUnitStateCode } from './plugin-unit-state';
 
 describe('derivePluginUnitState (#1149)', () => {
@@ -8,8 +8,7 @@ describe('derivePluginUnitState (#1149)', () => {
     anchored: true,
     enabled: true,
     serverEnabled: true,
-    manifestUnreadable: false,
-    dormantReason: null,
+    dormancy: null,
     outstandingCount: 0,
   };
 
@@ -24,25 +23,19 @@ describe('derivePluginUnitState (#1149)', () => {
         anchored: true,
         enabled: false,
         serverEnabled: false,
-        manifestUnreadable: true,
-        dormantReason: PluginUnitDormantReason.ScopeOrphaned,
+        dormancy: 'unavailable',
         outstandingCount: 3,
       },
       'off',
     ],
     [
-      'a stored manifest the server cannot read reads unavailable: the ability refuses it, so nothing runs',
-      { ...base, manifestUnreadable: true },
+      'a stored manifest the server cannot read arrives as dormancy unavailable: the ability refuses it, so nothing runs (#1151)',
+      { ...base, dormancy: 'unavailable' },
       'unavailable',
     ],
     [
-      'an unreadable manifest outranks a non-conforming configuration and outstanding consent',
-      {
-        ...base,
-        manifestUnreadable: true,
-        dormantReason: PluginUnitDormantReason.NeedsConfiguration,
-        outstandingCount: 1,
-      },
+      'dormancy unavailable outranks outstanding consent (#1151)',
+      { ...base, dormancy: 'unavailable', outstandingCount: 1 },
       'unavailable',
     ],
     [
@@ -52,17 +45,12 @@ describe('derivePluginUnitState (#1149)', () => {
     ],
     [
       'the server switch off outranks a non-conforming configuration, which curing would not make run',
-      { ...base, serverEnabled: false, dormantReason: PluginUnitDormantReason.NeedsConfiguration },
-      'unavailable',
-    ],
-    [
-      'an orphaned scope reads unavailable even with consent outstanding',
-      { ...base, dormantReason: PluginUnitDormantReason.ScopeOrphaned, outstandingCount: 2 },
+      { ...base, serverEnabled: false, dormancy: 'needs_configuration' },
       'unavailable',
     ],
     [
       'a non-conforming configuration reads needs_configuration even with consent outstanding',
-      { ...base, dormantReason: PluginUnitDormantReason.NeedsConfiguration, outstandingCount: 1 },
+      { ...base, dormancy: 'needs_configuration', outstandingCount: 1 },
       'needs_configuration',
     ],
     ['an outstanding required permission reads review_pending', { ...base, outstandingCount: 1 }, 'review_pending'],
@@ -71,7 +59,19 @@ describe('derivePluginUnitState (#1149)', () => {
     expect(derivePluginUnitState(input)).toBe(expected);
   });
 
+  it.each(PLUGIN_UNIT_DORMANCY_CODES)(
+    'reads off for a switched-off unit whatever its dormancy (#1151): %s',
+    (dormancy) => {
+      expect(derivePluginUnitState({ ...base, enabled: false, dormancy })).toBe('off');
+      expect(derivePluginUnitState({ ...base, anchored: false, enabled: false, dormancy })).toBe('off');
+    },
+  );
+
   it('lists the five state codes a client can receive', () => {
     expect(PLUGIN_UNIT_STATE_CODES).toEqual(['off', 'on', 'review_pending', 'needs_configuration', 'unavailable']);
+  });
+
+  it('every dormancy code is one of the state codes (#1151)', () => {
+    expect(PLUGIN_UNIT_STATE_CODES).toEqual(expect.arrayContaining([...PLUGIN_UNIT_DORMANCY_CODES]));
   });
 });

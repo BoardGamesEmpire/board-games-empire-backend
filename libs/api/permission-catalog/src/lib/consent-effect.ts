@@ -1,4 +1,5 @@
 import {
+  derivePluginUnitDormancy,
   isPluginServing,
   isPluginUnitServed,
   judgeConsentDecision,
@@ -6,8 +7,9 @@ import {
   PluginGrantStatus,
   requestedByManifest,
   type PermissionRuleColumns,
+  type PluginActiveManifest,
+  type PluginActiveManifestReader,
   type PluginGrant,
-  type PluginRequestedPermissionsReader,
   type Prisma,
   type RiskLevel,
 } from '@bge/database';
@@ -64,9 +66,11 @@ function confers(permission: ConsentEffectColumns, decision: ConsentDecision): b
  * shares with that read, so the two cannot disagree:
  *
  * - The plugin is enabled and not uninstalled (`isPluginServing`).
- * - A household or user decision's unit serves the plugin: its enablement row
- *   exists, is enabled and, for a household, is not dormant
- *   (`isPluginUnitServed`). A server decision has no enablement row and is
+ * - A household or user decision's unit serves the plugin: its unit
+ *   enablement exists and is switched on and, for a household, the dormancy
+ *   rule (`derivePluginUnitDormancy`, #1151) finds no dormancy in it, judged
+ *   from the active manifest and the unit enablement's `config` as stored
+ *   (`isPluginUnitServed`). A server decision has no unit enablement and is
  *   read for every unit.
  * - The plugin's active manifest, re-validated by the runtime's reader,
  *   requests the permission at the decision's scope (`requestedByManifest`).
@@ -80,7 +84,7 @@ function confers(permission: ConsentEffectColumns, decision: ConsentDecision): b
 export async function loadConsentDecisionsInForce(
   db: Pick<Prisma.TransactionClient, 'pluginGrant' | 'householdPlugin' | 'userPlugin'>,
   permissionSlug: string,
-  reader: PluginRequestedPermissionsReader | undefined,
+  reader: PluginActiveManifestReader | undefined,
 ): Promise<ConsentDecision[]> {
   if (reader === undefined) {
     return [];
@@ -98,22 +102,30 @@ export async function loadConsentDecisionsInForce(
     },
   });
 
-  // Each plugin's manifest is read once, however many decisions it holds.
-  const boundByPlugin = new Map<string, ReturnType<typeof requestedByManifest> | null>();
-  const requested = (decision: (typeof stored)[number]): boolean => {
+  // Each plugin's manifest is read once, however many decisions it holds;
+  // `null` when it fails re-validation.
+  const boundByPlugin = new Map<string, BoundManifest | null>();
+  const boundOf = (decision: (typeof stored)[number]): BoundManifest | null => {
     let bound = boundByPlugin.get(decision.pluginId);
     if (bound === undefined) {
       const { slug, version, manifestJson } = decision.plugin;
       const result = reader.read({ slug, version, manifestJson });
-      bound = result.valid ? requestedByManifest(result.requested) : null;
+      bound = result.valid
+        ? { manifest: result.manifest, requested: requestedByManifest(result.manifest.requested) }
+        : null;
       boundByPlugin.set(decision.pluginId, bound);
     }
-    return bound?.({ scopeType: decision.scopeType, permissionSlug }) ?? false;
+    return bound;
   };
 
-  const pluginServed = stored.filter((decision) => isPluginServing(decision.plugin) && requested(decision));
+  const pluginServed = stored.filter(
+    (decision) =>
+      isPluginServing(decision.plugin) &&
+      (boundOf(decision)?.requested({ scopeType: decision.scopeType, permissionSlug }) ?? false),
+  );
 
-  const servedUnits = await loadServedUnits(db, pluginServed);
+  // Every plugin left holds a manifest that re-validated, read above.
+  const servedUnits = await loadServedUnits(db, pluginServed, (pluginId) => boundByPlugin.get(pluginId)?.manifest);
 
   return pluginServed
     .filter(
@@ -123,10 +135,21 @@ export async function loadConsentDecisionsInForce(
     .map(({ scopeType, decidedRiskLevel, status }) => ({ scopeType, decidedRiskLevel, status }));
 }
 
-/** The household and user units among `decisions` whose enablement row serves the decision's plugin. */
+/** A plugin's re-validated active manifest, with its manifest bound built once. */
+interface BoundManifest {
+  readonly manifest: PluginActiveManifest;
+  readonly requested: ReturnType<typeof requestedByManifest>;
+}
+
+/**
+ * The household and user units among `decisions` that serve the decision's
+ * plugin. `manifestOf` answers the active manifest of every plugin among
+ * `decisions`; the dormancy rule judges each household unit enablement by it.
+ */
 async function loadServedUnits(
   db: Pick<Prisma.TransactionClient, 'householdPlugin' | 'userPlugin'>,
   decisions: readonly Pick<PluginGrant, 'pluginId' | 'scopeType' | 'scopeId'>[],
+  manifestOf: (pluginId: string) => PluginActiveManifest | undefined,
 ): Promise<ReadonlySet<string>> {
   const at = (scopeType: PluginGrantScope) => decisions.filter((decision) => decision.scopeType === scopeType);
   const households = at(PluginGrantScope.Household);
@@ -134,16 +157,34 @@ async function loadServedUnits(
   const served = new Set<string>();
 
   if (households.length > 0) {
+    // The query is a cross product of households and plugins, so it can
+    // return unit enablements no decision names. Only the named, switched-on
+    // ones are judged, as the ability read judges no switched-off unit.
+    const named = new Set(
+      households.map(({ scopeId, pluginId }) => unitKey(PluginGrantScope.Household, scopeId, pluginId)),
+    );
     const rows = await db.householdPlugin.findMany({
       where: {
         householdId: { in: [...new Set(households.map(({ scopeId }) => scopeId))] },
         pluginId: { in: [...new Set(households.map(({ pluginId }) => pluginId))] },
       },
-      select: { householdId: true, pluginId: true, enabled: true, dormantReason: true },
+      select: { householdId: true, pluginId: true, enabled: true, config: true },
     });
     for (const row of rows) {
-      if (isPluginUnitServed(row)) {
-        served.add(unitKey(PluginGrantScope.Household, row.householdId, row.pluginId));
+      const key = unitKey(PluginGrantScope.Household, row.householdId, row.pluginId);
+      if (!named.has(key) || !row.enabled) {
+        continue;
+      }
+
+      // Each row is a stored unit enablement, so its `config` is the document
+      // the rule judges as stored, a JSON `null` included (#1151).
+      const dormancy = derivePluginUnitDormancy({
+        scopeType: 'Household',
+        manifest: manifestOf(row.pluginId) ?? null,
+        retainedConfig: row.config,
+      });
+      if (isPluginUnitServed(row, dormancy)) {
+        served.add(key);
       }
     }
   }
@@ -157,8 +198,9 @@ async function loadServedUnits(
       select: { userId: true, pluginId: true, enabled: true },
     });
     for (const row of rows) {
-      // The user axis has no dormancy, as `loadPluginUnitEnablement` reads it.
-      if (isPluginUnitServed({ ...row, dormantReason: null })) {
+      // A user unit is not judged on configuration (#228), as the ability read
+      // does not judge it: it is served when it is switched on.
+      if (isPluginUnitServed(row, null)) {
         served.add(unitKey(PluginGrantScope.User, row.userId, row.pluginId));
       }
     }

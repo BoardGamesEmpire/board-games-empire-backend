@@ -1,5 +1,5 @@
 import { PluginGrantScope } from '../client';
-import { requestedByManifest } from './plugin-requested-permissions-reader';
+import { requestedByManifest } from './plugin-active-manifest-reader';
 
 describe('requestedByManifest (#577, #772)', () => {
   // The manifest bound the plugin ability read applies, shared with the

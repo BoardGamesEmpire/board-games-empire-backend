@@ -505,12 +505,15 @@ function buildRenderers(): RendererMap {
     fields: { slug: exception.slug, stagingId: exception.stagingId },
   }));
 
-  // The enable-time config gate (#323): enable refused because required household config was
-  // neither supplied nor retained in valid form. Curable state conflict,
-  // not a validation error — the request itself was well-formed; `issues`
-  // names what a RETAINED document violates (empty when none existed) so
-  // the client's schema-driven form renders what to fix without a second
-  // request.
+  // The switch-on config gate (#323, #1151): a household switch-on that
+  // supplies no configuration is refused when the document the unit would
+  // hold (its retained one, or an empty one for a household with no unit
+  // enablement) fails the active schema, with or without
+  // `requiresHouseholdConfig`. Curable state conflict, not a validation
+  // error — the request itself was well-formed; `issues` lists the
+  // violations so the client's schema-driven form renders what to fix
+  // without a second request, and is empty only for a first switch-on the
+  // manifest requires a document for.
   renders(PluginUnitConfigRequiredError, (exception) => ({
     status: Http.Conflict,
     message: t('errors.plugin.unit_config_required', { slug: exception.pluginSlug }),
