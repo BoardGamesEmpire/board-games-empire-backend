@@ -1108,7 +1108,7 @@ How a plugin's code is run: inside the server's own process, or, planned, in a s
 _Avoid_: isolation tier, tier; isolation (the separate-process mode is not a security boundary); worker, for the separate-process mode
 
 **Plugin context**:
-The deliberately narrow set of server services a plugin is handed: logging, its own settings, emitting its declared events, and a read-only view of who triggered it. It is the only way a plugin is meant to reach the server; nothing stops a plugin importing the server's internals directly, which is why such code is a forbidden import.
+The deliberately narrow set of server services a plugin is handed: logging, its own settings, emitting its declared events, a read-only view of who triggered it, and an HTTP client held to its plugin manifest's outbound domains. It is the only way a plugin is meant to reach the server; nothing stops a plugin importing the server's internals directly, which is why such code is a forbidden import.
 _Avoid_: capability surface, DI scope
 
 **Forbidden import**:
@@ -1116,7 +1116,7 @@ Code in a plugin that reaches for the server's internals or for raw network or d
 _Avoid_: sandbox, security scan
 
 **Outbound domains**:
-The internet hosts a plugin declares it will contact. A plugin may instead leave its reach to whatever the outbound HTTP policy allows, which counts as widening it.
+The internet hosts a plugin declares it will contact. A plugin may instead declare them `configured`, which counts as widening its reach; until what that allows is designed, such a plugin is refused every request (#1293).
 _Avoid_: allowlist, network reach
 
 **Plugin-owned storage**:

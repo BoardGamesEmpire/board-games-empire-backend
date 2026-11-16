@@ -6,6 +6,7 @@ import { pipeline } from 'node:stream/promises';
 import { request as undiciRequest } from 'undici';
 import type Dispatcher from 'undici/types/dispatcher';
 import {
+  HostNotAllowedError,
   InvalidRequestUrlError,
   OutboundNetworkError,
   RedirectLimitExceededError,
@@ -59,6 +60,16 @@ const discardBody = (body: Dispatcher.ResponseData['body']): void => {
   body.destroy();
 };
 
+/**
+ * Request headers that carry the caller's credentials. They are meant for the
+ * origin the caller named, so a redirect to another origin goes on without
+ * them. fetch does the same (#1083).
+ */
+const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set(['authorization', 'cookie', 'proxy-authorization']);
+
+const withoutCredentials = (headers: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(Object.entries(headers).filter(([name]) => !CREDENTIAL_HEADERS.has(name.toLowerCase())));
+
 /** Status codes that trigger retry when a retry policy is configured. */
 const DEFAULT_RETRY_STATUSES: readonly number[] = [408, 429, 502, 503, 504];
 
@@ -83,6 +94,8 @@ interface ResolvedOptions {
    * leaves it out, so each hop gets its own `timeoutMs`.
    */
   deadline?: AbortSignal;
+  /** The caller's host rule, asked on every hop. `download()` never sets it. */
+  allowHost?: (hostname: string) => boolean;
 }
 
 /** Where a terminal 2xx body goes instead of memory. */
@@ -108,7 +121,11 @@ interface TerminalHop {
 
 interface HopResult {
   status: number;
+  /** The status line's reason phrase; empty over HTTP/2. */
+  statusText: string;
   headers: Record<string, string>;
+  /** Each Set-Cookie header by itself; `headers` holds them joined. */
+  setCookie: string[];
   bodyBytes: Buffer;
   /** Set when the body was streamed to a `DownloadSink`. */
   written?: { bytes: number; sha256: string };
@@ -129,7 +146,9 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
  *      and TCP connect.
  *   4. Manual redirect handling: 3xx responses re-run the full gauntlet on
  *      `Location` before issuing the next hop. No "first hop validated,
- *      subsequent hops trusted" shortcuts.
+ *      subsequent hops trusted" shortcuts. A caller's `allowHost` rule is
+ *      asked on every hop too, ahead of step 2. A redirect to another origin
+ *      goes on without the caller's credential headers (#1083).
  *   5. Body parsing per `responseType` (json/text/arraybuffer).
  *
  * Retries (when configured) re-run the gauntlet on every attempt, so a
@@ -207,9 +226,11 @@ export class SecureHttpService {
 
         // SSRF and URL errors are policy failures, not transient — never retry.
         // Redirect-limit also doesn't retry (the loop is the bug, not the network).
-        // An oversized body won't shrink on a second try (#1094).
+        // An oversized body won't shrink on a second try (#1094). Nor will
+        // the caller's own host rule change its answer (#1083).
         if (
           safeErr instanceof SsrfRejectionError ||
+          safeErr instanceof HostNotAllowedError ||
           safeErr instanceof InvalidRequestUrlError ||
           safeErr instanceof RedirectToDisallowedTargetError ||
           safeErr instanceof RedirectLimitExceededError ||
@@ -326,10 +347,27 @@ export class SecureHttpService {
     let currentUrl = initialUrl;
     let currentMethod = options.method;
     let currentBody = options.body;
+    let currentHeaders = options.headers;
     let redirectCount = 0;
 
     while (true) {
       const parsedUrl = this.parseUrl(currentUrl);
+
+      // A request the caller has already cancelled starts no hop. The lookup
+      // below takes no signal, so without this it would still run (#1083).
+      options.signal?.throwIfAborted();
+
+      // ── Caller's host rule for this hop ────────────────────────
+      // Ahead of the lookup, so a refused host is never resolved (#1083).
+      if (options.allowHost && !options.allowHost(parsedUrl.hostname)) {
+        const hostErr = new HostNotAllowedError(parsedUrl.hostname);
+        if (redirectCount === 0) {
+          throw hostErr;
+        }
+
+        await this.notify('onRedirectDenied', { from: initialUrl, to: currentUrl, reason: 'host-not-allowed' });
+        throw new RedirectToDisallowedTargetError(initialUrl, currentUrl, hostErr);
+      }
 
       // ── SSRF gauntlet for this hop ─────────────────────────────
       const decision = await this.ipPolicy.evaluate(parsedUrl, snapshot);
@@ -362,7 +400,7 @@ export class SecureHttpService {
         decision.pinnedIp,
         decision.pinnedFamily,
         currentMethod,
-        options.headers,
+        currentHeaders,
         currentBody,
         options.timeoutMs,
         options.signal,
@@ -389,6 +427,13 @@ export class SecureHttpService {
         ) {
           currentMethod = 'GET';
           currentBody = undefined;
+        }
+
+        // Another host, another port, or https down to http: the caller's
+        // credentials were not meant for it. Once dropped they stay dropped
+        // for the rest of the chain, as in fetch (#1083).
+        if (new URL(nextUrl).origin !== parsedUrl.origin) {
+          currentHeaders = withoutCredentials(currentHeaders);
         }
 
         currentUrl = nextUrl;
@@ -440,7 +485,9 @@ export class SecureHttpService {
       });
 
       const status = result.statusCode;
+      const { statusText } = result;
       const responseHeaders = this.normalizeHeaders(result.headers);
+      const setCookie = this.setCookieHeaders(result.headers);
 
       // Only the terminal answer goes to the sink. A redirect's body is
       // never read for a download: nothing uses it, and reading it under
@@ -450,15 +497,15 @@ export class SecureHttpService {
       if (sink) {
         if (redirecting || status < 200 || status > 299) {
           discardBody(result.body);
-          return { status, headers: responseHeaders, bodyBytes: Buffer.alloc(0) };
+          return { status, statusText, headers: responseHeaders, setCookie, bodyBytes: Buffer.alloc(0) };
         }
 
         const written = await this.streamToFile(result.body, responseHeaders, url, sink);
-        return { status, headers: responseHeaders, bodyBytes: Buffer.alloc(0), written };
+        return { status, statusText, headers: responseHeaders, setCookie, bodyBytes: Buffer.alloc(0), written };
       }
 
       const bodyBytes = await this.readBodyCapped(result.body, url);
-      return { status, headers: responseHeaders, bodyBytes };
+      return { status, statusText, headers: responseHeaders, setCookie, bodyBytes };
     } catch (err) {
       // Distinguish timeout from generic network failure for clean error mapping.
       // A destination or cap failure is already specific, so it wins over a
@@ -561,7 +608,9 @@ export class SecureHttpService {
 
     return {
       status: hop.status,
+      statusText: hop.statusText,
       headers: Object.freeze({ ...hop.headers }),
+      setCookie: Object.freeze([...hop.setCookie]),
       body,
       raw,
       durationMs,
@@ -624,6 +673,7 @@ export class SecureHttpService {
       responseType: options.responseType ?? 'json',
       retry: options.retry,
       signal: options.signal,
+      allowHost: options.allowHost,
     };
   }
 
@@ -753,6 +803,21 @@ export class SecureHttpService {
     }
 
     return out;
+  }
+
+  /**
+   * Each Set-Cookie header as it arrived. It is the one header a recipient
+   * may not join with a comma: a cookie's Expires date holds one, so the
+   * joined value in `normalizeHeaders`' result can't be split again (#1083).
+   */
+  private setCookieHeaders(input: Dispatcher.ResponseData['headers']): string[] {
+    const entry = Object.entries(input).find(([name]) => name.toLowerCase() === 'set-cookie');
+    const value = entry?.[1];
+    if (value === undefined) {
+      return [];
+    }
+
+    return Array.isArray(value) ? [...value] : [String(value)];
   }
 
   /**

@@ -36,8 +36,24 @@ export class InvalidRequestUrlError extends SafeHttpError {
 }
 
 /**
+ * The caller's own host rule (`SafeHttpRequestOptions.allowHost`) refused the
+ * hostname, before any address lookup. On a redirect hop
+ * `RedirectToDisallowedTargetError` wraps this and is thrown instead (#1083).
+ * Its code isn't `HOST_NOT_ALLOWED`, which names the api's inbound Host-header
+ * refusal (#977): a log line keeps one name for one meaning.
+ */
+export class HostNotAllowedError extends SafeHttpError {
+  readonly code = 'OUTBOUND_HOST_NOT_ALLOWED' as const;
+
+  constructor(readonly host: string) {
+    super(`Host not allowed by the caller's rule: ${host}`);
+  }
+}
+
+/**
  * A `Location` header on a 3xx response pointed at a destination that failed
- * the SSRF gauntlet. The inner `cause` carries the underlying rejection.
+ * the SSRF gauntlet or the caller's host rule. The inner `cause` carries the
+ * underlying rejection.
  *
  * Common attack pattern: attacker registers `https://benign.example.com`
  * which responds with `Location: http://169.254.169.254/`. Initial URL
@@ -49,7 +65,7 @@ export class RedirectToDisallowedTargetError extends SafeHttpError {
   constructor(
     readonly from: string,
     readonly to: string,
-    override readonly cause: SsrfRejectionError,
+    override readonly cause: SsrfRejectionError | HostNotAllowedError,
   ) {
     super(`Redirect from ${from} to disallowed target ${to}: ${cause.message}`);
   }

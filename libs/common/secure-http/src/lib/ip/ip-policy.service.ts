@@ -3,6 +3,7 @@ import { DEFAULT_PRIVATE_CIDRS, PERMANENT_BLOCKED_CIDRS, PERMANENT_BLOCKED_HOSTN
 import { DnsResolutionError, type DnsResolver, type ResolvedAddress } from '../dns/dns-resolver.interface';
 import type { SafeHttpPolicySnapshot } from '../interfaces/safe-http-policy-snapshot.interface';
 import { DNS_RESOLVER } from '../safe-http.tokens';
+import { canonicalHostname } from './canonical-hostname';
 import { findContainingCidr, parseCidrList, type ParsedCidr } from './cidr';
 import { hostnameMatchesAny } from './hostname-matcher';
 import { parseIp, type ParsedIp } from './ip';
@@ -53,9 +54,13 @@ export class IpPolicyService {
     }
 
     const hostname = url.hostname.toLowerCase();
+    // Every host-list comparison uses the canonical form, so writing a
+    // trailing dot can't slip a host past the lists. The lookup, the decision
+    // and the request keep the name as written (#1083).
+    const listedName = canonicalHostname(hostname);
 
     // ── 2. Hostname permanent blocklist ──────────────────────────
-    if (PERMANENT_BLOCKED_HOSTNAMES.has(hostname)) {
+    if (PERMANENT_BLOCKED_HOSTNAMES.has(listedName)) {
       this.logger.warn(`Rejecting URL(${url.href}) with permanently blocked hostname: ${hostname}`);
 
       return this.reject({
@@ -66,7 +71,7 @@ export class IpPolicyService {
     }
 
     // ── 3. Hostname admin blocklist ──────────────────────────────
-    if (hostnameMatchesAny(hostname, snapshot.blockedHosts, !snapshot.strictMode)) {
+    if (hostnameMatchesAny(listedName, snapshot.blockedHosts, !snapshot.strictMode)) {
       this.logger.warn(`Rejecting URL(${url.href}) with admin-blocked hostname: ${hostname}`);
 
       return this.reject({
@@ -115,7 +120,7 @@ export class IpPolicyService {
     // malformed entries, and policy-load logs flag any that slipped through.
     const adminBlockedCidrs = parseCidrList(snapshot.blockedCidrs);
     const adminAllowedCidrs = parseCidrList(snapshot.allowedCidrs);
-    const hostOnAllowedList = hostnameMatchesAny(hostname, snapshot.allowedHosts, !snapshot.strictMode);
+    const hostOnAllowedList = hostnameMatchesAny(listedName, snapshot.allowedHosts, !snapshot.strictMode);
 
     // ── 5. Per-IP evaluation ─────────────────────────────────────
     // First pass: anything that fails permanent or admin block lists

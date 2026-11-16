@@ -1,4 +1,5 @@
 import type { PluginActorView } from './plugin-actor-view.js';
+import type { PluginHttp } from './plugin-http.js';
 
 /**
  * The capability surface the host hands a plugin factory (#59). Plugins
@@ -6,13 +7,15 @@ import type { PluginActorView } from './plugin-actor-view.js';
  * Worker mode (#197) implements the same interface with host-side RPC
  * shims, so nothing here may assume in-process identity.
  *
- * Deliberately narrow at Phase B: logger, config, namespaced event
- * emission, and read-only actor access — the capabilities with concrete
- * host machinery behind them today. The manifest-scoped outbound HTTP
- * capability (per-plugin `SecureHttpService` bound to `outboundDomains`)
- * and category context wrappers join the interface with their first
- * consumers (#194 gateway plugins / #61 storage drivers) per the
- * concrete-first rule — an untestable speculative binding helps nobody.
+ * Deliberately narrow: logger, config, namespaced event emission,
+ * read-only actor access, and outbound HTTP — the capabilities with
+ * concrete server machinery behind them today. The HTTP client arrived with
+ * its first consumer, data-gateway plugins (#1083): it is held to the
+ * plugin manifest's `outboundDomains` on every hop. A `Response` can't cross a
+ * process boundary, so worker mode's shim rebuilds it on the plugin's side
+ * (#197). Category context wrappers join the interface with their first
+ * consumers (#61 storage drivers) per the concrete-first rule — an
+ * untestable speculative binding helps nobody.
  */
 export interface PluginContext {
   readonly pluginId: string;
@@ -21,6 +24,7 @@ export interface PluginContext {
   readonly config: PluginConfigAccessor;
   readonly events: PluginEventPublisher;
   readonly actor: PluginActorAccessor;
+  readonly http: PluginHttp;
 }
 
 /**

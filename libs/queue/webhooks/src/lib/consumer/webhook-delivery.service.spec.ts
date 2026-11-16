@@ -14,7 +14,17 @@ const PLAINTEXT_SECRET = 'whsec_test_secret_value_1234567890';
 const STORED_SECRET = `enc(${PLAINTEXT_SECRET})`; // what the column holds (ciphertext)
 
 function httpResponse(status: number) {
-  return { status, headers: {}, body: null, raw: '', durationMs: 1, finalUrl: 'https://x', redirectCount: 0 };
+  return {
+    status,
+    statusText: '',
+    headers: {},
+    setCookie: [],
+    body: null,
+    raw: '',
+    durationMs: 1,
+    finalUrl: 'https://x',
+    redirectCount: 0,
+  };
 }
 
 function job(overrides: Partial<WebhookDeliveryJob> = {}): WebhookDeliveryJob {

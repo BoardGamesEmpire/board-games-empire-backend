@@ -222,6 +222,49 @@ describe('IpPolicyService', () => {
     });
   });
 
+  // `example.com.` and `example.com` name the same host, and `URL.hostname`
+  // keeps the trailing dot. Without normalising it, a host blocked by name
+  // was reachable by writing it with the dot. A plugin's HTTP client accepts
+  // a declared host written that way, which made this gap reachable from
+  // plugin code; webhooks had it too (#1083). The lookup and the request
+  // still use the name as written.
+  describe('a hostname written with a trailing dot (#1083)', () => {
+    it('a block-list entry example.com refuses http://example.com./ (#1083)', async () => {
+      dns.set('example.com.', [v4('8.8.8.8')]);
+      const decision = await service.evaluate(
+        new URL('http://example.com./'),
+        buildSnapshot({ blockedHosts: ['example.com'] }),
+      );
+      expect(decision).toMatchObject({ allowed: false, reason: 'admin-blocklist' });
+    });
+
+    it('a wildcard block-list entry refuses a subdomain written with a trailing dot (#1083)', async () => {
+      dns.set('api.example.com.', [v4('8.8.8.8')]);
+      const decision = await service.evaluate(
+        new URL('http://api.example.com./'),
+        buildSnapshot({ strictMode: false, blockedHosts: ['*.example.com'] }),
+      );
+      expect(decision).toMatchObject({ allowed: false, reason: 'admin-blocklist' });
+    });
+
+    it('the permanent hostname blocklist refuses metadata.google.internal. (#1083)', async () => {
+      dns.set('metadata.google.internal.', [v4('8.8.8.8')]);
+      const decision = await service.evaluate(new URL('http://metadata.google.internal./'), buildSnapshot());
+      expect(decision).toMatchObject({ allowed: false, reason: 'permanent-blocklist' });
+    });
+
+    // An allow-listed host skips the private-range deny. Written with the dot
+    // it is still the listed host, and it is looked up and requested as written.
+    it('an allow-list entry treats a listed host written with a trailing dot as the listed host (#1083)', async () => {
+      dns.set('jenkins.local.', [v4('10.0.0.5')]);
+      const decision = await service.evaluate(
+        new URL('http://jenkins.local./'),
+        buildSnapshot({ allowedHosts: ['jenkins.local'] }),
+      );
+      expect(decision).toEqual({ allowed: true, hostname: 'jenkins.local.', pinnedIp: '10.0.0.5', pinnedFamily: 4 });
+    });
+  });
+
   describe('IPv4-mapped IPv6 evasion', () => {
     it('rejects ::ffff:127.0.0.1 with ipv4-mapped-evasion reason', async () => {
       dns.set('example.com', [v6('::ffff:127.0.0.1')]);

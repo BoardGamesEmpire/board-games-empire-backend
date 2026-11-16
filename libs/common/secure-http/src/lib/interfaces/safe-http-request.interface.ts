@@ -36,8 +36,12 @@ export type SafeHttpRequestBody = string | Uint8Array | ArrayBuffer | Record<str
  *
  * Notably absent (by design):
  *   - `trust` — every call goes through the same gauntlet
- *   - `allowedDomains` — caller can pre-check the URL before calling
  *   - `strict` — strict mode is global, not per-call
+ *
+ * A caller held to named hosts can't simply pre-check the URL: the service
+ * follows redirects itself, and a check made before the request can't see
+ * where a redirect goes. `allowHost` exists for that, and is asked on every
+ * hop (#1083).
  */
 export interface SafeHttpRequestOptions {
   /** Default `GET`. */
@@ -47,6 +51,11 @@ export interface SafeHttpRequestOptions {
    * Headers forwarded verbatim. `Host` is set automatically by the service
    * to the URL's original hostname (for vhost routing on a pinned IP); any
    * `Host` entry the caller supplies is overwritten.
+   *
+   * A redirect to another origin (another host, another port, or https down
+   * to http) goes on without `authorization`, `cookie` and
+   * `proxy-authorization`, as fetch does. Any other header follows every
+   * redirect (#1083).
    */
   headers?: Record<string, string>;
 
@@ -79,9 +88,22 @@ export interface SafeHttpRequestOptions {
 
   /**
    * Caller-controlled cancellation. Composes with the request timeout —
-   * whichever fires first wins.
+   * whichever fires first wins. A request already cancelled when a hop
+   * begins starts neither that hop nor its address lookup; a lookup already
+   * under way runs to its end, bounded by the resolver's own timeouts, and
+   * the hop after it is not sent (#1083).
    */
   signal?: AbortSignal;
+
+  /**
+   * The caller's own host rule, asked with `URL.hostname` of the first URL
+   * and of every redirect target, before the outbound HTTP policy looks the
+   * address up. It narrows the policy and never widens it. A refusal is a
+   * `HostNotAllowedError` on the first URL, and a
+   * `RedirectToDisallowedTargetError` caused by one on a redirect; neither
+   * is retried (#1083).
+   */
+  allowHost?: (hostname: string) => boolean;
 }
 
 /**
@@ -112,6 +134,7 @@ export interface SafeHttpDownloadOptions {
    */
   timeoutMs: number;
 
+  /** Forwarded as `SafeHttpRequestOptions.headers` are, credentials rule included. */
   headers?: Record<string, string>;
 
   /**

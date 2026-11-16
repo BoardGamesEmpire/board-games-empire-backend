@@ -44,6 +44,8 @@ import { PluginUpdateService } from './update/plugin-update.service';
  *   gateway-config channels.
  * - `ScheduleModule.forRoot()` where the config-refresh interval backstop
  *   should fire (api/worker); elsewhere the decorator is inert.
+ * - `SecureHttpModule` (global) providing `SecureHttpService` — each
+ *   plugin's HTTP client runs under the outbound HTTP policy (#1083).
  *
  * `@Global()`: a single plugin runtime per process, configured ONCE by the
  * host's `forRootAsync` — the StorageModule precedent. The HTTP surface

@@ -13,10 +13,24 @@ export interface SafeHttpResponse<T = unknown> {
   status: number;
 
   /**
+   * The reason phrase of the final response's status line as the server sent
+   * it, `Service Unavailable` for example. Empty when there was none, as over
+   * HTTP/2. The plugin HTTP client's Response carries it, as fetch's does (#1083).
+   */
+  statusText: string;
+
+  /**
    * Lower-cased header names mapped to their values. Multi-value headers
-   * are joined with `, ` per RFC 7230 §3.2.2.
+   * are joined with `, ` per RFC 7230 §3.2.2. That includes `set-cookie`,
+   * whose joined value can't be split again: read `setCookie` for cookies.
    */
   headers: Readonly<Record<string, string>>;
+
+  /**
+   * Each `Set-Cookie` header of the final response by itself, in the order
+   * it arrived. Empty when there was none (#1083).
+   */
+  setCookie: readonly string[];
 
   /**
    * Decoded body per `responseType`. `null` when decoding failed (e.g. JSON

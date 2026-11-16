@@ -175,7 +175,9 @@ const isIncomingArchive = (archivePath: string, pluginsRoot: string): boolean =>
  */
 const unresolvable = (err: unknown): boolean =>
   (err instanceof SsrfRejectionError && err.reason === 'dns-failure') ||
-  (err instanceof RedirectToDisallowedTargetError && err.cause.reason === 'dns-failure');
+  (err instanceof RedirectToDisallowedTargetError &&
+    err.cause instanceof SsrfRejectionError &&
+    err.cause.reason === 'dns-failure');
 
 /**
  * What a failed download means for a plugin artifact (#1094). A link the
