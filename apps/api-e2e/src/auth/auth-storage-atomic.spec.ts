@@ -17,8 +17,9 @@ import { selectRedisServer, startRedisServer } from '../support/redis-server';
  * each step is a Redis command, which an in-memory store can't stand in for.
  * Each instance here is one api process, so two instances over two clients are
  * two processes sharing one Redis. Like `bootstrap/cache-flush.spec.ts`, this
- * spec starts its own container, of the server the run selected (#462), so the
- * single steps are shown on that server rather than on stock Redis.
+ * spec starts its own container, of the Redis-compatible server the run selected
+ * (#462), so the single steps are shown on that server rather than on stock
+ * Redis.
  */
 
 /** The configuration an instance needs to build, with email and password sign-in on. */

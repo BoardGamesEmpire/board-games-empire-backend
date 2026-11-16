@@ -8,7 +8,7 @@
 BGE speaks the Redis protocol and should work with any Redis-compatible server.
 The api e2e suite runs on each setup below that has a name: the `e2e` job in
 `.github/workflows/ci.yml` runs it on Redis for every pull request that affects
-the api, and `.github/workflows/redis-compat.yml` runs it on the others weekly,
+the api, and [`.github/workflows/redis-compat.yml`](../.github/workflows/redis-compat.yml) runs it on the others weekly,
 and on demand. A setup stays in those jobs only while the suite passes on it in
 full. In the Status column:
 
@@ -20,8 +20,10 @@ full. In the Status column:
 
 The suite runs the api, and a worker where a spec needs one, with all three
 connections (see [Connection topology](#connection-topology)) on the one
-Redis-compatible server. It shows that BGE works there, not how fast: it is not
-a load test, and no speed was measured on any setup.
+Redis-compatible server, each on its own logical database on every setup,
+including `dragonfly-hashtags` (its emulated cluster mode accepted `SELECT` on a
+database other than 0: the queue ran on db 2). It shows what passes there, not
+how fast: it is not a load test, and no speed was measured on any setup.
 
 The suite starts neither the coordinator nor the gateway worker, so it runs no
 game import. The game-import flow was probed on its own instead (2026-11-16,
@@ -183,7 +185,7 @@ start the queue's Dragonfly with the first:
   two queues carry different hash tags; see
   [game imports on Dragonfly](#dragonfly--game-imports-need-allow-undeclared-keys).
 
-BGE has measured the speed of neither: the suite shows that BGE works on them,
+BGE has measured the speed of neither: the suite shows what passes on them,
 not how fast.
 
 ```bash
@@ -350,7 +352,7 @@ This document describes standalone Redis-compatible servers only, not
 clusters. On a **standalone** Redis, Valkey or KeyDB, braces are ordinary
 characters in a key name and change nothing.
 
-Dragonfly reads them even on a single Redis-compatible server. In the
+Dragonfly reads them in the
 `dragonfly-hashtags` setup (`--cluster_mode=emulated --lock_on_hashtags`),
 Dragonfly's documentation says it assigns each queue to a thread by the tag and
 locks by the tag, and its BullMQ guide asks for hash-tagged queue names there,

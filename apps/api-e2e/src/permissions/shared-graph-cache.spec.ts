@@ -15,7 +15,7 @@ import { selectRedisServer, startRedisServer } from '../support/redis-server';
  * worker had cached, which kept serving it until its TTL ended.
  *
  * Two compiles of the real `PermissionsModule`, each over its own client of
- * one real Redis-compatible server (the server the run selected, #462), stand
+ * one real Redis-compatible server (the one the run selected, #462), stand
  * in for the api and the worker, so the module's own wiring decides where each
  * writes. The database is a stub that counts loads, so a load is the only way
  * to see a miss. This spec starts its own container, as `bootstrap/cache-flush`

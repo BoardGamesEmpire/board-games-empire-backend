@@ -38,7 +38,7 @@ import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../su
  * store stands by untouched. DB-only on the harness database, which is in
  * sync and seeded, so removing one grant is what makes the next reconcile
  * write. The DB-only runner provisions no Redis, so this spec starts its own
- * container, of the server the run selected (#462).
+ * container, of the Redis-compatible server the run selected (#462).
  */
 
 const silent: BootstrapLogger = { log: () => undefined, warn: () => undefined };
@@ -231,8 +231,11 @@ describe('the cache flush after a reconcile that wrote rows or a data migration 
         expect(await client.exists(...others)).toBe(others.length);
       }
     } finally {
-      await client.del(...others);
-      client.disconnect();
+      try {
+        await client.del(...others);
+      } finally {
+        client.disconnect();
+      }
     }
   }, 60_000);
 });

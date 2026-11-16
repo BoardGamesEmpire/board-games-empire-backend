@@ -25,7 +25,7 @@ export interface FlushClient {
 }
 
 /**
- * Keys per SCAN page: a hint to the server, not a bound. Each page of matches
+ * Keys per SCAN page: a hint to the Redis-compatible server, not a bound. Each page of matches
  * is one UNLINK.
  *
  * Under 100 on purpose (#462). KeyDB 6.3 serves a SCAN of COUNT 100 or more

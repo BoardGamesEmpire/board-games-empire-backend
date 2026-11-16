@@ -1,5 +1,6 @@
+import { E2E_REDIS_SERVER_VAR } from './e2e-env';
 import type { RedisServerName } from './redis-server';
-import { E2E_REDIS_SERVER_VAR, REDIS_SERVERS, selectRedisServer } from './redis-server';
+import { REDIS_SERVERS, selectRedisServer } from './redis-server';
 
 /** Every name a run may give, in the order the refusal lists them. */
 const NAMES: readonly RedisServerName[] = [

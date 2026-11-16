@@ -2,6 +2,7 @@
 import { pollUntil } from '@bge/testing-e2e/poll';
 import Redis from 'iovalkey';
 import { GenericContainer, Wait } from 'testcontainers';
+import { E2E_REDIS_SERVER_VAR } from './e2e-env';
 
 /**
  * The Redis-compatible server the e2e suite runs against (#462).
@@ -22,9 +23,10 @@ import { GenericContainer, Wait } from 'testcontainers';
  *
  * Why each setting:
  *
- * - Every image is pinned, so a result names the version it ran on. KeyDB
- *   publishes version tags per architecture only, so its multi-architecture
- *   image (KeyDB 6.3.4) is pinned by digest.
+ * - The four non-default images are pinned, so a result names the version it
+ *   ran on. KeyDB publishes version tags per architecture only, so its
+ *   multi-architecture image (KeyDB 6.3.4) is pinned by digest. `redis` keeps
+ *   the floating `redis:7-alpine` that every pull request has always run on.
  * - Redis, Valkey and KeyDB run their image's own command, with no password.
  *   For KeyDB that was probed (2026-11-16): its default config turns protected
  *   mode off and binds every interface, so the mapped port reaches it.
@@ -37,9 +39,6 @@ import { GenericContainer, Wait } from 'testcontainers';
  * - Both Dragonfly setups lift the limit on locked memory, as Dragonfly's
  *   Docker instructions ask.
  */
-
-/** Names the Redis-compatible server a run starts: one of {@link REDIS_SERVERS}. */
-export const E2E_REDIS_SERVER_VAR = 'BGE_E2E_REDIS_SERVER';
 
 export type RedisServerName = 'redis' | 'valkey' | 'keydb' | 'dragonfly-undeclared-keys' | 'dragonfly-hashtags';
 
@@ -193,7 +192,8 @@ export async function startRedisServer(profile: RedisServerProfile): Promise<Sta
       intervalMs: 250,
     });
   } catch (error) {
-    await started.stop();
+    // A failed stop must not replace the PING timeout, which names the server.
+    await started.stop().catch(() => undefined);
     throw error;
   }
 

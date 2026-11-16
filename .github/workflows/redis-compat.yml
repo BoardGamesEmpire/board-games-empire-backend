@@ -2,7 +2,7 @@ name: redis-compat
 
 # Runs the api e2e suite against each Redis-compatible server an operator might
 # put behind the API, so a regression in one of them shows up here instead of
-# in an operator's deployment (#462). `ci.yml` already covers Redis itself;
+# on an operator's server (#462). `ci.yml` already covers Redis itself;
 # this covers the others.
 #
 # Never a PR gate. Each run is every setup's full suite, split in two shards,

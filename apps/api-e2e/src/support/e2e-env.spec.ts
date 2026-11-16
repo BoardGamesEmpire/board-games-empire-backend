@@ -11,6 +11,7 @@ import {
   E2E_DATABASE_URL_VAR,
   E2E_MAILPIT_VAR,
   E2E_OWNS_REDIS_VAR,
+  E2E_REDIS_SERVER_VAR,
   E2E_REDIS_URL_VAR,
   fakeProviderEnv,
   parseRedisUrl,
@@ -24,7 +25,6 @@ import {
   workerEnvOverrides,
   type RedisEndpoint,
 } from './e2e-env';
-import { E2E_REDIS_SERVER_VAR } from './redis-server';
 
 describe('e2e-env (pure logic)', () => {
   describe('decideProvisioning', () => {

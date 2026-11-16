@@ -23,7 +23,7 @@ describe('hasHashTag (#462)', () => {
     ['mail-delivery', false],
     ['{}', false],
     ['}{a', false],
-  ])('%s -> %s', (name, expected) => {
+  ])("%s: has a hash tag is %s, by Redis Cluster's braces rule (#462)", (name, expected) => {
     expect(hasHashTag(name)).toBe(expected);
   });
 });

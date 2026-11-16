@@ -11,8 +11,6 @@
  * overrides below win without touching the file.
  */
 
-import { E2E_REDIS_SERVER_VAR } from './redis-server';
-
 /** Escape hatch: point the suite at an existing Postgres instead of a container. */
 export const E2E_DATABASE_URL_VAR = 'BGE_E2E_DATABASE_URL';
 
@@ -26,6 +24,9 @@ export const E2E_DATABASE_CONTAINER_ADDRESS_VAR = 'BGE_E2E_DATABASE_CONTAINER_AD
 
 /** Escape hatch: point the suite at an existing Redis instead of a container. */
 export const E2E_REDIS_URL_VAR = 'BGE_E2E_REDIS_URL';
+
+/** Names the Redis-compatible server a run starts (#462): one of the names in `redis-server.ts`. */
+export const E2E_REDIS_SERVER_VAR = 'BGE_E2E_REDIS_SERVER';
 
 /**
  * Whether the harness provisioned the Redis server itself. Published by
