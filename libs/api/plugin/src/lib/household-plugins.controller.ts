@@ -108,10 +108,12 @@ export class HouseholdPluginsController {
       "Driven from the installed set, not from this household's enablement rows: every plugin the household axis " +
       'admits appears, with `unit.anchored` false where no row exists yet — so a household that has enabled ' +
       'nothing still sees what it could enable. A plugin whose scope no longer admits household enablement but ' +
-      'which this household still holds a row for is listed too, with `unit.state` unavailable or needs_configuration — a ' +
-      'retained unit enablement that serves nothing is exactly what a household admin needs to see, and the ' +
-      'state code says whether a server admin (re-scoping the plugin, or switching it back on: `serverEnabled`) ' +
-      'or a fresh configuration is what would revive it. Tombstoned plugins never ' +
+      'for which this household still holds a unit enablement is listed too, with `unit.dormancy` unavailable — a ' +
+      'retained unit enablement that serves nothing is exactly what a household admin needs to see. ' +
+      '`unit.dormancy` says what stands in the way apart from the switch and consent, whether or not the unit ' +
+      'is switched on: unavailable means only a server admin can revive it, needs_configuration that a ' +
+      'conforming configuration would. A switched-on unit also reads unavailable while `serverEnabled` is ' +
+      'false. Tombstoned plugins never ' +
       'appear — there is no path to participate in one again — and unlike `GET /plugins` this route accepts no ' +
       'flag to admit them.',
   })
@@ -414,7 +416,8 @@ export class HouseholdPluginsController {
     description:
       'Why a feature is or is not running here: per-feature active|disabled with a denied|pending ' +
       'reason paired with the blocking permission slugs (the client renders actionable "why is this missing" ' +
-      'feedback from the pairing), plus the unit-level served, the unit state code and consent standing.',
+      'feedback from the pairing), plus the unit-level served, the unit state code, its dormancy (what stands in ' +
+      'the way apart from the switch and consent, whether or not the unit is switched on) and consent standing.',
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })

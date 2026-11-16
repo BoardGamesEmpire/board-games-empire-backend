@@ -1,14 +1,8 @@
 import type { PluginUnit } from '@bge/actor-context';
-import {
-  DatabaseService,
-  PluginGrantScope,
-  PluginGrantStatus,
-  PluginScope,
-  PluginUnitDormantReason,
-  RiskLevel,
-} from '@bge/database';
+import { DatabaseService, PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel } from '@bge/database';
 import { createMockDatabaseService, UNIT_BOUND_RULES, type MockDatabaseService } from '@bge/testing';
-import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { PluginConsentCheckClassifier } from '../consent/plugin-consent-check-classifier.service';
 import { PluginConsentStandingService } from '../consent/plugin-consent-standing.service';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
@@ -114,7 +108,12 @@ describe('PluginFeatureStateService', () => {
   const USER_UNIT: PluginUnit = { scopeType: 'User', userId: 'u-1' };
 
   const pluginRow = (
-    overrides: Partial<{ enabled: boolean; uninstalledAt: Date | null; scope: PluginScope }> = {},
+    overrides: Partial<{
+      enabled: boolean;
+      uninstalledAt: Date | null;
+      scope: PluginScope;
+      manifestJson: unknown;
+    }> = {},
   ) => ({
     id: 'plg_1',
     slug: 'demo-sink',
@@ -185,7 +184,9 @@ describe('PluginFeatureStateService', () => {
   beforeEach(() => {
     db = createMockDatabaseService();
     db.plugin.findUnique.mockResolvedValue(pluginRow() as never);
-    db.householdPlugin.findUnique.mockResolvedValue({ enabled: true } as never);
+    // The household's document conforms to the manifest's schema, so the unit
+    // is not dormant unless a test arranges a cause (#1151).
+    db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, config: {} } as never);
     db.userPlugin.findUnique.mockResolvedValue({ enabled: true } as never);
     db.pluginGrant.findMany.mockResolvedValue(householdHappyGrants as never);
     db.permission.findMany.mockResolvedValue(allCoreRisks as never);
@@ -199,6 +200,7 @@ describe('PluginFeatureStateService', () => {
     service = new PluginFeatureStateService(
       db as unknown as DatabaseService,
       new PluginConsentStandingService(classifier, options),
+      new PluginConfigSchemaService(),
       options,
     );
   });
@@ -557,41 +559,108 @@ describe('PluginFeatureStateService', () => {
     });
 
     /**
-     * The third component of the predicate (#369). A dormant row is enabled
-     * and the household asked for nothing, so without this the read answers
-     * `served: true` for a unit the manifest moved out from under.
+     * The third component of the predicate (#1151). A dormant unit is
+     * switched on and the household asked for nothing, so without this the
+     * read answers `served: true` for a unit the manifest moved out from
+     * under. Each test arranges the cause, never a stored reason: dormancy is
+     * worked out on this read from the active manifest and the unit's document.
      */
-    it.each<[string, PluginUnitDormantReason, string]>([
-      ['needs_configuration', PluginUnitDormantReason.NeedsConfiguration, 'needs_configuration'],
-      ['unavailable', PluginUnitDormantReason.ScopeOrphaned, 'unavailable'],
-    ])('a dormant row reads %s from dormantReason, with served false', async (_label, dormantReason, state) => {
-      db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, dormantReason } as never);
-
-      const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
-
-      expect(result).toMatchObject({ served: false, state });
-      // Dormancy is not a consent state: the features keep the states their
-      // grants earned, exactly as for a switched-off unit.
-      expect(result?.features.every((feature) => feature.state === 'active')).toBe(true);
+    const serverScopeManifest = (): PluginManifest => ({
+      ...manifest,
+      scope: 'server',
+      // A server-scope manifest may not ask a household for consent.
+      permissions: {
+        ...manifest.permissions,
+        checks: manifest.permissions.checks.filter((check) => check.consentScope !== 'household'),
+      },
     });
 
-    it.each<[string, PluginUnitDormantReason]>([
-      ['needs_configuration', PluginUnitDormantReason.NeedsConfiguration],
-      ['unavailable', PluginUnitDormantReason.ScopeOrphaned],
-    ])(
-      'a dormant row that also owes a required check still reads %s, not review_pending',
-      async (state, dormantReason) => {
-        db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, dormantReason } as never);
+    const dormancyCauses: ReadonlyArray<[string, () => void]> = [
+      [
+        'needs_configuration',
+        () => {
+          // The schema types webhookUrl as a string, so 42 is a document it rejects.
+          db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, config: { webhookUrl: 42 } } as never);
+        },
+      ],
+      [
+        'unavailable',
+        () => {
+          db.plugin.findUnique.mockResolvedValue(pluginRow({ manifestJson: serverScopeManifest() }) as never);
+        },
+      ],
+    ];
+
+    it.each(dormancyCauses)(
+      'a switched-on household unit reads %s for both state and dormancy, with served false (#1151)',
+      async (code, arrange) => {
+        arrange();
+
+        const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
+
+        expect(result).toMatchObject({ served: false, state: code, dormancy: code });
+        // Dormancy is not a consent state: the features keep the states their
+        // grants earned, exactly as for a switched-off unit.
+        expect(result?.features.every((feature) => feature.state === 'active')).toBe(true);
+      },
+    );
+
+    it.each(dormancyCauses)(
+      'a switched-off household unit reads off and keeps dormancy %s, with served false (#1151)',
+      async (code, arrange) => {
+        arrange();
+        // The same document each cause arranged, with the unit's own switch off.
+        const config = code === 'needs_configuration' ? { webhookUrl: 42 } : {};
+        db.householdPlugin.findUnique.mockResolvedValue({ enabled: false, config } as never);
+
+        const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
+
+        expect(result).toMatchObject({ served: false, state: 'off', dormancy: code });
+      },
+    );
+
+    it.each(dormancyCauses)(
+      'a dormant unit that also owes a required check still reads %s, not review_pending (#1151)',
+      async (code, arrange) => {
+        arrange();
         db.pluginGrant.findMany.mockResolvedValue(
-          householdHappyGrants.filter((grant) => grant.permissionSlug !== 'update:calendar') as never,
+          householdHappyGrants.filter((grant) => grant.permissionSlug !== MANAGE_CANONICAL) as never,
         );
 
         const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
 
         expect(result?.consent.outstanding.length).toBeGreaterThan(0);
-        expect(result).toMatchObject({ served: false, state });
+        expect(result).toMatchObject({ served: false, state: code, dormancy: code });
       },
     );
+
+    it('a household unit under a config schema the server cannot use reads unavailable (#1151)', async () => {
+      db.plugin.findUnique.mockResolvedValue(
+        pluginRow({
+          manifestJson: { ...manifest, config: { ...manifest.config, schema: { type: 'no-such-type' } } },
+        }) as never,
+      );
+
+      const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
+
+      expect(result).toMatchObject({ served: false, state: 'unavailable', dormancy: 'unavailable' });
+    });
+
+    it('a served household unit reads dormancy null (#1151)', async () => {
+      const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
+
+      expect(result).toMatchObject({ served: true, state: 'on', dormancy: null });
+    });
+
+    it('a user unit under a server-scope manifest reads dormancy null: user consent is legal at any plugin scope (#225, #1151)', async () => {
+      db.plugin.findUnique.mockResolvedValue(
+        pluginRow({ scope: PluginScope.Server, manifestJson: serverScopeManifest() }) as never,
+      );
+
+      const result = await service.resolveForUnit('plg_1', USER_UNIT);
+
+      expect(result).toMatchObject({ served: true, dormancy: null });
+    });
 
     it('never reads dormant on the user axis — user consent is legal at any plugin scope (#225)', async () => {
       const result = await service.resolveForUnit('plg_1', USER_UNIT);
@@ -608,14 +677,17 @@ describe('PluginFeatureStateService', () => {
       expect(result).toMatchObject({ served: false });
     });
 
-    it('the tombstone short-circuit returns served false, state off and empty consent lists (#1149)', async () => {
+    it('the tombstone short-circuit returns served false, state off, no dormancy and empty consent lists (#1149, #1151)', async () => {
       db.plugin.findUnique.mockResolvedValue(pluginRow({ uninstalledAt: new Date('2026-08-01T00:00:00Z') }) as never);
 
       const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
 
+      // Nothing is worked out for an uninstalled plugin: the read returns
+      // before the manifest is read.
       expect(result).toMatchObject({
         served: false,
         state: 'off',
+        dormancy: null,
         consent: { outstanding: [], optionalOff: [] },
         features: [],
       });

@@ -88,6 +88,7 @@ const FEATURE_STATE = {
   served: true,
   serverEnabled: true,
   state: 'on',
+  dormancy: null,
   consent: { outstanding: [], optionalOff: [] },
   features: [
     {

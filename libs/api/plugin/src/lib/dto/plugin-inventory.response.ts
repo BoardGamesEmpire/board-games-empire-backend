@@ -1,4 +1,11 @@
-import { PluginCategory, PluginExecutionMode, PluginScope, RiskLevel } from '@bge/database';
+import {
+  PLUGIN_UNIT_DORMANCY_CODES,
+  PluginCategory,
+  PluginExecutionMode,
+  PluginScope,
+  RiskLevel,
+  type PluginUnitDormancy,
+} from '@bge/database';
 import type {
   ConsentOutstandingCheck,
   ConsentOutstandingKind,
@@ -230,13 +237,26 @@ class UnitStateDto implements PluginInventoryUnitState {
       'required checks are outstanding, see consent; it can list only outstanding_elsewhere entries, a ' +
       'server-scope permission a server admin must answer, and a client renders that as waiting on the server ' +
       'admin, not as a prompt the household or user can accept. ' +
-      'needs_configuration: the retained configuration no longer fits the active schema; supplying a conforming ' +
+      'needs_configuration: switched on, but the settings do not fit the active schema; supplying a conforming ' +
       'document heals it. unavailable: switched on, but the server cannot run it for this unit, because the ' +
-      'server switch is off (serverEnabled false), the stored manifest cannot be read (manifestUnreadable true) ' +
-      'or the plugin no longer has this axis; only a server admin restores it. Worked out on every read, never ' +
-      'stored.',
+      'server switch is off (serverEnabled false) or dormancy is unavailable; only a server admin restores it. ' +
+      'Worked out on every read, never stored.',
   })
   state!: PluginUnitStateCode;
+
+  @ApiProperty({
+    enum: PLUGIN_UNIT_DORMANCY_CODES,
+    enumName: 'PluginUnitDormancy',
+    nullable: true,
+    description:
+      'What keeps the unit from running apart from its own switch and its consent. It is present whether or not ' +
+      'the unit is switched on, so a client can say what switching it on would meet. unavailable: the server ' +
+      'cannot run it for this unit, because the stored manifest cannot be read (manifestUnreadable true), the ' +
+      'plugin no longer has this axis, or its settings schema cannot be used; only a server admin restores it. ' +
+      'needs_configuration: the household settings do not fit the active schema; supplying a conforming ' +
+      'document heals it. null: nothing stands in the way. Worked out on every read, never stored.',
+  })
+  dormancy!: PluginUnitDormancy | null;
 
   @ApiProperty({
     type: PluginConsentStandingDto,

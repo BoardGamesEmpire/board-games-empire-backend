@@ -1198,7 +1198,7 @@ Retyping each Critical-risk permission that an install or update gives server co
 _Avoid_: second factor, typed confirmation
 
 **Unit enablement**:
-A household's or user's own participation in a plugin: their on/off choice and their settings. A household creates it by switching the plugin on; a user creates theirs the same way, for a plugin that asks something of users. A client receives one of five state codes for a unit: `off` (not switched on, or no unit enablement), `on` (running with everything the plugin asks for), `review_pending` (running on what was agreed while a required permission is outstanding), `needs_configuration` (switched on but its settings no longer fit the plugin) and `unavailable` (switched on, but the server cannot run it for this unit: the server switch is off, the stored manifest cannot be read, or this version has no surface at the unit's scope).
+A household's or user's own participation in a plugin: their on/off choice and their settings. A household creates it by switching the plugin on; a user creates theirs the same way, for a plugin that asks something of users. A client receives one of five state codes for a unit: `off` (not switched on, or no unit enablement), `on` (running with everything the plugin asks for), `review_pending` (running on what was agreed while a required permission is outstanding), `needs_configuration` (switched on but its settings no longer fit the plugin) and `unavailable` (switched on, but the server cannot run it for this unit: the server switch is off, the stored manifest cannot be read, this version has no surface at the unit's scope, or its settings schema cannot be used). Beside the state code, a client receives the unit's dormancy, whether or not the unit is switched on.
 _Avoid_: enablement row, anchor, enrolled, unit row
 
 **Re-consent**:
@@ -1220,7 +1220,7 @@ The on/off control for a plugin across the whole server. Nothing runs for anyone
 _Avoid_: kill switch, server-level switch; enabled on its own
 
 **Dormancy**:
-A plugin unit, for the server or a household, kept in place but unable to run until something is fixed, such as settings a new version no longer accepts. Nobody chooses it; switching a plugin off on purpose is disabling it.
+What keeps a plugin unit from running apart from its own switch and its consent, until something is fixed. It is worked out each time it is read, from the plugin's active version and the unit's settings, and never stored. `unavailable` means the server cannot run the plugin for this unit: its stored manifest cannot be read, this version has no surface at the unit's scope, or its settings schema cannot be used. `needs_configuration` means a household's settings do not fit this version's schema, and supplying settings that fit cures it. Nobody chooses it; switching a plugin off on purpose is disabling it.
 _Avoid_: dormant for consent given ahead of an update (say pre-consent)
 
 **Restart required**:
