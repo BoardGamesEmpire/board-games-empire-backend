@@ -1,4 +1,4 @@
-import type { PluginUnitDormantReason, Prisma, PrismaClient } from '../client';
+import type { Prisma, PrismaClient } from '../client';
 import type { PluginActiveManifest } from './plugin-active-manifest-reader';
 import type { PluginUnitCoordinates } from './plugin-grant.constants';
 
@@ -6,24 +6,19 @@ import type { PluginUnitCoordinates } from './plugin-grant.constants';
  * A unit's enablement state for one plugin, components preserved (feature
  * state reports them separately).
  *
- * Consent is not a component: a unit that still owes a required permission
- * keeps serving on the grants it gave, and the ability denies what it has not
- * granted (#1149; removes #1061, #1063, #1147). "Consented" is answered by
- * `PluginConsentStandingService` in `@bge/plugin`, not here.
+ * Dormancy is not a component: it is worked out from the active manifest and
+ * `retainedConfig` by {@link derivePluginUnitDormancy} (#1151), which the
+ * caller runs with the manifest it reads.
+ *
+ * Consent is not a component either: a unit that still owes a required
+ * permission keeps serving on the grants it gave, and the ability denies what
+ * it has not granted (#1149; removes #1061, #1063, #1147). "Consented" is
+ * answered by `PluginConsentStandingService` in `@bge/plugin`, not here.
  */
 export interface PluginUnitEnablement {
   /** A unit enablement exists for `(unit, pluginId)`. Always `true` for Server units, which have none to store. */
   readonly anchored: boolean;
   readonly enabled: boolean;
-  /**
-   * Non-null when the unit enablement is retained but cannot legitimately
-   * serve (#369, #370): the plugin's scope no longer admits household
-   * enablement, or the retained config no longer satisfies the active schema.
-   * Always `null` for Server and User units — the server axis has no unit
-   * enablement, and the user axis has no dormancy: user consent is legal at
-   * any plugin scope (#225), and per-user config belongs to #228.
-   */
-  readonly dormantReason: PluginUnitDormantReason | null;
   /**
    * The document {@link derivePluginUnitDormancy} judges (#1151): a household
    * unit enablement's `config` exactly as stored (a stored JSON `null`
@@ -104,12 +99,18 @@ export function isPluginServing(plugin: { readonly enabled: boolean; readonly un
 }
 
 /**
- * The unit half of the serving predicate collapsed to a boolean: the unit
- * enablement is enabled and not dormant. Consent is not a component (#1149).
- * Shared for the reason {@link isPluginServing} is.
+ * The unit half of the serving predicate collapsed to a boolean: the unit is
+ * switched on and {@link derivePluginUnitDormancy} finds no dormancy in it
+ * (#1151). Dormancy is independent of the switch: a household's switch
+ * survives a scope narrowing or a schema tightening, so a switched-on unit can
+ * still serve nothing. Consent is not a component (#1149). Shared for the
+ * reason {@link isPluginServing} is.
  */
-export function isPluginUnitServed(state: Pick<PluginUnitEnablement, 'enabled' | 'dormantReason'>): boolean {
-  return state.enabled && state.dormantReason === null;
+export function isPluginUnitServed(
+  state: Pick<PluginUnitEnablement, 'enabled'>,
+  dormancy: PluginUnitDormancy | null,
+): boolean {
+  return state.enabled && dormancy === null;
 }
 
 /**
@@ -124,8 +125,9 @@ export function isPluginUnitServed(state: Pick<PluginUnitEnablement, 'enabled' |
  * `PermissionsService`) and the feature-state derivation for the same
  * reason `grantScopeCoordinatesForUnit` lives here: the two surfaces must
  * agree on what "served" means, and the reader side cannot import the
- * runtime. Callers collapse it to a boolean with {@link isPluginUnitServed},
- * or report the components separately.
+ * runtime. Callers work out the unit's dormancy with
+ * {@link derivePluginUnitDormancy} and collapse both to a boolean with
+ * {@link isPluginUnitServed}, or report the components separately.
  */
 export async function loadPluginUnitEnablement(
   db: Pick<PrismaClient, 'householdPlugin' | 'userPlugin'>,
@@ -134,18 +136,17 @@ export async function loadPluginUnitEnablement(
 ): Promise<PluginUnitEnablement> {
   switch (unit.scopeType) {
     case 'Server':
-      return { anchored: true, enabled: true, dormantReason: null, retainedConfig: null };
+      return { anchored: true, enabled: true, retainedConfig: null };
 
     case 'Household': {
       const row = await db.householdPlugin.findUnique({
         where: { householdId_pluginId: { householdId: unit.householdId, pluginId } },
-        select: { enabled: true, dormantReason: true, config: true },
+        select: { enabled: true, config: true },
       });
 
       return {
         anchored: row !== null,
         enabled: row?.enabled ?? false,
-        dormantReason: row?.dormantReason ?? null,
         // Not `row?.config ?? {}`: a stored JSON `null` is a document the rule
         // rejects, and `??` would read it as the empty one (#1151).
         retainedConfig: row === null ? {} : row.config,
@@ -158,11 +159,10 @@ export async function loadPluginUnitEnablement(
         select: { enabled: true },
       });
 
-      // No dormancy on this axis — see PluginUnitEnablement.dormantReason.
+      // Per-user configuration belongs to #228, so the rule judges no document here.
       return {
         anchored: row !== null,
         enabled: row?.enabled ?? false,
-        dormantReason: null,
         retainedConfig: null,
       };
     }

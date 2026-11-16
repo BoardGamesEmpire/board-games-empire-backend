@@ -1,4 +1,3 @@
-import { PluginUnitDormantReason } from '../client';
 import type { PluginActiveManifest, PluginConfigVerdict } from './plugin-active-manifest-reader';
 import {
   derivePluginUnitDormancy,
@@ -20,31 +19,23 @@ describe('loadPluginUnitEnablement', () => {
     await expect(loadPluginUnitEnablement(client, 'plg_1', { scopeType: 'Server' })).resolves.toEqual({
       anchored: true,
       enabled: true,
-      dormantReason: null,
       retainedConfig: null,
     });
     expect(db.householdPlugin.findUnique).not.toHaveBeenCalled();
     expect(db.userPlugin.findUnique).not.toHaveBeenCalled();
   });
 
-  it('reads the household unit enablement by its compound key, dormancy included', async () => {
-    db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, dormantReason: null, config: {} });
+  it('reads the household unit enablement by its compound key, and no stored dormancy (#1151)', async () => {
+    db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, config: {} });
 
     await expect(
       loadPluginUnitEnablement(client, 'plg_1', { scopeType: 'Household', householdId: 'hh-1' }),
-    ).resolves.toEqual({ anchored: true, enabled: true, dormantReason: null, retainedConfig: {} });
+    ).resolves.toEqual({ anchored: true, enabled: true, retainedConfig: {} });
+    // Dormancy is worked out from the active manifest by derivePluginUnitDormancy, so nothing reads a stored one.
     expect(db.householdPlugin.findUnique).toHaveBeenCalledWith({
       where: { householdId_pluginId: { householdId: 'hh-1', pluginId: 'plg_1' } },
-      select: { enabled: true, dormantReason: true, config: true },
+      select: { enabled: true, config: true },
     });
-  });
-
-  it('carries the dormancy reason through, so every caller collapses the same predicate (#369)', async () => {
-    db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, dormantReason: 'ScopeOrphaned', config: {} });
-
-    await expect(
-      loadPluginUnitEnablement(client, 'plg_1', { scopeType: 'Household', householdId: 'hh-1' }),
-    ).resolves.toEqual({ anchored: true, enabled: true, dormantReason: 'ScopeOrphaned', retainedConfig: {} });
   });
 
   it('reads the user unit enablement by its compound key', async () => {
@@ -53,8 +44,6 @@ describe('loadPluginUnitEnablement', () => {
     await expect(loadPluginUnitEnablement(client, 'plg_1', { scopeType: 'User', userId: 'u-1' })).resolves.toEqual({
       anchored: true,
       enabled: true,
-      // The user axis has no dormancy column and no orphan state (#225).
-      dormantReason: null,
       retainedConfig: null,
     });
     expect(db.userPlugin.findUnique).toHaveBeenCalledWith({
@@ -68,7 +57,7 @@ describe('loadPluginUnitEnablement', () => {
 
     await expect(
       loadPluginUnitEnablement(client, 'plg_1', { scopeType: 'Household', householdId: 'hh-1' }),
-    ).resolves.toEqual({ anchored: false, enabled: false, dormantReason: null, retainedConfig: {} });
+    ).resolves.toEqual({ anchored: false, enabled: false, retainedConfig: {} });
   });
 
   it('a disabled unit enablement is still anchored (#1149)', async () => {
@@ -77,7 +66,6 @@ describe('loadPluginUnitEnablement', () => {
     await expect(loadPluginUnitEnablement(client, 'plg_1', { scopeType: 'User', userId: 'u-1' })).resolves.toEqual({
       anchored: true,
       enabled: false,
-      dormantReason: null,
       retainedConfig: null,
     });
   });
@@ -92,11 +80,7 @@ describe('loadPluginUnitEnablement', () => {
     const household = { scopeType: 'Household', householdId: 'hh-1' } as const;
 
     it('returns a household unit enablement config as its retained config', async () => {
-      db.householdPlugin.findUnique.mockResolvedValue({
-        enabled: true,
-        dormantReason: null,
-        config: { webhookUrl: 'https://x.test' },
-      });
+      db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, config: { webhookUrl: 'https://x.test' } });
 
       await expect(loadPluginUnitEnablement(client, 'plg_1', household)).resolves.toEqual(
         expect.objectContaining({ retainedConfig: { webhookUrl: 'https://x.test' } }),
@@ -107,7 +91,7 @@ describe('loadPluginUnitEnablement', () => {
     });
 
     it('returns a stored JSON null as itself, not as an empty document, so the rule can reject it', async () => {
-      db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, dormantReason: null, config: null });
+      db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, config: null });
 
       await expect(loadPluginUnitEnablement(client, 'plg_1', household)).resolves.toEqual(
         expect.objectContaining({ retainedConfig: null }),
@@ -213,11 +197,10 @@ describe('the serving predicate (#772)', () => {
     expect(isPluginServing({ enabled: true, uninstalledAt: new Date('2026-11-01T00:00:00.000Z') })).toBe(false);
   });
 
-  it('serves a unit whose enablement is enabled and not dormant, and no other', () => {
-    const served = { enabled: true, dormantReason: null };
-
-    expect(isPluginUnitServed(served)).toBe(true);
-    expect(isPluginUnitServed({ ...served, enabled: false })).toBe(false);
-    expect(isPluginUnitServed({ ...served, dormantReason: PluginUnitDormantReason.ScopeOrphaned })).toBe(false);
+  it('serves a unit that is switched on and that the dormancy rule finds no dormancy in, and no other (#1151)', () => {
+    expect(isPluginUnitServed({ enabled: true }, null)).toBe(true);
+    expect(isPluginUnitServed({ enabled: false }, null)).toBe(false);
+    expect(isPluginUnitServed({ enabled: true }, 'unavailable')).toBe(false);
+    expect(isPluginUnitServed({ enabled: true }, 'needs_configuration')).toBe(false);
   });
 });

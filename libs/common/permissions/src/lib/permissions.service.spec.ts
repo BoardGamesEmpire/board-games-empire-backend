@@ -11,6 +11,7 @@ import {
   SERVER_SCOPE_SENTINEL,
   User,
   type PluginActiveManifestReading,
+  type PluginConfigVerdict,
   type PluginRequestedPermission,
 } from '@bge/database';
 import { CACHE_REDIS_CLIENT, type FlushClient } from '@bge/redis';
@@ -791,7 +792,7 @@ describe('PermissionsService', () => {
       );
     };
 
-    const servedUnitRow = { enabled: true };
+    const servedUnitRow = { enabled: true, config: {} };
 
     beforeEach(() => {
       db.plugin.findUnique.mockResolvedValue(pluginRow() as never);
@@ -821,16 +822,25 @@ describe('PermissionsService', () => {
         expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
       });
 
-      it.each<[string, { enabled: boolean; dormantReason?: string | null } | null]>([
-        ['the household unit enablement is missing', null],
-        ['the household unit is disabled', { enabled: false }],
+      it.each<[string, { enabled: boolean; config: unknown } | null, PluginActiveManifestReading]>([
+        ['the household unit enablement is missing', null, activeManifestReading([])],
+        ['the household unit is disabled', { enabled: false, config: {} }, activeManifestReading([])],
         // Dormancy is independent of the household's own `enabled` intent
         // (#369): the unit enablement is enabled, and abilities must still stop
-        // resolving.
-        ['the household unit is dormant for scope', { enabled: true, dormantReason: 'ScopeOrphaned' }],
-        ['the household unit is dormant for configuration', { enabled: true, dormantReason: 'NeedsConfiguration' }],
-      ])('is not servable when %s', async (_label, row) => {
+        // resolving. It is worked out from the active manifest (#1151).
+        [
+          'the household unit is dormant for scope',
+          { enabled: true, config: {} },
+          { valid: true, manifest: { requested: [], householdSurface: false, judgeConfig: () => 'conforms' } },
+        ],
+        [
+          'the household unit is dormant for configuration',
+          { enabled: true, config: { webhookUrl: 42 } },
+          { valid: true, manifest: { requested: [], householdSurface: true, judgeConfig: () => 'rejected' } },
+        ],
+      ])('is not servable when %s', async (_label, row, reading) => {
         db.householdPlugin.findUnique.mockResolvedValue(row as never);
+        reader.read.mockReturnValue(reading);
 
         const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
 
@@ -1216,23 +1226,170 @@ describe('PermissionsService', () => {
         });
       });
 
-      it('never reads the manifest when the plugin holds no decisions', async () => {
-        grantRows([]);
-
-        await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
-
-        expect(reader.read).not.toHaveBeenCalled();
-      });
-
-      it('confers nothing on a plugin actor when no reader is registered', async () => {
-        jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      it('confers nothing on a server unit that holds decisions when no reader is registered, and warns once', async () => {
+        const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
         const withoutReader = new PermissionsService(db as never, cache, redis as never);
         db.pluginGrant.findMany.mockResolvedValue([grantRow('read:game')] as never);
         db.permission.findMany.mockResolvedValue([makePermission({ slug: 'read:game' })] as never);
 
-        const snapshot = await withoutReader.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+        const snapshot = await withoutReader.getPluginGrantSnapshot('plugin-1', { scopeType: 'Server' });
 
         expect(snapshot).toMatchObject({ servable: true, corePermissions: [], ownGrantSlugs: [] });
+        expect(warn).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('getPluginGrantSnapshot: dormancy is worked out when read (#1151)', () => {
+      const USER_UNIT: PluginUnit = { scopeType: 'User', userId: 'u-1' };
+
+      /** A valid reading of a manifest requesting `requested`, whose schema answers `verdict` for every document. */
+      const manifestJudging = (
+        verdict: PluginConfigVerdict,
+        { householdSurface = true, requested = [] as readonly PluginRequestedPermission[] } = {},
+      ) => {
+        const judgeConfig = jest.fn<PluginConfigVerdict, [unknown]>().mockReturnValue(verdict);
+        reader.read.mockReturnValue({ valid: true, manifest: { requested, householdSurface, judgeConfig } });
+
+        return judgeConfig;
+      };
+
+      /** A household-scope decision the active manifest requests, over a permission that binds the household. */
+      const householdDecision = () => {
+        db.pluginGrant.findMany.mockResolvedValue([
+          grantRow('update:calendar', RiskLevel.Low, PluginGrantScope.Household),
+        ] as never);
+        db.permission.findMany.mockResolvedValue([
+          makePermission({ slug: 'update:calendar', ...UNIT_BOUND_RULES.Household }),
+        ] as never);
+
+        return [{ slug: 'update:calendar', scopeType: PluginGrantScope.Household }] as const;
+      };
+
+      it('confers nothing for a household whose retained configuration the active schema rejects', async () => {
+        db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, config: { webhookUrl: 42 } } as never);
+        const judgeConfig = manifestJudging('rejected', { requested: householdDecision() });
+
+        const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+
+        expect(snapshot).toMatchObject({ servable: false, corePermissions: [], ownGrantSlugs: [] });
+        expect(judgeConfig).toHaveBeenCalledWith({ webhookUrl: 42 });
+        expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
+      });
+
+      it('confers nothing for a household under a manifest with no household surface', async () => {
+        const judgeConfig = manifestJudging('conforms', { householdSurface: false, requested: householdDecision() });
+
+        const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+
+        expect(snapshot).toMatchObject({ servable: false, corePermissions: [], ownGrantSlugs: [] });
+        expect(judgeConfig).not.toHaveBeenCalled();
+        expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
+      });
+
+      it('confers nothing for a household under a config schema that cannot be used', async () => {
+        manifestJudging('schema-unusable', { requested: householdDecision() });
+
+        const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+
+        expect(snapshot).toMatchObject({ servable: false, corePermissions: [], ownGrantSlugs: [] });
+        expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
+      });
+
+      it('serves a household whose document conforms', async () => {
+        db.householdPlugin.findUnique.mockResolvedValue({
+          enabled: true,
+          config: { webhookUrl: 'https://x.test' },
+        } as never);
+        const judgeConfig = manifestJudging('conforms', { requested: householdDecision() });
+
+        const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+
+        expect(snapshot).toMatchObject({ servable: true });
+        expect(snapshot?.corePermissions.map((permission) => permission.slug)).toEqual(['update:calendar']);
+        expect(judgeConfig).toHaveBeenCalledWith({ webhookUrl: 'https://x.test' });
+      });
+
+      it('reads the stored manifest once per resolution', async () => {
+        manifestJudging('conforms', { requested: householdDecision() });
+
+        await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+
+        // The dormancy rule and the manifest bound share one reading.
+        expect(reader.read).toHaveBeenCalledTimes(1);
+
+        await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+
+        // Never cached across resolutions: a new manifest takes effect on the next one.
+        expect(reader.read).toHaveBeenCalledTimes(2);
+      });
+
+      it.each([
+        ['while it holds decisions', true],
+        ['while it holds none', false],
+      ])(
+        "refuses a switched-on household's ability when the stored manifest cannot be read, %s",
+        async (_label, withDecisions) => {
+          if (withDecisions) {
+            householdDecision();
+          }
+          reader.read.mockReturnValue({ valid: false, detail: 'manifest.scope: invalid' });
+
+          const failure = await service
+            .getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT)
+            .catch((error: unknown) => error);
+
+          expect(failure).toBeInstanceOf(PluginAbilityRenderRejectionError);
+          expect(failure).toMatchObject({ reason: 'invalid-stored-manifest', detail: 'manifest.scope: invalid' });
+        },
+      );
+
+      it('does not serve a household in a process with no manifest reader, and warns once', async () => {
+        const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+        const withoutReader = new PermissionsService(db as never, cache, redis as never);
+        householdDecision();
+
+        const snapshot = await withoutReader.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+
+        expect(snapshot).toMatchObject({ servable: false, corePermissions: [], ownGrantSlugs: [] });
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
+      });
+
+      it.each<[string, () => void]>([
+        [
+          'an uninstalled plugin',
+          () => db.plugin.findUnique.mockResolvedValue(pluginRow({ uninstalledAt: new Date('2026-11-01') }) as never),
+        ],
+        ['a switched-off plugin', () => db.plugin.findUnique.mockResolvedValue(pluginRow({ enabled: false }) as never)],
+        ['a household with no unit enablement', () => db.householdPlugin.findUnique.mockResolvedValue(null as never)],
+        [
+          'a switched-off household unit',
+          () => db.householdPlugin.findUnique.mockResolvedValue({ enabled: false, config: {} } as never),
+        ],
+      ])('refuses %s before reading its manifest', async (_label, arrange) => {
+        arrange();
+        householdDecision();
+        reader.read.mockImplementation(() => {
+          throw new Error('the manifest must not be read');
+        });
+
+        const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
+
+        expect(snapshot).toMatchObject({ servable: false, corePermissions: [], ownGrantSlugs: [] });
+        expect(reader.read).not.toHaveBeenCalled();
+      });
+
+      it.each<[string, PluginUnit]>([
+        ['user', USER_UNIT],
+        ['server', { scopeType: 'Server' }],
+      ])("never judges a %s unit's configuration", async (_label, unit) => {
+        grantRows([]);
+
+        const snapshot = await service.getPluginGrantSnapshot('plugin-1', unit);
+
+        expect(snapshot).toMatchObject({ servable: true });
+        // With no decisions there is nothing for the manifest to bound either.
+        expect(reader.read).not.toHaveBeenCalled();
       });
     });
   });

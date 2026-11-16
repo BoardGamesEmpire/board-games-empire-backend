@@ -2,6 +2,7 @@ import type { PluginUnit } from '@bge/actor-context';
 import {
   CONSENT_UNIT_BINDING_REFUSAL,
   DatabaseService,
+  derivePluginUnitDormancy,
   grantScopeCoordinatesForUnit,
   isPluginServing,
   isPluginUnitServed,
@@ -15,7 +16,9 @@ import {
   requestedByManifest,
   riskCovers,
   type ConsentDecisionVerdict,
+  type PluginActiveManifest,
   type PluginActiveManifestReader,
+  type PluginUnitEnablement,
   type RiskLevel,
 } from '@bge/database';
 import { CACHE_REDIS_CLIENT, RedisKeyFlush, type Redis } from '@bge/redis';
@@ -554,8 +557,13 @@ export class PermissionsService {
    * here rather than trusted to upstream machinery —
    *
    * - **Serving predicate.** `servable` is false when the plugin is disabled
-   *   or tombstoned, or (Household/User units) when the unit's enablement
-   *   is missing, disabled, or dormant. Consent is not part of "served"
+   *   or uninstalled, or (Household/User units) when the unit's enablement
+   *   is missing or switched off; those refusals come before the manifest is
+   *   read. A switched-on Household unit is served when the dormancy rule
+   *   (`derivePluginUnitDormancy`, #1151) finds no dormancy in it, worked out
+   *   from the active manifest and the household's retained configuration;
+   *   an unreadable stored manifest rejects the ability, and a process with
+   *   no manifest reader serves no household. Consent is not part of "served"
    *   (#1149; removes #1061, #1063): a unit that still owes a required
    *   permission stays servable, and the intersection of `Granted` rows
    *   below is what denies the ungranted slug. Whether a unit has consented
@@ -585,7 +593,8 @@ export class PermissionsService {
    *   a staged update's requested permission (#1150), which confers once
    *   that update is activated, or a decision on a permission a later
    *   manifest dropped. The manifest is re-validated, never trusted; one
-   *   that fails rejects the whole ability.
+   *   that fails rejects the whole ability. It is read once per resolution,
+   *   and the dormancy rule and this bound share that reading.
    *
    * On a core permission, the wildcard, unit-binding and risk checks are
    * `judgeConsentDecision`'s, which the permission catalog's count of the
@@ -609,12 +618,12 @@ export class PermissionsService {
   async getPluginGrantSnapshot(pluginId: string, unit: PluginUnit): Promise<PluginGrantSnapshot | null> {
     // Independent reads — the unit enablement is keyed by (unit, pluginId)
     // and does not need the plugin row first.
-    const [plugin, unitServed] = await Promise.all([
+    const [plugin, unitEnablement] = await Promise.all([
       this.db.plugin.findUnique({
         where: { id: pluginId },
         select: { id: true, slug: true, version: true, manifestJson: true, enabled: true, uninstalledAt: true },
       }),
-      this.isUnitServed(pluginId, unit),
+      loadPluginUnitEnablement(this.db, pluginId, unit),
     ]);
 
     if (!plugin) {
@@ -622,10 +631,21 @@ export class PermissionsService {
     }
 
     const base = { plugin: { id: plugin.id, slug: plugin.slug }, unit };
-    const servable = isPluginServing(plugin) && unitServed;
+    const notServable = { ...base, servable: false, corePermissions: [], ownGrantSlugs: [] };
 
-    if (!servable) {
-      return { ...base, servable: false, corePermissions: [], ownGrantSlugs: [] };
+    // The cheap refusals first: nothing is read or judged for a plugin or a
+    // unit that is switched off, uninstalled, or has no unit enablement.
+    if (!isPluginServing(plugin) || !unitEnablement.enabled) {
+      return notServable;
+    }
+
+    // One reading of the stored manifest per resolution, shared by the
+    // dormancy rule and the manifest bound below; a local, never a field, so
+    // the next resolution reads the manifest again.
+    const activeManifest = this.activeManifestReadingOf(plugin, unit);
+
+    if (!this.isUnitServed(plugin.id, unit, unitEnablement, activeManifest)) {
+      return notServable;
     }
 
     const grants = await this.db.pluginGrant.findMany({
@@ -678,7 +698,7 @@ export class PermissionsService {
       }
     }
 
-    const requestedGrants = this.grantsRequestedByActiveManifest(plugin, unit, grants);
+    const requestedGrants = this.grantsRequestedByActiveManifest(plugin.id, activeManifest(), grants);
     const ownSlugs = new Set(requestedGrants.map((grant) => grant.permissionSlug).filter(isPluginPermissionSlug));
     const coreSlugs = requestedGrants.map((grant) => grant.permissionSlug).filter((slug) => !ownSlugs.has(slug));
 
@@ -786,23 +806,32 @@ export class PermissionsService {
   }
 
   /**
-   * The snapshot's manifest bound (#577): keeps only the decisions whose
-   * permission the plugin's active manifest requests at that decision's
-   * scope. Throws the typed rejection when the stored manifest fails
-   * re-validation, and keeps nothing when no reader is registered.
+   * Reads the plugin's active manifest at most once for one resolution (#577,
+   * #1151): the returned function reads it on its first call and answers that
+   * same reading on every later call. It throws the typed rejection when the
+   * stored manifest fails re-validation, and answers `null` when this process
+   * registers no reader. `getPluginGrantSnapshot` holds it in a local, so every
+   * resolution reads the stored manifest again.
    */
-  private grantsRequestedByActiveManifest<TGrant extends { permissionSlug: string; scopeType: PluginGrantScope }>(
+  private activeManifestReadingOf(
     plugin: { id: string; slug: string; version: string; manifestJson: unknown },
     unit: PluginUnit,
-    grants: readonly TGrant[],
-  ): TGrant[] {
-    if (!this.activeManifestReader) {
-      this.logger.warn(
-        `Plugin ${plugin.id} holds consent decisions, but this process registers no reader for its active ` +
-          'manifest; conferring nothing (#577)',
-      );
+  ): () => PluginActiveManifest | null {
+    let reading: { readonly manifest: PluginActiveManifest | null } | undefined;
 
-      return [];
+    return () => {
+      reading ??= { manifest: this.readActiveManifest(plugin, unit) };
+
+      return reading.manifest;
+    };
+  }
+
+  private readActiveManifest(
+    plugin: { id: string; slug: string; version: string; manifestJson: unknown },
+    unit: PluginUnit,
+  ): PluginActiveManifest | null {
+    if (!this.activeManifestReader) {
+      return null;
     }
 
     const result = this.activeManifestReader.read({
@@ -822,7 +851,30 @@ export class PermissionsService {
       });
     }
 
-    const requested = requestedByManifest(result.manifest.requested);
+    return result.manifest;
+  }
+
+  /**
+   * The snapshot's manifest bound (#577): keeps only the decisions whose
+   * permission the plugin's active manifest requests at that decision's
+   * scope, and keeps nothing when no reader is registered (`manifest` is
+   * `null`).
+   */
+  private grantsRequestedByActiveManifest<TGrant extends { permissionSlug: string; scopeType: PluginGrantScope }>(
+    pluginId: string,
+    manifest: PluginActiveManifest | null,
+    grants: readonly TGrant[],
+  ): TGrant[] {
+    if (manifest === null) {
+      this.logger.warn(
+        `Plugin ${pluginId} holds consent decisions, but this process registers no reader for its active ` +
+          'manifest; conferring nothing (#577)',
+      );
+
+      return [];
+    }
+
+    const requested = requestedByManifest(manifest.requested);
 
     return grants.filter((grant) => {
       if (requested(grant)) {
@@ -833,7 +885,7 @@ export class PermissionsService {
       // update, or a decision on a permission a later manifest dropped, is an
       // ordinary state, not an anomaly.
       this.logger.debug(
-        `Plugin ${plugin.id} decision on '${grant.permissionSlug}' at ${grant.scopeType} scope is not requested ` +
+        `Plugin ${pluginId} decision on '${grant.permissionSlug}' at ${grant.scopeType} scope is not requested ` +
           'by the active manifest; conferring nothing',
       );
 
@@ -842,25 +894,56 @@ export class PermissionsService {
   }
 
   /**
-   * The unit half of the serving predicate:
-   * `enabled && dormantReason === null` on the unit's enablement (#225, #369),
-   * read through the shared `loadPluginUnitEnablement` so this predicate and
-   * the feature-state derivation cannot drift on what "served" means.
+   * The unit half of the serving predicate, for a unit that is switched on
+   * (#225): a Household unit is served when `derivePluginUnitDormancy` finds
+   * no dormancy in it, worked out from the active manifest and the household's
+   * retained configuration (#1151). The feature-state derivation and the
+   * permission catalog's count of the consent decisions an edit affects run
+   * the same rule, so the three cannot disagree on what "served" means.
    *
-   * Dormancy is independent of `enabled`: a dormant unit enablement is one the
-   * manifest moved out from under (a scope narrowing, a schema tightening), so
-   * the household's own `enabled` intent survives it and abilities must stop
-   * resolving regardless of that intent.
+   * Dormancy is independent of the switch: a household's switch survives a
+   * scope narrowing or a schema tightening, so a switched-on household can
+   * still serve nothing. A process with no manifest reader cannot work out
+   * whether a household can run the plugin, so it serves no household.
+   *
+   * Server and User units are not judged on configuration: the server axis has
+   * no unit enablement (#697), and per-user configuration belongs to #228.
+   * Their manifest is read only when they hold consent decisions, for the
+   * manifest bound.
    *
    * Consent is deliberately absent (#1149; removes #1061, #1063): an unmet
    * required permission is the ability's to deny, grant by grant, not a reason
    * to stop serving. `PluginConsentStandingService` in `@bge/plugin` answers
    * whether a unit has consented.
    */
-  private async isUnitServed(pluginId: string, unit: PluginUnit): Promise<boolean> {
-    const state = await loadPluginUnitEnablement(this.db, pluginId, unit);
+  private isUnitServed(
+    pluginId: string,
+    unit: PluginUnit,
+    unitEnablement: PluginUnitEnablement,
+    activeManifest: () => PluginActiveManifest | null,
+  ): boolean {
+    if (unit.scopeType !== 'Household') {
+      return isPluginUnitServed(unitEnablement, null);
+    }
 
-    return isPluginUnitServed(state);
+    const manifest = activeManifest();
+
+    if (manifest === null) {
+      this.logger.warn(
+        `Plugin ${pluginId}: this process registers no reader for its active manifest, so it cannot work out ` +
+          `whether household ${unit.householdId} can run the plugin; not serving it (#1151)`,
+      );
+
+      return false;
+    }
+
+    const dormancy = derivePluginUnitDormancy({
+      scopeType: unit.scopeType,
+      manifest,
+      retainedConfig: unitEnablement.retainedConfig,
+    });
+
+    return isPluginUnitServed(unitEnablement, dormancy);
   }
 
   private loadApiKeyGraph(apiKeyId: string) {
