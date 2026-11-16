@@ -28,6 +28,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Http } from '@status/codes';
 import assert from 'node:assert';
+import { isDeepStrictEqual } from 'node:util';
 import { assertInvitable } from './attendee/invitable';
 import { browseEventScope } from './browse-event-scope';
 import { ATTENDEE_ORDER } from './constants/attendee-order.constant';
@@ -686,8 +687,7 @@ export class EventService {
         // grant is checked against this row before the patch is judged, so a
         // caller it doesn't reach gets 403, never a 400 that tells them how
         // many live dates the event has (#796). The write repeats it.
-        // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-        const updateCeiling = this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update);
+        const updateCeiling = this.patchCeiling(dto);
         const entitled = (await tx.event.count({ where: { id, AND: updateCeiling } })) > 0;
         assert(entitled, new ForbiddenException(t('common.forbidden.update')));
 
@@ -814,6 +814,29 @@ export class EventService {
 
       throw error;
     }
+  }
+
+  /**
+   * The write ceiling of a PATCH: each column the patch sends adds the
+   * conditions of the permissions that cover it, so the event must fall under
+   * every one. Read with no field, the ceiling took every update permission on
+   * Event, so an API key scoped to only the cancel or archive permission,
+   * whose fields leave these columns out, could edit the event (#1295). A
+   * column no permission covers yields the deny-all, so the caller gets 403.
+   * The keys are never empty, since {@link updateEvent} refuses an empty patch
+   * first.
+   *
+   * The catalog binds every column to the same permissions, so the columns
+   * mostly yield the same clauses. Each is kept once: repeating a clause in an
+   * AND changes nothing but the size of the WHERE.
+   */
+  private patchCeiling(dto: UpdateEventDto): Prisma.EventWhereInput[] {
+    const clauses = Object.keys(dto).flatMap((field) =>
+      // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+      this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update, field),
+    );
+
+    return clauses.filter((clause, index) => clauses.findIndex((kept) => isDeepStrictEqual(kept, clause)) === index);
   }
 
   private validateOccurrencesForMode(mode: EventSchedulingMode, occurrences?: CreateEventDto['occurrences']): void {

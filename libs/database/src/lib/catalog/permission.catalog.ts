@@ -134,9 +134,10 @@ const attendingRoleInEvent = {
 // bound to (#795). Leaving out the cancel columns and `archivedAt` is what
 // keeps those grants from passing the cancel and archive routes, whose checks
 // name those columns: an organizer edits an event but doesn't call it off.
-// `PATCH` itself still checks no field, so the list binds nothing there until
-// #589 names the columns a patch writes. Module-private for the reasons
-// `acceptedFriendOfActingUser` gives.
+// `PATCH` checks each column a patch sends, so the cancel and archive
+// permissions, bound to other columns, don't pass it either (#1295). The
+// event lib keeps its own copy for the route, and a spec there pins the two
+// equal. Module-private for the reasons `acceptedFriendOfActingUser` gives.
 const EVENT_PATCH_FIELDS = [
   'title',
   'description',
@@ -149,9 +150,8 @@ const EVENT_PATCH_FIELDS = [
 ] as const satisfies readonly Prisma.EventScalarFieldEnum[];
 
 // The EventOccurrence columns `PATCH /events/:eventId/occurrences/:occurrenceId`
-// writes, which the date's edit permissions are bound to (#979). Unlike the event's
-// PATCH (#589), the date's names the fields it writes, so each one a request
-// sends is checked. Leaving out the status columns is what keeps these
+// writes, which the date's edit permissions are bound to (#979). As with the
+// event's PATCH (#1295), each field a request sends is checked. Leaving out the status columns is what keeps these
 // permissions from passing the confirm, decline and cancel routes: an event
 // organizer edits a date but doesn't confirm, decline or cancel it. Module-private for the
 // reasons `acceptedFriendOfActingUser` gives.

@@ -56,9 +56,10 @@ function NoNulAnywhere(options: ValidationOptions): PropertyDecorator {
  * keeps it.
  *
  * Only these can change. Changing a permission's action or resource type would
- * make its slug name something else, nothing enforces its fields yet (#589),
- * and every role rule is a grant, never a denial. The global pipe refuses any
- * other key with 400.
+ * make its slug name something else, and changing its fields would part them
+ * from the columns the routes check against them (#979, #1295). Every role
+ * rule is a grant, never a denial. The global pipe refuses any other key with
+ * 400.
  *
  * Each property validates under `@ValidateIf(value !== undefined)` rather than
  * `@IsOptional`, which would let `null` through unvalidated. `reason` is the
