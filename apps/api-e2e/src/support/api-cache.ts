@@ -144,7 +144,8 @@ export async function cacheIndexSizes(env: NodeJS.ProcessEnv = process.env): Pro
   const sizes: Record<string, number> = {};
 
   try {
-    for await (const page of client.scanStream({ match: 'namespace:*', type: 'set', count: 500 })) {
+    // Under 100: KeyDB 6.3 holds a command sent behind a larger SCAN (#462), the same reason as SCAN_PAGE.
+    for await (const page of client.scanStream({ match: 'namespace:*', type: 'set', count: 99 })) {
       for (const key of page as string[]) {
         sizes[key] = await client.scard(key);
       }

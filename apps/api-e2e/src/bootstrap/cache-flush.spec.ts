@@ -194,4 +194,45 @@ describe('the cache flush after a reconcile that wrote rows or a data migration 
     expect(summary.dataMigrations).toEqual({ applied: [], unknown: SHIPPED, cachesFlushed: false });
     expect(await present(CACHED)).toEqual([1, 1, 1, 1, 1, 1]);
   });
+
+  // KeyDB 6.3 serves a SCAN of COUNT 100 or more asynchronously and holds the
+  // next command on that connection until the connection sends again. The scan
+  // stream reads ahead, so at COUNT 500 about two flushes in three left the last
+  // page's UNLINK held and the flush never resolved (#462). Ten rounds over a
+  // keyspace of several pages make a recurrence all but certain; the 2 s command
+  // timeout turns a held UNLINK into a failure, not a hung suite.
+  it('resolves every flush of a keyspace of several scan pages, with no matching key left (#462)', async () => {
+    const client = new Redis(server.connectionUrl, { commandTimeout: 2000 });
+    const matching = Array.from({ length: 1000 }, (_, index) =>
+      permissionsCacheKey(PermissionsService.userGraphCacheKey(`flood-${index}`)),
+    );
+    const others = Array.from({ length: 2000 }, (_, index) => `bge:flush-flood:other-${index}`);
+
+    async function seed(): Promise<void> {
+      const pipeline = client.pipeline();
+
+      for (const key of [...matching, ...others]) {
+        pipeline.set(key, '1');
+      }
+
+      await pipeline.exec();
+    }
+
+    try {
+      // The test before leaves its primed graphs under the patterns; the counts below are the seeded keys alone.
+      await client.del(...CACHED);
+
+      for (let round = 0; round < 10; round++) {
+        await seed();
+
+        await expect(new RedisKeyFlush(client, PATTERNS).flush()).resolves.toBe(matching.length);
+
+        expect(await client.exists(...matching)).toBe(0);
+        expect(await client.exists(...others)).toBe(others.length);
+      }
+    } finally {
+      await client.del(...others);
+      client.disconnect();
+    }
+  }, 60_000);
 });
