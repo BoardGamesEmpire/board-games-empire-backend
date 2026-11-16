@@ -135,6 +135,7 @@ enum NotificationType {
   GameNominationQuorumNotMet
 
   GameAddedToEvent
+  GameRemovedFromEvent
 
   /**
    * Game share notifications (#810), each sent to a different audience:

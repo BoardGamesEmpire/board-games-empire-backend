@@ -167,6 +167,37 @@ export interface NominationOutcomePayload {
 /** A game was added to an event's play list. */
 export interface GameAddedToEventPayload extends EventRefPayload {
   nominatedGameTitle: string;
+  /** Tells apart two editions that share a title (#1271). */
+  nominatedGameSubtitle: string | null;
+}
+
+/** Why a game left an event's lineup (#769). */
+export const LineupRemovalReason = {
+  /**
+   * Taken off through the removal route by a host-level role: the host, a
+   * co-host, an event moderator, or a household owner or admin on a
+   * household event.
+   */
+  TakenOut: 'TakenOut',
+  /** The attendee supplying it left the event: removed, or not attending. */
+  SupplierLeft: 'SupplierLeft',
+  /** A write to the event's dates put its lineup ahead again, with nobody bringing the game. */
+  NobodyBringing: 'NobodyBringing',
+} as const;
+
+export type LineupRemovalReason = (typeof LineupRemovalReason)[keyof typeof LineupRemovalReason];
+
+/**
+ * A game left the lineup of an event the recipient is still coming to (#769).
+ * `occurrenceId` is `null` for a game in the event's own lineup.
+ */
+export interface GameRemovedFromEventPayload extends EventRefPayload {
+  lineupGameId: string;
+  occurrenceId: string | null;
+  gameTitle: string;
+  /** Tells apart two editions that share a title (#1271). */
+  gameSubtitle: string | null;
+  reason: LineupRemovalReason;
 }
 
 /** An event occurrence changed status (confirmed/declined/canceled/…). */
@@ -319,6 +350,7 @@ export type NotificationPayloadMap = {
   [NotificationType.GameNominationFailed]: NominationOutcomePayload;
   [NotificationType.GameNominationQuorumNotMet]: NominationOutcomePayload;
   [NotificationType.GameAddedToEvent]: GameAddedToEventPayload;
+  [NotificationType.GameRemovedFromEvent]: GameRemovedFromEventPayload;
   // Occurrence lifecycle — Confirmed/Canceled/Declined are emitted today;
   // Proposed/Rescheduled are not yet, but share the same shape.
   [NotificationType.EventOccurrenceProposed]: OccurrenceChangePayload;

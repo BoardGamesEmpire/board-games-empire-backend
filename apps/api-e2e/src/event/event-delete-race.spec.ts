@@ -4,7 +4,9 @@ import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { arrangeListEntry } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
+import { eventGameEnvelope } from './event-wire';
 
 /**
  * Two writes to one event, the second queued behind a delete (#731).
@@ -189,6 +191,34 @@ describe('two writes racing one event (#731)', () => {
     expect(row.deletedAt).not.toBeNull();
 
     // Last, for the reason the test above gives.
+    expect(queuedOn).toEqual([expect.stringMatching(LOCKS_THE_EVENT), expect.stringMatching(LOCKS_THE_EVENT)]);
+  });
+
+  // A delete keeps the lineup's rows, so a removal that found the event live
+  // and queued behind the delete would otherwise take the game out of a
+  // deleted event's lineup and tell its attendees (#769).
+  it("answers a lineup game's removal queued behind a DELETE 404, and the game stays (#769)", async () => {
+    const host = await actors.user();
+    const eventId = await createdEventId(host);
+    const lineupGameId = eventGameEnvelope(
+      await request(baseUrl)
+        .post(`${EVENTS_PATH}/${eventId}/nominations/direct-add`)
+        .set(host.headers)
+        .send(await arrangeListEntry(db.client, eventId, host.user.id))
+        .expect(201),
+      'POST /api/events/:eventId/nominations/direct-add as the host',
+    ).id;
+
+    const { statuses, queuedOn } = await race(
+      eventId,
+      () => deleteEvent(host, eventId),
+      () => request(baseUrl).delete(`${EVENTS_PATH}/${eventId}/lineup/${lineupGameId}`).set(host.headers),
+    );
+
+    expect(statuses).toEqual([200, 404]);
+    await expect(db.client.eventGame.count({ where: { id: lineupGameId } })).resolves.toBe(1);
+
+    // Last, for the reason the first test gives.
     expect(queuedOn).toEqual([expect.stringMatching(LOCKS_THE_EVENT), expect.stringMatching(LOCKS_THE_EVENT)]);
   });
 });

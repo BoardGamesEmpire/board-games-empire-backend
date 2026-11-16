@@ -1,5 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
 import { ResourceType, type EventGame, type EventGameNomination, type EventGameVote } from '@bge/database';
+import type { LineupRemovalReason } from '@bge/notifications-service';
 import { NominationEvent } from '../constants';
 
 /**
@@ -8,9 +9,12 @@ import { NominationEvent } from '../constants';
  *
  * Payloads carry ROW STATE (before/after snapshots) plus listener-facing
  * context fields; the acting actor, source, and correlationId live in CLS and
- * are read at handle time — never on the payload. All events here are audited
- * by default (opt out per class with `@Auditable(false)`); only before/after
- * reach the audit row, so context fields stay out of persistence.
+ * are read at handle time. The one exception is the acting user's id on
+ * {@link GameRemovedFromEventEvent}, a context field for the listener that
+ * spares them the notification, as the attendee events carry it (#769). All
+ * events here are audited by default (opt out per class with
+ * `@Auditable(false)`); only before/after reach the audit row, so context
+ * fields stay out of persistence.
  */
 
 type NominationCreatedSnapshot = Readonly<
@@ -179,8 +183,10 @@ export class GameAddedToEventEvent extends MutationEvent<EventGame> {
 }
 
 /**
- * An EventGame row was deleted because the attendee supplying it is out of the
- * event (#551). Its own name, apart from {@link GameAddedToEventEvent}.
+ * A game left the lineup: an EventGame row was deleted, for one of three
+ * reasons (#769): a host removed it, the attendee supplying it left the event
+ * (#551), or a date write found nobody bringing it. Its own name, apart from
+ * {@link GameAddedToEventEvent}.
  */
 export class GameRemovedFromEventEvent extends MutationEvent<EventGame> {
   static readonly eventName = NominationEvent.GameRemovedFromEvent;
@@ -195,6 +201,14 @@ export class GameRemovedFromEventEvent extends MutationEvent<EventGame> {
     before: EventGameAddedSnapshot,
     /** Parent event id — the row's own `eventId` is null for occurrence-scoped games. */
     public readonly eventId: string,
+    /** Why the game left. Context for listeners, not audited (#769). */
+    public readonly reason: LineupRemovalReason,
+    /**
+     * The user who acted: the host who removed it, or whoever answered the
+     * RSVP, removed the attendee or wrote the date. `null` when the actor is
+     * not a user. Context for listeners, not audited (#769).
+     */
+    public readonly actingUserId: string | null,
     initiatedAt: Date,
   ) {
     super(before, null, initiatedAt);

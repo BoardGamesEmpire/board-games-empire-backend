@@ -2,6 +2,7 @@ import {
   AvailabilityResponse,
   EventParticipationStatus,
   EventSchedulingMode,
+  GameAdditionMode,
   NominationStatus,
   OccurrenceStatus,
   ResourceType,
@@ -16,7 +17,13 @@ import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { arrangeListEntry, hoursFromNow } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
-import { attendeeEnvelope, eventEnvelope, eventGameEnvelope, occurrenceEnvelope } from './event-wire';
+import {
+  attendeeEnvelope,
+  eventEnvelope,
+  eventGameEnvelope,
+  nominationEnvelope,
+  occurrenceEnvelope,
+} from './event-wire';
 
 /**
  * Who may write what on an event, over the real routes (#454, #539, #457, #458,
@@ -416,6 +423,105 @@ describe('event write authorization', () => {
         'POST /api/events/:eventId/nominations/direct-add',
       );
       expect(added.suppliedBy.id).toBe(own.suppliedById);
+    });
+  });
+
+  describe('who adds a game directly (#1215)', () => {
+    const lineupCount = (eventId: string) => db.client.eventGame.count({ where: { eventId } });
+
+    // Under either mode the direct add is a host-level write, so a
+    // participant's grant must not reach it. The nomination is their way in.
+    it.each([GameAdditionMode.HostOnly, GameAdditionMode.Direct])(
+      "refuses a participant's direct add under %s, and writes nothing",
+      async (gameAdditionMode) => {
+        const host = await actors.user();
+        const participant = await actors.user();
+        const eventId = await createdEventId(host, { policy: { gameAdditionMode } });
+        await addAttendee(host, eventId, { userId: participant.user.id, role: SystemRole.EventParticipant }).expect(
+          201,
+        );
+        const own = await arrangeListEntry(db.client, eventId, participant.user.id);
+        const hostEntry = await arrangeListEntry(db.client, eventId, host.user.id);
+
+        // Control: the host adds under the same mode, so the refusal is the
+        // participant's role and not the mode or the body.
+        await directAdd(host, eventId, hostEntry).expect(201);
+        const before = await lineupCount(eventId);
+
+        await directAdd(participant, eventId, own).expect(403);
+        expect(await lineupCount(eventId)).toBe(before);
+      },
+    );
+
+    it('lets a co-host add directly under HostOnly', async () => {
+      const host = await actors.user();
+      const coHost = await actors.user();
+      const eventId = await createdEventId(host, { policy: { gameAdditionMode: GameAdditionMode.HostOnly } });
+      await addAttendee(host, eventId, { userId: coHost.user.id, role: SystemRole.EventCoHost }).expect(201);
+      const own = await arrangeListEntry(db.client, eventId, coHost.user.id);
+
+      await directAdd(coHost, eventId, own).expect(201);
+      expect(await lineupCount(eventId)).toBe(1);
+    });
+
+    it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin])(
+      "lets a household's %s add directly to its event under HostOnly",
+      async (householdRole) => {
+        const owner = await actors.user();
+        const admin = await actors.user();
+        const member = await actors.user();
+        const plainMember = await actors.user();
+        const { household } = await actors.householdWithMembers({
+          owner,
+          members: [
+            { actor: admin, role: SystemRole.HouseholdAdmin },
+            { actor: member, role: SystemRole.HouseholdMember },
+            { actor: plainMember, role: SystemRole.HouseholdMember },
+          ],
+        });
+        const eventId = await createdEventId(member, {
+          householdId: household.id,
+          policy: { gameAdditionMode: GameAdditionMode.HostOnly },
+        });
+        const offered = await arrangeListEntry(db.client, eventId, member.user.id);
+
+        // The add records the attendee who made it, so the household's
+        // authority attends as a participant: a role that holds no
+        // direct-add grant of its own, as the refusals above show. Only the
+        // household grant can make this 201.
+        const actor = householdRole === SystemRole.HouseholdOwner ? owner : admin;
+        await addAttendee(member, eventId, { userId: actor.user.id, role: SystemRole.EventParticipant }).expect(201);
+
+        // Control: a member who is neither the household's owner nor its
+        // admin, attending the same way, is refused on the same event, so the
+        // 201 below is the household role's.
+        await addAttendee(member, eventId, { userId: plainMember.user.id, role: SystemRole.EventParticipant }).expect(
+          201,
+        );
+        await directAdd(plainMember, eventId, offered).expect(403);
+        expect(await lineupCount(eventId)).toBe(0);
+
+        await directAdd(actor, eventId, offered).expect(201);
+        expect(await lineupCount(eventId)).toBe(1);
+      },
+    );
+
+    it("still adds a participant's nomination straight to the lineup under Direct", async () => {
+      const host = await actors.user();
+      const participant = await actors.user();
+      const eventId = await createdEventId(host, { policy: { gameAdditionMode: GameAdditionMode.Direct } });
+      await addAttendee(host, eventId, { userId: participant.user.id, role: SystemRole.EventParticipant }).expect(201);
+      const own = await arrangeListEntry(db.client, eventId, participant.user.id);
+
+      const nomination = nominationEnvelope(
+        await request(baseUrl)
+          .post(`${EVENTS_PATH}/${eventId}/nominations`)
+          .set(participant.headers)
+          .send({ platformGameId: own.platformGameId, suppliedFromId: own.suppliedById })
+          .expect(201),
+        'POST /api/events/:eventId/nominations as a participant under Direct',
+      );
+      expect(nomination.elevatedTo).not.toBeNull();
     });
   });
 

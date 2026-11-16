@@ -822,6 +822,19 @@ describe('the shipped catalogs', () => {
       expect(host.filter((slug) => !coHost.includes(slug))).toEqual(['delete:event']);
     });
 
+    // The direct add is a host-level write under every addition mode, so a
+    // participant's way into the lineup is a nomination (#1215).
+    it('give EventParticipant no create on a lineup game, household-bound or not (#1215)', () => {
+      const lineupCreates = PERMISSION_CATALOG.filter(
+        ({ action, subject }) => subject === ResourceType.EventGame && action === Action.create,
+      ).map(({ slug }) => slug);
+
+      expect(lineupCreates.sort()).toEqual(['create:event_game', 'create:event_game:household']);
+      expect(
+        ROLE_PERMISSION_CATALOG[SystemRole.EventParticipant].filter((slug) => lineupCreates.includes(slug)),
+      ).toEqual([]);
+    });
+
     it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin])(
       "give %s no delete on an event or its dates: it edits and cancels the household's events, and deletes only what it hosts (#168, #567)",
       (roleName) => {

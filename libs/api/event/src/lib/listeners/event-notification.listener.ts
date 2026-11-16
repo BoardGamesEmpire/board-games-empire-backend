@@ -16,6 +16,7 @@ import type { EventCancelledEvent, EventReopenedEvent } from '../lifecycle/event
 import { NominationEvent } from '../nomination/constants';
 import type {
   GameAddedToEventEvent,
+  GameRemovedFromEventEvent,
   NominationCreatedEvent,
   NominationResolvedEvent,
 } from '../nomination/events/nomination.events';
@@ -375,21 +376,10 @@ export class EventNotificationListener {
     const { platformGameId } = event.after;
 
     try {
-      const [eventRecord, platformGame] = await Promise.all([
-        this.db.event.findUnique({
-          where: { id: eventId },
-          select: { title: true },
-        }),
-        this.db.platformGame.findUnique({
-          where: { id: platformGameId },
-          select: { id: true, game: { select: { title: true } } },
-        }),
-      ]);
+      const titles = await this.lineupGameTitles('GameAddedToEvent', eventId, platformGameId);
 
-      if (!eventRecord || !platformGame) {
-        return this.logger.warn(
-          `Event or game not found for GameAddedToEvent notification, eventId=${eventId}, platformGameId=${platformGameId}`,
-        );
+      if (!titles) {
+        return;
       }
 
       const attendees = await this.db.eventAttendee.findMany({
@@ -404,8 +394,9 @@ export class EventNotificationListener {
           type: NotificationType.GameAddedToEvent,
           payload: {
             eventId,
-            eventTitle: eventRecord.title,
-            nominatedGameTitle: platformGame.game.title,
+            eventTitle: titles.eventTitle,
+            nominatedGameTitle: titles.gameTitle,
+            nominatedGameSubtitle: titles.gameSubtitle,
           },
         }));
 
@@ -418,6 +409,88 @@ export class EventNotificationListener {
         err instanceof Error ? err.stack : String(err),
       );
     }
+  }
+
+  /**
+   * #769. Every removal tells the attendees still coming, whatever the reason
+   * (a host's removal, the supplier leaving, a date write that found nobody
+   * bringing it), except the person acting. A supplier who left is out of
+   * that audience already. The reason rides on the notification so the client
+   * can say why.
+   */
+  @OnEvent(NominationEvent.GameRemovedFromEvent, { async: true })
+  async onGameRemoved(event: GameRemovedFromEventEvent): Promise<void> {
+    const { eventId, reason, actingUserId } = event;
+    const { id: lineupGameId, occurrenceId, platformGameId } = event.before;
+
+    try {
+      const titles = await this.lineupGameTitles('GameRemovedFromEvent', eventId, platformGameId);
+
+      if (!titles) {
+        return;
+      }
+
+      const recipients = withoutActor(await usersStillComing(this.db, eventId), actingUserId);
+
+      if (recipients.length > 0) {
+        await this.notifications.createMany(
+          recipients.map((userId) => ({
+            userId,
+            type: NotificationType.GameRemovedFromEvent,
+            payload: {
+              eventId,
+              eventTitle: titles.eventTitle,
+              lineupGameId,
+              occurrenceId,
+              gameTitle: titles.gameTitle,
+              gameSubtitle: titles.gameSubtitle,
+              reason,
+            },
+          })),
+        );
+      }
+    } catch (err) {
+      this.logger.error(
+        `Failed to notify on GameRemovedFromEvent eventId=${eventId} lineupGameId=${lineupGameId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+  }
+
+  /**
+   * The event's title and the game's, with its subtitle so two editions that
+   * share a title can be told apart (#1271), which a lineup game's
+   * notifications carry, or `null` with a warning when either is gone. `domainEvent` names
+   * the domain event in the warning.
+   */
+  private async lineupGameTitles(
+    domainEvent: 'GameAddedToEvent' | 'GameRemovedFromEvent',
+    eventId: string,
+    platformGameId: string,
+  ): Promise<{ eventTitle: string; gameTitle: string; gameSubtitle: string | null } | null> {
+    const [eventRecord, platformGame] = await Promise.all([
+      this.db.event.findUnique({
+        where: { id: eventId },
+        select: { title: true },
+      }),
+      this.db.platformGame.findUnique({
+        where: { id: platformGameId },
+        select: { id: true, game: { select: { title: true, subtitle: true } } },
+      }),
+    ]);
+
+    if (!eventRecord || !platformGame) {
+      this.logger.warn(
+        `Event or game not found for ${domainEvent} notification, eventId=${eventId}, platformGameId=${platformGameId}`,
+      );
+      return null;
+    }
+
+    return {
+      eventTitle: eventRecord.title,
+      gameTitle: platformGame.game.title,
+      gameSubtitle: platformGame.game.subtitle,
+    };
   }
 
   /**

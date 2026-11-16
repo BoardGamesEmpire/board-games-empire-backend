@@ -12,6 +12,7 @@ import {
   ScheduledGameRole,
 } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
+import { LineupRemovalReason } from '@bge/notifications-service';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
@@ -1133,11 +1134,11 @@ describe('EventOccurrenceService', () => {
 
   /**
    * A game stays on a date that has started when its supplier leaves, or when
-   * its entry comes off their offered games (#551). Moving that date's start
-   * to one still to come, adding a date, or removing the last one puts the
-   * lineup ahead again, holding a game nobody is bringing, and no route takes
-   * a game off a lineup. Each of those writes takes such games off in its own
-   * transaction.
+   * its entry comes off their offered games (#551), and the removal route
+   * refuses a lineup that has started (#769). Moving that date's start to one
+   * still to come, adding a date, or removing the last one puts the lineup
+   * ahead again, holding a game nobody is bringing. Each of those writes takes
+   * such games off in its own transaction.
    */
   describe('a lineup a date write puts ahead again', () => {
     const NEXT_WEEK = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -1259,6 +1260,21 @@ describe('EventOccurrenceService', () => {
       expect(removed.subjectId).toBe('eg-off');
       expect(removed.eventId).toBe('event-1');
     });
+
+    // The notification tells the table nobody was bringing the game and
+    // spares whoever wrote the date (#769).
+    it.each(dateWrites)(
+      '$name reports each game as one nobody is bringing, by the user who wrote it',
+      async ({ name }) => {
+        gamesTakenOff();
+
+        await run(name);
+
+        const removed = emitter.emit.mock.calls.at(-1)?.[1];
+        expect(removed.reason).toBe(LineupRemovalReason.NobodyBringing);
+        expect(removed.actingUserId).toBe(MOCK_ACTING_USER_ID);
+      },
+    );
 
     it.each(dateWrites)('$name takes nothing off when every game ahead has someone bringing it', async ({ name }) => {
       await run(name);

@@ -418,9 +418,9 @@ describe('leaving an event', () => {
   });
 
   /**
-   * A started date keeps its lineup, games nobody is bringing included. A
-   * write to the event's dates that puts that lineup ahead again takes them
-   * off, since no route does.
+   * A started date keeps its lineup, games nobody is bringing included: a
+   * host can't remove a started date's game either (#769). A write to the
+   * event's dates that puts that lineup ahead again takes them off.
    */
   describe('a date write that puts a lineup ahead again', () => {
     it('takes off the games nobody is bringing when a date that has started is moved to a start still to come', async () => {
