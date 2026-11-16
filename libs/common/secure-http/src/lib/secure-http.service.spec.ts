@@ -349,7 +349,7 @@ describe('SecureHttpService', () => {
         const refusal = service.request('http://example.com/data', { allowHost: () => false });
 
         await expect(refusal).rejects.toBeInstanceOf(HostNotAllowedError);
-        await expect(refusal).rejects.toMatchObject({ code: 'HOST_NOT_ALLOWED', host: 'example.com' });
+        await expect(refusal).rejects.toMatchObject({ code: 'OUTBOUND_HOST_NOT_ALLOWED', host: 'example.com' });
         expect(evaluate).not.toHaveBeenCalled();
         expect(build).not.toHaveBeenCalled();
       });

@@ -39,9 +39,11 @@ export class InvalidRequestUrlError extends SafeHttpError {
  * The caller's own host rule (`SafeHttpRequestOptions.allowHost`) refused the
  * hostname, before any address lookup. On a redirect hop
  * `RedirectToDisallowedTargetError` wraps this and is thrown instead (#1083).
+ * Its code isn't `HOST_NOT_ALLOWED`, which names the api's inbound Host-header
+ * refusal (#977): a log line keeps one name for one meaning.
  */
 export class HostNotAllowedError extends SafeHttpError {
-  readonly code = 'HOST_NOT_ALLOWED' as const;
+  readonly code = 'OUTBOUND_HOST_NOT_ALLOWED' as const;
 
   constructor(readonly host: string) {
     super(`Host not allowed by the caller's rule: ${host}`);
