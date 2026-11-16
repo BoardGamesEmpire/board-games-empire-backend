@@ -6,8 +6,8 @@ import {
   PluginGrantStatus,
   requestedByManifest,
   type PermissionRuleColumns,
+  type PluginActiveManifestReader,
   type PluginGrant,
-  type PluginRequestedPermissionsReader,
   type Prisma,
   type RiskLevel,
 } from '@bge/database';
@@ -80,7 +80,7 @@ function confers(permission: ConsentEffectColumns, decision: ConsentDecision): b
 export async function loadConsentDecisionsInForce(
   db: Pick<Prisma.TransactionClient, 'pluginGrant' | 'householdPlugin' | 'userPlugin'>,
   permissionSlug: string,
-  reader: PluginRequestedPermissionsReader | undefined,
+  reader: PluginActiveManifestReader | undefined,
 ): Promise<ConsentDecision[]> {
   if (reader === undefined) {
     return [];
@@ -105,7 +105,7 @@ export async function loadConsentDecisionsInForce(
     if (bound === undefined) {
       const { slug, version, manifestJson } = decision.plugin;
       const result = reader.read({ slug, version, manifestJson });
-      bound = result.valid ? requestedByManifest(result.requested) : null;
+      bound = result.valid ? requestedByManifest(result.manifest.requested) : null;
       boundByPlugin.set(decision.pluginId, bound);
     }
     return bound?.({ scopeType: decision.scopeType, permissionSlug }) ?? false;

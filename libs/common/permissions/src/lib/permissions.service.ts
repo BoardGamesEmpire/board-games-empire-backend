@@ -8,14 +8,14 @@ import {
   isWildcardSubject,
   judgeConsentDecision,
   loadPluginUnitEnablement,
-  PLUGIN_REQUESTED_PERMISSIONS_READER,
+  PLUGIN_ACTIVE_MANIFEST_READER,
   PluginGrantScope,
   PluginGrantStatus,
   Prisma,
   requestedByManifest,
   riskCovers,
   type ConsentDecisionVerdict,
-  type PluginRequestedPermissionsReader,
+  type PluginActiveManifestReader,
   type RiskLevel,
 } from '@bge/database';
 import { CACHE_REDIS_CLIENT, RedisKeyFlush, type Redis } from '@bge/redis';
@@ -78,8 +78,8 @@ export class PermissionsService {
      * actors rather than every decision on file.
      */
     @Optional()
-    @Inject(PLUGIN_REQUESTED_PERMISSIONS_READER)
-    private readonly requestedPermissionsReader?: PluginRequestedPermissionsReader,
+    @Inject(PLUGIN_ACTIVE_MANIFEST_READER)
+    private readonly activeManifestReader?: PluginActiveManifestReader,
   ) {}
 
   /**
@@ -796,7 +796,7 @@ export class PermissionsService {
     unit: PluginUnit,
     grants: readonly TGrant[],
   ): TGrant[] {
-    if (!this.requestedPermissionsReader) {
+    if (!this.activeManifestReader) {
       this.logger.warn(
         `Plugin ${plugin.id} holds consent decisions, but this process registers no reader for its active ` +
           'manifest; conferring nothing (#577)',
@@ -805,7 +805,7 @@ export class PermissionsService {
       return [];
     }
 
-    const result = this.requestedPermissionsReader.read({
+    const result = this.activeManifestReader.read({
       slug: plugin.slug,
       version: plugin.version,
       manifestJson: plugin.manifestJson,
@@ -822,7 +822,7 @@ export class PermissionsService {
       });
     }
 
-    const requested = requestedByManifest(result.requested);
+    const requested = requestedByManifest(result.manifest.requested);
 
     return grants.filter((grant) => {
       if (requested(grant)) {

@@ -1,5 +1,11 @@
 import { PluginUnitDormantReason } from '../client';
-import { isPluginServing, isPluginUnitServed, loadPluginUnitEnablement } from './plugin-unit-enablement';
+import type { PluginActiveManifest, PluginConfigVerdict } from './plugin-active-manifest-reader';
+import {
+  derivePluginUnitDormancy,
+  isPluginServing,
+  isPluginUnitServed,
+  loadPluginUnitEnablement,
+} from './plugin-unit-enablement';
 
 describe('loadPluginUnitEnablement', () => {
   const db = {
@@ -15,29 +21,30 @@ describe('loadPluginUnitEnablement', () => {
       anchored: true,
       enabled: true,
       dormantReason: null,
+      retainedConfig: null,
     });
     expect(db.householdPlugin.findUnique).not.toHaveBeenCalled();
     expect(db.userPlugin.findUnique).not.toHaveBeenCalled();
   });
 
   it('reads the household unit enablement by its compound key, dormancy included', async () => {
-    db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, dormantReason: null });
+    db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, dormantReason: null, config: {} });
 
     await expect(
       loadPluginUnitEnablement(client, 'plg_1', { scopeType: 'Household', householdId: 'hh-1' }),
-    ).resolves.toEqual({ anchored: true, enabled: true, dormantReason: null });
+    ).resolves.toEqual({ anchored: true, enabled: true, dormantReason: null, retainedConfig: {} });
     expect(db.householdPlugin.findUnique).toHaveBeenCalledWith({
       where: { householdId_pluginId: { householdId: 'hh-1', pluginId: 'plg_1' } },
-      select: { enabled: true, dormantReason: true },
+      select: { enabled: true, dormantReason: true, config: true },
     });
   });
 
   it('carries the dormancy reason through, so every caller collapses the same predicate (#369)', async () => {
-    db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, dormantReason: 'ScopeOrphaned' });
+    db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, dormantReason: 'ScopeOrphaned', config: {} });
 
     await expect(
       loadPluginUnitEnablement(client, 'plg_1', { scopeType: 'Household', householdId: 'hh-1' }),
-    ).resolves.toEqual({ anchored: true, enabled: true, dormantReason: 'ScopeOrphaned' });
+    ).resolves.toEqual({ anchored: true, enabled: true, dormantReason: 'ScopeOrphaned', retainedConfig: {} });
   });
 
   it('reads the user unit enablement by its compound key', async () => {
@@ -48,6 +55,7 @@ describe('loadPluginUnitEnablement', () => {
       enabled: true,
       // The user axis has no dormancy column and no orphan state (#225).
       dormantReason: null,
+      retainedConfig: null,
     });
     expect(db.userPlugin.findUnique).toHaveBeenCalledWith({
       where: { userId_pluginId: { userId: 'u-1', pluginId: 'plg_1' } },
@@ -60,7 +68,7 @@ describe('loadPluginUnitEnablement', () => {
 
     await expect(
       loadPluginUnitEnablement(client, 'plg_1', { scopeType: 'Household', householdId: 'hh-1' }),
-    ).resolves.toEqual({ anchored: false, enabled: false, dormantReason: null });
+    ).resolves.toEqual({ anchored: false, enabled: false, dormantReason: null, retainedConfig: {} });
   });
 
   it('a disabled unit enablement is still anchored (#1149)', async () => {
@@ -70,6 +78,7 @@ describe('loadPluginUnitEnablement', () => {
       anchored: true,
       enabled: false,
       dormantReason: null,
+      retainedConfig: null,
     });
   });
 
@@ -77,6 +86,121 @@ describe('loadPluginUnitEnablement', () => {
     await expect(loadPluginUnitEnablement(client, 'plg_1', { scopeType: 'Galaxy' } as never)).rejects.toThrow(
       RangeError,
     );
+  });
+
+  describe('the document the dormancy rule judges (#1151)', () => {
+    const household = { scopeType: 'Household', householdId: 'hh-1' } as const;
+
+    it('returns a household unit enablement config as its retained config', async () => {
+      db.householdPlugin.findUnique.mockResolvedValue({
+        enabled: true,
+        dormantReason: null,
+        config: { webhookUrl: 'https://x.test' },
+      });
+
+      await expect(loadPluginUnitEnablement(client, 'plg_1', household)).resolves.toEqual(
+        expect.objectContaining({ retainedConfig: { webhookUrl: 'https://x.test' } }),
+      );
+      expect(db.householdPlugin.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ select: expect.objectContaining({ config: true }) }),
+      );
+    });
+
+    it('returns a stored JSON null as itself, not as an empty document, so the rule can reject it', async () => {
+      db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, dormantReason: null, config: null });
+
+      await expect(loadPluginUnitEnablement(client, 'plg_1', household)).resolves.toEqual(
+        expect.objectContaining({ retainedConfig: null }),
+      );
+    });
+
+    it('returns an empty document for a household with no unit enablement', async () => {
+      db.householdPlugin.findUnique.mockResolvedValue(null);
+
+      await expect(loadPluginUnitEnablement(client, 'plg_1', household)).resolves.toEqual(
+        expect.objectContaining({ retainedConfig: {} }),
+      );
+    });
+
+    it('returns null for Server and User units, whose configuration the rule never judges', async () => {
+      db.userPlugin.findUnique.mockResolvedValue({ enabled: true });
+
+      await expect(loadPluginUnitEnablement(client, 'plg_1', { scopeType: 'Server' })).resolves.toEqual(
+        expect.objectContaining({ retainedConfig: null }),
+      );
+      await expect(loadPluginUnitEnablement(client, 'plg_1', { scopeType: 'User', userId: 'u-1' })).resolves.toEqual(
+        expect.objectContaining({ retainedConfig: null }),
+      );
+    });
+  });
+});
+
+describe('derivePluginUnitDormancy (#1151)', () => {
+  const manifestJudging = (
+    verdict: PluginConfigVerdict,
+    householdSurface = true,
+  ): PluginActiveManifest & { judgeConfig: jest.Mock<PluginConfigVerdict, [unknown]> } => ({
+    requested: [],
+    householdSurface,
+    judgeConfig: jest.fn<PluginConfigVerdict, [unknown]>().mockReturnValue(verdict),
+  });
+
+  it.each(['Server', 'Household', 'User'] as const)(
+    'reads unavailable for a %s unit when the stored manifest cannot be read',
+    (scopeType) => {
+      expect(derivePluginUnitDormancy({ scopeType, manifest: null, retainedConfig: {} })).toBe('unavailable');
+    },
+  );
+
+  it('reads unavailable for a household when the manifest has no household surface', () => {
+    const manifest = manifestJudging('conforms', false);
+
+    expect(derivePluginUnitDormancy({ scopeType: 'Household', manifest, retainedConfig: {} })).toBe('unavailable');
+    // A server-scope plugin's schema is never compiled for a household.
+    expect(manifest.judgeConfig).not.toHaveBeenCalled();
+  });
+
+  it('reads unavailable for a household when the config schema cannot be used', () => {
+    expect(
+      derivePluginUnitDormancy({
+        scopeType: 'Household',
+        manifest: manifestJudging('schema-unusable'),
+        retainedConfig: {},
+      }),
+    ).toBe('unavailable');
+  });
+
+  it('reads needs_configuration for a household whose document the schema rejects', () => {
+    const manifest = manifestJudging('rejected');
+
+    expect(derivePluginUnitDormancy({ scopeType: 'Household', manifest, retainedConfig: { webhookUrl: 42 } })).toBe(
+      'needs_configuration',
+    );
+    expect(manifest.judgeConfig).toHaveBeenCalledWith({ webhookUrl: 42 });
+  });
+
+  it('reads null for a household whose document conforms', () => {
+    expect(
+      derivePluginUnitDormancy({ scopeType: 'Household', manifest: manifestJudging('conforms'), retainedConfig: {} }),
+    ).toBeNull();
+  });
+
+  it("never judges a Server or User unit's configuration (#697, #228)", () => {
+    const manifest = manifestJudging('rejected', false);
+
+    expect(derivePluginUnitDormancy({ scopeType: 'Server', manifest, retainedConfig: null })).toBeNull();
+    expect(derivePluginUnitDormancy({ scopeType: 'User', manifest, retainedConfig: null })).toBeNull();
+    expect(manifest.judgeConfig).not.toHaveBeenCalled();
+  });
+
+  it('fails loud on a scope type outside the union', () => {
+    expect(() =>
+      derivePluginUnitDormancy({
+        scopeType: 'Galaxy' as never,
+        manifest: manifestJudging('conforms'),
+        retainedConfig: {},
+      }),
+    ).toThrow(RangeError);
   });
 });
 

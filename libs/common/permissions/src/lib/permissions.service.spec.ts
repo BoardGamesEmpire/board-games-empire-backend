@@ -3,14 +3,15 @@ import {
   Action,
   CONSENT_UNIT_BINDING_REFUSAL,
   PERMISSION_CATALOG,
-  PLUGIN_REQUESTED_PERMISSIONS_READER,
+  PLUGIN_ACTIVE_MANIFEST_READER,
   PluginGrantScope,
   PluginGrantStatus,
   ResourceType,
   RiskLevel,
   SERVER_SCOPE_SENTINEL,
   User,
-  type PluginRequestedPermissions,
+  type PluginActiveManifestReading,
+  type PluginRequestedPermission,
 } from '@bge/database';
 import { CACHE_REDIS_CLIENT, type FlushClient } from '@bge/redis';
 import {
@@ -57,26 +58,35 @@ function fakeFlushClient(keys: readonly string[] = []) {
 
 type FakeFlushClient = ReturnType<typeof fakeFlushClient>;
 
+/**
+ * A valid reading whose active manifest requests `requested`. The rest of the
+ * manifest (#1151) is not what these cases exercise, so it reads as a
+ * household-scope manifest every document conforms to.
+ */
+function activeManifestReading(requested: readonly PluginRequestedPermission[]): PluginActiveManifestReading {
+  return { valid: true, manifest: { requested, householdSurface: true, judgeConfig: () => 'conforms' } };
+}
+
 describe('PermissionsService', () => {
   let service: PermissionsService;
   let db: MockDatabaseService;
   let cache: Cache;
   let redis: FakeFlushClient;
-  let reader: { read: jest.Mock<PluginRequestedPermissions, [unknown]> };
+  let reader: { read: jest.Mock<PluginActiveManifestReading, [unknown]> };
 
   beforeEach(async () => {
     // A real in-memory cache, not a stub: whether a cached graph still counts
     // as a hit depends on what an eviction wrote since it was cached.
     cache = createCache();
     redis = fakeFlushClient();
-    reader = { read: jest.fn().mockReturnValue({ valid: true, requested: [] }) };
+    reader = { read: jest.fn().mockReturnValue(activeManifestReading([])) };
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
       providers: [
         PermissionsService,
         { provide: PERMISSIONS_CACHE, useValue: cache },
         { provide: CACHE_REDIS_CLIENT, useValue: redis },
-        { provide: PLUGIN_REQUESTED_PERMISSIONS_READER, useValue: reader },
+        { provide: PLUGIN_ACTIVE_MANIFEST_READER, useValue: reader },
       ],
     });
 
@@ -721,7 +731,7 @@ describe('PermissionsService', () => {
           PermissionsService,
           { provide: PERMISSIONS_CACHE, useValue: cache },
           { provide: CACHE_REDIS_CLIENT, useValue: redis },
-          { provide: PLUGIN_REQUESTED_PERMISSIONS_READER, useValue: reader },
+          { provide: PLUGIN_ACTIVE_MANIFEST_READER, useValue: reader },
         ],
       });
 
@@ -776,10 +786,9 @@ describe('PermissionsService', () => {
      */
     const grantRows = (rows: readonly ReturnType<typeof grantRow>[]) => {
       db.pluginGrant.findMany.mockResolvedValue(rows as never);
-      reader.read.mockReturnValue({
-        valid: true,
-        requested: rows.map(({ permissionSlug, scopeType }) => ({ slug: permissionSlug, scopeType })),
-      });
+      reader.read.mockReturnValue(
+        activeManifestReading(rows.map(({ permissionSlug, scopeType }) => ({ slug: permissionSlug, scopeType }))),
+      );
     };
 
     const servedUnitRow = { enabled: true };
@@ -841,13 +850,12 @@ describe('PermissionsService', () => {
         db.permission.findMany.mockResolvedValue([
           makePermission({ slug: 'read:game', riskLevel: RiskLevel.Medium }),
         ] as never);
-        reader.read.mockReturnValue({
-          valid: true,
-          requested: [
+        reader.read.mockReturnValue(
+          activeManifestReading([
             { slug: 'read:game', scopeType: PluginGrantScope.Server },
             { slug: 'update:game', scopeType: PluginGrantScope.Server },
-          ],
-        });
+          ]),
+        );
 
         const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
 
@@ -1128,7 +1136,7 @@ describe('PermissionsService', () => {
       it('confers nothing for a granted decision on a permission the active manifest no longer requests', async () => {
         db.pluginGrant.findMany.mockResolvedValue([grantRow('read:game')] as never);
         db.permission.findMany.mockResolvedValue([makePermission({ slug: 'read:game' })] as never);
-        reader.read.mockReturnValue({ valid: true, requested: [] });
+        reader.read.mockReturnValue(activeManifestReading([]));
 
         const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
 
@@ -1143,10 +1151,9 @@ describe('PermissionsService', () => {
         db.permission.findMany.mockResolvedValue([
           makePermission({ slug: 'update:calendar', ...UNIT_BOUND_RULES.Household }),
         ] as never);
-        reader.read.mockReturnValue({
-          valid: true,
-          requested: [{ slug: 'update:calendar', scopeType: PluginGrantScope.Server }],
-        });
+        reader.read.mockReturnValue(
+          activeManifestReading([{ slug: 'update:calendar', scopeType: PluginGrantScope.Server }]),
+        );
 
         const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
 
@@ -1165,10 +1172,9 @@ describe('PermissionsService', () => {
           makePermission({ slug: 'read:game', ...UNIT_BOUND_RULES.Household }),
           makePermission({ slug: 'update:game', ...UNIT_BOUND_RULES.Household }),
         ] as never);
-        reader.read.mockReturnValue({
-          valid: true,
-          requested: [{ slug: 'read:game', scopeType: PluginGrantScope.Household }],
-        });
+        reader.read.mockReturnValue(
+          activeManifestReading([{ slug: 'read:game', scopeType: PluginGrantScope.Household }]),
+        );
 
         const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
 
@@ -1184,10 +1190,9 @@ describe('PermissionsService', () => {
           { slug: 'plugin|demo-plugin|manage:digest', riskLevel: RiskLevel.Low },
           { slug: 'plugin|demo-plugin|manage:archive', riskLevel: RiskLevel.Low },
         ] as never);
-        reader.read.mockReturnValue({
-          valid: true,
-          requested: [{ slug: 'plugin|demo-plugin|manage:digest', scopeType: PluginGrantScope.Server }],
-        });
+        reader.read.mockReturnValue(
+          activeManifestReading([{ slug: 'plugin|demo-plugin|manage:digest', scopeType: PluginGrantScope.Server }]),
+        );
 
         const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);
 

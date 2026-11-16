@@ -57,6 +57,16 @@ export class PluginConfigSchemaService {
     }
   }
 
+  /**
+   * Compiles and caches a schema, throwing `PluginConfigSchemaUnusableError`
+   * when it cannot be used. `warm` without the silence: for a caller that has
+   * to know the schema is usable before it looks at any document, because an
+   * unusable schema outranks the document's own shape (#1151).
+   */
+  assertUsable(input: Omit<PluginConfigValidationInput, 'config'>): void {
+    this.compiledValidator(input);
+  }
+
   /** Returns every violation (empty when the payload conforms); throws `PluginConfigSchemaUnusableError` when the schema cannot compile. */
   validate(input: PluginConfigValidationInput): readonly PluginConfigIssue[] {
     const validator = this.compiledValidator(input);

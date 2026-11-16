@@ -137,6 +137,22 @@ describe('PluginConfigSchemaService', () => {
         expect((err as PluginConfigSchemaUnusableError).version).toBe('2.1.0');
       }
     });
+
+    describe('assertUsable (#1151)', () => {
+      // Separates "the schema cannot be used" from any document, so a caller
+      // can rank that answer above the document's shape.
+      const assertUsable = (schema: Record<string, unknown>) =>
+        service.assertUsable({ slug: 'alpha', version: '1.0.0', schema });
+
+      it('returns quietly for a schema that compiles', () => {
+        expect(() => assertUsable({ type: 'object' })).not.toThrow();
+      });
+
+      it('throws PluginConfigSchemaUnusableError for a schema that cannot compile, and for an asynchronous one', () => {
+        expect(() => assertUsable({ type: 'no-such-type' })).toThrow(PluginConfigSchemaUnusableError);
+        expect(() => assertUsable({ $async: true })).toThrow(PluginConfigSchemaUnusableError);
+      });
+    });
   });
 
   describe('compiled-validator cache', () => {

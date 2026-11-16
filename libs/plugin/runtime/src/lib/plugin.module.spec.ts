@@ -1,24 +1,24 @@
-import { PLUGIN_REQUESTED_PERMISSIONS_READER } from '@bge/database';
+import { PLUGIN_ACTIVE_MANIFEST_READER } from '@bge/database';
 import { GLOBAL_MODULE_METADATA, MODULE_METADATA } from '@nestjs/common/constants.js';
 import { PluginGrantAuthorityService } from './grants/plugin-grant-authority.service';
 import { PluginDirectoryResolverService } from './loader/plugin-directory-resolver.service';
-import { StoredManifestRequestedPermissionsReader } from './manifest/stored-manifest-requested-permissions.reader';
+import { StoredActiveManifestReader } from './manifest/stored-active-manifest.reader';
 import { MODULE_OPTIONS_TOKEN } from './plugin-module.options';
 import { PluginModule } from './plugin.module';
 
 /**
- * The permissions lib injects the requested-permissions reader optionally,
- * so a missing provider never fails boot: plugin actors would quietly hold
- * nothing. This pins the wiring the api relies on instead (#577).
+ * The permissions lib injects the active-manifest reader optionally, so a
+ * missing provider never fails boot: plugin actors would quietly hold
+ * nothing. This pins the wiring the api relies on instead (#577, #1151).
  */
-describe('PluginModule wiring (#577)', () => {
-  it('provides the requested-permissions reader globally, so the permissions lib can inject it', () => {
+describe('PluginModule wiring (#577, #1151)', () => {
+  it('provides the active-manifest reader globally, so the permissions lib can inject it', () => {
     expect(Reflect.getMetadata(GLOBAL_MODULE_METADATA, PluginModule)).toBe(true);
     expect(Reflect.getMetadata(MODULE_METADATA.PROVIDERS, PluginModule)).toContainEqual({
-      provide: PLUGIN_REQUESTED_PERMISSIONS_READER,
-      useClass: StoredManifestRequestedPermissionsReader,
+      provide: PLUGIN_ACTIVE_MANIFEST_READER,
+      useClass: StoredActiveManifestReader,
     });
-    expect(Reflect.getMetadata(MODULE_METADATA.EXPORTS, PluginModule)).toContain(PLUGIN_REQUESTED_PERMISSIONS_READER);
+    expect(Reflect.getMetadata(MODULE_METADATA.EXPORTS, PluginModule)).toContain(PLUGIN_ACTIVE_MANIFEST_READER);
   });
 });
 

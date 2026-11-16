@@ -1,10 +1,14 @@
 import { PluginGrantScope } from '@bge/database';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
+import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
-import { StoredManifestRequestedPermissionsReader } from './stored-manifest-requested-permissions.reader';
+import { StoredActiveManifestReader } from './stored-active-manifest.reader';
 
-describe('StoredManifestRequestedPermissionsReader (#577)', () => {
-  const reader = new StoredManifestRequestedPermissionsReader(buildPluginModuleOptions({ bgeVersion: '0.0.0' }));
+describe('StoredActiveManifestReader (#577, #1151)', () => {
+  const reader = new StoredActiveManifestReader(
+    buildPluginModuleOptions({ bgeVersion: '0.0.0' }),
+    new PluginConfigSchemaService(),
+  );
 
   const manifest = buildPluginManifest({
     scope: 'household',
@@ -27,16 +31,27 @@ describe('StoredManifestRequestedPermissionsReader (#577)', () => {
     },
   });
 
-  it('maps each requested permission to its decision scope', () => {
+  it('answers the active manifest, mapping each requested permission to its decision scope', () => {
     const result = reader.read({ slug: 'demo-sink', version: '1.2.0', manifestJson: manifest });
 
     expect(result).toEqual({
       valid: true,
-      requested: [
-        { slug: 'plugin|demo-sink|manage:digest', scopeType: PluginGrantScope.Server },
-        { slug: 'read:game:public', scopeType: PluginGrantScope.Household },
-      ],
+      manifest: expect.objectContaining({
+        requested: [
+          { slug: 'plugin|demo-sink|manage:digest', scopeType: PluginGrantScope.Server },
+          { slug: 'read:game:public', scopeType: PluginGrantScope.Household },
+        ],
+        householdSurface: true,
+      }),
     });
+  });
+
+  it('answers a manifest whose config schema judges documents (#1151)', () => {
+    const result = reader.read({ slug: 'demo-sink', version: '1.2.0', manifestJson: manifest });
+
+    // The fixture's schema types webhookUrl as a string.
+    expect(result.valid && result.manifest.judgeConfig({ webhookUrl: 'https://x.test' })).toBe('conforms');
+    expect(result.valid && result.manifest.judgeConfig({ webhookUrl: 42 })).toBe('rejected');
   });
 
   it('reports a manifest whose version disagrees with the row as invalid', () => {

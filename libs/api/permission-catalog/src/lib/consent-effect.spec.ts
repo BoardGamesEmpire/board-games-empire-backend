@@ -126,7 +126,11 @@ describe('loadConsentDecisionsInForce (#772)', () => {
 
   const requestedAt = (...scopes: PluginGrantScope[]) => ({
     valid: true,
-    requested: scopes.map((scopeType) => ({ slug: SLUG, scopeType })),
+    manifest: {
+      requested: scopes.map((scopeType) => ({ slug: SLUG, scopeType })),
+      householdSurface: true,
+      judgeConfig: () => 'conforms',
+    },
   });
 
   // The mock carries every delegate the loader reads; its jest types are not Prisma's.
