@@ -1,6 +1,6 @@
 import { AuditContextService } from '@bge/actor-context';
 import { Controller, Get, Header } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { ServerDiscoveryDto } from './dto/server-discovery.dto';
 import { ServerDiscoveryService } from './server-discovery.service';
@@ -28,6 +28,8 @@ import { ServerDiscoveryService } from './server-discovery.service';
  * on, which do not apply here.
  */
 @ApiTags('discovery')
+@ApiBearerAuth()
+@ApiSecurity('api_key')
 @Controller('discovery')
 export class DiscoveryController {
   constructor(

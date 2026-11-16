@@ -2,6 +2,7 @@ import { AuditContextService } from '@bge/actor-context';
 import { CHECK_POLICIES_KEY } from '@bge/permissions';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { HEADERS_METADATA, INTERCEPTORS_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { DECORATORS } from '@nestjs/swagger';
 import { AllowAnonymous, OptionalAuth } from '@thallesp/nestjs-better-auth';
 import { SERVER_DISCOVERY_PATH } from './constants';
 import { DiscoveryController } from './discovery.controller';
@@ -58,6 +59,12 @@ describe('DiscoveryController (#78)', () => {
     }
 
     expect(Reflect.getMetadata(CHECK_POLICIES_KEY, DiscoveryController.prototype.getServer)).toBeUndefined();
+  });
+
+  it('documents a session and an API key as its sign-in, so the OpenAPI document does not show it as public', () => {
+    expect(Reflect.getMetadata(DECORATORS.API_SECURITY, DiscoveryController)).toEqual(
+      expect.arrayContaining([{ bearer: [] }, { api_key: [] }]),
+    );
   });
 
   it('keeps the camelCase keys the rest of the API uses', () => {
