@@ -109,10 +109,14 @@ export class LineupService {
    * - Both are judged under the event's lock ({@link lockEventForLineupRemoval}),
    *   which a date write, a cancel and a supplier leaving also take, so none
    *   of them changes the answer before the delete, and a supplier leaving
-   *   never reports the same game gone.
+   *   never reports the same game gone. "Started" is judged at the time of
+   *   that read, not when the request began, since the lock may have waited
+   *   past a date's start, as a date's confirm judges it (#1005).
    * - A removal that loses a race, to another removal, the supplier leaving
    *   or a date write, answers 404, as #1064 decided for lost races: whether
-   *   the game left before the lock or while this waited on it.
+   *   the game left before the lock or while this waited on it. So does one
+   *   that loses to the event's delete, which keeps the lineup's rows: the
+   *   event is read again under the lock.
    *
    * The answer is read before the transaction, from the game as first found,
    * so no read follows the commit: a failed one would report a removal that
@@ -147,10 +151,14 @@ export class LineupService {
     const snapshot = await this.db.$transaction(async (tx) => {
       const locked = await lockEventForLineupRemoval(tx, eventId);
 
-      const ahead = locked?.cancelledAt
+      if (!locked) {
+        throw new NotFoundException(t('errors.event.not_found', { id: eventId }));
+      }
+
+      const ahead = locked.cancelledAt
         ? null
         : await tx.eventGame.findFirst({
-            where: { id: lineupGameId, ...lineupStillAhead(initiatedAt) },
+            where: { id: lineupGameId, ...lineupStillAhead(new Date()) },
             select: LINEUP_GAME_SNAPSHOT_SELECT,
           });
 
@@ -191,10 +199,10 @@ export class LineupService {
  * event's dates is still to come.
  */
 function closedCopy(
-  event: { cancelledAt: Date | null } | undefined,
+  event: { cancelledAt: Date | null },
   occurrenceId: string | null,
 ): 'errors.lineup.event_cancelled' | 'errors.lineup.date_closed' | 'errors.lineup.event_closed' {
-  if (event?.cancelledAt) {
+  if (event.cancelledAt) {
     return 'errors.lineup.event_cancelled';
   }
 

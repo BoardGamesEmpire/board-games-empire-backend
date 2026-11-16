@@ -159,7 +159,11 @@ export async function lockEventDates(tx: Prisma.TransactionClient, eventId: stri
 /**
  * Locks the event's row `FOR NO KEY UPDATE` for a host's removal of a lineup
  * game (#769), until the caller's transaction ends, and answers when the
- * event was cancelled, `undefined` for an event that is gone.
+ * event was cancelled, `undefined` for an event that is gone or deleted.
+ *
+ * A delete takes the same lock (`lockLiveEvent`) and keeps the lineup's rows,
+ * so a removal that queued behind one reads the row again here and finds it
+ * deleted, rather than taking a game out of a deleted event's lineup.
  *
  * It is the lock a write to the event's dates takes ({@link writeEventDates}),
  * which conflicts with {@link lockEventDates} and with itself, so a removal
@@ -173,11 +177,11 @@ export async function lockEventForLineupRemoval(
   tx: Prisma.TransactionClient,
   eventId: string,
 ): Promise<{ cancelledAt: Date | null } | undefined> {
-  const [event] = await tx.$queryRaw<{ cancelledAt: Date | null }[]>(
-    Prisma.sql`SELECT cancelled_at AS "cancelledAt" FROM events WHERE id = ${eventId} FOR NO KEY UPDATE`,
+  const [event] = await tx.$queryRaw<{ cancelledAt: Date | null; deletedAt: Date | null }[]>(
+    Prisma.sql`SELECT cancelled_at AS "cancelledAt", deleted_at AS "deletedAt" FROM events WHERE id = ${eventId} FOR NO KEY UPDATE`,
   );
 
-  return event;
+  return event && event.deletedAt === null ? { cancelledAt: event.cancelledAt } : undefined;
 }
 
 /**

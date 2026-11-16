@@ -200,8 +200,8 @@ describe('LineupService (#799)', () => {
   describe('removeLineupGame (#769)', () => {
     beforeEach(() => {
       db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: 'hh-1' } as never);
-      // The event's lock, which answers whether it was cancelled.
-      db.$queryRaw.mockResolvedValue([{ cancelledAt: null }] as never);
+      // The event's lock, which answers whether it was cancelled or deleted.
+      db.$queryRaw.mockResolvedValue([{ cancelledAt: null, deletedAt: null }] as never);
     });
 
     /** What the read of the game finds, then the read under the event's lock. */
@@ -278,7 +278,7 @@ describe('LineupService (#799)', () => {
 
         const [[lock]] = db.$queryRaw.mock.calls;
         expect(rawQueryText(lock)).toBe(
-          'SELECT cancelled_at AS "cancelledAt" FROM events WHERE id = ? FOR NO KEY UPDATE',
+          'SELECT cancelled_at AS "cancelledAt", deleted_at AS "deletedAt" FROM events WHERE id = ? FOR NO KEY UPDATE',
         );
         expect((lock as unknown as Prisma.Sql).values).toEqual(['event-1']);
         expect(db.eventGame.findFirst).toHaveBeenLastCalledWith({
@@ -306,6 +306,57 @@ describe('LineupService (#799)', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
+    // The lock may wait past a date's start, so the read under it judges the
+    // lineup at its own time, as a date's confirm does (#1005), not at the
+    // time the request began.
+    it('judges whether the lineup has started at the time of the read under the lock (#769)', async () => {
+      jest.useFakeTimers({
+        now: new Date('2026-11-20T17:59:59Z'),
+        doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask', 'setTimeout', 'setInterval'],
+      });
+
+      try {
+        const afterTheWait = new Date('2026-11-20T18:00:01Z');
+        db.$queryRaw.mockImplementation((() => {
+          jest.setSystemTime(afterTheWait);
+
+          return Promise.resolve([{ cancelledAt: null, deletedAt: null }]);
+        }) as never);
+        reads(lineupRow('eg-1', 'att-1'), snapshotRow('eg-1', 'att-1'));
+        db.eventGame.deleteMany.mockResolvedValue({ count: 1 });
+
+        await service.removeLineupGame('event-1', 'eg-1');
+
+        expect(db.eventGame.findFirst).toHaveBeenLastCalledWith({
+          where: { id: 'eg-1', ...lineupStillAhead(afterTheWait) },
+          select: LINEUP_GAME_SNAPSHOT_SELECT,
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    // A delete takes the same lock and keeps the lineup's rows, so a removal
+    // that queued behind it would otherwise take a game out of a deleted
+    // event's lineup and notify its attendees. A household's delete removes
+    // the row outright. Either answers the event's 404, as a request arriving
+    // after the delete would.
+    it.each([
+      { state: 'deleted', lock: [{ cancelledAt: null, deletedAt: new Date('2026-11-01T00:00:00Z') }] },
+      { state: 'gone', lock: [] },
+    ])('answers 404 when the event is $state under the lock, removing nothing (#769)', async ({ lock }) => {
+      reads(lineupRow('eg-1', 'att-1'), snapshotRow('eg-1', 'att-1'));
+      db.$queryRaw.mockResolvedValue(lock as never);
+
+      await expect(service.removeLineupGame('event-1', 'eg-1')).rejects.toMatchObject({
+        status: 404,
+        response: t('errors.event.not_found', { id: 'event-1' }),
+      });
+      expect(db.eventGame.findFirst).toHaveBeenCalledTimes(1);
+      expect(db.eventGame.deleteMany).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
     // Every write that deletes lineup games takes the event's lock, so this
     // is a backstop for a delete that reaches the row another way.
     it('answers 404 when the game left the lineup after it was read (#769)', async () => {
@@ -325,7 +376,7 @@ describe('LineupService (#799)', () => {
       { parent: "the event's own game", occurrenceId: null },
     ])('answers 409 LINEUP_STARTED for $parent of a cancelled event (#769)', async ({ occurrenceId }) => {
       reads({ ...lineupRow('eg-1', 'att-1'), occurrenceId });
-      db.$queryRaw.mockResolvedValue([{ cancelledAt: new Date('2026-11-01T00:00:00Z') }] as never);
+      db.$queryRaw.mockResolvedValue([{ cancelledAt: new Date('2026-11-01T00:00:00Z'), deletedAt: null }] as never);
       db.eventGame.count.mockResolvedValue(1);
 
       await expect(service.removeLineupGame('event-1', 'eg-1')).rejects.toMatchObject({
