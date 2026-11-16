@@ -65,4 +65,9 @@ export function assertHeldConfigSatisfiesGate(
   if (dormancy === 'needs_configuration') {
     throw new PluginUnitConfigRequiredError(manifest.slug, configDocumentIssues(configSchema, target, retainedConfig));
   }
+
+  // Every dormancy refuses above, so only null reaches here. A new dormancy
+  // value fails to compile on this line until the gate decides how to refuse
+  // it (#1151).
+  dormancy satisfies null;
 }

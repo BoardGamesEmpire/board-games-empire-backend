@@ -222,8 +222,10 @@ export class HouseholdPluginsController {
     description:
       'PLUGIN_CONSENT_ACT_STALE: the plugin or a permission risk changed since the consent surface was read; ' +
       'read it again and answer again. PLUGIN_CONSENT_ACT_UNGRANTABLE: a required permission cannot be granted ' +
-      'here, which only a server admin can fix. PLUGIN_UNIT_CONFIG_REQUIRED: the plugin needs household ' +
-      'configuration and none valid was sent or kept (issues[] names what to fix).',
+      'here, which only a server admin can fix. PLUGIN_UNIT_CONFIG_REQUIRED: no config was sent, and the ' +
+      "configuration the unit would hold (its retained one, or an empty one) does not fit the manifest's " +
+      'config.schema, or this is a first switch-on of a plugin that sets requiresHouseholdConfig ' +
+      '(issues[] names what to fix, and is empty in that last case).',
   })
   @ApiResponse({
     status: Http.UnprocessableEntity,
