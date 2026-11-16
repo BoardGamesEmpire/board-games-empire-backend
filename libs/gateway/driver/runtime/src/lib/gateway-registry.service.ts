@@ -54,6 +54,12 @@ interface CachedDriver {
   driver: DataGatewayDriver;
   configHash: string;
   origin: DriverOrigin;
+
+  /**
+   * For a driver the plugin driver source built, the install of the plugin
+   * it was built from: its `installedAt`, which a reinstall rewrites (#1083).
+   */
+  installedAt?: Date;
 }
 
 interface FailureTrack {
@@ -751,14 +757,15 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
    * plugin's reasons hold with or without a capability.
    *
    * It is more than a question. When it finds a plugin DataGateway's row
-   * disabled, or its plugin not loaded, it also drops what this process
-   * holds for it ({@link dropPluginDriver}). Nothing else would. Uninstalling
-   * a plugin disables its row, as does an update that moves it out of the
+   * disabled, its plugin not loaded, or its driver built from an earlier
+   * install of the plugin, it also drops what this process holds for it
+   * ({@link dropPluginDriver}). Nothing else would. Uninstalling a plugin
+   * disables its row, as does an update that moves it out of the
    * data-gateway category, and neither publishes a config event. A driver
    * that isn't disposed keeps the plugin's handles and timers until the
    * process restarts. One whose plugin isn't loaded reaches a copy that is
-   * gone, or an earlier install's. The next use builds a driver from the
-   * copy loaded then.
+   * gone, and one built from an earlier install reaches that install's copy.
+   * The next use builds a driver from the copy loaded then.
    *
    * No other answer touches the cache. A plugin that is only switched off
    * keeps its driver, unused, for when it is switched on again: disposing it
@@ -791,6 +798,14 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
 
         return 'plugin_not_loaded';
       }
+
+      // `isLoaded` answers for the install the row names now. A reinstall
+      // between two uses that no decision saw, the row disabled and enabled
+      // again, leaves the earlier install's driver cached, so it is dropped
+      // here and the next use builds one from this install.
+      if (this.heldForAnotherInstall(gatewayId, row.plugin)) {
+        this.dropPluginDriver(gatewayId);
+      }
     }
 
     return capability === undefined ? null : routingRefusal(row, capability);
@@ -822,8 +837,20 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
   }
 
   /**
+   * Whether the driver cached for a plugin DataGateway was built from an
+   * install of its plugin other than `plugin`'s. Switching the plugin off and
+   * on keeps its install, and so its driver (#1083).
+   */
+  private heldForAnotherInstall(gatewayId: string, plugin: RoutedPlugin): boolean {
+    const cached = this.clients.get(gatewayId);
+
+    return cached?.origin === 'plugin' && cached.installedAt?.getTime() !== plugin.installedAt.getTime();
+  }
+
+  /**
    * Drops what this process holds for a plugin DataGateway whose row is
-   * disabled or whose plugin isn't loaded: the cached driver, which is
+   * disabled, whose plugin isn't loaded, or whose driver was built from an
+   * earlier install of its plugin: the cached driver, which is
    * disposed, and a driver still being built or interviewed, which is
    * discarded when done instead of cached. That one was built from a copy of
    * the plugin this decision found gone, and cached, it would be served once
@@ -965,8 +992,12 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     }
 
     // No config hash: no connection fields went into the driver, so no
-    // 'updated' event can outdate it.
-    await this.interviewAndCache({ gatewayId, driver, configHash: '', origin: 'plugin' }, generation);
+    // 'updated' event can outdate it. A reinstall can, so the install it was
+    // built from is kept with it.
+    await this.interviewAndCache(
+      { gatewayId, driver, configHash: '', origin: 'plugin', installedAt: plugin.installedAt },
+      generation,
+    );
   }
 
   /**

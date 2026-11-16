@@ -210,6 +210,48 @@ describe("The gateway registry and a plugin DataGateway's row (#1083)", () => {
     expect(source.build).toHaveBeenCalledTimes(1);
   });
 
+  // Between two uses the plugin was uninstalled and installed again, and no
+  // routing decision saw its row disabled. The source answers for the
+  // install the row names now, so it says loaded, and the driver held is the
+  // earlier install's, reaching a copy that is gone.
+  it('drops the driver of an earlier install of the plugin and builds one from the install the row names now (#1083)', async () => {
+    interviewedRow(GW);
+    const earlier = makeDriver();
+    const reinstalled = makeDriver();
+    source.build.mockResolvedValueOnce(earlier).mockResolvedValueOnce(reinstalled);
+    await expect(service.resolve(GW, Search)).resolves.toBe(earlier);
+
+    const installedAt = new Date('2026-11-02T00:00:00Z');
+    table.patch(GW, { plugin: servedPlugin({ installedAt }) });
+
+    await expect(service.resolve(GW, Search)).resolves.toBe(reinstalled);
+    expect(earlier.dispose).toHaveBeenCalledTimes(1);
+    expect(source.build).toHaveBeenLastCalledWith(GW, expect.objectContaining({ installedAt }));
+  });
+
+  // The build had begun from the earlier install's copy. Its own call gets
+  // that driver, as a call already under way does; the next decision drops it.
+  it('drops a driver whose build finished after the plugin was reinstalled, at the next routing decision (#1083)', async () => {
+    interviewedRow(GW);
+    const earlier = makeDriver();
+    const reinstalled = makeDriver();
+    let finishBuild!: (driver: DataGatewayDriver) => void;
+    source.build
+      .mockReturnValueOnce(new Promise<DataGatewayDriver>((resolve) => (finishBuild = resolve)))
+      .mockResolvedValueOnce(reinstalled);
+
+    const resolving = service.resolve(GW, Search);
+    await settle();
+    expect(source.build).toHaveBeenCalledTimes(1);
+
+    table.patch(GW, { plugin: servedPlugin({ installedAt: new Date('2026-11-02T00:00:00Z') }) });
+    finishBuild(earlier);
+    await expect(resolving).resolves.toBe(earlier);
+
+    await expect(service.resolve(GW, Search)).resolves.toBe(reinstalled);
+    expect(earlier.dispose).toHaveBeenCalledTimes(1);
+  });
+
   // A remote DataGateway's driver is the config events' to take down, as before.
   it('leaves a remote row its driver when a routing decision refuses it', async () => {
     table.seed({ id: 'remote' });
