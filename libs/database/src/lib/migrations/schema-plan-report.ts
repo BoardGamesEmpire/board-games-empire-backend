@@ -2,6 +2,15 @@ import { indent, type PlanReport } from '../catalog/catalog-plan-report';
 import type { MigrationState } from './migration-state';
 
 /**
+ * The second of `divergedFixLines`, alone: the fix that holds before this
+ * build's migrations have applied, when deleting a row would still be early
+ * (#1148).
+ */
+export const DEVELOPMENT_DATABASE_RESET_LINE =
+  "On a development database, for another branch's migration left by switching branches over it, " +
+  "`npm run db:reset` rebuilds the database from this build's migrations, deleting its data.";
+
+/**
  * The schema half of what `npm run db:plan` prints (#236), first, as the boot
  * reads it first: `_prisma_migrations` against the migration manifest this
  * build was generated from, classified as the boot classifies it. Same
@@ -40,7 +49,9 @@ function behindLines({ pending, unknown }: MigrationState): string[] {
   // The run that applies the pending migrations comes after every row already
   // in the ledger, so each unknown one then reads as a rewritten history
   // (#1148): the boot warns and runs the seeds. A pending migration that
-  // repeats a renamed one's changes fails on them, so the fix comes first.
+  // repeats a renamed one's changes fails on them. No DELETE yet: until the
+  // pending migrations apply, this build's migrations hold none of a renamed
+  // one's changes, and deleting its row would not stop the repeat failing.
   if (unknown.length > 0) {
     lines.push(
       '',
@@ -48,7 +59,9 @@ function behindLines({ pending, unknown }: MigrationState): string[] {
         'migrations above would be: after applying them, the boot finds the migration history rewritten, warns, and ' +
         'runs the seeds. If one was renamed and a migration above repeats its changes, applying fails on them.',
       ...unknown.map(indent),
-      ...divergedFixLines(unknown),
+      'Delete no row yet: plan again after the migrations above apply, and this report names each rewritten ' +
+        "migration's row and how to delete it.",
+      DEVELOPMENT_DATABASE_RESET_LINE,
     );
   }
   lines.push(
@@ -115,8 +128,7 @@ export function divergedFixLines(names: readonly string[]): string[] {
   return [
     "For one renamed or deleted, whose changes this build's migrations already made, delete its ledger row: " +
       names.map((name) => `DELETE FROM _prisma_migrations WHERE migration_name = '${name}';`).join(' '),
-    "On a development database, for another branch's migration left by switching branches over it, " +
-      "`npm run db:reset` rebuilds the database from this build's migrations, deleting its data.",
+    DEVELOPMENT_DATABASE_RESET_LINE,
   ];
 }
 

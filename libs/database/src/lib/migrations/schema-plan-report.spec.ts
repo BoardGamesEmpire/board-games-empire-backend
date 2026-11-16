@@ -32,9 +32,10 @@ describe('describeSchemaReport', () => {
     expect(report.lines.at(-1)).toBe('Schema: behind by 2 migration(s).');
   });
 
-  it('names the migrations this build does not know beside the pending ones, says applying makes the history rewritten, and gives both fixes (#1148)', () => {
+  it('names the migrations this build does not know beside the pending ones, says applying makes the history rewritten, and defers deleting rows until they apply (#1148)', () => {
     // After the pending migrations apply, in a run after every row already in
-    // the ledger, each unknown migration reads as a rewritten history.
+    // the ledger, each unknown migration reads as a rewritten history. Before
+    // then no build's migrations hold a renamed one's changes, so no DELETE.
     const report = describeSchemaReport(
       state({ kind: 'behind', pending: ['20260301_permissions'], unknown: ['20260215_renamed_away'] }),
     );
@@ -44,7 +45,9 @@ describe('describeSchemaReport', () => {
     const text = report.lines.join('\n');
     expect(text).toMatch(/the boot finds the migration history rewritten, warns, and runs the seeds/);
     expect(text).toMatch(/applying fails on them/);
-    expect(text).toContain("DELETE FROM _prisma_migrations WHERE migration_name = '20260215_renamed_away';");
+    expect(text).not.toContain('DELETE FROM');
+    expect(text).toMatch(/Delete no row yet: plan again after the migrations above apply/);
+    expect(text).toMatch(/On a development database, .*`npm run db:reset`/);
     expect(text).not.toMatch(/left alone/);
     expect(report.lines.at(-1)).toBe('Schema: behind by 1 migration(s).');
   });

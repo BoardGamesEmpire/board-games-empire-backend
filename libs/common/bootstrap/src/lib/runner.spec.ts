@@ -593,9 +593,11 @@ describe('the boot sequence', () => {
       expect(warnings()[0]).toContain('Running the seeds and the data migrations');
     });
 
-    it('behind with a migrator whose migrations fail over a renamed migration: names the old row and its fix before refusing (#1148)', async () => {
+    it('behind with a migrator whose migrations fail over a renamed migration: names the old row, and puts resolving the failed migration before deleting any row (#1148)', async () => {
       // The new name repeats the old one's changes, so applying it fails on
-      // them; the row under the old name is what explains the refusal.
+      // them; the row under the old name is what explains the refusal. Deleting
+      // that row alone recovers nothing while the new name stays failed, and the
+      // failure may have nothing to do with it, so the warning prints no DELETE.
       const ledger = new FakeLedger([
         finishedAt('20260109_init', EARLIER),
         finishedAt('20260219_games', EARLIER),
@@ -622,7 +624,9 @@ describe('the boot sequence', () => {
       expect(seeder.runs).toBe(0);
       expect(warnings()).toHaveLength(1);
       expect(warnings()[0]).toContain(RENAMED);
-      expect(warnings()[0]).toContain(`DELETE FROM _prisma_migrations WHERE migration_name = '${RENAMED}';`);
+      expect(warnings()[0]).toMatch(/Resolve the failed migration first.*then.*delete its row/);
+      expect(warnings()[0]).not.toContain('DELETE FROM');
+      expect(warnings()[0]).toMatch(/On a development database, .*`npm run db:reset`/);
       expect(warnings()[0]).not.toMatch(/rollback/);
     });
 

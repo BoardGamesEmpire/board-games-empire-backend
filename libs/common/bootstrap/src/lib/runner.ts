@@ -1,5 +1,5 @@
 import type { MigrationState, MigrationStateKind } from '@bge/database';
-import { classifyMigrationState, divergedFixLines } from '@bge/database';
+import { classifyMigrationState, DEVELOPMENT_DATABASE_RESET_LINE, divergedFixLines } from '@bge/database';
 import { SpanStatusCode, trace, type Span, type Tracer } from '@opentelemetry/api';
 import { DATABASE_URL_VARIABLE, MIGRATION_URL_VARIABLE, type MigrationCredential } from './migration-credential';
 import {
@@ -226,13 +226,17 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
     // The warning that would have come after migrating, when migrating fails
     // instead: a pending migration that repeats a renamed one's changes fails
     // on them, and the row left under the old name is the explanation (#1148).
+    // No DELETE here: while the pending migration stays failed, deleting the
+    // old row recovers nothing, and the failure may have another cause.
     const warnAboutUnknownAfterFailedMigrate = (state: MigrationState): void => {
       if (state.unknown.length === 0) return;
       logger.warn(
         `Applying this build's migrations failed over a database holding ${state.unknown.length} migration(s) it ` +
           `does not know (${state.unknown.join(', ')}). A migration renamed or deleted after the database applied ` +
           'it leaves its row behind, and a pending migration repeating its changes fails on them. ' +
-          divergedFixLines(state.unknown).join(' '),
+          'Resolve the failed migration first: the next boot names it and how to mark it. If one of these was ' +
+          "renamed or deleted, then, once this build's migrations hold its changes, delete its row from " +
+          `_prisma_migrations. ${DEVELOPMENT_DATABASE_RESET_LINE}`,
       );
     };
 
