@@ -36,3 +36,10 @@ export const authPath = (segment: string): string => {
  * breaking change to the document's shape.
  */
 export const WELL_KNOWN_SCHEMA_VERSION = 1;
+
+/**
+ * Schema version of signed-in server discovery (#78), versioned apart from the
+ * bge-identity document. Clients parse known fields and ignore unknown ones;
+ * this is bumped only on a breaking change to the document's shape.
+ */
+export const SERVER_DISCOVERY_SCHEMA_VERSION = 1;
