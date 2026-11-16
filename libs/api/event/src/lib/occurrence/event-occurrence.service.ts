@@ -10,7 +10,6 @@ import {
   OccurrenceStatus,
   Prisma,
   ResourceType,
-  type EventOccurrence,
 } from '@bge/database';
 import { CodedHttpException, t } from '@bge/i18n';
 import { AbilityService, resolveActingUserIdOrNull, ScopeComposer } from '@bge/permissions';
