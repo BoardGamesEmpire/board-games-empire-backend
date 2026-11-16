@@ -5,26 +5,59 @@
 
 ## Compatible servers
 
-BGE speaks the Redis protocol and should work with any server that implements
-it. **Only Redis is actually exercised.** The e2e suite provisions a stock Redis
-container and nothing in CI starts anything else, so every other row below is
-expectation rather than measurement. Written that way on purpose: this table
-used to be headed "Tested deployments" over three ticks, which was true of the
-first row only.
+BGE speaks the Redis protocol and should work with any Redis-compatible server.
+The api e2e suite runs on each setup below that has a name: the `e2e` job in
+`.github/workflows/ci.yml` runs it on Redis for every pull request that affects
+the api, and `.github/workflows/redis-compat.yml` runs it on the others weekly,
+and on demand. A setup stays in those jobs only while the suite passes on it in
+full. In the Status column:
 
-| Server                   | Status               | Notes                                                               |
-| ------------------------ | -------------------- | ------------------------------------------------------------------- |
-| Redis OSS                | ✅ Tested            | Reference implementation; the container the e2e suite runs against  |
-| Redis Stack / Enterprise | ⚠ Expected, untested | Redis OSS plus modules and tooling; nothing in CI starts either     |
-| Valkey                   | ⚠ Expected, untested | What the cache client (`iovalkey`) targets; AWS ElastiCache default |
-| Dragonfly                | ⚠ Expected, untested | Multi-threaded; see the queue-naming and Streams notes below        |
-| KeyDB                    | ⚠ Expected, untested | Multi-threaded Redis fork                                           |
-| Garnet                   | ⚠ Expected, untested | Microsoft's durable cache/store                                     |
+- **✅ Tested**: the suite passes, and no measured gap is known.
+- **⚠ with a reason**: the suite passes, but a measured gap remains, named in
+  the row.
+- **⚠ Expected, untested**: nothing has been run, so the row is expectation
+  rather than measurement.
 
-Verifying these — and restoring a ✅ where one is earned — is tracked in #462.
-If you run BGE against any of them, that issue is where the evidence goes.
+The suite runs the api, and a worker where a spec needs one, with all three
+connections (see [Connection topology](#connection-topology)) on the one
+Redis-compatible server. It shows that BGE works there, not how fast: it is not
+a load test, and no speed was measured on any setup.
 
-Mixing implementations is fine — see [Split-server deployments](#split-server-deployments).
+The suite starts neither the coordinator nor the gateway worker, so it runs no
+game import. The game-import flow was probed on its own instead (2026-11-16,
+BullMQ 5.81): a parent job on `{bge.games.import}` with its fetch child on
+`{bge.gateway.fetch}`, each completed by a BullMQ worker. The table's
+"Game-import flow" column gives what that probe found.
+
+| Server                   | Suite setup                 | Status                                      | Game-import flow (probed) | Notes                                                                                                                                                                                                               |
+| ------------------------ | --------------------------- | ------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Redis OSS 7              | `redis`                     | ✅ Tested                                   | ✅ Completes              | Reference implementation; the default, and what `ci.yml` runs                                                                                                                                                       |
+| Valkey 9.0               | `valkey`                    | ✅ Tested                                   | ✅ Completes              | What the cache client (`iovalkey`) targets; AWS ElastiCache default                                                                                                                                                 |
+| KeyDB 6.3                | `keydb`                     | ✅ Tested                                   | ✅ Completes              | Multi-threaded Redis fork; see [KeyDB](#keydb--two-limits-bge-works-around)                                                                                                                                         |
+| Dragonfly 2.1            | `dragonfly-undeclared-keys` | ✅ Tested                                   | ✅ Completes              | Run with `--default_lua_flags=allow-undeclared-keys`; by Dragonfly's account, each script locks the whole store                                                                                                     |
+| Dragonfly 2.1            | `dragonfly-hashtags`        | ⚠ Suite passes; game imports never complete | ❌ Never completes        | Run with `--cluster_mode=emulated --lock_on_hashtags`; if your server imports games, use `dragonfly-undeclared-keys` instead (see [game imports on Dragonfly](#dragonfly--game-imports-need-allow-undeclared-keys)) |
+| Redis Stack / Enterprise | —                           | ⚠ Expected, untested                        | Untested                  | Redis OSS plus modules and tooling; nothing in CI starts either                                                                                                                                                     |
+| Garnet                   | —                           | ⚠ Expected, untested                        | Untested                  | Microsoft's durable cache/store                                                                                                                                                                                     |
+
+Dragonfly with neither flag set refuses a Lua script that reaches a key the
+script was not given, and BullMQ's scripts do: probed with no flags, it refused
+to add even a single job. It needs one of the two flag sets; see
+[Dragonfly for cache + queue](#dragonfly-for-cache--queue-valkey-for-sockets).
+`apps/api-e2e/src/support/redis-server.ts` names the image each setup starts.
+Each is pinned to one version, except Redis's `redis:7-alpine`, which follows
+the latest Redis 7.
+
+To run the suite on one of them yourself, name its setup in
+`BGE_E2E_REDIS_SERVER` ([`apps/api-e2e/README.md`](../apps/api-e2e/README.md)
+lists the names). Unset, it is `redis`. Like every run of the suite, it needs a
+running Docker daemon:
+
+```sh
+BGE_E2E_REDIS_SERVER=valkey npm run nx -- e2e @boardgamesempire/api-e2e
+```
+
+Each connection can point at a different Redis-compatible server — see
+[Split-server deployments](#split-server-deployments).
 
 ## Connection topology
 
@@ -126,8 +159,32 @@ Each connection can target a different server entirely. Common combinations:
 
 ### Dragonfly for cache + queue, Valkey for sockets
 
-Dragonfly's multi-core performance benefits cache and queue throughput.
-Valkey's mature streams implementation handles the Socket.IO adapter.
+The suite runs every connection on one Redis-compatible server, so it has not
+run this mix as such. It passes with all three connections on Valkey, and with
+all three on Dragonfly started with either flag set below.
+
+Out of the box, Dragonfly refuses a Lua script that reaches a key the script was
+not given, answering `script tried accessing undeclared key` (its
+[scripting documentation](https://www.dragonflydb.io/docs/managing-dragonfly/scripting)
+says so). BullMQ's scripts reach such keys: probed with no flags on 2026-11-16,
+Dragonfly 2.1 refused to add even a single job. Dragonfly's
+[BullMQ guide](https://www.dragonflydb.io/docs/integrations/bullmq) asks for one
+of two flag sets, and the suite passes on each. If your server imports games,
+start the queue's Dragonfly with the first:
+
+- **`--default_lua_flags=allow-undeclared-keys`** (setup
+  `dragonfly-undeclared-keys`). Lets every script reach any key. By Dragonfly's
+  guide, it locks the whole store for each script and slows things down
+  considerably. The game-import flow completes on it (probed).
+- **`--cluster_mode=emulated --lock_on_hashtags`** (setup `dragonfly-hashtags`).
+  By Dragonfly's documentation, it locks by hash tag instead of by key, each
+  queue belongs to one thread, and queues on different tags can be worked on in
+  parallel. BGE's game imports never complete on it today, because the import's
+  two queues carry different hash tags; see
+  [game imports on Dragonfly](#dragonfly--game-imports-need-allow-undeclared-keys).
+
+BGE has measured the speed of neither: the suite shows that BGE works on them,
+not how fast.
 
 ```bash
 # Cache → Dragonfly
@@ -146,8 +203,8 @@ REDIS_BULLMQ_PORT=6379
 REDIS_BULLMQ_DATABASE=2
 ```
 
-Note that database indices need not match across servers — each connection's
-`*_DATABASE` is independent.
+Note that database indices need not match across Redis-compatible servers —
+each connection's `*_DATABASE` is independent.
 
 ### Managed cache, self-hosted queue and sockets
 
@@ -262,24 +319,59 @@ implementation) is required for game search and import to function.
 
 ### BullMQ queue naming — the curly braces
 
-BullMQ queue names in BGE are wrapped in curly braces (`{bge.games.import}`,
-`{bge.gateway.fetch}`). Braces are **Redis Cluster hash tags**, a Redis feature
-that Valkey Cluster implements identically: when a key contains `{...}`, only the
-substring inside the braces is hashed to pick a slot, which is how multi-key
-operations are kept on one node.
+Every BullMQ queue name in BGE is wrapped in curly braces:
 
-On a **standalone** server — which is every deployment this document describes —
-braces are ordinary characters in a key name and change nothing.
+- `{bge.games.import}`
+- `{bge.gateway.fetch}`
+- `{bge.gateway.vocabulary}`
+- `{bge.media.contribution-sweep}`
+- `{bge.friendship.extended-network}`
+- `{bge.mail.delivery}`
+- `{bge.webhooks.delivery}`
+- `{bge.feedback.delivery}`
 
-Dragonfly reuses the same bracketed portion for **thread affinity**, so each
-queue's commands land on one core. That is an additional Dragonfly-specific
-effect rather than the reason the braces are there, and it is taken from
-Dragonfly's own documentation, never measured here (#462).
+Braces are **Redis Cluster hash tags**, a Redis feature that Valkey Cluster
+implements identically: when a key contains `{...}`, only the substring inside
+the braces is hashed to pick a slot, which is how multi-key operations are kept
+on one node. BullMQ puts a queue's name in each of its keys
+(`bull:{bge.games.import}:wait`, ...), so all of them share its tag.
+
+The `Check BullMQ queue hash tags` step in `.github/workflows/ci.yml` keeps this
+true on every pull request. It runs
+`libs/scripts/src/bin/check-queue-hash-tags.js`, which finds every place in
+`apps/` and `libs/` that registers or names a queue, and fails on a name with no
+hash tag, or on one it cannot follow to a single string literal.
+
+Plugin queues follow the same rule. Nothing registers a plugin's queues with
+BullMQ yet; whatever does must register each one's full name in braces,
+`{plugin:<slug>:<queue>}`, so its keys share one tag.
+
+This document describes standalone Redis-compatible servers only, not
+clusters. On a **standalone** Redis, Valkey or KeyDB, braces are ordinary
+characters in a key name and change nothing.
+
+Dragonfly reads them even on a single Redis-compatible server. In the
+`dragonfly-hashtags` setup (`--cluster_mode=emulated --lock_on_hashtags`),
+Dragonfly's documentation says it assigns each queue to a thread by the tag and
+locks by the tag, and its BullMQ guide asks for hash-tagged queue names there,
+with one shared tag for queues in a parent/child relationship. The suite passes
+on that setup with these names, and measured nothing about speed. The
+game-import flow, which the suite does not run, spans two tags and never
+completes there; see
+[game imports on Dragonfly](#dragonfly--game-imports-need-allow-undeclared-keys).
+
+Emulated cluster mode is still a single Redis-compatible server, and it does
+not raise `CROSSSLOT`: a cross-slot `MGET` and the rate limiter's two-key script
+both succeed on it (probed 2026-11-16). So of the three cases in the callout
+below, the rate limiter and the permission-graph cache concern clustered Redis
+and Valkey only. The game-import queues matter on `dragonfly-hashtags` too, as
+above, where the import fails with no error reaching BGE.
 
 > **If you run clustered Redis or Valkey, read this.** BGE neither configures nor
-> tests clustered mode. The two queue names above carry **different** hash tags,
-> so their keys hash to different slots — and the game-import flow spans both
-> queues through a single `FlowProducer.add`, which is a multi-key operation.
+> tests clustered mode. The game-import queues, `{bge.games.import}` and
+> `{bge.gateway.fetch}`, carry **different** hash tags, so their keys hash to
+> different slots — and the game-import flow spans both queues through a single
+> `FlowProducer.add`, which is a multi-key operation.
 > Under a cluster that combination raises `CROSSSLOT`. Running BGE clustered
 > needs the flow's queues brought under one tag first; the braces as they stand
 > do not make BGE cluster-compatible.
@@ -309,22 +401,50 @@ Dragonfly's own documentation, never measured here (#462).
 > loads its caller's graph from Postgres. Nothing stale is served; the cache is
 > simply off. The same fix applies, held back for the same reason.
 
-### Dragonfly — Streams edge cases
+### Dragonfly — game imports need `allow-undeclared-keys`
 
-Dragonfly's streams implementation is **expected** to handle the BGE workload
-(Socket.IO cross-instance event distribution), but that has not been verified
-here — no BGE test has run against Dragonfly at any scale (#462). If you operate
-at high WebSocket throughput (thousands of concurrent connections, sustained
-high event rates), read the Dragonfly migration guide for stream-related caveats
-rather than relying on this paragraph.
+A game import is a BullMQ flow: a parent job on `{bge.games.import}` with one
+fetch child on `{bge.gateway.fetch}`
+(`libs/api/game-import/src/lib/flows/import-flow.builder.ts`), and an
+expansion's import has the same shape. The two queues carry different hash tags,
+while Dragonfly's BullMQ guide says queues in a parent/child relationship should
+share one.
 
-### Valkey — no caveats expected
+On the `dragonfly-hashtags` setup that mismatch stops every game import. Probed
+on 2026-11-16 (BullMQ 5.81, Dragonfly 2.1): adding the flow writes the parent,
+but the script that adds the child reaches the parent's job key under the other
+tag and is refused (`script tried accessing undeclared key`). BullMQ checks only
+the parent's result, so the add succeeds with no error, the fetch job never
+exists, and the import waits for it forever. The api e2e suite runs no game
+import, so its pass on this setup does not cover this.
 
-Valkey is the closest drop-in replacement for Redis, and the cache client
-(`iovalkey`) is written for it, so every BGE component is expected to work
-against Valkey identically. "No caveats" is a prediction rather than a result —
-like the rest of the table, it is untested here (#462). AWS ElastiCache
-Serverless defaults to Valkey as of 2025.
+The same flow completes on `dragonfly-undeclared-keys`, and on Redis, Valkey and
+KeyDB. So if your server imports games and its queue connection is on
+Dragonfly, start Dragonfly with `--default_lua_flags=allow-undeclared-keys`. In
+the same probe, the flow also completed on `dragonfly-hashtags` once both queues
+shared one tag (`{bge.games}.import` and `{bge.games}.fetch`), but BGE's queue
+names have not changed.
+
+### Dragonfly — Streams on one process
+
+The suite passes with the Socket.IO streams adapter on Dragonfly, in both
+setups, its WebSocket specs included. It runs one api process, though, so
+nothing here has sent events from one api process to another through Dragonfly,
+or run Dragonfly at high WebSocket throughput (thousands of concurrent
+connections, sustained high event rates).
+
+### Valkey — no caveats
+
+Valkey 9.0 passes the suite with no Valkey-specific change in BGE. It is the
+closest drop-in replacement for Redis, and the cache client (`iovalkey`) is
+written for it. AWS ElastiCache Serverless defaults to Valkey as of 2025.
+
+### KeyDB — two limits BGE works around
+
+KeyDB 6.3 holds a command sent behind a `SCAN` of `COUNT` 100 or more on the
+same connection until that connection sends again, so BGE scans with a `COUNT`
+under 100. It is a fork of Redis 6 and rejects `PEXPIRE ... NX`, an option Redis
+7.0 added, so BGE's Lua scripts don't use it.
 
 ## Library choices
 
