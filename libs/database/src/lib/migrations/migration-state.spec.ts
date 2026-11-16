@@ -111,14 +111,16 @@ describe('classifyMigrationState', () => {
   });
 
   // A migration renamed or deleted on master, or another branch's migration
-  // left by switching branches over one database, finished before migrations
-  // this build knows. A rollback leaves the newer build's migrations finishing
-  // last. Decided by `finished_at`, not by name: migrations reach master out of
-  // name order, so a newer build's migration can be named older (#1148).
+  // left by switching branches over one database, was applied by a run before
+  // the last run of migrations this build knows. A rollback leaves the newer
+  // build's migrations in the last run. Decided by run, not by name or by
+  // finish order: migrations reach master out of name order, so a newer
+  // build's migration can be named older, and one run applies it before
+  // later-named ones (#1148).
   describe('a migration history that was rewritten (#1148)', () => {
     const LATER = '2026-09-02T00:00:00Z';
 
-    it('is diverged when a migration this build knows finished after the unknown one: a renamed or deleted migration (#1148)', () => {
+    it('is diverged when migrations this build knows were applied by a later run than the unknown one: a renamed or deleted migration (#1148)', () => {
       const state = classifyMigrationState(CHAIN, [
         finishedAt('20260215_renamed_away', '2026-09-01T00:00:00Z'),
         ...CHAIN.map((name) => finishedAt(name, LATER)),
@@ -133,7 +135,7 @@ describe('classifyMigrationState', () => {
       });
     });
 
-    it('is ahead, not diverged, when the unknown migration is named older but finished after every known one: a rollback past an out-of-order merge', () => {
+    it('is ahead, not diverged, when the unknown migration is named older but came in the last run: a rollback past an out-of-order merge', () => {
       const state = classifyMigrationState(CHAIN, [
         ...CHAIN.map((name) => finishedAt(name, '2026-09-01T00:00:00Z')),
         finishedAt('20260101_merged_late', LATER),

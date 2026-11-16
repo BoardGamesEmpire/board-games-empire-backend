@@ -686,7 +686,7 @@ describe('the boot sequence against Postgres', () => {
       }
     });
 
-    it('warns about a migration renamed away and boots, running the seeds: a known migration finished after it (#1148)', async () => {
+    it('warns about a migration renamed away and boots, running the seeds: known migrations were applied by a later run (#1148)', async () => {
       const name = '20261104120000_renamed_away';
       await sandboxAdmin.query(
         "INSERT INTO _prisma_migrations (id, checksum, migration_name, started_at, finished_at, applied_steps_count) VALUES ($1, $2, $3, '2000-01-01', '2000-01-01', 1)",

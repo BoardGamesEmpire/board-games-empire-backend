@@ -497,7 +497,8 @@ describe('the boot sequence', () => {
   });
 
   // A migration renamed or deleted on master, or another branch's migration,
-  // finished before migrations this build knows: the history was rewritten,
+  // was applied by a run before the last run of migrations this build knows:
+  // the history was rewritten,
   // and nothing newer is serving. The boot warns, naming the fixes, and seeds
   // as over a database in sync (#1148).
   describe('a migration history that was rewritten (#1148)', () => {
