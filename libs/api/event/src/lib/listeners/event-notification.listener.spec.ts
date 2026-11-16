@@ -26,6 +26,7 @@ import {
 import { EventCreatedEvent, EventDeletedEvent } from '../events/event.events';
 import { EventCancelledEvent, EventReopenedEvent } from '../lifecycle/events/event-lifecycle.events';
 import {
+  GameAddedToEventEvent,
   GameRemovedFromEventEvent,
   NominationCreatedEvent,
   NominationResolvedEvent,
@@ -933,6 +934,122 @@ describe('EventNotificationListener', () => {
       expect(notifications.createMany).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('eventId=ev-1'));
       warn.mockRestore();
+    });
+
+    it('tells nobody when the person acting is the only one still coming (#769)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'user-host' }] as never);
+
+      await listener.onGameRemoved(removal(LineupRemovalReason.RemovedByHost, 'user-host'));
+
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+
+    // The removal has committed by the time this runs, so a failed write is
+    // logged, never thrown back into the emit.
+    it('logs a failed write rather than throwing it (#769)', async () => {
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      db.eventAttendee.findMany.mockResolvedValue([{ userId: 'user-a' }] as never);
+      notifications.createMany.mockRejectedValue(new Error('db down'));
+
+      await expect(
+        listener.onGameRemoved(removal(LineupRemovalReason.RemovedByHost, 'user-host')),
+      ).resolves.toBeUndefined();
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('lineupGameId=lg-1'), expect.any(String));
+      error.mockRestore();
+    });
+  });
+
+  describe('onGameAdded', () => {
+    const addition = (occurrenceId: string | null = null) =>
+      new GameAddedToEventEvent(
+        {
+          id: 'lg-1',
+          eventId: occurrenceId ? null : 'ev-1',
+          occurrenceId,
+          platformGameId: 'pg-1',
+          suppliedById: 'att-supplier',
+          nominationId: null,
+          addedById: 'att-host',
+          role: ScheduledGameRole.Primary,
+        },
+        'ev-1',
+        'att-host',
+        new Date(),
+      );
+
+    beforeEach(() => {
+      db.event.findUnique.mockResolvedValue(makeEvent({ id: 'ev-1', title: 'Game Night' }));
+      db.platformGame.findUnique.mockResolvedValue(
+        stubPlatformGameWithGame({ id: 'pg-1' }, { id: 'game-1', title: 'Wingspan', subtitle: 'Asia' }) as never,
+      );
+    });
+
+    // A date's game names its event through the context field, the row's own
+    // eventId being null, so both read the same event.
+    it.each([null, 'occ-1'])(
+      'tells every attendee with an account except whoever added it, naming the game with its subtitle (occurrenceId %s) (#1271)',
+      async (occurrenceId) => {
+        db.eventAttendee.findMany.mockResolvedValue([
+          { id: 'att-a', userId: 'user-a' },
+          { id: 'att-host', userId: 'user-host' },
+          { id: 'att-b', userId: 'user-b' },
+        ] as never);
+
+        await listener.onGameAdded(addition(occurrenceId));
+
+        expect(db.event.findUnique).toHaveBeenCalledWith({ where: { id: 'ev-1' }, select: { title: true } });
+        expect(db.platformGame.findUnique).toHaveBeenCalledWith({
+          where: { id: 'pg-1' },
+          select: { id: true, game: { select: { title: true, subtitle: true } } },
+        });
+        expect(db.eventAttendee.findMany).toHaveBeenCalledWith({
+          where: { eventId: 'ev-1', userId: { not: null }, removedAt: null },
+          select: { userId: true, id: true },
+        });
+        expect(notifications.createMany).toHaveBeenCalledWith(
+          ['user-a', 'user-b'].map((userId) => ({
+            userId,
+            type: NotificationType.GameAddedToEvent,
+            payload: {
+              eventId: 'ev-1',
+              eventTitle: 'Game Night',
+              nominatedGameTitle: 'Wingspan',
+              // Two editions can share a title (#1271).
+              nominatedGameSubtitle: 'Asia',
+            },
+          })),
+        );
+      },
+    );
+
+    it("tells nobody when the event or the game can't be found, and logs it (#1271)", async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      db.event.findUnique.mockResolvedValue(null);
+
+      await listener.onGameAdded(addition());
+
+      expect(db.eventAttendee.findMany).not.toHaveBeenCalled();
+      expect(notifications.createMany).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('GameAddedToEvent notification, eventId=ev-1'));
+      warn.mockRestore();
+    });
+
+    it('tells nobody when whoever added it is the only attendee with an account (#1271)', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([{ id: 'att-host', userId: 'user-host' }] as never);
+
+      await listener.onGameAdded(addition());
+
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+
+    it('logs a failed write rather than throwing it (#1271)', async () => {
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      db.eventAttendee.findMany.mockResolvedValue([{ id: 'att-a', userId: 'user-a' }] as never);
+      notifications.createMany.mockRejectedValue(new Error('db down'));
+
+      await expect(listener.onGameAdded(addition())).resolves.toBeUndefined();
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('GameAddedToEvent eventId=ev-1'), expect.any(String));
+      error.mockRestore();
     });
   });
 
