@@ -851,12 +851,12 @@ describe('EventService', () => {
       );
     });
 
-    // Read with no field, the ceiling took every update rule on Event, the
-    // cancel and archive grants among them, whose fields leave the patch's
-    // columns out. A key holding only one of those could then edit the event
-    // (#1295).
+    // Read with no field, the ceiling took every update permission on Event,
+    // the cancel and archive permissions among them, whose fields leave the
+    // patch's columns out. A key scoped to only one of those could then edit
+    // the event (#1295).
     describe('the update ceiling, per column the patch sends (#1295)', () => {
-      const TITLE_COND = { title: 'ceiling' } as never;
+      const TITLE_COND = { title: 'ceiling' };
       const LOCATION_COND = { location: 'ceiling' } as never;
 
       beforeEach(() => {
@@ -866,7 +866,8 @@ describe('EventService', () => {
           field?: string,
         ) => {
           if (type !== ResourceType.Event || action !== Action.update) return [COND];
-          if (field === 'title') return [TITLE_COND];
+          // An equal clause, but not the same object, as each read builds its own.
+          if (field === 'title' || field === 'description') return [{ ...TITLE_COND }];
           if (field === 'location') return [LOCATION_COND];
           return [{ OR: [] }];
         }) as never);
@@ -895,9 +896,22 @@ describe('EventService', () => {
         );
       });
 
-      // No rule admits `url` here, so its ceiling is deny-all, and the event
-      // can't fall under it however the title's ceiling reaches it.
-      it('answers 403 when no rule admits a column the patch sends, and writes nothing (#1295)', async () => {
+      // The catalog binds every column to the same permissions, so the
+      // columns mostly yield one clause. Repeated, it would only grow the WHERE.
+      it('keeps a clause the columns share once (#1295)', async () => {
+        await service.updateEvent('event-1', { title: 'New', description: 'Same ceiling', location: 'Hall' } as never);
+
+        expect(tx.event.count).toHaveBeenCalledWith({ where: { id: 'event-1', AND: [TITLE_COND, LOCATION_COND] } });
+        expect(tx.event.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: 'event-1', deletedAt: null, AND: [TITLE_COND, LOCATION_COND] },
+          }),
+        );
+      });
+
+      // No permission covers `url` here, so its ceiling is deny-all, and the
+      // event can't fall under it however the title's ceiling reaches it.
+      it('answers 403 when no permission covers a column the patch sends, and writes nothing (#1295)', async () => {
         tx.event.count.mockImplementation((({ where }: { where: { AND: unknown[] } }) =>
           Promise.resolve(where.AND.some((clause) => JSON.stringify(clause) === '{"OR":[]}') ? 0 : 1)) as never);
 

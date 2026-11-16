@@ -7,6 +7,7 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTag
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
+import { EVENT_PATCH_FIELDS } from './constants/event-patch-fields.constant';
 import { CreateEventDto } from './dto/create-event.dto';
 import { ListEventsQueryDto } from './dto/list-events.query.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
@@ -131,7 +132,13 @@ export class EventController {
     );
   }
 
-  @ApiOperation({ summary: 'Update an event' })
+  @ApiOperation({
+    summary: 'Update an event',
+    description:
+      'Each field the request sends needs a permission that covers it: title, description, image, location, url, ' +
+      "type, reach and schedulingMode are covered by `update:event`, or its `:household` variant on a household's " +
+      'event (#1295).',
+  })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Event updated successfully' })
   @ApiResponse({
@@ -144,7 +151,10 @@ export class EventController {
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: 'Event not found' })
-  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Event))
+  // A permission bound only to the cancel columns or `archivedAt` can edit
+  // none of these, so it is refused here, before the write takes the event's
+  // row lock, rather than by the write's ceiling (#1295).
+  @CheckPolicies((ability) => EVENT_PATCH_FIELDS.some((field) => ability.can(Action.update, ResourceType.Event, field)))
   @Patch(':id')
   updateEvent(@Param('id') id: string, @Body() updateEventDto: UpdateEventDto) {
     return from(this.eventService.updateEvent(id, updateEventDto)).pipe(

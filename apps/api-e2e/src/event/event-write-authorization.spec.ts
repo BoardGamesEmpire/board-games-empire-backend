@@ -239,10 +239,10 @@ describe('event write authorization', () => {
     });
   });
 
-  // The cancel and archive grants are bound to the columns they write, which
-  // a PATCH never sends. With no field in its ceiling, the PATCH passed any
-  // update rule on Event, so a key holding only one of those grants, whose
-  // owner hosts the event, edited the whole event (#1295).
+  // The cancel and archive permissions are bound to the columns they write,
+  // which a PATCH never sends. With no field in its checks, the PATCH passed
+  // any update permission on Event, so a key scoped to only one of those,
+  // whose owner hosts the event, edited the whole event (#1295).
   describe('editing an event through an API key (#1295)', () => {
     const keyFor = (owner: SessionActor, eventId: string, slug: string) =>
       mintApiKey(baseUrl, db.client, owner, { slugs: [slug], resourceType: ResourceType.Event, resourceId: eventId });
@@ -268,11 +268,11 @@ describe('event write authorization', () => {
       await updateEvent(key, eventId, { title: 'Edited through a cancel key' }).expect(403);
       expect(await storedTitle(eventId)).toBe(before);
 
-      // Control: the key's grant reaches this event, for the columns it is bound to.
+      // Control: the key's permission reaches this event, for the columns it is bound to.
       await request(baseUrl).post(`${EVENTS_PATH}/${eventId}/cancel`).set(key.headers).send({}).expect(200);
     });
 
-    it('refuses a PATCH from a key holding only update:event:archive, whose grant still reaches the event', async () => {
+    it('refuses a PATCH from a key holding only update:event:archive, whose permission still reaches the event', async () => {
       const host = await actors.user();
       const eventId = await createdEventId(host);
       const before = await storedTitle(eventId);

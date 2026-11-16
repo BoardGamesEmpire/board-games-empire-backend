@@ -1,11 +1,13 @@
-import { Event, EventStatus, ResourceType } from '@bge/database';
+import { Action, Event, EventStatus, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
-import { PoliciesGuard } from '@bge/permissions';
+import { CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { createTestingModuleWithDb, makeEvent, paginationQuery } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ClsServiceManager } from 'nestjs-cls';
+import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
+import { EVENT_PATCH_FIELDS } from './constants/event-patch-fields.constant';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { EventController } from './event.controller';
@@ -173,6 +175,57 @@ describe('EventController', () => {
       expect(result).toEqual({
         message: t('success.event.updated', { id: 'ev-1' }),
         event: updated,
+      });
+    });
+
+    // The route's guard asks for an update on any column a PATCH writes. With
+    // no field it passed a permission bound only to the cancel columns or
+    // `archivedAt`, so an API key scoped to one of those reached the write and
+    // its row lock before the ceiling refused it (#1295).
+    describe('the guard (#1295)', () => {
+      const guard = () => {
+        const handlers = Reflect.getMetadata(CHECK_POLICIES_KEY, EventController.prototype.updateEvent) as Array<
+          (ability: AppAbility) => boolean
+        >;
+        expect(handlers).toHaveLength(1);
+
+        return handlers[0];
+      };
+
+      /**
+       * An ability holding one update permission on Event, bound to `covered`.
+       * Asked with no field, CASL passes it whatever its fields, as it passed
+       * the cancel and archive permissions here.
+       */
+      const coveringOnly = (...covered: string[]) =>
+        ({
+          can: jest.fn(
+            (action: Action, type: ResourceType, field?: string) =>
+              action === Action.update &&
+              type === ResourceType.Event &&
+              covered.length > 0 &&
+              (field === undefined || covered.includes(field)),
+          ),
+        }) as unknown as AppAbility;
+
+      it('asks about each column a PATCH writes, and never with no column', () => {
+        const ability = coveringOnly();
+        guard()(ability);
+
+        expect(jest.mocked(ability.can).mock.calls).toEqual(
+          EVENT_PATCH_FIELDS.map((field) => [Action.update, ResourceType.Event, field]),
+        );
+      });
+
+      it('passes a permission covering any one of those columns', () => {
+        expect(guard()(coveringOnly('schedulingMode'))).toBe(true);
+      });
+
+      it.each([
+        ['cancel', ['cancelledAt', 'cancelledById', 'cancelReason']],
+        ['archive', ['archivedAt']],
+      ])('refuses a permission bound only to the %s columns', (_name, columns) => {
+        expect(guard()(coveringOnly(...columns))).toBe(false);
       });
     });
   });
