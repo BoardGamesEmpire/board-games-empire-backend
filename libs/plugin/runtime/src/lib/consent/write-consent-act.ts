@@ -44,8 +44,10 @@ export interface WrittenConsentAct {
  * the plugin row before calling it and announces what changed after its
  * transaction commits.
  *
- * Every decision is written, the ones that already stand included, so a
- * row's `actId` always names the act that last set it. Each is one upsert on
+ * Every decision it is handed is written, one that already stands included,
+ * so a row's `actId` names the act that last wrote it. A staged review hands
+ * it only the decisions it changes, so a decision kept from an earlier
+ * manifest keeps naming the act that gave it (#1152). Each is one upsert on
  * the unit's coordinates, so an act that read no row for a permission updates
  * the row another act inserted since, and the later write wins.
  *

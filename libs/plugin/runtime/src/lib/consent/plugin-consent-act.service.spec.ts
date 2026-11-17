@@ -939,6 +939,62 @@ describe('PluginConsentActService', () => {
       expect(created.event.context).toEqual({ manifestVersion: '1.3.0', actId: 'act-1' });
     });
 
+    it('a staged review writes only the decisions it changes, so a decision that already stands keeps the act that gave it (#1152)', async () => {
+      // The staged update requests two household permissions the active
+      // manifest does not: one the unit decided under an earlier manifest,
+      // whose decision activation kept, and one it never decided. Rejecting
+      // the staging deletes the decisions whose act names it, so re-stamping
+      // the kept one would take a decision the unit gave before the staging.
+      const KEPT = 'read:game:public';
+      const stagedWithKept = buildPluginManifest({
+        version: '1.3.0',
+        scope: 'household',
+        permissions: {
+          declares: ['manage:digest'],
+          checks: [
+            ...activeChecks,
+            { slug: KEPT, required: false, reason: { en: 'Lists public games.' }, consentScope: 'household' },
+            {
+              slug: STAGED_NEW,
+              required: false,
+              reason: { en: 'Reads submitted feedback for the digest.' },
+              consentScope: 'household',
+            },
+          ],
+        },
+      });
+      db.plugin.findUnique.mockResolvedValue(
+        stagedPlugin({ pendingManifestJson: stagedWithKept as unknown as Prisma.JsonValue }),
+      );
+      claim = claimRow({ pending_sha256: STAGED_SHA, pending_staging_id: 'staging-a' });
+      householdRow = makeHouseholdRow();
+      standing = [standingGrant(KEPT, PluginGrantStatus.Granted, { actId: 'act-earlier' })];
+
+      const result = await service.review({
+        ...householdToggle,
+        manifestSha256: STAGED_SHA,
+        answers: [granted(KEPT), granted(STAGED_NEW)],
+      });
+
+      expect(result.changed).toBe(true);
+      expect(order.filter((step) => step.startsWith('grant:'))).toEqual([`grant:${STAGED_NEW}`]);
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalledWith(
+        expect.objectContaining({ create: expect.objectContaining({ permissionSlug: KEPT }) }),
+      );
+      // The act still records everything the review was shown and answered.
+      expect(db.pluginConsentAct.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          stagingId: 'staging-a',
+          presentation: expect.objectContaining({
+            checks: expect.arrayContaining([
+              expect.objectContaining({ slug: KEPT, outcome: 'granted' }),
+              expect.objectContaining({ slug: STAGED_NEW, outcome: 'granted' }),
+            ]),
+          }),
+        }),
+      });
+    });
+
     it('a review naming a staged sha that is no longer staged is refused as stale (#1150)', async () => {
       householdRow = makeHouseholdRow();
       const stagedReview = { ...householdToggle, manifestSha256: STAGED_SHA, answers: [granted(STAGED_NEW)] };

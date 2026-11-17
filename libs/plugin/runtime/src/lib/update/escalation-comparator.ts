@@ -1,4 +1,5 @@
 import { PluginGrantScope, PluginGrantStatus, riskCovers, type RiskLevel } from '@bge/database';
+import { CONSENT_SCOPE_TO_GRANT_SCOPE } from '../grants/consent-scope.map';
 import type {
   GrantComparisonView,
   ManifestComparisonView,
@@ -39,7 +40,6 @@ export interface EscalationComparatorInput {
 export const compareForEscalations = (input: EscalationComparatorInput): UpdateEscalationComparison => {
   const escalations: UpdateEscalation[] = [];
   const activeChecks = new Map(input.active.checks.map((check) => [check.canonicalSlug, check]));
-  const scopeChangedSlugs = new Set<string>();
 
   for (const check of input.next.checks) {
     const previous = activeChecks.get(check.canonicalSlug);
@@ -55,7 +55,6 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
     }
 
     if (check.consentScope !== previous.consentScope) {
-      scopeChangedSlugs.add(check.canonicalSlug);
       escalations.push({
         kind: 'consent-scope-changed',
         slug: check.canonicalSlug,
@@ -63,9 +62,12 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
         to: check.consentScope,
         required: check.required,
       });
-      // A scope change subsumes a simultaneous required promotion: the
-      // permission has to be consented from scratch at the new scope, so
-      // reporting the promotion too would double-count one decision.
+      // A scope change subsumes a simultaneous required promotion: the move
+      // carries `required` itself, and a required move already routes the
+      // new scope's re-consent, so reporting the promotion too would
+      // double-count one decision. A decision kept at the new scope from an
+      // earlier manifest that requested it there counts again, with no act
+      // (#1152).
       continue;
     }
 
@@ -78,29 +80,33 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
     }
   }
 
-  // Risk escalation: only decisions that EXIST can be escalated
-  // against, and only for permissions the next manifest still requests.
-  // Activation deletes a decision on a permission the next manifest stops
-  // requesting (#577), so it has nothing to escalate.
-  const nextSlugs = new Set(input.next.checks.map((check) => check.canonicalSlug));
+  // Risk escalation: only decisions that EXIST can be escalated against, and
+  // only where the next manifest requests the permission at the decision's
+  // own scope. Activation keeps every consent decision (#1152), so a decision
+  // on a permission the next manifest does not request, or requests at
+  // another scope, is kept, confers nothing while that holds (the bound
+  // applied when abilities are read, #577), and escalates nothing: routing
+  // it would ask re-consent of units that are not the deciding principal and
+  // cannot become one, since a consent act answers only the permissions its
+  // unit's consent scope owns (#1150, #1336), and a Server decision there
+  // would gate approval on a permission approval does not write.
+  const nextScopeBySlug = new Map(
+    input.next.checks.map((check) => [check.canonicalSlug, CONSENT_SCOPE_TO_GRANT_SCOPE[check.consentScope]]),
+  );
 
   for (const grant of input.grants) {
-    if (!nextSlugs.has(grant.permissionSlug)) {
+    if (nextScopeBySlug.get(grant.permissionSlug) !== grant.scopeType) {
       continue;
     }
 
-    // A scope change subsumes a simultaneous risk escalation, exactly as it
-    // subsumes a required promotion above. The grant whose risk went stale
-    // belongs to the OLD scope's principal, and activation deletes it
-    // (delete-to-pending) — routing it would ask re-consent of units that are
-    // no longer the deciding principal and CANNOT become one: a consent act
-    // answers only the permissions its unit's consent scope owns (#1150,
-    // #1336), so a unit asked this way has no action available to answer it.
-    // The scope change already forces consent from scratch at the new scope,
-    // where it is stamped at today's risk.
-    if (scopeChangedSlugs.has(grant.permissionSlug)) {
-      continue;
-    }
+    // A permission that moved scope is no exception: a decision at its new
+    // scope, kept from an earlier manifest that requested it there or given
+    // as a pre-consent, counts again on activation, so a stale one escalates
+    // like any other. A move asks the new scope's units only when the
+    // permission is required, and an optional move would otherwise leave a
+    // unit holding the stale decision never told (#1152). A required move
+    // names the permission in its re-consent list once, however many
+    // escalations it raises.
 
     // A Denied row confers no authority, so a risk reclassification on it
     // escalates nothing: there is no consent to re-take, nothing to gate
@@ -194,13 +200,17 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
     }
   }
 
+  // One permission can raise more than one escalation: a re-requested one is
+  // new and its kept decision's risk escalated (#1152), a promoted one can
+  // have escalated too, and every unit holding a stale decision on it
+  // escalates. Each list names a permission once, where it first appeared.
   return {
     escalations,
     serverGating,
     deniedRequiredSlugs,
-    householdReconsentSlugs,
-    serverRiskEscalatedSlugs,
-    userReconsentSlugs,
+    householdReconsentSlugs: [...new Set(householdReconsentSlugs)],
+    serverRiskEscalatedSlugs: [...new Set(serverRiskEscalatedSlugs)],
+    userReconsentSlugs: [...new Set(userReconsentSlugs)],
   };
 };
 

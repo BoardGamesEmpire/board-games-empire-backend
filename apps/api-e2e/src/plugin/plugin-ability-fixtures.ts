@@ -115,13 +115,36 @@ export async function pluginAbilitySlugsForHousehold(
   pluginId: string,
   householdId: string,
 ): Promise<string[]> {
+  const snapshot = await householdGrantSnapshot(client, pluginId, householdId);
+
+  return (snapshot?.corePermissions ?? []).map((permission) => permission.slug).sort();
+}
+
+/**
+ * The plugin's own declared permissions (`plugin|<slug>|…`) its ability holds
+ * for one household, from the same snapshot read as
+ * {@link pluginAbilitySlugsForHousehold} (#1152). A declared permission
+ * confers only while the active manifest requests it at the decision's scope
+ * and its catalog row exists.
+ */
+export async function pluginOwnAbilitySlugsForHousehold(
+  client: PrismaClient,
+  pluginId: string,
+  householdId: string,
+): Promise<string[]> {
+  const snapshot = await householdGrantSnapshot(client, pluginId, householdId);
+
+  return [...(snapshot?.ownGrantSlugs ?? [])].sort();
+}
+
+/** `PermissionsService.getPluginGrantSnapshot` for one household, over the spec's own client. */
+function householdGrantSnapshot(client: PrismaClient, pluginId: string, householdId: string) {
   const service = new PermissionsService(
     client as unknown as DatabaseService,
     {} as never,
     {} as never,
     activeManifestReader,
   );
-  const snapshot = await service.getPluginGrantSnapshot(pluginId, { scopeType: 'Household', householdId });
 
-  return (snapshot?.corePermissions ?? []).map((permission) => permission.slug).sort();
+  return service.getPluginGrantSnapshot(pluginId, { scopeType: 'Household', householdId });
 }

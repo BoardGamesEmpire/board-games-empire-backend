@@ -518,7 +518,7 @@ describe('PluginLifecycleListener', () => {
           status: PluginGrantStatus.Granted,
           decidedRiskLevel: RiskLevel.Medium,
         },
-        'permission-no-longer-requested',
+        'staged-update-rejected',
         { manifestVersion: '1.2.3', actId: 'act-1' },
         initiatedAt,
       );
@@ -536,7 +536,7 @@ describe('PluginLifecycleListener', () => {
           payload: {
             permissionSlug: 'read:public_content',
             decidedRiskLevel: RiskLevel.Medium,
-            reason: 'permission-no-longer-requested',
+            reason: 'staged-update-rejected',
             actId: 'act-1',
           },
         }),

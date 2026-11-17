@@ -30,7 +30,7 @@ import {
 import { planConsentAct } from './consent-act-plan';
 import { unitOwnsConsentScope, type ConsentManifestSource } from './consent-classification.types';
 import { emitDecisionEvents, type WrittenDecision } from './consent-decision-events';
-import { decisionsStand } from './consent-decision-stands';
+import { decisionsStand, decisionStands } from './consent-decision-stands';
 import {
   PluginConsentActNoUserScopeError,
   PluginConsentActStaleError,
@@ -331,7 +331,22 @@ export class PluginConsentActService {
         }
       }
 
-      // The plan's decisions are already in permission order.
+      // A staged review (the claim returned a staging id) writes only the
+      // decisions it changes. Activation keeps consent decisions (#1152), so
+      // the staged manifest can request again a permission the unit decided
+      // under an earlier one; rewritten here, that decision would name this
+      // review's act, and rejecting the staging deletes every decision whose
+      // act names it, a decision given before the staging existed included.
+      // A kept decision the review changes becomes this staging's
+      // pre-consent and goes with it, since nothing records the earlier
+      // answer to put back. The presentation is unchanged, so the act still
+      // records everything shown and answered. An act on the active manifest
+      // writes every decision. The plan's decisions are already in permission
+      // order, and the filter keeps it.
+      const decisions =
+        stagingId === null
+          ? plan.decisions
+          : plan.decisions.filter((decision) => !decisionStands(decision, standingBySlug.get(decision.permissionSlug)));
       const { act, changed: changedDecisions } = await writeConsentAct(tx, {
         pluginId: plugin.id,
         pluginSlug: plugin.slug,
@@ -342,7 +357,7 @@ export class PluginConsentActService {
         manifestSha256: input.manifestSha256,
         stagingId,
         presentation: plan.presentation,
-        decisions: plan.decisions,
+        decisions,
         standingBySlug,
         actorId: input.actorId,
         decidedAt: initiatedAt,

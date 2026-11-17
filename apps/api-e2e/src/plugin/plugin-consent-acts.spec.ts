@@ -1196,6 +1196,81 @@ describe('consent acts (#1150)', () => {
       expect(await pluginAbilitySlugsForHousehold(db.client, plugin.id, householdId)).toEqual(abilityBefore);
     });
 
+    it('rejecting a staged update keeps a decision the unit gave under an earlier version, even when its staged review answered that permission again (#1152)', async () => {
+      const admin = await actors.admin();
+      const { owner, householdId, unit } = await household();
+      const THIRD_STAGING_ID = 'e2e-staging-third';
+      // A (1.2.0) requests P; B (1.3.0), staged, stops requesting it.
+      const P = HOUSEHOLD_OPTIONAL;
+      const Q = HOUSEHOLD_REQUIRED;
+      const plugin = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, P], [MANAGE_DIGEST_CHECK]);
+
+      await sendSwitchOn(
+        baseUrl,
+        owner,
+        unit,
+        plugin.slug,
+        switchOnBody(await readConsentSurface(baseUrl, owner, unit, plugin.slug), {
+          [P.slug]: PluginGrantStatus.Granted,
+        }),
+      ).expect(200);
+      await approve(admin, plugin.slug).expect(200);
+
+      // Activation kept P's decision, given under A.
+      const [given] = await decisionsAt(plugin.id, PluginGrantScope.Household, householdId);
+
+      expect(given).toMatchObject({ permissionSlug: P.slug, status: PluginGrantStatus.Granted });
+
+      // A third version, staged under a staging of its own, requests P again
+      // and a new permission Q.
+      await db.client.plugin.update({
+        where: { id: plugin.id },
+        data: stagedUpdateColumns({
+          manifest: manifestWith('1.4.0', [MANAGE_DIGEST_CHECK, P, Q]),
+          sha256: 'd'.repeat(64),
+          stagingId: THIRD_STAGING_ID,
+        }),
+      });
+
+      const staged = await readConsentSurface(baseUrl, owner, unit, plugin.slug, { staged: true });
+      const reviewed = await sendReview(
+        baseUrl,
+        owner,
+        unit,
+        plugin.slug,
+        reviewBody(staged, { [P.slug]: PluginGrantStatus.Granted, [Q.slug]: PluginGrantStatus.Granted }),
+      ).expect(200);
+
+      expect(reviewed.body).toMatchObject({ changed: true, act: { kind: 'Review' } });
+      // The review recorded both answers and wrote only Q: P's decision still
+      // names the act that gave it.
+      expect(await decisionsAt(plugin.id, PluginGrantScope.Household, householdId)).toEqual([
+        expect.objectContaining({ permissionSlug: Q.slug, actId: reviewed.body.act.id }),
+        given,
+      ]);
+
+      await reject(admin, plugin.slug, THIRD_STAGING_ID).expect(200);
+
+      expect(await decisionsAt(plugin.id, PluginGrantScope.Household, householdId)).toEqual([given]);
+
+      // The listener writes after the response: wait for Q's revocation row,
+      // then read every revocation row of the plugin.
+      const revocations = () =>
+        db.client.pluginLifecycleEvent.findMany({
+          where: { pluginId: plugin.id, event: PluginLifecycleEventType.GrantRevoked },
+        });
+
+      await pollUntil(async () => ((await revocations()).length > 0 ? true : undefined), {
+        description: `the pre-consent's revocation lifecycle row for '${plugin.slug}'`,
+        timeoutMs: 5_000,
+      });
+      expect(await revocations()).toEqual([
+        expect.objectContaining({
+          payload: expect.objectContaining({ permissionSlug: Q.slug, reason: 'staged-update-rejected' }),
+        }),
+      ]);
+    });
+
     it('a permission pre-consented at the consent scope the staged manifest moves it to survives activation and confers after (#1150)', async () => {
       const admin = await actors.admin();
       const { owner, householdId, unit } = await household();
@@ -1229,8 +1304,8 @@ describe('consent acts (#1150)', () => {
 
       expect(approved.body.reconsentHouseholdUnits).not.toContainEqual(expect.objectContaining({ householdId }));
 
-      // Activation's scope move deletes the decisions at the scope the
-      // permission left, never the pre-consent at the scope it moved to.
+      // Activation deletes no consent decision (#1152), so the pre-consent at
+      // the scope the permission moved to stands and confers.
       expect(await decisionsAt(plugin.id, PluginGrantScope.Household, householdId)).toEqual([
         expect.objectContaining({ permissionSlug: HOUSEHOLD_REQUIRED.slug, status: PluginGrantStatus.Granted }),
       ]);
