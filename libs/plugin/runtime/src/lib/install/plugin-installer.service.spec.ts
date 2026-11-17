@@ -1021,6 +1021,8 @@ describe('PluginInstallerService', () => {
               pendingSha256: null,
               pendingSince: null,
               pendingStagingId: null,
+              pendingFromUrl: null,
+              pendingRegistrySlug: null,
             }),
           }),
         );

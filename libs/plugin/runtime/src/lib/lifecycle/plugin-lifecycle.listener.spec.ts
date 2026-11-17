@@ -49,6 +49,13 @@ describe('PluginLifecycleListener', () => {
   const initiatedAt = new Date('2026-07-24T00:00:00.000Z');
   const actor: Actor = { kind: 'user', userId: 'user-1' };
 
+  /** A staged plugin artifact's provenance, for the staged-update and update-approval rows (#1096). */
+  const stagedProvenance: PluginProvenance = {
+    sha256: sha('c'),
+    url: 'https://registry.example/demo-sink-1.3.0.tgz',
+    registrySlug: 'bge-official',
+  };
+
   let emitter: EventEmitter2;
   let db: MockDatabaseService;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getActor' | 'getCorrelationId'>>;
@@ -192,6 +199,7 @@ describe('PluginLifecycleListener', () => {
       const event = new PluginUpdateApprovedEvent(
         { id: 'plugin-1', slug: 'demo-sink', version: '1.2.0', pendingVersion: '1.3.0', pendingStagingId: 'staging-1' },
         { id: 'plugin-1', slug: 'demo-sink', version: '1.3.0', pendingVersion: null, pendingStagingId: null },
+        stagedProvenance,
         [{ slug: 'plugin.demo-sink.send', required: true, consentScope: 'server', reason: 'Send digests' }],
         true,
         'act-approve',
@@ -229,6 +237,7 @@ describe('PluginLifecycleListener', () => {
             pendingStagingId: 'staging-2',
           },
           { id: 'plugin-1', slug: 'demo-sink', version: '1.3.0', pendingVersion: null, pendingStagingId: null },
+          stagedProvenance,
           [],
           false,
           null,
@@ -240,6 +249,61 @@ describe('PluginLifecycleListener', () => {
       expect(createdRow()).toEqual(
         expect.objectContaining({ payload: expect.objectContaining({ stagingId: 'staging-2' }) }),
       );
+    });
+
+    it("records the activated artifact's provenance on the update-approval row (#1096)", async () => {
+      emitter.emit(
+        PluginEvent.UpdateApproved,
+        new PluginUpdateApprovedEvent(
+          {
+            id: 'plugin-1',
+            slug: 'demo-sink',
+            version: '1.2.0',
+            pendingVersion: '1.3.0',
+            pendingStagingId: 'staging-1',
+          },
+          { id: 'plugin-1', slug: 'demo-sink', version: '1.3.0', pendingVersion: null, pendingStagingId: null },
+          stagedProvenance,
+          [],
+          false,
+          'act-approve',
+          initiatedAt,
+        ),
+      );
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          event: PluginLifecycleEventType.UpdateApproved,
+          payload: expect.objectContaining({ provenance: stagedProvenance }),
+        }),
+      );
+    });
+
+    it("records the staged artifact's provenance on the staged-update row (#1096)", async () => {
+      emitter.emit(
+        PluginEvent.UpdatePending,
+        new PluginUpdatePendingEvent(
+          { id: 'plugin-1', slug: 'demo-sink', version: '1.2.0', pendingVersion: null, pendingStagingId: null },
+          {
+            id: 'plugin-1',
+            slug: 'demo-sink',
+            version: '1.2.0',
+            pendingVersion: '1.3.0',
+            pendingStagingId: 'staging-1',
+          },
+          stagedProvenance,
+          [],
+          [],
+          initiatedAt,
+        ),
+      );
+      await flush();
+
+      const payload = createdRow()['payload'] as Record<string, unknown>;
+      expect(payload['provenance']).toEqual(stagedProvenance);
+      // One name for the plugin artifact's origin, the one install's row uses.
+      expect(payload).not.toHaveProperty('pendingSha256');
     });
 
     it('records the staging id on update_pending, so two stagings of one artifact stay apart (#357)', async () => {
@@ -254,7 +318,7 @@ describe('PluginLifecycleListener', () => {
             pendingVersion: '1.3.0',
             pendingStagingId: 'staging-1',
           },
-          sha('b'),
+          stagedProvenance,
           [],
           [],
           initiatedAt,

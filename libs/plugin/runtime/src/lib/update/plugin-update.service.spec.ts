@@ -195,6 +195,9 @@ describe('PluginUpdateService', () => {
     ...overrides,
   });
 
+  /** The link a plugin artifact was fetched from, for the provenance cases (#1096). */
+  const LINK = 'https://registry.example/demo-sink-1.3.0.tgz';
+
   beforeAll(() => {
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
@@ -410,6 +413,8 @@ describe('PluginUpdateService', () => {
             pendingSha256: null,
             pendingSince: null,
             pendingStagingId: null,
+            pendingFromUrl: null,
+            pendingRegistrySlug: null,
           }),
         }),
       );
@@ -428,6 +433,43 @@ describe('PluginUpdateService', () => {
       expect(result.activated).toBe(true);
       expect(db.plugin.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ installedSha256: 'd'.repeat(64) }) }),
+      );
+    });
+
+    it("an update activated as it is staged records its artifact's link and registry (#1096)", async () => {
+      // The plugin's provenance follows its active version, so the link and
+      // registry the row names are the activated plugin artifact's.
+      await writeManifest(nextManifest());
+
+      const result = await service.stage(input({ url: LINK, registrySlug: 'bge-official' }));
+
+      expect(result.activated).toBe(true);
+      const [claim] = db.plugin.updateMany.mock.calls[0];
+      expect(claim.data).toMatchObject({
+        installedSha256: 'b'.repeat(64),
+        installedFromUrl: LINK,
+        registrySlug: 'bge-official',
+      });
+      expect(emitter.emit).toHaveBeenCalledWith(
+        PluginUpdateApprovedEvent.eventName,
+        expect.objectContaining({ provenance: { sha256: 'b'.repeat(64), url: LINK, registrySlug: 'bge-official' } }),
+      );
+    });
+
+    it("an uploaded update leaves the plugin with no link, not the first install's (#1096)", async () => {
+      // An uploaded plugin artifact has a checksum and no link. Keeping the
+      // first install's link would describe code that is no longer active.
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ installedFromUrl: LINK, registrySlug: 'bge-official' }));
+      await writeManifest(nextManifest());
+
+      const result = await service.stage(input());
+
+      expect(result.activated).toBe(true);
+      const [claim] = db.plugin.updateMany.mock.calls[0];
+      expect(claim.data).toMatchObject({ installedFromUrl: null, registrySlug: null });
+      expect(emitter.emit).toHaveBeenCalledWith(
+        PluginUpdateApprovedEvent.eventName,
+        expect.objectContaining({ provenance: { sha256: 'b'.repeat(64), url: null, registrySlug: null } }),
       );
     });
 
@@ -782,7 +824,26 @@ describe('PluginUpdateService', () => {
       );
       expect(emitter.emit).toHaveBeenCalledWith(
         PluginUpdatePendingEvent.eventName,
-        expect.objectContaining({ pendingSha256: 'd'.repeat(64) }),
+        expect.objectContaining({ provenance: { sha256: 'd'.repeat(64), url: null, registrySlug: null } }),
+      );
+    });
+
+    it("a staged update records its artifact's link and registry beside its checksum (#1096)", async () => {
+      // Update approval makes these the plugin's own, so the staging keeps
+      // them with the checksum they describe.
+      await writeManifest(nextManifest({ storage: { ...activeManifest.storage, writesCore: ['GameNight'] } }));
+
+      await service.stage(input({ url: LINK, registrySlug: 'bge-official' }));
+
+      const [claim] = db.plugin.updateMany.mock.calls[0];
+      expect(claim.data).toMatchObject({
+        pendingSha256: 'b'.repeat(64),
+        pendingFromUrl: LINK,
+        pendingRegistrySlug: 'bge-official',
+      });
+      expect(emitter.emit).toHaveBeenCalledWith(
+        PluginUpdatePendingEvent.eventName,
+        expect.objectContaining({ provenance: { sha256: 'b'.repeat(64), url: LINK, registrySlug: 'bge-official' } }),
       );
     });
 
@@ -962,6 +1023,57 @@ describe('PluginUpdateService', () => {
 
       expect(db.plugin.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ installedSha256: 'e'.repeat(64) }) }),
+      );
+    });
+
+    it("approval makes the staged link and registry the plugin's own (#1096)", async () => {
+      // The plugin's provenance follows its active version: the first
+      // install's link and registry stop describing it once the staged
+      // plugin artifact activates.
+      db.plugin.findUnique.mockResolvedValue(
+        pendingPlugin(nextManifest(), {
+          installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
+          registrySlug: 'first-registry',
+          pendingSha256: 'e'.repeat(64),
+          pendingFromUrl: LINK,
+          pendingRegistrySlug: 'bge-official',
+        }),
+      );
+
+      await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
+
+      const [claim] = db.plugin.updateMany.mock.calls[0];
+      expect(claim.data).toMatchObject({
+        installedSha256: 'e'.repeat(64),
+        installedFromUrl: LINK,
+        registrySlug: 'bge-official',
+      });
+      expect(emitter.emit).toHaveBeenCalledWith(
+        PluginUpdateApprovedEvent.eventName,
+        expect.objectContaining({ provenance: { sha256: 'e'.repeat(64), url: LINK, registrySlug: 'bge-official' } }),
+      );
+    });
+
+    it("approving an uploaded staged update leaves the plugin with no link, not the first install's (#1096)", async () => {
+      // An uploaded plugin artifact has no link and no registry. Activating it
+      // must clear the first install's, which no longer describes the plugin.
+      db.plugin.findUnique.mockResolvedValue(
+        pendingPlugin(nextManifest(), {
+          installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
+          registrySlug: 'first-registry',
+          pendingSha256: 'e'.repeat(64),
+          pendingFromUrl: null,
+          pendingRegistrySlug: null,
+        }),
+      );
+
+      await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
+
+      const [claim] = db.plugin.updateMany.mock.calls[0];
+      expect(claim.data).toMatchObject({ installedFromUrl: null, registrySlug: null });
+      expect(emitter.emit).toHaveBeenCalledWith(
+        PluginUpdateApprovedEvent.eventName,
+        expect.objectContaining({ provenance: { sha256: 'e'.repeat(64), url: null, registrySlug: null } }),
       );
     });
 

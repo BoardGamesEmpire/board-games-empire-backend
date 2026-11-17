@@ -16,11 +16,7 @@ import {
   type PluginGrant,
   type UserPlugin,
 } from '@bge/database';
-import {
-  parsePluginArtifactSha256,
-  type PluginArtifactDirectory,
-  type PluginArtifactSha256,
-} from '@boardgamesempire/plugin-contract';
+import { parsePluginArtifactSha256, type PluginArtifactDirectory } from '@boardgamesempire/plugin-contract';
 import {
   PluginManifestValidationError,
   resolveLocalizedString,
@@ -55,6 +51,7 @@ import {
   UserPluginReconsentRequestedEvent,
   type GrantedPermissionRecord,
   type PluginGrantRevocationReason,
+  type PluginProvenance,
 } from '../events/plugin.events';
 import { CONSENT_SCOPE_TO_GRANT_SCOPE } from '../grants/consent-scope.map';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
@@ -166,19 +163,33 @@ interface PendingUpdateApproval {
 }
 
 interface ResolvedPendingApproval extends ResolvedPendingUpdate {
-  /** The staged plugin artifact's checksum, which activation records as `installedSha256`. */
-  readonly pendingSha256: PluginArtifactSha256;
+  /**
+   * The staged plugin artifact's provenance, from the staged columns, which
+   * activation makes the plugin's own: its checksum becomes `installedSha256`,
+   * its link `installedFromUrl` and its registry `registrySlug` (#1096).
+   */
+  readonly provenance: PluginProvenance;
 }
 
 export interface PluginUpdateStageInput {
   /**
-   * The NEW version's plugin artifact directory, which update staging is to
-   * place (planned, #1096). Its checksum is the one the staging records as
-   * `pendingSha256` (#224); the link and
-   * registry columns keep describing the INSTALL. This service never opens
-   * the plugin artifact itself (#59).
+   * The NEW version's plugin artifact directory. Its checksum is the one the
+   * staging records as `pendingSha256` (#224), beside the link and registry
+   * below; activation makes all three the plugin's provenance (#1096). This
+   * service never opens the plugin artifact itself (#59).
    */
   readonly directory: PluginArtifactDirectory;
+
+  /**
+   * The link the plugin artifact was fetched from (#1096). Omitted for a
+   * manual upload, which has a checksum but no link, and then the activated
+   * plugin names no link, not the one its first install came from.
+   */
+  readonly url?: string;
+
+  /** `PluginRegistrySource.slug` the plugin artifact was discovered through (#1096). */
+  readonly registrySlug?: string;
+
   /** The staging admin — server-admin authority is verified, never assumed, exactly as install verifies it. */
   readonly initiatorId: string;
   /** Admin opt-in: extend static analysis into node_modules; findings advisory only. */
@@ -398,8 +409,12 @@ interface ActivationInput {
   readonly active: PluginManifestValidationResult;
   readonly next: PluginManifestValidationResult;
 
-  /** The checksum of the plugin artifact being activated, which becomes `installedSha256` (#224). */
-  readonly artifactSha256: PluginArtifactSha256;
+  /**
+   * The provenance of the plugin artifact being activated, which becomes the
+   * plugin's own: `installedSha256` (#224), `installedFromUrl` and
+   * `registrySlug` (#1096).
+   */
+  readonly provenance: PluginProvenance;
   readonly comparison: UpdateEscalationComparison;
   readonly corePermissions: ReadonlyMap<string, Permission>;
   readonly actorId: string;
@@ -523,6 +538,15 @@ export class PluginUpdateService {
     // checksum the one the loader resolves, so a directory the resolver would
     // refuse at that boot is refused now, with the same error (#224).
     const directory = await this.directories.confirm(input.directory);
+    // What the staging records and an activation makes the plugin's own, as
+    // install builds it: the checksum is the artifact directory's (#224), and
+    // a link or registry the input leaves out is null, never the first
+    // install's (#1096).
+    const provenance: PluginProvenance = {
+      sha256: directory.sha256,
+      url: input.url ?? null,
+      registrySlug: input.registrySlug ?? null,
+    };
 
     const plugin = await this.loadUpdatablePlugin(directory.slug);
 
@@ -559,7 +583,7 @@ export class PluginUpdateService {
         plugin,
         active,
         next,
-        artifactSha256: directory.sha256,
+        provenance,
         comparison,
         corePermissions,
         actorId: input.initiatorId,
@@ -573,7 +597,7 @@ export class PluginUpdateService {
       });
 
       if (outcome !== null) {
-        this.emitActivation(plugin, outcome, next, initiatedAt);
+        this.emitActivation(plugin, outcome, provenance, next, initiatedAt);
         this.logger.log(
           `Plugin '${plugin.slug}' updated ${plugin.version} → ${next.manifest.version} without staged consent ` +
             `(no server-gating escalation); restart required to load the new code`,
@@ -612,7 +636,11 @@ export class PluginUpdateService {
         data: {
           pendingVersion: next.manifest.version,
           pendingManifestJson: next.manifest as Prisma.InputJsonValue,
-          pendingSha256: directory.sha256,
+          pendingSha256: provenance.sha256,
+          // The link and registry ride with the checksum they describe, so an
+          // update approval can make all three the plugin's own (#1096).
+          pendingFromUrl: provenance.url,
+          pendingRegistrySlug: provenance.registrySlug,
           pendingSince: initiatedAt,
           // The staging's identity (#357): fresh for every staging, even one
           // of the same version from the same artifact, so a rejection or an
@@ -633,7 +661,7 @@ export class PluginUpdateService {
       new PluginUpdatePendingEvent(
         this.stagingSnapshot(plugin),
         this.stagingSnapshot(staged),
-        directory.sha256,
+        provenance,
         comparison.escalations,
         acknowledgedForbiddenImports,
         initiatedAt,
@@ -662,7 +690,7 @@ export class PluginUpdateService {
       throw new PluginUpdateAuthorityError(input.approverId);
     }
 
-    const { plugin, active, next, corePermissions, comparison, decisions, pendingSha256 } =
+    const { plugin, active, next, corePermissions, comparison, decisions, provenance } =
       await this.resolvePendingUpdate(input.slug, { stagingId: input.stagingId });
 
     // Before the Critical confirmation, whose set a stale read may also have
@@ -703,7 +731,7 @@ export class PluginUpdateService {
       plugin,
       active,
       next,
-      artifactSha256: pendingSha256,
+      provenance,
       comparison,
       corePermissions,
       actorId: input.approverId,
@@ -723,7 +751,7 @@ export class PluginUpdateService {
 
     // The set worked out inside the transaction, not the one above: the
     // event must describe what was actually granted.
-    this.emitActivation(plugin, outcome, next, initiatedAt);
+    this.emitActivation(plugin, outcome, provenance, next, initiatedAt);
     this.logger.log(
       `Plugin '${plugin.slug}' update approved: ${plugin.version} → ${next.manifest.version}, ` +
         `${outcome.acceptedGrants.length} server consent decision(s) written under act ${act.id}, ` +
@@ -965,16 +993,16 @@ export class PluginUpdateService {
    * a version that can no longer load would trade a typed refusal here for
    * a quarantine at the next boot.
    *
-   * An approval passes the staging it answers, and gets the staged checksum
-   * back as well, checked (#357, #1117). The staged-update read passes
-   * neither.
+   * An approval passes the staging it answers, and gets the staged
+   * provenance back as well, its checksum checked (#357, #1117, #1096). The
+   * staged-update read passes neither.
    */
   private resolvePendingUpdate(slug: string): Promise<ResolvedPendingUpdate>;
   private resolvePendingUpdate(slug: string, approval: PendingUpdateApproval): Promise<ResolvedPendingApproval>;
   private async resolvePendingUpdate(
     slug: string,
     approval?: PendingUpdateApproval,
-  ): Promise<ResolvedPendingUpdate & { readonly pendingSha256?: PluginArtifactSha256 }> {
+  ): Promise<ResolvedPendingUpdate & { readonly provenance?: PluginProvenance }> {
     const plugin = await this.loadUpdatablePlugin(slug);
 
     // A staged row without its checksum names no plugin artifact, so there
@@ -1009,7 +1037,14 @@ export class PluginUpdateService {
     const corePermissions = await this.loadCorePermissions(next);
     const { comparison, decisions } = await this.compare(plugin, active, next, corePermissions);
 
-    return { plugin, active, next, corePermissions, comparison, decisions, pendingSha256 };
+    // The staged link and registry ride with the checksum they describe
+    // (#1096); only an approval activates them, so only an approval gets them.
+    const provenance: PluginProvenance | undefined =
+      pendingSha256 === undefined
+        ? undefined
+        : { sha256: pendingSha256, url: plugin.pendingFromUrl, registrySlug: plugin.pendingRegistrySlug };
+
+    return { plugin, active, next, corePermissions, comparison, decisions, provenance };
   }
 
   /**
@@ -1373,7 +1408,7 @@ export class PluginUpdateService {
    * emitted by the caller AFTER commit.
    */
   private async activateInTransaction(input: ActivationInput): Promise<ActivationOutcome> {
-    const { plugin, active, next, artifactSha256, comparison, corePermissions, actorId, initiatedAt, approval } = input;
+    const { plugin, active, next, provenance, comparison, corePermissions, actorId, initiatedAt, approval } = input;
 
     // Outside the transaction: none of it reads the database.
     const correlationId = approval === undefined ? null : (this.auditContext.getCorrelationId() ?? null);
@@ -1449,8 +1484,12 @@ export class PluginUpdateService {
           config: retainedConfig.config as Prisma.InputJsonValue,
           // Activation switches which artifact directory the row names, and
           // nothing on disk moves: the loader finds the new code by this
-          // checksum on the next boot (#224).
-          installedSha256: artifactSha256,
+          // checksum on the next boot (#224). The link and registry follow it,
+          // so the row's provenance describes the active version, never the
+          // first install's (#1096).
+          installedSha256: provenance.sha256,
+          installedFromUrl: provenance.url,
+          registrySlug: provenance.registrySlug,
           ...CLEARED_STAGED_UPDATE,
           // The running instance is still the prior code; the loader
           // clears this on the boot that actually loads the new version.
@@ -1647,7 +1686,7 @@ export class PluginUpdateService {
             scopeId: SERVER_SCOPE_SENTINEL,
             kind: PluginConsentActKind.UpdateApprove,
             manifestVersion: next.manifest.version,
-            manifestSha256: artifactSha256,
+            manifestSha256: provenance.sha256,
             presentation: acceptance.presentation as unknown as Prisma.InputJsonValue,
             decidedById: actorId,
             decidedAt: initiatedAt,
@@ -1732,10 +1771,15 @@ export class PluginUpdateService {
     });
   }
 
-  /** Post-commit emissions, matching the commit-then-emit discipline everywhere else. */
+  /**
+   * Post-commit emissions, matching the commit-then-emit discipline everywhere
+   * else. `provenance` is the one the activation wrote, passed in rather than
+   * read back off the row, so the event cannot announce another (#1096).
+   */
   private emitActivation(
     before: Plugin,
     outcome: ActivationOutcome,
+    provenance: PluginProvenance,
     next: PluginManifestValidationResult,
     initiatedAt: Date,
   ): void {
@@ -1757,6 +1801,7 @@ export class PluginUpdateService {
       new PluginUpdateApprovedEvent(
         this.stagingSnapshot(before),
         this.stagingSnapshot(outcome.plugin),
+        provenance,
         grantedPermissions,
         outcome.retainedConfigReset,
         outcome.act?.id ?? null,
