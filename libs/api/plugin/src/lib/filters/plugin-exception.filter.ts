@@ -73,6 +73,7 @@ import {
 } from '@bge/plugin';
 import {
   PluginArchiveRefusedError,
+  PluginArtifactBelongsToAnotherPluginError,
   PluginArtifactChecksumMismatchError,
   PluginArtifactDownloadFailedError,
   PluginArtifactLinkRefusedError,
@@ -688,6 +689,16 @@ function buildRenderers(): RendererMap {
     status: Http.NotFound,
     message: t('errors.plugin.artifact_not_found'),
     fields: { sha256: exception.sha256 },
+  }));
+
+  // An update staged from another plugin's artifact (#1096).
+  renders(PluginArtifactBelongsToAnotherPluginError, (exception) => ({
+    status: Http.Conflict,
+    message: t('errors.plugin.artifact_belongs_to_another_plugin', {
+      slug: exception.slug,
+      artifactSlug: exception.artifactSlug,
+    }),
+    fields: { slug: exception.slug, artifactSlug: exception.artifactSlug, sha256: exception.sha256 },
   }));
 
   renders(PluginArtifactSourceError, (exception) => ({

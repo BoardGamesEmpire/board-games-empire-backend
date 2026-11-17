@@ -8,6 +8,8 @@ import {
   type PluginGrantAuthorityService,
   type PluginInstallAssessment,
   type PluginInstallerService,
+  type PluginUpdateAssessment,
+  type PluginUpdateService,
 } from '@bge/plugin';
 import {
   DnsResolutionError,
@@ -183,6 +185,7 @@ describe('PluginArtifactReceiver (#1094)', () => {
   let http: SecureHttpService;
   let store: { recordReceived: jest.Mock; findLive: jest.Mock; refreshForInstall: jest.Mock; remove: jest.Mock };
   let installer: { assess: jest.Mock };
+  let updates: { assess: jest.Mock };
   let resolver: PluginDirectoryResolverService;
   let authority: { isServerAdmin: jest.Mock };
   let db: MockDatabaseService;
@@ -211,6 +214,8 @@ describe('PluginArtifactReceiver (#1094)', () => {
       remove: jest.fn(),
     };
     installer = { assess: jest.fn(assessmentOf) };
+    // No living plugin has the slug, as before a first install.
+    updates = { assess: jest.fn().mockResolvedValue(null) };
     // The real resolver: the placed directory must be one it confirms.
     resolver = new PluginDirectoryResolverService(buildPluginModuleOptions({ pluginsRoot: root }));
     authority = { isServerAdmin: jest.fn().mockResolvedValue(true) };
@@ -221,6 +226,7 @@ describe('PluginArtifactReceiver (#1094)', () => {
       http,
       store as unknown as PluginArtifactStore,
       installer as unknown as PluginInstallerService,
+      updates as unknown as PluginUpdateService,
       resolver,
       authority as unknown as PluginGrantAuthorityService,
       db as unknown as DatabaseService,
@@ -959,6 +965,57 @@ describe('PluginArtifactReceiver (#1094)', () => {
       const receipt = await receiver.read(sha256, ADMIN);
 
       expect(receipt.assessment.dataGatewayNameConflict).toBe('Demo Gateway');
+    });
+  });
+
+  describe('what an update over the living plugin would do (#1096)', () => {
+    const update = {
+      activeVersion: '1.1.0',
+      refusal: null,
+      changes: null,
+    } as unknown as PluginUpdateAssessment;
+
+    it("a receipt for a living plugin's slug carries the update assessment (#1096)", async () => {
+      updates.assess.mockResolvedValue(update);
+
+      const receipt = await byUpload();
+
+      expect(updates.assess).toHaveBeenCalledWith(receipt.directory);
+      expect(receipt.update).toBe(update);
+      // Read before the row is written, so a failure to read it leaves no row.
+      expect(store.recordReceived.mock.invocationCallOrder[0]).toBeGreaterThan(
+        updates.assess.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      );
+      expect(updates.assess.mock.invocationCallOrder[0]).toBeGreaterThan(
+        installer.assess.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      );
+    });
+
+    it('a receipt for a slug nobody installed carries none', async () => {
+      const receipt = await byUpload();
+
+      expect(receipt.update).toBeNull();
+    });
+
+    it('a failure to assess the update leaves no row (#1096)', async () => {
+      const lost = new Error('connection lost');
+      updates.assess.mockRejectedValue(lost);
+
+      await expect(byUpload()).rejects.toBe(lost);
+
+      expect(store.recordReceived).not.toHaveBeenCalled();
+    });
+
+    it('reading an artifact back assesses the update again', async () => {
+      const received = await byUpload();
+      store.findLive.mockResolvedValue(received.artifact);
+      updates.assess.mockClear();
+      updates.assess.mockResolvedValue(update);
+
+      const receipt = await receiver.read(sha256, ADMIN);
+
+      expect(updates.assess).toHaveBeenCalledWith(received.directory);
+      expect(receipt.update).toBe(update);
     });
   });
 });

@@ -126,3 +126,20 @@ export class PluginArtifactNotFoundError extends Error {
     super(`No plugin artifact with the checksum ${printable(sha256)} is waiting to be installed.`);
   }
 }
+
+/**
+ * The plugin artifact named for a staged update of plugin `slug` is for
+ * another plugin, `artifactSlug` (#1096). Nothing is staged, and the
+ * artifact's row is kept for the plugin it is for.
+ */
+export class PluginArtifactBelongsToAnotherPluginError extends Error {
+  override readonly name = 'PluginArtifactBelongsToAnotherPluginError';
+
+  constructor(
+    readonly slug: string,
+    readonly artifactSlug: string,
+    readonly sha256: string,
+  ) {
+    super(`The plugin artifact ${sha256} is for plugin '${artifactSlug}', not '${slug}'.`);
+  }
+}

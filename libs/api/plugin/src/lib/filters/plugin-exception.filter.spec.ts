@@ -51,6 +51,7 @@ import {
 import * as pluginArtifacts from '@bge/plugin-artifacts';
 import {
   PluginArchiveRefusedError,
+  PluginArtifactBelongsToAnotherPluginError,
   PluginArtifactChecksumMismatchError,
   PluginArtifactDownloadFailedError,
   PluginArtifactLinkRefusedError,
@@ -727,6 +728,21 @@ describe('PluginExceptionFilter', () => {
       expect(body()['code']).toBe('PLUGIN_ARTIFACT_NOT_FOUND');
       expect(body()['message']).toBe('t:errors.plugin.artifact_not_found');
       expect(body()['sha256']).toBe('c'.repeat(64));
+    });
+
+    it("renders another plugin's artifact named for an update as 409, naming both plugins (#1096)", () => {
+      filter.catch(new PluginArtifactBelongsToAnotherPluginError('demo-sink', 'other-sink', 'c'.repeat(64)), host);
+
+      expect(rendered().getStatus()).toBe(Http.Conflict);
+      expect(body()['code']).toBe('PLUGIN_ARTIFACT_BELONGS_TO_ANOTHER_PLUGIN');
+      expect(body()['message']).toBe('t:errors.plugin.artifact_belongs_to_another_plugin');
+      expect(body()['slug']).toBe('demo-sink');
+      expect(body()['artifactSlug']).toBe('other-sink');
+      expect(body()['sha256']).toBe('c'.repeat(64));
+      expect(translate).toHaveBeenCalledWith(
+        expect.stringContaining('errors.plugin.artifact_belongs_to_another_plugin'),
+        expect.objectContaining({ args: { slug: 'demo-sink', artifactSlug: 'other-sink' } }),
+      );
     });
 
     it.each([
