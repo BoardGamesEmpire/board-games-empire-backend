@@ -14,8 +14,9 @@ import type { PluginManifest } from '@boardgamesempire/plugin-manifest';
  * stay local to their specs, and that is the point rather than an oversight:
  * `read:game:public` is REQUIRED in the consent race, where denying it must
  * show in the household's consent standing as a refusal (#1149), and OPTIONAL
- * in the pre-row race, which is about waiting rather than about consent. A
- * shared constant would have to pick one, and whichever it picked would
+ * in a spec about waiting rather than about consent, where a required one
+ * would only add a review pending to a consent standing the spec never reads.
+ * A shared constant would have to pick one, and whichever it picked would
  * quietly change what the other spec proves.
  */
 export type Check = PluginManifest['permissions']['checks'][number];

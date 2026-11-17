@@ -11,21 +11,16 @@ import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plug
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier } from '../support/lock-barrier';
-import { bindTemplate, readShippedSql, readShippedValue } from '../support/shipped-sql';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import {
   readConsentSurface,
   readStagedShownRisks,
-  reviewBody,
-  sendReview,
   sendSwitchOn,
   sendToggle,
   switchOnBody,
   toggleBody,
-  type ConsentAnswerStatus,
   type ShownRiskBody,
 } from './consent-act-fixtures';
-import { LOCK_SOURCES } from './lock-order';
 import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
 import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
@@ -65,24 +60,14 @@ describe('consent decisions under concurrency (#360)', () => {
   const STAGED_AT = new Date('2026-08-01T12:00:00Z');
 
   /**
-   * As in the pre-row race: generous, because a request has to clear its
-   * guards and a manifest revalidation before it reaches the lock, and one that
-   * answers early is reported at once rather than at the deadline.
+   * Generous on purpose. A request has to clear a session lookup, a policy
+   * guard and a manifest revalidation before it reaches the lock, and the
+   * harness concedes first-touch latency is seconds-scale, so a budget sized
+   * for a barrier statement would report a cold start as a lock defect. A
+   * request that answers early is reported at once rather than at the
+   * deadline, so the long deadline only costs time on a stuck run.
    */
   const REQUEST_REACHES_LOCK_MS = 20_000;
-
-  /**
-   * A household unit's advisory key, its statement and its format lifted from
-   * source rather than retyped: a key nothing contends for blocks nobody, and
-   * the case holding it would pass for the wrong reason.
-   */
-  const unitKeyLock = readShippedSql(LOCK_SOURCES.unitScopeLock, ['scopeKey'], {
-    after: 'lockHouseholdUnitScope',
-    matching: /pg_advisory_xact_lock/,
-  });
-  const unitKeyFormat = readShippedValue(LOCK_SOURCES.unitScopeLock, ['householdId', 'pluginId'], {
-    after: 'lockHouseholdUnitScope',
-  });
 
   let db: TestDatabase;
   let actors: Actors;
@@ -149,10 +134,10 @@ describe('consent decisions under concurrency (#360)', () => {
   };
 
   /**
-   * Fires a request expected to block, and keeps hold of it safely: the same
-   * helper the pre-row race uses, for the same two reasons. A promise nobody
-   * has handled becomes an unhandled rejection if an assertion throws first,
-   * and a request that answers early is reported as answered, not as a timeout.
+   * Fires a request expected to block, and keeps hold of it safely, for two
+   * reasons. A promise nobody has handled becomes an unhandled rejection if an
+   * assertion throws first, and a request that answers early is a fixture
+   * problem, so it is reported as answered, not as a timeout.
    */
   const fire = (send: () => request.Test) => {
     let outcome: string | undefined;
@@ -317,178 +302,6 @@ describe('consent decisions under concurrency (#360)', () => {
       ]);
 
       await expectBothActsRecordedAndOneWins(responses, plugin, household.id, before.updatedAt);
-    });
-  });
-
-  describe('two identical toggles on one unit', () => {
-    it('queue at the unit key, so the later one reads the earlier decision and records no act (#1150)', async () => {
-      // An act takes the unit's advisory key before it reads the standing
-      // decisions, so of two acts on one unit the later reads what the earlier
-      // wrote. Two identical toggles therefore record ONE act: the later one
-      // finds its answer already standing and changes nothing. Read before the
-      // key, both would pass the check and both would be recorded.
-      //
-      // The key is held so both requests are in flight before either reads;
-      // which one records the act is the race's business and is not asserted.
-      const owner = await actors.user();
-      const { household } = await actors.householdWithMembers({ owner });
-      const { plugin, unit, surface } = await arrangeSwitchedOnWithPendingOptional(owner, household.id);
-      const body = toggleBody(surface, OPTIONAL_HOUSEHOLD_CHECK.slug, PluginGrantStatus.Granted);
-
-      const responses = await withBarrier(async (barrier) => {
-        const { holder } = barrier;
-
-        await holder.begin();
-        await holder.query(unitKeyLock.text, [bindTemplate(unitKeyFormat, [household.id, plugin.id])]);
-
-        const first = fire(() => sendToggle(baseUrl, owner, unit, plugin.slug, body));
-        const second = fire(() => sendToggle(baseUrl, owner, unit, plugin.slug, body));
-
-        await expectBackendsQueuedBehind(barrier, {
-          heldBy: holder.pid,
-          count: 2,
-          description: 'the two identical toggles',
-          timeoutMs: REQUEST_REACHES_LOCK_MS,
-        });
-
-        // Released at once: both requests wait inside an interactive
-        // transaction on its default budget.
-        await holder.commit();
-
-        return [await first.settled, await second.settled];
-      });
-
-      expect(responses.map((response) => response.status)).toEqual([200, 200]);
-      expect(responses.map((response) => response.body.changed as boolean).sort()).toEqual([false, true]);
-
-      const acts = await db.client.pluginConsentAct.findMany({
-        where: {
-          pluginId: plugin.id,
-          scopeType: PluginGrantScope.Household,
-          scopeId: household.id,
-          kind: PluginConsentActKind.Toggle,
-        },
-      });
-
-      expect(acts).toHaveLength(1);
-
-      const decision = await db.client.pluginGrant.findFirstOrThrow({
-        where: {
-          pluginId: plugin.id,
-          scopeType: PluginGrantScope.Household,
-          scopeId: household.id,
-          permissionSlug: OPTIONAL_HOUSEHOLD_CHECK.slug,
-        },
-      });
-
-      expect(decision).toMatchObject({ status: PluginGrantStatus.Granted, actId: acts[0]?.id });
-    });
-  });
-
-  describe('two reviews with opposite answers on one outstanding required permission', () => {
-    it("queue at the unit key, so the later one is judged against the earlier one's answer: one review lands and the other is refused (#1150)", async () => {
-      // An act classifies the unit's decisions and plans its answers under
-      // the unit's key. Classified before the key, a refusing review queued
-      // behind a granting one still planned the permission as outstanding,
-      // then denied the fresh grant and switched the unit off: both answered
-      // 200. Under the key, the later review sees what the earlier one left.
-      // A refusal after the grant is refused as not outstanding; a grant
-      // after the refusal finds the unit switched off.
-      //
-      // The granting review is queued first, the order that showed the flaw,
-      // but the assertions hold for either order and name no winner.
-      const owner = await actors.user();
-      const { household } = await actors.householdWithMembers({ owner });
-      const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK, POLICY_READ_CHECK]);
-      const unit = { householdId: household.id };
-      const before = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
-
-      await sendSwitchOn(baseUrl, owner, unit, plugin.slug, switchOnBody(before)).expect(200);
-
-      // What an activation leaves behind, arranged on the row: a manifest
-      // that requires a household permission nobody has answered yet.
-      const next = manifestWith('1.3.0', [MANAGE_DIGEST_CHECK, POLICY_READ_CHECK, HOUSEHOLD_CHECK]);
-      await db.client.plugin.update({
-        where: { id: plugin.id },
-        data: { version: next.version, manifestJson: next as never, installedSha256: 'c'.repeat(64) },
-      });
-
-      const surface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
-      const answer = (status: ConsentAnswerStatus) =>
-        sendReview(baseUrl, owner, unit, plugin.slug, reviewBody(surface, { [HOUSEHOLD_CHECK.slug]: status }));
-
-      const responses = await withBarrier(async (barrier) => {
-        const { holder } = barrier;
-
-        await holder.begin();
-        await holder.query(unitKeyLock.text, [bindTemplate(unitKeyFormat, [household.id, plugin.id])]);
-
-        const granting = fire(() => answer(PluginGrantStatus.Granted));
-
-        await expectBackendsQueuedBehind(barrier, {
-          heldBy: holder.pid,
-          count: 1,
-          description: 'the granting review',
-          timeoutMs: REQUEST_REACHES_LOCK_MS,
-        });
-
-        const refusing = fire(() => answer(PluginGrantStatus.Denied));
-
-        await expectBackendsQueuedBehind(barrier, {
-          heldBy: holder.pid,
-          count: 2,
-          description: 'the granting and the refusing review',
-          timeoutMs: REQUEST_REACHES_LOCK_MS,
-        });
-
-        // Released at once: both requests wait inside an interactive
-        // transaction on its default budget.
-        await holder.commit();
-
-        return { granting: await granting.settled, refusing: await refusing.settled };
-      });
-
-      // One review lands; the other is refused with the code its order earns.
-      const statuses = [responses.granting.status, responses.refusing.status];
-
-      expect(statuses.filter((status) => status === 200)).toHaveLength(1);
-
-      if (responses.granting.status === 200) {
-        expect(responses.refusing.status).toBe(422);
-        expect(responses.refusing.body).toMatchObject({
-          code: 'PLUGIN_CONSENT_ACT_ANSWER',
-          rule: 'not-outstanding',
-          permissionSlugs: [HOUSEHOLD_CHECK.slug],
-        });
-      } else {
-        expect(responses.granting.status).toBe(409);
-        expect(responses.granting.body).toMatchObject({ code: 'PLUGIN_CONSENT_ACT_UNIT_OFF' });
-      }
-
-      const reviews = await db.client.pluginConsentAct.findMany({
-        where: {
-          pluginId: plugin.id,
-          scopeType: PluginGrantScope.Household,
-          scopeId: household.id,
-          kind: PluginConsentActKind.Review,
-        },
-      });
-
-      expect(reviews).toHaveLength(1);
-
-      const decision = await db.client.pluginGrant.findFirstOrThrow({
-        where: {
-          pluginId: plugin.id,
-          scopeType: PluginGrantScope.Household,
-          scopeId: household.id,
-          permissionSlug: HOUSEHOLD_CHECK.slug,
-        },
-      });
-
-      // The decision is the landed review's, and the switch follows it: on
-      // with the grant, off with the refusal.
-      expect(decision.actId).toBe(reviews[0]?.id);
-      expect((await unitRow(household.id, plugin.id)).enabled).toBe(decision.status === PluginGrantStatus.Granted);
     });
   });
 

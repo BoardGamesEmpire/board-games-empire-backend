@@ -32,9 +32,8 @@ describe('role transitions racing a soft-delete (#386)', () => {
   const baseUrl = requireBaseUrl(process.env);
 
   /**
-   * Generous for the reason `plugin-prerow-race.spec.ts` gives: the request
-   * clears a session lookup and the route guards before it reaches the lock,
-   * and a cold start is seconds-scale. A request that answers is reported at
+   * Generous on purpose: the request clears a session lookup and the route
+   * guards before it reaches the lock, and a cold start is seconds-scale. A request that answers is reported at
    * once by `settledEarly`, so the long budget only costs time on a stuck run.
    */
   const REQUEST_REACHES_LOCK_MS = 20_000;
@@ -124,8 +123,8 @@ describe('role transitions racing a soft-delete (#386)', () => {
    * Fires a request that is expected to BLOCK, and keeps hold of it safely: the
    * pending response is pre-handled so an assertion failing before it is
    * awaited cannot surface as an unhandled rejection, and its outcome is
-   * offered to `expectLockWaiter` for reporting. Same shape as the helper in
-   * `plugin-prerow-race.spec.ts`.
+   * offered to `expectLockWaiter` for reporting, so a request that answers
+   * early is reported as answered rather than as a timeout.
    */
   const fire = (send: () => request.Test) => {
     let outcome: string | undefined;

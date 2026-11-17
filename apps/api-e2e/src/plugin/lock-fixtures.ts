@@ -57,13 +57,13 @@ export const FK_PLUGIN_LOCK = 'SELECT p.id FROM plugins p WHERE p.id = $1 FOR KE
  * The insert arm of a consent decision's upsert: a decision on a permission
  * slug that has no grant row yet.
  *
- * A control rather than a claim, and the counterpart to {@link GRANT_ROW_LOCK},
- * which stands in for the update arm. A `FOR UPDATE` matching zero rows locks
- * nothing, so this insert walks straight past a holder with every EXISTING
- * grant row for the plugin locked. That is not a defect: it is why every
- * writer of a server-scope decision claims the plugin row before it writes
- * (#398, #1336), and why unit writers take an advisory key rather than
- * trusting a row lock.
+ * Its only lock on the plugin row is the `FOR KEY SHARE` its foreign key
+ * takes. A row lock on a plugin's grant rows covers the rows that exist, and
+ * a `FOR UPDATE` matching zero rows locks nothing, so this insert walks
+ * straight past a holder with every EXISTING grant row for the plugin locked.
+ * That is not a defect: it is why every writer of a server-scope decision
+ * claims the plugin row before it writes (#398, #1336), and why unit writers
+ * take an advisory key rather than trusting a row lock.
  *
  * Named rather than typed at its one call site, and the enum values are the
  * enum members rather than quoted literals. The column list and the vocabulary
@@ -78,52 +78,6 @@ export const SERVER_GRANT_INSERT =
    VALUES ($1, $2, '${PluginGrantScope.Server}', '', $3, '${PluginGrantStatus.Granted}', '${FIXTURE_ACT_ID}', ` +
   `'${RiskLevel.Low}', now(), now())
    RETURNING id`;
-
-/**
- * The `grant row` stage of the claimed lock order, as activation takes it, as
- * a statement a barrier can hold open.
- *
- * No shipped statement locks a consent decision by raw SQL: an approval takes
- * the Server unit's rows through its `pluginGrant.upsert` writes (#1336), and
- * the update arm of an upsert is a row lock Prisma cannot express as a held
- * one. So this states the stage in the form the `grant row` pattern
- * recognises, the way {@link UNIT_ROW_LOCK} stands in for the unit writers.
- * `FOR UPDATE` is at least as strong as the `FOR NO KEY UPDATE` the upsert's
- * update arm takes, so a barrier holding it waits out every writer the real
- * write would.
- */
-export const GRANT_ROW_LOCK = `SELECT id FROM plugin_grants WHERE plugin_id = $1 AND scope_type = '${PluginGrantScope.Server}' FOR UPDATE`;
-
-/**
- * The update arm of a consent decision's upsert, on a Server unit row that
- * already exists: a write of non-key columns only, so it takes the row
- * `FOR NO KEY UPDATE`, the mode a consent act's `pluginGrant.upsert` takes
- * when the decision has a row (#1336).
- *
- * The waiter's half of a grant-row barrier. {@link GRANT_ROW_LOCK} is the
- * holder's: a waiter issuing that too would only show that `FOR UPDATE` blocks
- * `FOR UPDATE`, and could not fail for the weaker mode the real upsert takes.
- * It writes no key column, so it matches no stage of the claimed order and
- * takes no lock on `plugins` through the foreign key.
- */
-export const SERVER_GRANT_RESTAMP =
-  `UPDATE plugin_grants SET decided_at = now(), updated_at = now() ` +
-  `WHERE plugin_id = $1 AND scope_type = '${PluginGrantScope.Server}' RETURNING id`;
-
-/**
- * The `unit row` stage of the claimed lock order, as a statement a barrier can
- * hold open.
- *
- * No shipped statement locks a unit enablement by raw SQL: a unit's consent
- * standing (#1149) and its dormancy (#1151) are worked out when read, and the
- * unit writers take the row through a Prisma write (`tx.householdPlugin.update`,
- * a consent act's create or `upsert` (#1150), uninstall's purge), which Prisma
- * cannot express as a held lock. So this states the stage in the form the `unit row`
- * pattern recognises. `FOR UPDATE` is the strongest row mode, at least as
- * strong as the `FOR NO KEY UPDATE` an UPDATE of non-key columns takes, so a
- * barrier holding it waits out every unit writer the real write would.
- */
-export const UNIT_ROW_LOCK = 'SELECT id FROM household_plugins WHERE household_id = $1 AND plugin_id = $2 FOR UPDATE';
 
 export interface PluginLockFixture {
   readonly pluginId: string;
@@ -179,77 +133,4 @@ export async function arrangeHouseholdFor(prisma: PrismaClient): Promise<{ house
   });
 
   return { householdId: household.id, userId: user.id };
-}
-
-/**
- * A grant row for a plugin, at whichever consent scope the caller needs.
- *
- * The slug defaults to a fresh one per call rather than to a fixed name. The
- * uniqueness index is `(plugin, scope type, scope id, slug)`, and server-scope
- * rows share the empty-string scope sentinel — so a shared default turns
- * "arrange two grants for this plugin" into a raw unique violation raised from
- * inside a fixture, which reads as an unrelated flake. Callers that care which
- * slug it is say so.
- */
-export async function arrangeGrant(
-  prisma: PrismaClient,
-  options: {
-    readonly pluginId: string;
-    readonly scopeType?: PluginGrantScope;
-    readonly scopeId?: string;
-    readonly permissionSlug?: string;
-    readonly status?: PluginGrantStatus;
-  },
-): Promise<{ grantId: string; permissionSlug: string }> {
-  const permissionSlug = options.permissionSlug ?? `lock-fixture:${randomUUID()}`;
-  const grant = await prisma.pluginGrant.create({
-    data: {
-      pluginId: options.pluginId,
-      scopeType: options.scopeType ?? PluginGrantScope.Server,
-      scopeId: options.scopeId ?? '',
-      permissionSlug,
-      status: options.status ?? PluginGrantStatus.Granted,
-      actId: FIXTURE_ACT_ID,
-      decidedRiskLevel: RiskLevel.Low,
-      decidedAt: new Date(),
-    },
-    select: { id: true },
-  });
-
-  return { grantId: grant.id, permissionSlug };
-}
-
-/**
- * A server-scope grant row, so {@link GRANT_ROW_LOCK} has something to lock.
- *
- * The lock covers EXISTING rows only, which is a claim the specs test in both
- * directions — so a fixture that quietly created the row for a case about its
- * absence would be the whole answer. Callers say which they want.
- */
-export async function arrangeServerGrant(
-  prisma: PrismaClient,
-  pluginId: string,
-  permissionSlug?: string,
-  status: PluginGrantStatus = PluginGrantStatus.Granted,
-): Promise<{ grantId: string; permissionSlug: string }> {
-  return arrangeGrant(prisma, { pluginId, permissionSlug, status });
-}
-
-/**
- * An existing household unit row — the case where a row lock has a row.
- *
- * Its absence is the pre-row race (#360 step 5), which is why every spec that
- * uses this states whether it wanted the row to exist.
- */
-export async function arrangeHouseholdUnit(
-  prisma: PrismaClient,
-  householdId: string,
-  pluginId: string,
-): Promise<{ unitId: string }> {
-  const unit = await prisma.householdPlugin.create({
-    data: { householdId, pluginId },
-    select: { id: true },
-  });
-
-  return { unitId: unit.id };
 }

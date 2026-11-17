@@ -4,7 +4,6 @@ import { expectBlocked, expectNotBlocked, withBarrier } from '../support/lock-ba
 import { readShippedSql } from '../support/shipped-sql';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { arrangePlugin, SERVER_GRANT_INSERT } from './lock-fixtures';
-import { LOCK_SOURCES } from './lock-order';
 
 /**
  * The server config PATCH's claim on the `plugins` row (#578), run against
@@ -38,7 +37,9 @@ import { LOCK_SOURCES } from './lock-order';
  *    not. A control shows `FOR UPDATE` holding it.
  */
 describe('the server config PATCH claims the plugin row (FOR NO KEY UPDATE, #578)', () => {
-  const { lifecycleService: LIFECYCLE_SERVICE, updateService: UPDATE_SERVICE } = LOCK_SOURCES;
+  /** The files the two lifted statements ship in. */
+  const LIFECYCLE_SERVICE = 'libs/plugin/runtime/src/lib/lifecycle/plugin-lifecycle.service.ts';
+  const UPDATE_SERVICE = 'libs/plugin/runtime/src/lib/update/plugin-update.service.ts';
 
   /**
    * The statement `updateConfig` ships, binding the expected plugin manifest
@@ -58,9 +59,10 @@ describe('the server config PATCH claims the plugin row (FOR NO KEY UPDATE, #578
    * Activation's read of `config`, the first lock its transaction takes on the
    * plugin row, lifted rather than stood in for. It reads `category` beside
    * it, which decides whether the plugin's DataGateway row follows the update
-   * (#1083). The anchor is the one the lock-order spec uses: the file ships a
-   * second `FOR UPDATE` (the grant rows), so the shape alone does not name one
-   * statement.
+   * (#1083). Anchored on the declaration the statement is assigned to, for the
+   * reason the config claim above is: a second raw statement added to the file
+   * is then a named failure rather than a lift that follows whichever comes
+   * first.
    */
   const activationConfigClaim = readShippedSql(UPDATE_SERVICE, ['plugin.id'], {
     after: 'const [current] = await tx.$queryRaw',
