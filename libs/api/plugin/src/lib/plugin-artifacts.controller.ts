@@ -7,6 +7,7 @@ import {
   PluginInventoryService,
   presentArtifactChecks,
   type PluginModuleOptions,
+  type PluginUpdateAssessment,
 } from '@bge/plugin';
 import { PluginArtifactInstaller, PluginArtifactReceiver, type PluginArtifactReceipt } from '@bge/plugin-artifacts';
 import { resolveLocalizedString } from '@boardgamesempire/plugin-manifest';
@@ -253,7 +254,7 @@ export class PluginArtifactsController {
   private present(receipt: PluginArtifactReceipt): PluginArtifactResponseDto {
     const locale = this.auditContext.getLocale() ?? undefined;
     const { defaultLocale } = this.options;
-    const { artifact, assessment, installedPlugin } = receipt;
+    const { artifact, assessment, installedPlugin, update } = receipt;
     const { manifest, warnings } = assessment.validated;
     const text = (value: Parameters<typeof resolveLocalizedString>[0]): string =>
       resolveLocalizedString(value, { locale: locale ?? defaultLocale, defaultLocale });
@@ -296,6 +297,35 @@ export class PluginArtifactsController {
       },
       warnings: [...warnings],
       installedPlugin: { state: installedPlugin.state, version: installedPlugin.version },
+      update: update === null ? null : this.presentUpdate(update),
+    };
+  }
+
+  /**
+   * What staging the plugin artifact as an update would do (#1096). The
+   * comparison's three parts sit beside the rest, as the staged-update read
+   * spells them, so a client reads one shape before and after the staging.
+   */
+  private presentUpdate({
+    activeVersion,
+    refusal,
+    changes,
+  }: PluginUpdateAssessment): PluginArtifactResponseDto['update'] {
+    return {
+      activeVersion,
+      refusal,
+      changes:
+        changes === null
+          ? null
+          : {
+              activatesAtOnce: changes.activatesAtOnce,
+              escalations: changes.comparison.escalations,
+              serverGating: changes.comparison.serverGating,
+              deniedRequiredSlugs: [...changes.comparison.deniedRequiredSlugs],
+              declares: { added: [...changes.declares.added], removed: [...changes.declares.removed] },
+              noLongerRequested: [...changes.noLongerRequested],
+              dataGatewayNameConflict: changes.dataGatewayNameConflict,
+            },
     };
   }
 }

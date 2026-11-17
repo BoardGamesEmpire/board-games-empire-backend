@@ -39,7 +39,8 @@ import { UserPluginsController } from './user-plugins.controller';
     // class-referenced guard in the controller's host module, and the database
     // module is not global, so without this the app fails at boot.
     DatabaseModule,
-    // The receiver and the installer behind the install ingress's routes (#1094).
+    // The receiver and the installer behind the install ingress's routes (#1094),
+    // and the staging service behind the update staging route (#1096).
     PluginArtifactsModule,
     // Supplies SupportedLocalesService to the controllers, which refuse a
     // write that stores a presentation in a locale this server does not

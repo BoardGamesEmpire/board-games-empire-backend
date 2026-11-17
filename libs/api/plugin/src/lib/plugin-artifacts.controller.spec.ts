@@ -2,7 +2,7 @@ import type { AuditContextService } from '@bge/actor-context';
 import { Action, ResourceType, RiskLevel } from '@bge/database';
 import type { SupportedLocalesService } from '@bge/i18n';
 import { CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
-import { PluginConsentActLocaleError, type PluginInventoryService } from '@bge/plugin';
+import { PluginConsentActLocaleError, type PluginInventoryService, type PluginUpdateAssessment } from '@bge/plugin';
 import { createMockAbilityService, MOCK_ACTING_USER_ID, type MockAbilityService } from '@bge/testing';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
@@ -59,7 +59,31 @@ const receipt = (state: 'none' | 'installed' | 'uninstalled' = 'none') => ({
     dataGatewayNameConflict: null as string | null,
   },
   installedPlugin: { state, version: state === 'none' ? null : '1.0.0' },
+  // What staging it as an update would do (#1096): nothing, for a slug nobody installed.
+  update: null as PluginUpdateAssessment | null,
 });
+
+const ESCALATION = { kind: 'outbound-domain-added', domain: 'api.example.test' } as const;
+
+// An update of an installed 1.0.0 that server-gates on a new outbound domain (#1096).
+const UPDATE = {
+  activeVersion: '1.0.0',
+  refusal: null,
+  changes: {
+    comparison: {
+      escalations: [ESCALATION],
+      serverGating: true,
+      deniedRequiredSlugs: ['feedback:read'],
+      householdReconsentSlugs: ['calendar:read'],
+      serverRiskEscalatedSlugs: [],
+      userReconsentSlugs: [],
+    },
+    activatesAtOnce: false,
+    declares: { added: ['plugin|demo-sink|manage:digest'], removed: [] },
+    noLongerRequested: ['feedback:write'],
+    dataGatewayNameConflict: null,
+  },
+};
 
 const UPLOADED = { path: '/plugins/.incoming/x.tgz', size: 4096, sha256: 'b'.repeat(64) } as never;
 
@@ -215,6 +239,58 @@ describe('PluginArtifactsController (#1094)', () => {
       const result = await firstValueFrom(controller.post({ url: 'https://example.test/x.tgz', sha256: SHA }));
 
       expect(result.dataGatewayNameConflict).toBe('Demo Gateway');
+    });
+
+    it('presents the update block, spelling the comparison as the staged-update read does (#1096)', async () => {
+      const installed = receipt('installed');
+      installed.update = UPDATE;
+      receiver.receiveByLink.mockResolvedValue(installed);
+
+      const result = await firstValueFrom(controller.post({ url: 'https://example.test/x.tgz', sha256: SHA }));
+
+      // The comparison's three parts sit beside the rest, as on
+      // GET /plugins/:slug/update/pending; the re-consent slug lists stay out.
+      expect(result.update).toEqual({
+        activeVersion: '1.0.0',
+        refusal: null,
+        changes: {
+          activatesAtOnce: false,
+          escalations: [ESCALATION],
+          serverGating: true,
+          deniedRequiredSlugs: ['feedback:read'],
+          declares: { added: ['plugin|demo-sink|manage:digest'], removed: [] },
+          noLongerRequested: ['feedback:write'],
+          dataGatewayNameConflict: null,
+        },
+      });
+    });
+
+    it('presents no update block for a slug nobody installed', async () => {
+      const result = await firstValueFrom(controller.post({ url: 'https://example.test/x.tgz', sha256: SHA }));
+
+      expect(result.update).toBeNull();
+    });
+
+    it('presents a taken DataGateway name as the refusal for an update that would be activated at once (#1096)', async () => {
+      const installed = receipt('installed');
+      installed.update = {
+        activeVersion: '1.0.0',
+        refusal: 'data_gateway_name_taken',
+        changes: {
+          ...UPDATE.changes,
+          comparison: { ...UPDATE.changes.comparison, escalations: [], serverGating: false, deniedRequiredSlugs: [] },
+          activatesAtOnce: true,
+          dataGatewayNameConflict: 'Demo Gateway',
+        },
+      };
+      receiver.read.mockResolvedValue(installed);
+
+      const result = await firstValueFrom(controller.read(SHA));
+
+      expect(result.update?.refusal).toBe('data_gateway_name_taken');
+      expect(result.update?.changes).toEqual(
+        expect.objectContaining({ activatesAtOnce: true, dataGatewayNameConflict: 'Demo Gateway' }),
+      );
     });
 
     it.each([undefined, null, ''])('treats a url of %p beside a file as an upload (#1094)', async (url) => {
