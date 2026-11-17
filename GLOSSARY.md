@@ -1231,7 +1231,7 @@ What keeps a plugin unit from running apart from the two switches, its own and t
 _Avoid_: dormant for consent given ahead of an update (say pre-consent)
 
 **Restart required**:
-A change the server has recorded but will act on only after its next restart, such as a new active version, a plugin switched on while not loaded, or an uninstall.
+A change the server has recorded but will act on only after its next restart, such as a new active version, a plugin switched on while not loaded, or an uninstall. The server names the process role to restart.
 _Avoid_: pending restart, hot reload
 
 **Uninstalled plugin**:

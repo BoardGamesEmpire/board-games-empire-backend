@@ -5,6 +5,9 @@ import { randomUUID } from 'node:crypto';
 /** The staging id (#357) a staged update carries by default; approve and reject must send it. */
 export const INVENTORY_STAGING_ID = 'e2e-staging-1';
 
+/** The checksum every fixture plugin row is installed from. */
+export const INSTALLED_SHA256 = 'a'.repeat(64);
+
 /**
  * The consent act a consent decision arranged directly on its row names
  * (#1336). Every decision names the act that wrote it, but `act_id` has no
@@ -35,7 +38,7 @@ export function pluginRowData(
     scope: PluginScope.Household,
     manifestJson: { slug, version },
     enabled: false,
-    installedSha256: 'a'.repeat(64),
+    installedSha256: INSTALLED_SHA256,
     ...overrides,
   };
 }

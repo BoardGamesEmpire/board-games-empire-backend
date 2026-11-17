@@ -34,8 +34,9 @@ import { FIXTURE_ACT_ID, INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumn
  * on the response and announced without a write to their rows (#1149), and
  * the 404/410/409 distinctions the pending read draws.
  *
- * Staged state is arranged directly on the row — the ingress that calls
- * `stage()` with a resolved directory is #84's, and no endpoint exists.
+ * Staged state is arranged directly on the row so each case fixes its
+ * manifests exactly; staging through the real route is covered by
+ * `plugin-update-staging.spec.ts` (#1096).
  * Core checks reference SEEDED permissions only (`permissions` is a
  * preserved table the between-test sweep never truncates, so tests must not
  * write to it): `read:safe_http_policy` (Medium) as the plain new check and
@@ -1045,6 +1046,22 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
       const failure = await db.client.plugin
         .update({ where: { id: plugin.id }, data: { pendingFromUrl: 'https://artifacts.example.test/x.tgz' } })
+        .catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(errorText(failure)).toContain('plugins_staged_provenance_needs_staging');
+      const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      expect(row.pendingFromUrl).toBeNull();
+      expect(row.pendingRegistrySlug).toBeNull();
+    });
+
+    it('the database refuses a staged registry alone on a plugin with no staged update (#1096)', async () => {
+      // The constraint's other arm: the registry is refused on its own, not
+      // only when it rides with a link.
+      const plugin = await db.client.plugin.create({ data: pluginRowData() });
+
+      const failure = await db.client.plugin
+        .update({ where: { id: plugin.id }, data: { pendingRegistrySlug: 'e2e-registry' } })
         .catch((err: unknown) => err);
 
       expect(failure).toBeInstanceOf(Error);

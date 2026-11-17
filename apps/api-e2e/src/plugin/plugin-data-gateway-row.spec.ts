@@ -21,8 +21,10 @@ import { pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
  * plugin into or out of the data-gateway category makes the row follow.
  *
  * Every step goes through the api: the artifact step, then the install, and
- * the uninstall route. The update cases stage on the plugin's row, since no
- * route stages one, and approve through the api. No coordinator runs here, so
+ * the uninstall route. The update cases stage on the plugin's row so each
+ * fixes its manifests exactly (the staging route is covered by
+ * `plugin-update-staging.spec.ts`, #1096), and approve through the api. No
+ * coordinator runs here, so
  * nothing calls the routes that reach one (the DataGateway connect and
  * interview routes).
  */

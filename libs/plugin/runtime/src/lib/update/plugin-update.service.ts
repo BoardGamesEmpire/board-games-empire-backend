@@ -562,10 +562,12 @@ interface ActivationOutcome {
 
 /**
  * The update consent seam (#59 Phase C3): the DB/consent half of a
- * plugin update. #84's distribution pipeline wraps `stage()` exactly as it
- * wraps `install()` — ingress, SHA-256 verification, extraction, and disk
- * placement of the new version stay there, as does removing a rejected
- * version's staged files.
+ * plugin update. The plugin artifact step and the staging service
+ * (`PluginArtifactStager`, #1096) wrap `stage()` exactly as the artifact
+ * installer wraps `install()` — ingress, SHA-256 verification, extraction,
+ * and disk placement of the new version stay there, never in this service,
+ * and removing a rejected version's directory is the plugin artifact
+ * sweep's (#1094).
  *
  * `stage()` validates the new manifest (with `bgeCompat` ENFORCED — a
  * version that cannot load must not be activatable), screens it through the
@@ -1158,7 +1160,7 @@ export class PluginUpdateService {
     });
 
     // Removing the staged artifact's directory, once no living row names it,
-    // is the planned artifact sweep's job (#1094, #224); this service never
+    // is the plugin artifact sweep's job (#1094, #224); this service never
     // touches the filesystem beyond reading manifests (#59).
     this.emitter.emit(
       PluginUpdateRejectedEvent.eventName,

@@ -71,14 +71,14 @@ export interface PluginUninstallResult {
  * denials included — reinstall is fresh consent) and the `PluginPermission`
  * catalog, retains the row and, by default, unit config rows; clears any
  * staged update (once cleared, no row names the staged artifact's directory,
- * so the planned artifact sweep, #1094, is to remove it); force-disables in
+ * so the plugin artifact sweep, #1094, removes it); force-disables in
  * the same write — the
  * loader's boot query treats that as an invariant — and sets
  * `restartRequired` so diagnostics show the running instance still holds
  * the old module until next boot. No hot unload, by design. No living row
  * names the installed artifact's directory after this either, but the
- * running module still reads from it, so the sweep is to keep it until
- * that boot.
+ * running module still reads from it, so the sweep keeps it until that
+ * boot.
  */
 @Injectable()
 export class PluginLifecycleService {
