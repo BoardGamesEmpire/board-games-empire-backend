@@ -1,5 +1,7 @@
 import { PLUGIN_ACTIVE_MANIFEST_READER } from '@bge/database';
 import { GLOBAL_MODULE_METADATA, MODULE_METADATA } from '@nestjs/common/constants.js';
+import { PluginConsentActService } from './consent/plugin-consent-act.service';
+import { PluginServerConsentActService } from './consent/plugin-server-consent-act.service';
 import { PluginGrantAuthorityService } from './grants/plugin-grant-authority.service';
 import { PluginDirectoryResolverService } from './loader/plugin-directory-resolver.service';
 import { StoredActiveManifestReader } from './manifest/stored-active-manifest.reader';
@@ -19,6 +21,21 @@ describe('PluginModule wiring (#577, #1151)', () => {
       useClass: StoredActiveManifestReader,
     });
     expect(Reflect.getMetadata(MODULE_METADATA.EXPORTS, PluginModule)).toContain(PLUGIN_ACTIVE_MANIFEST_READER);
+  });
+});
+
+/**
+ * The API edge injects the Server unit's consent act writer, so the runtime
+ * provides it and exports it beside the household and user one (#1336).
+ */
+describe('PluginModule exports for the consent act edges (#1336)', () => {
+  it("provides and exports the household and user act writer and the Server unit's", () => {
+    expect(Reflect.getMetadata(MODULE_METADATA.PROVIDERS, PluginModule)).toEqual(
+      expect.arrayContaining([PluginConsentActService, PluginServerConsentActService]),
+    );
+    expect(Reflect.getMetadata(MODULE_METADATA.EXPORTS, PluginModule)).toEqual(
+      expect.arrayContaining([PluginConsentActService, PluginServerConsentActService]),
+    );
   });
 });
 

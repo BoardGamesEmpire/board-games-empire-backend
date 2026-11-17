@@ -15,6 +15,7 @@ export * from './lib/consent/plugin-consent-check-classifier.service';
 export * from './lib/consent/plugin-consent-presentation.service';
 export * from './lib/consent/plugin-consent-standing.service';
 export * from './lib/consent/plugin-consent-standing.types';
+export * from './lib/consent/plugin-server-consent-act.service';
 export * from './lib/context/plugin-context.factory';
 export * from './lib/events/plugin-lifecycle-event-type.map';
 export * from './lib/events/plugin.events';

@@ -241,6 +241,7 @@ const UNIT_LIFECYCLE = 'libs/plugin/runtime/src/lib/units/plugin-unit-lifecycle.
 const UPDATE_SERVICE = 'libs/plugin/runtime/src/lib/update/plugin-update.service.ts';
 const LIFECYCLE_SERVICE = 'libs/plugin/runtime/src/lib/lifecycle/plugin-lifecycle.service.ts';
 const CONSENT_ACT_SERVICE = 'libs/plugin/runtime/src/lib/consent/plugin-consent-act.service.ts';
+const SERVER_CONSENT_ACT_SERVICE = 'libs/plugin/runtime/src/lib/consent/plugin-server-consent-act.service.ts';
 
 /**
  * The installer, which takes no entry in {@link LOCK_ORDER_PATHS}.
@@ -285,6 +286,7 @@ export const LOCK_SOURCES = {
   lifecycleService: LIFECYCLE_SERVICE,
   installerService: INSTALLER_SERVICE,
   consentActService: CONSENT_ACT_SERVICE,
+  serverConsentActService: SERVER_CONSENT_ACT_SERVICE,
   unitScopeLock: 'libs/plugin/runtime/src/lib/grants/unit-scope-lock.ts',
   pluginDataGatewayRow: PLUGIN_DATA_GATEWAY_ROW,
   dataGatewayService: DATA_GATEWAY_SERVICE,
@@ -339,6 +341,19 @@ export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
       'last the unit enablement write. The key comes after the plugin row because a writer that waits on the ' +
       'plugin row while holding the key closes a cycle against any writer that holds the row and waits for the ' +
       'key.',
+  },
+  {
+    label: "server consent act (a server admin's toggle and review)",
+    file: SERVER_CONSENT_ACT_SERVICE,
+    functionName: 'commit',
+    stages: ['plugin row', 'grant row'],
+    because:
+      'Toggle and review are one transaction through commit (#1336). The plugin-row claim comes first for the ' +
+      'FK reason the household and user act gives: the grant upserts take FOR KEY SHARE on that row AFTER ' +
+      'writing the grant tuple, so without the claim this path holds the plugin row LAST and deadlocks against ' +
+      'activation (#398). The claim also compares the active sha the consent surface named. Then the grant ' +
+      'rows, in permission order. No household row, no advisory key and no unit enablement: the Server unit ' +
+      'has none of them.',
   },
   {
     label: 'decide() — a server decision',

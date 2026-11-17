@@ -40,12 +40,13 @@ import {
 } from '../units/unit.errors';
 import { planConsentAct } from './consent-act-plan';
 import { unitOwnsConsentScope, type ConsentManifestSource } from './consent-classification.types';
+import { decisionsStand, decisionStands } from './consent-decision-stands';
 import {
   PluginConsentActNoUserScopeError,
   PluginConsentActStaleError,
   PluginConsentActUnitOffError,
 } from './plugin-consent-act.errors';
-import type { ConsentActAnswer, ConsentActDecision, ConsentActKind, ConsentActUnit } from './plugin-consent-act.types';
+import type { ConsentActAnswer, ConsentActKind, ConsentActUnit } from './plugin-consent-act.types';
 import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
 
 export interface ConsentActInput {
@@ -677,19 +678,6 @@ export class PluginConsentActService {
       );
     }
   }
-}
-
-/** The row already holds this decision: same status, same risk. */
-function decisionStands(decision: ConsentActDecision, row: PluginGrant | null | undefined): boolean {
-  return row != null && row.status === decision.status && row.decidedRiskLevel === decision.decidedRiskLevel;
-}
-
-/** Every planned decision already stands at the unit's coordinates. */
-function decisionsStand(
-  decisions: readonly ConsentActDecision[],
-  standingBySlug: ReadonlyMap<string, PluginGrant>,
-): boolean {
-  return decisions.every((decision) => decisionStands(decision, standingBySlug.get(decision.permissionSlug)));
 }
 
 function isHouseholdEnablement(row: UnitEnablement): row is HouseholdPlugin {

@@ -291,6 +291,7 @@ describe('the plugin consent path is one lock order (#360)', () => {
     const {
       installerService: INSTALLER_SERVICE,
       consentActService: CONSENT_ACT_SERVICE,
+      serverConsentActService: SERVER_CONSENT_ACT_SERVICE,
       pluginDataGatewayRow: DATA_GATEWAY_ROW,
     } = LOCK_SOURCES;
     const { dataGatewayService: DATA_GATEWAY_SERVICE, gatewayInterviewService: GATEWAY_INTERVIEW_SERVICE } =
@@ -307,6 +308,9 @@ describe('the plugin consent path is one lock order (#360)', () => {
       { file: CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'pluginGrant.upsert', claimed: true },
       { file: CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'householdPlugin.create', claimed: true },
       { file: CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'userPlugin.upsert', claimed: true },
+      // The server act writes the Server unit's decisions under its own
+      // `claimPluginForAct` the same way (#1336).
+      { file: SERVER_CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'pluginGrant.upsert', claimed: true },
       { file: GRANT_SERVICE, enclosing: 'attempt', write: 'pluginGrant.upsert', claimed: true },
       // The one write that sets `data_gateways.plugin_id` (#1083). Unclaimed
       // where the audit reads it and exempt on the strength of its caller,
