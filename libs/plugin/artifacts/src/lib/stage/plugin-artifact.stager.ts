@@ -159,8 +159,17 @@ export class PluginArtifactStager {
       // committed first, so this one was refused: the staging is done all the
       // same. While the plugin neither has this checksum staged nor runs it,
       // the refusal is the answer, whatever it was, and the artifact's row
-      // stays so the server admin can try again.
-      const winner = await this.winner(input.slug, sha256).catch(() => null);
+      // stays so the server admin can try again. A look for a winner that
+      // fails leaves the refusal as the answer, and a warning as its trace.
+      const winner = await this.winner(input.slug, sha256).catch((readErr: unknown) => {
+        this.logger.warn(
+          `Staging an update of plugin '${input.slug}' was refused, and the look for a staging that won failed: ${
+            readErr instanceof Error ? readErr.message : String(readErr)
+          }`,
+        );
+
+        return null;
+      });
       if (winner === null) {
         throw err;
       }

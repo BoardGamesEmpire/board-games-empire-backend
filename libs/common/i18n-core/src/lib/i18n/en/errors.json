@@ -399,6 +399,7 @@
     "install_permission_collision": "Plugin '{slug}' declares permission slugs that already exist",
     "update_version_conflict": "Version '{version}' of plugin '{slug}' is already active",
     "update_pending_conflict": "Plugin '{slug}' already has version '{pendingVersion}' staged — resolve it before staging '{incomingVersion}'",
+    "update_active_version_moved": "Plugin '{slug}' changed to version '{activeVersion}' while this update was being staged. Stage the update again, so that it is compared with that version.",
     "update_no_pending": "Plugin '{slug}' has no staged pending update to resolve",
     "update_data_gateway_name_conflict": "This update makes '{slug}' a data-gateway plugin, and a DataGateway named '{name}' already exists. Rename that DataGateway, then try the update again. Deleting it doesn't free the name, and a deleted DataGateway can't be renamed.",
     "update_staging_replaced": "The staged update for plugin '{slug}' changed since it was shown — review it again before approving or rejecting it",

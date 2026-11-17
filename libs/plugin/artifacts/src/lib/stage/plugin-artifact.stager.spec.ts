@@ -8,6 +8,7 @@ import {
   PluginUpdatePluginNotFoundError,
   PluginUpdateStaticAnalysisError,
   PluginUpdateTombstonedError,
+  PluginUpdateVersionConflictError,
   type PluginDirectoryResolverService,
   type PluginGrantAuthorityService,
   type PluginUpdateService,
@@ -330,8 +331,11 @@ describe('PluginArtifactStager (#1096)', () => {
     });
 
     it('the one that loses to an update activated at once answers with the plugin (#1096)', async () => {
+      // The other activation committed first, so this one is refused as
+      // activating the version that is already active: by its claim, or by
+      // the version check when it loaded the row after that commit.
       db.plugin.findUnique.mockResolvedValueOnce(pluginRow()).mockResolvedValueOnce(running);
-      updates.stage.mockRejectedValue(new Error('the version is already active'));
+      updates.stage.mockRejectedValue(new PluginUpdateVersionConflictError('demo-sink', '1.3.0'));
 
       await expect(stage()).resolves.toEqual({ plugin: running, activated: true, dataGatewayNameConflict: null });
     });
@@ -366,6 +370,29 @@ describe('PluginArtifactStager (#1096)', () => {
       updates.stage.mockRejectedValue(conflict);
 
       await expect(stage()).rejects.toBe(conflict);
+    });
+
+    it('a failed look for a winner leaves a warning naming the plugin and the failure (#1096)', async () => {
+      // The refusal stays the answer, and a database failure during it still leaves a trace.
+      const conflict = new PluginUpdatePendingConflictError('demo-sink', '1.2.5', '1.3.0');
+      db.plugin.findUnique.mockResolvedValueOnce(pluginRow()).mockRejectedValueOnce(new Error('connection lost'));
+      updates.stage.mockRejectedValue(conflict);
+
+      await expect(stage()).rejects.toBe(conflict);
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("'demo-sink'"));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('connection lost'));
+    });
+
+    it('a refused staging whose look for a winner succeeds leaves no warning (#1096)', async () => {
+      const conflict = new PluginUpdatePendingConflictError('demo-sink', '1.2.5', '1.3.0');
+      db.plugin.findUnique.mockResolvedValue(pluginRow({ pendingSha256: runningSha256, pendingVersion: '1.2.5' }));
+      updates.stage.mockRejectedValue(conflict);
+
+      await expect(stage()).rejects.toBe(conflict);
+
+      expect(warn).not.toHaveBeenCalled();
     });
 
     it('a plugin uninstalled since is no winner (#1096)', async () => {

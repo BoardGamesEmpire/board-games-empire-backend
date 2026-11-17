@@ -114,6 +114,32 @@ export class PluginUpdateVersionConflictError extends Error {
 }
 
 /**
+ * Another plugin artifact became active while this update was being staged,
+ * so what this update was compared against is no longer the active plugin
+ * artifact (#1096). Its version may even be the same number, from other
+ * content. Nothing of the update is activated; staging it again compares it
+ * with the plugin artifact that is active now.
+ */
+export class PluginUpdateActiveVersionMovedError extends Error {
+  override readonly name = 'PluginUpdateActiveVersionMovedError';
+
+  constructor(
+    public readonly slug: string,
+
+    /** The active version the update was compared against. */
+    public readonly comparedVersion: string,
+
+    /** The version that is active now. */
+    public readonly activeVersion: string,
+  ) {
+    super(
+      `Plugin '${slug}' changed to version '${activeVersion}' while this update, compared with version ` +
+        `'${comparedVersion}', was being staged; stage the update again so that it is compared with the active version`,
+    );
+  }
+}
+
+/**
  * A pending update is already staged. Refused rather than superseded: the
  * staged version may already be sitting in front of an admin, and silently
  * replacing it would discard an in-flight consent decision and leave the

@@ -42,6 +42,7 @@ import { PluginDirectoryResolverService } from '../loader/plugin-directory-resol
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginUpdateService, type PluginUpdateStageInput } from './plugin-update.service';
 import {
+  PluginUpdateActiveVersionMovedError,
   PluginUpdateAuthorityError,
   PluginUpdateCriticalConfirmationError,
   PluginUpdateDataGatewayNameConflictError,
@@ -420,7 +421,13 @@ describe('PluginUpdateService', () => {
           // take the whole activation with it) AND on the pending slot still
           // being empty — the immediate path must not clobber a concurrently
           // staged update with its cleared columns.
-          where: { id: 'plugin-1', uninstalledAt: null, pendingVersion: null, pendingStagingId: null },
+          where: {
+            id: 'plugin-1',
+            uninstalledAt: null,
+            pendingVersion: null,
+            pendingStagingId: null,
+            installedSha256: 'old-sha',
+          },
           data: expect.objectContaining({
             version: '1.3.0',
             restartRequired: true,
@@ -706,6 +713,84 @@ describe('PluginUpdateService', () => {
       await writeManifest(nextManifest());
 
       await expect(service.stage(input())).rejects.toThrow(PluginUpdatePendingConflictError);
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // With nothing staged, the staged columns alone cannot tell two stagings
+    // of the same update apart, so the claim also holds the active plugin
+    // artifact the update was compared against, by its checksum: a version
+    // number can come back, a checksum of other content cannot (#1096).
+    it('an update activated as it is staged claims the active plugin artifact it was compared against (#1096)', async () => {
+      await writeManifest(nextManifest());
+
+      await service.stage(input());
+
+      const [claim] = db.plugin.updateMany.mock.calls[0];
+      expect(claim.where).toMatchObject({ installedSha256: 'old-sha' });
+      expect(claim.where).not.toHaveProperty('version');
+    });
+
+    it('answers the version as already active when a concurrent request activated it first (#1096)', async () => {
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin()) // the load: 1.2.0 active, nothing staged
+        // the claim's re-read: the winner activated 1.3.0 from its plugin artifact
+        .mockResolvedValue(makePlugin({ version: '1.3.0', installedSha256: 'b'.repeat(64) }));
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+      await writeManifest(nextManifest());
+
+      const failure = await service.stage(input()).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateVersionConflictError);
+      expect(failure).toMatchObject({ slug: 'demo-sink', version: '1.3.0' });
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('refuses when another version became active while this one was being staged (#1096)', async () => {
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin()) // the load: 1.2.0 active, nothing staged
+        // the claim's re-read: another update activated 1.4.0 from another plugin artifact
+        .mockResolvedValue(makePlugin({ version: '1.4.0', installedSha256: 'c'.repeat(64) }));
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+      await writeManifest(nextManifest());
+
+      const failure = await service.stage(input()).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateActiveVersionMovedError);
+      expect(failure).toMatchObject({ slug: 'demo-sink', comparedVersion: '1.2.0', activeVersion: '1.4.0' });
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('answers a staged-update conflict it cannot name when nothing explains a lost claim (#1096)', async () => {
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin()) // the load: 1.2.0 active, nothing staged
+        // the claim's re-read: not uninstalled, nothing staged, the same checksum
+        .mockResolvedValue(makePlugin());
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+      await writeManifest(nextManifest());
+
+      const failure = await service.stage(input()).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdatePendingConflictError);
+      expect(failure).toMatchObject({ slug: 'demo-sink', pendingVersion: 'unknown' });
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // An update may move to any other version, an earlier one included, so
+    // 1.2.0 can be active again from another plugin artifact, with another
+    // manifest than the one this update was compared against (#1096).
+    it('a version number that came back does not pass for the artifact it was compared against (#1096)', async () => {
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin()) // the load: 1.2.0 active from 'old-sha', nothing staged
+        // the claim's re-read: 1.2.0 again, from another plugin artifact
+        .mockResolvedValue(makePlugin({ installedSha256: 'c'.repeat(64) }));
+      // The checksum guard matches no row.
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+      await writeManifest(nextManifest());
+
+      const failure = await service.stage(input()).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateActiveVersionMovedError);
+      expect(failure).toMatchObject({ slug: 'demo-sink', comparedVersion: '1.2.0', activeVersion: '1.2.0' });
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
@@ -1077,6 +1162,7 @@ describe('PluginUpdateService', () => {
         uninstalledAt: null,
         pendingVersion: '1.3.0',
         pendingStagingId: 'staging-a',
+        installedSha256: 'old-sha',
       });
     });
 
@@ -1264,6 +1350,7 @@ describe('PluginUpdateService', () => {
             uninstalledAt: null,
             pendingVersion: '1.3.0',
             pendingStagingId: 'staging-a',
+            installedSha256: 'old-sha',
           },
         }),
       );

@@ -80,6 +80,7 @@ import { compareForEscalations, deniedRequiredServerSlugs } from './escalation-c
 import { CLEARED_STAGED_UPDATE } from './staged-update.columns';
 import type { ManifestComparisonView, UpdateEscalation, UpdateEscalationComparison } from './update-escalation.types';
 import {
+  PluginUpdateActiveVersionMovedError,
   PluginUpdateAuthorityError,
   PluginUpdateCriticalConfirmationError,
   PluginUpdateDataGatewayNameConflictError,
@@ -155,8 +156,22 @@ interface ResolvedPendingUpdate {
 type LostStagedWrite =
   /** It answered a staging: an update approval or a rejection, which named this staging id. */
   | { readonly answeredStagingId: string }
-  /** It claimed the empty slot for this version: a staging, or an update activated as it is staged. */
-  | { readonly claimedEmptySlotFor: string };
+  /**
+   * It claimed the empty slot for this version: a staging, or an update
+   * activated as it is staged. Only the activation also held the active
+   * plugin artifact it was compared against, `comparedWith` (#1096); the
+   * staging write does not guard on it, so it carries none.
+   */
+  | { readonly claimedEmptySlotFor: string; readonly comparedWith?: ComparedActiveArtifact };
+
+/** The active plugin artifact an activation was compared against (#1096). */
+interface ComparedActiveArtifact {
+  /** Its checksum, which the activation's claim holds. */
+  readonly sha256: string;
+
+  /** Its version, which a refusal names. */
+  readonly version: string;
+}
 
 /** What an approval brings to the resolution: the staging it answers (#357). */
 interface PendingUpdateApproval {
@@ -1313,9 +1328,18 @@ export class PluginUpdateService {
    * consumed or gone (`PluginUpdateNoPendingError`) or replaced by another
    * staging (`PluginUpdateStagingReplacedError`, #357): nothing is left for it
    * to resolve. A write that claimed an empty slot (the staging write, or an
-   * activation with nothing staged) lost it to a concurrent stage and gets
-   * `PluginUpdatePendingConflictError`, the refuse-don't-supersede answer,
-   * built from the version now staged (#1116).
+   * activation with nothing staged) and finds a staged update there lost it to
+   * a concurrent stage and gets `PluginUpdatePendingConflictError`, the
+   * refuse-don't-supersede answer, built from the version now staged (#1116).
+   *
+   * An activation with nothing staged also held the active plugin artifact it
+   * was compared against, by its checksum (#1096). When it finds nothing
+   * staged and another checksum installed, it lost to another activation: one
+   * that made the version being activated active, as from a double click,
+   * gets `PluginUpdateVersionConflictError`, and any other gets
+   * `PluginUpdateActiveVersionMovedError`, since the comparison it was
+   * activated on is stale. An empty-slot claim nothing explains keeps the
+   * pending conflict, its staged version unknown.
    */
   private async refusalForLostStagedWrite(
     tx: Prisma.TransactionClient,
@@ -1324,7 +1348,13 @@ export class PluginUpdateService {
   ): Promise<Error> {
     const current = await tx.plugin.findUnique({
       where: { id: plugin.id },
-      select: { uninstalledAt: true, pendingVersion: true, pendingStagingId: true },
+      select: {
+        uninstalledAt: true,
+        pendingVersion: true,
+        pendingStagingId: true,
+        installedSha256: true,
+        version: true,
+      },
     });
 
     if (current?.uninstalledAt != null) {
@@ -1337,6 +1367,19 @@ export class PluginUpdateService {
       }
 
       return new PluginUpdateNoPendingError(plugin.slug);
+    }
+
+    if (
+      current !== null &&
+      current.pendingVersion === null &&
+      write.comparedWith !== undefined &&
+      current.installedSha256 !== write.comparedWith.sha256
+    ) {
+      if (current.version === write.claimedEmptySlotFor) {
+        return new PluginUpdateVersionConflictError(plugin.slug, write.claimedEmptySlotFor);
+      }
+
+      return new PluginUpdateActiveVersionMovedError(plugin.slug, write.comparedWith.version, current.version);
     }
 
     return new PluginUpdatePendingConflictError(
@@ -1715,12 +1758,26 @@ export class PluginUpdateService {
       // a timestamp can repeat. The staging id is fresh per staging write
       // and never reused. Claiming before any other write means the loser
       // exits with a typed refusal while the transaction has touched nothing.
+      // The claim also holds that the active plugin artifact is still the one
+      // this activation was compared against, by its checksum (#1096). With
+      // nothing staged, the staged columns are null before and after an
+      // activation, so two stagings that both decided to activate at once
+      // would both match them, and the second would activate again, or
+      // activate a comparison made against a manifest no longer active. A
+      // version number would not do: an update may move to any other version,
+      // an earlier one included, so a number can come back with other
+      // content, and a checksum of other content cannot. A reinstall from
+      // another plugin artifact inside the window moves the checksum too, so
+      // the guard refuses it (#1096). A reinstall from the same artifact has
+      // the same manifest but fresh grants, and that older race is not closed
+      // here.
       const claimed = await tx.plugin.updateMany({
         where: {
           id: plugin.id,
           uninstalledAt: null,
           pendingVersion: plugin.pendingVersion,
           pendingStagingId: plugin.pendingStagingId,
+          installedSha256: plugin.installedSha256,
         },
         data: {
           version: next.manifest.version,
@@ -1751,17 +1808,22 @@ export class PluginUpdateService {
       });
 
       if (claimed.count !== 1) {
-        // The pending state moved. An approval's staged update was consumed or
-        // replaced, while the immediate stage() path lost the empty slot to a
-        // concurrent stage. The database keeps the five staged columns all null
-        // or all set (`plugins_staged_update_all_or_nothing`), so a row's
-        // staging id is not null exactly when it had a staged update (#1116).
+        // The pending state or the active plugin artifact moved. An approval's
+        // staged update was consumed or replaced, while the immediate stage()
+        // path lost the empty slot to a concurrent stage, or lost the active
+        // plugin artifact it was compared against to a concurrent activation
+        // (#1096). The database keeps the five staged columns all null or all
+        // set (`plugins_staged_update_all_or_nothing`), so a row's staging id
+        // is not null exactly when it had a staged update (#1116).
         throw await this.refusalForLostStagedWrite(
           tx,
           plugin,
           plugin.pendingStagingId !== null
             ? { answeredStagingId: plugin.pendingStagingId }
-            : { claimedEmptySlotFor: next.manifest.version },
+            : {
+                claimedEmptySlotFor: next.manifest.version,
+                comparedWith: { sha256: plugin.installedSha256, version: plugin.version },
+              },
         );
       }
 
@@ -1777,9 +1839,9 @@ export class PluginUpdateService {
       // name that is taken takes the whole activation back.
       //
       // The category it leaves is the one read under the lock above, not the
-      // one on the row loaded before it. With nothing staged, the claim only
-      // holds that nothing is staged still, so another activation can have
-      // moved the plugin since that load, and the row with it.
+      // one on the row loaded before it. The claim holds the staged update and
+      // the active plugin artifact, not the category, so the category is read
+      // where nothing else can move it.
       const wasDataGateway = current.category === PluginCategory.DataGateway;
       const becomesDataGateway = MANIFEST_CATEGORY_TO_PRISMA[next.manifest.category] === PluginCategory.DataGateway;
 

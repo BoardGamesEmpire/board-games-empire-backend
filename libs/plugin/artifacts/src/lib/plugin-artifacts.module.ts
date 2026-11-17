@@ -16,12 +16,11 @@ import { PluginArtifactSweepService } from './sweep/plugin-artifact-sweep.servic
  * Its other collaborators come from global modules the host configures once.
  * The plugin runtime, `PluginModule.forRootAsync`, exports the installer, the
  * update service, the directory resolver, the authority check and its module
- * options, which name
- * the plugins root. Importing `PluginModule` here would build a second runtime
- * with no options. `SecureHttpModule` provides the download. The database
- * module is not global, so it is imported, and so is `AuditContextModule`,
- * which provides the sweep's system actor scope over the host's global
- * `ClsModule`.
+ * options, which name the plugins root. Importing `PluginModule` here would
+ * build a second runtime with no options. `SecureHttpModule` provides the
+ * download. The database module is not global, so it is imported, and so is
+ * `AuditContextModule`, which provides the sweep's system actor scope over the
+ * host's global `ClsModule`.
  *
  * The sweep runs at boot and hourly wherever this module is imported: in the
  * api, through `PluginsApiModule`, where `ScheduleModule.forRoot()` drives
