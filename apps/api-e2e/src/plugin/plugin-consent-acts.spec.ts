@@ -1328,6 +1328,86 @@ describe('consent acts (#1150)', () => {
       ]);
     });
 
+    it('rejecting a staged update keeps a pre-consent an earlier staging’s review gave once that staging activated (#1152)', async () => {
+      // The kept decision names an act that answered a staging, not an act on
+      // the active manifest: a rejection that deleted the decisions of every
+      // act with a staging id, rather than of this staging's acts, would take
+      // it.
+      const admin = await actors.admin();
+      const { owner, householdId, unit } = await household();
+      const SECOND_STAGING_ID = 'e2e-staging-second';
+      // A (1.2.0) is active; B (1.3.0), staged, adds the optional permission P.
+      const P = HOUSEHOLD_OPTIONAL;
+      const Q = HOUSEHOLD_REQUIRED;
+      const plugin = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK], [MANAGE_DIGEST_CHECK, P]);
+
+      await sendSwitchOn(
+        baseUrl,
+        owner,
+        unit,
+        plugin.slug,
+        switchOnBody(await readConsentSurface(baseUrl, owner, unit, plugin.slug)),
+      ).expect(200);
+
+      const firstReview = await sendReview(
+        baseUrl,
+        owner,
+        unit,
+        plugin.slug,
+        reviewBody(await readConsentSurface(baseUrl, owner, unit, plugin.slug, { staged: true }), {
+          [P.slug]: PluginGrantStatus.Granted,
+        }),
+      ).expect(200);
+
+      await approve(admin, plugin.slug).expect(200);
+
+      // B activated and kept P's pre-consent, which still names the review
+      // that answered B's staging.
+      const [given] = await decisionsAt(plugin.id, PluginGrantScope.Household, householdId);
+
+      expect(given).toMatchObject({
+        permissionSlug: P.slug,
+        status: PluginGrantStatus.Granted,
+        actId: firstReview.body.act.id,
+      });
+      expect(await actsAt(plugin.id, PluginGrantScope.Household, householdId)).toContainEqual(
+        expect.objectContaining({ id: firstReview.body.act.id, stagingId: INVENTORY_STAGING_ID }),
+      );
+
+      // C (1.4.0), staged under a staging of its own, requests P again and a
+      // new permission Q, which the household pre-consents.
+      await db.client.plugin.update({
+        where: { id: plugin.id },
+        data: stagedUpdateColumns({
+          manifest: manifestWith('1.4.0', [MANAGE_DIGEST_CHECK, P, Q]),
+          sha256: 'd'.repeat(64),
+          stagingId: SECOND_STAGING_ID,
+        }),
+      });
+
+      const secondReview = await sendReview(
+        baseUrl,
+        owner,
+        unit,
+        plugin.slug,
+        reviewBody(await readConsentSurface(baseUrl, owner, unit, plugin.slug, { staged: true }), {
+          [Q.slug]: PluginGrantStatus.Granted,
+        }),
+      ).expect(200);
+
+      expect(await decisionsAt(plugin.id, PluginGrantScope.Household, householdId)).toEqual([
+        expect.objectContaining({ permissionSlug: Q.slug, actId: secondReview.body.act.id }),
+        given,
+      ]);
+
+      await reject(admin, plugin.slug, SECOND_STAGING_ID).expect(200);
+
+      // Only C's pre-consent went; P's decision, given under B's staging,
+      // stands and still confers.
+      expect(await decisionsAt(plugin.id, PluginGrantScope.Household, householdId)).toEqual([given]);
+      expect(await pluginAbilitySlugsForHousehold(db.client, plugin.id, householdId)).toContain(P.slug);
+    });
+
     it('a permission pre-consented at the consent scope the staged manifest moves it to survives activation and confers after (#1150)', async () => {
       const admin = await actors.admin();
       const { owner, householdId, unit } = await household();
