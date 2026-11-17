@@ -639,9 +639,11 @@ export class PluginInstallerService {
 
         // Reinstall clears the tombstone in place. Consent starts from zero
         // (the uninstall purge emptied the catalog; re-seeded below), the
-        // enable switch starts OFF like any fresh install, and the running
-        // process may still hold the pre-uninstall module — restartRequired
-        // says so until the loader's success path clears it.
+        // Server switch starts OFF like any fresh install, every unit
+        // enablement is already off because uninstall switched each one off
+        // (#1328), and the running process may still hold the pre-uninstall
+        // module — restartRequired says so until the loader's success path
+        // clears it.
         //
         // Guarded on the tombstone STILL being present, the way the unique
         // slug index guards a fresh install: two concurrent reinstalls both
@@ -683,8 +685,10 @@ export class PluginInstallerService {
 
         plugin = await tx.plugin.findUniqueOrThrow({ where: { id: existing.id } });
 
-        // A reinstall reads and writes no household unit enablement: whether a
-        // retained one can run under this manifest is worked out when read (#1151).
+        // A reinstall reads and writes no unit enablement: uninstall switched
+        // every one off (#1328), so each unit switches on again by a consent
+        // act under this sha, and whether a retained one can run under this
+        // manifest is worked out when read (#1151).
       }
 
       // A data-gateway plugin's DataGateway row, created or (on a reinstall)

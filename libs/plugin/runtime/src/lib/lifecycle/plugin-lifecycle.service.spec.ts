@@ -647,6 +647,39 @@ describe('PluginLifecycleService', () => {
       expect(db.userPlugin.deleteMany).toHaveBeenCalledWith({ where: { pluginId: 'plugin-1' } });
     });
 
+    it('switches every household and user unit enablement off, after reading the affected units, and keeps their configuration (#1328)', async () => {
+      await service.uninstall({ slug: 'demo-sink', actorId: 'admin-1' });
+
+      // Only `enabled` moves: each unit keeps its configuration, and a
+      // reinstall finds every unit off, so switching on again is a consent
+      // act under the new sha.
+      expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
+        where: { pluginId: 'plugin-1', enabled: true },
+        data: { enabled: false },
+      });
+      expect(db.userPlugin.updateMany).toHaveBeenCalledWith({
+        where: { pluginId: 'plugin-1', enabled: true },
+        data: { enabled: false },
+      });
+
+      // After both reads: switched off first, the units that were on would
+      // be missing from the uninstall event that announces them.
+      const lastRead = Math.max(
+        db.householdPlugin.findMany.mock.invocationCallOrder[0],
+        db.userPlugin.findMany.mock.invocationCallOrder[0],
+      );
+
+      expect(lastRead).toBeLessThan(db.householdPlugin.updateMany.mock.invocationCallOrder[0]);
+      expect(lastRead).toBeLessThan(db.userPlugin.updateMany.mock.invocationCallOrder[0]);
+    });
+
+    it('switches nothing off under purgeData, which deletes the unit enablements (#1328)', async () => {
+      await service.uninstall({ slug: 'demo-sink', actorId: 'admin-1', purgeData: true });
+
+      expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
+      expect(db.userPlugin.updateMany).not.toHaveBeenCalled();
+    });
+
     it('snapshots the units AFTER the tombstone claim — a first enable racing this must not be purged unannounced', async () => {
       await service.uninstall({ slug: 'demo-sink', actorId: 'admin-1', purgeData: true });
 

@@ -206,18 +206,20 @@ export class PluginLifecycleService {
         throw new PluginLifecycleTombstonedError(plugin.slug, await this.readTombstone(tx, plugin.slug, initiatedAt));
       }
 
-      // Captured AFTER the claim and BEFORE the purge, and both halves are
-      // load-bearing. Before the purge because under `purgeData` these rows
-      // are gone by commit time, and the event payload is the only durable
-      // record of who the removal affected. After the claim because a unit
-      // writer racing this transaction is ordered by the claim's row lock,
-      // not by anything earlier: the unit paths read the plugin row
-      // `FOR SHARE` (#323), so one that got its share lock first blocks the
-      // claim until it commits — and is then visible to this read — while
-      // one arriving later blocks on the claim and refuses over the
-      // tombstone it sees. Read before the claim, a first enable committing
-      // in that window is purged without ever being announced, and the
-      // household is never told the plugin it just turned on is gone.
+      // Captured AFTER the claim and BEFORE the switch-off and the purge, and
+      // both halves are load-bearing. Before them because each takes away
+      // what this reads: the switch-off leaves no unit enablement on (#1328),
+      // and under `purgeData` the rows are gone by commit time, so the event
+      // payload is the only durable record of who the removal affected.
+      // After the claim because a unit writer racing this transaction is
+      // ordered by the claim's row lock, not by anything earlier: the unit
+      // paths read the plugin row `FOR SHARE` (#323), so one that got its
+      // share lock first blocks the claim until it commits — and is then
+      // visible to this read — while one arriving later blocks on the claim
+      // and refuses over the tombstone it sees. Read before the claim, a
+      // first enable committing in that window is purged without ever being
+      // announced, and the household is never told the plugin it just turned
+      // on is gone.
       const affectedHouseholds = await tx.householdPlugin.findMany({
         where: { pluginId: plugin.id, enabled: true },
         select: { householdId: true },
@@ -226,6 +228,24 @@ export class PluginLifecycleService {
         where: { pluginId: plugin.id, enabled: true },
         select: { userId: true },
       });
+
+      // Every retained unit enablement is switched off, its configuration
+      // kept, so nothing reads as on for a plugin that is not installed and a
+      // reinstall finds every unit off: a unit that wants the plugin back
+      // switches it on, a consent act under the sha then installed (#1328).
+      // No unit is announced on its own: the uninstall event names the units
+      // the reads above found on. Under `purgeData` the unit enablements are
+      // deleted below instead.
+      if (input.purgeData !== true) {
+        await tx.householdPlugin.updateMany({
+          where: { pluginId: plugin.id, enabled: true },
+          data: { enabled: false },
+        });
+        await tx.userPlugin.updateMany({
+          where: { pluginId: plugin.id, enabled: true },
+          data: { enabled: false },
+        });
+      }
 
       await tx.pluginGrant.deleteMany({ where: { pluginId: plugin.id } });
       await tx.pluginPermission.deleteMany({ where: { pluginId: plugin.id } });
