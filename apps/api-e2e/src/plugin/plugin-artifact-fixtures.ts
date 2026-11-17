@@ -58,6 +58,10 @@ export const freshPluginSlug = (prefix: string): string => `${prefix}-${randomBy
  * slug follows it. The fixture's `feedback:read` is dropped for the reason the
  * other plugin specs give: no seeded `Permission` row backs it. `bgeCompat` is
  * widened to cover the server's build-time stamp.
+ *
+ * `overrides` merge as `buildPluginManifest` merges its own: a nested section
+ * merges one level deep over this artifact's, so a partial `storage` keeps
+ * the slug's table rather than the fixture's (#1096).
  */
 export const artifactManifest = (
   slug: string,
@@ -65,22 +69,29 @@ export const artifactManifest = (
   extraChecks: PluginManifest['permissions']['checks'] = [],
 ): PluginManifest => {
   const [manageDigest] = buildPluginManifest().permissions.checks;
+  const { permissions, events, storage, jobs, ...rest } = overrides;
 
   return buildPluginManifest({
     slug,
     bgeCompat: '>=0.0.0',
+    ...rest,
     permissions: {
       declares: ['manage:digest'],
       checks: [...(manageDigest === undefined ? [] : [manageDigest]), ...extraChecks],
+      ...permissions,
     },
-    events: { subscribes: ['feedback.created'], emits: [`plugin.${slug}.digest-sent`] },
+    events: { subscribes: ['feedback.created'], emits: [`plugin.${slug}.digest-sent`], ...events },
     storage: {
       ownTables: [`plugin_${slug.replaceAll('-', '_')}_digests`],
       readsCore: ['Feedback'],
       writesCore: [],
+      ...storage,
     },
-    jobs: { queues: [`plugin.${slug}.digest`], schedules: [{ name: 'weekly-digest', cron: '0 9 * * 1' }] },
-    ...overrides,
+    jobs: {
+      queues: [`plugin.${slug}.digest`],
+      schedules: [{ name: 'weekly-digest', cron: '0 9 * * 1' }],
+      ...jobs,
+    },
   });
 };
 

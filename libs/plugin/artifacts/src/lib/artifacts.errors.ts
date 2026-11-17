@@ -115,15 +115,16 @@ export class PluginArtifactDownloadFailedError extends Error {
 }
 
 /**
- * No plugin artifact with this checksum is waiting to be installed (#1094):
- * it was never received, it expired, it was installed, or its directory is
- * gone.
+ * No plugin artifact with this checksum is waiting on this server (#1094): it
+ * was never received, it expired, it was installed or staged as an update, or
+ * its directory is gone. Install and update staging both refuse with it, so
+ * its message names neither (#1096).
  */
 export class PluginArtifactNotFoundError extends Error {
   override readonly name = 'PluginArtifactNotFoundError';
 
   constructor(readonly sha256: string) {
-    super(`No plugin artifact with the checksum ${printable(sha256)} is waiting to be installed.`);
+    super(`No plugin artifact with the checksum ${printable(sha256)} is waiting on this server.`);
   }
 }
 
