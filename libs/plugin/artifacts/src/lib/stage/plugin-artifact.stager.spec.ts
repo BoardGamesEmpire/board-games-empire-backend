@@ -72,7 +72,7 @@ describe('PluginArtifactStager (#1096)', () => {
   } as unknown as PluginUpdateStageResult;
 
   let store: { refreshForInstall: jest.Mock; remove: jest.Mock };
-  let updates: { stage: jest.Mock; describePending: jest.Mock };
+  let updates: { stage: jest.Mock; describeStaging: jest.Mock };
   let directories: { resolve: jest.Mock };
   let authority: { isServerAdmin: jest.Mock };
   let db: { plugin: { findUnique: jest.Mock } };
@@ -88,7 +88,7 @@ describe('PluginArtifactStager (#1096)', () => {
     };
     updates = {
       stage: jest.fn().mockResolvedValue(stageResult),
-      describePending: jest.fn().mockResolvedValue({ dataGatewayNameConflict: null }),
+      describeStaging: jest.fn().mockResolvedValue({ dataGatewayNameConflict: null }),
     };
     directories = { resolve: jest.fn().mockResolvedValue(directory) };
     authority = { isServerAdmin: jest.fn().mockResolvedValue(true) };
@@ -258,7 +258,7 @@ describe('PluginArtifactStager (#1096)', () => {
   describe('a staging that is already done (#1096)', () => {
     it('answers the staged update when the plugin already has one from this checksum, and stages nothing', async () => {
       db.plugin.findUnique.mockResolvedValue(staged);
-      updates.describePending.mockResolvedValue({ dataGatewayNameConflict: 'Demo Gateway' });
+      updates.describeStaging.mockResolvedValue({ dataGatewayNameConflict: 'Demo Gateway' });
 
       await expect(stage()).resolves.toEqual({
         plugin: staged,
@@ -266,10 +266,23 @@ describe('PluginArtifactStager (#1096)', () => {
         dataGatewayNameConflict: 'Demo Gateway',
       });
 
-      expect(updates.describePending).toHaveBeenCalledWith('demo-sink');
+      expect(updates.describeStaging).toHaveBeenCalledWith(staged);
       expect(updates.stage).not.toHaveBeenCalled();
       expect(store.refreshForInstall).not.toHaveBeenCalled();
       expect(store.remove).not.toHaveBeenCalled();
+    });
+
+    // A rejection or another staging can land between the read and the
+    // DataGateway name's: the name is worked out from the row the answer
+    // returns, never from a fresh read, so the repeat neither turns into the
+    // staged-update read's refusal nor names a name for another staging.
+    it('works out the DataGateway name from the row it answers with, not a fresh read (#1096)', async () => {
+      db.plugin.findUnique.mockResolvedValue(staged);
+
+      await stage();
+
+      expect(db.plugin.findUnique).toHaveBeenCalledTimes(1);
+      expect(updates.describeStaging.mock.calls[0][0]).toBe(staged);
     });
 
     // The staged-update read refuses over the stored manifests themselves: one
@@ -288,7 +301,7 @@ describe('PluginArtifactStager (#1096)', () => {
       ],
     ])('answers the staged update with no DataGateway name when %s (#1096)', async (_case, refusal) => {
       db.plugin.findUnique.mockResolvedValue(staged);
-      updates.describePending.mockRejectedValue(refusal);
+      updates.describeStaging.mockRejectedValue(refusal);
 
       await expect(stage()).resolves.toEqual({ plugin: staged, activated: false, dataGatewayNameConflict: null });
 
@@ -298,7 +311,7 @@ describe('PluginArtifactStager (#1096)', () => {
     it('lets any other failure of the staged-update read propagate (#1096)', async () => {
       db.plugin.findUnique.mockResolvedValue(staged);
       const lost = new Error('connection lost');
-      updates.describePending.mockRejectedValue(lost);
+      updates.describeStaging.mockRejectedValue(lost);
 
       await expect(stage()).rejects.toBe(lost);
     });
@@ -309,7 +322,7 @@ describe('PluginArtifactStager (#1096)', () => {
       await expect(stage()).resolves.toEqual({ plugin: running, activated: true, dataGatewayNameConflict: null });
 
       expect(updates.stage).not.toHaveBeenCalled();
-      expect(updates.describePending).not.toHaveBeenCalled();
+      expect(updates.describeStaging).not.toHaveBeenCalled();
       expect(store.refreshForInstall).not.toHaveBeenCalled();
       expect(store.remove).not.toHaveBeenCalled();
     });
@@ -330,7 +343,7 @@ describe('PluginArtifactStager (#1096)', () => {
       // Both find nothing staged; by the time this one fails, the other has committed.
       db.plugin.findUnique.mockResolvedValueOnce(pluginRow()).mockResolvedValueOnce(staged);
       updates.stage.mockRejectedValue(new PluginUpdatePendingConflictError('demo-sink', '1.3.0', '1.3.0'));
-      updates.describePending.mockResolvedValue({ dataGatewayNameConflict: 'Demo Gateway' });
+      updates.describeStaging.mockResolvedValue({ dataGatewayNameConflict: 'Demo Gateway' });
 
       await expect(stage()).resolves.toEqual({
         plugin: staged,

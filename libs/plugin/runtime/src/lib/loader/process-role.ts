@@ -16,6 +16,11 @@ export type PluginProcessRole = (typeof PLUGIN_PROCESS_ROLES)[number];
  * data-gateway plugin still names it: it is the process that has to load it.
  * Working this out from the plugin load records instead is #332's; the body
  * can move to the records without changing what callers receive.
+ *
+ * The answer is from the category alone, so an update that moves a plugin
+ * into or out of data-gateway names only the process role of the category it
+ * moves to. The process of the other role keeps running the old code until it
+ * restarts too, which only the load records can tell (#332).
  */
 export function processRoleLoading(category: PluginCategory): PluginProcessRole {
   return category === PluginCategory.DataGateway ? 'coordinator' : 'api';

@@ -158,15 +158,14 @@ type LostStagedWrite =
   | { readonly answeredStagingId: string }
   /**
    * It claimed the empty slot for this version: a staging, or an update
-   * activated as it is staged. Only the activation also held the active
-   * plugin artifact it was compared against, `comparedWith` (#1096); the
-   * staging write does not guard on it, so it carries none.
+   * activated as it is staged. Both also held the active plugin artifact
+   * they were compared against, `comparedWith` (#1096).
    */
-  | { readonly claimedEmptySlotFor: string; readonly comparedWith?: ComparedActiveArtifact };
+  | { readonly claimedEmptySlotFor: string; readonly comparedWith: ComparedActiveArtifact };
 
-/** The active plugin artifact an activation was compared against (#1096). */
+/** The active plugin artifact a staging or an activation was compared against (#1096). */
 interface ComparedActiveArtifact {
-  /** Its checksum, which the activation's claim holds. */
+  /** Its checksum, which the claim holds. */
   readonly sha256: string;
 
   /** Its version, which a refusal names. */
@@ -750,9 +749,13 @@ export class PluginUpdateService {
       // silently overwrite the winner's staged version — exactly the
       // supersede this refusal exists to prevent. `uninstalledAt` rides the
       // same guard: uninstall clears these columns, and re-arming them
-      // afterwards would report a staged update against a tombstone.
+      // afterwards would report a staged update against a tombstone. So does
+      // the active plugin artifact the comparison was made against, as the
+      // activation claim holds it: a concurrent staging that activated at
+      // once leaves the slot empty, and this staging's escalations would
+      // describe a manifest no longer active (#1096).
       const claimed = await tx.plugin.updateMany({
-        where: { id: plugin.id, pendingVersion: null, uninstalledAt: null },
+        where: { id: plugin.id, pendingVersion: null, uninstalledAt: null, installedSha256: plugin.installedSha256 },
         data: {
           pendingVersion: next.manifest.version,
           pendingManifestJson: next.manifest as Prisma.InputJsonValue,
@@ -770,7 +773,10 @@ export class PluginUpdateService {
       });
 
       if (claimed.count !== 1) {
-        throw await this.refusalForLostStagedWrite(tx, plugin, { claimedEmptySlotFor: next.manifest.version });
+        throw await this.refusalForLostStagedWrite(tx, plugin, {
+          claimedEmptySlotFor: next.manifest.version,
+          comparedWith: { sha256: plugin.installedSha256, version: plugin.version },
+        });
       }
 
       return tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
@@ -891,7 +897,7 @@ export class PluginUpdateService {
     }
 
     const { plugin, active, next, corePermissions, comparison, decisions, provenance } =
-      await this.resolvePendingUpdate(input.slug, { stagingId: input.stagingId });
+      await this.resolvePendingUpdate(await this.loadUpdatablePlugin(input.slug), { stagingId: input.stagingId });
 
     // Before the Critical confirmation, whose set a stale read may also have
     // named wrong. The catalog risks here are the ones the transaction stamps,
@@ -998,7 +1004,23 @@ export class PluginUpdateService {
    * about the decisions they both read (#1336).
    */
   async describePending(slug: string): Promise<PluginUpdatePendingDescription> {
-    const { plugin, active, next, corePermissions, comparison } = await this.resolvePendingUpdate(slug);
+    return this.describeStaging(await this.loadUpdatablePlugin(slug));
+  }
+
+  /**
+   * {@link describePending} for a plugin row the caller has already read
+   * (#1096). The description is of that row's staging, with no second read,
+   * so it cannot describe a staging that replaced it or refuse over one
+   * resolved since: the staging service answers a repeated staging this way,
+   * and its answer names the row it returns. A tombstoned row, or one with
+   * nothing staged, is refused as `describePending` refuses it.
+   */
+  async describeStaging(plugin: Plugin): Promise<PluginUpdatePendingDescription> {
+    if (plugin.uninstalledAt !== null) {
+      throw new PluginUpdateTombstonedError(plugin.slug, plugin.uninstalledAt);
+    }
+
+    const { active, next, corePermissions, comparison } = await this.resolvePendingUpdate(plugin);
     const changes = await this.changesFrom(plugin, active, next, comparison);
     const owing = await this.unitsOwingReconsent(this.db, plugin.id, next, corePermissions, comparison);
     // A scope that owes nothing had its units neither read nor counted, and
@@ -1249,8 +1271,9 @@ export class PluginUpdateService {
   }
 
   /**
-   * The shared approve/describe prologue: load by slug with the
-   * not-found / tombstoned / no-pending distinctions, re-validate both
+   * The shared approve/describe prologue, from a living plugin row the
+   * caller loaded (the not-found and tombstoned distinctions are the
+   * caller's): the no-pending distinction, re-validate both
    * stored manifests, and recompute the escalation comparison against
    * TODAY's decisions — never replayed from staging, because decisions can
    * change between stage and now. One implementation on purpose: the
@@ -1267,14 +1290,12 @@ export class PluginUpdateService {
    * provenance back as well, its checksum checked (#357, #1117, #1096). The
    * staged-update read passes neither.
    */
-  private resolvePendingUpdate(slug: string): Promise<ResolvedPendingUpdate>;
-  private resolvePendingUpdate(slug: string, approval: PendingUpdateApproval): Promise<ResolvedPendingApproval>;
+  private resolvePendingUpdate(plugin: Plugin): Promise<ResolvedPendingUpdate>;
+  private resolvePendingUpdate(plugin: Plugin, approval: PendingUpdateApproval): Promise<ResolvedPendingApproval>;
   private async resolvePendingUpdate(
-    slug: string,
+    plugin: Plugin,
     approval?: PendingUpdateApproval,
   ): Promise<ResolvedPendingUpdate & { readonly provenance?: PluginProvenance }> {
-    const plugin = await this.loadUpdatablePlugin(slug);
-
     // A staged row without its checksum names no plugin artifact, so there
     // is nothing approval could activate (#696): it is not a staged update.
     if (plugin.pendingVersion === null || plugin.pendingManifestJson === null || plugin.pendingSha256 === null) {
@@ -1351,14 +1372,14 @@ export class PluginUpdateService {
    * a concurrent stage and gets `PluginUpdatePendingConflictError`, the
    * refuse-don't-supersede answer, built from the version now staged (#1116).
    *
-   * An activation with nothing staged also held the active plugin artifact it
-   * was compared against, by its checksum (#1096). When it finds nothing
-   * staged and another checksum installed, it lost to another activation: one
-   * that made the version being activated active, as from a double click,
-   * gets `PluginUpdateVersionConflictError`, and any other gets
+   * An empty-slot claim also held the active plugin artifact it was compared
+   * against, by its checksum (#1096). When it finds nothing staged and another
+   * checksum installed, it lost to an activation: one that made the version
+   * being claimed for active, as from a double click, gets
+   * `PluginUpdateVersionConflictError`, and any other gets
    * `PluginUpdateActiveArtifactMovedError`, since the comparison it was
-   * activated on is stale. An empty-slot claim nothing explains keeps the
-   * staged-update conflict, its staged version unknown.
+   * staged or activated on is stale. An empty-slot claim nothing explains
+   * keeps the staged-update conflict, its staged version unknown.
    */
   private async refusalForLostStagedWrite(
     tx: Prisma.TransactionClient,
@@ -1388,12 +1409,7 @@ export class PluginUpdateService {
       return new PluginUpdateNoPendingError(plugin.slug);
     }
 
-    if (
-      current !== null &&
-      current.pendingVersion === null &&
-      write.comparedWith !== undefined &&
-      current.installedSha256 !== write.comparedWith.sha256
-    ) {
+    if (current !== null && current.pendingVersion === null && current.installedSha256 !== write.comparedWith.sha256) {
       if (current.version === write.claimedEmptySlotFor) {
         return new PluginUpdateVersionConflictError(plugin.slug, write.claimedEmptySlotFor);
       }

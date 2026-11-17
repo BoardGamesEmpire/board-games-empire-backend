@@ -933,7 +933,7 @@ describe('PluginUpdateService', () => {
       expect(result.comparison.escalations).toEqual([{ kind: 'writes-core-added', model: 'GameNight' }]);
       // Conditional on the slot still being empty inside the transaction.
       expect(db.plugin.updateMany).toHaveBeenCalledWith({
-        where: { id: 'plugin-1', pendingVersion: null, uninstalledAt: null },
+        where: { id: 'plugin-1', pendingVersion: null, uninstalledAt: null, installedSha256: 'old-sha' },
         data: expect.objectContaining({
           pendingVersion: '1.3.0',
           pendingSha256: 'b'.repeat(64),
@@ -1012,6 +1012,41 @@ describe('PluginUpdateService', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
+    // A concurrent staging of the same version that activated at once leaves
+    // the slot empty, so the staged columns alone would let this staging
+    // through, its escalations worked out against a manifest no longer
+    // active. The claim holds the active plugin artifact, as the activation
+    // claim does (#1096).
+    it('a staging that loses the active plugin artifact to an activation of its version answers it as already active (#1096)', async () => {
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin()) // the load: 1.2.0 active from 'old-sha', nothing staged
+        // the claim's re-read: another artifact of 1.3.0 activated at once
+        .mockResolvedValue(makePlugin({ version: '1.3.0', installedSha256: 'c'.repeat(64) }));
+      await writeManifest(nextManifest({ storage: { ...activeManifest.storage, writesCore: ['GameNight'] } }));
+
+      const failure = await service.stage(input()).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateVersionConflictError);
+      expect(failure).toMatchObject({ slug: 'demo-sink', version: '1.3.0' });
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('a staging that loses the active plugin artifact to another version is told to stage again (#1096)', async () => {
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin()) // the load: 1.2.0 active from 'old-sha', nothing staged
+        // the claim's re-read: 1.4.0 activated from another plugin artifact
+        .mockResolvedValue(makePlugin({ version: '1.4.0', installedSha256: 'c'.repeat(64) }));
+      await writeManifest(nextManifest({ storage: { ...activeManifest.storage, writesCore: ['GameNight'] } }));
+
+      const failure = await service.stage(input()).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateActiveArtifactMovedError);
+      expect(failure).toMatchObject({ slug: 'demo-sink', comparedVersion: '1.2.0', activeVersion: '1.4.0' });
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
     it('refuses to stage onto a row uninstalled mid-flight rather than re-arming the pending columns uninstall just cleared', async () => {
       const uninstalledAt = new Date('2026-08-16T12:00:00Z');
       db.plugin.updateMany.mockResolvedValue({ count: 0 });
@@ -1084,7 +1119,7 @@ describe('PluginUpdateService', () => {
         expect(result.comparison.serverGating).toBe(true);
         expect(result.comparison.deniedRequiredSlugs).toEqual(['feedback:read']);
         expect(db.plugin.updateMany).toHaveBeenLastCalledWith({
-          where: { id: 'plugin-1', pendingVersion: null, uninstalledAt: null },
+          where: { id: 'plugin-1', pendingVersion: null, uninstalledAt: null, installedSha256: 'old-sha' },
           data: expect.objectContaining({ pendingVersion: '1.3.0', pendingSha256: 'b'.repeat(64) }),
         });
         expect(db.pluginConsentAct.create).not.toHaveBeenCalled();
@@ -3196,6 +3231,26 @@ describe('PluginUpdateService', () => {
 
     it('throws the no-pending error when nothing is staged', async () => {
       await expect(service.describePending('demo-sink')).rejects.toThrow(PluginUpdateNoPendingError);
+    });
+
+    // The staging service answers a repeated staging from the row it read, so
+    // the description must be of that row's staging: a rejection or another
+    // staging landing since can neither refuse it nor be described in its
+    // place (#1096).
+    it('describes the staging in a row the caller read, without reading the row again (#1096)', async () => {
+      const row = stagedPlugin(nextManifest());
+
+      const description = await service.describeStaging(row);
+
+      expect(db.plugin.findUnique).not.toHaveBeenCalled();
+      expect(description.plugin).toBe(row);
+      expect(description.plugin.pendingStagingId).toBe('staging-a');
+    });
+
+    it('refuses a tombstoned row handed to it, as the read by slug does (#1096)', async () => {
+      const row = stagedPlugin(nextManifest(), { uninstalledAt: new Date('2026-08-01T00:00:00Z') });
+
+      await expect(service.describeStaging(row)).rejects.toThrow(PluginUpdateTombstonedError);
     });
 
     it('reads a staged update whose checksum is not a checksum, since only approval uses it (#1117)', async () => {

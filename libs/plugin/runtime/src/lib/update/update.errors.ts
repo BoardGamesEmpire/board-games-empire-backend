@@ -117,8 +117,8 @@ export class PluginUpdateVersionConflictError extends Error {
  * Another plugin artifact became active while this update was being staged,
  * so what this update was compared against is no longer the active plugin
  * artifact (#1096). Its version may even be the same number, from other
- * content. Nothing of the update is activated; staging it again compares it
- * with the plugin artifact that is active now.
+ * content. Nothing of the update is staged or activated; staging it again
+ * compares it with the plugin artifact that is active now.
  */
 export class PluginUpdateActiveArtifactMovedError extends Error {
   override readonly name = 'PluginUpdateActiveArtifactMovedError';

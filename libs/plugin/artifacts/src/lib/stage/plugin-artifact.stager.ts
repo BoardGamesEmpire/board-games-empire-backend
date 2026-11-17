@@ -199,7 +199,7 @@ export class PluginArtifactStager {
    */
   private async alreadyDone(plugin: Plugin, sha256: PluginArtifactSha256): Promise<PluginArtifactStagingResult | null> {
     if (plugin.pendingSha256 === sha256) {
-      return { plugin, activated: false, dataGatewayNameConflict: await this.stagedNameConflict(plugin.slug) };
+      return { plugin, activated: false, dataGatewayNameConflict: await this.stagedNameConflict(plugin) };
     }
 
     if (plugin.installedSha256 === sha256) {
@@ -221,16 +221,19 @@ export class PluginArtifactStager {
   }
 
   /**
-   * The staged update's taken DataGateway name, as the staged-update read
-   * works it out now. When that read refuses over the stored manifests (one
-   * cannot be read, or a permission it requests is a core permission retired
-   * since the staging or is forbidden), it reports none: the staging is done,
-   * and must still answer (#1096). Any other failure, a database one
-   * included, propagates rather than reading as no conflict.
+   * The taken DataGateway name of the staged update in this row, as the
+   * staged-update read works it out now. It describes the row already read,
+   * never a fresh one, so a staging rejected or replaced since cannot turn a
+   * repeat into a refusal or answer with a name for another staging (#1096).
+   * When the read refuses over the stored manifests (one cannot be read, or a
+   * permission it requests is a core permission retired since the staging or
+   * is forbidden), it reports none: the staging is done, and must still
+   * answer. Any other failure, a database one included, propagates rather
+   * than reading as no conflict.
    */
-  private async stagedNameConflict(slug: string): Promise<string | null> {
+  private async stagedNameConflict(plugin: Plugin): Promise<string | null> {
     try {
-      return (await this.updates.describePending(slug)).dataGatewayNameConflict;
+      return (await this.updates.describeStaging(plugin)).dataGatewayNameConflict;
     } catch (err) {
       if (
         err instanceof PluginUpdateManifestError ||
