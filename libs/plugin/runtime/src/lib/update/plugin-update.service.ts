@@ -178,6 +178,13 @@ interface ResolvedPendingUpdate {
   readonly comparison: UpdateEscalationComparison;
 }
 
+/** What a guarded write on a plugin's staged update was doing when it matched no row (#1116). */
+type LostStagedWrite =
+  /** It answered a staging: an update approval or a rejection, which named this staging id. */
+  | { readonly answeredStagingId: string }
+  /** It claimed the empty slot for this version: a staging, or an update activated as it is staged. */
+  | { readonly claimedEmptySlotFor: string };
+
 /** What an approval brings to the resolution: the staging it answers (#357). */
 interface PendingUpdateApproval {
   readonly stagingId: string;
@@ -319,6 +326,34 @@ interface ReconsentCandidate<TUnit> {
   readonly outstanding: readonly string[];
 }
 
+/**
+ * What one activation needs, shared by `activate()` and
+ * `activateInTransaction()` so the two cannot drift apart (#1116).
+ */
+interface ActivationInput {
+  readonly plugin: Plugin;
+  readonly active: PluginManifestValidationResult;
+  readonly next: PluginManifestValidationResult;
+
+  /** The checksum of the plugin artifact being activated, which becomes `installedSha256` (#224). */
+  readonly artifactSha256: PluginArtifactSha256;
+  readonly comparison: UpdateEscalationComparison;
+  readonly checksToSeed: readonly NormalizedPermissionRequest[];
+  readonly corePermissions: ReadonlyMap<string, Permission>;
+  readonly actorId: string;
+  readonly initiatedAt: Date;
+
+  /**
+   * `approve()`'s second-factor inputs, re-verified inside the transaction
+   * against the tx-local seed set. Absent on the immediate `stage()` path,
+   * which never seeds through an approval: nothing escalated to confirm.
+   */
+  readonly reentry?: {
+    readonly confirmCriticalSlugs: readonly string[];
+    readonly riskEscalatedChecks: readonly NormalizedPermissionRequest[];
+  };
+}
+
 interface ActivationOutcome {
   readonly plugin: Plugin;
   /** The checks actually seeded — the caller's set re-filtered against the tx-local decisions (see `activate()`). */
@@ -442,17 +477,17 @@ export class PluginUpdateService {
     // their consent is the units', and activation announces the re-consent
     // they owe (#1149).
     if (!comparison.serverGating && comparison.blockedByDenial.length === 0) {
-      const outcome = await this.activate(
+      const outcome = await this.activate({
         plugin,
         active,
         next,
-        directory.sha256,
+        artifactSha256: directory.sha256,
         comparison,
-        [],
+        checksToSeed: [],
         corePermissions,
-        input.initiatorId,
+        actorId: input.initiatorId,
         initiatedAt,
-      );
+      });
       this.emitActivation(plugin, outcome, next, initiatedAt);
       this.logger.log(
         `Plugin '${plugin.slug}' updated ${plugin.version} → ${next.manifest.version} without staged consent ` +
@@ -493,20 +528,7 @@ export class PluginUpdateService {
       });
 
       if (claimed.count !== 1) {
-        const current = await tx.plugin.findUnique({
-          where: { id: plugin.id },
-          select: { pendingVersion: true, uninstalledAt: true },
-        });
-
-        if (current?.uninstalledAt != null) {
-          throw new PluginUpdateTombstonedError(plugin.slug, current.uninstalledAt);
-        }
-
-        throw new PluginUpdatePendingConflictError(
-          plugin.slug,
-          current?.pendingVersion ?? 'unknown',
-          next.manifest.version,
-        );
+        throw await this.refusalForLostStagedWrite(tx, plugin, { claimedEmptySlotFor: next.manifest.version });
       }
 
       return tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
@@ -583,18 +605,18 @@ export class PluginUpdateService {
       throw new PluginUpdateCriticalConfirmationError(plugin.slug, reentry.expected, reentry.received);
     }
 
-    const outcome = await this.activate(
+    const outcome = await this.activate({
       plugin,
       active,
       next,
-      pendingSha256,
+      artifactSha256: pendingSha256,
       comparison,
       checksToSeed,
       corePermissions,
-      input.approverId,
+      actorId: input.approverId,
       initiatedAt,
-      { confirmCriticalSlugs: input.confirmCriticalSlugs ?? [], riskEscalatedChecks },
-    );
+      reentry: { confirmCriticalSlugs: input.confirmCriticalSlugs ?? [], riskEscalatedChecks },
+    });
 
     // The tx-local seeded set, not the pre-transaction one: a concurrent
     // decision may have shrunk it, and the event must describe what was
@@ -662,13 +684,7 @@ export class PluginUpdateService {
 
     const plugin = await this.loadUpdatablePlugin(input.slug);
 
-    if (plugin.pendingVersion === null) {
-      throw new PluginUpdateNoPendingError(plugin.slug);
-    }
-
-    if (plugin.pendingStagingId !== input.stagingId) {
-      throw new PluginUpdateStagingReplacedError(plugin.slug, input.stagingId);
-    }
+    this.assertAnswersCurrentStaging(plugin, input.stagingId);
 
     const stagedVersion = plugin.pendingVersion;
     const activeUnitRequests = this.activeUnitRequests(plugin);
@@ -696,23 +712,7 @@ export class PluginUpdateService {
       });
 
       if (cleared.count !== 1) {
-        const current = await tx.plugin.findUnique({
-          where: { id: plugin.id },
-          select: { uninstalledAt: true, pendingStagingId: true },
-        });
-
-        if (current?.uninstalledAt != null) {
-          throw new PluginUpdateTombstonedError(plugin.slug, current.uninstalledAt);
-        }
-
-        // Another staging took the slot after the check above: the rejector
-        // answered one that is gone, the same answer as if it had already
-        // been gone when the request arrived (#357).
-        if (current?.pendingStagingId != null && current.pendingStagingId !== input.stagingId) {
-          throw new PluginUpdateStagingReplacedError(plugin.slug, input.stagingId);
-        }
-
-        throw new PluginUpdateNoPendingError(plugin.slug);
+        throw await this.refusalForLostStagedWrite(tx, plugin, { answeredStagingId: input.stagingId });
       }
 
       // Read back INSIDE the claim, like the staging and activation writes.
@@ -868,8 +868,8 @@ export class PluginUpdateService {
 
     // Before the staged manifest is validated or compared: a staging the
     // approver never saw is refused for that, whatever else is wrong with it.
-    if (approval !== undefined && plugin.pendingStagingId !== approval.stagingId) {
-      throw new PluginUpdateStagingReplacedError(plugin.slug, approval.stagingId);
+    if (approval !== undefined) {
+      this.assertAnswersCurrentStaging(plugin, approval.stagingId);
     }
 
     // Activation makes the staged checksum a path segment and
@@ -893,6 +893,69 @@ export class PluginUpdateService {
     const comparison = await this.compare(plugin, active, next, corePermissions);
 
     return { plugin, active, next, corePermissions, comparison, pendingSha256 };
+  }
+
+  /**
+   * Refuses an update approval or a rejection that does not answer the staging
+   * currently in the row: no staged update is `PluginUpdateNoPendingError`, a
+   * staging id that whoever approves or rejects never saw is
+   * `PluginUpdateStagingReplacedError`. One home for the check, so approve and
+   * reject cannot drift apart (#357, #1116).
+   */
+  private assertAnswersCurrentStaging(
+    plugin: Plugin,
+    stagingId: string,
+  ): asserts plugin is Plugin & { pendingVersion: string } {
+    if (plugin.pendingVersion === null) {
+      throw new PluginUpdateNoPendingError(plugin.slug);
+    }
+
+    if (plugin.pendingStagingId !== stagingId) {
+      throw new PluginUpdateStagingReplacedError(plugin.slug, stagingId);
+    }
+  }
+
+  /**
+   * Why a guarded write on a plugin's staged update matched no row, given what
+   * the write was doing. Re-reads the row through `tx`, so the answer comes
+   * from the state the write lost to.
+   *
+   * An uninstalled plugin always gets `PluginUpdateTombstonedError`. A write
+   * that answered a staging (an update approval, a rejection) finds it
+   * consumed or gone (`PluginUpdateNoPendingError`) or replaced by another
+   * staging (`PluginUpdateStagingReplacedError`, #357): nothing is left for it
+   * to resolve. A write that claimed an empty slot (the staging write, or an
+   * activation with nothing staged) lost it to a concurrent stage and gets
+   * `PluginUpdatePendingConflictError`, the refuse-don't-supersede answer,
+   * built from the version now staged (#1116).
+   */
+  private async refusalForLostStagedWrite(
+    tx: Prisma.TransactionClient,
+    plugin: Pick<Plugin, 'id' | 'slug'>,
+    write: LostStagedWrite,
+  ): Promise<Error> {
+    const current = await tx.plugin.findUnique({
+      where: { id: plugin.id },
+      select: { uninstalledAt: true, pendingVersion: true, pendingStagingId: true },
+    });
+
+    if (current?.uninstalledAt != null) {
+      return new PluginUpdateTombstonedError(plugin.slug, current.uninstalledAt);
+    }
+
+    if ('answeredStagingId' in write) {
+      if (current?.pendingStagingId != null && current.pendingStagingId !== write.answeredStagingId) {
+        return new PluginUpdateStagingReplacedError(plugin.slug, write.answeredStagingId);
+      }
+
+      return new PluginUpdateNoPendingError(plugin.slug);
+    }
+
+    return new PluginUpdatePendingConflictError(
+      plugin.slug,
+      current?.pendingVersion ?? 'unknown',
+      write.claimedEmptySlotFor,
+    );
   }
 
   /** A tombstoned row is not an update target, and the distinction deserves its own error (#59). */
@@ -1147,22 +1210,9 @@ export class PluginUpdateService {
    * The activation entry point: one bounded retry around the transaction,
    * for the one race the transaction's own reads cannot close.
    */
-  private async activate(
-    plugin: Plugin,
-    active: PluginManifestValidationResult,
-    next: PluginManifestValidationResult,
-    /** The checksum of the plugin artifact being activated, which becomes `installedSha256` (#224). */
-    artifactSha256: PluginArtifactSha256,
-    comparison: UpdateEscalationComparison,
-    checksToSeed: readonly NormalizedPermissionRequest[],
-    corePermissions: ReadonlyMap<string, Permission>,
-    actorId: string,
-    initiatedAt: Date,
-    reentry?: {
-      readonly confirmCriticalSlugs: readonly string[];
-      readonly riskEscalatedChecks: readonly NormalizedPermissionRequest[];
-    },
-  ): Promise<ActivationOutcome> {
+  private async activate(input: ActivationInput): Promise<ActivationOutcome> {
+    const { next } = input;
+
     // Compiled here rather than inside the transaction: the retained server
     // config validation below runs holding the claimed row, and ajv's codegen
     // has no business inside that window (mirrors `install()`'s own warm
@@ -1173,19 +1223,7 @@ export class PluginUpdateService {
       schema: next.manifest.config.schema,
     });
 
-    const attempt = (): Promise<ActivationOutcome> =>
-      this.activateInTransaction(
-        plugin,
-        active,
-        next,
-        artifactSha256,
-        comparison,
-        checksToSeed,
-        corePermissions,
-        actorId,
-        initiatedAt,
-        reentry,
-      );
+    const attempt = (): Promise<ActivationOutcome> => this.activateInTransaction(input);
 
     try {
       return await attempt();
@@ -1232,27 +1270,20 @@ export class PluginUpdateService {
    * the re-consent announcements among them, are collected inside and
    * emitted by the caller AFTER commit.
    */
-  private async activateInTransaction(
-    plugin: Plugin,
-    active: PluginManifestValidationResult,
-    next: PluginManifestValidationResult,
-    artifactSha256: PluginArtifactSha256,
-    comparison: UpdateEscalationComparison,
-    checksToSeed: readonly NormalizedPermissionRequest[],
-    corePermissions: ReadonlyMap<string, Permission>,
-    actorId: string,
-    initiatedAt: Date,
-    /**
-     * `approve()`'s second-factor inputs, re-verified inside the
-     * transaction against the tx-local seed set. Absent on the immediate
-     * `stage()` path, which never seeds through an approval — nothing
-     * escalated to confirm.
-     */
-    reentry?: {
-      readonly confirmCriticalSlugs: readonly string[];
-      readonly riskEscalatedChecks: readonly NormalizedPermissionRequest[];
-    },
-  ): Promise<ActivationOutcome> {
+  private async activateInTransaction(input: ActivationInput): Promise<ActivationOutcome> {
+    const {
+      plugin,
+      active,
+      next,
+      artifactSha256,
+      comparison,
+      checksToSeed,
+      corePermissions,
+      actorId,
+      initiatedAt,
+      reentry,
+    } = input;
+
     return this.db.$transaction(async (tx) => {
       // Row-LOCKED, not a plain read (D-CN). `PluginLifecycleService.updateConfig`
       // is a plain UPDATE with no version precondition ("last-writer-wins by
@@ -1331,38 +1362,17 @@ export class PluginUpdateService {
       });
 
       if (claimed.count !== 1) {
-        const current = await tx.plugin.findUnique({
-          where: { id: plugin.id },
-          select: { uninstalledAt: true, pendingVersion: true, pendingStagingId: true },
-        });
-
-        if (current?.uninstalledAt != null) {
-          throw new PluginUpdateTombstonedError(plugin.slug, current.uninstalledAt);
-        }
-
-        // The pending state moved. Which refusal is right depends on which
-        // caller this is: an approval's staged update was consumed or
-        // replaced (nothing left for THIS approval to resolve), while the
-        // immediate stage() path lost the empty slot to a concurrent stage
-        // — the same refuse-don't-supersede answer the staging write gives.
-        if (plugin.pendingVersion !== null) {
-          // Another staging took the slot after approve() checked it: the
-          // approver reviewed one that is gone (#357).
-          if (
-            plugin.pendingStagingId !== null &&
-            current?.pendingStagingId != null &&
-            current.pendingStagingId !== plugin.pendingStagingId
-          ) {
-            throw new PluginUpdateStagingReplacedError(plugin.slug, plugin.pendingStagingId);
-          }
-
-          throw new PluginUpdateNoPendingError(plugin.slug);
-        }
-
-        throw new PluginUpdatePendingConflictError(
-          plugin.slug,
-          current?.pendingVersion ?? 'unknown',
-          next.manifest.version,
+        // The pending state moved. An approval's staged update was consumed or
+        // replaced, while the immediate stage() path lost the empty slot to a
+        // concurrent stage. The database keeps the five staged columns all null
+        // or all set (`plugins_staged_update_all_or_nothing`), so a row's
+        // staging id is not null exactly when it had a staged update (#1116).
+        throw await this.refusalForLostStagedWrite(
+          tx,
+          plugin,
+          plugin.pendingStagingId !== null
+            ? { answeredStagingId: plugin.pendingStagingId }
+            : { claimedEmptySlotFor: next.manifest.version },
         );
       }
 

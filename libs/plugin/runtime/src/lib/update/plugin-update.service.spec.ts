@@ -903,6 +903,29 @@ describe('PluginUpdateService', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
+    it('approve answers a replaced staging before it judges the staged manifest (#1116)', async () => {
+      db.plugin.findUnique.mockResolvedValue(
+        makePlugin({
+          pendingVersion: '1.3.0',
+          pendingManifestJson: { slug: 'demo-sink', version: '1.3.0' }, // fails validation
+          pendingSha256: sha('b'),
+          pendingSince: new Date(),
+          pendingStagingId: 'current-staging',
+        }),
+      );
+
+      const failure = await service
+        .approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'stale-staging' })
+        .catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateStagingReplacedError);
+      expect(failure).toMatchObject({ stagingId: 'stale-staging' });
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(db.plugin.updateMany).not.toHaveBeenCalled();
+      expect(db.pluginGrant.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
     it('approve answers a replaced staging when another one takes the slot between its check and its claim (#357)', async () => {
       db.plugin.findUnique
         .mockResolvedValueOnce(pendingPlugin(nextManifest())) // this approve's load: staging-a
