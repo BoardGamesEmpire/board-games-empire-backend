@@ -1,3 +1,5 @@
+export * from './lib/around-driver-calls.js';
+export * from './lib/data-gateway-driver-factory.js';
 export * from './lib/data-gateway-driver.js';
 export * from './lib/driver-logger.js';
 export * from './lib/driver-observables.js';
