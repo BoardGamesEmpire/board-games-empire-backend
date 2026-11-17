@@ -150,6 +150,7 @@ describe('PluginLifecycleListener', () => {
           auditFindings: null,
           staticAnalysis: [],
           acknowledgedForbiddenImports: [],
+          actId: 'act-install',
         },
         initiatedAt,
       );
@@ -174,6 +175,8 @@ describe('PluginLifecycleListener', () => {
             auditFindings: null,
             staticAnalysis: [],
             acknowledgedForbiddenImports: [],
+            // The InstallAccept act that holds what the server admin was shown (#1336).
+            actId: 'act-install',
           }),
         }),
       );
@@ -185,12 +188,13 @@ describe('PluginLifecycleListener', () => {
     });
 
     /** D-CN on #59/#370: the reset flag rides the same payload the seeded grants already do. */
-    it('persists an UpdateApproved row carrying granted permissions and the retained-config reset flag', async () => {
+    it('persists an UpdateApproved row carrying granted permissions, the retained-config reset flag and the act (#1336)', async () => {
       const event = new PluginUpdateApprovedEvent(
         { id: 'plugin-1', slug: 'demo-sink', version: '1.2.0', pendingVersion: '1.3.0', pendingStagingId: 'staging-1' },
         { id: 'plugin-1', slug: 'demo-sink', version: '1.3.0', pendingVersion: null, pendingStagingId: null },
         [{ slug: 'plugin.demo-sink.send', required: true, consentScope: 'server', reason: 'Send digests' }],
         true,
+        'act-approve',
         initiatedAt,
       );
 
@@ -207,6 +211,7 @@ describe('PluginLifecycleListener', () => {
               { slug: 'plugin.demo-sink.send', required: true, consentScope: 'server', reason: 'Send digests' },
             ],
             retainedConfigReset: true,
+            actId: 'act-approve',
           }),
         }),
       );
@@ -226,6 +231,7 @@ describe('PluginLifecycleListener', () => {
           { id: 'plugin-1', slug: 'demo-sink', version: '1.3.0', pendingVersion: null, pendingStagingId: null },
           [],
           false,
+          null,
           initiatedAt,
         ),
       );

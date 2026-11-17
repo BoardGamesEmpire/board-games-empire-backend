@@ -27,6 +27,7 @@ import { PluginConfigSchemaService } from '../config/plugin-config-schema.servic
 import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
 import {
   HouseholdPluginReconsentRequestedEvent,
+  PluginGrantCreatedEvent,
   PluginGrantRevokedEvent,
   PluginUpdateApprovedEvent,
   PluginUpdatePendingEvent,
@@ -582,8 +583,9 @@ describe('PluginUpdateService', () => {
       expect(db.pluginGrant.create).not.toHaveBeenCalled();
       expect(emitter.emit).toHaveBeenCalledWith(
         PluginUpdateApprovedEvent.eventName,
-        expect.objectContaining({ grantedPermissions: [] }),
+        expect.objectContaining({ grantedPermissions: [], actId: null }),
       );
+      expect(emitter.emit).not.toHaveBeenCalledWith(PluginGrantCreatedEvent.eventName, expect.anything());
     });
 
     it('refuses when a concurrent stage claims the empty pending slot mid-activation, rather than clobbering it', async () => {
@@ -1209,6 +1211,37 @@ describe('PluginUpdateService', () => {
           ['feedback:read', PluginGrantStatus.Granted, 'act-approve'],
           ['plugin|demo-sink|manage:digest', PluginGrantStatus.Granted, 'act-approve'],
         ]);
+      });
+
+      it('approval announces the denial it overturns as a grant decision, with the row as it stood, under the act (#1336)', async () => {
+        db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextRequiringFeedbackRead()));
+        db.pluginGrant.findMany.mockResolvedValue([deniedFeedbackRead(), grantedDigest()]);
+
+        await service.approve(approveInput());
+
+        const grantEvents = emitter.emit.mock.calls.filter(([name]) => name === PluginGrantCreatedEvent.eventName);
+
+        // manage:digest is re-written exactly as it stood, so it announces nothing.
+        expect(grantEvents).toHaveLength(1);
+        expect(grantEvents[0][1]).toMatchObject({
+          before: { permissionSlug: 'feedback:read', status: PluginGrantStatus.Denied },
+          after: { permissionSlug: 'feedback:read', status: PluginGrantStatus.Granted },
+          context: { manifestVersion: '1.3.0', actId: 'act-approve' },
+        });
+        expect(emitter.emit).toHaveBeenCalledWith(
+          PluginUpdateApprovedEvent.eventName,
+          expect.objectContaining({ actId: 'act-approve' }),
+        );
+      });
+
+      it('approval announces a decision it writes where none stood only through plugin.update_approved (#1336)', async () => {
+        db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
+        db.pluginGrant.findMany.mockResolvedValue([]);
+
+        const result = await service.approve(approveInput());
+
+        expect(result.seededGrants.map((grant) => grant.permissionSlug)).toContain('plugin|demo-sink|manage:digest');
+        expect(emitter.emit).not.toHaveBeenCalledWith(PluginGrantCreatedEvent.eventName, expect.anything());
       });
 
       it('approval records one UpdateApprove act holding the staged sha, the staged version and what it showed (#1336)', async () => {
@@ -2876,6 +2909,13 @@ describe('PluginUpdateService', () => {
         // A count, not a row read: there is nothing to judge per user.
         expect(db.userPlugin.count).toHaveBeenCalledWith({ where: { pluginId: 'plugin-1', enabled: true } });
         expect(db.userPlugin.findMany).not.toHaveBeenCalled();
+      });
+
+      it('activation counts no units in a scope that owes nothing, while it holds the plugin row (#1336)', async () => {
+        await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
+
+        expect(db.userPlugin.count).not.toHaveBeenCalled();
+        expect(db.householdPlugin.count).not.toHaveBeenCalled();
       });
 
       it('names, on approval, exactly the households the read left uncovered (#1336)', async () => {

@@ -35,6 +35,8 @@ import { createId } from '@paralleldrive/cuid2';
 import { readFile } from 'node:fs/promises';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { retainedServerConfig } from '../config/retained-server-config';
+import { emitDecisionEvents, type WrittenDecision } from '../consent/consent-decision-events';
+import { decisionStands } from '../consent/consent-decision-stands';
 import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
 import type { ShownRisk } from '../consent/plugin-consent-act.types';
 import {
@@ -362,9 +364,13 @@ interface ReconsentCandidate<TUnit> {
   readonly outstanding: readonly string[];
 }
 
-/** One scope's switched-on units, and those of them that owe re-consent (#1336). */
+/**
+ * One scope's switched-on units, and those of them that owe re-consent
+ * (#1336). `switchedOn` is null when the scope owes nothing, so no unit was
+ * read and none was counted.
+ */
 interface ScopeReconsent<TUnit> {
-  readonly switchedOn: number;
+  readonly switchedOn: number | null;
   readonly owing: ReconsentCandidate<TUnit>[];
 }
 
@@ -420,6 +426,14 @@ interface ActivationOutcome {
   readonly acceptedChecks: readonly NormalizedPermissionRequest[];
   /** The consent decisions written for `acceptedChecks`, in permission order. */
   readonly acceptedGrants: readonly PluginGrant[];
+  /**
+   * The accepted decisions that changed a row that already stood: a denial
+   * the approval overturned, or a grant it re-stamped at today's risk. Each
+   * gets its grant event, which carries the row as it stood before; a
+   * decision written where none stood is announced by the approval's own
+   * event (#1336).
+   */
+  readonly changedDecisions: readonly WrittenDecision[];
   /** The approval's `UpdateApprove` consent act; null when the update activated without approval. */
   readonly act: PluginConsentAct | null;
   readonly revokedGrants: readonly PluginGrant[];
@@ -758,6 +772,11 @@ export class PluginUpdateService {
     const { plugin, active, next, corePermissions, comparison } = await this.resolvePendingUpdate(slug);
     const declares = declaredSlugDiff(active, next);
     const owing = await this.unitsOwingReconsent(this.db, plugin.id, next, corePermissions, comparison);
+    // A scope that owes nothing had its units neither read nor counted, and
+    // every one of them covers the staged update.
+    const switchedOn = { pluginId: plugin.id, enabled: true };
+    const household = owing.household.switchedOn ?? (await this.db.householdPlugin.count({ where: switchedOn }));
+    const user = owing.user.switchedOn ?? (await this.db.userPlugin.count({ where: switchedOn }));
 
     return {
       plugin,
@@ -766,11 +785,8 @@ export class PluginUpdateService {
       declares,
       noLongerRequested: requestedSlugsDropped(active, next, declares.removed),
       unitCoverage: {
-        household: {
-          switchedOn: owing.household.switchedOn,
-          covered: owing.household.switchedOn - owing.household.owing.length,
-        },
-        user: { switchedOn: owing.user.switchedOn, covered: owing.user.switchedOn - owing.user.owing.length },
+        household: { switchedOn: household, covered: household - owing.household.owing.length },
+        user: { switchedOn: user, covered: user - owing.user.owing.length },
       },
     };
   }
@@ -1503,6 +1519,7 @@ export class PluginUpdateService {
       const serverDecisions = await tx.pluginGrant.findMany({
         where: { pluginId: plugin.id, scopeType: PluginGrantScope.Server, scopeId: SERVER_SCOPE_SENTINEL },
       });
+      const serverDecisionsBySlug = new Map(serverDecisions.map((row) => [row.permissionSlug, row]));
       let acceptedChecks: readonly NormalizedPermissionRequest[] = [];
 
       if (approval === undefined) {
@@ -1609,6 +1626,7 @@ export class PluginUpdateService {
       // included, so each row's actId names the act that last set it.
       let act: PluginConsentAct | null = null;
       const acceptedGrants: PluginGrant[] = [];
+      const changedDecisions: WrittenDecision[] = [];
 
       if (approval !== undefined) {
         const acceptance = planServerAcceptance({
@@ -1654,13 +1672,21 @@ export class PluginUpdateService {
             permissionSlug: decision.permissionSlug,
           };
 
-          acceptedGrants.push(
-            await tx.pluginGrant.upsert({
-              where: { pluginId_scopeType_scopeId_permissionSlug: coordinates },
-              create: { ...coordinates, ...fields },
-              update: fields,
-            }),
-          );
+          const after = await tx.pluginGrant.upsert({
+            where: { pluginId_scopeType_scopeId_permissionSlug: coordinates },
+            create: { ...coordinates, ...fields },
+            update: fields,
+          });
+          // The rows read under the claim, before the deletion passes: those
+          // passes delete only permissions `next` stops requesting or moves
+          // out of server scope, never one the approval accepts here.
+          const before = serverDecisionsBySlug.get(decision.permissionSlug);
+
+          acceptedGrants.push(after);
+
+          if (before !== undefined && !decisionStands(decision, before)) {
+            changedDecisions.push({ before, after });
+          }
         }
       }
 
@@ -1692,6 +1718,7 @@ export class PluginUpdateService {
         plugin: updated,
         acceptedChecks,
         acceptedGrants,
+        changedDecisions,
         act,
         revokedGrants,
         unrequestedGrants,
@@ -1731,9 +1758,23 @@ export class PluginUpdateService {
         this.stagingSnapshot(outcome.plugin),
         grantedPermissions,
         outcome.retainedConfigReset,
+        outcome.act?.id ?? null,
         initiatedAt,
       ),
     );
+
+    // A decision the approval changed on a row that already stood, a denial
+    // overturned above all, is a decision change like any server consent
+    // act's, and announces itself the same way (#1336). Only an approval
+    // writes decisions, so there is an act whenever there is one to announce.
+    if (outcome.act !== null) {
+      emitDecisionEvents(
+        this.emitter,
+        outcome.changedDecisions,
+        { manifestVersion: next.manifest.version, actId: outcome.act.id },
+        initiatedAt,
+      );
+    }
 
     const revocations: readonly { grant: PluginGrant; reason: PluginGrantRevocationReason }[] = [
       ...outcome.revokedGrants.map((grant) => ({ grant, reason: 'permission-removed' as const })),
@@ -1811,9 +1852,11 @@ export class PluginUpdateService {
    * enablement never appear: no row means not enabled, so there is nobody to
    * tell (#225).
    *
-   * A scope with no re-consent slugs owes nothing, so its units are counted,
-   * not read. Fixed query count regardless of how many units run the plugin:
-   * at most one unit read and one grant read per scope. A per-unit loop put
+   * A scope with no re-consent slugs owes nothing, so its units are neither
+   * read nor counted here: activation holds the plugin row `FOR UPDATE` and
+   * has no use for the count, so the staged-update read counts them itself.
+   * Fixed query count regardless of how many units run the plugin: at most
+   * one unit read and one grant read per scope. A per-unit loop put
    * activation's duration on the number of installs, and exceeding the
    * interactive-transaction timeout would roll back the whole update —
    * failing an activation because the plugin was POPULAR.
@@ -1835,7 +1878,7 @@ export class PluginUpdateService {
     let household: ScopeReconsent<HouseholdPlugin>;
 
     if (comparison.householdReconsentSlugs.length === 0) {
-      household = { switchedOn: await client.householdPlugin.count({ where: switchedOn }), owing: [] };
+      household = { switchedOn: null, owing: [] };
     } else {
       const units = await client.householdPlugin.findMany({ where: switchedOn });
       const granted =
@@ -1868,7 +1911,7 @@ export class PluginUpdateService {
     let user: ScopeReconsent<UserPlugin>;
 
     if (comparison.userReconsentSlugs.length === 0) {
-      user = { switchedOn: await client.userPlugin.count({ where: switchedOn }), owing: [] };
+      user = { switchedOn: null, owing: [] };
     } else {
       const units = await client.userPlugin.findMany({ where: switchedOn });
       const granted =

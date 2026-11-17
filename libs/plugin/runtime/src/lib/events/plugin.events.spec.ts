@@ -62,6 +62,7 @@ describe('plugin lifecycle events', () => {
         auditFindings,
         staticAnalysis,
         acknowledgedForbiddenImports: ['axios'],
+        actId: 'act_1',
       },
       initiatedAt,
     );
@@ -86,6 +87,10 @@ describe('plugin lifecycle events', () => {
       expect(event.acknowledgedForbiddenImports).toEqual(['axios']);
     });
 
+    it('names the InstallAccept consent act the install recorded (#1336)', () => {
+      expect(event.actId).toBe('act_1');
+    });
+
     it('flattens the context object onto the event — consumers read fields, not a nested bag', () => {
       const context: PluginInstallAuditContext = {
         provenance,
@@ -93,6 +98,7 @@ describe('plugin lifecycle events', () => {
         auditFindings: null,
         staticAnalysis: [],
         acknowledgedForbiddenImports: [],
+        actId: 'act_2',
       };
       const clean = new PluginInstalledEvent(
         {

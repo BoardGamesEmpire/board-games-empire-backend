@@ -284,6 +284,7 @@ export class PluginInstallerService {
       analysis,
       acknowledgedForbiddenImports,
       retainedConfigReset,
+      persisted.act.id,
       initiatedAt,
     );
     this.logger.log(
@@ -780,10 +781,11 @@ export class PluginInstallerService {
   /**
    * Post-commit, matching the commit-then-emit discipline everywhere else.
    * The installed event carries the full grant summary; per-grant
-   * `plugin.grant_created` events are deliberately NOT emitted for the seed
-   * — those record decisions made through the consent surface, and the
-   * seeded rows' provenance (including `decidedRiskLevel`) already lives on
-   * the rows themselves and in this event's payload.
+   * `plugin.grant_created` events are deliberately NOT emitted for the seed:
+   * it creates every row, so no decision stood before it for a grant event to
+   * carry, and the seeded rows' provenance (including `decidedRiskLevel`)
+   * already lives on the rows themselves and in this event's payload, with
+   * the act that recorded them (#1336).
    */
   private emitInstalled(
     plugin: Plugin,
@@ -792,6 +794,7 @@ export class PluginInstallerService {
     analysis: StaticAnalysisReport,
     acknowledgedForbiddenImports: readonly string[],
     retainedConfigReset: boolean,
+    actId: string,
     initiatedAt: Date,
   ): void {
     const grantedPermissions: GrantedPermissionRecord[] = serverChecks.map((check) => ({
@@ -825,6 +828,7 @@ export class PluginInstallerService {
         staticAnalysis: analysis.findings,
         acknowledgedForbiddenImports,
         retainedConfigReset,
+        actId,
       },
       initiatedAt,
     );

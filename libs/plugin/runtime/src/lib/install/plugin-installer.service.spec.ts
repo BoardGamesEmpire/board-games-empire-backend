@@ -423,6 +423,12 @@ describe('PluginInstallerService', () => {
       }
     });
 
+    it('names the act on plugin.installed, so its lifecycle row can find what the server admin was shown (#1336)', async () => {
+      const result = await service.install(input());
+
+      expect(installedEvent().actId).toBe(result.act.id);
+    });
+
     it('records the act and its decisions at the same instant, the install time (#1336)', async () => {
       await service.install(input());
 
