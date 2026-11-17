@@ -791,6 +791,14 @@ export function pluginDataGatewayRowPlacements(): readonly SourceSite[] {
  * non-zero when no file matches, and that is left to throw. Both callers ask
  * about names the tree is expected to spell, so an empty answer means a
  * renamed identifier, and returned quietly it would read as a clean tree.
+ *
+ * "Shipped" leaves out specs and every e2e project, this one included (#1083).
+ * No e2e project is built into an image or run by the server: each is a test
+ * harness that seeds its own database through Prisma, writing plugin rows and
+ * their children directly because no running server is there to do it. Those
+ * writes take part in no lock order a server takes, so holding them to one
+ * would only make every new e2e project's seeding fail an audit about
+ * something else.
  */
 function shippedFilesNaming(identifiers: readonly string[]): readonly string[] {
   // `execFileSync` with an argument array: the pattern is built from
@@ -811,7 +819,10 @@ function shippedFilesNaming(identifiers: readonly string[]): readonly string[] {
       '--',
       '*.ts',
       ':!*.spec.ts',
-      ':!apps/api-e2e/*',
+      // Every e2e project, the next one too, by the `-e2e` suffix each of them
+      // carries. Without the `:(glob)` magic a pathspec's `*` also matches `/`,
+      // so this reaches every file under each such app, however deep.
+      ':!apps/*-e2e/*',
     ],
     { cwd: workspaceRoot(), encoding: 'utf8' },
   );

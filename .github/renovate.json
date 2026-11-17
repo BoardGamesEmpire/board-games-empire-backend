@@ -2,7 +2,7 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
     "Keeps the Dockerfile's images, the workflows' action pins and the npm dependencies current (#599, #613). Each action stays pinned to a commit SHA, with its full release as a trailing comment.",
-    "The dockerfile, github-actions and npm managers are enabled, with one regex manager for the BuildKit image ci.yml pins (#600). The postgres and redis tags in compose.yaml move by hand, together with the e2e harness's copies in apps/api-e2e and the postgres service in ci.yml's main job.",
+    "The dockerfile, github-actions and npm managers are enabled, with one regex manager for the BuildKit image ci.yml pins (#600). The postgres and redis tags in compose.yaml move by hand, together with the e2e harness's copies in apps/api-e2e and apps/gateway-coordinator-e2e and the postgres service in ci.yml's main job.",
     "branchPrefix restates Renovate's default because ci.yml matches it, as well as the app's account: CI on Renovate's PRs runs without Nx Cloud.",
     "Nothing is automerged. master requires no status checks, and every merge is a billed Nx Cloud execution either way.",
     "constraints holds Renovate to npm 11.10 or later, the first npm that reads min-release-age from .npmrc (#613). An older npm ignores the setting, and the rules below rely on it."

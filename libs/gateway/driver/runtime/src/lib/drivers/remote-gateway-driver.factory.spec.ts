@@ -1,9 +1,10 @@
 import { AuthType } from '@bge/database';
-import { pingWithRetry } from '@bge/utils';
+import { pingWithRetry, walkDir } from '@bge/utils';
 import type { Interceptor } from '@grpc/grpc-js';
 import type { ClientGrpcProxy } from '@nestjs/microservices';
 import { ClientProxyFactory, Transport } from '@nestjs/microservices';
 import { Test } from '@nestjs/testing';
+import * as path from 'node:path';
 import { EMPTY, of } from 'rxjs';
 import { GatewayCredentialsFactory } from '../credentials/gateway-credentials.factory';
 import { RemoteGatewayDriverFactory } from './remote-gateway-driver.factory';
@@ -92,6 +93,38 @@ describe('RemoteGatewayDriverFactory', () => {
       options: { url: 'http://gateway:50051', package: 'bge.gateway.v1' },
     });
     expect(create.mock.calls[0][0].options).not.toHaveProperty('channelOptions');
+  });
+
+  // Each app's build copies the gateway proto tree beside its bundle, which
+  // is where this file is compiled into.
+  it('reads the gateway protos from beside the file it is compiled into (#1083)', async () => {
+    const create = jest.spyOn(ClientProxyFactory, 'create').mockReturnValue(makeProxy({ ping: jest.fn() }) as never);
+    (pingWithRetry as jest.Mock).mockResolvedValue({ status: 'SERVING' });
+
+    await factory.create(options);
+
+    const besideIt = path.join(__dirname, 'proto');
+    expect(walkDir).toHaveBeenLastCalledWith(besideIt, expect.anything(), expect.anything());
+    expect(create.mock.calls[0][0]).toMatchObject({ options: { loader: { includeDirs: [besideIt] } } });
+  });
+
+  // A process that is no bundle has no proto tree beside this file: the
+  // coordinator's e2e suite runs the gateway worker's plugin driver source
+  // in its test process, and points it at the built coordinator's protos.
+  it('reads the gateway protos from the directory a subclass names instead (#1083)', async () => {
+    class ProtosElsewhereFactory extends RemoteGatewayDriverFactory {
+      protected override protoDirectory(): string {
+        return '/elsewhere/proto';
+      }
+    }
+
+    const create = jest.spyOn(ClientProxyFactory, 'create').mockReturnValue(makeProxy({ ping: jest.fn() }) as never);
+    (pingWithRetry as jest.Mock).mockResolvedValue({ status: 'SERVING' });
+
+    await new ProtosElsewhereFactory(new GatewayCredentialsFactory()).create(options);
+
+    expect(walkDir).toHaveBeenLastCalledWith('/elsewhere/proto', expect.anything(), expect.anything());
+    expect(create.mock.calls[0][0]).toMatchObject({ options: { loader: { includeDirs: ['/elsewhere/proto'] } } });
   });
 
   describe('RemoteGatewayDriver delegation', () => {

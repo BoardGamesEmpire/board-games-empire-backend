@@ -43,9 +43,10 @@ export class RemoteGatewayDriverFactory {
 
     this.logger.log(`Connecting to gateway ${options.gatewayId} at ${url} with auth type ${options.authType}`);
 
-    // The gateway proto tree ships alongside the compiled bundle; the shared
-    // tree also carries the coordinator package, which gateways don't serve.
-    const protoPaths = walkDir(path.join(__dirname, 'proto'), /\.proto$/, [/(^|[/\\])coordinator([/\\]|$)/]);
+    // The shared proto tree also carries the coordinator package, which
+    // gateways don't serve.
+    const protoDirectory = this.protoDirectory();
+    const protoPaths = walkDir(protoDirectory, /\.proto$/, [/(^|[/\\])coordinator([/\\]|$)/]);
 
     const channelCredentials = this.credentialsFactory.create(options.authType, options.authParameters);
     const proxy = ClientProxyFactory.create({
@@ -55,7 +56,7 @@ export class RemoteGatewayDriverFactory {
         package: PROTO_PACKAGE_NAME,
         protoPath: protoPaths,
         loader: {
-          includeDirs: [path.join(__dirname, 'proto')],
+          includeDirs: [protoDirectory],
           arrays: true,
           longs: String,
           enums: String,
@@ -96,5 +97,16 @@ export class RemoteGatewayDriverFactory {
     }
 
     return new RemoteGatewayDriver(options.gatewayId, proxy, client);
+  }
+
+  /**
+   * Where the gateway proto tree lies: beside the compiled bundle, where each
+   * app's build copies it. A method, so that a process that is no bundle can
+   * name the directory itself. The coordinator's e2e suite does: it runs the
+   * gateway worker's plugin driver source in its test process, and reads the
+   * protos from the built coordinator's (#1083).
+   */
+  protected protoDirectory(): string {
+    return path.join(__dirname, 'proto');
   }
 }

@@ -1,0 +1,18 @@
+{
+  "slug": "in-memory-gateway",
+  "version": "1.0.0",
+  "bgeCompat": ">=0.0.0",
+  "category": "data-gateway",
+  "scope": "server",
+  "displayName": { "en": "In-memory gateway" },
+  "description": { "en": "The e2e suite's data-gateway plugin: one game, held in memory." },
+  "features": [],
+  "permissions": { "declares": [], "checks": [] },
+  "events": { "subscribes": [], "emits": [] },
+  "topics": [],
+  "network": { "outboundDomains": [] },
+  "storage": { "ownTables": [], "readsCore": [], "writesCore": [] },
+  "jobs": { "queues": [], "schedules": [] },
+  "config": { "schema": { "type": "object" }, "requiresHouseholdConfig": false },
+  "metadataSchemaVersion": 1
+}
