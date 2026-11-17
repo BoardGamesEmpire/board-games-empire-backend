@@ -1,4 +1,4 @@
-import { OccurrenceStatus, Prisma, type DatabaseService } from '@bge/database';
+import { liveEventWhere, OccurrenceStatus, Prisma, type DatabaseService } from '@bge/database';
 import { type PaginatedRows } from '@bge/shared';
 import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
 import { dateNotPassedWhere } from './date-end.util';
@@ -23,10 +23,11 @@ export function upcomingDateWhere(now: Date): Prisma.EventOccurrenceWhereInput {
 /**
  * An event that can still take place: live, not cancelled, not archived. It is
  * `upcomingEventWhere` without the date test, for a read whose rows are
- * already dates that haven't ended (#962).
+ * already dates that haven't ended (#962). Live is `liveEventWhere`, so a
+ * deleted household's events leave browse and the household's list (#992).
  */
 function standingEventWhere(): Prisma.EventWhereInput {
-  return { deletedAt: null, cancelledAt: null, archivedAt: null };
+  return { ...liveEventWhere(), cancelledAt: null, archivedAt: null };
 }
 
 /**

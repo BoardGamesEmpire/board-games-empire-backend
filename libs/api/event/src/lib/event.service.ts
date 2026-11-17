@@ -7,6 +7,7 @@ import {
   EventSchedulingMode,
   EventStatus,
   isPrismaDependentRecordNotFoundError,
+  liveEventWhere,
   normalizeClientRequestId,
   OccurrenceStatus,
   Prisma,
@@ -101,8 +102,9 @@ export class EventService {
    * shows stays readable by id for whoever could read it before. It is
    * narrowed out of the list, not withdrawn.
    *
-   * `deletedAt: null` stays beside the scope. A soft delete keeps the attendee
-   * rows, so the attendance clause alone still matches a deleted event.
+   * `liveEventWhere` stays beside the scope. A soft delete keeps the attendee
+   * rows, and a household delete stamps only the household, so the attendance
+   * clause alone still matches a deleted event or a deleted household's (#992).
    * `archivedAt: null` joins it unless `includeArchived` asks otherwise: the
    * host put the event away, and it stays readable by id (#795).
    *
@@ -130,7 +132,7 @@ export class EventService {
     const userId = resolveScopeSubjectId(this.abilityService);
 
     const where = this.scopeComposer.compose(ResourceType.Event, Action.read, {
-      deletedAt: null,
+      ...liveEventWhere(),
       ...(query.includeArchived ? {} : { archivedAt: null }),
       attendees: { some: { userId, ...NOT_REMOVED } },
     });
@@ -185,11 +187,12 @@ export class EventService {
    * and staff get this household's events rather than every event on the server. An empty page is a 200 with no check
    * for hidden rows, which would tell a stranger the household has events.
    *
-   * The scope names the household and checks that it is live. `HouseholdLivenessGuard`
+   * The scope names the household, and whether its events are live is
+   * `pageUpcomingEvents`' to say, as on browse: its upcoming-events filter
+   * holds `liveEventWhere`, household half included. `HouseholdLivenessGuard`
    * passes an actor who can't read `Household`, such as a key scoped to events,
-   * and a soft delete leaves the household's events live (#992), so without it
-   * that key would list a deleted household's events. Whether the event itself
-   * is live is `pageUpcomingEvents`' to say, as on browse.
+   * and a household delete stamps only the household, so that filter is what
+   * keeps the key from listing a deleted household's events (#992).
    *
    * It limits which events are listed, not what each one embeds, as on
    * `GET /events`: an actor whose occurrence or policy ceiling is narrower than
@@ -203,10 +206,7 @@ export class EventService {
     householdId: string,
     query: DefaultPaginationQueryDto,
   ): Promise<PaginatedRows<EventListRow>> {
-    const where = this.scopeComposer.compose(ResourceType.Event, Action.read, {
-      householdId,
-      household: { is: { deletedAt: null } },
-    });
+    const where = this.scopeComposer.compose(ResourceType.Event, Action.read, { householdId });
 
     return pageUpcomingEvents(
       this.db,
@@ -323,7 +323,7 @@ export class EventService {
           this.db.event.findUnique({
             where: {
               id,
-              deletedAt: null,
+              ...liveEventWhere(),
               // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
               AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.read),
             },
@@ -588,7 +588,8 @@ export class EventService {
    * (#252), in the shape the create returned it.
    *
    * The row comes back whatever has happened to it since, soft delete
-   * included: it is the creator's own create, and its outcome. The parts are
+   * included, its own or its household's (#992): it is the creator's own
+   * create, and its outcome. The parts are
    * other users' data, so each is read under its own type's ceiling, as
    * `getEventById` reads them (#560), and a removed attendee is left out. A
    * creator who still hosts the event gets what the create answered; one who
@@ -663,8 +664,11 @@ export class EventService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    // `row` is gone only if a household delete cascaded to it since; its
-    // dates went with it, and the row read above still names the create.
+    // A delete through the API, the event's or its household's, only stamps
+    // a row, so `row` is here and answers as the doc above says. It is gone
+    // only if the household's row was removed outright since, outside the
+    // API, and the foreign key cascaded to the event; its dates went with it,
+    // and the row read above still names the create.
     return withEventStatus(
       { ...(row ?? event), occurrences, attendees, policy: toEventPolicyViewOrNull(policyRow) },
       statusDates,
@@ -707,7 +711,7 @@ export class EventService {
         }
 
         const updated = await tx.event.update({
-          where: { id, deletedAt: null, AND: updateCeiling },
+          where: { id, ...liveEventWhere(), AND: updateCeiling },
           data: dto,
           include: { occurrences: { orderBy: OCCURRENCE_ORDER } },
         });
@@ -771,7 +775,7 @@ export class EventService {
         return tx.event.update({
           where: {
             id,
-            deletedAt: null,
+            ...liveEventWhere(),
             // eslint-disable-next-line no-restricted-syntax -- single-row soft delete by id, not a collection read
             AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.delete),
           },

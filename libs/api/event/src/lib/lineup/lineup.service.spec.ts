@@ -1,4 +1,11 @@
-import { Action, EventParticipationStatus, Prisma, ResourceType, ScheduledGameRole } from '@bge/database';
+import {
+  Action,
+  EventParticipationStatus,
+  liveEventWhere,
+  Prisma,
+  ResourceType,
+  ScheduledGameRole,
+} from '@bge/database';
 import { t } from '@bge/i18n';
 import { LineupRemovalReason } from '@bge/notifications-service';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
@@ -103,7 +110,7 @@ describe('LineupService (#799)', () => {
     db.event.count.mockResolvedValue(0);
 
     await expect(service.listLineup('missing', query())).rejects.toThrow(NotFoundException);
-    expect(db.event.count).toHaveBeenCalledWith({ where: { id: 'missing', deletedAt: null } });
+    expect(db.event.count).toHaveBeenCalledWith({ where: { id: 'missing', ...liveEventWhere() } });
     expect(db.eventOccurrence.findMany).not.toHaveBeenCalled();
     expect(db.eventGame.findMany).not.toHaveBeenCalled();
   });
@@ -199,9 +206,8 @@ describe('LineupService (#799)', () => {
 
   describe('removeLineupGame (#769)', () => {
     beforeEach(() => {
-      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: 'hh-1' } as never);
-      // The event's lock, which answers whether it was cancelled or deleted.
-      db.$queryRaw.mockResolvedValue([{ cancelledAt: null, deletedAt: null }] as never);
+      // The event as first read, and as the live read under its lock finds it.
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: 'hh-1', cancelledAt: null } as never);
     });
 
     /** What the read of the game finds, then the read under the event's lock. */
@@ -213,7 +219,7 @@ describe('LineupService (#799)', () => {
 
       await expect(service.removeLineupGame('missing', 'eg-1')).rejects.toThrow(NotFoundException);
       expect(db.event.findUnique).toHaveBeenCalledWith({
-        where: { id: 'missing', deletedAt: null },
+        where: { id: 'missing', ...liveEventWhere() },
         select: { id: true, householdId: true },
       });
       expect(db.eventGame.findFirst).not.toHaveBeenCalled();
@@ -277,9 +283,7 @@ describe('LineupService (#799)', () => {
         });
 
         const [[lock]] = db.$queryRaw.mock.calls;
-        expect(rawQueryText(lock)).toBe(
-          'SELECT cancelled_at AS "cancelledAt", deleted_at AS "deletedAt" FROM events WHERE id = ? FOR NO KEY UPDATE',
-        );
+        expect(rawQueryText(lock)).toBe('SELECT id FROM events WHERE id = ? FOR NO KEY UPDATE');
         expect((lock as unknown as Prisma.Sql).values).toEqual(['event-1']);
         expect(db.eventGame.findFirst).toHaveBeenLastCalledWith({
           where: { id: 'eg-1', ...lineupStillAhead(expect.any(Date)) },
@@ -320,7 +324,7 @@ describe('LineupService (#799)', () => {
         db.$queryRaw.mockImplementation((() => {
           jest.setSystemTime(afterTheWait);
 
-          return Promise.resolve([{ cancelledAt: null, deletedAt: null }]);
+          return Promise.resolve([]);
         }) as never);
         reads(lineupRow('eg-1', 'att-1'), snapshotRow('eg-1', 'att-1'));
         db.eventGame.deleteMany.mockResolvedValue({ count: 1 });
@@ -338,20 +342,22 @@ describe('LineupService (#799)', () => {
 
     // A delete takes the same lock and keeps the lineup's rows, so a removal
     // that queued behind it would otherwise take a game out of a deleted
-    // event's lineup and notify its attendees. A household's delete removes
-    // the row outright. Either answers the event's 404, as a request arriving
-    // after the delete would.
-    it.each([
-      { state: 'deleted', lock: [{ cancelledAt: null, deletedAt: new Date('2026-11-01T00:00:00Z') }] },
-      { state: 'gone', lock: [] },
-    ])('answers 404 when the event is $state under the lock, removing nothing (#769)', async ({ lock }) => {
+    // event's lineup and notify its attendees. The event is read again under
+    // the lock through the shared liveness clause, so one deleted since, one
+    // whose household was deleted (which stamps only the household, #992), or
+    // a missing row answers the 404 a request arriving after would.
+    it('answers 404 when the event is not live under the lock, removing nothing (#769, #992)', async () => {
       reads(lineupRow('eg-1', 'att-1'), snapshotRow('eg-1', 'att-1'));
-      db.$queryRaw.mockResolvedValue(lock as never);
+      db.event.findUnique
+        .mockResolvedValueOnce({ id: 'event-1', householdId: 'hh-1', cancelledAt: null } as never)
+        .mockResolvedValueOnce(null);
 
       await expect(service.removeLineupGame('event-1', 'eg-1')).rejects.toMatchObject({
         status: 404,
         response: t('errors.event.not_found', { id: 'event-1' }),
       });
+      expect(db.event.findUnique).toHaveBeenLastCalledWith({ where: { id: 'event-1', ...liveEventWhere() } });
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(db.event.findUnique.mock.invocationCallOrder[1]);
       expect(db.eventGame.findFirst).toHaveBeenCalledTimes(1);
       expect(db.eventGame.deleteMany).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();
@@ -376,7 +382,11 @@ describe('LineupService (#799)', () => {
       { parent: "the event's own game", occurrenceId: null },
     ])('answers 409 LINEUP_STARTED for $parent of a cancelled event (#769)', async ({ occurrenceId }) => {
       reads({ ...lineupRow('eg-1', 'att-1'), occurrenceId });
-      db.$queryRaw.mockResolvedValue([{ cancelledAt: new Date('2026-11-01T00:00:00Z'), deletedAt: null }] as never);
+      db.event.findUnique.mockResolvedValue({
+        id: 'event-1',
+        householdId: 'hh-1',
+        cancelledAt: new Date('2026-11-01T00:00:00Z'),
+      } as never);
       db.eventGame.count.mockResolvedValue(1);
 
       await expect(service.removeLineupGame('event-1', 'eg-1')).rejects.toMatchObject({

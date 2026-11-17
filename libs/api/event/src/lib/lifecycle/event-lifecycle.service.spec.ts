@@ -85,7 +85,10 @@ describe('EventLifecycleService', () => {
 
     row = live();
     tx.$queryRaw.mockResolvedValue([]);
-    tx.event.findUnique.mockImplementation((() => Promise.resolve(row)) as never);
+    // The lock reads through `liveEventWhere`, so a deleted row reads as none,
+    // as the database would answer it (#992).
+    tx.event.findUnique.mockImplementation(((args: { where: Prisma.EventWhereUniqueInput }) =>
+      Promise.resolve(args.where.deletedAt === null && row?.deletedAt ? null : row)) as never);
     tx.event.update.mockImplementation(((args: { data: Partial<Event> }) =>
       Promise.resolve({ ...row, ...args.data })) as never);
     tx.event.count.mockResolvedValue(1);

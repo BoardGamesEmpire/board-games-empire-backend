@@ -170,8 +170,9 @@ describe("a household's upcoming events (#506)", () => {
 
   /**
    * The liveness guard answers a session 404, and passes a key that can't read
-   * `Household`. A soft delete leaves the household's events live (#992), so
-   * only the scope's own check on the household keeps them off this list.
+   * `Household`. A household delete stamps only the household, so the scope's
+   * shared liveness clause is what keeps its events off this list, and the
+   * event reads as gone by id too (#992).
    */
   it('answers the household owner 404 for a deleted household, and a key the guard passes an empty page', async () => {
     const owner = await actors.user();
@@ -197,7 +198,7 @@ describe("a household's upcoming events (#506)", () => {
     expect(asKey.events).toEqual([]);
     expect(asKey.total).toBe(0);
 
-    // The event itself stays live and readable by id, which is #992's to decide.
-    await request(baseUrl).get(`${EVENTS_PATH}/${eventId}`).set(key.headers).expect(200);
+    // The event reads as gone by id too, the 404 a deleted event gives (#992).
+    await request(baseUrl).get(`${EVENTS_PATH}/${eventId}`).set(key.headers).expect(404);
   });
 });

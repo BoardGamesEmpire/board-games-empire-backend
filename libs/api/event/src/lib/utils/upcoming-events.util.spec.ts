@@ -1,4 +1,11 @@
-import { EventParticipationStatus, EventStatus, OccurrenceStatus, Prisma, type DatabaseService } from '@bge/database';
+import {
+  EventParticipationStatus,
+  EventStatus,
+  liveEventWhere,
+  OccurrenceStatus,
+  Prisma,
+  type DatabaseService,
+} from '@bge/database';
 import {
   createMockDatabaseService,
   makeEvent,
@@ -23,7 +30,7 @@ const OWN_WHERE = { id: 'sentinel-own-where' } satisfies Prisma.EventAttendeeWhe
 const UPCOMING = { AND: [upcomingEventWhere(now), WHERE] };
 
 /** The events a date that hasn't ended may belong to: those among `WHERE` that can still take place. */
-const STANDING = { AND: [{ deletedAt: null, cancelledAt: null, archivedAt: null }, WHERE] };
+const STANDING = { AND: [{ ...liveEventWhere(), cancelledAt: null, archivedAt: null }, WHERE] };
 
 /**
  * "Upcoming" is `deriveEventStatus`'s window, so every row the helper pages
@@ -47,7 +54,7 @@ describe('upcomingEventWhere (#962)', () => {
   // left out.
   it('declares a live, uncancelled, unarchived event with such a date', () => {
     expect(upcomingEventWhere(now)).toEqual({
-      deletedAt: null,
+      ...liveEventWhere(),
       cancelledAt: null,
       archivedAt: null,
       occurrences: { some: upcomingDateWhere(now) },
@@ -101,6 +108,25 @@ describe('pageUpcomingEvents (#962)', () => {
     await page();
 
     expect(db.event.count).toHaveBeenCalledWith({ where: UPCOMING });
+  });
+
+  // A household delete stamps only the household, so the event's own
+  // `deletedAt` stays null and only the shared liveness clause leaves it out,
+  // on browse and on the household's list alike.
+  it('leaves out an event whose household is deleted (#992)', async () => {
+    await page();
+
+    expect(db.event.count).toHaveBeenCalledWith({
+      where: { AND: [expect.objectContaining(liveEventWhere()), WHERE] },
+    });
+    expect(groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          ...upcomingDateWhere(now),
+          event: { is: { AND: [expect.objectContaining(liveEventWhere()), WHERE] } },
+        },
+      }),
+    );
   });
 
   it('reads the rows by id with every date and the policy, and serves them in page order', async () => {

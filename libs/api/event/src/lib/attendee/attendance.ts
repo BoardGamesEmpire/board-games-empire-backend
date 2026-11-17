@@ -136,10 +136,11 @@ export async function lockSupplier(tx: Prisma.TransactionClient, gameListId: str
  * entry coming off their offered games.
  *
  * A write to the event's dates ({@link writeEventDates}), and a host's
- * removal ({@link lockEventForLineupRemoval}), take the same row
- * `FOR NO KEY UPDATE`, which conflicts with this: whichever comes second
- * waits, then sees the first. Without this lock, a supplier could
- * leave while a date that has started is moved to a start still to come.
+ * removal of a lineup game (`LineupService.removeLineupGame`, through
+ * `lockLiveEvent`), take the same row `FOR NO KEY UPDATE`, which conflicts
+ * with this: whichever comes second waits, then sees the first. Without this
+ * lock, a supplier could leave while a date that has started is moved to a
+ * start still to come.
  * Their leaving would read the date as started and keep their game in its
  * lineup, and the move, reading before they left, would see them in the
  * event, so the lineup would end up ahead, holding a game nobody is
@@ -154,34 +155,6 @@ export async function lockSupplier(tx: Prisma.TransactionClient, gameListId: str
  */
 export async function lockEventDates(tx: Prisma.TransactionClient, eventId: string): Promise<void> {
   await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${eventId} FOR SHARE`);
-}
-
-/**
- * Locks the event's row `FOR NO KEY UPDATE` for a host's removal of a lineup
- * game (#769), until the caller's transaction ends, and answers when the
- * event was cancelled, `undefined` for an event that is gone or deleted.
- *
- * A delete takes the same lock (`lockLiveEvent`) and keeps the lineup's rows,
- * so a removal that queued behind one reads the row again here and finds it
- * deleted, rather than taking a game out of a deleted event's lineup.
- *
- * It is the lock a write to the event's dates takes ({@link writeEventDates}),
- * which conflicts with {@link lockEventDates} and with itself, so a removal
- * takes turns with those writes and with every write that can leave a lineup
- * game with nobody bringing it. Under the shared lock alone, a removal and a
- * supplier leaving could both read the same game, and each would report
- * deleting it. It conflicts with a cancel or reopen too, which update the
- * row, so the answer holds until the caller commits.
- */
-export async function lockEventForLineupRemoval(
-  tx: Prisma.TransactionClient,
-  eventId: string,
-): Promise<{ cancelledAt: Date | null } | undefined> {
-  const [event] = await tx.$queryRaw<{ cancelledAt: Date | null; deletedAt: Date | null }[]>(
-    Prisma.sql`SELECT cancelled_at AS "cancelledAt", deleted_at AS "deletedAt" FROM events WHERE id = ${eventId} FOR NO KEY UPDATE`,
-  );
-
-  return event && event.deletedAt === null ? { cancelledAt: event.cancelledAt } : undefined;
 }
 
 /**
@@ -265,7 +238,7 @@ export async function syncSuppliedGames(
  * declined or cancelled date never returns to proposed or confirmed.
  *
  * The event's row is locked `FOR NO KEY UPDATE` before the write, so this,
- * a host's removal ({@link lockEventForLineupRemoval}) and each write that can
+ * a host's removal (`LineupService.removeLineupGame`) and each write that can
  * leave a lineup game with nobody bringing it take turns
  * ({@link lockEventDates}). One that commits first is seen by the
  * read after the write. One that comes second waits for this to commit,

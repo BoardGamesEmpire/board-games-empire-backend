@@ -6,6 +6,7 @@ import {
   EventStatus,
   FriendshipStatus,
   HUMAN_USER_WHERE,
+  liveEventWhere,
   OccurrenceOverrideScope,
   OccurrenceStatus,
   PlatformType,
@@ -170,17 +171,25 @@ describe('EventService', () => {
       // A row a host removed keeps no role, so its event is not the caller's.
       // An archived event is left out unless asked for (#795).
       expect(compose).toHaveBeenCalledWith(ResourceType.Event, Action.read, {
-        deletedAt: null,
+        ...liveEventWhere(),
         archivedAt: null,
         attendees: { some: { userId: MOCK_ACTING_USER_ID, removedAt: null } },
       });
+    });
+
+    // A household delete stamps only the household, so an attendee who isn't
+    // a member would still list the event through their attendee row.
+    it('lists only events whose household is live, through the shared liveness clause (#992)', async () => {
+      await read();
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.Event, Action.read, expect.objectContaining(liveEventWhere()));
     });
 
     it('lists archived events too when asked to (#795)', async () => {
       await read({ includeArchived: 'true' });
 
       expect(compose).toHaveBeenCalledWith(ResourceType.Event, Action.read, {
-        deletedAt: null,
+        ...liveEventWhere(),
         attendees: { some: { userId: MOCK_ACTING_USER_ID, removedAt: null } },
       });
     });
@@ -204,8 +213,9 @@ describe('EventService', () => {
 
     // Asking is not enough: the query has to use the answer. The ceiling stays
     // ANDed in, because for an `apiKey` actor it carries the key ∩ owner floor.
-    // `deletedAt: null` stays because a soft delete keeps the attendee rows, so
-    // the attendance clause alone still matches a deleted event.
+    // `liveEventWhere` stays because a soft delete keeps the attendee rows, and
+    // a household delete stamps only the household, so the attendance clause
+    // alone still matches a deleted event or a deleted household's (#992).
     it('queries with the composed clause, the ceiling clipping its scope rather than supplying it', async () => {
       await read();
 
@@ -213,7 +223,7 @@ describe('EventService', () => {
       expect(db.event.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
-            deletedAt: null,
+            ...liveEventWhere(),
             archivedAt: null,
             attendees: { some: { userId: MOCK_ACTING_USER_ID, removedAt: null } },
             AND: [COND],
@@ -368,7 +378,7 @@ describe('EventService', () => {
 
       const composed = { ...browseEventScope(MOCK_ACTING_USER_ID), AND: [COND] };
       const upcoming = { AND: [upcomingEventWhere(NOW), composed] };
-      const standing = { AND: [{ deletedAt: null, cancelledAt: null, archivedAt: null }, composed] };
+      const standing = { AND: [{ ...liveEventWhere(), cancelledAt: null, archivedAt: null }, composed] };
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Event, Action.read);
       expect(groupBy).toHaveBeenCalledWith(
         expect.objectContaining({ where: { ...upcomingDateWhere(NOW), event: { is: standing } }, skip: 20, take: 20 }),
@@ -410,13 +420,14 @@ describe('EventService', () => {
   });
 
   /**
-   * #506. A household's upcoming events, whoever is asking. The scope also
-   * checks the household, because the liveness guard passes an actor who can't
-   * read `Household` and a soft delete leaves its events live (#992).
+   * #506. A household's upcoming events, whoever is asking. The scope names
+   * the household; the upcoming-events filter says the events are live, which
+   * matters because the liveness guard passes an actor who can't read
+   * `Household` and a household delete stamps only the household (#992).
    */
   describe('getHouseholdEvents (#506)', () => {
     const NOW = new Date('2026-11-01T12:00:00Z');
-    const SCOPE = { householdId: 'household-1', household: { is: { deletedAt: null } } };
+    const SCOPE = { householdId: 'household-1' };
     let groupBy: jest.Mock;
 
     const list = (init: Record<string, unknown> = {}) =>
@@ -436,17 +447,17 @@ describe('EventService', () => {
 
     afterEach(() => jest.useRealTimers());
 
-    it('asks the composer for its where clause, naming the household and that it is live', async () => {
+    it('asks the composer for its where clause, naming the household', async () => {
       await list();
 
       expect(compose).toHaveBeenCalledWith(ResourceType.Event, Action.read, SCOPE);
     });
 
-    it('pages through the composed clause, the ceiling limiting it rather than supplying it', async () => {
+    it("pages through the composed clause under the upcoming-events filter, which keeps a deleted household's events out (#992)", async () => {
       await list({ page: 2 });
 
       const composed = { ...SCOPE, AND: [COND] };
-      const standing = { AND: [{ deletedAt: null, cancelledAt: null, archivedAt: null }, composed] };
+      const standing = { AND: [{ ...liveEventWhere(), cancelledAt: null, archivedAt: null }, composed] };
       expect(groupBy).toHaveBeenCalledWith(
         expect.objectContaining({ where: { ...upcomingDateWhere(NOW), event: { is: standing } }, skip: 20, take: 20 }),
       );
@@ -504,12 +515,20 @@ describe('EventService', () => {
       db.eventOccurrencePolicy.findMany.mockResolvedValue([]);
     });
 
+    it('reads an event by id only while its household is live (#992)', async () => {
+      await service.getEventById('event-1');
+
+      expect(db.event.findUnique).toHaveBeenCalledWith({
+        where: expect.objectContaining({ id: 'event-1', ...liveEventWhere() }),
+      });
+    });
+
     // Exact, so an embed put back on the event read fails here.
     it('reads the event under its own ceiling, embedding nothing', async () => {
       await service.getEventById('event-1');
 
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Event, Action.read);
-      expect(db.event.findUnique).toHaveBeenCalledWith({ where: { id: 'event-1', deletedAt: null, AND: [COND] } });
+      expect(db.event.findUnique).toHaveBeenCalledWith({ where: { id: 'event-1', ...liveEventWhere(), AND: [COND] } });
     });
 
     it("reads the occurrences and attendees as the event's lists, each composed with its own type's ceiling", async () => {
@@ -759,7 +778,10 @@ describe('EventService', () => {
 
       row = makeEvent({ id: 'event-1' });
       tx.$queryRaw.mockResolvedValue([]);
-      tx.event.findUnique.mockImplementation((() => Promise.resolve(row)) as never);
+      // The lock reads through `liveEventWhere`, so a deleted row reads as
+      // none, as the database would answer it (#992).
+      tx.event.findUnique.mockImplementation(((args: { where: Prisma.EventWhereUniqueInput }) =>
+        Promise.resolve(args.where.deletedAt === null && row?.deletedAt ? null : row)) as never);
       // The caller's update ceiling reaches the event.
       tx.event.count.mockResolvedValue(1);
       tx.event.update.mockImplementation(((args: { data: Partial<Event> }) =>
@@ -799,7 +821,6 @@ describe('EventService', () => {
         expect(emitter.emit).not.toHaveBeenCalled();
       });
 
-      // A household delete removes its events' rows outright.
       it('answers 404 when the row is gone', async () => {
         row = null;
 
@@ -813,7 +834,7 @@ describe('EventService', () => {
         await run();
 
         expect(tx.event.update).toHaveBeenCalledWith(
-          expect.objectContaining({ where: { id: 'event-1', deletedAt: null, AND: [COND] } }),
+          expect.objectContaining({ where: { id: 'event-1', ...liveEventWhere(), AND: [COND] } }),
         );
       });
 
@@ -891,7 +912,7 @@ describe('EventService', () => {
         expect(tx.event.count).toHaveBeenCalledWith({ where: { id: 'event-1', AND: [TITLE_COND, LOCATION_COND] } });
         expect(tx.event.update).toHaveBeenCalledWith(
           expect.objectContaining({
-            where: { id: 'event-1', deletedAt: null, AND: [TITLE_COND, LOCATION_COND] },
+            where: { id: 'event-1', ...liveEventWhere(), AND: [TITLE_COND, LOCATION_COND] },
           }),
         );
       });
@@ -904,7 +925,7 @@ describe('EventService', () => {
         expect(tx.event.count).toHaveBeenCalledWith({ where: { id: 'event-1', AND: [TITLE_COND, LOCATION_COND] } });
         expect(tx.event.update).toHaveBeenCalledWith(
           expect.objectContaining({
-            where: { id: 'event-1', deletedAt: null, AND: [TITLE_COND, LOCATION_COND] },
+            where: { id: 'event-1', ...liveEventWhere(), AND: [TITLE_COND, LOCATION_COND] },
           }),
         );
       });

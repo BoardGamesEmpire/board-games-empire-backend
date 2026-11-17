@@ -7,6 +7,7 @@ import {
   EventParticipationStatus,
   EventSchedulingMode,
   isPrismaDependentRecordNotFoundError,
+  liveEventWhere,
   OccurrenceStatus,
   Prisma,
   ResourceType,
@@ -221,7 +222,7 @@ export class EventOccurrenceService {
     const initiatedAt = new Date();
     const actingUserId = resolveActingUserIdOrNull(this.abilityService);
     const event = await this.db.event.findUnique({
-      where: { id: eventId, deletedAt: null },
+      where: { id: eventId, ...liveEventWhere() },
       select: { id: true, householdId: true },
     });
 
@@ -246,7 +247,7 @@ export class EventOccurrenceService {
         // the same lock, so the mode is read again here, or a date could be
         // added to an event that just became Fixed with one date already (#796).
         const locked = await tx.event.findUnique({
-          where: { id: eventId, deletedAt: null },
+          where: { id: eventId, ...liveEventWhere() },
           select: { schedulingMode: true },
         });
         assert(locked, new NotFoundException(t('errors.event.not_found', { id: eventId })));

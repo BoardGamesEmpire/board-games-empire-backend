@@ -6,13 +6,9 @@ import type { PaginatedRows } from '@bge/shared';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Http } from '@status/codes';
-import {
-  emitRemovedGames,
-  LINEUP_GAME_SNAPSHOT_SELECT,
-  lineupStillAhead,
-  lockEventForLineupRemoval,
-} from '../attendee/attendance';
+import { emitRemovedGames, LINEUP_GAME_SNAPSHOT_SELECT, lineupStillAhead } from '../attendee/attendance';
 import { assertEventExists, requireEvent } from '../event-access.helpers';
+import { lockLiveEvent } from '../utils/lock-live-event.util';
 import type { ListLineupQueryDto } from './dto/list-lineup.query.dto';
 import { LINEUP_GAME_SELECT, lineupGameSubject, withSuppliers, type LineupGame } from './lineup-game';
 import { readableLineupWhere } from './lineup-scope';
@@ -106,17 +102,18 @@ export class LineupService {
    *   and an event whose dates were all cancelled, so the copy says which.
    *   A cancelled event's lineup has started whatever its dates, so one with
    *   no dates keeps its games too.
-   * - Both are judged under the event's lock ({@link lockEventForLineupRemoval}),
-   *   which a date write, a cancel and a supplier leaving also take, so none
-   *   of them changes the answer before the delete, and a supplier leaving
-   *   never reports the same game gone. "Started" is judged at the time of
+   * - Both are judged under the event's lock ({@link lockLiveEvent}), which
+   *   a date write, a cancel and a supplier leaving also take, so none of
+   *   them changes the answer before the delete, and a supplier leaving never
+   *   reports the same game gone. "Started" is judged at the time of
    *   that read, not when the request began, since the lock may have waited
    *   past a date's start, as a date's confirm judges it (#1005).
    * - A removal that loses a race, to another removal, the supplier leaving
    *   or a date write, answers 404, as #1064 decided for lost races: whether
    *   the game left before the lock or while this waited on it. So does one
    *   that loses to the event's delete, which keeps the lineup's rows: the
-   *   event is read again under the lock.
+   *   event is read again under the lock, and one that isn't live, deleted
+   *   itself or in a deleted household, answers 404 (#992).
    *
    * The answer is read before the transaction, from the game as first found,
    * so no read follows the commit: a failed one would report a removal that
@@ -149,11 +146,13 @@ export class LineupService {
     const [removed] = await withSuppliers(this.db, this.scopeComposer, [found]);
 
     const snapshot = await this.db.$transaction(async (tx) => {
-      const locked = await lockEventForLineupRemoval(tx, eventId);
-
-      if (!locked) {
-        throw new NotFoundException(t('errors.event.not_found', { id: eventId }));
-      }
+      // FOR NO KEY UPDATE, the lock a date write takes, so this takes turns
+      // with those writes and with every write that can leave a lineup game
+      // with nobody bringing it (`lockEventDates`'s FOR SHARE). Under the
+      // shared lock alone, a removal and a supplier leaving could both read
+      // the same game, and each would report deleting it. A cancel or reopen
+      // updates the row, so the cancel it reads holds until this commits.
+      const locked = await lockLiveEvent(tx, eventId);
 
       const ahead = locked.cancelledAt
         ? null

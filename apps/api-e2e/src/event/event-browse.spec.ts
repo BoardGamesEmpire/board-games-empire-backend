@@ -126,11 +126,11 @@ describe('browsing upcoming events (#962)', () => {
     expect(ids).not.toContain(friendsOfFriendsId);
   });
 
-  // The household arm needs a live household. A member holding the Admin
-  // role reads every event, so only the browse scope can leave the deleted
-  // household's event out of their list, and they still read it by id.
-  // Private, so only membership lists it. A soft-deleted household's event
-  // whose reach admits others stays listed through that reach (#962).
+  // The household arm needs a live household. Private, so only membership
+  // lists it. A member holding the Admin role reads every event, yet the
+  // deleted household's event leaves their list and reads as gone by id too:
+  // a household delete hides its events from everyone, whatever their reach
+  // (#962, #992).
   it("lists an upcoming event of the acting user's household, whatever its reach, and stops listing it through a soft-deleted household", async () => {
     const [owner, member, admin] = await Promise.all([actors.user(), actors.user(), actors.admin()]);
     const { household } = await actors.householdWithMembers({
@@ -147,7 +147,7 @@ describe('browsing upcoming events (#962)', () => {
 
     await request(baseUrl).delete(`/api/households/${household.id}`).set(owner.headers).expect(200);
 
-    await readEvent(admin, eventId).expect(200);
+    await readEvent(admin, eventId).expect(404);
     expect(await browse(member)).not.toContain(eventId);
     expect(await browse(admin)).not.toContain(eventId);
   });

@@ -1,4 +1,4 @@
-import { Action, DatabaseService, ResourceType } from '@bge/database';
+import { Action, DatabaseService, liveEventWhere, ResourceType } from '@bge/database';
 import type { AppAbility, ModelResourceType } from '@bge/permissions';
 import { accessibleBy } from '@casl/prisma';
 import { Injectable } from '@nestjs/common';
@@ -60,14 +60,25 @@ export class WebhookVisibilityService {
    */
   private readonly checks: ReadonlyMap<ResourceType, VisibilityCheck> = new Map<ResourceType, VisibilityCheck>([
     // Event and Game are soft-deleted — a tombstoned row is visible only to an
-    // event that fires after its subject's delete (`subjectDeleted`).
+    // event that fires after its subject's delete (`subjectDeleted`). A live
+    // event is `liveEventWhere`, as on the REST read, so a deleted household's
+    // events are refused too (#992). The scope carries no `OR`, so the
+    // clause's `OR` spreads beside it safely.
     [
       ResourceType.Event,
       (id, abilities, options) =>
-        this.exists(this.db.event.count({ where: this.scope(ResourceType.Event, id, abilities, true, options) })),
+        this.exists(
+          this.db.event.count({
+            where: {
+              ...this.scope(ResourceType.Event, id, abilities, false, options),
+              ...(options.subjectDeleted ? {} : liveEventWhere()),
+            },
+          }),
+        ),
     ],
     // An event policy has no `deletedAt`; it lives and dies with its event, so
-    // a deleted event's policy is refused through the event (#796).
+    // a policy whose event is deleted, or in a deleted household, is refused
+    // through the event (#796, #992).
     [
       ResourceType.EventPolicy,
       (id, abilities, options) =>
@@ -75,7 +86,7 @@ export class WebhookVisibilityService {
           this.db.eventPolicy.count({
             where: {
               ...this.scope(ResourceType.EventPolicy, id, abilities, false, options),
-              event: { is: { deletedAt: null } },
+              event: { is: liveEventWhere() },
             },
           }),
         ),
@@ -136,8 +147,9 @@ export class WebhookVisibilityService {
 
   /**
    * The count `where` every subject shares: this id, `accessibleBy` each
-   * ability for the action, and — for soft-deletable subjects — not
-   * tombstoned, unless the event fired after the delete. Built with the
+   * ability for the action, and — when `softDelete` is set — not
+   * tombstoned, unless the event fired after the delete. Event passes `false`
+   * and adds the wider `liveEventWhere` itself (#992). Built with the
    * concrete subject literal so `.ofType` types the CASL clause precisely.
    */
   private scope<TResource extends ModelResourceType>(

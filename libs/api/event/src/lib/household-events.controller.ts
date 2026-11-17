@@ -16,9 +16,10 @@ import { EventService } from './event.service';
  *
  * The liveness guard answers 404 for a missing or deleted household, ahead of
  * `PoliciesGuard`. It passes an actor who can't read `Household`, such as an
- * API key scoped to events, and a soft delete leaves the household's events
- * live (#992), so the service's scope checks the household as well. Without it,
- * such a key would list a deleted household's events.
+ * API key scoped to events. A household delete stamps only the household, so
+ * the service's scope applies the shared event liveness clause, which checks
+ * the household as well (#992). Without it, such a key would list a deleted
+ * household's events.
  *
  * An empty page is a 200 with no check for hidden rows. A household always has
  * members, so a 403 on the members route gives nothing away, but here it would

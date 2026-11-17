@@ -1,20 +1,32 @@
-import type { DatabaseService, Event } from '@bge/database';
+import { liveEventWhere, type DatabaseService, type Event, type Prisma } from '@bge/database';
 import { t } from '@bge/i18n';
 import type { AbilityService } from '@bge/permissions';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { NOT_REMOVED } from './constants/not-removed.constant';
 
 /**
- * Asserts an event exists (and is not soft-deleted), throwing `NotFoundException`
- * otherwise. Shared by the event sub-resource services (attendee, occurrence,
- * nomination) so the existence predicate lives in exactly one place.
+ * Whether an event is live: not soft-deleted, and outside any household or in
+ * one that is not soft-deleted (`liveEventWhere`, #992). It takes a
+ * transaction client too, so a write can ask under the lock it holds.
  */
-export async function assertEventExists(db: DatabaseService, eventId: string): Promise<void> {
-  const count = await db.event.count({
-    where: { id: eventId, deletedAt: null },
-  });
+export async function isEventLive(client: Pick<Prisma.TransactionClient, 'event'>, eventId: string): Promise<boolean> {
+  const count = await client.event.count({ where: { id: eventId, ...liveEventWhere() } });
 
-  if (count === 0) {
+  return count > 0;
+}
+
+/**
+ * Asserts an event is live ({@link isEventLive}), throwing `NotFoundException`
+ * otherwise, the 404 a deleted event gives. Shared by the event sub-resource
+ * services (attendee, occurrence, nomination) so the existence predicate lives
+ * in exactly one place. A deleted household's events answer the same, for
+ * everyone, staff included, until a restore brings them back (#992).
+ */
+export async function assertEventExists(
+  client: Pick<Prisma.TransactionClient, 'event'>,
+  eventId: string,
+): Promise<void> {
+  if (!(await isEventLive(client, eventId))) {
     throw new NotFoundException(t('errors.event.not_found', { id: eventId }));
   }
 }
@@ -29,7 +41,7 @@ export async function assertEventExists(db: DatabaseService, eventId: string): P
  */
 export async function requireEvent(db: DatabaseService, eventId: string): Promise<Pick<Event, 'id' | 'householdId'>> {
   const event = await db.event.findUnique({
-    where: { id: eventId, deletedAt: null },
+    where: { id: eventId, ...liveEventWhere() },
     select: { id: true, householdId: true },
   });
 

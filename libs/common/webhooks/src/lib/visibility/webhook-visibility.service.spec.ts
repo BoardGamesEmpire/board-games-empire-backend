@@ -1,4 +1,4 @@
-import { Action, DatabaseService, JobType, PERMISSION_CATALOG, ResourceType } from '@bge/database';
+import { Action, DatabaseService, JobType, liveEventWhere, PERMISSION_CATALOG, ResourceType } from '@bge/database';
 import type { AppAbility } from '@bge/permissions';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { createPrismaAbility } from '@casl/prisma';
@@ -73,10 +73,29 @@ describe('WebhookVisibilityService', () => {
       where: expect.objectContaining({
         id: 'policy-1',
         AND: [expect.anything()],
-        event: { is: { deletedAt: null } },
+        event: { is: liveEventWhere() },
       }),
     });
     expect(db.eventPolicy.count.mock.calls[0][0]?.where).not.toHaveProperty('deletedAt');
+  });
+
+  // A household delete stamps only the household, so the event's own
+  // `deletedAt` stays null; the shared liveness clause refuses it, as the REST
+  // read does.
+  it('refuses an Event whose household is deleted (#992)', async () => {
+    db.event.count.mockResolvedValue(0);
+
+    await expect(service.isVisibleTo(ResourceType.Event, 'event-1', [ability])).resolves.toBe(false);
+    expect(db.event.count).toHaveBeenCalledWith({ where: expect.objectContaining(liveEventWhere()) });
+  });
+
+  it("refuses an event policy whose event's household is deleted (#992)", async () => {
+    db.eventPolicy.count.mockResolvedValue(0);
+
+    await expect(service.isVisibleTo(ResourceType.EventPolicy, 'policy-1', [ability])).resolves.toBe(false);
+    expect(db.eventPolicy.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({ event: { is: liveEventWhere() } }),
+    });
   });
 
   describe('the action it checks', () => {
@@ -144,6 +163,8 @@ describe('WebhookVisibilityService', () => {
       const where = db.event.count.mock.calls[0][0]?.where as Record<string, unknown>;
       expect(where).toMatchObject({ id: 'event-1', AND: [expect.anything()] });
       expect('deletedAt' in where).toBe(false);
+      // Nor the household half of the liveness clause (#992).
+      expect('OR' in where).toBe(false);
     });
 
     it('still checks the action it is given', async () => {
