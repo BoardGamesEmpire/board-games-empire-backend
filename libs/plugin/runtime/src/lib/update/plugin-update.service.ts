@@ -309,14 +309,14 @@ export interface PluginUpdatePendingDescription {
    * activation uses to find who owes re-consent, so `switchedOn - covered`
    * is the number of units the approval then reports, as the decisions stand.
    */
-  readonly unitAnswers: {
-    readonly household: PluginUpdateUnitAnswers;
-    readonly user: PluginUpdateUnitAnswers;
+  readonly unitCoverage: {
+    readonly household: PluginUpdateUnitCoverage;
+    readonly user: PluginUpdateUnitCoverage;
   };
 }
 
 /** How one scope's switched-on units stand against a staged update (#1336). */
-export interface PluginUpdateUnitAnswers {
+export interface PluginUpdateUnitCoverage {
   /** Units with the plugin switched on at this scope. */
   readonly switchedOn: number;
   /** Of those, the units that would be asked nothing on activation. */
@@ -740,7 +740,7 @@ export class PluginUpdateService {
       pendingSince: plugin.pendingSince,
       declares,
       noLongerRequested: requestedSlugsDropped(active, next, declares.removed),
-      unitAnswers: {
+      unitCoverage: {
         household: {
           switchedOn: owing.household.switchedOn,
           covered: owing.household.switchedOn - owing.household.owing.length,

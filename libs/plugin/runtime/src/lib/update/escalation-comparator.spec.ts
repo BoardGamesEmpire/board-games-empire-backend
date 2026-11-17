@@ -192,6 +192,20 @@ describe('compareForEscalations', () => {
       expect(result.householdReconsentSlugs).toEqual([]);
     });
 
+    it('does not gate on a SERVER-scope escalation of an optional permission, which approval would leave as it stands (#1336)', () => {
+      // Gating here would hold every later update for approval until a
+      // review act answers the decision, and approving would not answer it.
+      const result = compare({
+        active: view({ checks: [check('feedback:read', 'server', false)] }),
+        next: view({ checks: [check('feedback:read', 'server', false)] }),
+        grants: [grant({ decidedRiskLevel: RiskLevel.Low })],
+        currentRiskBySlug: new Map([['feedback:read', RiskLevel.Critical]]),
+      });
+
+      expect(result.serverGating).toBe(false);
+      expect(result.serverRiskEscalatedSlugs).toEqual(['feedback:read']);
+    });
+
     it('routes a USER-scope escalation to the user units, not the server admin (#225)', () => {
       const result = compare({
         active: view({ checks: [check('read:public_content', 'user')] }),

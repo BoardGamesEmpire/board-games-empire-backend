@@ -1078,7 +1078,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
       const before = await readPending(admin, plugin.slug).expect(200);
 
-      expect(before.body.unitAnswers).toEqual({
+      expect(before.body.unitCoverage).toEqual({
         household: { switchedOn: 3, covered: 0 },
         user: { switchedOn: 0, covered: 0 },
       });
@@ -1098,7 +1098,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
       const after = await readPending(admin, plugin.slug).expect(200);
 
-      expect(after.body.unitAnswers).toEqual({
+      expect(after.body.unitCoverage).toEqual({
         household: { switchedOn: 3, covered: 1 },
         user: { switchedOn: 0, covered: 0 },
       });
@@ -1108,7 +1108,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
       expect(owing.map((entry) => entry.householdId).sort()).toEqual(waiting.map((household) => household.id).sort());
       expect(owing).toHaveLength(
-        after.body.unitAnswers.household.switchedOn - after.body.unitAnswers.household.covered,
+        after.body.unitCoverage.household.switchedOn - after.body.unitCoverage.household.covered,
       );
       expect(owing.every((entry) => entry.outstanding.join() === HOUSEHOLD_CHECK.slug)).toBe(true);
       expect(approved.body.reconsentUserUnits).toEqual([]);

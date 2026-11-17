@@ -2757,7 +2757,7 @@ describe('PluginUpdateService', () => {
      * read activation uses to work out who owes re-consent, so the count the
      * server admin reads and the units the approval then reports agree.
      */
-    describe('unitAnswers (#1336)', () => {
+    describe('unitCoverage (#1336)', () => {
       const calendarRead = {
         slug: 'calendar:read',
         ...UNIT_BOUND_RULES.Household,
@@ -2819,14 +2819,14 @@ describe('PluginUpdateService', () => {
       it('counts three switched-on households, one of which accepted the staged update ahead of time, as one covered (#1336)', async () => {
         const description = await service.describePending('demo-sink');
 
-        expect(description.unitAnswers.household).toEqual({ switchedOn: 3, covered: 1 });
+        expect(description.unitCoverage.household).toEqual({ switchedOn: 3, covered: 1 });
         expect(db.householdPlugin.findMany).toHaveBeenCalledWith({ where: { pluginId: 'plugin-1', enabled: true } });
       });
 
       it('counts every switched-on user as covered when the staged update asks users nothing new (#1336)', async () => {
         const description = await service.describePending('demo-sink');
 
-        expect(description.unitAnswers.user).toEqual({ switchedOn: 2, covered: 2 });
+        expect(description.unitCoverage.user).toEqual({ switchedOn: 2, covered: 2 });
         // A count, not a row read: there is nothing to judge per user.
         expect(db.userPlugin.count).toHaveBeenCalledWith({ where: { pluginId: 'plugin-1', enabled: true } });
         expect(db.userPlugin.findMany).not.toHaveBeenCalled();
@@ -2841,10 +2841,10 @@ describe('PluginUpdateService', () => {
           { householdId: 'household-3', outstanding: ['calendar:read'] },
         ]);
         expect(result.reconsentHouseholdUnits).toHaveLength(
-          description.unitAnswers.household.switchedOn - description.unitAnswers.household.covered,
+          description.unitCoverage.household.switchedOn - description.unitCoverage.household.covered,
         );
         expect(result.reconsentUserUnits).toHaveLength(
-          description.unitAnswers.user.switchedOn - description.unitAnswers.user.covered,
+          description.unitCoverage.user.switchedOn - description.unitCoverage.user.covered,
         );
       });
     });

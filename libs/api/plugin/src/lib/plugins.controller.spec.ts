@@ -74,7 +74,7 @@ const PENDING_PLUGIN = {
 } as never;
 const DECLARES = { added: ['plugin|demo-sink|manage:digest'], removed: ['plugin|demo-sink|read:legacy'] };
 const NO_LONGER_REQUESTED = ['feedback:read'];
-const UNIT_ANSWERS = { household: { switchedOn: 3, covered: 1 }, user: { switchedOn: 2, covered: 2 } };
+const UNIT_COVERAGE = { household: { switchedOn: 3, covered: 1 }, user: { switchedOn: 2, covered: 2 } };
 const PRESENTATION = {
   plugin: { id: 'plugin-1', slug: 'demo-sink', enabled: true },
   manifestVersion: '1.3.0',
@@ -253,7 +253,7 @@ describe('PluginsController (delegation)', () => {
         pendingSince: new Date('2026-07-29T00:00:00Z'),
         declares: DECLARES,
         noLongerRequested: NO_LONGER_REQUESTED,
-        unitAnswers: UNIT_ANSWERS,
+        unitCoverage: UNIT_COVERAGE,
       }),
     };
     presentation = {
@@ -447,7 +447,7 @@ describe('PluginsController (delegation)', () => {
         deniedRequiredSlugs: ['read:household'],
         // Per scope, the switched-on units and the ones approving would ask
         // nothing of (#1336).
-        unitAnswers: UNIT_ANSWERS,
+        unitCoverage: UNIT_COVERAGE,
         // The catalog diff rides the body: no escalation kind describes a
         // declaration change, so a client cannot reconstruct it.
         declares: DECLARES,

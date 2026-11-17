@@ -134,6 +134,9 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
   }
 
   const deniedRequiredSlugs = deniedRequiredServerSlugs(input.next.checks, input.grants);
+  const nextRequiredSlugs = new Set(
+    input.next.checks.filter((check) => check.required).map((check) => check.canonicalSlug),
+  );
 
   const serverGating =
     deniedRequiredSlugs.length > 0 ||
@@ -142,8 +145,16 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
         (escalation.kind === 'new-permission' && escalation.consentScope === 'server') ||
         (escalation.kind === 'consent-scope-changed' && escalation.to === 'server') ||
         // Only a SERVER-scope decision's risk escalation is the server admin's
-        // to re-approve; a household's stale consent is the household's.
-        (escalation.kind === 'risk-escalated' && escalation.scopeType === PluginGrantScope.Server) ||
+        // to re-approve; a household's stale consent is the household's. And
+        // only on a permission the next manifest requires, the one kind
+        // approval re-writes at today's risk (#1336). Approval leaves an
+        // optional one as it stands, so gating on it would gate every later
+        // update until a review act answers it, while it confers nothing in
+        // the meantime: a decision whose risk no longer covers today's fails
+        // closed when the plugin's abilities are read.
+        (escalation.kind === 'risk-escalated' &&
+          escalation.scopeType === PluginGrantScope.Server &&
+          nextRequiredSlugs.has(escalation.slug)) ||
         escalation.kind === 'outbound-domain-added' ||
         escalation.kind === 'outbound-domains-configured' ||
         escalation.kind === 'writes-core-added',

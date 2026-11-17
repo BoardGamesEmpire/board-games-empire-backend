@@ -84,7 +84,9 @@ export interface UpdateEscalationComparison {
   /**
    * True when activation needs the server admin's explicit approval: a new
    * server-consentable permission, a permission moving TO server consent, a
-   * risk escalation on a SERVER-scope decision, an outbound-domain
+   * risk escalation on a SERVER-scope decision on a permission the next
+   * manifest requires (an optional one waits for a review act and confers
+   * nothing until then, #1336), an outbound-domain
    * broadening, a `writesCore` addition, or a denied server-scope permission
    * the next manifest requires (`deniedRequiredSlugs`).
    *

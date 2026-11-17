@@ -1263,7 +1263,7 @@ A change in a new plugin version that widens what the plugin can reach or change
 _Avoid_: breaking change, permission escalation
 
 **Server-gating escalation**:
-An escalation the server must approve before an update can go live. An update that requires a server-scope permission a server admin refused waits for approval the same way, though that is not an escalation. Escalations that households or users own never wait for the server; those units go to review pending instead.
+An escalation the server must approve before an update can go live. An update that requires a server-scope permission a server admin refused waits for approval the same way, though that is not an escalation. A risk that rose on an optional permission the server granted does not hold the update either: approving would not answer it, so it waits for the server admin's review instead. Escalations that households or users own never wait for the server; those units go to review pending instead.
 _Avoid_: blocking escalation
 
 **Update approval**:
