@@ -12,6 +12,13 @@ export interface ConsentActWrite {
   readonly kind: PluginConsentActKind;
   readonly manifestVersion: string;
   readonly manifestSha256: string;
+  /**
+   * The staged update the act answered: the plugin row's `pendingStagingId`
+   * when `manifestSha256` names the staged manifest, null for an act on the
+   * active one. Rejecting that staging deletes the decisions whose act names
+   * it (#1152).
+   */
+  readonly stagingId: string | null;
   readonly presentation: ConsentActPresentation;
   /** In permission order: the order every writer takes the rows in. */
   readonly decisions: readonly ConsentActDecision[];
@@ -62,6 +69,7 @@ export async function writeConsentAct(
       kind: input.kind,
       manifestVersion: input.manifestVersion,
       manifestSha256: input.manifestSha256,
+      stagingId: input.stagingId,
       presentation: input.presentation as unknown as Prisma.InputJsonValue,
       decidedById: input.actorId,
       decidedAt: input.decidedAt,

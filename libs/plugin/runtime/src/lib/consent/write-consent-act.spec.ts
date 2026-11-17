@@ -58,6 +58,7 @@ describe('writeConsentAct', () => {
     kind: PluginConsentActKind.Toggle,
     manifestVersion: '1.2.0',
     manifestSha256: 'sha-active',
+    stagingId: null,
     presentation,
     decisions: [decision('feedback:read')],
     standingBySlug: new Map(),
@@ -103,6 +104,7 @@ describe('writeConsentAct', () => {
         kind: PluginConsentActKind.Toggle,
         manifestVersion: '1.2.0',
         manifestSha256: 'sha-active',
+        stagingId: null,
         presentation,
         decidedById: 'admin-1',
         decidedAt: DECIDED_AT,
@@ -110,6 +112,19 @@ describe('writeConsentAct', () => {
       },
     });
     expect(written.act.id).toBe('act-1');
+  });
+
+  it('records the staging the act answered, and null for an act on the active manifest (#1152)', async () => {
+    await write({ kind: PluginConsentActKind.Review, manifestSha256: 'sha-staged', stagingId: 'staging-a' });
+    await write();
+
+    const acts = db.pluginConsentAct.create.mock.calls.map(([args]) => args.data) as unknown as Record<
+      string,
+      unknown
+    >[];
+
+    // A rejection of the staging deletes the decisions whose act names it.
+    expect(acts.map((act) => act['stagingId'])).toEqual(['staging-a', null]);
   });
 
   it('upserts every decision in the order given, each naming the act (#1152)', async () => {
@@ -160,7 +175,7 @@ describe('writeConsentAct', () => {
     expect(db.pluginConsentAct.create.mock.invocationCallOrder[0]).toBeLessThan(
       db.pluginGrant.upsert.mock.invocationCallOrder[0],
     );
-    expect(written.rows.map((written) => written.permissionSlug)).toEqual(
+    expect(written.rows.map((upserted) => upserted.permissionSlug)).toEqual(
       decisions.map((planned) => planned.permissionSlug),
     );
   });

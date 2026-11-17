@@ -35,6 +35,12 @@ model PluginConsentAct {
   manifestVersion String @map("manifest_version")
   manifestSha256  String @map("manifest_sha256")
 
+  /// The staged update this act answered: the plugin's `pendingStagingId`
+  /// when the act named the staged manifest, null for an act on the active
+  /// one. Rejecting that staging deletes the consent decisions whose act
+  /// names it, and no others (#1152).
+  stagingId String? @map("staging_id")
+
   /// What the person was shown: the requested permissions and the copy and
   /// risk each carried, captured at decision time rather than rebuilt later
   /// from a catalog that may since have changed.

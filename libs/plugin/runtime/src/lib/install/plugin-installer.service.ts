@@ -729,6 +729,8 @@ export class PluginInstallerService {
         kind: PluginConsentActKind.InstallAccept,
         manifestVersion: manifest.version,
         manifestSha256: provenance.sha256,
+        // An install answers no staged update.
+        stagingId: null,
         presentation: acceptance.presentation,
         decisions: acceptance.decisions,
         standingBySlug: new Map(),

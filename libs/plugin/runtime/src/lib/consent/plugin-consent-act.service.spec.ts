@@ -146,6 +146,7 @@ describe('PluginConsentActService', () => {
     readonly scope: PluginScope;
     readonly installed_sha256: string;
     readonly pending_sha256: string | null;
+    readonly pending_staging_id: string | null;
   }
 
   const claimRow = (overrides: Partial<ClaimRow> = {}): ClaimRow => ({
@@ -153,6 +154,7 @@ describe('PluginConsentActService', () => {
     scope: PluginScope.Household,
     installed_sha256: ACTIVE_SHA,
     pending_sha256: null,
+    pending_staging_id: null,
     ...overrides,
   });
 
@@ -407,6 +409,8 @@ describe('PluginConsentActService', () => {
           kind: 'SwitchOn',
           manifestVersion: '1.2.0',
           manifestSha256: ACTIVE_SHA,
+          // An act on the active manifest answered no staging (#1152).
+          stagingId: null,
           decidedById: 'admin-1',
           correlationId: 'corr-1',
         }),
@@ -900,9 +904,9 @@ describe('PluginConsentActService', () => {
       expectNothingWritten();
     });
 
-    it('a staged review reads the staged manifest and records the staged version and sha on the act (#1150)', async () => {
+    it('a staged review reads the staged manifest and records the staged version, sha and staging on the act (#1150, #1152)', async () => {
       db.plugin.findUnique.mockResolvedValue(stagedPlugin());
-      claim = claimRow({ pending_sha256: STAGED_SHA });
+      claim = claimRow({ pending_sha256: STAGED_SHA, pending_staging_id: 'staging-a' });
       householdRow = makeHouseholdRow();
 
       const result = await service.review({
@@ -922,6 +926,9 @@ describe('PluginConsentActService', () => {
           kind: 'Review',
           manifestVersion: '1.3.0',
           manifestSha256: STAGED_SHA,
+          // The staging the claim read under the share lock: the one a
+          // rejection deletes this act's decisions by.
+          stagingId: 'staging-a',
           presentation: expect.objectContaining({ source: 'staged' }),
         }),
       });
@@ -963,6 +970,20 @@ describe('PluginConsentActService', () => {
       // read before the transaction, so the claim must still find that one.
       db.plugin.findUnique.mockResolvedValue(stagedPlugin());
       claim = claimRow({ installed_sha256: 'sha-reinstalled', pending_sha256: STAGED_SHA });
+      householdRow = makeHouseholdRow();
+
+      await expect(
+        service.review({ ...householdToggle, manifestSha256: STAGED_SHA, answers: [granted(STAGED_NEW)] }),
+      ).rejects.toEqual(expect.objectContaining({ constructor: PluginConsentActStaleError, kind: 'manifest' }));
+      expectNothingWritten();
+    });
+
+    it('a staged review is refused as stale when the claim reads a staged sha with no staging id, rather than record an act that names no staging (#1152)', async () => {
+      // The database keeps the staged columns all set or all null, so this
+      // row cannot be reached. Recorded, the review would name no staging,
+      // and rejecting the update could never find its pre-consents.
+      db.plugin.findUnique.mockResolvedValue(stagedPlugin());
+      claim = claimRow({ pending_sha256: STAGED_SHA, pending_staging_id: null });
       householdRow = makeHouseholdRow();
 
       await expect(

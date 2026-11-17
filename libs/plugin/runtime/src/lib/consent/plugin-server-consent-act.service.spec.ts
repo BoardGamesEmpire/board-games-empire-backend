@@ -351,6 +351,8 @@ describe('PluginServerConsentActService', () => {
           kind: 'Review',
           manifestVersion: '1.2.0',
           manifestSha256: SHA,
+          // The Server unit's act is on the active manifest: no staging (#1152).
+          stagingId: null,
           decidedById: 'admin-1',
           correlationId: 'corr-1',
         }),

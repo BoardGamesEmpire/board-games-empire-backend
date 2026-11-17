@@ -85,6 +85,7 @@ interface ConsentActClaimRow {
   readonly scope: PluginScope;
   readonly installed_sha256: string;
   readonly pending_sha256: string | null;
+  readonly pending_staging_id: string | null;
 }
 
 /** What a written act did to its unit enablement besides leaving it as `unit`. */
@@ -230,8 +231,9 @@ export class PluginConsentActService {
       // this transaction would take the plugin row last and close a cycle
       // with activation (#398). The claim also compares the sha the consent
       // surface named, so nothing judged below can be judged against a
-      // manifest that has since moved (#361, #1150).
-      await this.claimPluginForAct(tx, plugin.id, plugin.slug, {
+      // manifest that has since moved (#361, #1150), and returns the staging
+      // a staged review answers, which the act records (#1152).
+      const stagingId = await this.claimPluginForAct(tx, plugin.id, plugin.slug, {
         source: named.source,
         manifestSha256: input.manifestSha256,
         installedSha256: plugin.installedSha256,
@@ -338,6 +340,7 @@ export class PluginConsentActService {
         kind: PluginConsentActKind[kind],
         manifestVersion: named.version,
         manifestSha256: input.manifestSha256,
+        stagingId,
         presentation: plan.presentation,
         decisions: plan.decisions,
         standingBySlug,
@@ -430,6 +433,12 @@ export class PluginConsentActService {
    * A staged review pins BOTH shas: the staged one it names, and the active
    * one the request read, because the planner judged which staged
    * permissions are new against that active manifest.
+   *
+   * Returns the staging the act answers: the row's `pending_staging_id`, read
+   * under the same lock as the staged sha, for a staged review, and null for
+   * an act on the active manifest. A rejection deletes the consent decisions
+   * whose act names its staging, so a staged review that named none could
+   * never be cleared away (#1152).
    */
   private async claimPluginForAct(
     tx: Prisma.TransactionClient,
@@ -443,8 +452,9 @@ export class PluginConsentActService {
       /** A household switch-on writes a household surface, which the plugin's scope must still admit. */
       readonly householdSurface: boolean;
     },
-  ): Promise<void> {
-    const rows = await tx.$queryRaw<ConsentActClaimRow[]>`SELECT uninstalled_at, scope, installed_sha256, pending_sha256
+  ): Promise<string | null> {
+    const rows = await tx.$queryRaw<ConsentActClaimRow[]>`SELECT uninstalled_at, scope, installed_sha256,
+        pending_sha256, pending_staging_id
         FROM plugins WHERE id = ${pluginId} FOR SHARE`;
     const row = rows[0];
 
@@ -468,6 +478,20 @@ export class PluginConsentActService {
     if (expected.householdSurface) {
       assertHouseholdSurface(pluginSlug, row.scope);
     }
+
+    if (expected.source === 'active') {
+      return null;
+    }
+
+    // The database keeps the staged columns all set or all null
+    // (`plugins_staged_update_all_or_nothing`), so a staged sha with no
+    // staging id is unreachable. Should one be read, the review is refused
+    // rather than recorded naming no staging.
+    if (row.pending_staging_id === null) {
+      throw new PluginConsentActStaleError(pluginSlug, 'manifest');
+    }
+
+    return row.pending_staging_id;
   }
 
   /**

@@ -1561,6 +1561,8 @@ describe('PluginUpdateService', () => {
             kind: PluginConsentActKind.UpdateApprove,
             manifestVersion: '1.3.0',
             manifestSha256: 'e'.repeat(64),
+            // The approval answers the staging it was sent with (#1152).
+            stagingId: 'staging-a',
             presentation: {
               locale: 'de',
               source: 'staged',
@@ -2735,26 +2737,12 @@ describe('PluginUpdateService', () => {
       db.pluginGrant.findMany.mockResolvedValue([]);
     });
 
-    it('reject deletes the pre-consents given to the staged update and announces each one (#1150)', async () => {
-      // The active manifest asks households for calendar:read only. The
-      // staged update added events:read for households and notes:read for
-      // users, and one household and one user accepted them ahead of time.
-      const active = buildPluginManifest({
-        scope: 'household',
-        permissions: {
-          ...activeManifest.permissions,
-          checks: [
-            ...activeManifest.permissions.checks,
-            {
-              slug: 'calendar:read',
-              required: false,
-              reason: { en: 'Schedules digests around events.' },
-              consentScope: 'household' as const,
-            },
-          ],
-        },
-      });
-      db.plugin.findUnique.mockResolvedValue(staged({ manifestJson: active as unknown as Prisma.JsonValue }));
+    it('rejection deletes the consent decisions whose act names the rejected staging, and no others (#1152)', async () => {
+      // One household and one user accepted the staged update's new
+      // permissions ahead of time, each in a staged review that recorded this
+      // staging.
+      db.plugin.findUnique.mockResolvedValue(staged());
+      db.pluginConsentAct.findMany.mockResolvedValue([{ id: 'act-hh' }, { id: 'act-user' }] as never);
       const householdPreConsent = makeGrant({
         id: 'grant-hh',
         scopeType: PluginGrantScope.Household,
@@ -2773,23 +2761,32 @@ describe('PluginUpdateService', () => {
 
       await service.reject({ slug: 'demo-sink', rejectorId: 'admin-1', stagingId: 'staging-a' });
 
-      // Only household and user decisions the active manifest does not
-      // request at their scope: a server decision is never a pre-consent, and
-      // the household's decision on calendar:read is in force.
-      expect(db.pluginGrant.findMany).toHaveBeenCalledWith({
+      // The acts that answered this staging, by the id the rejection was sent
+      // with, then exactly the decisions those acts wrote: a decision given
+      // under the active manifest names another act, whatever its permission.
+      expect(db.pluginConsentAct.findMany).toHaveBeenCalledWith({
         where: {
           pluginId: 'plugin-1',
-          OR: [
-            { scopeType: PluginGrantScope.Household, permissionSlug: { notIn: ['calendar:read'] } },
-            { scopeType: PluginGrantScope.User, permissionSlug: { notIn: [] } },
-          ],
+          stagingId: 'staging-a',
+          scopeType: { in: [PluginGrantScope.Household, PluginGrantScope.User] },
         },
+        select: { id: true },
+      });
+      expect(db.pluginGrant.findMany).toHaveBeenCalledWith({
+        where: { pluginId: 'plugin-1', actId: { in: ['act-hh', 'act-user'] } },
       });
       expect(db.pluginGrant.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['grant-hh', 'grant-user'] } } });
-      // The clear claims the plugin row before the decisions are read, so a
-      // staged review in flight is either read here or refused afterwards.
+      // The clear claims the plugin row before the acts and decisions are
+      // read, so a staged review in flight is either read here or refused
+      // afterwards.
       expect(db.plugin.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+        db.pluginConsentAct.findMany.mock.invocationCallOrder[0] ?? 0,
+      );
+      expect(db.pluginConsentAct.findMany.mock.invocationCallOrder[0]).toBeLessThan(
         db.pluginGrant.findMany.mock.invocationCallOrder[0] ?? 0,
+      );
+      expect(db.pluginGrant.findMany.mock.invocationCallOrder[0]).toBeLessThan(
+        db.pluginGrant.deleteMany.mock.invocationCallOrder[0] ?? 0,
       );
       expect(revokedEvents()).toEqual([
         expect.objectContaining({
@@ -2815,22 +2812,33 @@ describe('PluginUpdateService', () => {
       expect(revokedEvents()).toEqual([]);
     });
 
-    it('reject still clears a staged update whose active manifest cannot be read, and leaves every decision alone (#1150)', async () => {
-      // Which decisions are pre-consents is read from the active manifest.
-      // One that no longer validates must not block the rejection, and must
-      // not be guessed around.
+    it('rejection over an unreadable active manifest still deletes the pre-consents given to the staging (#1152)', async () => {
+      // The acts say which decisions answered the staging, so no manifest is
+      // read to tell a pre-consent from a decision in force: an active
+      // manifest that no longer validates blocks nothing.
       db.plugin.findUnique.mockResolvedValue(staged({ manifestJson: { slug: 'demo-sink' } as Prisma.JsonValue }));
+      db.pluginConsentAct.findMany.mockResolvedValue([{ id: 'act-hh' }] as never);
+      db.pluginGrant.findMany.mockResolvedValue([
+        makeGrant({
+          id: 'grant-hh',
+          scopeType: PluginGrantScope.Household,
+          scopeId: 'household-1',
+          permissionSlug: 'events:read',
+          actId: 'act-hh',
+        }),
+      ]);
 
       await service.reject({ slug: 'demo-sink', rejectorId: 'admin-1', stagingId: 'staging-a' });
 
       expect(db.plugin.updateMany).toHaveBeenCalledTimes(1);
-      expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
-      expect(db.pluginGrant.deleteMany).not.toHaveBeenCalled();
+      expect(db.pluginGrant.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['grant-hh'] } } });
       expect(emitter.emit).toHaveBeenCalledWith(
         PluginUpdateRejectedEvent.eventName,
         expect.any(PluginUpdateRejectedEvent),
       );
-      expect(revokedEvents()).toEqual([]);
+      expect(revokedEvents()).toEqual([
+        expect.objectContaining({ subjectId: 'grant-hh', reason: 'staged-update-rejected' }),
+      ]);
     });
 
     it('reject clears only the staging it loaded, by its staging id (#357)', async () => {

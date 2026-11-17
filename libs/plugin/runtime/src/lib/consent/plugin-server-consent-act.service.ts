@@ -178,6 +178,9 @@ export class PluginServerConsentActService {
         kind: PluginConsentActKind[kind],
         manifestVersion: plugin.version,
         manifestSha256: input.manifestSha256,
+        // The claim admits only the active sha: the Server unit answers a
+        // staged update through approval, never through this act.
+        stagingId: null,
         presentation: plan.presentation,
         decisions: plan.decisions,
         standingBySlug,

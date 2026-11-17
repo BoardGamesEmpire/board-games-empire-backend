@@ -415,6 +415,8 @@ describe('PluginInstallerService', () => {
           scopeId: SERVER_SCOPE_SENTINEL,
           manifestVersion: '1.2.0',
           manifestSha256: sha('a'),
+          // An install answers no staged update (#1152).
+          stagingId: null,
           presentation: expect.any(Object),
           decidedById: 'admin-1',
           decidedAt: expect.any(Date),

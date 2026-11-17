@@ -1123,7 +1123,6 @@ export class PluginUpdateService {
     this.assertAnswersCurrentStaging(plugin, input.stagingId);
 
     const stagedVersion = plugin.pendingVersion;
-    const activeUnitRequests = this.activeUnitRequests(plugin);
 
     // Conditional on the EXACT staging the rejector saw, like every other
     // staged-update writer: an unconditional clear racing an approve would
@@ -1163,10 +1162,24 @@ export class PluginUpdateService {
       // The pre-consents households and users gave to this staged update go
       // with it (#1150). Left in place, a later update that requests the same
       // permission would find it already granted, a consent nobody gave to
-      // that update: the inheritance activation prevents for a permission an
-      // update stops requesting (#577). A pre-consent is a household or user
-      // decision the active manifest does not request at its scope, and with
-      // the staged update gone nothing requests it at all.
+      // that update. A pre-consent is a consent decision whose act names this
+      // staging (#1152): a staged review records the staging it answered, and
+      // may only grant a permission the active manifest does not request at
+      // the unit's scope, so those decisions are exactly the pre-consents.
+      // Any other decision names an act that answered no staging (one on the
+      // active manifest) or another staging (an earlier approval's), whatever
+      // its permission, and stays. No manifest is read to tell them apart, so
+      // a rejection over an active manifest that no longer validates deletes
+      // them all the same. A pre-consent is a household's or user's consent
+      // decision, and the Server unit answers a staged update by approving
+      // it, so an approval's act, which names the staging it consumed, is
+      // never matched and a rejection cannot reach the Server unit's
+      // decisions.
+      //
+      // The acts are matched on `input.stagingId`, the string
+      // `assertAnswersCurrentStaging` proved equal to the row's staging id
+      // and the clear above matched: never on a value that could be null,
+      // since a null staging id matches every act on the active manifest.
       //
       // Read and deleted under the claim above, which holds the plugin row.
       // A staged review claims that row `FOR SHARE` before it writes, so one
@@ -1174,21 +1187,17 @@ export class PluginUpdateService {
       // or waits for this transaction and is then refused: its sha is no
       // longer the staged one. Read before the delete, because the
       // revocation events are the only durable record of what went.
-      const preConsents =
-        activeUnitRequests === null
-          ? []
-          : await tx.pluginGrant.findMany({
-              where: {
-                pluginId: plugin.id,
-                OR: [
-                  {
-                    scopeType: PluginGrantScope.Household,
-                    permissionSlug: { notIn: [...activeUnitRequests.household] },
-                  },
-                  { scopeType: PluginGrantScope.User, permissionSlug: { notIn: [...activeUnitRequests.user] } },
-                ],
-              },
-            });
+      const stagingActs = await tx.pluginConsentAct.findMany({
+        where: {
+          pluginId: plugin.id,
+          stagingId: input.stagingId,
+          scopeType: { in: [PluginGrantScope.Household, PluginGrantScope.User] },
+        },
+        select: { id: true },
+      });
+      const preConsents = await tx.pluginGrant.findMany({
+        where: { pluginId: plugin.id, actId: { in: stagingActs.map((act) => act.id) } },
+      });
 
       if (preConsents.length > 0) {
         await tx.pluginGrant.deleteMany({ where: { id: { in: preConsents.map((grant) => grant.id) } } });
@@ -1224,49 +1233,6 @@ export class PluginUpdateService {
     );
 
     return rejected;
-  }
-
-  /**
-   * The permissions the ACTIVE manifest requests of households and of users,
-   * which is what tells a pre-consent from a consent decision in force:
-   * rejecting a staged update deletes the household and user decisions
-   * outside these sets (#1150).
-   *
-   * Null when the stored active manifest cannot be read. A rejection must
-   * stay possible then, as it does over a corrupt staged manifest (#1117),
-   * so it clears the staged update and leaves every decision alone rather
-   * than guess which are pre-consents. Nothing confers from such a plugin,
-   * and no update of it can be staged or approved until the active manifest
-   * reads again; the warning below records that pre-consents may remain.
-   */
-  private activeUnitRequests(
-    plugin: Plugin,
-  ): { readonly household: ReadonlySet<string>; readonly user: ReadonlySet<string> } | null {
-    let active: PluginManifestValidationResult;
-
-    try {
-      active = this.validateActiveManifest(plugin);
-    } catch (err) {
-      if (!(err instanceof PluginUpdateManifestError)) {
-        throw err;
-      }
-
-      this.logger.warn(
-        `Plugin '${plugin.slug}': the active manifest cannot be read, so rejecting its staged update deletes no ` +
-          `pre-consents (${err.message})`,
-      );
-
-      return null;
-    }
-
-    const requestedAt = (consentScope: NormalizedPermissionRequest['consentScope']): ReadonlySet<string> =>
-      new Set(
-        active.permissionChecks
-          .filter((check) => check.consentScope === consentScope)
-          .map((check) => check.canonicalSlug),
-      );
-
-    return { household: requestedAt('household'), user: requestedAt('user') };
   }
 
   /**
@@ -2017,6 +1983,8 @@ export class PluginUpdateService {
           kind: PluginConsentActKind.UpdateApprove,
           manifestVersion: next.manifest.version,
           manifestSha256: provenance.sha256,
+          // The staging the approval answered, which the claim above held.
+          stagingId: plugin.pendingStagingId,
           presentation: acceptance.presentation,
           decisions: acceptance.decisions,
           standingBySlug: serverDecisionsBySlug,
