@@ -31,7 +31,6 @@ import { readFile } from 'node:fs/promises';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { retainedServerConfig } from '../config/retained-server-config';
 import { emitDecisionEvents, type WrittenDecision } from '../consent/consent-decision-events';
-import { decisionStands } from '../consent/consent-decision-stands';
 import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
 import type { ShownRisk } from '../consent/plugin-consent-act.types';
 import {
@@ -40,6 +39,7 @@ import {
   type ConsentCheckDecisionInput,
 } from '../consent/plugin-consent-check-classifier.service';
 import { planServerAcceptance, planServerApproval, staleShownRisks } from '../consent/server-acceptance';
+import { writeConsentAct } from '../consent/write-consent-act';
 import { grantSnapshot, householdSwitchSnapshot, userSwitchSnapshot } from '../events/plugin-event-snapshots';
 import {
   HouseholdPluginReconsentRequestedEvent,
@@ -2005,56 +2005,32 @@ export class PluginUpdateService {
           defaultLocale: this.options.defaultLocale,
         });
 
-        act = await tx.pluginConsentAct.create({
-          data: {
-            pluginId: plugin.id,
-            pluginSlug: plugin.slug,
-            scopeType: PluginGrantScope.Server,
-            scopeId: SERVER_SCOPE_SENTINEL,
-            kind: PluginConsentActKind.UpdateApprove,
-            manifestVersion: next.manifest.version,
-            manifestSha256: provenance.sha256,
-            presentation: acceptance.presentation as unknown as Prisma.InputJsonValue,
-            decidedById: actorId,
-            decidedAt: initiatedAt,
-            correlationId,
-          },
+        // The acceptance's decisions are in permission order. The standing
+        // rows are the ones read under the claim, before the deletion passes:
+        // those passes delete only permissions `next` stops requesting or
+        // moves out of server scope, never one the approval accepts here.
+        const written = await writeConsentAct(tx, {
+          pluginId: plugin.id,
+          pluginSlug: plugin.slug,
+          scopeType: PluginGrantScope.Server,
+          scopeId: SERVER_SCOPE_SENTINEL,
+          kind: PluginConsentActKind.UpdateApprove,
+          manifestVersion: next.manifest.version,
+          manifestSha256: provenance.sha256,
+          presentation: acceptance.presentation,
+          decisions: acceptance.decisions,
+          standingBySlug: serverDecisionsBySlug,
+          actorId,
+          decidedAt: initiatedAt,
+          correlationId,
         });
 
-        // In permission order, which the acceptance sorts by code unit: the
-        // order every writer of the Server unit's consent decisions takes
-        // their rows in.
-        for (const decision of acceptance.decisions) {
-          const fields = {
-            status: decision.status,
-            decidedRiskLevel: decision.decidedRiskLevel,
-            decidedById: actorId,
-            decidedAt: initiatedAt,
-            actId: act.id,
-          };
-          const coordinates = {
-            pluginId: plugin.id,
-            scopeType: PluginGrantScope.Server,
-            scopeId: SERVER_SCOPE_SENTINEL,
-            permissionSlug: decision.permissionSlug,
-          };
-
-          const after = await tx.pluginGrant.upsert({
-            where: { pluginId_scopeType_scopeId_permissionSlug: coordinates },
-            create: { ...coordinates, ...fields },
-            update: fields,
-          });
-          // The rows read under the claim, before the deletion passes: those
-          // passes delete only permissions `next` stops requesting or moves
-          // out of server scope, never one the approval accepts here.
-          const before = serverDecisionsBySlug.get(decision.permissionSlug);
-
-          acceptedGrants.push(after);
-
-          if (before !== undefined && !decisionStands(decision, before)) {
-            changedDecisions.push({ before, after });
-          }
-        }
+        act = written.act;
+        acceptedGrants.push(...written.rows);
+        // A decision the approval writes fresh is announced by
+        // `plugin.update_approved`, so only a row that stood before is
+        // announced as a decision change.
+        changedDecisions.push(...written.changed.filter(({ before }) => before !== null));
       }
 
       const updated = await tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });

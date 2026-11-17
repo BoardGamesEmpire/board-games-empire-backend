@@ -3,9 +3,9 @@ import type { ConsentActDecision } from './plugin-consent-act.types';
 
 /*
  * Whether a consent act would change a consent decision, shared by the
- * household and user act and the server act (#1150, #1336). Pure: each act
- * reads its standing rows and writes its decisions in its own file, under its
- * own plugin-row claim.
+ * household and user act, the server act and `writeConsentAct` (#1150, #1336,
+ * #1152). Pure: each act reads its standing rows under its own plugin-row
+ * claim, and `writeConsentAct` writes the decisions.
  */
 
 /** The row already holds this decision: same status, same risk. */

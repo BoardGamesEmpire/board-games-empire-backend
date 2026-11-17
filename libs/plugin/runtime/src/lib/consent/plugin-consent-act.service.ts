@@ -30,7 +30,7 @@ import {
 import { planConsentAct } from './consent-act-plan';
 import { unitOwnsConsentScope, type ConsentManifestSource } from './consent-classification.types';
 import { emitDecisionEvents, type WrittenDecision } from './consent-decision-events';
-import { decisionsStand, decisionStands } from './consent-decision-stands';
+import { decisionsStand } from './consent-decision-stands';
 import {
   PluginConsentActNoUserScopeError,
   PluginConsentActStaleError,
@@ -38,6 +38,7 @@ import {
 } from './plugin-consent-act.errors';
 import type { ConsentActAnswer, ConsentActKind, ConsentActUnit } from './plugin-consent-act.types';
 import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
+import { writeConsentAct } from './write-consent-act';
 
 export interface ConsentActInput {
   readonly slug: string;
@@ -328,55 +329,22 @@ export class PluginConsentActService {
         }
       }
 
-      const act = await tx.pluginConsentAct.create({
-        data: {
-          pluginId: plugin.id,
-          pluginSlug: plugin.slug,
-          scopeType,
-          scopeId,
-          kind: PluginConsentActKind[kind],
-          manifestVersion: named.version,
-          manifestSha256: input.manifestSha256,
-          presentation: plan.presentation as unknown as Prisma.InputJsonValue,
-          decidedById: input.actorId,
-          decidedAt: initiatedAt,
-          correlationId,
-        },
+      // The plan's decisions are already in permission order.
+      const { act, changed: changedDecisions } = await writeConsentAct(tx, {
+        pluginId: plugin.id,
+        pluginSlug: plugin.slug,
+        scopeType,
+        scopeId,
+        kind: PluginConsentActKind[kind],
+        manifestVersion: named.version,
+        manifestSha256: input.manifestSha256,
+        presentation: plan.presentation,
+        decisions: plan.decisions,
+        standingBySlug,
+        actorId: input.actorId,
+        decidedAt: initiatedAt,
+        correlationId,
       });
-
-      // Every planned decision is written, the ones that already stand
-      // included, so a row's actId always names the act that last set it.
-      // In permission order, which the plan sorts by code unit: two acts on
-      // one unit then take their grant rows in the same order, where any
-      // other order lets each hold a row the other waits on.
-      const changedDecisions: WrittenDecision[] = [];
-
-      for (const decision of plan.decisions) {
-        const fields = {
-          status: decision.status,
-          decidedRiskLevel: decision.decidedRiskLevel,
-          decidedById: input.actorId,
-          decidedAt: initiatedAt,
-          actId: act.id,
-        };
-        const after = await tx.pluginGrant.upsert({
-          where: {
-            pluginId_scopeType_scopeId_permissionSlug: {
-              pluginId: plugin.id,
-              scopeType,
-              scopeId,
-              permissionSlug: decision.permissionSlug,
-            },
-          },
-          create: { pluginId: plugin.id, scopeType, scopeId, permissionSlug: decision.permissionSlug, ...fields },
-          update: fields,
-        });
-        const before = standingBySlug.get(decision.permissionSlug) ?? null;
-
-        if (!decisionStands(decision, before)) {
-          changedDecisions.push({ before, after });
-        }
-      }
 
       // Every written outcome differs only in the unit it leaves and what
       // happened to it.

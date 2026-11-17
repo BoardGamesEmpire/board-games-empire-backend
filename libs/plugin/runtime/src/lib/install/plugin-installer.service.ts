@@ -31,6 +31,7 @@ import { retainedServerConfig } from '../config/retained-server-config';
 import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
 import type { ShownRisk } from '../consent/plugin-consent-act.types';
 import { planServerAcceptance, staleShownRisks } from '../consent/server-acceptance';
+import { writeConsentAct } from '../consent/write-consent-act';
 import { PluginInstalledEvent, type GrantedPermissionRecord, type PluginProvenance } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
@@ -716,44 +717,25 @@ export class PluginInstallerService {
 
       // The Server unit's consent to this install, one act whatever the
       // manifest requests of the server, so every install leaves a record of
-      // what the server admin accepted and under which sha (#1336).
-      const act = await tx.pluginConsentAct.create({
-        data: {
-          pluginId: plugin.id,
-          pluginSlug: manifest.slug,
-          scopeType: PluginGrantScope.Server,
-          scopeId: SERVER_SCOPE_SENTINEL,
-          kind: PluginConsentActKind.InstallAccept,
-          manifestVersion: manifest.version,
-          manifestSha256: provenance.sha256,
-          presentation: acceptance.presentation as unknown as Prisma.InputJsonValue,
-          decidedById: installerId,
-          decidedAt: initiatedAt,
-          correlationId,
-        },
+      // what the server admin accepted and under which sha (#1336). The
+      // acceptance's decisions are in permission order. No consent decision
+      // stands before an install, fresh or a reinstall, whose uninstall purged
+      // every one, so each upsert inserts.
+      const { act, rows: seededGrants } = await writeConsentAct(tx, {
+        pluginId: plugin.id,
+        pluginSlug: manifest.slug,
+        scopeType: PluginGrantScope.Server,
+        scopeId: SERVER_SCOPE_SENTINEL,
+        kind: PluginConsentActKind.InstallAccept,
+        manifestVersion: manifest.version,
+        manifestSha256: provenance.sha256,
+        presentation: acceptance.presentation,
+        decisions: acceptance.decisions,
+        standingBySlug: new Map(),
+        actorId: installerId,
+        decidedAt: initiatedAt,
+        correlationId,
       });
-
-      // In permission order, which the acceptance sorts by code unit: the
-      // order every writer of the Server unit's consent decisions takes them.
-      const seededGrants: PluginGrant[] = [];
-
-      for (const decision of acceptance.decisions) {
-        seededGrants.push(
-          await tx.pluginGrant.create({
-            data: {
-              pluginId: plugin.id,
-              scopeType: PluginGrantScope.Server,
-              scopeId: SERVER_SCOPE_SENTINEL,
-              permissionSlug: decision.permissionSlug,
-              status: decision.status,
-              decidedById: installerId,
-              decidedAt: initiatedAt,
-              decidedRiskLevel: decision.decidedRiskLevel,
-              actId: act.id,
-            },
-          }),
-        );
-      }
 
       return { plugin, declaredPermissions, act, seededGrants, retainedConfigReset };
     });
