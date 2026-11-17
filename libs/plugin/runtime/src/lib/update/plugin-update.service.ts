@@ -178,6 +178,13 @@ interface ResolvedPendingUpdate {
   readonly comparison: UpdateEscalationComparison;
 }
 
+/** What a guarded write on a plugin's staged update was doing when it matched no row (#1116). */
+type LostStagedWrite =
+  /** It answered a staging: an update approval or a rejection, which named this staging id. */
+  | { readonly answeredStagingId: string }
+  /** It claimed the empty slot for this version: a staging, or an update activated as it is staged. */
+  | { readonly claimedEmptySlotFor: string };
+
 /** What an approval brings to the resolution: the staging it answers (#357). */
 interface PendingUpdateApproval {
   readonly stagingId: string;
@@ -319,6 +326,10 @@ interface ReconsentCandidate<TUnit> {
   readonly outstanding: readonly string[];
 }
 
+/**
+ * What one activation needs, shared by `activate()` and
+ * `activateInTransaction()` so the two cannot drift apart (#1116).
+ */
 interface ActivationInput {
   readonly plugin: Plugin;
   readonly active: PluginManifestValidationResult;
@@ -517,12 +528,7 @@ export class PluginUpdateService {
       });
 
       if (claimed.count !== 1) {
-        throw await this.refusalForLostStagedWrite(
-          tx,
-          plugin,
-          null,
-          (staged) => new PluginUpdatePendingConflictError(plugin.slug, staged ?? 'unknown', next.manifest.version),
-        );
+        throw await this.refusalForLostStagedWrite(tx, plugin, { claimedEmptySlotFor: next.manifest.version });
       }
 
       return tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
@@ -706,7 +712,7 @@ export class PluginUpdateService {
       });
 
       if (cleared.count !== 1) {
-        throw await this.refusalForLostStagedWrite(tx, plugin, input.stagingId);
+        throw await this.refusalForLostStagedWrite(tx, plugin, { answeredStagingId: input.stagingId });
       }
 
       // Read back INSIDE the claim, like the staging and activation writes.
@@ -890,10 +896,11 @@ export class PluginUpdateService {
   }
 
   /**
-   * Refuses a decision that does not answer the staging currently in the row:
-   * no staged version is `PluginUpdateNoPendingError`, a staging id the
-   * decider never saw is `PluginUpdateStagingReplacedError`. One home for the
-   * check, so approve and reject cannot drift apart (#357, #1116).
+   * Refuses an update approval or a rejection that does not answer the staging
+   * currently in the row: no staged update is `PluginUpdateNoPendingError`, a
+   * staging id that whoever approves or rejects never saw is
+   * `PluginUpdateStagingReplacedError`. One home for the check, so approve and
+   * reject cannot drift apart (#357, #1116).
    */
   private assertAnswersCurrentStaging(
     plugin: Plugin,
@@ -909,27 +916,23 @@ export class PluginUpdateService {
   }
 
   /**
-   * Why a guarded write on a plugin's staged update matched no row. `stagingId`
-   * is the staging the caller answered, or null when it claimed an empty slot.
-   * Re-reads the row through `tx`, so the answer comes from the state the
-   * write lost to.
+   * Why a guarded write on a plugin's staged update matched no row, given what
+   * the write was doing. Re-reads the row through `tx`, so the answer comes
+   * from the state the write lost to.
    *
-   * An uninstalled plugin is always the tombstone refusal. A caller that
-   * answered a staging (an approval, a rejection) finds it consumed or gone
-   * (`PluginUpdateNoPendingError`) or replaced by another staging
-   * (`PluginUpdateStagingReplacedError`, #357): nothing is left for it to
-   * resolve. A caller that claimed an empty slot (the staging write, or an
+   * An uninstalled plugin always gets `PluginUpdateTombstonedError`. A write
+   * that answered a staging (an update approval, a rejection) finds it
+   * consumed or gone (`PluginUpdateNoPendingError`) or replaced by another
+   * staging (`PluginUpdateStagingReplacedError`, #357): nothing is left for it
+   * to resolve. A write that claimed an empty slot (the staging write, or an
    * activation with nothing staged) lost it to a concurrent stage and gets
-   * `lostEmptySlot`'s refusal, the refuse-don't-supersede answer, built from
-   * the version now staged. The database keeps the five staged columns all
-   * null or all set, so "the caller had a staged update" and "its staging id
-   * is not null" are one condition (#1116).
+   * `PluginUpdatePendingConflictError`, the refuse-don't-supersede answer,
+   * built from the version now staged (#1116).
    */
   private async refusalForLostStagedWrite(
     tx: Prisma.TransactionClient,
     plugin: Pick<Plugin, 'id' | 'slug'>,
-    stagingId: string | null,
-    lostEmptySlot?: (stagedVersion: string | null) => Error,
+    write: LostStagedWrite,
   ): Promise<Error> {
     const current = await tx.plugin.findUnique({
       where: { id: plugin.id },
@@ -940,21 +943,19 @@ export class PluginUpdateService {
       return new PluginUpdateTombstonedError(plugin.slug, current.uninstalledAt);
     }
 
-    if (stagingId !== null) {
-      if (current?.pendingStagingId != null && current.pendingStagingId !== stagingId) {
-        return new PluginUpdateStagingReplacedError(plugin.slug, stagingId);
+    if ('answeredStagingId' in write) {
+      if (current?.pendingStagingId != null && current.pendingStagingId !== write.answeredStagingId) {
+        return new PluginUpdateStagingReplacedError(plugin.slug, write.answeredStagingId);
       }
 
       return new PluginUpdateNoPendingError(plugin.slug);
     }
 
-    if (lostEmptySlot === undefined) {
-      return new Error(
-        `refusalForLostStagedWrite for '${plugin.slug}' needs lostEmptySlot when the caller answered no staging`,
-      );
-    }
-
-    return lostEmptySlot(current?.pendingVersion ?? null);
+    return new PluginUpdatePendingConflictError(
+      plugin.slug,
+      current?.pendingVersion ?? 'unknown',
+      write.claimedEmptySlotFor,
+    );
   }
 
   /** A tombstoned row is not an update target, and the distinction deserves its own error (#59). */
@@ -1363,12 +1364,15 @@ export class PluginUpdateService {
       if (claimed.count !== 1) {
         // The pending state moved. An approval's staged update was consumed or
         // replaced, while the immediate stage() path lost the empty slot to a
-        // concurrent stage (#1116).
+        // concurrent stage. The database keeps the five staged columns all null
+        // or all set (`plugins_staged_update_all_or_nothing`), so a row's
+        // staging id is not null exactly when it had a staged update (#1116).
         throw await this.refusalForLostStagedWrite(
           tx,
           plugin,
-          plugin.pendingStagingId,
-          (staged) => new PluginUpdatePendingConflictError(plugin.slug, staged ?? 'unknown', next.manifest.version),
+          plugin.pendingStagingId !== null
+            ? { answeredStagingId: plugin.pendingStagingId }
+            : { claimedEmptySlotFor: next.manifest.version },
         );
       }
 

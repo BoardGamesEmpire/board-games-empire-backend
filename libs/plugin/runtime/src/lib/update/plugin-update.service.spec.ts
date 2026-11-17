@@ -914,10 +914,16 @@ describe('PluginUpdateService', () => {
         }),
       );
 
-      await expect(
-        service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'stale-staging' }),
-      ).rejects.toBeInstanceOf(PluginUpdateStagingReplacedError);
+      const failure = await service
+        .approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'stale-staging' })
+        .catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateStagingReplacedError);
+      expect(failure).toMatchObject({ stagingId: 'stale-staging' });
       expect(db.$transaction).not.toHaveBeenCalled();
+      expect(db.plugin.updateMany).not.toHaveBeenCalled();
+      expect(db.pluginGrant.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
     });
 
     it('approve answers a replaced staging when another one takes the slot between its check and its claim (#357)', async () => {
