@@ -178,6 +178,7 @@ export interface PluginInventoryEntry extends PluginInventoryIdentity {
   /** Non-null only when the caller opted into tombstones (D-CH). */
   readonly uninstalledAt: Date | null;
   readonly restartRequired: boolean;
+
   /**
    * The process roles to restart so the server runs what it has recorded:
    * empty unless {@link restartRequired} (#1096).

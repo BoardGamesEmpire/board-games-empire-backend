@@ -380,7 +380,7 @@ export class PluginsController {
       'A forbidden import was not acknowledged exactly; the plugin artifact carries the version the plugin runs; ' +
       'the plugin already has a staged update, which an update approval or a rejection must answer first; the ' +
       'plugin artifact is for another plugin; another plugin artifact became active while the update was being ' +
-      'staged (PluginUpdateActiveVersionMovedError — stage it again); or the update would be activated at once ' +
+      'staged (PluginUpdateActiveArtifactMovedError — stage it again); or the update would be activated at once ' +
       'and another DataGateway already has the name its DataGateway would take',
   })
   @ApiResponse({
@@ -673,10 +673,11 @@ export class PluginsController {
   }
 
   /**
-   * The staging's message, from the row the staging produced or found
-   * (#1096). A repeated request can find the plugin already running the
-   * checksum after the restart, when no process role is owed one, so the
-   * activated message names one only when it exists.
+   * The staging's message, stating what the row the staging produced or found
+   * shows rather than an event (#1096): a row can owe a restart for another
+   * reason, and a repeated request can find no restart owed at all, so the
+   * activated message says the version is active and names a process role
+   * only when one is owed a restart.
    */
   private stagingMessage(slug: string, { plugin, activated }: PluginArtifactStagingResult) {
     if (!activated) {

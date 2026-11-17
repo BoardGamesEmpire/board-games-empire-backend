@@ -80,7 +80,7 @@ import { compareForEscalations, deniedRequiredServerSlugs } from './escalation-c
 import { CLEARED_STAGED_UPDATE } from './staged-update.columns';
 import type { ManifestComparisonView, UpdateEscalation, UpdateEscalationComparison } from './update-escalation.types';
 import {
-  PluginUpdateActiveVersionMovedError,
+  PluginUpdateActiveArtifactMovedError,
   PluginUpdateAuthorityError,
   PluginUpdateCriticalConfirmationError,
   PluginUpdateDataGatewayNameConflictError,
@@ -386,11 +386,17 @@ export const PLUGIN_UPDATE_STAGING_REFUSALS = [
 ] as const;
 
 /**
- * Why staging an artifact would be refused as things stand.
+ * Why staging an artifact would stage nothing as things stand (#1096).
  *
- * - `active_version`: the artifact is the plugin's active version.
+ * - `active_version`: the artifact is the plugin's active version. When it is
+ *   the very plugin artifact the plugin runs (the same checksum), the staging
+ *   route answers the plugin with 200 and writes nothing; any other artifact
+ *   is refused with 409.
  * - `staged_update_waiting`: the plugin already has a staged update, which an
- *   update approval or a rejection must answer first.
+ *   update approval or a rejection must answer first. When the artifact is
+ *   the very one staged (the same checksum), the staging route answers that
+ *   staged update with 200 and writes nothing; any other artifact is refused
+ *   with 409.
  * - `active_manifest_unreadable`: the plugin's stored active manifest cannot
  *   be read, so nothing can be compared against it.
  * - `data_gateway_name_taken`: the update would be activated at once, and its
@@ -401,6 +407,7 @@ export type PluginUpdateStagingRefusal = (typeof PLUGIN_UPDATE_STAGING_REFUSALS)
 /** What an update would change, as staging, the artifact step and the staged-update read all report it. */
 export interface PluginUpdateChanges {
   readonly comparison: UpdateEscalationComparison;
+
   /**
    * True when nothing server-gates: staging activates the update at once,
    * unless activation then finds a required server-scope permission denied
@@ -409,6 +416,7 @@ export interface PluginUpdateChanges {
   readonly activatesAtOnce: boolean;
   readonly declares: PluginUpdateDeclaresDiff;
   readonly noLongerRequested: readonly string[];
+
   /** The DataGateway name a move into data-gateway would take, when another row holds it (#1083). */
   readonly dataGatewayNameConflict: string | null;
 }
@@ -425,7 +433,16 @@ function dataGatewayNameRefusedOver(changes: PluginUpdateChanges): string | null
 
 export interface PluginUpdateAssessment {
   readonly activeVersion: string;
+
+  /**
+   * Why staging this artifact would stage nothing as things stand, else null
+   * (#1096). For `active_version` and `staged_update_waiting`, the very
+   * artifact the plugin runs or has staged (the same checksum) is answered by
+   * the staging route with the current record and 200, writing nothing; any
+   * other artifact is refused with 409.
+   */
   readonly refusal: PluginUpdateStagingRefusal | null;
+
   /** Null when nothing can be compared: the artifact is the active version, or the active manifest cannot be read. */
   readonly changes: PluginUpdateChanges | null;
 }
@@ -1339,9 +1356,9 @@ export class PluginUpdateService {
    * staged and another checksum installed, it lost to another activation: one
    * that made the version being activated active, as from a double click,
    * gets `PluginUpdateVersionConflictError`, and any other gets
-   * `PluginUpdateActiveVersionMovedError`, since the comparison it was
+   * `PluginUpdateActiveArtifactMovedError`, since the comparison it was
    * activated on is stale. An empty-slot claim nothing explains keeps the
-   * pending conflict, its staged version unknown.
+   * staged-update conflict, its staged version unknown.
    */
   private async refusalForLostStagedWrite(
     tx: Prisma.TransactionClient,
@@ -1381,7 +1398,7 @@ export class PluginUpdateService {
         return new PluginUpdateVersionConflictError(plugin.slug, write.claimedEmptySlotFor);
       }
 
-      return new PluginUpdateActiveVersionMovedError(plugin.slug, write.comparedWith.version, current.version);
+      return new PluginUpdateActiveArtifactMovedError(plugin.slug, write.comparedWith.version, current.version);
     }
 
     return new PluginUpdatePendingConflictError(
@@ -1810,7 +1827,7 @@ export class PluginUpdateService {
       });
 
       if (claimed.count !== 1) {
-        // The pending state or the active plugin artifact moved. An approval's
+        // The staged state or the active plugin artifact moved. An approval's
         // staged update was consumed or replaced, while the immediate stage()
         // path lost the empty slot to a concurrent stage, or lost the active
         // plugin artifact it was compared against to a concurrent activation

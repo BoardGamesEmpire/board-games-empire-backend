@@ -69,8 +69,10 @@ export function stagedUpdateColumns(
     readonly stagingId?: string;
     /** When the update was staged. Defaults to now. */
     readonly since?: Date;
+
     /** The link the staged artifact was fetched from (#1096). Defaults to null, as for an upload. */
     readonly url?: string;
+
     /** The registry the staged artifact came from (#1096). Defaults to null, as for an upload. */
     readonly registrySlug?: string;
   } = {},

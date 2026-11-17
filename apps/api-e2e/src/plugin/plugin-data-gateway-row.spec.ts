@@ -24,9 +24,8 @@ import { pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
  * the uninstall route. The update cases stage on the plugin's row so each
  * fixes its manifests exactly (the staging route is covered by
  * `plugin-update-staging.spec.ts`, #1096), and approve through the api. No
- * coordinator runs here, so
- * nothing calls the routes that reach one (the DataGateway connect and
- * interview routes).
+ * coordinator runs here, so nothing calls the routes that reach one (the
+ * DataGateway connect and interview routes).
  */
 describe('a data-gateway plugin’s DataGateway row (#1083)', () => {
   const baseUrl = requireBaseUrl(process.env);

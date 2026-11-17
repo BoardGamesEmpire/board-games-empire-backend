@@ -33,7 +33,7 @@ import {
   PluginUnitPluginNotFoundError,
   PluginUnitPluginTombstonedError,
   PluginUnitScopeError,
-  PluginUpdateActiveVersionMovedError,
+  PluginUpdateActiveArtifactMovedError,
   PluginUpdateAuthorityError,
   PluginUpdateCriticalConfirmationError,
   PluginUpdateDataGatewayNameConflictError,
@@ -296,20 +296,20 @@ describe('PluginExceptionFilter', () => {
     });
 
     it('renders a staging that another activation overtook as 409, naming both versions (#1096)', () => {
-      filter.catch(new PluginUpdateActiveVersionMovedError('sample', '2.0.0', '2.2.0'), host);
+      filter.catch(new PluginUpdateActiveArtifactMovedError('sample', '2.0.0', '2.2.0'), host);
 
       expect(rendered().getStatus()).toBe(Http.Conflict);
       expect(body()).toEqual({
         statusCode: 409,
         error: 'Conflict',
-        message: 't:errors.plugin.update_active_version_moved',
-        code: 'PLUGIN_UPDATE_ACTIVE_VERSION_MOVED',
+        message: 't:errors.plugin.update_active_artifact_moved',
+        code: 'PLUGIN_UPDATE_ACTIVE_ARTIFACT_MOVED',
         slug: 'sample',
         comparedVersion: '2.0.0',
         activeVersion: '2.2.0',
       });
       expect(translate).toHaveBeenCalledWith(
-        'errors.plugin.update_active_version_moved',
+        'errors.plugin.update_active_artifact_moved',
         expect.objectContaining({ args: { slug: 'sample', activeVersion: '2.2.0' } }),
       );
     });

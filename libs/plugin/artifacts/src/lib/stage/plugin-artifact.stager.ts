@@ -4,10 +4,12 @@ import {
   PluginDirectoryResolverService,
   PluginGrantAuthorityService,
   PluginUpdateAuthorityError,
+  PluginUpdateForbiddenPermissionError,
   PluginUpdateManifestError,
   PluginUpdatePluginNotFoundError,
   PluginUpdateService,
   PluginUpdateTombstonedError,
+  PluginUpdateUnknownCorePermissionError,
 } from '@bge/plugin';
 import type { PluginArtifactDirectory, PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { Injectable, Logger } from '@nestjs/common';
@@ -191,7 +193,9 @@ export class PluginArtifactStager {
   /**
    * The answer for a staging of this checksum that is already done, from the
    * plugin's row: its staged update, when that is from this checksum, or the
-   * plugin, when it runs it. Null when neither holds.
+   * plugin, when it runs it. Null when neither holds. The artifact step's
+   * assessment reports these two artifacts as `active_version` and
+   * `staged_update_waiting`, which for any other artifact are refusals (#1096).
    */
   private async alreadyDone(plugin: Plugin, sha256: PluginArtifactSha256): Promise<PluginArtifactStagingResult | null> {
     if (plugin.pendingSha256 === sha256) {
@@ -218,14 +222,21 @@ export class PluginArtifactStager {
 
   /**
    * The staged update's taken DataGateway name, as the staged-update read
-   * works it out now. A stored manifest that cannot be read reports none: the
-   * staging is done, and must still answer.
+   * works it out now. When that read refuses over the stored manifests (one
+   * cannot be read, or a permission it requests is a core permission retired
+   * since the staging or is forbidden), it reports none: the staging is done,
+   * and must still answer (#1096). Any other failure, a database one
+   * included, propagates rather than reading as no conflict.
    */
   private async stagedNameConflict(slug: string): Promise<string | null> {
     try {
       return (await this.updates.describePending(slug)).dataGatewayNameConflict;
     } catch (err) {
-      if (err instanceof PluginUpdateManifestError) {
+      if (
+        err instanceof PluginUpdateManifestError ||
+        err instanceof PluginUpdateUnknownCorePermissionError ||
+        err instanceof PluginUpdateForbiddenPermissionError
+      ) {
         return null;
       }
 

@@ -646,10 +646,10 @@ describe('PluginsController (delegation)', () => {
       );
     });
 
-    // A repeated request finds the plugin already running the checksum. Once
-    // the restart has happened no process role is owed one, and the message
-    // must not name one it does not have.
-    it('says the plugin already runs the version when a repeated request finds no restart owed (#1096)', async () => {
+    // A repeated request finds the checksum already active. Once the restart
+    // has happened no process role is owed one, and the message must not name
+    // one it does not have.
+    it('says the version is already active when a repeated request finds no restart owed (#1096)', async () => {
       stager.stage.mockResolvedValue({
         plugin: ALREADY_ACTIVE_ROW,
         activated: true,

@@ -57,7 +57,7 @@ import {
   PluginUnitPluginNotFoundError,
   PluginUnitPluginTombstonedError,
   PluginUnitScopeError,
-  PluginUpdateActiveVersionMovedError,
+  PluginUpdateActiveArtifactMovedError,
   PluginUpdateAuthorityError,
   PluginUpdateCriticalConfirmationError,
   PluginUpdateDataGatewayNameConflictError,
@@ -446,11 +446,11 @@ function buildRenderers(): RendererMap {
 
   // Another plugin artifact became active while the update was being staged,
   // and its version may be the same number, so the comparison is stale (#1096).
-  // The copy says which version is active now and that staging again compares
-  // the update with it.
-  renders(PluginUpdateActiveVersionMovedError, (exception) => ({
+  // The copy says that another update became active, which version is active
+  // now, and that staging again compares the update with what is active.
+  renders(PluginUpdateActiveArtifactMovedError, (exception) => ({
     status: Http.Conflict,
-    message: t('errors.plugin.update_active_version_moved', {
+    message: t('errors.plugin.update_active_artifact_moved', {
       slug: exception.slug,
       activeVersion: exception.activeVersion,
     }),

@@ -279,11 +279,14 @@ class ArtifactUpdateDto implements Omit<PluginUpdateAssessment, 'changes'> {
     enum: PLUGIN_UPDATE_STAGING_REFUSALS,
     nullable: true,
     description:
-      'Why staging the plugin artifact as an update would be refused as things stand; null when it would not. ' +
-      'active_version: it carries the version the plugin runs. staged_update_waiting: the plugin already has a staged ' +
-      'update, which an update approval or a rejection must answer first. active_manifest_unreadable: the ' +
-      "plugin's stored active manifest cannot be read. data_gateway_name_taken: the update would be activated at " +
-      'once, and another DataGateway already has the name its DataGateway would take.',
+      'Why staging the plugin artifact as an update would stage nothing as things stand; null when it would ' +
+      'stage it. active_version: it carries the version the plugin runs. staged_update_waiting: the plugin ' +
+      'already has a staged update, which an update approval or a rejection must answer first. For these two, ' +
+      'when this is the very plugin artifact the plugin runs or has staged, staging it answers 200 with what is ' +
+      'recorded and changes nothing; for any other plugin artifact staging answers 409. ' +
+      "active_manifest_unreadable: the plugin's stored active manifest cannot be read. data_gateway_name_taken: " +
+      'the update would be activated at once, and another DataGateway already has the name its DataGateway would ' +
+      'take.',
   })
   refusal!: PluginUpdateStagingRefusal | null;
 

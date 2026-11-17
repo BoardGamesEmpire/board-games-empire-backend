@@ -42,7 +42,7 @@ import { PluginDirectoryResolverService } from '../loader/plugin-directory-resol
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginUpdateService, type PluginUpdateStageInput } from './plugin-update.service';
 import {
-  PluginUpdateActiveVersionMovedError,
+  PluginUpdateActiveArtifactMovedError,
   PluginUpdateAuthorityError,
   PluginUpdateCriticalConfirmationError,
   PluginUpdateDataGatewayNameConflictError,
@@ -755,7 +755,7 @@ describe('PluginUpdateService', () => {
 
       const failure = await service.stage(input()).catch((err: unknown) => err);
 
-      expect(failure).toBeInstanceOf(PluginUpdateActiveVersionMovedError);
+      expect(failure).toBeInstanceOf(PluginUpdateActiveArtifactMovedError);
       expect(failure).toMatchObject({ slug: 'demo-sink', comparedVersion: '1.2.0', activeVersion: '1.4.0' });
       expect(emitter.emit).not.toHaveBeenCalled();
     });
@@ -789,7 +789,7 @@ describe('PluginUpdateService', () => {
 
       const failure = await service.stage(input()).catch((err: unknown) => err);
 
-      expect(failure).toBeInstanceOf(PluginUpdateActiveVersionMovedError);
+      expect(failure).toBeInstanceOf(PluginUpdateActiveArtifactMovedError);
       expect(failure).toMatchObject({ slug: 'demo-sink', comparedVersion: '1.2.0', activeVersion: '1.2.0' });
       expect(emitter.emit).not.toHaveBeenCalled();
     });
@@ -3006,6 +3006,29 @@ describe('PluginUpdateService', () => {
       expect(assessment?.changes?.comparison.escalations).toEqual(
         expect.arrayContaining([{ kind: 'writes-core-added', model: 'GameNight' }]),
       );
+    });
+
+    // The assessment judges by version and by the staged slot, while staging
+    // answers a repeat by checksum: the very artifact the plugin runs, or has
+    // staged, is answered with 200 and the current record, not refused. These
+    // two pin both sides, so neither is changed alone (#1096).
+    it('reports the active version for the very artifact the plugin runs, which staging answers as already done (#1096)', async () => {
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ installedSha256: sha('b') }));
+      await writeManifest(buildPluginManifest());
+
+      await expect(service.assess(directory())).resolves.toMatchObject({
+        refusal: 'active_version',
+        changes: null,
+      });
+    });
+
+    it('reports a staged update waiting for the very artifact that is staged, which staging answers as already done (#1096)', async () => {
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ pendingVersion: '1.3.0', pendingSha256: sha('b') }));
+      await writeManifest(nextManifest());
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment).toMatchObject({ refusal: 'staged_update_waiting' });
     });
 
     it('still answers when the active plugin manifest cannot be read (#1096)', async () => {

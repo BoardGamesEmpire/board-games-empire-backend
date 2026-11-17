@@ -168,7 +168,7 @@ export class PluginRowDto implements Plugin {
   @ApiProperty({ enum: PluginExecutionMode, enumName: 'PluginExecutionMode' })
   executionMode!: PluginExecutionMode;
 
-  @ApiProperty({ description: 'The server-level switch; unit enablement layers under it' })
+  @ApiProperty({ description: "The plugin's Server switch; each unit's own switch sits beneath it" })
   enabled!: boolean;
 
   @ApiProperty({
@@ -191,7 +191,7 @@ export class PluginRowDto implements Plugin {
   @ApiProperty({ type: 'object', additionalProperties: true, description: 'The active plugin manifest, as validated' })
   manifestJson!: Prisma.JsonValue;
 
-  @ApiProperty({ type: 'object', additionalProperties: true, description: 'The server-scope plugin configuration' })
+  @ApiProperty({ type: 'object', additionalProperties: true, description: "The plugin's server-scope settings" })
   config!: Prisma.JsonValue;
 
   @ApiProperty({ description: 'True when the plugin failed to load at the last start' })
@@ -395,7 +395,7 @@ export class StagePluginUpdateResponseDto {
   @ApiProperty({
     description:
       'Plain-language confirmation, localized: the update is staged and waits for approval, or it is activated ' +
-      'and names the process role to restart, or the plugin already runs the version',
+      'and loads when the named process role restarts, or the version is already active',
   })
   message!: string;
 

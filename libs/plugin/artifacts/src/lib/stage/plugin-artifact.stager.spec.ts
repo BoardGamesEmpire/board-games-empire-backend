@@ -3,11 +3,13 @@ import {
   PluginDirectoryLayoutError,
   PluginDirectoryNotFoundError,
   PluginUpdateAuthorityError,
+  PluginUpdateForbiddenPermissionError,
   PluginUpdateManifestError,
   PluginUpdatePendingConflictError,
   PluginUpdatePluginNotFoundError,
   PluginUpdateStaticAnalysisError,
   PluginUpdateTombstonedError,
+  PluginUpdateUnknownCorePermissionError,
   PluginUpdateVersionConflictError,
   type PluginDirectoryResolverService,
   type PluginGrantAuthorityService,
@@ -270,11 +272,23 @@ describe('PluginArtifactStager (#1096)', () => {
       expect(store.remove).not.toHaveBeenCalled();
     });
 
-    it('answers the staged update with no DataGateway name when its stored manifest cannot be read (#1096)', async () => {
+    // The staged-update read refuses over the stored manifests themselves: one
+    // that cannot be read, or permissions that a retired core permission or the
+    // forbidden list now refuses. The staging is done all the same, so the
+    // repeat still answers it (#1096).
+    it.each([
+      ['its stored manifest cannot be read', new PluginUpdateManifestError('demo-sink', 'pending', 'unreadable')],
+      [
+        'a core permission it requests was retired since the staging',
+        new PluginUpdateUnknownCorePermissionError('demo-sink', ['read:retired']),
+      ],
+      [
+        'a permission it requests is now forbidden',
+        new PluginUpdateForbiddenPermissionError('demo-sink', 'manage:all', 'is forbidden for the test'),
+      ],
+    ])('answers the staged update with no DataGateway name when %s (#1096)', async (_case, refusal) => {
       db.plugin.findUnique.mockResolvedValue(staged);
-      updates.describePending.mockRejectedValue(
-        new PluginUpdateManifestError('demo-sink', 'pending', 'unreadable for the test'),
-      );
+      updates.describePending.mockRejectedValue(refusal);
 
       await expect(stage()).resolves.toEqual({ plugin: staged, activated: false, dataGatewayNameConflict: null });
 

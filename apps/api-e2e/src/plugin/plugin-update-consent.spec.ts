@@ -24,7 +24,13 @@ import {
   shownServerRisks,
 } from './consent-act-fixtures';
 import { pluginAbilitySlugsForHousehold } from './plugin-ability-fixtures';
-import { FIXTURE_ACT_ID, INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
+import {
+  FIXTURE_ACT_ID,
+  INSTALLED_SHA256,
+  INVENTORY_STAGING_ID,
+  pluginRowData,
+  stagedUpdateColumns,
+} from './plugin-row-fixtures';
 
 /**
  * The wire half of #321: approve/reject/pending over a REAL staged row —
@@ -290,6 +296,41 @@ describe('plugin update consent (approve/reject/pending)', () => {
       data: stagedUpdateColumns({ manifest, sha256: 'c'.repeat(64), since: STAGED_AT, stagingId }),
     });
 
+  /** The link and registry a first install recorded, and those of the staged plugin artifact (#1096). */
+  const FIRST_INSTALL_PROVENANCE = {
+    installedFromUrl: 'https://plugins.example.test/demo-sink-1.2.0.tgz',
+    registrySlug: 'first-registry',
+  };
+
+  const STAGED_PROVENANCE = { url: 'https://mirror.example.test/demo-sink-1.3.0.tgz', registrySlug: 'second-registry' };
+
+  /**
+   * A staged plugin whose first install came from a link and a registry, and
+   * whose staged update came from others (#1096). Every artifact the staging
+   * route sees is an upload, so this is where provenance other than null
+   * meets Postgres.
+   */
+  const arrangeStagedPluginWithProvenance = async () => {
+    const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK]);
+    const { pendingFromUrl, pendingRegistrySlug } = stagedUpdateColumns(STAGED_PROVENANCE);
+
+    return db.client.plugin.update({
+      where: { id: plugin.id },
+      data: { ...FIRST_INSTALL_PROVENANCE, pendingFromUrl, pendingRegistrySlug },
+    });
+  };
+
+  /** All seven staged columns empty: the five the CHECK holds together, and the link and registry (#1096). */
+  const NO_STAGED_UPDATE = {
+    pendingVersion: null,
+    pendingManifestJson: null,
+    pendingSha256: null,
+    pendingSince: null,
+    pendingStagingId: null,
+    pendingFromUrl: null,
+    pendingRegistrySlug: null,
+  };
+
   describe('authorization', () => {
     it('refuses a non-admin at the policy gate on all three routes', async () => {
       const user = await actors.user();
@@ -358,6 +399,21 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
       const rows = await awaitLifecycleRow(plugin, PluginLifecycleEventType.UpdateApproved);
       expect(rows).toHaveLength(1);
+    });
+
+    it("approval makes the staged link and registry the plugin's own (#1096)", async () => {
+      const admin = await actors.admin();
+      const plugin = await arrangeStagedPluginWithProvenance();
+
+      await approve(admin, plugin.slug).expect(200);
+
+      const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      expect(row).toMatchObject({
+        installedFromUrl: STAGED_PROVENANCE.url,
+        registrySlug: STAGED_PROVENANCE.registrySlug,
+        installedSha256: STAGED_SHA,
+        ...NO_STAGED_UPDATE,
+      });
     });
 
     /**
@@ -886,6 +942,20 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
       const rows = await awaitLifecycleRow(plugin, PluginLifecycleEventType.UpdateRejected);
       expect(rows).toHaveLength(1);
+    });
+
+    it("rejecting a staged update clears its link and registry, and leaves the plugin's own (#1096)", async () => {
+      const admin = await actors.admin();
+      const plugin = await arrangeStagedPluginWithProvenance();
+
+      await reject(admin, plugin.slug).expect(200);
+
+      const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      expect(row).toMatchObject({
+        ...FIRST_INSTALL_PROVENANCE,
+        installedSha256: INSTALLED_SHA256,
+        ...NO_STAGED_UPDATE,
+      });
     });
   });
 

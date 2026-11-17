@@ -120,8 +120,8 @@ export class PluginUpdateVersionConflictError extends Error {
  * content. Nothing of the update is activated; staging it again compares it
  * with the plugin artifact that is active now.
  */
-export class PluginUpdateActiveVersionMovedError extends Error {
-  override readonly name = 'PluginUpdateActiveVersionMovedError';
+export class PluginUpdateActiveArtifactMovedError extends Error {
+  override readonly name = 'PluginUpdateActiveArtifactMovedError';
 
   constructor(
     public readonly slug: string,

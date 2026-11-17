@@ -42,9 +42,10 @@ export class PluginArtifactStore {
   }
 
   /**
-   * Reads the row for an install and moves its expiry forward. The guard on
-   * `expiresAt` makes an expired row (which the sweep may be deleting) read
-   * as absent, so an install never starts from a row about to vanish.
+   * Reads the row for an install, or for an update staging (#1096), and moves
+   * its expiry forward. The guard on `expiresAt` makes an expired row (which
+   * the sweep may be deleting) read as absent, so neither starts from a row
+   * about to vanish.
    */
   async refreshForInstall(sha256: PluginArtifactSha256, now: Date): Promise<PluginArtifact | null> {
     const { count } = await this.db.pluginArtifact.updateMany({
