@@ -7,6 +7,7 @@ import {
   PluginScope,
   Prisma,
   retainedConfigOf,
+  type PluginProcessRole,
   type PluginUnitDormancy,
 } from '@bge/database';
 import { parsePluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
@@ -17,7 +18,7 @@ import { PluginConsentStandingService } from '../consent/plugin-consent-standing
 import type { PluginConsentStanding } from '../consent/plugin-consent-standing.types';
 import type { PluginProvenance } from '../events/plugin.events';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
-import { restartProcessRoles, type PluginProcessRole } from '../loader/process-role';
+import { restartProcessRoles } from '../loader/process-role';
 import { activeManifestOf } from '../manifest/active-manifest';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';

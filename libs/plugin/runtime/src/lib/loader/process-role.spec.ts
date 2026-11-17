@@ -1,17 +1,7 @@
 import { PluginCategory } from '@bge/database';
-import { PLUGIN_PROCESS_ROLES, processRoleLoading, restartProcessRoles } from './process-role';
+import { restartProcessRoles } from './process-role';
 
-describe('process role', () => {
-  it('the coordinator loads data-gateway plugins, and the api every other category (#1096)', () => {
-    for (const category of Object.values(PluginCategory)) {
-      expect(processRoleLoading(category)).toBe(category === PluginCategory.DataGateway ? 'coordinator' : 'api');
-    }
-  });
-
-  it('names the api and the coordinator, the process roles that load plugins (#1096)', () => {
-    expect(PLUGIN_PROCESS_ROLES).toEqual(['api', 'coordinator']);
-  });
-
+describe('restartProcessRoles', () => {
   it('names no process role while no restart is required (#1096)', () => {
     for (const category of Object.values(PluginCategory)) {
       expect(restartProcessRoles({ category, restartRequired: false })).toEqual([]);

@@ -1,4 +1,5 @@
 import {
+  PLUGIN_PROCESS_ROLES,
   PluginCategory,
   PluginConsentActKind,
   PluginExecutionMode,
@@ -9,11 +10,10 @@ import {
   type Plugin,
   type PluginConsentAct,
   type PluginGrant,
+  type PluginProcessRole,
   type Prisma,
 } from '@bge/database';
 import {
-  PLUGIN_PROCESS_ROLES,
-  type PluginProcessRole,
   type PluginUpdateReconsentHouseholdUnit,
   type PluginUpdateReconsentUserUnit,
   type UpdateEscalation,

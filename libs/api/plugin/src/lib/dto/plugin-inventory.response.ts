@@ -1,9 +1,11 @@
 import {
+  PLUGIN_PROCESS_ROLES,
   PLUGIN_UNIT_DORMANCY_CODES,
   PluginCategory,
   PluginExecutionMode,
   PluginScope,
   RiskLevel,
+  type PluginProcessRole,
   type PluginUnitDormancy,
 } from '@bge/database';
 import type {
@@ -18,12 +20,11 @@ import type {
   PluginInventoryPendingUpdate,
   PluginInventoryServerUnitState,
   PluginInventoryUnitState,
-  PluginProcessRole,
   PluginProvenance,
   PluginUnitInventoryEntry,
   PluginUnitStateCode,
 } from '@bge/plugin';
-import { PLUGIN_PROCESS_ROLES, PLUGIN_UNIT_STATE_CODES } from '@bge/plugin';
+import { PLUGIN_UNIT_STATE_CODES } from '@bge/plugin';
 import { ApiProperty } from '@nestjs/swagger';
 
 /**

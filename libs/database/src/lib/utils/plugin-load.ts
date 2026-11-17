@@ -10,13 +10,20 @@ import { PluginCategory } from '../client';
 export const PLUGIN_LOAD_STALE_MS = 5 * 60_000;
 
 /**
+ * The process roles that load plugins (#1096). The names are the ones the
+ * launcher gives those processes, so they are not translated.
+ */
+export const PLUGIN_PROCESS_ROLES = ['api', 'coordinator'] as const;
+export type PluginProcessRole = (typeof PLUGIN_PROCESS_ROLES)[number];
+
+/**
  * The process role that loads plugins of this category (#1083): the
  * coordinator runs data-gateway plugins, and the api runs every other
  * category. The one place that is decided: each app takes its
  * `loadCategories` from {@link categoriesLoadedBy}, and a process that
  * doesn't load a plugin asks this which process role's load records to read.
  */
-export function roleLoading(category: PluginCategory): string {
+export function roleLoading(category: PluginCategory): PluginProcessRole {
   return category === PluginCategory.DataGateway ? 'coordinator' : 'api';
 }
 

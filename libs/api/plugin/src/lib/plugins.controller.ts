@@ -1,5 +1,5 @@
 import { AuditContextService, SERVER_PLUGIN_UNIT } from '@bge/actor-context';
-import { Action, ResourceType } from '@bge/database';
+import { Action, ResourceType, roleLoading } from '@bge/database';
 import { SupportedLocalesService, t } from '@bge/i18n';
 import { AbilityService, CheckPolicies, PoliciesGuard, ScopeComposer, Unscoped } from '@bge/permissions';
 import {
@@ -16,7 +16,6 @@ import {
   PluginUpdateNoPendingError,
   PluginUpdatePluginNotFoundError,
   PluginUpdateService,
-  processRoleLoading,
   restartProcessRoles,
 } from '@bge/plugin';
 import { PluginArtifactStager, type PluginArtifactStagingResult } from '@bge/plugin-artifacts';
@@ -485,7 +484,7 @@ export class PluginsController {
         message: t('success.plugin.update_approved', {
           slug,
           version: result.plugin.version,
-          processRole: processRoleLoading(result.plugin.category),
+          processRole: roleLoading(result.plugin.category),
         }),
         plugin: result.plugin,
         comparison: result.comparison,
