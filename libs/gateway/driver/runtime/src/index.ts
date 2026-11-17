@@ -3,6 +3,7 @@ export * from './lib/constants/vocabulary-section.constants';
 export * from './lib/credentials/gateway-credentials.factory';
 export * from './lib/drivers/remote-gateway-driver.factory';
 export * from './lib/errors/gateway-interview.error';
+export * from './lib/errors/gateway-refusal-trailers';
 export * from './lib/errors/gateway-routing-refused.error';
 export * from './lib/errors/vocabulary-section.error';
 export * from './lib/events/gateway-registry.events';

@@ -1,6 +1,11 @@
 import { DataGatewayCapability } from '@bge/database';
 import { relayDriverAnswer } from '@bge/gateway-host';
-import { GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
+import {
+  GatewayRegistryService,
+  GatewayRoutingRefusedError,
+  refusalStatusCode,
+  refusalTrailers,
+} from '@bge/gateway-registry';
 import { BGE_GATEWAY_ID_HEADER } from '@bge/shared';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import type * as proto from '@boardgamesempire/proto-gateway';
@@ -23,12 +28,15 @@ function gatewayIdNamedBy(metadata: Metadata | undefined): string | undefined {
  * The gateway registry's refusal as the status the call answers with. A
  * DataGateway the registry doesn't know isn't there to whoever names it. Any
  * other refusal is of one that exists and may not serve the call as things
- * stand, which trying again won't change. The refusal's message says which.
+ * stand, which trying again won't change. The refusal's message says which,
+ * and its trailers say it to the gateway worker, which reads it back as a
+ * refusal and counts it toward no auto-disable.
  */
 const refusalStatus = (refusal: GatewayRoutingRefusedError): RpcException =>
   new RpcException({
-    code: refusal.reason === 'unknown' ? status.NOT_FOUND : status.FAILED_PRECONDITION,
+    code: refusalStatusCode(refusal),
     message: refusal.message,
+    metadata: refusalTrailers(refusal),
   });
 
 /**
@@ -46,7 +54,8 @@ const refusalStatus = (refusal: GatewayRoutingRefusedError): RpcException =>
  * the capability, and refuses a remote DataGateway as unknown. Ping, Check
  * and Describe need no capability, and are refused only for a DataGateway
  * that may not be used at all. A refusal answers NOT_FOUND or
- * FAILED_PRECONDITION ({@link refusalStatus}), and a call that names no
+ * FAILED_PRECONDITION with its reason in the trailers ({@link refusalStatus}),
+ * and a call that names no
  * DataGateway answers INVALID_ARGUMENT. Any other failure is relayed as a
  * remote DataGateway's app relays it, so a driver's own gRPC status, such as
  * UNIMPLEMENTED, reaches the gateway worker unchanged.

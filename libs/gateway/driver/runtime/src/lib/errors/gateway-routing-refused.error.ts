@@ -33,6 +33,10 @@ const MESSAGES: Readonly<Record<GatewayRefusalReason, (gatewayId: string, capabi
   switched_off: (gatewayId, capability) => `An admin switched ${capability} off for DataGateway ${gatewayId}`,
 };
 
+/** Whether `value` names a refusal reason this process knows (#1083). */
+export const isGatewayRefusalReason = (value: unknown): value is GatewayRefusalReason =>
+  typeof value === 'string' && Object.hasOwn(MESSAGES, value);
+
 /**
  * The gateway registry's refusal to use a DataGateway: to route a capability
  * to it, or, without a capability, to interview it on request. Callers

@@ -1,10 +1,16 @@
 import type { Actor } from '@bge/actor-context';
 import { AuditContextService, SystemActorScope } from '@bge/actor-context';
-import { AuthType, DatabaseService, PluginCategory } from '@bge/database';
+import { AuthType, DatabaseService, DataGatewayCapability, PluginCategory } from '@bge/database';
 import type { PluginLoadRecordRow } from '@bge/database/testing';
 import { fakePluginLoadRecords } from '@bge/database/testing';
 import type { PluginDriverSource, RoutedPlugin } from '@bge/gateway-registry';
-import { PLUGIN_DRIVER_SOURCE, RemoteGatewayDriverFactory } from '@bge/gateway-registry';
+import {
+  GatewayRoutingRefusedError,
+  PLUGIN_DRIVER_SOURCE,
+  refusalStatusCode,
+  refusalTrailers,
+  RemoteGatewayDriverFactory,
+} from '@bge/gateway-registry';
 import { BGE_ACTOR_HEADER, BGE_GATEWAY_ID_HEADER } from '@bge/shared';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { DATA_GATEWAY_DRIVER_OPERATIONS } from '@boardgamesempire/gateway-driver-contract';
@@ -16,7 +22,7 @@ import type { TestingModule } from '@nestjs/testing';
 import { Test } from '@nestjs/testing';
 import { ClsModule } from 'nestjs-cls';
 import { setTimeout as delay } from 'node:timers/promises';
-import { defer, firstValueFrom, of } from 'rxjs';
+import { defer, firstValueFrom, of, throwError } from 'rxjs';
 import { PluginGatewayRelayModule } from './plugin-gateway-relay.module';
 import { PluginGatewayRelaySource } from './plugin-gateway-relay.source';
 
@@ -345,6 +351,60 @@ describe('PluginGatewayRelaySource', () => {
       await driver.dispose();
 
       expect(built.dispose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // The coordinator makes its own routing decision on every call, and may
+  // refuse one this process let through: the plugin, or a capability, was
+  // switched off in between. Read as the gRPC error it arrives as, the
+  // refusal would count toward auto-disable, which no refusal does.
+  describe("the coordinator's refusals (#1083)", () => {
+    /** The error a call the coordinator refused for `reason` reports. */
+    const refusedBy = (reason: 'plugin_not_served' | 'switched_off'): Error => {
+      const refusal = new GatewayRoutingRefusedError(GW, reason, DataGatewayCapability.Fetch);
+
+      return Object.assign(new Error(refusal.message), {
+        code: refusalStatusCode(refusal),
+        metadata: refusalTrailers(refusal),
+      });
+    };
+
+    it('fails the build with the refusal when the coordinator refuses the connect ping (#1083)', async () => {
+      factory.create.mockRejectedValue(refusedBy('plugin_not_served'));
+
+      const failure = await source.build(GW, routedPlugin()).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(GatewayRoutingRefusedError);
+      expect(failure).toMatchObject({ gatewayId: GW, reason: 'plugin_not_served' });
+    });
+
+    it('fails a call with the refusal when the coordinator refuses it (#1083)', async () => {
+      const built = relayDriver();
+      built.fetchGame.mockReturnValue(throwError(() => refusedBy('switched_off')));
+      factory.create.mockResolvedValue(built);
+      const driver = await source.build(GW, routedPlugin());
+
+      const failure = await firstValueFrom(driver.fetchGame({ correlationId: 'c', externalId: '13' })).catch(
+        (err: unknown) => err,
+      );
+
+      expect(failure).toBeInstanceOf(GatewayRoutingRefusedError);
+      expect(failure).toMatchObject({ gatewayId: GW, reason: 'switched_off', capability: DataGatewayCapability.Fetch });
+    });
+
+    // A driver's own FAILED_PRECONDITION reaches this process unchanged, and
+    // counts, as a remote DataGateway's does.
+    it("leaves a driver's own error with the same status as it is (#1083)", async () => {
+      const own = Object.assign(new Error('9 FAILED_PRECONDITION: upstream key expired'), {
+        code: status.FAILED_PRECONDITION,
+        metadata: new Metadata(),
+      });
+      const built = relayDriver();
+      built.fetchGame.mockReturnValue(throwError(() => own));
+      factory.create.mockResolvedValue(built);
+      const driver = await source.build(GW, routedPlugin());
+
+      await expect(firstValueFrom(driver.fetchGame({ correlationId: 'c', externalId: '13' }))).rejects.toBe(own);
     });
   });
 

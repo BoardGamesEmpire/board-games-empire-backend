@@ -2,7 +2,7 @@ import { AuditContextService, SystemActorScope } from '@bge/actor-context';
 import { createOutboundActorMetadataInterceptor } from '@bge/actor-context-transport';
 import { AuthType, DatabaseService, hasLivePluginLoad, PluginCategory, roleLoading } from '@bge/database';
 import type { PluginDriverSource, RoutedPlugin } from '@bge/gateway-registry';
-import { RemoteGatewayDriverFactory } from '@bge/gateway-registry';
+import { refusalFromCallError, RemoteGatewayDriverFactory } from '@bge/gateway-registry';
 import { BGE_GATEWAY_ID_HEADER } from '@bge/shared';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { aroundDriverCalls } from '@boardgamesempire/gateway-driver-contract';
@@ -12,7 +12,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { isIPv6 } from 'node:net';
 import type { Observable } from 'rxjs';
-import { defer } from 'rxjs';
+import { catchError, defer, throwError } from 'rxjs';
 
 /** The reason the system actor states on a call that goes to the coordinator with no actor behind it. */
 const RELAY_REASON = 'plugin-gateway-relay';
@@ -88,6 +88,12 @@ export class PluginGatewayRelaySource implements PluginDriverSource {
    * uncaught: the gateway registry counts it as a failed connect, as it does
    * for a remote DataGateway that is down.
    *
+   * The coordinator makes its own routing decision on every call, the ping
+   * included, and may refuse one this process let through: the plugin, or a
+   * capability, was switched off in between. Its refusal is raised here, on
+   * the ping and on every call, as the gateway registry's own refusal, which
+   * counts toward no auto-disable, not as the gRPC error it arrived as.
+   *
    * The coordinator refuses a call that carries no actor. Most calls the
    * gateway worker routes are made inside the actor scope of the job that
    * caused them, and go out as that actor. One made with no actor in scope,
@@ -116,7 +122,12 @@ export class PluginGatewayRelaySource implements PluginDriverSource {
 
     // `run` keeps the scope through the factory's waits between tries of the
     // ping.
-    const driver = await (this.hasActor() ? dial() : this.systemActorScope.run(RELAY_REASON, dial));
+    let driver: DataGatewayDriver;
+    try {
+      driver = await (this.hasActor() ? dial() : this.systemActorScope.run(RELAY_REASON, dial));
+    } catch (err) {
+      throw refusalFromCallError(gatewayId, err) ?? err;
+    }
 
     // Each call decides when it is subscribed, not here and not when its
     // operation is called: gRPC sends a call when it is subscribed, and the
@@ -130,7 +141,9 @@ export class PluginGatewayRelaySource implements PluginDriverSource {
     // actor after its `await`, or before the call, never inside an operator
     // downstream of the answer.
     return aroundDriverCalls(driver, <T>(call: () => Observable<T>): Observable<T> =>
-      defer(() => (this.hasActor() ? call() : this.systemActorScope.runObservable(RELAY_REASON, call))),
+      defer(() => (this.hasActor() ? call() : this.systemActorScope.runObservable(RELAY_REASON, call))).pipe(
+        catchError((err: unknown) => throwError(() => refusalFromCallError(gatewayId, err) ?? err)),
+      ),
     );
   }
 

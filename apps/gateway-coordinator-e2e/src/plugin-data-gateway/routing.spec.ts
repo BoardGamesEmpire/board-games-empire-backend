@@ -1,5 +1,6 @@
 import type { Actor } from '@bge/actor-context';
 import { AuthType, DataGatewayCapability, PluginCategory, PluginScope } from '@bge/database';
+import { GatewayRoutingRefusedError } from '@bge/gateway-registry';
 import { status } from '@grpc/grpc-js';
 import { firstValueFrom, lastValueFrom, toArray } from 'rxjs';
 import { useCoordinator } from '../support/coordinator';
@@ -262,6 +263,30 @@ describe('a plugin DataGateway the coordinator runs', () => {
     const answered = await searchBothWays();
     expect(answered.coordinator).toEqual(THE_GAME_THEN_DONE);
     expect(answered.gateway).toEqual(THE_GAME_THEN_DONE);
+  });
+
+  // The gateway worker routes on its own reading of the rows, and the
+  // coordinator decides again. A refusal from the coordinator must reach the
+  // gateway worker as a refusal, which counts toward no auto-disable, not as
+  // the FAILED_PRECONDITION it travels as, which would count.
+  it("hands the gateway worker the coordinator's refusal as a refusal, on a call and on a build (#1083)", async () => {
+    const driver = await relay().build(plugin.gatewayId);
+    const probe = { correlationId: 'relay-refused', externalId: FIRST_BUILD.game.externalId };
+    await db().plugin.update({ where: { id: plugin.pluginId }, data: { enabled: false } });
+
+    try {
+      const onACall = await firstValueFrom(driver.fetchGame(probe)).catch((error: unknown) => error);
+      expect(onACall).toBeInstanceOf(GatewayRoutingRefusedError);
+      expect(onACall).toMatchObject({ gatewayId: plugin.gatewayId, reason: 'plugin_not_served' });
+
+      const onABuild = await relay()
+        .build(plugin.gatewayId)
+        .catch((error: unknown) => error);
+      expect(onABuild).toBeInstanceOf(GatewayRoutingRefusedError);
+      expect(onABuild).toMatchObject({ gatewayId: plugin.gatewayId, reason: 'plugin_not_served' });
+    } finally {
+      await db().plugin.update({ where: { id: plugin.pluginId }, data: { enabled: true } });
+    }
   });
 
   // An admin who asks for an interview is told which fix applies: here,

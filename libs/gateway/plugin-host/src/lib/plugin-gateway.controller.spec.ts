@@ -1,6 +1,6 @@
 import { DataGatewayCapability } from '@bge/database';
 import type { GatewayRefusalReason } from '@bge/gateway-registry';
-import { GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
+import { GatewayRegistryService, GatewayRoutingRefusedError, refusalFromCallError } from '@bge/gateway-registry';
 import { BGE_GATEWAY_ID_HEADER } from '@bge/shared';
 import type { DataGatewayDriver, DataGatewayDriverOperation } from '@boardgamesempire/gateway-driver-contract';
 import { unsupportedOperation } from '@boardgamesempire/gateway-driver-contract';
@@ -187,6 +187,7 @@ describe('PluginGatewayController', () => {
     expect((refusal as RpcException).getError()).toEqual({
       code: status.FAILED_PRECONDITION,
       message: "DataGateway acme's plugin isn't loaded: restart the coordinator",
+      metadata: expect.any(Metadata),
     });
     expect(driver.searchGames).not.toHaveBeenCalled();
   });
@@ -214,9 +215,30 @@ describe('PluginGatewayController', () => {
       const refusal = await rejection(answer('fetchGame', { correlationId: 'c', externalId: '13' }));
 
       expect(refusal).toBeInstanceOf(RpcException);
-      expect((refusal as RpcException).getError()).toEqual({ code, message });
+      expect((refusal as RpcException).getError()).toEqual({ code, message, metadata: expect.any(Metadata) });
     },
   );
+
+  // The gateway worker relays the call, and must read the coordinator's
+  // refusal as a refusal, which counts toward no auto-disable, not as a
+  // driver's error with the same status, which does.
+  it.each<GatewayRefusalReason>([
+    'unknown',
+    'disabled',
+    'plugin_not_served',
+    'plugin_not_loaded',
+    'not_interviewed',
+    'not_declared',
+    'switched_off',
+  ])('answers the refusal %s with trailers the gateway worker reads back as that refusal (#1083)', async (reason) => {
+    registry.pluginDriver.mockRejectedValue(new GatewayRoutingRefusedError(GW, reason, Fetch));
+
+    const refusal = (await rejection(answer('fetchGame', { correlationId: 'c', externalId: '13' }))) as RpcException;
+    const readBack = refusalFromCallError(GW, refusal.getError());
+
+    expect(readBack).toBeInstanceOf(GatewayRoutingRefusedError);
+    expect(readBack).toMatchObject({ gatewayId: GW, reason, capability: Fetch });
+  });
 
   // A driver can't depend on Nest, so it says which gRPC status a failure is
   // with a code on the error (#1082). The gateway worker reads the same
