@@ -44,6 +44,7 @@ export * from './lib/loader/plugin-instance-registry';
 export * from './lib/loader/plugin-load-recorder.service';
 export * from './lib/loader/plugin-loader.service';
 export * from './lib/loader/plugin-module-importer';
+export * from './lib/loader/process-role';
 export * from './lib/manifest/manifest-move';
 export * from './lib/manifest/stored-manifest';
 export * from './lib/plugin-module.options';

@@ -18,11 +18,12 @@ import type {
   PluginInventoryPendingUpdate,
   PluginInventoryServerUnitState,
   PluginInventoryUnitState,
+  PluginProcessRole,
   PluginProvenance,
   PluginUnitInventoryEntry,
   PluginUnitStateCode,
 } from '@bge/plugin';
-import { PLUGIN_UNIT_STATE_CODES } from '@bge/plugin';
+import { PLUGIN_PROCESS_ROLES, PLUGIN_UNIT_STATE_CODES } from '@bge/plugin';
 import { ApiProperty } from '@nestjs/swagger';
 
 /**
@@ -248,6 +249,14 @@ export class PluginInventoryEntryDto extends PluginInventoryIdentityDto implemen
 
   @ApiProperty({ description: 'An update activated in the DB while the process still runs the prior code' })
   restartRequired!: boolean;
+
+  @ApiProperty({
+    enum: PLUGIN_PROCESS_ROLES,
+    isArray: true,
+    description:
+      'The process roles to restart so the server runs what it has recorded. Empty unless a restart is required',
+  })
+  restartProcessRoles!: PluginProcessRole[];
 
   @ApiProperty()
   installedAt!: Date;

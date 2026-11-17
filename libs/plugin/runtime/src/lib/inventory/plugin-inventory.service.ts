@@ -17,6 +17,7 @@ import { PluginConsentStandingService } from '../consent/plugin-consent-standing
 import type { PluginConsentStanding } from '../consent/plugin-consent-standing.types';
 import type { PluginProvenance } from '../events/plugin.events';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
+import { restartProcessRoles, type PluginProcessRole } from '../loader/process-role';
 import { activeManifestOf } from '../manifest/active-manifest';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
@@ -177,6 +178,11 @@ export interface PluginInventoryEntry extends PluginInventoryIdentity {
   /** Non-null only when the caller opted into tombstones (D-CH). */
   readonly uninstalledAt: Date | null;
   readonly restartRequired: boolean;
+  /**
+   * The process roles to restart so the server runs what it has recorded:
+   * empty unless {@link restartRequired} (#1096).
+   */
+  readonly restartProcessRoles: readonly PluginProcessRole[];
   readonly installedAt: Date;
   readonly provenance: PluginProvenance;
   readonly pendingUpdate: PluginInventoryPendingUpdate | null;
@@ -760,6 +766,7 @@ export class PluginInventoryService {
       enabled: row.enabled,
       uninstalledAt: row.uninstalledAt,
       restartRequired: row.restartRequired,
+      restartProcessRoles: restartProcessRoles(row),
       installedAt: row.installedAt,
       provenance: this.provenanceOf(row),
       // A staged row without a checksum is no staged update, as approval and the

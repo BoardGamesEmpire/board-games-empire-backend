@@ -153,6 +153,19 @@ describe('PluginInventoryService', () => {
       expect(result.total).toBe(1);
     });
 
+    it('a plugin that needs a restart names the process role to restart (#1096)', async () => {
+      db.plugin.findMany.mockResolvedValue([
+        row({ id: 'plugin-1', category: PluginCategory.DataGateway, restartRequired: true }),
+        row({ id: 'plugin-2', slug: 'other', restartRequired: true }),
+        row({ id: 'plugin-3', slug: 'third', category: PluginCategory.DataGateway }),
+      ] as never);
+      db.plugin.count.mockResolvedValue(3 as never);
+
+      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
+
+      expect(rows.map((entry) => entry.restartProcessRoles)).toEqual([['coordinator'], ['api'], []]);
+    });
+
     it('derives skip/take from the resolved paging and orders by the unique slug', async () => {
       db.plugin.findMany.mockResolvedValue([] as never);
       db.plugin.count.mockResolvedValue(0 as never);
@@ -501,6 +514,16 @@ describe('PluginInventoryService', () => {
       db.plugin.findUnique.mockResolvedValue(row({ manifestJson: { nonsense: true } }) as never);
 
       await expect(service.getBySlug('demo-sink')).rejects.toBeInstanceOf(PluginInventoryManifestError);
+    });
+
+    it('a plugin that needs a restart names the process role to restart (#1096)', async () => {
+      db.plugin.findUnique.mockResolvedValue(
+        row({ category: PluginCategory.DataGateway, restartRequired: true }) as never,
+      );
+
+      const detail = await service.getBySlug('demo-sink');
+
+      expect(detail.restartProcessRoles).toEqual(['coordinator']);
     });
 
     it('adds the manifest detail a list page has no room for', async () => {
@@ -1028,6 +1051,7 @@ describe('PluginInventoryService', () => {
       'provenance',
       'installedAt',
       'restartRequired',
+      'restartProcessRoles',
       'pendingUpdate',
       'enabled',
       'version',
