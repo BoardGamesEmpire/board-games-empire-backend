@@ -37,6 +37,19 @@ export interface PluginModuleOptions {
   readonly loadCategories: readonly PluginCategory[];
 
   /**
+   * Whether this process's plugin load records say ready only once the host
+   * serves (#1083). The coordinator's do: a gateway worker that reads a ready
+   * record dials the coordinator, and Nest runs the bootstrap hooks, where
+   * the plugins load, before a microservice's gRPC server listens. A record
+   * ready any earlier would have the gateway worker dial nothing and count
+   * each failure against the plugin DataGateway. Such a host calls
+   * `PluginLoadRecorder.markServing()` once it listens. Without it, a load
+   * says ready as soon as its plugin is registered, as the api's do: no
+   * process dials the api for a plugin.
+   */
+  readonly readyOnceServing?: boolean;
+
+  /**
    * The server's check, per category, that a factory's product is what the
    * process hosting that category can serve (#1083). It runs before the
    * product is registered; a reason it returns quarantines the plugin like

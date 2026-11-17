@@ -11,6 +11,7 @@ import { bootstrapLogger, otel } from './app/lib/logger';
 import { runBootstrap } from '@bge/bootstrap';
 import { bootstrapGrpcMicroservice } from '@bge/gateway-host';
 import { nestLoggerFromPino } from '@bge/logger';
+import { PluginLoadRecorder } from '@bge/plugin';
 import * as path from 'node:path';
 import { AppModule } from './app/app.module';
 import coordinatorConfig from './app/configuration/coordinator.config';
@@ -39,6 +40,12 @@ async function bootstrap(): Promise<void> {
     // refuses its plugin DataGateways instead of dialling a server that is
     // gone (#1083).
     registerShutdown: (app) => registerShutdownHandlers(withdrawLoadRecordsBeforeClose(app), otel, bootstrapLogger),
+    // The same gap at startup: the plugins load in the bootstrap hooks, which
+    // Nest runs before the gRPC server listens. Their load records say ready
+    // only from here, so a gateway worker refuses a plugin DataGateway until
+    // the coordinator answers, instead of dialling it and counting each
+    // failure (#1083). It never rejects.
+    afterListen: (app) => app.get(PluginLoadRecorder).markServing(),
     onBootstrapError,
   });
 }

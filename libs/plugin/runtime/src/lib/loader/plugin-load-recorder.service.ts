@@ -47,6 +47,11 @@ interface LoadRecord {
  * would dial a server that is gone and count each failure against the plugin
  * DataGateway (#1083).
  *
+ * The coordinator has the same gap at startup: Nest runs the bootstrap hooks,
+ * where the plugins load, before the gRPC server listens. So its records say
+ * ready only once it calls `markServing()`, after it listens
+ * (`readyOnceServing`, #1083).
+ *
  * The recorder also holds every record in memory, and the heartbeat writes a
  * missing one again. A row can go missing while the process still runs its
  * code: its first write failed, or the database was out of reach for five
@@ -92,11 +97,20 @@ export class PluginLoadRecorder implements BeforeApplicationShutdown {
   /** The withdrawal once begun, so a second call waits for it instead of deleting again. */
   private withdrawal?: Promise<void>;
 
+  /**
+   * Whether a load marked ready may say so in its row (#1083): from the
+   * start, unless the host says when it serves (`readyOnceServing`), and
+   * then from `markServing()` on.
+   */
+  private serving: boolean;
+
   constructor(
     private readonly db: DatabaseService,
     private readonly systemActorScope: SystemActorScope,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
-  ) {}
+  ) {
+    this.serving = options.readyOnceServing !== true;
+  }
 
   /**
    * An upsert, so a restarted plugin's record and a reload both land on the
@@ -136,6 +150,44 @@ export class PluginLoadRecorder implements BeforeApplicationShutdown {
     this.flagIfRewriting();
 
     await this.writeNow(slug, load, new Date());
+  }
+
+  /**
+   * Says this process now serves (#1083). A host whose options set
+   * `readyOnceServing` calls it once its server listens: until then its rows
+   * say not ready whatever the loads in memory say, and from here on a load
+   * marked ready says so in its row. The loads already marked ready are
+   * written ready now.
+   *
+   * It never rejects, since the host calls it once it is already serving and
+   * a rejection would fail the boot: a write that fails is logged, and the
+   * next heartbeat writes it again. Once shutdown has begun nothing is
+   * written, and a second call does nothing.
+   */
+  async markServing(): Promise<void> {
+    if (this.serving || this.stopping) {
+      return;
+    }
+
+    this.serving = true;
+    this.flagIfRewriting();
+    const now = new Date();
+
+    for (const [slug, load] of this.loads) {
+      if (!load.ready) {
+        continue;
+      }
+
+      try {
+        await this.writeNow(slug, load, now);
+      } catch (err) {
+        this.logger.error(
+          `Failed to record that plugin '${slug}' is served; the next heartbeat writes it again: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
   }
 
   /**
@@ -334,11 +386,23 @@ export class PluginLoadRecorder implements BeforeApplicationShutdown {
     heartbeatAt: Date,
   ): Promise<void> {
     const processRole = this.options.processRole;
+    // Read as the write is sent, so a rewrite that reaches a record after
+    // `markServing()` writes it ready.
+    const readyHere = ready && this.serving;
 
     await this.db.pluginProcessLoad.upsert({
       where: { processId_slug: { processId: this.processId, slug } },
-      create: { processId: this.processId, processRole, slug, sha256, installedAt, ready, loadedAt, heartbeatAt },
-      update: { processRole, sha256, installedAt, ready, loadedAt, heartbeatAt },
+      create: {
+        processId: this.processId,
+        processRole,
+        slug,
+        sha256,
+        installedAt,
+        ready: readyHere,
+        loadedAt,
+        heartbeatAt,
+      },
+      update: { processRole, sha256, installedAt, ready: readyHere, loadedAt, heartbeatAt },
     });
   }
 }

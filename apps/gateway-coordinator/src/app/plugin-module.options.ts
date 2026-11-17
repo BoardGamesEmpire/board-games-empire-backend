@@ -26,6 +26,9 @@ export function coordinatorPluginModuleOptions(config: ConfigService): PluginMod
     processRole: 'coordinator',
     loadCategories: [PluginCategory.DataGateway],
     productChecks: { [PluginCategory.DataGateway]: dataGatewayProductCheck },
+    // A gateway worker dials this process once a record says ready, and the
+    // gRPC server listens only after the plugins load: `main.ts` says when.
+    readyOnceServing: true,
     bgeVersion: BGE_VERSION,
     defaultLocale: FALLBACK_LOCALE,
   };

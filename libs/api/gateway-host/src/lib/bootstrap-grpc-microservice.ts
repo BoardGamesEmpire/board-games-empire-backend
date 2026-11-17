@@ -70,6 +70,15 @@ export interface GrpcMicroserviceBootstrapConfig {
   readonly registerShutdown: (app: INestMicroservice) => void;
 
   /**
+   * Runs once the server listens, before the startup line is logged. Nest
+   * runs the app's bootstrap hooks before the server listens, so this is the
+   * first moment the service can say it is reachable: the coordinator marks
+   * its plugin load records ready here, which a gateway worker reads before
+   * it dials (#1083). A rejection fails the boot.
+   */
+  readonly afterListen?: (app: INestMicroservice) => Promise<void>;
+
+  /**
    * Bootstrap-failure handler. When the bootstrap calls it, the error is
    * already logged and `process.exitCode` is already 1; this only performs the
    * host-specific flush/shutdown before `process.exit(1)` (pino flush for
@@ -112,6 +121,7 @@ export async function bootstrapGrpcMicroservice(config: GrpcMicroserviceBootstra
     protoExclude = [],
     bootstrapLogger,
     registerShutdown,
+    afterListen,
     onBootstrapError,
   } = config;
 
@@ -160,6 +170,7 @@ export async function bootstrapGrpcMicroservice(config: GrpcMicroserviceBootstra
     registerShutdown(app);
 
     await app.listen();
+    await afterListen?.(app);
     const { host, port } = app.get<GrpcListenAddress>(addressConfig.KEY);
     bootstrapLogger.info({ url: joinHostPort(host, port) }, '🚀 application is running on grpc');
   } catch (error) {

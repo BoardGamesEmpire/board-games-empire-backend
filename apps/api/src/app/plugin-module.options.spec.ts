@@ -18,6 +18,11 @@ describe("the api's plugin runtime options", () => {
     },
   );
 
+  // No process dials the api for a plugin.
+  it('marks a load record ready as soon as its plugin is registered (#1083)', () => {
+    expect(options.readyOnceServing).toBeUndefined();
+  });
+
   it('labels its plugin load records with its own process role (#1083)', () => {
     expect(options.processRole).toBe('api');
   });

@@ -285,6 +285,35 @@ describe('bootstrapGrpcMicroservice', () => {
     await expect(connects('::1', defaultPort)).resolves.toBeUndefined();
   });
 
+  // Nest runs the bootstrap hooks before the server listens; the coordinator
+  // says its plugins are reachable only from here (#1083).
+  it('runs afterListen once the server accepts connections (#1083)', async () => {
+    const reachable: boolean[] = [];
+
+    await bootstrap({
+      afterListen: async () => {
+        reachable.push(
+          await connects('127.0.0.1', defaultPort).then(
+            () => true,
+            () => false,
+          ),
+        );
+      },
+    });
+
+    expect(reachable).toEqual([true]);
+  });
+
+  it('fails the boot when afterListen rejects (#1083)', async () => {
+    const onBootstrapError = jest.fn();
+    const failure = new Error('could not say it serves');
+
+    await bootstrap({ afterListen: () => Promise.reject(failure), onBootstrapError });
+
+    expect(onBootstrapError).toHaveBeenCalledWith(failure);
+    expect(process.exitCode).toBe(1);
+  });
+
   // The coordinator serves its own package and, for the plugin DataGateways
   // it hosts, the gateway's.
   it('serves every package it is given (#1083)', async () => {

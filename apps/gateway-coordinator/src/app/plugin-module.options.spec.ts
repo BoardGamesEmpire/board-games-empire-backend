@@ -20,6 +20,12 @@ describe("the coordinator's plugin runtime options", () => {
     expect(options.productChecks).toEqual({ [PluginCategory.DataGateway]: dataGatewayProductCheck });
   });
 
+  // Its plugins load before its gRPC server listens, and a gateway worker
+  // dials it once a record says ready.
+  it('marks its load records ready only once it serves (#1083)', () => {
+    expect(options.readyOnceServing).toBe(true);
+  });
+
   it.each(Object.values(PluginCategory))(
     'loads %s exactly when the coordinator is the process role that loads it (#1083)',
     (category) => {

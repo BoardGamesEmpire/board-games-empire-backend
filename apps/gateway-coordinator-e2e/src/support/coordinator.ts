@@ -17,6 +17,7 @@ import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { COORDINATOR_NODE_ENV } from './e2e-env';
+import { createTestDatabase } from './test-db';
 
 /**
  * Launches the coordinator's built bundle and hands out gRPC clients for the
@@ -334,6 +335,41 @@ async function isServing(address: string): Promise<boolean> {
   }
 }
 
+/**
+ * Whether the coordinator has finished its boot: it answers, and every
+ * plugin it loaded says so in its load record. It marks the records ready
+ * only once its gRPC server listens (#1083), so an answer alone can come a
+ * moment before a spec could read them. A plugin whose load failed is
+ * quarantined, disabled, and its record never says ready, so it isn't
+ * waited for.
+ */
+async function hasBooted(address: string): Promise<boolean> {
+  if (!(await isServing(address))) {
+    return false;
+  }
+
+  const database = createTestDatabase();
+
+  try {
+    const waiting = await database.client.pluginProcessLoad.findMany({
+      where: { processRole: 'coordinator', ready: false },
+      select: { slug: true },
+    });
+
+    if (waiting.length === 0) {
+      return true;
+    }
+
+    const loading = await database.client.plugin.count({
+      where: { slug: { in: waiting.map(({ slug }) => slug) }, enabled: true, loadFailed: false },
+    });
+
+    return loading === 0;
+  } finally {
+    await database.close();
+  }
+}
+
 /** The launch of the bundle on `port`, over the environment as it is now. */
 function childLaunch(launch: CoordinatorLaunch, port: number): ChildLaunch {
   const address = coordinatorAddress(port);
@@ -353,7 +389,7 @@ function childLaunch(launch: CoordinatorLaunch, port: number): ChildLaunch {
       DATABASE_MIGRATION_URL: '',
     },
     verbose: process.env[E2E_VERBOSE_VAR] === 'true',
-    isReady: () => isServing(address),
+    isReady: () => hasBooted(address),
     timeoutMs: READINESS_TIMEOUT_MS,
     pollMs: READINESS_POLL_MS,
   };

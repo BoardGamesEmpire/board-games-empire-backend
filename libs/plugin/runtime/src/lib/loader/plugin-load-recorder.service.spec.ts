@@ -287,6 +287,121 @@ describe('PluginLoadRecorder', () => {
     });
   });
 
+  // The coordinator loads its plugins in Nest's bootstrap hooks, which run
+  // before its gRPC server listens; a gateway worker that read a ready record
+  // then would dial nothing and count the failure (#1083).
+  describe('a host that says when it serves (#1083)', () => {
+    const readiness = () => db.pluginProcessLoad.upsert.mock.calls.map(([args]) => args.create.ready);
+    const updatedReadiness = () => db.pluginProcessLoad.upsert.mock.calls.map(([args]) => args.update.ready);
+
+    beforeEach(() => {
+      recorder = new PluginLoadRecorder(
+        db as unknown as DatabaseService,
+        scope as unknown as SystemActorScope,
+        buildPluginModuleOptions({ processRole: 'coordinator', readyOnceServing: true }),
+      );
+    });
+
+    it('writes a load marked ready as not ready until the host serves (#1083)', async () => {
+      await recorder.record('demo-sink', sha('a'), installedAt);
+      await recorder.markReady('demo-sink');
+
+      expect(readiness()).toEqual([false, false]);
+      expect(updatedReadiness()).toEqual([false, false]);
+    });
+
+    it('writes the loads already marked ready as ready once the host serves, and no other (#1083)', async () => {
+      await recorder.record('demo-sink', sha('a'), installedAt);
+      await recorder.markReady('demo-sink');
+      await recorder.record('half-loaded', sha('b'), installedAt);
+      db.pluginProcessLoad.upsert.mockClear();
+
+      await recorder.markServing();
+
+      expect(db.pluginProcessLoad.upsert).toHaveBeenCalledTimes(1);
+      expect(db.pluginProcessLoad.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { processId_slug: { processId: recorder.processId, slug: 'demo-sink' } },
+          create: expect.objectContaining({ ready: true }),
+          update: expect.objectContaining({ ready: true }),
+        }),
+      );
+    });
+
+    it('writes a load marked ready after the host serves as ready at once (#1083)', async () => {
+      await recorder.markServing();
+      await recorder.record('demo-sink', sha('a'), installedAt);
+      await recorder.markReady('demo-sink');
+
+      expect(readiness()).toEqual([false, true]);
+    });
+
+    it('a heartbeat rewrite before the host serves keeps a ready load not ready, and one after writes it ready (#1083)', async () => {
+      await recorder.record('demo-sink', sha('a'), installedAt);
+      await recorder.markReady('demo-sink');
+      db.pluginProcessLoad.upsert.mockClear();
+      db.pluginProcessLoad.updateMany.mockResolvedValue({ count: 0 });
+
+      await recorder.heartbeat();
+      expect(readiness()).toEqual([false]);
+
+      await recorder.markServing();
+      db.pluginProcessLoad.upsert.mockClear();
+      await recorder.heartbeat();
+
+      expect(readiness()).toEqual([true]);
+    });
+
+    it('logs a failed write and resolves, and the next heartbeat writes it again (#1083)', async () => {
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      await recorder.record('demo-sink', sha('a'), installedAt);
+      await recorder.markReady('demo-sink');
+      db.pluginProcessLoad.upsert.mockRejectedValueOnce(new Error('db blip'));
+
+      await expect(recorder.markServing()).resolves.toBeUndefined();
+      expect(error).toHaveBeenCalledWith(expect.stringContaining("plugin 'demo-sink' is served"));
+
+      db.pluginProcessLoad.upsert.mockClear();
+      db.pluginProcessLoad.updateMany.mockResolvedValue({ count: 1 });
+      await recorder.heartbeat();
+
+      expect(readiness()).toEqual([true]);
+      error.mockRestore();
+    });
+
+    it('writes nothing once the records are withdrawn (#1083)', async () => {
+      await recorder.record('demo-sink', sha('a'), installedAt);
+      await recorder.markReady('demo-sink');
+      await recorder.withdrawLoadRecords();
+      db.pluginProcessLoad.upsert.mockClear();
+
+      await recorder.markServing();
+
+      expect(db.pluginProcessLoad.upsert).not.toHaveBeenCalled();
+    });
+
+    it('writes nothing on a second call (#1083)', async () => {
+      await recorder.record('demo-sink', sha('a'), installedAt);
+      await recorder.markReady('demo-sink');
+      await recorder.markServing();
+      db.pluginProcessLoad.upsert.mockClear();
+
+      await recorder.markServing();
+
+      expect(db.pluginProcessLoad.upsert).not.toHaveBeenCalled();
+    });
+  });
+
+  it('a host that says nothing of when it serves writes a load ready as soon as it is marked, and markServing() writes nothing (#1083)', async () => {
+    await recorder.record('demo-sink', sha('a'), installedAt);
+    await recorder.markReady('demo-sink');
+    db.pluginProcessLoad.upsert.mockClear();
+
+    await recorder.markServing();
+
+    expect(db.pluginProcessLoad.upsert).not.toHaveBeenCalled();
+  });
+
   it("the heartbeat touches only this process's records (#1094)", async () => {
     await recorder.heartbeat();
 
