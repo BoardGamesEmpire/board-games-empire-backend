@@ -33,8 +33,8 @@ import { readShippedSource } from './shipped-sql';
  *
  * Comments are blanked before anything is matched, and that is load-bearing
  * rather than tidy: these services discuss their own lock order in prose above
- * the code that takes it (`plugin-grant.service.ts` mentions `FOR UPDATE` and
- * `lockUserUnitScope` in comments), so a matcher that read comments would pin
+ * the code that takes it (`plugin-consent-act.service.ts` mentions
+ * `FOR SHARE` and the advisory key in comments), so a matcher that read comments would pin
  * the order of the documentation.
  */
 
@@ -417,8 +417,8 @@ function blankCommentRanges(source: string, file: ts.SourceFile): string {
  * because Postgres also takes locks nobody wrote: an INSERT into a table with
  * an FK takes `FOR KEY SHARE` on the parent row from the referential-integrity
  * trigger, and RI checks are AFTER ROW triggers, so that lock lands only once
- * the child tuple is written. `decide()` deadlocked on exactly that for as long
- * as it existed, with the order pins above green the whole time (#398).
+ * the child tuple is written. The server's first decision writer deadlocked on
+ * exactly that, with the order pins above green the whole time (#398).
  *
  * The check that closes it is not another stage. A stage is a FIRST OCCURRENCE
  * in a body, and the implied lock's honest position is *after* the write, which

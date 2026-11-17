@@ -5,7 +5,7 @@ import type { StaticAnalysisFinding } from './static-analysis.types';
  * Typed failures for the install pipeline (#59 Phase C2). Domain errors, not
  * HTTP exceptions — the C4 install endpoints (and the #84 pipeline wrapping
  * this seam) own the mapping to status codes, same discipline as the loader
- * and grant errors. Every rejection leaves NO partial state: the persist is
+ * and consent act errors. Every rejection leaves NO partial state: the persist is
  * a single transaction and every check runs before it.
  */
 

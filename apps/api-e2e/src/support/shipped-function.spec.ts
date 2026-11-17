@@ -477,8 +477,8 @@ describe('shipped-function', () => {
     });
 
     it('checks only the stages a path claims, so a subset is a legitimate claim', () => {
-      // Not every writer takes every lock: `decide()` never locks the plugin
-      // row. What is refused is claiming a stage and not taking it.
+      // Not every writer takes every lock: the server consent act takes
+      // neither the household row nor the advisory key. What is refused is claiming a stage and not taking it.
       const body = `
         await lockHouseholdUnitScope(tx);
         await this.claimHouseholdUnit(tx);

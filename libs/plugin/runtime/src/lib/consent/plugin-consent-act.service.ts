@@ -128,7 +128,7 @@ type ActOutcome =
  *
  * It takes the total lock order every per-unit writer of the plugin runtime
  * takes (`apps/api-e2e/src/plugin/lock-order.ts`): household row, plugin row,
- * the unit's advisory key, grant rows, the unit enablement. `decide()` and
+ * the unit's advisory key, grant rows, the unit enablement. That file and
  * `PluginUnitLifecycleService` explain each stage; the comments in `commit`
  * say only what is particular to an act.
  */
@@ -171,8 +171,7 @@ export class PluginConsentActService {
     const config = household && kind === 'SwitchOn' ? input.config : undefined;
 
     // The plugin is read once per request, before the transaction, and a
-    // deadlock replay judges against this same read (#361, as `decide()`
-    // does). A deadlock means a writer of this plugin row was live, most
+    // deadlock replay judges against this same read (#361). A deadlock means a writer of this plugin row was live, most
     // often an activation (#398); a replay that read again would record
     // consent against a manifest that moved mid-request with nothing telling
     // the client. Judged against the first read, the replay's claim sees the
@@ -225,8 +224,8 @@ export class PluginConsentActService {
     const correlationId = this.auditContext.getCorrelationId() ?? null;
     const locale = input.locale ?? this.options.defaultLocale;
 
-    // Retried once if Postgres picks this attempt as the deadlock victim, as
-    // `decide()` is (#398): the abort took the transaction whole and the
+    // Retried once if Postgres picks this attempt as the deadlock victim
+    // (#398): the abort took the transaction whole and the
     // events emit below, after the commit, so a replay writes nothing twice.
     const outcome = await retryOnDeadlock(() =>
       this.db.$transaction(async (tx): Promise<ActOutcome> => {
@@ -268,8 +267,8 @@ export class PluginConsentActService {
         }
 
         // The catalog and the unit's decisions are read under the claim and
-        // the key, through this transaction, for the reason `decide()` reads
-        // the risk there (#361).
+        // the key, through this transaction, so the act judges against the
+        // risk and the decisions it writes over (#361).
         const classification = await this.classifier.classify(plugin.id, unit, named.validated.permissionChecks, {
           source: named.source,
           client: tx,
@@ -480,7 +479,7 @@ export class PluginConsentActService {
    * The plugin-row claim of a consent act: the row `FOR SHARE`, as every
    * per-unit writer takes it (#398), and the check that the manifest the act
    * names is still the one the row holds (#1150). The sha pins the exact
-   * bytes, so it replaces `decide()`'s content comparison.
+   * bytes, so no comparison of the manifest's content is needed.
    *
    * A staged review pins BOTH shas: the staged one it names, and the active
    * one the request read, because the planner judged which staged

@@ -7,8 +7,6 @@ import {
   PluginConsentPresentationService,
   PluginFeatureStateNotFoundError,
   PluginFeatureStateService,
-  PluginGrantPluginNotFoundError,
-  PluginGrantService,
   PluginInventoryNotFoundError,
   PluginInventoryService,
   PluginLifecycleNotFoundError,
@@ -27,7 +25,6 @@ import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import {
   ApprovePluginUpdateDto,
-  DecidePluginGrantDto,
   ListPluginsQueryDto,
   PluginInventoryDetailResponseDto,
   PluginInventoryEntryDto,
@@ -93,7 +90,6 @@ export class PluginsController {
     private readonly lifecycle: PluginLifecycleService,
     private readonly abilityService: AbilityService,
     private readonly updates: PluginUpdateService,
-    private readonly grants: PluginGrantService,
     private readonly presentation: PluginConsentPresentationService,
     private readonly featureState: PluginFeatureStateService,
     private readonly inventory: PluginInventoryService,
@@ -135,55 +131,7 @@ export class PluginsController {
     ).pipe(map((page) => paginated('plugins', page, query, ResourceType.Plugin)));
   }
 
-  // ─── Grant decisions + consent presentation (#322): Server scope ──────────
-
-  @ApiOperation({
-    summary: 'Record a server-scope consent decision for one requested permission',
-    description:
-      'Grant or durably deny a permission the active manifest requests at server consent scope. Idempotent on ' +
-      'exact re-statement (changed: false). Denying a permission the active manifest REQUIRES is refused with a ' +
-      '409 naming the honest levers — disable or uninstall (D-AV); a permission only a staged update requires ' +
-      'stays deniable, and blocks at approve instead.',
-  })
-  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
-  @ApiResponse({
-    status: Http.Forbidden,
-    description: 'Insufficient permissions, or a categorically ungrantable permission',
-  })
-  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
-  @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
-  @ApiResponse({
-    status: Http.Conflict,
-    description:
-      'Denial refused: the active plugin manifest requires this permission (disable or uninstall instead). Also ' +
-      'returned when the plugin manifest was replaced while the decision was in flight, so it was not recorded; ' +
-      "reload the plugin's permissions and decide again",
-  })
-  @ApiResponse({
-    status: Http.UnprocessableEntity,
-    description: 'Not requested by the manifest, or decided at the wrong consent scope',
-  })
-  @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
-  @HttpCode(Http.Ok)
-  @Post(':slug/grants')
-  decideGrant(@Param('slug') slug: string, @Body() dto: DecidePluginGrantDto) {
-    return from(
-      this.assertUnderCeiling(slug, Action.manage, PluginGrantPluginNotFoundError).then(() =>
-        this.grants.decide({
-          slug,
-          permissionSlug: dto.permissionSlug,
-          status: dto.status,
-          deciderId: this.abilityService.getActingUserId(),
-        }),
-      ),
-    ).pipe(
-      map(({ grant, changed }) => ({
-        message: t('success.plugin.grant_decided', { slug, permissionSlug: dto.permissionSlug }),
-        grant,
-        changed,
-      })),
-    );
-  }
+  // ─── Consent presentation (#322): Server scope ─────────────────────────────
 
   @ApiOperation({
     summary: "Present the active manifest's consent surface for the Server unit",
@@ -198,7 +146,7 @@ export class PluginsController {
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies(canReadServerPlugins)
   // Must stay out of the response cache: it exists to be read right before a
-  // decide POST, and the decide's write must be visible on the re-read.
+  // consent act, and the act's writes must be visible on the re-read.
   @Get(':slug/consent')
   consentPresentation(@Param('slug') slug: string) {
     return from(

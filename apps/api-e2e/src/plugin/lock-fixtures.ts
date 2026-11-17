@@ -54,27 +54,11 @@ export const ACTIVATION_VERSION_BUMP =
 export const FK_PLUGIN_LOCK = 'SELECT p.id FROM plugins p WHERE p.id = $1 FOR KEY SHARE';
 
 /**
- * What `decide()` and a consent act (#1150) do to an existing grant row, as a
- * statement a barrier can hold open.
+ * The insert arm of a consent decision's upsert: a decision on a permission
+ * slug that has no grant row yet.
  *
- * Prisma issues the real one as an upsert — `INSERT … ON CONFLICT DO UPDATE` —
- * and its update arm is this write. Standing in for it follows the
- * `UNINSTALL_CLAIM` precedent, and what matters for every ordering question is
- * unchanged: it writes non-key columns, so it takes `FOR NO KEY UPDATE`, which
- * is the mode {@link GRANT_ROW_LOCK} on the same row conflicts with in both
- * directions. The insert arm is not a claim and is not modelled here: a row
- * that does not exist cannot be locked. {@link SERVER_GRANT_INSERT} exists to
- * show exactly that.
- */
-export const GRANT_DECISION_CLAIM =
-  'UPDATE plugin_grants SET status = $2, decided_at = now(), updated_at = now() WHERE id = $1 RETURNING id';
-
-/**
- * The other arm of the same upsert: a decision on a permission slug that has no
- * grant row yet.
- *
- * A control rather than a claim, and the counterpart to
- * {@link GRANT_DECISION_CLAIM}. A `FOR UPDATE` matching zero rows locks
+ * A control rather than a claim, and the counterpart to {@link GRANT_ROW_LOCK},
+ * which stands in for the update arm. A `FOR UPDATE` matching zero rows locks
  * nothing, so this insert walks straight past a holder with every EXISTING
  * grant row for the plugin locked. That is not a defect: it is why every
  * writer of a server-scope decision claims the plugin row before it writes

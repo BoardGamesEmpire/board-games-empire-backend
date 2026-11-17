@@ -12,7 +12,6 @@ import { PluginServerConsentActService } from './consent/plugin-server-consent-a
 import { PluginContextFactory } from './context/plugin-context.factory';
 import { PluginFeatureStateService } from './features/plugin-feature-state.service';
 import { PluginGrantAuthorityService } from './grants/plugin-grant-authority.service';
-import { PluginGrantService } from './grants/plugin-grant.service';
 import { PluginInstallerService } from './install/plugin-installer.service';
 import { PluginStaticAnalysisService } from './install/plugin-static-analysis.service';
 import { PluginInventoryService } from './inventory/plugin-inventory.service';
@@ -74,7 +73,6 @@ import { PluginUpdateService } from './update/plugin-update.service';
     PluginConfigSchemaService,
     PluginConfigService,
     PluginGrantAuthorityService,
-    PluginGrantService,
     PluginInstallerService,
     PluginInventoryService,
     PluginLifecycleListener,
@@ -100,7 +98,6 @@ import { PluginUpdateService } from './update/plugin-update.service';
     PluginInstanceRegistry,
     PluginConfigService,
     PluginContextFactory,
-    PluginGrantService,
     PluginInstallerService,
     // #354's endpoint-facing inventory reader — the only read surface that
     // answers before a slug is known.

@@ -5,7 +5,7 @@ import type { StaticAnalysisFinding } from '../install/static-analysis.types';
  * Typed failures for the update pipeline (#59 Phase C3). Domain errors, not
  * HTTP exceptions — the C4 update endpoints (and the #84 pipeline wrapping
  * this seam) own the status-code mapping, the same discipline as the
- * install, loader, and grant errors. Every rejection leaves NO partial
+ * install, loader, and consent act errors. Every rejection leaves NO partial
  * state: staging and activation are each a single transaction, and every
  * check runs before it.
  */
@@ -83,7 +83,7 @@ export class PluginUpdateAuthorityError extends Error {
  *   update, which clears the state either way — but drift here is
  *   corruption, so it also warrants a loud log.
  * - `'active'` — the STORED active manifest: corrupted server state, never
- *   a caller error (the same contract as `PluginGrantManifestInvalidError`).
+ *   a caller error (the same contract as `PluginUnitManifestError`).
  */
 export type PluginUpdateManifestSource = 'new' | 'pending' | 'active';
 

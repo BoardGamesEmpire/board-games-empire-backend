@@ -472,8 +472,8 @@ describe('plugin unit enablement + feature state (#323)', () => {
 
     it('the user axis is a real surface on a SERVER-scope plugin — the switch and the read both work there', async () => {
       // The manifest gate refuses household consent on a server-scope
-      // plugin but permits user consent at any scope (#225), and decide()
-      // creates a real unit enablement there. So the household 422 must not
+      // plugin but permits user consent at any scope (#225), and a user's
+      // switch-on (#1150) creates a real unit enablement there. So the household 422 must not
       // generalize to this axis: the user would be toggling a unit whose
       // blocked features they could never read.
       const user = await actors.user();

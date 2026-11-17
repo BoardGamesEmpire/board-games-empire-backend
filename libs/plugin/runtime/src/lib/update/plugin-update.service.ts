@@ -1382,8 +1382,8 @@ export class PluginUpdateService {
       // comparison's read, before this transaction opened, and a consent act
       // can land in between; here is where the approval's answer is decided.
       // A plain read is stable: this transaction holds the plugin row
-      // `FOR UPDATE`, and every writer of a server-scope decision (a server
-      // consent act, `decide()`) claims that row `FOR SHARE` before it writes,
+      // `FOR UPDATE`, and every other writer of a server-scope decision (a
+      // server consent act) claims that row `FOR SHARE` before it writes,
       // so it either committed before the claim above, and is read here, or
       // waits for this transaction to commit, and its own claim then compares
       // the sha and refuses the moved manifest (#361, #1336).
@@ -1437,7 +1437,7 @@ export class PluginUpdateService {
       // provenance (#577). Left in place, a later version that requests the
       // permission again would inherit a consent decision nobody made for
       // it. Read before the delete, for the same reason as the declares diff.
-      // A decide() or a consent act (#1150) that judged against the outgoing
+      // A consent act (#1150, #1336) that judged against the outgoing
       // plugin manifest cannot write one back afterwards: its claim waits for
       // this transaction and then refuses the moved plugin manifest (#361).
       const droppedRequests = requestedSlugsDropped(active, next, removedDeclares);
@@ -1718,8 +1718,8 @@ export class PluginUpdateService {
           reason,
           // The row does not store the manifest version (#1150), so a decision
           // names its act's: consent given at one version can outlive the next
-          // unchanged one. A decision with no act, one `decide()` wrote, names
-          // the manifest this update replaces.
+          // unchanged one. A decision with no act names the manifest this
+          // update replaces.
           {
             manifestVersion:
               (grant.actId === null ? undefined : outcome.revokedActVersions.get(grant.actId)) ?? before.version,

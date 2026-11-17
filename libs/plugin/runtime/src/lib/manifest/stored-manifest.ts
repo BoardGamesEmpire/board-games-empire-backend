@@ -18,7 +18,7 @@ export interface StoredManifestRow {
 /**
  * Builds the surface's typed error for an invalid stored manifest. Each
  * consumer keeps its own error class so the C4 boundary can map per domain
- * (`PluginGrantManifestInvalidError`, `PluginFeatureStateManifestError`,
+ * (`PluginUnitManifestError`, `PluginFeatureStateManifestError`,
  * `PluginConsentPresentationManifestError`) — what is shared is the
  * validation contract, not the error identity.
  */
@@ -30,7 +30,7 @@ export type StoredManifestInvalidFactory = (
 
 /**
  * The never-trust-a-stored-manifest contract, shared by every surface that
- * re-reads `Plugin.manifestJson` at consumption time (the grant write path,
+ * re-reads `Plugin.manifestJson` at consumption time (consent acts,
  * feature-state derivation, consent presentation — extracted when the third
  * copy was about to become a fourth):
  *
@@ -53,7 +53,7 @@ export type StoredManifestInvalidFactory = (
  * wearing similar clothes.
  *
  * Tombstone checks stay with the caller — this helper is reachable both from
- * paths that refuse tombstoned rows (`decide`) and paths that must
+ * paths that refuse uninstalled plugins (a consent act) and paths that must
  * short-circuit BEFORE validation so a stale manifest cannot turn
  * "uninstalled" into a 5xx (feature-state, presentation).
  */

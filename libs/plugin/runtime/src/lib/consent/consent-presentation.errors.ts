@@ -35,7 +35,7 @@ export class PluginConsentPresentationNotFoundError extends Error {
 
 /**
  * The requested plugin is tombstoned (#322): its grants are purged, and
- * neither `decide()` nor a consent act (#1150) records new ones, so no
+ * no consent act (#1150, #1336) records new ones, so no
  * consent surface exists — but the
  * record exists and says so, which is D-AY's 410, never a 404.
  */

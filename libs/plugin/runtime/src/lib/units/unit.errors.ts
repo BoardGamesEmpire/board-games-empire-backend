@@ -7,7 +7,7 @@ import { describeManifestMove, type PluginChangeKind } from '../manifest/manifes
  * admin's enable/disable/config writes and the user's own enable/disable.
  * Domain errors, not HTTP exceptions — the API filter owns the status
  * mapping, the same discipline as the lifecycle, install, update, and
- * grant errors.
+ * consent act errors.
  */
 
 /** The actor is not an owner/admin member of the anchoring household. */

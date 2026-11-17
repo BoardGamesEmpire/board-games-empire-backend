@@ -94,9 +94,9 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
     // belongs to the OLD scope's principal, and activation deletes it
     // (delete-to-pending) — routing it would ask re-consent of units that are
     // no longer the deciding principal and CANNOT become one: a consent act
-    // answers only the permissions its unit's consent scope owns, and
-    // decide() records server-scope decisions only (#1150), so a unit asked
-    // this way has no action available to answer it. The
+    // answers only the permissions its unit's consent scope owns (#1150,
+    // #1336), so a unit asked this way has no action available to answer
+    // it. The
     // scope change already forces consent from scratch at the new scope,
     // where it is stamped at today's risk.
     if (scopeChangedSlugs.has(grant.permissionSlug)) {

@@ -33,15 +33,16 @@ import { readShippedTree, workspaceRoot } from '../support/shipped-sql';
  * the key ahead of its decisions, so two acts on one unit run one after the
  * other and the later reads what the earlier wrote. That was safe to move
  * because the act is the only writer that takes both: the unit paths take the
- * key and no grant row, and `decide()`, activation, a rejected update and
- * uninstall take grant rows and no key. With nothing holding a grant row while
+ * key and no grant row, and the server consent act, activation, a rejected
+ * update and uninstall take grant rows and no key. With nothing holding a grant row while
  * it waits for a key, no cycle runs through the pair in either direction.
  *
  * Before this constant the order lived in prose, in three service doc comments
  * that had to be kept in agreement by hand. Pinning it in one place is what
- * gave #398 a single literal to amend when `decide()` gained its plugin-row
- * claim (below), and what makes a writer that disagrees with the claim surface
- * as a red test rather than as reasoning in a PR description.
+ * gave #398 a single literal to amend when the server's decision writer gained
+ * its plugin-row claim (below), and what makes a writer that disagrees with
+ * the claim surface as a red test rather than as reasoning in a PR
+ * description.
  *
  * The stages are LOCKS, not accesses, and the patterns are held to it. A unit
  * row READ under the advisory key is not a unit-row lock, so the two fused
@@ -63,13 +64,13 @@ import { readShippedTree, workspaceRoot } from '../support/shipped-sql';
  * can take a plugin-row lock this constant cannot observe, in the LAST
  * position rather than the first.
  *
- * `decide()` is how that was found: it claimed `['grant row', 'unit row']`, said
- * outright that it took no plugin-row lock, and deadlocked against activation's
- * `FOR UPDATE` on every contended grant INSERT while both the barrier suite and
- * the pin suite stayed green (#398). Its entry now claims the plugin row it
- * really does take, first, because the source now says so; the consent act,
- * which took over every household and user decision (#1150), claims it the
- * same way before it writes its first consent decision.
+ * The server's first decision writer is how that was found: it claimed
+ * `['grant row', 'unit row']`, said outright that it took no plugin-row lock,
+ * and deadlocked against activation's `FOR UPDATE` on every contended grant
+ * INSERT while both the barrier suite and the pin suite stayed green (#398).
+ * Every consent act — household and user (#1150), and the Server unit's
+ * (#1336) — claims the plugin row first, before it writes its first consent
+ * decision.
  *
  * The rule that gap left in prose is now enforced (#399): every write to an
  * FK-child table must be preceded, on every path that reaches it, by a
@@ -163,14 +164,14 @@ export const CLAIMED_LOCK_ORDER = [
   },
   {
     /**
-     * The upserts of `decide()`, of a consent act (#1150) and of an approval
-     * (#1336) take it. No shipped statement takes it by raw `FOR UPDATE`; the
-     * raw alternative stays for the replayed statement and for any raw lock
-     * someone writes later. The pre-reads — the `findUnique` in `decide()`,
-     * the standing-decision `findMany` in a consent act, an approval's read of
-     * the Server unit's decisions — are deliberately NOT matched: they run
-     * before the upsert and lock nothing, so counting them would date the
-     * stage to a read that orders nothing.
+     * The upserts of a consent act (#1150, #1336) and of an approval (#1336)
+     * take it. No shipped statement takes it by raw `FOR UPDATE`; the raw
+     * alternative stays for the replayed statement and for any raw lock
+     * someone writes later. The pre-reads — the standing-decision `findMany`
+     * in a consent act, an approval's read of the Server unit's decisions —
+     * are deliberately NOT matched: they run before the upsert and lock
+     * nothing, so counting them would date the stage to a read that orders
+     * nothing.
      */
     name: 'grant row',
     pattern: anyOf(/pluginGrant\.upsert\(/, relationLock('plugin_grants', 'FOR UPDATE')),
@@ -238,7 +239,6 @@ export interface LockOrderPath {
   readonly branch?: RegExp;
 }
 
-const GRANT_SERVICE = 'libs/plugin/runtime/src/lib/grants/plugin-grant.service.ts';
 const UNIT_LIFECYCLE = 'libs/plugin/runtime/src/lib/units/plugin-unit-lifecycle.service.ts';
 const UPDATE_SERVICE = 'libs/plugin/runtime/src/lib/update/plugin-update.service.ts';
 const LIFECYCLE_SERVICE = 'libs/plugin/runtime/src/lib/lifecycle/plugin-lifecycle.service.ts';
@@ -282,7 +282,6 @@ const GATEWAY_INTERVIEW_SERVICE = 'libs/gateway/driver/runtime/src/lib/gateway-i
 /** The files the pinned paths live in, so no spec retypes one. */
 export const LOCK_SOURCES = {
   householdShareLock: 'libs/database/src/lib/utils/household-share-lock.ts',
-  grantService: GRANT_SERVICE,
   unitLifecycle: UNIT_LIFECYCLE,
   updateService: UPDATE_SERVICE,
   lifecycleService: LIFECYCLE_SERVICE,
@@ -302,9 +301,9 @@ export const LOCK_SOURCES = {
  * is exactly the set where the claim has content. The consent act is the one
  * path that takes all five, and the only one that takes both the key and a
  * grant row: it writes household and user decisions and creates or switches
- * the unit enablement in one transaction (#1150). `decide()` is now
- * a server decision only, so it takes the plugin-row prefix and the grant row
- * and nothing after.
+ * the unit enablement in one transaction (#1150). The server consent act
+ * writes the Server unit's decisions only, so it takes the plugin-row prefix
+ * and the grant row and nothing after (#1336).
  */
 export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
   {
@@ -356,19 +355,6 @@ export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
       'activation (#398). The claim also compares the active sha the consent surface named. Then the grant ' +
       'rows, in permission order. No household row, no advisory key and no unit enablement: the Server unit ' +
       'has none of them.',
-  },
-  {
-    label: 'decide() — a server decision',
-    file: GRANT_SERVICE,
-    functionName: 'decide',
-    stages: ['plugin row', 'grant row'],
-    because:
-      'A server decision takes the plugin-row claim (#398), then the upsert takes the grant row, and writes ' +
-      'nothing else: household and user decisions are consent acts now, so no household lock, no unit-scope ' +
-      'key and no unit enablement follow (#1150). The claim comes first for the same FK reason as the act: ' +
-      'without it the grant INSERT takes the plugin row last and deadlocks against activation. The same ' +
-      'claim compares the plugin manifest the gates were judged against, so nothing is re-read after the ' +
-      'write (#361).',
   },
   {
     label: 'activateInTransaction (approval)',
@@ -877,10 +863,11 @@ export function fkChildWriteShapes(children: readonly ChildRelation[]): readonly
     ...children.map((child) => ({
       pattern: modelWrite([child.accessor], [...FK_CHILD_REPARENT_METHODS]),
       withArguments: fieldNamed([child.foreignKey]),
-      // `data`, not the whole call. Activation's grant re-stamp is addressed by
-      // its compound unique key, so `where` names `pluginId` while `data`
-      // rewrites four other columns — a guard over the whole call reports it,
-      // and would report every keyed child update in the tree with it.
+      // `data`, not the whole call. The installer's switch of a plugin's
+      // DataGateway row (`placePluginDataGatewayRow`) is addressed by its
+      // plugin, so `where` names `pluginId` while `data` rewrites only
+      // `enabled` — a guard over the whole call reports it, and would report
+      // every child update addressed by its plugin with it.
       argumentProperty: 'data',
     })),
     {

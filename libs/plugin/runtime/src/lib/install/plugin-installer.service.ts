@@ -343,7 +343,7 @@ export class PluginInstallerService {
 
   /**
    * Full-enforcement validation — unlike consent-time re-validation
-   * (`PluginGrantService`), install DOES gate on `bgeCompat`: a plugin that
+   * (`revalidateStoredManifest`), install DOES gate on `bgeCompat`: a plugin that
    * cannot load under the running BGE must not be installable.
    */
   private async validateManifest(directory: PluginArtifactDirectory): Promise<PluginManifestValidationResult> {

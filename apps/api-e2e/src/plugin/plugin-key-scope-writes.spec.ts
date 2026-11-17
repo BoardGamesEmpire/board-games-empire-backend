@@ -1,4 +1,4 @@
-import { PluginGrantStatus, ResourceType, type Plugin } from '@bge/database';
+import { PluginGrantStatus, ResourceType, RiskLevel, type Plugin } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -36,12 +36,29 @@ describe('server plugin writes through a key scoped to one plugin (#978)', () =>
     await db.close();
   });
 
+  /**
+   * The sha every inventory fixture plugin is installed with, so a review act
+   * names its plugin manifest without reading the consent surface first.
+   */
+  const INSTALLED_SHA = 'a'.repeat(64);
+
   const WRITES = {
-    'POST /plugins/:slug/grants': (actor, slug) =>
+    // The Server unit's review act grants the fixture's required server-scope
+    // permission, which no consent decision covers yet (#1336).
+    'POST /plugins/:slug/consent/review': (actor, slug) =>
       request(baseUrl)
-        .post(`/api/plugins/${slug}/grants`)
+        .post(`/api/plugins/${slug}/consent/review`)
         .set(actor.headers)
-        .send({ permissionSlug: `plugin|${slug}|manage:digest`, status: PluginGrantStatus.Granted }),
+        .send({
+          manifestSha256: INSTALLED_SHA,
+          answers: [
+            {
+              permissionSlug: `plugin|${slug}|manage:digest`,
+              status: PluginGrantStatus.Granted,
+              riskLevel: RiskLevel.Low,
+            },
+          ],
+        }),
     'POST /plugins/:slug/enable': (actor, slug) =>
       request(baseUrl).post(`/api/plugins/${slug}/enable`).set(actor.headers).send({}),
     'POST /plugins/:slug/disable': (actor, slug) =>
@@ -121,7 +138,7 @@ describe('server plugin writes through a key scoped to one plugin (#978)', () =>
     // its service draws for an unknown slug.
     const unknown = await answers(admin, missing);
     expect(unknown).toEqual({
-      'POST /plugins/:slug/grants': [404, 'PLUGIN_GRANT_PLUGIN_NOT_FOUND'],
+      'POST /plugins/:slug/consent/review': [404, 'PLUGIN_UNIT_PLUGIN_NOT_FOUND'],
       'POST /plugins/:slug/enable': [404, 'PLUGIN_LIFECYCLE_NOT_FOUND'],
       'POST /plugins/:slug/disable': [404, 'PLUGIN_LIFECYCLE_NOT_FOUND'],
       'PATCH /plugins/:slug/config': [404, 'PLUGIN_LIFECYCLE_NOT_FOUND'],
@@ -160,7 +177,7 @@ describe('server plugin writes through a key scoped to one plugin (#978)', () =>
     const unpinned = await manageKey(admin);
     expect(
       await statusesOf(unpinned, [
-        ['POST /plugins/:slug/grants', live.slug],
+        ['POST /plugins/:slug/consent/review', live.slug],
         ['POST /plugins/:slug/disable', live.slug],
         ['POST /plugins/:slug/enable', live.slug],
         ['PATCH /plugins/:slug/config', live.slug],
@@ -170,7 +187,7 @@ describe('server plugin writes through a key scoped to one plugin (#978)', () =>
         ['POST /plugins/:slug/uninstall', live.slug],
       ]),
     ).toEqual([
-      ['POST /plugins/:slug/grants', 200],
+      ['POST /plugins/:slug/consent/review', 200],
       ['POST /plugins/:slug/disable', 200],
       ['POST /plugins/:slug/enable', 200],
       ['PATCH /plugins/:slug/config', 200],
