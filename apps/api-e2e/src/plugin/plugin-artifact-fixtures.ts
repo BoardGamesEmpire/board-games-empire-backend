@@ -1,5 +1,4 @@
 import { buildPluginTarball, type PluginTarballEntry } from '@bge/plugin-artifacts';
-import type { SessionActor } from '@bge/testing-e2e';
 import {
   buildPluginManifest,
   resolveLocalizedString,
@@ -9,6 +8,7 @@ import {
 import { createHash, randomBytes } from 'node:crypto';
 import { access } from 'node:fs/promises';
 import request from 'supertest';
+import type { Caller } from '../support/api-key';
 import { deferredRequest } from '../support/deferred-request';
 import { E2E_PLUGINS_ROOT_VAR } from '../support/e2e-env';
 import { readArtifactShownRisks } from './consent-act-fixtures';
@@ -109,21 +109,20 @@ export const buildArtifact = async (options: ArtifactOptions = {}): Promise<Buil
   };
 };
 
-/** The artifact routes, for one api. */
+/** The artifact routes, for one api, as a session or an API key calls them. */
 export const artifactRoutes = (baseUrl: string) => ({
   /** Posts the artifact by upload, with the checksum the server admin expects. */
-  upload: (actor: SessionActor, artifact: BuiltArtifact, expectedSha256: string = artifact.sha256) =>
+  upload: (actor: Caller, artifact: BuiltArtifact, expectedSha256: string = artifact.sha256) =>
     request(baseUrl)
       .post(ARTIFACTS_PATH)
       .set(actor.headers)
       .field('sha256', expectedSha256)
       .attach('file', artifact.bytes, { filename: `${artifact.slug}.tgz`, contentType: 'application/gzip' }),
 
-  readBack: (actor: SessionActor, sha256: string) =>
-    request(baseUrl).get(`${ARTIFACTS_PATH}/${sha256}`).set(actor.headers),
+  readBack: (actor: Caller, sha256: string) => request(baseUrl).get(`${ARTIFACTS_PATH}/${sha256}`).set(actor.headers),
 
   /** Sends the risks the artifact read shows, as a client would; a spec's body overrides them (#1336). */
-  install: (actor: SessionActor, body: { readonly sha256: string } & Record<string, unknown>) =>
+  install: (actor: Caller, body: { readonly sha256: string } & Record<string, unknown>) =>
     deferredRequest(
       () => readArtifactShownRisks(baseUrl, actor, body.sha256),
       (shownRisks) =>

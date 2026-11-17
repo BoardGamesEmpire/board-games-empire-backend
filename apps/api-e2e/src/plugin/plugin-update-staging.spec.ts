@@ -1,8 +1,9 @@
-import { AuthType, PluginLifecycleEventType, type Plugin } from '@bge/database';
+import { AuthType, PluginLifecycleEventType, ResourceType, type Plugin } from '@bge/database';
 import { createActors, pollUntil, type Actors, type SessionActor } from '@bge/testing-e2e';
 import type { PluginManifest, PluginManifestOverrides } from '@boardgamesempire/plugin-manifest';
 import { join } from 'node:path';
 import request from 'supertest';
+import { mintApiKey } from '../support/api-key';
 import { deferredRequest } from '../support/deferred-request';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectErrorEnvelope } from '../support/error-envelope';
@@ -32,7 +33,7 @@ import {
 describe('staging a plugin update from a plugin artifact (#1096)', () => {
   const baseUrl = requireBaseUrl(process.env);
   const PLUGINS_PATH = '/api/plugins';
-  const { upload, install } = artifactRoutes(baseUrl);
+  const { upload, readBack, install } = artifactRoutes(baseUrl);
 
   let db: TestDatabase;
   let actors: Actors;
@@ -142,13 +143,17 @@ describe('staging a plugin update from a plugin artifact (#1096)', () => {
   };
 
   /**
-   * The plugin's lifecycle rows of one kind, once the listener has written
-   * what the requests so far emitted. The listener writes each row after the
-   * response, so the first row of the kind is awaited, then the server admin
-   * switches the plugin on as a marker and its row is awaited too: a second
-   * row of the kind would have been emitted, and its write begun, before the
-   * marker's. A row later still could only let a count pass that should fail,
-   * never fail one that should pass.
+   * The plugin's lifecycle rows of one kind, once the listener has had its
+   * chance to write what the requests so far emitted. The listener writes
+   * each row after the response, so the first row of the kind is awaited,
+   * then the server admin switches the plugin on as a marker and its row is
+   * awaited too: a second row of the kind would have been emitted, and its
+   * insert started, before the marker's. Started is not finished: the
+   * listener writes each row on its own, with nothing ordering the commits,
+   * so a duplicate whose insert is still running when the marker's commits
+   * goes uncounted. A miss can only let a count pass that should fail, never
+   * fail one that should pass, so this catches a duplicate in practice
+   * without proving there is none.
    */
   const settledLifecycleRows = async (actor: SessionActor, slug: string, event: PluginLifecycleEventType) => {
     const { id: pluginId } = await pluginRow(slug);
@@ -485,6 +490,38 @@ describe('staging a plugin update from a plugin artifact (#1096)', () => {
 
     expectErrorEnvelope(refused, { status: 410, code: 'PLUGIN_UPDATE_TOMBSTONED' });
     expect(stagedColumnsOf(await pluginRow(first.slug))).toEqual(NOTHING_STAGED);
+  });
+
+  // The artifact routes gate on a type-level manage Plugin, which a key passes
+  // whatever plugin its scope names, and the receiver checks only that the
+  // key's owner is a server admin. The update block describes the installed
+  // plugin, its denials included, so it waits on that plugin's ceiling.
+  it('an artifact posted or read through a key scoped to another plugin carries no update block (#1096)', async () => {
+    const admin = await actors.admin();
+    const first = await installFirstVersion(admin);
+    const other = await installFirstVersion(admin);
+    const next = await nextVersion(first, WAITS_FOR_APPROVAL);
+    await upload(admin, next).expect(200);
+    const keyFor = async (slug: string) =>
+      mintApiKey(baseUrl, db.client, admin, {
+        slugs: ['manage:plugin'],
+        resourceType: ResourceType.Plugin,
+        resourceId: (await pluginRow(slug)).id,
+      });
+    const [elsewhere, here] = [await keyFor(other.slug), await keyFor(first.slug)];
+
+    const readElsewhere = await readBack(elsewhere, next.sha256).expect(200);
+    const postedElsewhere = await upload(elsewhere, next).expect(200);
+    const readHere = await readBack(here, next.sha256).expect(200);
+    const postedHere = await upload(here, next).expect(200);
+
+    // Null, as for a slug nobody installed; the rest is the artifact's own.
+    expect(readElsewhere.body.update).toBeNull();
+    expect(postedElsewhere.body.update).toBeNull();
+    expect(readElsewhere.body.artifact.sha256).toBe(next.sha256);
+    expect(readHere.body.update).toMatchObject({ activeVersion: '1.2.0', refusal: null });
+    expect(readHere.body.update.changes.serverGating).toBe(true);
+    expect(postedHere.body.update).toEqual(readHere.body.update);
   });
 
   it('the staging route refuses an actor without manage Plugin (#1096)', async () => {

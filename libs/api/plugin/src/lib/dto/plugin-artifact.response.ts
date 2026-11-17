@@ -369,7 +369,8 @@ export class PluginArtifactResponseDto {
     nullable: true,
     description:
       'What staging the plugin artifact as an update of the installed plugin with its slug would do. Null when ' +
-      'no living plugin has the slug: none was installed, or it was uninstalled.',
+      'no living plugin has the slug (none was installed, or it was uninstalled), or when the caller may not ' +
+      'manage that plugin, as for an API key whose scope names another plugin.',
   })
   update!: ArtifactUpdateDto | null;
 }

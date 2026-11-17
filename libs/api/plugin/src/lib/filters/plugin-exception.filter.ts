@@ -446,8 +446,9 @@ function buildRenderers(): RendererMap {
 
   // Another plugin artifact became active while the update was being staged,
   // and its version may be the same number, so the comparison is stale (#1096).
-  // The copy says that another update became active, which version is active
-  // now, and that staging again compares the update with what is active.
+  // The copy says that the active plugin artifact changed, by another update or
+  // a reinstall, which version is active now, and that staging again compares
+  // the update with what is active.
   renders(PluginUpdateActiveArtifactMovedError, (exception) => ({
     status: Http.Conflict,
     message: t('errors.plugin.update_active_artifact_moved', {
