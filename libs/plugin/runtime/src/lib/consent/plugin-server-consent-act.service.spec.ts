@@ -473,8 +473,8 @@ describe('PluginServerConsentActService', () => {
 
     it('does not replay the transaction when Postgres picks it as a deadlock victim (#1336)', async () => {
       // The server act takes the plugin row and then the grant rows in
-      // permission order, the order activation takes them in, so it carries
-      // no deadlock retry: an aborted act reaches the caller as it is.
+      // permission order, the order activation takes them in, and an aborted
+      // act reaches the caller as it is (#1152).
       const victim = deadlock();
       db.$transaction.mockImplementationOnce(() => Promise.reject(victim));
 

@@ -177,9 +177,9 @@ export class PluginConsentPresentationService {
    * approval screen needs: which checks approval will seed (`pending` at
    * server scope), which are already covered, and which a durable denial
    * blocks. Checks that moved consent scope are classified at their NEW
-   * scope, with the principal that now owns them: the decision at the old
+   * scope, with the consent unit that now owns them: the decision at the old
    * scope is kept and confers nothing once the move is activated (#1152), so
-   * a moved check reads `pending` unless that principal holds a decision at
+   * a moved check reads `pending` unless that unit holds a decision at
    * the new scope: a pre-consent it gave on this staged consent surface, or
    * a decision kept from an earlier manifest that requested it there.
    */

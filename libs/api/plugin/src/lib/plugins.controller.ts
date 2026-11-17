@@ -324,7 +324,8 @@ export class PluginsController {
     summary: 'Uninstall a plugin (tombstone)',
     description:
       'Purges all consent (grants and the declared-permission catalog — reinstall is fresh consent), retains the row ' +
-      'and unit configuration unless purgeData is true, and clears any staged update. The loaded module keeps running ' +
+      'and unit configuration unless purgeData is true, and clears any staged update. Every household and user unit ' +
+      'is switched off, so each is switched on again after a reinstall. The loaded module keeps running ' +
       'until restart but is no longer served; restartRequired records that.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
@@ -545,7 +546,7 @@ export class PluginsController {
       "and the staged manifest's " +
       'consent surface localized for the requester. Approving deletes no consent decision: one on a removed or ' +
       'no longer requested permission is kept and confers nothing until a later update requests the permission ' +
-      'at its scope again. deniedRequiredSlugs lists the server-scope permissions the ' +
+      'at its consent scope. deniedRequiredSlugs lists the server-scope permissions the ' +
       'update requires that the Server unit denied: approving grants them. unitCoverage gives, for the household ' +
       'and the user scope, switchedOn (units with the plugin switched on) and covered (those of them approving ' +
       'would ask nothing of, such as a household that already accepted the staged update); the rest are told ' +

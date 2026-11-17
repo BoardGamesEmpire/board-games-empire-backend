@@ -58,9 +58,10 @@ export const FK_PLUGIN_LOCK = 'SELECT p.id FROM plugins p WHERE p.id = $1 FOR KE
  * slug that has no grant row yet.
  *
  * Its only lock on the plugin row is the `FOR KEY SHARE` its foreign key
- * takes. A row lock on a plugin's grant rows covers the rows that exist, and
- * a `FOR UPDATE` matching zero rows locks nothing, so this insert walks
- * straight past a holder with every EXISTING grant row for the plugin locked.
+ * takes. A row lock on a plugin's consent decisions covers the rows that
+ * exist, and a `FOR UPDATE` matching zero rows locks nothing, so this insert
+ * walks straight past a holder with every EXISTING consent decision for the
+ * plugin locked.
  * That is not a defect: it is why every writer of a consent decision claims
  * the plugin row before it writes (#398, #1336), and why every decision is
  * written by upsert, whose insert waits for one in flight on the same row and

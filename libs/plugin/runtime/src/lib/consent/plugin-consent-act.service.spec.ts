@@ -311,10 +311,6 @@ describe('PluginConsentActService', () => {
       order.push('unit read');
       return Promise.resolve(householdRow);
     }) as never);
-    db.householdPlugin.create.mockImplementation((({ data }: { data: Partial<HouseholdPlugin> }) => {
-      order.push('unit');
-      return Promise.resolve(makeHouseholdRow(data));
-    }) as never);
     db.householdPlugin.update.mockImplementation((({ data }: { data: Partial<HouseholdPlugin> }) => {
       order.push('unit');
       // Prisma leaves a column whose value is `undefined` as it is.
@@ -372,7 +368,6 @@ describe('PluginConsentActService', () => {
   const expectNothingWritten = () => {
     expect(db.pluginConsentAct.create).not.toHaveBeenCalled();
     expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
-    expect(db.householdPlugin.create).not.toHaveBeenCalled();
     expect(db.householdPlugin.update).not.toHaveBeenCalled();
     expect(db.householdPlugin.upsert).not.toHaveBeenCalled();
     expect(db.userPlugin.upsert).not.toHaveBeenCalled();
@@ -475,7 +470,6 @@ describe('PluginConsentActService', () => {
       // racing switch-on's insert left.
       expect(upsert.update).toEqual({ enabled: true, config: undefined });
       expect(upsert.update['config']).toBeUndefined();
-      expect(db.householdPlugin.create).not.toHaveBeenCalled();
     });
 
     it("classifies the unit's decisions only under the plugin-row claim, so the plan judges the manifest the claim pinned (#1150, #1152)", async () => {
@@ -645,7 +639,6 @@ describe('PluginConsentActService', () => {
       // A unit already switched on, with no document supplied, needs no
       // write: the document it holds passed the config gate (#323, #1151).
       expect(db.householdPlugin.upsert).not.toHaveBeenCalled();
-      expect(db.householdPlugin.create).not.toHaveBeenCalled();
       expect(db.householdPlugin.update).not.toHaveBeenCalled();
       expect(result).toEqual(expect.objectContaining({ changed: true, switchedOff: false, unit: householdRow }));
       expect(emitted().map(({ event }) => event.constructor)).toEqual([
@@ -992,6 +985,50 @@ describe('PluginConsentActService', () => {
             ]),
           }),
         }),
+      });
+    });
+
+    it('a staged review that changes a kept decision writes it under the staged act, so it goes with the staging if that is rejected (#1152)', async () => {
+      // The staged update requests again a permission the unit refused under
+      // an earlier manifest, and activation kept that refusal. Granting it
+      // changes the decision, so it is written, and its row names this act,
+      // which names the staging: nothing records the earlier refusal to put
+      // back, so a rejection of the staging deletes it as a pre-consent.
+      const KEPT = 'read:game:public';
+      const stagedWithKept = buildPluginManifest({
+        version: '1.3.0',
+        scope: 'household',
+        permissions: {
+          declares: ['manage:digest'],
+          checks: [
+            ...activeChecks,
+            { slug: KEPT, required: false, reason: { en: 'Lists public games.' }, consentScope: 'household' },
+          ],
+        },
+      });
+      db.plugin.findUnique.mockResolvedValue(
+        stagedPlugin({ pendingManifestJson: stagedWithKept as unknown as Prisma.JsonValue }),
+      );
+      claim = claimRow({ pending_sha256: STAGED_SHA, pending_staging_id: 'staging-a' });
+      householdRow = makeHouseholdRow();
+      standing = [standingGrant(KEPT, PluginGrantStatus.Denied, { actId: 'act-earlier' })];
+
+      const result = await service.review({
+        ...householdToggle,
+        manifestSha256: STAGED_SHA,
+        answers: [granted(KEPT)],
+      });
+
+      expect(result.changed).toBe(true);
+      expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(1);
+      expect(db.pluginGrant.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ permissionSlug: KEPT, status: PluginGrantStatus.Granted, actId: 'act-1' }),
+          update: expect.objectContaining({ status: PluginGrantStatus.Granted, actId: 'act-1' }),
+        }),
+      );
+      expect(db.pluginConsentAct.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ kind: 'Review', manifestSha256: STAGED_SHA, stagingId: 'staging-a' }),
       });
     });
 

@@ -46,11 +46,11 @@ export type UpdateEscalation =
   /**
    * A permission requested by both versions changed which unit consents to
    * it. Not a widening or a narrowing but a DIFFERENT consent act: a
-   * decision at `from` was made by a principal that no longer owns it, and
-   * it is kept and confers nothing while the permission is requested at
-   * `to` (#1152). At `to` the permission is consented by that scope's units,
-   * and a decision kept there from an earlier manifest that requested it at
-   * `to` counts again, with no act.
+   * decision at `from` was made by a consent unit at a scope that no longer
+   * owns it, and it is kept and confers nothing while the permission is
+   * requested at `to` (#1152). At `to` the permission is consented by that
+   * scope's units, and a decision kept there from an earlier manifest that
+   * requested it at `to` counts again, with no act.
    */
   | {
       readonly kind: 'consent-scope-changed';

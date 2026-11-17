@@ -1100,6 +1100,63 @@ describe('consent acts (#1150)', () => {
       );
     });
 
+    it('rejecting a staged update whose active manifest no longer validates still deletes its pre-consents, and nothing else (#1152)', async () => {
+      // A rejection finds the pre-consents by the staging their acts name and
+      // reads no manifest, so an active manifest that cannot be read changes
+      // neither what it deletes nor what it keeps.
+      const admin = await actors.admin();
+      const { owner, householdId, unit } = await household();
+      const plugin = await arrangeStagedPlugin(
+        [MANAGE_DIGEST_CHECK, HOUSEHOLD_OPTIONAL],
+        [MANAGE_DIGEST_CHECK, HOUSEHOLD_OPTIONAL, HOUSEHOLD_REQUIRED],
+      );
+
+      await sendSwitchOn(
+        baseUrl,
+        owner,
+        unit,
+        plugin.slug,
+        switchOnBody(await readConsentSurface(baseUrl, owner, unit, plugin.slug), {
+          [HOUSEHOLD_OPTIONAL.slug]: PluginGrantStatus.Granted,
+        }),
+      ).expect(200);
+
+      const staged = await readConsentSurface(baseUrl, owner, unit, plugin.slug, { staged: true });
+      const reviewed = await sendReview(
+        baseUrl,
+        owner,
+        unit,
+        plugin.slug,
+        reviewBody(staged, { [HOUSEHOLD_REQUIRED.slug]: PluginGrantStatus.Granted }),
+      ).expect(200);
+
+      const decisionsBefore = await decisionsAt(plugin.id, PluginGrantScope.Household, householdId);
+      const inForce = decisionsBefore.find((decision) => decision.permissionSlug === HOUSEHOLD_OPTIONAL.slug);
+
+      expect(decisionsBefore).toEqual([
+        expect.objectContaining({ permissionSlug: HOUSEHOLD_REQUIRED.slug, actId: reviewed.body.act.id }),
+        expect.objectContaining({ permissionSlug: HOUSEHOLD_OPTIONAL.slug }),
+      ]);
+      expect(await pluginAbilitySlugsForHousehold(db.client, plugin.id, householdId)).toContain(
+        HOUSEHOLD_OPTIONAL.slug,
+      );
+
+      await db.client.plugin.update({ where: { id: plugin.id }, data: { manifestJson: { nonsense: true } } });
+
+      // The active manifest no longer validates: reading the plugin's
+      // abilities, which validates it again, refuses.
+      await expect(pluginAbilitySlugsForHousehold(db.client, plugin.id, householdId)).rejects.toThrow(
+        /stored manifest failed re-validation/,
+      );
+
+      await reject(admin, plugin.slug).expect(200);
+
+      // The pre-consent went, and the decision given under the active
+      // manifest is the same row, written by the same act.
+      expect(await decisionsAt(plugin.id, PluginGrantScope.Household, householdId)).toEqual([inForce]);
+      expect(inForce).toMatchObject({ status: PluginGrantStatus.Granted });
+    });
+
     it('a staged review records the staging it answered, and an act on the active manifest records none (#1152)', async () => {
       const { owner, householdId, unit } = await household();
       const plugin = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK], [MANAGE_DIGEST_CHECK, HOUSEHOLD_REQUIRED]);

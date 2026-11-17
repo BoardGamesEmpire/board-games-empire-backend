@@ -1,5 +1,5 @@
-import { PluginGrantScope, PluginGrantStatus, riskCovers, type RiskLevel } from '@bge/database';
-import { CONSENT_SCOPE_TO_GRANT_SCOPE } from '../grants/consent-scope.map';
+import { PluginGrantScope, PluginGrantStatus, requestedByManifest, riskCovers, type RiskLevel } from '@bge/database';
+import { requestedPermissionsOf } from '../manifest/active-manifest';
 import type {
   GrantComparisonView,
   ManifestComparisonView,
@@ -82,31 +82,30 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
 
   // Risk escalation: only decisions that EXIST can be escalated against, and
   // only where the next manifest requests the permission at the decision's
-  // own scope. Activation keeps every consent decision (#1152), so a decision
-  // on a permission the next manifest does not request, or requests at
-  // another scope, is kept, confers nothing while that holds (the bound
-  // applied when abilities are read, #577), and escalates nothing: routing
-  // it would ask re-consent of units that are not the deciding principal and
-  // cannot become one, since a consent act answers only the permissions its
-  // unit's consent scope owns (#1150, #1336), and a Server decision there
-  // would gate approval on a permission approval does not write.
-  const nextScopeBySlug = new Map(
-    input.next.checks.map((check) => [check.canonicalSlug, CONSENT_SCOPE_TO_GRANT_SCOPE[check.consentScope]]),
-  );
+  // own scope, by the manifest bound the ability read applies
+  // (`requestedByManifest`, #577). Activation keeps every consent decision
+  // (#1152), so a decision on a permission the next manifest does not
+  // request, or requests at another scope, is kept, confers nothing while
+  // that holds, and escalates nothing: routing it would ask re-consent of
+  // units that do not decide it and cannot come to decide it, since a consent
+  // act answers only the permissions its unit's consent scope owns (#1150,
+  // #1336), and a Server decision there would gate approval on a permission
+  // approval does not write.
+  //
+  // A permission that moved scope is bound the same way at its new scope: a
+  // decision there, kept from an earlier manifest that requested it there or
+  // given as a pre-consent, counts again on activation, so a stale one
+  // escalates here. A move asks the new scope's units only when the
+  // permission is required, so an optional move leaves this the only thing
+  // that tells a unit holding the stale decision (#1152); a required move
+  // names the permission in its re-consent list once, however many
+  // escalations it raises.
+  const requestedByNext = requestedByManifest(requestedPermissionsOf(input.next.checks));
 
   for (const grant of input.grants) {
-    if (nextScopeBySlug.get(grant.permissionSlug) !== grant.scopeType) {
+    if (!requestedByNext(grant)) {
       continue;
     }
-
-    // A permission that moved scope is no exception: a decision at its new
-    // scope, kept from an earlier manifest that requested it there or given
-    // as a pre-consent, counts again on activation, so a stale one escalates
-    // like any other. A move asks the new scope's units only when the
-    // permission is required, and an optional move would otherwise leave a
-    // unit holding the stale decision never told (#1152). A required move
-    // names the permission in its re-consent list once, however many
-    // escalations it raises.
 
     // A Denied row confers no authority, so a risk reclassification on it
     // escalates nothing: there is no consent to re-take, nothing to gate

@@ -17,10 +17,11 @@ import {
  *
  * Every unit transaction opens by re-reading the plugin row `FOR SHARE`, and the
  * comment on `assertStillLiving` in `plugin-unit-lifecycle.service.ts` states
- * exactly why that mode and not `FOR UPDATE`: concurrent unit writes for the same plugin must proceed
- * in parallel while an uninstall is blocked. That is a claim about two cells of
- * the Postgres lock-conflict matrix, and until now it was asserted nowhere —
- * the unit suite mocks `$queryRaw` and pins the statement's text.
+ * exactly why that mode and not `FOR UPDATE`: concurrent unit writes for the
+ * same plugin must proceed in parallel while an uninstall is blocked. That is a
+ * claim about two cells of the Postgres lock-conflict matrix, and until now it
+ * was asserted nowhere — the unit suite mocks `$queryRaw` and pins the
+ * statement's text.
  *
  * Three modes are in play and only one of them is correct:
  *

@@ -1,5 +1,10 @@
-import { PluginScope, type PluginActiveManifest, type PluginConfigVerdict } from '@bge/database';
-import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
+import {
+  PluginScope,
+  type PluginActiveManifest,
+  type PluginConfigVerdict,
+  type PluginRequestedPermission,
+} from '@bge/database';
+import type { PluginConsentScopeValue, PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
 import { PluginConfigSchemaUnusableError, type PluginConfigIssue } from '../config/config-schema.errors';
 import type { PluginConfigSchemaService, PluginConfigValidationInput } from '../config/plugin-config-schema.service';
 import { CONSENT_SCOPE_TO_GRANT_SCOPE } from '../grants/consent-scope.map';
@@ -36,6 +41,22 @@ export function configDocumentIssues(
 }
 
 /**
+ * The permissions a manifest's checks request, each at the decision scope its
+ * consent scope maps to: what `requestedByManifest` from `@bge/database` takes.
+ * The active manifest's bound and the update comparison's risk loop both build
+ * it here, so the manifest bound has one statement however it is asked (#577,
+ * #1152).
+ */
+export function requestedPermissionsOf(
+  checks: readonly { readonly canonicalSlug: string; readonly consentScope: PluginConsentScopeValue }[],
+): PluginRequestedPermission[] {
+  return checks.map((check) => ({
+    slug: check.canonicalSlug,
+    scopeType: CONSENT_SCOPE_TO_GRANT_SCOPE[check.consentScope],
+  }));
+}
+
+/**
  * The runtime's half of the dormancy rule and the manifest bound (#577,
  * #1151): what `@bge/database` needs from one re-validated active manifest.
  * Built here because only the runtime can re-validate a manifest and compile
@@ -54,10 +75,7 @@ export function activeManifestOf(
   const target = { slug: manifest.slug, version: manifest.version, schema: manifest.config.schema };
 
   return {
-    requested: validated.permissionChecks.map((check) => ({
-      slug: check.canonicalSlug,
-      scopeType: CONSENT_SCOPE_TO_GRANT_SCOPE[check.consentScope],
-    })),
+    requested: requestedPermissionsOf(validated.permissionChecks),
     householdSurface: MANIFEST_SCOPE_TO_PRISMA[manifest.scope] !== PluginScope.Server,
     judgeConfig(document: unknown): PluginConfigVerdict {
       try {

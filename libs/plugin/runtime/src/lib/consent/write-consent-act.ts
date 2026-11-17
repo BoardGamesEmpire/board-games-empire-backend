@@ -24,7 +24,7 @@ export interface ConsentActWrite {
   readonly decisions: readonly ConsentActDecision[];
   /** The rows read before the write, by permission slug; a missing slug had no decision. */
   readonly standingBySlug: ReadonlyMap<string, PluginGrant>;
-  readonly actorId: string | null;
+  readonly actorId: string;
   readonly decidedAt: Date;
   readonly correlationId: string | null;
 }

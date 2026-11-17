@@ -333,7 +333,7 @@ describe('consent decisions under concurrency (#360)', () => {
       const surface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
       const body = switchOnBody(surface, { [HOUSEHOLD_CHECK.slug]: PluginGrantStatus.Granted });
 
-      const [first, other] = await withBarrier(async (barrier) => {
+      const [ownerResponse, secondResponse] = await withBarrier(async (barrier) => {
         const { holder } = barrier;
 
         // The plugin row held as activation holds it, so both switch-ons queue
@@ -362,7 +362,7 @@ describe('consent decisions under concurrency (#360)', () => {
       });
 
       // Asserted as a pair rather than chained, so a 500 reports its status.
-      expect([first.status, other.status]).toEqual([200, 200]);
+      expect([ownerResponse.status, secondResponse.status]).toEqual([200, 200]);
 
       const units = await db.client.householdPlugin.findMany({
         where: { householdId: household.id, pluginId: plugin.id },
@@ -542,19 +542,18 @@ describe('consent decisions under concurrency (#360)', () => {
   });
 
   describe('an approval against a server toggle', () => {
-    it('a toggle on an optional server-scope permission lands before the approval, which leaves it alone, or is refused stale after it (#1336)', async () => {
+    it('a toggle on an optional server-scope permission that reaches the plugin row after an approval is refused stale, and the approval grants the permission under its own act (#1336)', async () => {
       // The approval grants every optional server-scope permission the Server
-      // unit has not decided, and leaves one it has decided as it stands. A
-      // server admin's refusal racing the approval must therefore end one of
-      // two ways: it commits first, under the active sha, and the approval
-      // reads it and leaves it; or the approval commits first, granting the
-      // permission under its own act, and the toggle, whose claim waits behind
-      // activation's FOR UPDATE, finds the sha moved and is refused. What must
-      // never happen is a refusal recorded under a sha the plugin no longer
-      // holds, or an approval that overwrote a refusal it could have read.
-      // Two admins, for the reason the household case above gives: one session
-      // issuing both requests leaves "something above the service serialized
-      // them" as a live explanation for a green run.
+      // unit has not decided. The row is held as activation holds it and the
+      // approval is queued ahead of the toggle, and Postgres grants a queued
+      // row lock in arrival order, so this case has one outcome: the approval
+      // commits first, granting the permission under its own act, and the
+      // toggle, whose claim waits behind activation's FOR UPDATE, finds the
+      // sha it named moved and is refused. What must never happen is a refusal
+      // recorded under a sha the plugin no longer holds. Two admins, for the
+      // reason the household case above gives: one session issuing both
+      // requests leaves "something above the service serialized them" as a
+      // live explanation for a green run.
       const admin = await actors.admin();
       const approver = await actors.admin();
       const staged = manifestWith('1.3.0', [MANAGE_DIGEST_CHECK, POLICY_READ_CHECK, HOUSEHOLD_CHECK]);
@@ -612,7 +611,6 @@ describe('consent decisions under concurrency (#360)', () => {
         return { toggle: await refusal.settled, activation: await approval.settled };
       });
 
-      // The approval wins either way: a toggle never refuses it.
       expect(activation.status).toBe(200);
 
       const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
@@ -633,29 +631,12 @@ describe('consent decisions under concurrency (#360)', () => {
       const approvalAct = acts.find((act) => act.kind === PluginConsentActKind.UpdateApprove);
 
       expect(approvalAct?.id).toBe(activation.body.act.id);
-
-      // Either legal outcome is accepted, and neither is required.
-      if (toggle.status === 200) {
-        // The refusal landed first, under the active sha, and the approval
-        // read it inside its transaction and left it as it stands.
-        const toggleAct = acts.find((act) => act.kind === PluginConsentActKind.Toggle);
-
-        expect(acts).toHaveLength(2);
-        expect(toggleAct?.id).toBe(toggle.body.act.id);
-        expect(toggleAct?.manifestSha256).toBe(activeSha);
-        // Ahead of the approval's act, not after it: both stamps are the api's
-        // clock, so a toggle whose claim waited behind the activation would
-        // carry the later one.
-        expect(toggleAct?.createdAt.getTime()).toBeLessThan(approvalAct?.createdAt.getTime() ?? 0);
-        expect(decision).toMatchObject({ status: PluginGrantStatus.Denied, actId: toggleAct?.id });
-      } else {
-        // The approval landed first and granted the undecided permission; the
-        // toggle then found the sha it named no longer installed.
-        expect(toggle.status).toBe(409);
-        expect(toggle.body.code).toBe('PLUGIN_CONSENT_ACT_STALE');
-        expect(acts).toHaveLength(1);
-        expect(decision).toMatchObject({ status: PluginGrantStatus.Granted, actId: approvalAct?.id });
-      }
+      // The toggle found the sha it named no longer installed, so the only act
+      // on record is the approval's, and the permission it granted stands.
+      expect(toggle.status).toBe(409);
+      expect(toggle.body.code).toBe('PLUGIN_CONSENT_ACT_STALE');
+      expect(acts).toHaveLength(1);
+      expect(decision).toMatchObject({ status: PluginGrantStatus.Granted, actId: approvalAct?.id });
     });
   });
 });

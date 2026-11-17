@@ -231,14 +231,24 @@ export class PluginLifecycleService {
         select: { userId: true },
       });
 
-      // Every retained unit enablement is switched off, its configuration
-      // kept, so nothing reads as on for a plugin that is not installed and a
-      // reinstall finds every unit off: a unit that wants the plugin back
-      // switches it on, a consent act under the sha then installed (#1328).
-      // No unit is announced on its own: the uninstall event names the units
-      // the reads above found on. Under `purgeData` the unit enablements are
-      // deleted below instead.
-      if (input.purgeData !== true) {
+      await tx.pluginGrant.deleteMany({ where: { pluginId: plugin.id } });
+      await tx.pluginPermission.deleteMany({ where: { pluginId: plugin.id } });
+      // A data-gateway plugin's DataGateway row is disabled and kept, even
+      // under purgeData: the game sources imported through it hang on it, and
+      // a reinstall enables it again (#1083). Other categories have no row.
+      await disablePluginDataGatewayRow(tx, plugin.id);
+
+      // Every unit enablement has one of two fates. Under `purgeData` it is
+      // deleted with its configuration. Otherwise it is kept and switched off,
+      // its configuration kept, so nothing reads as on for a plugin that is
+      // not installed and a reinstall finds every unit off: a unit that wants
+      // the plugin back switches it on, a consent act under the sha then
+      // installed (#1328). Either way no unit is announced on its own: the
+      // uninstall event names the units the reads above found on.
+      if (input.purgeData === true) {
+        await tx.householdPlugin.deleteMany({ where: { pluginId: plugin.id } });
+        await tx.userPlugin.deleteMany({ where: { pluginId: plugin.id } });
+      } else {
         await tx.householdPlugin.updateMany({
           where: { pluginId: plugin.id, enabled: true },
           data: { enabled: false },
@@ -247,18 +257,6 @@ export class PluginLifecycleService {
           where: { pluginId: plugin.id, enabled: true },
           data: { enabled: false },
         });
-      }
-
-      await tx.pluginGrant.deleteMany({ where: { pluginId: plugin.id } });
-      await tx.pluginPermission.deleteMany({ where: { pluginId: plugin.id } });
-      // A data-gateway plugin's DataGateway row is disabled and kept, even
-      // under purgeData: the game sources imported through it hang on it, and
-      // a reinstall enables it again (#1083). Other categories have no row.
-      await disablePluginDataGatewayRow(tx, plugin.id);
-
-      if (input.purgeData === true) {
-        await tx.householdPlugin.deleteMany({ where: { pluginId: plugin.id } });
-        await tx.userPlugin.deleteMany({ where: { pluginId: plugin.id } });
       }
 
       const row = await tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });

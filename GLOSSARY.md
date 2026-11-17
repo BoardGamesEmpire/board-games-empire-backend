@@ -1189,7 +1189,7 @@ A grant given when the permission carried a lower risk level than it does now. I
 _Avoid_: stale risk, risk-stale grant
 
 **Revocation**:
-A consent decision undone without anyone choosing to undo it: the staged update a pre-consent was given to was rejected. An update never revokes a decision: one the active manifest does not request is kept and confers nothing, and confers again if a later manifest requests it. A decision is never revoked because whoever gave it left or lost their role. The permission goes back to awaiting an answer, and the reason is kept.
+A consent decision undone without anyone choosing to undo it: the staged update a pre-consent was given to was rejected. An update never revokes a decision: one the active manifest does not request at its consent scope is kept and confers nothing, and confers again if a later manifest requests it there. A decision is never revoked because whoever gave it left or lost their role. The permission goes back to awaiting an answer, and the reason is kept.
 _Avoid_: invalidation; durable denial (a refusal someone chose)
 
 **Categorical exclusion**:

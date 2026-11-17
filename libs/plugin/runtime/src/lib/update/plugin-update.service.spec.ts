@@ -1712,8 +1712,8 @@ describe('PluginUpdateService', () => {
        * The writes are upserts under the plugin row's `FOR UPDATE`, which every
        * writer of a server-scope decision claims first, so no decision can
        * commit between the transaction's read and its writes: a unique
-       * violation has nothing to explain, and retrying it would replay a write
-       * that fails the same way.
+       * violation has nothing to explain, and the aborted approval reaches the
+       * caller as it is (#1152).
        */
       it.each([
         [
@@ -1729,7 +1729,7 @@ describe('PluginUpdateService', () => {
           () => uniqueViolation({ fields: ['plugin_id', 'slug'], constraintName: 'plugin_permissions_slug_key' }),
         ],
         ['carrying no identifiable constraint', () => uniqueViolationWithoutMeta()],
-      ])('propagates a unique violation %s without retrying (#1336)', async (_label, makeError) => {
+      ])('propagates a unique violation %s as it is (#1336, #1152)', async (_label, makeError) => {
         db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
         const failure = makeError();
         db.pluginGrant.upsert.mockRejectedValue(failure);

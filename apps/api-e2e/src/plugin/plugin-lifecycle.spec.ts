@@ -183,7 +183,7 @@ describe('plugin lifecycle (server-level)', () => {
       });
     };
 
-    it('tombstones the row, purges consent, clears the staged update, and reports the affected units', async () => {
+    it('marks the plugin uninstalled, purges consent, clears the staged update, switches every unit enablement off keeping its configuration, and reports the affected units (#1328)', async () => {
       const admin = await actors.admin();
       const owner = await actors.user();
       const { household } = await actors.householdWithMembers({ owner });

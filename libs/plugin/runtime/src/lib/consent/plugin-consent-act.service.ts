@@ -1,6 +1,6 @@
 import { AuditContextService } from '@bge/actor-context';
 import type { HouseholdPlugin, Plugin, PluginConsentAct, PluginScope, UserPlugin } from '@bge/database';
-import { DatabaseService, lockLiveHousehold, PluginConsentActKind, PluginGrantScope, Prisma } from '@bge/database';
+import { DatabaseService, lockLiveHousehold, PluginConsentActKind, PluginGrantScope, type Prisma } from '@bge/database';
 import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
