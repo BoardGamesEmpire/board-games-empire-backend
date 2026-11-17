@@ -1,5 +1,5 @@
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import type { StartedRedisContainer } from '@testcontainers/redis';
+import type { StartedTestContainer } from 'testcontainers';
 
 /**
  * The containers `global-setup` starts and `global-teardown` stops. Jest runs
@@ -8,7 +8,7 @@ import type { StartedRedisContainer } from '@testcontainers/redis';
  */
 export interface E2EGlobalState {
   readonly postgres?: StartedPostgreSqlContainer;
-  readonly redis?: StartedRedisContainer;
+  readonly redis?: StartedTestContainer;
 }
 
 interface E2EGlobalCarrier {

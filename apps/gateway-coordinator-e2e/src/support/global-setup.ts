@@ -4,11 +4,26 @@
 import { WORKSPACE_ROOT } from '@bge/testing-e2e/child-process';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
-import type { StartedRedisContainer } from '@testcontainers/redis';
-import { RedisContainer } from '@testcontainers/redis';
 import { spawnSync } from 'node:child_process';
+import type { StartedTestContainer } from 'testcontainers';
+import { GenericContainer, Wait } from 'testcontainers';
 import { POSTGRES_IMAGE, REDIS_IMAGE, redisEnvOverrides } from './e2e-env';
 import { setE2EGlobalState } from './global-state';
+
+const REDIS_PORT = 6379;
+
+/**
+ * Starts stock Redis as a plain container. The workspace dropped
+ * `@testcontainers/redis` when `apps/api-e2e` moved to its own server
+ * profiles (#462); this is all the coordinator's suite used from it: the
+ * port, and the log line that says Redis accepts connections.
+ */
+function startRedis(): Promise<StartedTestContainer> {
+  return new GenericContainer(REDIS_IMAGE)
+    .withExposedPorts(REDIS_PORT)
+    .withWaitStrategy(Wait.forLogMessage('Ready to accept connections'))
+    .start();
+}
 
 /**
  * Runs the Prisma CLI against the harness's database, as `apps/api-e2e` does:
@@ -55,7 +70,7 @@ function runPrisma(args: readonly string[], databaseUrl: string): void {
  */
 export default async function globalSetup(): Promise<void> {
   let postgres: StartedPostgreSqlContainer | undefined;
-  let redis: StartedRedisContainer | undefined;
+  let redis: StartedTestContainer | undefined;
 
   try {
     console.log(`[e2e] starting ${POSTGRES_IMAGE} (testcontainers)...`);
@@ -63,14 +78,14 @@ export default async function globalSetup(): Promise<void> {
     const databaseUrl = postgres.getConnectionUri();
 
     console.log(`[e2e] starting ${REDIS_IMAGE} (testcontainers)...`);
-    redis = await new RedisContainer(REDIS_IMAGE).start();
+    redis = await startRedis();
 
     process.env['DATABASE_URL'] = databaseUrl;
     // The migration credential too, to the same database: a developer's `.env`
     // may set one for their own database, and Nx loads `.env` into this
     // process.
     process.env['DATABASE_MIGRATION_URL'] = databaseUrl;
-    Object.assign(process.env, redisEnvOverrides(redis.getHost(), redis.getPort()));
+    Object.assign(process.env, redisEnvOverrides(redis.getHost(), redis.getMappedPort(REDIS_PORT)));
 
     runPrisma(['migrate', 'deploy'], databaseUrl);
     runPrisma(['db', 'seed'], databaseUrl);
