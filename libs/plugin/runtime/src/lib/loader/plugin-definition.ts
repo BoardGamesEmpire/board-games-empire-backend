@@ -18,6 +18,10 @@ export interface LoadedPlugin {
   readonly scope: PluginScope;
   /** The artifact the plugin was loaded from, as the directory it ran from names it (#1094). */
   readonly sha256: PluginArtifactSha256;
+
+  /** The plugin row's `installedAt` as the loader read it: which install this is (#1083). */
+  readonly installedAt: Date;
+
   readonly manifest: PluginManifest;
   readonly instance: unknown;
 }

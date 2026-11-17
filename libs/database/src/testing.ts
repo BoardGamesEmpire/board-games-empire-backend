@@ -6,4 +6,5 @@
  * wrong home for them regardless; #305 tracks extracting a leaf test library.
  */
 
+export * from './lib/utils/plugin-load.fixtures';
 export * from './lib/utils/prisma-error.fixtures';

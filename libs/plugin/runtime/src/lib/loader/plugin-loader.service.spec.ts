@@ -40,7 +40,7 @@ describe('PluginLoaderService', () => {
   let emitter: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
   let systemActorScope: jest.Mocked<Pick<SystemActorScope, 'run'>>;
   let pluginActorScope: jest.Mocked<Pick<PluginActorScope, 'run'>>;
-  let recorder: jest.Mocked<Pick<PluginLoadRecorder, 'record'>>;
+  let recorder: jest.Mocked<Pick<PluginLoadRecorder, 'record' | 'markReady'>>;
   let loader: PluginLoaderService;
 
   const context: PluginContext = {} as PluginContext;
@@ -55,6 +55,7 @@ describe('PluginLoaderService', () => {
       scope: PluginScope.Server,
       enabled: true,
       installedSha256: 'a'.repeat(64),
+      installedAt: new Date('2026-10-01T00:00:00Z'),
       manifestJson: { slug: 'demo-sink' },
       config: { apiKey: 'k' },
       loadFailed: false,
@@ -102,7 +103,7 @@ describe('PluginLoaderService', () => {
     pluginActorScope = {
       run: jest.fn(<T>(_pluginId: string, _unit: unknown, _reason: string, fn: () => T): T => fn()),
     } as unknown as jest.Mocked<Pick<PluginActorScope, 'run'>>;
-    recorder = { record: jest.fn().mockResolvedValue(undefined) };
+    recorder = { record: jest.fn().mockResolvedValue(undefined), markReady: jest.fn().mockResolvedValue(undefined) };
     validateMock.mockReturnValue({
       manifest,
       permissionChecks: [],
@@ -162,6 +163,17 @@ describe('PluginLoaderService', () => {
           instance,
         }),
       );
+    });
+
+    it('registers the plugin with the install it loaded, as the row names it (#1083)', async () => {
+      const row = makePluginRow({ installedAt: new Date('2026-11-02T08:30:00Z') });
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
+      importer.importModule.mockResolvedValue({ default: jest.fn().mockReturnValue({}) });
+
+      await loader.loadAllEnabled();
+
+      expect(registry.resolve(row.slug).installedAt).toEqual(new Date('2026-11-02T08:30:00Z'));
     });
 
     it('primes the config snapshot BEFORE invoking the factory', async () => {
@@ -298,8 +310,53 @@ describe('PluginLoaderService', () => {
       // could remove it in the meantime.
       expect(atRecord).toEqual([{ resolved: 0, imported: 0, registered: false }]);
       expect(recorder.record).toHaveBeenCalledTimes(1);
-      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'));
+      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'), new Date('2026-10-01T00:00:00Z'));
       expect(registry.resolve(row.slug).sha256).toBe(sha('a'));
+    });
+
+    it('marks the record ready once the plugin is registered, and not before (#1083)', async () => {
+      const row = await loadDemo();
+      // Captured, not asserted, inside the mock, as above.
+      const atReady: boolean[] = [];
+      recorder.markReady.mockImplementation(() => {
+        atReady.push(registry.has(row.slug));
+        return Promise.resolve();
+      });
+
+      await loader.loadAllEnabled();
+
+      expect(recorder.markReady).toHaveBeenCalledTimes(1);
+      expect(recorder.markReady).toHaveBeenCalledWith(row.slug);
+      expect(atReady).toEqual([true]);
+    });
+
+    it('never marks ready a load that fails, which keeps its record (#1083)', async () => {
+      const row = await loadDemo();
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      const checked = buildLoader(
+        buildPluginModuleOptions({ productChecks: { [PluginCategory.FeedbackSink]: () => 'not a sink' } }),
+      );
+
+      await checked.loadAllEnabled();
+
+      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'), row.installedAt);
+      expect(recorder.markReady).not.toHaveBeenCalled();
+      error.mockRestore();
+    });
+
+    it('a failed readiness write is logged and neither fails the load nor quarantines it (#1083)', async () => {
+      const row = await loadDemo();
+      recorder.markReady.mockRejectedValue(new Error('db down'));
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+
+      await loader.loadAllEnabled();
+
+      expect(registry.isEnabled(row.slug)).toBe(true);
+      expect(configService.evict).not.toHaveBeenCalled();
+      expect(db.plugin.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(expect.stringContaining(`'${row.slug}'`));
+      error.mockRestore();
     });
 
     it('a failed record is logged and neither retried nor quarantined: the heartbeat writes it again (#1094)', async () => {
@@ -326,7 +383,7 @@ describe('PluginLoaderService', () => {
 
       await loader.loadAllEnabled();
 
-      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'));
+      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'), row.installedAt);
       expect(db.plugin.update).toHaveBeenCalled();
     });
 
@@ -337,7 +394,7 @@ describe('PluginLoaderService', () => {
 
       await loader.loadAllEnabled();
 
-      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'));
+      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'), row.installedAt);
       expect(db.plugin.update).toHaveBeenCalled();
     });
 

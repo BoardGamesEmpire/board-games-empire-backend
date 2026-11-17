@@ -128,7 +128,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
     // resolver refuses it.
     const sha256 = parsePluginArtifactSha256(plugin.installedSha256);
     if (sha256 !== null) {
-      await this.recordLoad(plugin.slug, sha256);
+      await this.recordLoad(plugin.slug, sha256, plugin.installedAt);
     }
 
     const directory = await this.directories.resolve(plugin.slug, plugin.installedSha256);
@@ -180,11 +180,17 @@ export class PluginLoaderService implements OnApplicationBootstrap {
         category: plugin.category,
         scope: plugin.scope,
         sha256: directory.sha256,
+        installedAt: plugin.installedAt,
         manifest,
         instance,
       },
       { enabled: true },
     );
+
+    // Only now does the record say the load completed (#1083): until here a
+    // failure keeps the record, and with it the directory, but no other
+    // process may read the plugin as loaded.
+    await this.markReady(plugin.slug);
 
     // The code now running is the activated version — the disk check above
     // proved it — so a clean load is what clears both self-healing flags,
@@ -213,13 +219,29 @@ export class PluginLoaderService implements OnApplicationBootstrap {
    * never stops the load: it is logged, and the recorder's next heartbeat
    * writes the record again.
    */
-  private async recordLoad(slug: string, sha256: PluginArtifactSha256): Promise<void> {
+  private async recordLoad(slug: string, sha256: PluginArtifactSha256, installedAt: Date): Promise<void> {
     try {
-      await this.recorder.record(slug, sha256);
+      await this.recorder.record(slug, sha256, installedAt);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(
         `Failed to record the artifact plugin '${slug}' runs; the next heartbeat writes it again: ${message}`,
+      );
+    }
+  }
+
+  /**
+   * Records that the plugin is loaded (#1083). Its failure never fails the
+   * load, which has already succeeded: it is logged, and the recorder's next
+   * heartbeat writes it again.
+   */
+  private async markReady(slug: string): Promise<void> {
+    try {
+      await this.recorder.markReady(slug);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `Failed to record that plugin '${slug}' is loaded; the next heartbeat writes it again: ${message}`,
       );
     }
   }

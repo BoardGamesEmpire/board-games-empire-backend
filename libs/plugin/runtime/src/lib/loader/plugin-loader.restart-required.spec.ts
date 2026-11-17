@@ -97,7 +97,10 @@ describe('PluginLoaderService — restart-required and tombstones', () => {
       warnings: [],
     });
 
-    const recorder = { record: jest.fn().mockResolvedValue(undefined) };
+    const recorder = {
+      record: jest.fn().mockResolvedValue(undefined),
+      markReady: jest.fn().mockResolvedValue(undefined),
+    };
     const contextFactory = { create: jest.fn().mockReturnValue(context) };
     const configService = { prime: jest.fn(), evict: jest.fn() };
     const systemActorScope = { run: jest.fn(<T>(_reason: string, fn: () => T): T => fn()) };
