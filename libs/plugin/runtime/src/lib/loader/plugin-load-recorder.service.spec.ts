@@ -7,7 +7,6 @@ import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixtu
 import {
   PLUGIN_LOAD_HEARTBEAT_MS,
   PLUGIN_LOAD_SHUTDOWN_WAIT_MS,
-  PLUGIN_LOAD_STALE_MS,
   PluginLoadRecorder,
 } from './plugin-load-recorder.service';
 
@@ -42,9 +41,8 @@ describe('PluginLoadRecorder', () => {
     );
   });
 
-  it('refreshes every minute and calls a record stale after five (#1094)', () => {
+  it('refreshes every minute (#1094)', () => {
     expect(PLUGIN_LOAD_HEARTBEAT_MS).toBe(60_000);
-    expect(PLUGIN_LOAD_STALE_MS).toBe(5 * 60_000);
   });
 
   it('gives each recorder its own process id (#1094)', () => {
@@ -421,6 +419,47 @@ describe('PluginLoadRecorder', () => {
     db.pluginProcessLoad.deleteMany.mockRejectedValue(new Error('db down'));
 
     await expect(recorder.beforeApplicationShutdown()).resolves.toBeUndefined();
+  });
+
+  // The coordinator withdraws its records before `app.close()`, which stops
+  // its gRPC server before the shutdown hooks run; the hook then runs too.
+  describe('withdrawing the load records ahead of shutdown (#1083)', () => {
+    it("deletes this process's records once, however often it is called, the shutdown hook included (#1083)", async () => {
+      await recorder.record('demo-sink', sha('a'), installedAt);
+
+      await recorder.withdrawLoadRecords();
+      await recorder.withdrawLoadRecords();
+      await recorder.beforeApplicationShutdown();
+
+      expect(scope.run).toHaveBeenCalledWith('plugin-load-shutdown', expect.any(Function));
+      expect(db.pluginProcessLoad.deleteMany).toHaveBeenCalledTimes(1);
+      expect(db.pluginProcessLoad.deleteMany).toHaveBeenCalledWith({ where: { processId: recorder.processId } });
+    });
+
+    it('writes nothing after the records are withdrawn (#1083)', async () => {
+      await recorder.record('demo-sink', sha('a'), installedAt);
+      await recorder.withdrawLoadRecords();
+      db.pluginProcessLoad.upsert.mockClear();
+
+      await recorder.record('demo-sink', sha('a'), installedAt);
+      await recorder.markReady('demo-sink');
+      await recorder.heartbeat();
+
+      expect(db.pluginProcessLoad.upsert).not.toHaveBeenCalled();
+      expect(db.pluginProcessLoad.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('a failed delete is swallowed (#1083)', async () => {
+      db.pluginProcessLoad.deleteMany.mockRejectedValue(new Error('db down'));
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+
+      try {
+        await expect(recorder.withdrawLoadRecords()).resolves.toBeUndefined();
+        expect(error).toHaveBeenCalledWith(expect.stringContaining('db down'));
+      } finally {
+        error.mockRestore();
+      }
+    });
   });
 
   // A process that reads these rows takes a fresh one as loaded, and no

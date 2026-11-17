@@ -809,7 +809,7 @@ describe("The gateway registry and a plugin DataGateway's row (#1083)", () => {
     await expect(service.resolve(GW, Search)).resolves.toBe(driver);
   });
 
-  it('connect still connects a remote row', async () => {
+  it('connect still connects a remote row (#1083)', async () => {
     table.seed({ id: 'remote' });
     const driver = makeDriver();
     factory.create.mockResolvedValueOnce(driver);

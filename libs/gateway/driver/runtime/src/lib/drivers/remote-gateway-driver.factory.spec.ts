@@ -80,6 +80,32 @@ describe('RemoteGatewayDriverFactory', () => {
     expect(pingWithRetry).toHaveBeenLastCalledWith(serviceClient, 'bgg', expect.anything());
   });
 
+  // The gateway worker's ping of the coordinator retries only while the
+  // coordinator can't be reached: a ping it answered was counted there.
+  it('passes the ping retry rule it is given to the ping (#1083)', async () => {
+    const serviceClient = { ping: jest.fn() };
+    jest.spyOn(ClientProxyFactory, 'create').mockReturnValue(makeProxy(serviceClient) as never);
+    (pingWithRetry as jest.Mock).mockResolvedValue({ status: 'SERVING' });
+    const shouldRetryPing = jest.fn(() => false);
+
+    await factory.create(options, { shouldRetryPing });
+
+    const [client, gatewayId, , , , rule] = (pingWithRetry as jest.Mock).mock.lastCall;
+    expect(client).toBe(serviceClient);
+    expect(gatewayId).toBe('bgg');
+    expect(rule).toBe(shouldRetryPing);
+  });
+
+  it('pings with the default retry rule when it is given none (#1083)', async () => {
+    const serviceClient = { ping: jest.fn() };
+    jest.spyOn(ClientProxyFactory, 'create').mockReturnValue(makeProxy(serviceClient) as never);
+    (pingWithRetry as jest.Mock).mockResolvedValue({ status: 'SERVING' });
+
+    await factory.create(options, { interceptors: [jest.fn()] });
+
+    expect(pingWithRetry).toHaveBeenLastCalledWith(serviceClient, 'bgg', expect.anything());
+  });
+
   // A remote DataGateway is dialled with nothing added to its calls.
   it('builds the client with no channel options when it is given no interceptors (#1083)', async () => {
     const create = jest.spyOn(ClientProxyFactory, 'create').mockReturnValue(makeProxy({ ping: jest.fn() }) as never);

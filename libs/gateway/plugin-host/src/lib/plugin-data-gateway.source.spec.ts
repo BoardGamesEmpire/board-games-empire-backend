@@ -179,7 +179,7 @@ describe('PluginDataGatewaySource', () => {
     // The gateway registry asked whether the plugin was loaded before it
     // asked for the driver. A refusal says the copy went in between, which
     // the registry counts as no failure of the DataGateway's.
-    it('refuses to build from a copy loaded before a reinstall', async () => {
+    it('refuses to build from a copy loaded before a reinstall (#1083)', async () => {
       const factory = jest.fn(() => new InMemoryGatewayDriver());
       load(factory);
 
@@ -218,7 +218,7 @@ describe('PluginDataGatewaySource', () => {
       ]);
     });
 
-    it('awaits an async driver factory', async () => {
+    it('awaits an async driver factory (#1083)', async () => {
       load(async () => {
         await settle();
 
@@ -234,7 +234,7 @@ describe('PluginDataGatewaySource', () => {
 
     // The gateway registry asks again after it disposes a driver, or after a
     // first interview fails: each driver it holds is one the plugin built for it.
-    it('a second build calls the factory again', async () => {
+    it('a second build calls the factory again (#1083)', async () => {
       const factory = jest.fn(() => new InMemoryGatewayDriver());
       load(factory);
 
@@ -248,7 +248,7 @@ describe('PluginDataGatewaySource', () => {
     // The registry counts a rejected build as a failed connect, toward
     // disabling the DataGateway. A non-driver it was handed instead would
     // fail only in the first interview, which is not counted.
-    it("fails the build when the factory returns something that isn't a driver", async () => {
+    it("fails the build when the factory returns something that isn't a driver (#1083)", async () => {
       const notDrivers: Record<string, unknown> = {
         nothing: undefined,
         'a driver with an operation missing': { ...driverShape(), listMechanics: undefined },

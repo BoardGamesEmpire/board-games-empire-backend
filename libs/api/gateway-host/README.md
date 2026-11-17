@@ -15,6 +15,10 @@ copy:
   hands it to the driver. A driver's error that carries a gRPC status code
   (`unsupportedOperation` gives UNIMPLEMENTED) goes out as that status. It
   disposes of the driver when the app shuts down.
+- **`relayDriverAnswer(answer)`** — a driver's answer as a controller relays
+  it: an error that carries a gRPC status code goes out as that status, any
+  other error as it is. `DataGatewayController` relays through it, and so does
+  the coordinator when it answers for a plugin DataGateway (#1083).
 - **`createDriverLogger(context)`** and **`nodeUpstreamFetch`** — the logger
   and the `UpstreamFetch` an app hands its driver: Nest's `Logger`, and Node's
   `fetch`.

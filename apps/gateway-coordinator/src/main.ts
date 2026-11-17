@@ -14,6 +14,7 @@ import { nestLoggerFromPino } from '@bge/logger';
 import * as path from 'node:path';
 import { AppModule } from './app/app.module';
 import coordinatorConfig from './app/configuration/coordinator.config';
+import { withdrawLoadRecordsBeforeClose } from './app/lib/withdraw-load-records-before-close';
 
 const onBootstrapError = (): void => void otel.shutdown().finally(() => process.exit(1));
 
@@ -33,7 +34,11 @@ async function bootstrap(): Promise<void> {
     protoDir: path.join(__dirname, 'proto'),
     bootstrapLogger,
     // Coordinator is OTel-instrumented: sequence app.close() → otel.shutdown().
-    registerShutdown: (app) => registerShutdownHandlers(app, otel, bootstrapLogger),
+    // Its plugin load records are withdrawn before app.close(), which stops
+    // the gRPC server before the shutdown hooks run: a gateway worker then
+    // refuses its plugin DataGateways instead of dialling a server that is
+    // gone (#1083).
+    registerShutdown: (app) => registerShutdownHandlers(withdrawLoadRecordsBeforeClose(app), otel, bootstrapLogger),
     onBootstrapError,
   });
 }

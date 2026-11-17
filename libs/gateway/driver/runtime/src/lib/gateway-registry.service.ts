@@ -293,6 +293,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
   // one. Nothing is cached mid-build, so this is what tells a routing
   // decision that a build is of a newer install than its row names (#1083).
   private readonly installBeingBuilt = new Map<string, Date>();
+
   // DataGateways whose connection config changed since this process cached a
   // driver for them. Their stored answers came through the old connection,
   // so the next connect interviews them again, whatever the answers' age and

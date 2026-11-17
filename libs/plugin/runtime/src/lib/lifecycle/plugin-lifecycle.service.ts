@@ -1,5 +1,6 @@
 import type { PluginUnit } from '@bge/actor-context';
-import { DatabaseService, hasLivePluginLoad, Prisma, roleLoading, type Plugin } from '@bge/database';
+import type { Plugin } from '@bge/database';
+import { DatabaseService, hasLivePluginLoad, Prisma, roleLoading } from '@bge/database';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigValidationError } from '../config/config-schema.errors';

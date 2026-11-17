@@ -35,9 +35,9 @@ import { PLUGIN_MODULE_IMPORTER, type PluginModuleImporter } from './plugin-modu
  * category's product check, and registers it with `PluginInstanceRegistry`.
  *
  * Per-plugin isolation is the load-failure contract: a plugin whose
- * directory, manifest, entrypoint, import, factory, or product check fails,
- * whose product its category's check refuses (#1083), or whose artifact
- * directory holds another version than the row's, is QUARANTINED
+ * directory, manifest, entrypoint, import or factory fails, whose product its
+ * category's product check refuses (#1083), or whose artifact directory
+ * holds another version than the row's, is QUARANTINED
  * — `LoadFailed` provenance recorded, force-disabled in the DB (a
  * quarantined plugin must not auto-retry on every boot; re-enabling is an
  * explicit admin decision), logged at error level — and boot continues.

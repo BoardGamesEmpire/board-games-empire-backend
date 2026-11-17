@@ -34,10 +34,13 @@ export class RemoteGatewayDriverFactory {
    * worker's plugin driver source dials the coordinator, which refuses a call
    * that names no DataGateway or no actor (#1083). Its interceptors run, in
    * the order given, on every call the client makes, so on the ping here too.
+   * Its `shouldRetryPing` says which errors of the connect ping are worth
+   * another try; without it, every error is, as for a remote DataGateway
+   * that isn't up yet.
    */
   async create(
     options: GatewayConnectionOptions,
-    channel?: { interceptors?: Interceptor[] },
+    channel?: { interceptors?: Interceptor[]; shouldRetryPing?: (error: unknown) => boolean },
   ): Promise<RemoteGatewayDriver> {
     const url = `${options.connectionUrl}:${options.connectionPort}`;
 
@@ -76,7 +79,10 @@ export class RemoteGatewayDriverFactory {
     const client = proxy.getService<GatewayServiceClient>('GatewayService');
 
     try {
-      const response = await pingWithRetry(client, options.gatewayId, this.logger);
+      // The attempts and delay are left at their defaults.
+      const response = channel?.shouldRetryPing
+        ? await pingWithRetry(client, options.gatewayId, this.logger, undefined, undefined, channel.shouldRetryPing)
+        : await pingWithRetry(client, options.gatewayId, this.logger);
 
       this.logger.log(
         `Successfully connected to gateway ${options.gatewayId} at ${url}. Response: ${JSON.stringify(response)}`,

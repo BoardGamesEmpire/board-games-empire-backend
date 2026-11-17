@@ -72,7 +72,7 @@ describe('hasLivePluginLoad', () => {
     await expect(hasLivePluginLoad(db, plugin, 'coordinator', now)).resolves.toBe(false);
   });
 
-  it('asks the database once', async () => {
+  it('asks the database once (#1083)', async () => {
     table.rows = [record()];
 
     await hasLivePluginLoad(db, plugin, 'coordinator', now);

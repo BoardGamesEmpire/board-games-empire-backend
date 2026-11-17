@@ -165,7 +165,7 @@ describe("a plugin DataGateway across its plugin's reinstall and update", () => 
       });
     });
 
-    it('keeps serving after an update is activated, until it restarts', async () => {
+    it('keeps serving after an update is activated, until it restarts (#1083)', async () => {
       const served = await searchBothWays();
       expect(served.coordinator).toEqual(theGameThenDone(FIRST_BUILD));
       expect(served.gateway).toEqual(theGameThenDone(FIRST_BUILD));

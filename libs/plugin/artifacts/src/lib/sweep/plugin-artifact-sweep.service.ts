@@ -1,6 +1,7 @@
 import { SystemActorScope } from '@bge/actor-context';
-import { DatabaseService } from '@bge/database';
-import { MODULE_OPTIONS_TOKEN, PLUGIN_LOAD_STALE_MS, type PluginModuleOptions } from '@bge/plugin';
+import { DatabaseService, PLUGIN_LOAD_STALE_MS } from '@bge/database';
+import type { PluginModuleOptions } from '@bge/plugin';
+import { MODULE_OPTIONS_TOKEN } from '@bge/plugin';
 import { parsePluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { PLUGIN_SLUG_PATTERN } from '@boardgamesempire/plugin-manifest';
 import {

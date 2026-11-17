@@ -1,13 +1,13 @@
 import { AuditContextService, SystemActorScope } from '@bge/actor-context';
 import { createOutboundActorMetadataInterceptor } from '@bge/actor-context-transport';
-import { AuthType, DatabaseService, hasLivePluginLoad } from '@bge/database';
+import { AuthType, DatabaseService, hasLivePluginLoad, PluginCategory, roleLoading } from '@bge/database';
 import type { PluginDriverSource, RoutedPlugin } from '@bge/gateway-registry';
 import { RemoteGatewayDriverFactory } from '@bge/gateway-registry';
 import { BGE_GATEWAY_ID_HEADER } from '@bge/shared';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { aroundDriverCalls } from '@boardgamesempire/gateway-driver-contract';
 import type { Interceptor, InterceptorOptions, NextCall } from '@grpc/grpc-js';
-import { InterceptingCall } from '@grpc/grpc-js';
+import { InterceptingCall, status } from '@grpc/grpc-js';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { isIPv6 } from 'node:net';
@@ -36,6 +36,16 @@ function createGatewayIdMetadataInterceptor(gatewayId: string): Interceptor {
       },
     });
 }
+
+/**
+ * Whether a failed connect ping to the coordinator is worth another try: only
+ * when the coordinator can't be reached yet (#1083). A ping the coordinator
+ * answered with an error has been through its routing decision, or through a
+ * build of the plugin's driver that it already counted against the
+ * DataGateway, and asking again would make it build and count again.
+ */
+const coordinatorUnreachable = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && 'code' in error && error.code === status.UNAVAILABLE;
 
 /**
  * The gateway worker's plugin driver source (#1083). The gateway worker loads
@@ -68,7 +78,7 @@ export class PluginGatewayRelaySource implements PluginDriverSource {
    * not loaded for the one decision that asked, and keeps the driver it holds.
    */
   isLoaded(plugin: RoutedPlugin): Promise<boolean> {
-    return hasLivePluginLoad(this.db, plugin, 'coordinator');
+    return hasLivePluginLoad(this.db, plugin, roleLoading(PluginCategory.DataGateway));
   }
 
   /**
@@ -98,7 +108,10 @@ export class PluginGatewayRelaySource implements PluginDriverSource {
           connectionPort: this.config.getOrThrow<number>('coordinatorClient.port'),
           authType: AuthType.None,
         },
-        { interceptors: [createOutboundActorMetadataInterceptor(), createGatewayIdMetadataInterceptor(gatewayId)] },
+        {
+          interceptors: [createOutboundActorMetadataInterceptor(), createGatewayIdMetadataInterceptor(gatewayId)],
+          shouldRetryPing: coordinatorUnreachable,
+        },
       );
 
     // `run` keeps the scope through the factory's waits between tries of the

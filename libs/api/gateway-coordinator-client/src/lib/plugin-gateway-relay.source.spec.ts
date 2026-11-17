@@ -10,7 +10,7 @@ import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contrac
 import { DATA_GATEWAY_DRIVER_OPERATIONS } from '@boardgamesempire/gateway-driver-contract';
 import type * as proto from '@boardgamesempire/proto-gateway';
 import type { InterceptingCall, Interceptor, InterceptorOptions, NextCall } from '@grpc/grpc-js';
-import { Metadata } from '@grpc/grpc-js';
+import { Metadata, status } from '@grpc/grpc-js';
 import type { DynamicModule } from '@nestjs/common';
 import type { TestingModule } from '@nestjs/testing';
 import { Test } from '@nestjs/testing';
@@ -295,6 +295,44 @@ describe('PluginGatewayRelaySource', () => {
       factory.create.mockRejectedValue(new Error('14 UNAVAILABLE: No connection established'));
 
       await expect(source.build(GW, routedPlugin())).rejects.toThrow('14 UNAVAILABLE: No connection established');
+    });
+
+    // A ping the coordinator answered with an error went through its routing
+    // decision, or through a build of the plugin's driver it already counted:
+    // asking again would make it build and count again.
+    describe('the connect ping tries again only while the coordinator cannot be reached (#1083)', () => {
+      /** The rule the source hands the factory for whether a failed connect ping is tried again. */
+      const pingRetryRule = async (): Promise<(error: unknown) => boolean> => {
+        factory.create.mockResolvedValue(relayDriver());
+        await source.build(GW, routedPlugin());
+
+        const [, channel] = factory.create.mock.calls[0] as Parameters<RemoteGatewayDriverFactory['create']>;
+        const rule = channel?.shouldRetryPing;
+
+        if (!rule) {
+          throw new Error('The source handed the factory no ping retry rule');
+        }
+
+        return rule;
+      };
+
+      /** An error as a gRPC client reports a call that ended with `code`. */
+      const grpcError = (code: status): Error => Object.assign(new Error(`${code} ${status[code]}`), { code });
+
+      it('tries again when the coordinator is unavailable (#1083)', async () => {
+        const rule = await pingRetryRule();
+
+        expect(rule(grpcError(status.UNAVAILABLE))).toBe(true);
+      });
+
+      it.each(['FAILED_PRECONDITION', 'NOT_FOUND', 'UNKNOWN'] as const)(
+        'does not try again when the coordinator answered %s (#1083)',
+        async (code) => {
+          const rule = await pingRetryRule();
+
+          expect(rule(grpcError(status[code]))).toBe(false);
+        },
+      );
     });
 
     // The gateway registry disposes a driver it drops, and the gRPC channel

@@ -118,7 +118,7 @@ describe('a plugin DataGateway the coordinator runs', () => {
     expect(row).toMatchObject({ enabled: true, loadFailed: false, restartRequired: false });
   });
 
-  it('does not load a plugin of another category', async () => {
+  it('does not load a plugin of another category (#1083)', async () => {
     const row = await db().plugin.findUniqueOrThrow({ where: { slug: OTHER_CATEGORY_SLUG } });
     expect(row).toMatchObject({ enabled: true, loadFailed: false, loadError: null });
 
@@ -281,7 +281,7 @@ describe('a plugin DataGateway the coordinator runs', () => {
     await expect(coordinator().service.reinterviewGateway(plugin.gatewayId)).resolves.toMatchObject({ success: true });
   });
 
-  it('stops routing when the row is disabled', async () => {
+  it('stops routing when the row is disabled (#1083)', async () => {
     await db().dataGateway.update({ where: { id: plugin.gatewayId }, data: { enabled: false } });
 
     try {

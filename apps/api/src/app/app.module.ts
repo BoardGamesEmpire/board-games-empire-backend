@@ -218,8 +218,8 @@ import { apiPluginModuleOptions } from './plugin-module.options';
     // above. With zero installed plugins the boot pass is a clean no-op; a
     // missing root only surfaces per-plugin through the quarantine path.
     // It loads every plugin category but the data-gateway plugins, which the
-    // coordinator loads and serves (#1083); the api still installs, updates
-    // and switches them, under the same plugins root.
+    // coordinator loads and serves (#1083); the api installs, updates and
+    // switches them, under the same plugins root.
     PluginModule.forRootAsync({
       inject: [ConfigService],
       useFactory: apiPluginModuleOptions,

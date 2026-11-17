@@ -158,7 +158,7 @@ describe('PluginGatewayController', () => {
 
   // Without the id nothing says whose driver should answer, so no driver is
   // asked for, and none is built to find out.
-  it('refuses a call with no DataGateway id', async () => {
+  it('refuses a call with no DataGateway id (#1083)', async () => {
     const calls: Record<string, { metadata?: Metadata }> = {
       'metadata that names none': { metadata: metadataNaming() },
       'an empty id': { metadata: metadataNaming('') },
@@ -178,7 +178,7 @@ describe('PluginGatewayController', () => {
     expect(registry.pluginDriver).not.toHaveBeenCalled();
   });
 
-  it("answers FAILED_PRECONDITION when the plugin isn't loaded", async () => {
+  it("answers FAILED_PRECONDITION when the plugin isn't loaded (#1083)", async () => {
     registry.pluginDriver.mockRejectedValue(new GatewayRoutingRefusedError(GW, 'plugin_not_loaded'));
 
     const refusal = await rejection(answer('searchGames', { correlationId: 'c', query: 'catan' }));
@@ -221,7 +221,7 @@ describe('PluginGatewayController', () => {
   // A driver can't depend on Nest, so it says which gRPC status a failure is
   // with a code on the error (#1082). The gateway worker reads the same
   // status from a plugin DataGateway as from a remote one.
-  it("relays a driver's UNIMPLEMENTED as that status", async () => {
+  it("relays a driver's UNIMPLEMENTED as that status (#1083)", async () => {
     driver.listMechanics.mockReturnValue(unsupportedOperation('ListMechanics'));
 
     const refusal = await rejection(answer('listMechanics', { correlationId: 'c' }));

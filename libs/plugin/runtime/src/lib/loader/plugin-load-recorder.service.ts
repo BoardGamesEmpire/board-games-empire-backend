@@ -7,10 +7,6 @@ import { createId } from '@paralleldrive/cuid2';
 import type { PluginModuleOptions } from '../plugin-module.options';
 import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 
-// Defined beside `hasLivePluginLoad`, which reads the same window; exported
-// here too so this lib's consumers keep importing it from `@bge/plugin`.
-export { PLUGIN_LOAD_STALE_MS } from '@bge/database';
-
 /** How often a process refreshes the heartbeat of its load records (#1094). */
 export const PLUGIN_LOAD_HEARTBEAT_MS = 60_000;
 
@@ -43,6 +39,13 @@ interface LoadRecord {
  * is registered, refreshed every minute, deleted at a clean shutdown. The
  * install marker and readiness are what a process that doesn't load the
  * plugin reads to learn whether one that does has it loaded (#1083).
+ *
+ * A process whose `app.close()` stops serving before the shutdown hooks run
+ * calls `withdrawLoadRecords()` itself, ahead of `app.close()`. The
+ * coordinator does: Nest closes a microservice's gRPC server first, and for
+ * as long as the hooks then take, a gateway worker reading a ready record
+ * would dial a server that is gone and count each failure against the plugin
+ * DataGateway (#1083).
  *
  * The recorder also holds every record in memory, and the heartbeat writes a
  * missing one again. A row can go missing while the process still runs its
@@ -85,6 +88,9 @@ export class PluginLoadRecorder implements BeforeApplicationShutdown {
 
   /** The ticks and writes in flight, which shutdown waits for before it deletes the rows. */
   private readonly inFlight = new Set<Promise<unknown>>();
+
+  /** The withdrawal once begun, so a second call waits for it instead of deleting again. */
+  private withdrawal?: Promise<void>;
 
   constructor(
     private readonly db: DatabaseService,
@@ -205,15 +211,28 @@ export class PluginLoadRecorder implements BeforeApplicationShutdown {
   }
 
   /**
-   * `apps/api/src/main.ts` handles its own signals and calls `app.close()`,
-   * and `app.close()` is what runs this hook; no `enableShutdownHooks()` is
-   * needed.
+   * `app.close()` runs this hook; `apps/api/src/main.ts` handles its own
+   * signals and calls it, and no `enableShutdownHooks()` is needed. The api
+   * relies on the hook alone: its HTTP server closes after the hooks run. A
+   * process that called `withdrawLoadRecords()` before `app.close()` has
+   * nothing left to do here, and this waits for that withdrawal.
+   */
+  async beforeApplicationShutdown(): Promise<void> {
+    await this.withdrawLoadRecords();
+  }
+
+  /**
+   * Withdraws this process's plugin load records: what a clean shutdown
+   * does, callable ahead of `app.close()` by a process that stops serving
+   * before its shutdown hooks run (see the class comment). Safe to call more
+   * than once: every call after the first waits for the first, and nothing
+   * is deleted twice.
    *
    * A row left behind misleads twice: the sweep keeps its artifact
    * directory, and a process that reads the rows (the gateway worker routing
    * to the coordinator, the api deciding a cold enable, #1083) takes this
    * plugin as loaded by a process that has stopped, for up to
-   * `PLUGIN_LOAD_STALE_MS`, with no process left to correct it. So shutdown
+   * `PLUGIN_LOAD_STALE_MS`, with no process left to correct it. So this
    * first stops everything that writes (`record`, `markReady` and the
    * heartbeat do nothing from here on, and the records in memory are
    * dropped), then waits for the tick and writes already in flight, and only
@@ -226,7 +245,13 @@ export class PluginLoadRecorder implements BeforeApplicationShutdown {
    * the same way. The database pool ends in `onApplicationShutdown`, after
    * this resolves, so the writes waited for finish on a live pool.
    */
-  async beforeApplicationShutdown(): Promise<void> {
+  withdrawLoadRecords(): Promise<void> {
+    this.withdrawal ??= this.withdraw();
+
+    return this.withdrawal;
+  }
+
+  private async withdraw(): Promise<void> {
     this.stopping = true;
     this.loads.clear();
     await this.settleInFlight();
