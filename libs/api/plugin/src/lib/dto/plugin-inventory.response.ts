@@ -16,6 +16,7 @@ import type {
   PluginInventoryFeature,
   PluginInventoryIdentity,
   PluginInventoryPendingUpdate,
+  PluginInventoryServerUnitState,
   PluginInventoryUnitState,
   PluginProvenance,
   PluginUnitInventoryEntry,
@@ -129,34 +130,6 @@ export class PluginInventoryIdentityDto implements PluginInventoryIdentity {
   manifestUnreadable!: boolean;
 }
 
-/** The server viewpoint (`read:plugin`): identity plus the operational picture. */
-export class PluginInventoryEntryDto extends PluginInventoryIdentityDto implements PluginInventoryEntry {
-  @ApiProperty({ description: 'Currently ACTIVE manifest version' })
-  version!: string;
-
-  @ApiProperty({ description: 'The server-level kill switch; unit enablement layers under it' })
-  enabled!: boolean;
-
-  @ApiProperty({
-    type: Date,
-    nullable: true,
-    description: 'Set only on tombstoned rows, which appear solely when includeUninstalled is requested',
-  })
-  uninstalledAt!: Date | null;
-
-  @ApiProperty({ description: 'An update activated in the DB while the process still runs the prior code' })
-  restartRequired!: boolean;
-
-  @ApiProperty()
-  installedAt!: Date;
-
-  @ApiProperty({ type: PluginProvenanceDto })
-  provenance!: PluginProvenanceDto;
-
-  @ApiProperty({ type: PendingUpdateDto, nullable: true, description: 'Null when no update is staged' })
-  pendingUpdate!: PendingUpdateDto | null;
-}
-
 export class ConsentOutstandingCheckDto implements ConsentOutstandingCheck {
   @ApiProperty({ description: 'The permission slug of the check' })
   slug!: string;
@@ -215,6 +188,80 @@ export class PluginConsentStandingDto implements PluginConsentStanding {
     description: 'Optional checks that confer nothing yet. Each switches its feature off without holding the unit.',
   })
   optionalOff!: ConsentOutstandingCheckDto[];
+}
+
+/**
+ * The Server unit's own standing (#1336). No `anchored` or `enabled`: the
+ * Server unit has no unit enablement, and the Server switch is the entry's
+ * `enabled`.
+ */
+class ServerUnitStateDto implements PluginInventoryServerUnitState {
+  @ApiProperty({
+    enum: PLUGIN_UNIT_STATE_CODES,
+    enumName: 'PluginUnitStateCode',
+    description:
+      "The Server unit's state, a stable code a client can announce or rephrase, the same code " +
+      'GET /plugins/:slug/features reports for the Server unit. off: the Server switch is off, or the plugin is ' +
+      'uninstalled. on: running with every server-scope permission the plugin asks for. review_pending: running ' +
+      'on what was agreed while required server-scope permissions are outstanding, see consent; a server admin ' +
+      'answers them with a review. unavailable: switched on, but the stored manifest cannot be read. Worked out on ' +
+      'every read, never stored.',
+  })
+  state!: PluginUnitStateCode;
+
+  @ApiProperty({
+    enum: PLUGIN_UNIT_DORMANCY_CODES,
+    enumName: 'PluginUnitDormancy',
+    nullable: true,
+    description:
+      'unavailable when the stored manifest cannot be read (manifestUnreadable true); null for every other row. ' +
+      'The Server unit holds no settings document of its own (#697), so no configuration is judged for it and it ' +
+      'never reads needs_configuration. Null for an uninstalled plugin. Worked out on every read, never stored.',
+  })
+  dormancy!: PluginUnitDormancy | null;
+
+  @ApiProperty({
+    type: PluginConsentStandingDto,
+    description:
+      "What the server still owes the plugin for the manifest's server-scope requested permissions, worked out " +
+      'from its consent decisions and the active manifest. Empty when the stored manifest cannot be read, and for ' +
+      'an uninstalled plugin.',
+  })
+  consent!: PluginConsentStandingDto;
+}
+
+/** The server viewpoint (`read:plugin`): identity plus the operational picture. */
+export class PluginInventoryEntryDto extends PluginInventoryIdentityDto implements PluginInventoryEntry {
+  @ApiProperty({ description: 'Currently ACTIVE manifest version' })
+  version!: string;
+
+  @ApiProperty({ description: 'The server-level kill switch; unit enablement layers under it' })
+  enabled!: boolean;
+
+  @ApiProperty({
+    type: Date,
+    nullable: true,
+    description: 'Set only on tombstoned rows, which appear solely when includeUninstalled is requested',
+  })
+  uninstalledAt!: Date | null;
+
+  @ApiProperty({ description: 'An update activated in the DB while the process still runs the prior code' })
+  restartRequired!: boolean;
+
+  @ApiProperty()
+  installedAt!: Date;
+
+  @ApiProperty({ type: PluginProvenanceDto })
+  provenance!: PluginProvenanceDto;
+
+  @ApiProperty({ type: PendingUpdateDto, nullable: true, description: 'Null when no update is staged' })
+  pendingUpdate!: PendingUpdateDto | null;
+
+  @ApiProperty({
+    type: ServerUnitStateDto,
+    description: "The Server unit's state, dormancy and consent standing, worked out on every read (#1336)",
+  })
+  unit!: ServerUnitStateDto;
 }
 
 class UnitStateDto implements PluginInventoryUnitState {

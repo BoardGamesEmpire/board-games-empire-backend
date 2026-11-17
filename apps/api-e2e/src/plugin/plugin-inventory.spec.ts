@@ -1,4 +1,4 @@
-import { PluginScope, ResourceType, type Plugin } from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, PluginScope, ResourceType, RiskLevel, type Plugin } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -6,6 +6,8 @@ import { mintApiKey, type Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { arrangeInventoryPlugin } from './inventory-fixtures';
+import type { Check } from './manifest-checks';
+import { FIXTURE_ACT_ID } from './plugin-row-fixtures';
 
 /**
  * The wire half of #354 — the only plugin reads that answer before a slug is
@@ -33,8 +35,36 @@ describe('installed-plugin inventory (#354)', () => {
     await db.close();
   });
 
-  const arrangePlugin = (row: Record<string, unknown> = {}): Promise<Plugin> =>
-    arrangeInventoryPlugin(db.client, { row });
+  const arrangePlugin = (row: Record<string, unknown> = {}, checks: readonly Check[] = []): Promise<Plugin> =>
+    arrangeInventoryPlugin(db.client, { row, checks });
+
+  /**
+   * REQUIRED at server scope. `read:safe_http_policy` is a seeded core
+   * permission, Medium today; a consent decision recorded below that is a
+   * risk rise, arranged on the decision because the catalog outlives each
+   * test (#1336).
+   */
+  const POLICY_REQUIRED: Check = {
+    slug: 'read:safe_http_policy',
+    required: true,
+    reason: { en: 'Inspects the outbound policy before scheduling digest delivery.' },
+    consentScope: 'server',
+  };
+
+  /** A Server-unit consent decision, arranged on the row. */
+  const seedServerDecision = (pluginId: string, permissionSlug: string, decidedRiskLevel: RiskLevel) =>
+    db.client.pluginGrant.create({
+      data: {
+        pluginId,
+        scopeType: PluginGrantScope.Server,
+        scopeId: '',
+        permissionSlug,
+        status: PluginGrantStatus.Granted,
+        actId: FIXTURE_ACT_ID,
+        decidedAt: new Date(),
+        decidedRiskLevel,
+      },
+    });
 
   /**
    * A plugin a household can hold a unit enablement under. The scope is the
@@ -176,6 +206,63 @@ describe('installed-plugin inventory (#354)', () => {
         displayName: null,
         description: null,
         manifestUnreadable: true,
+      });
+    });
+
+    it("GET /api/plugins lists the Server unit's state and consent standing, and agrees with GET /api/plugins/:slug/features (#1336)", async () => {
+      const admin = await actors.admin();
+      // Granted at Low while the catalog says Medium today: the consent
+      // decision no longer covers, so the Server unit owes a review.
+      const plugin = await arrangePlugin({}, [POLICY_REQUIRED]);
+      await seedServerDecision(plugin.id, `plugin|${plugin.slug}|manage:digest`, RiskLevel.Low);
+      await seedServerDecision(plugin.id, POLICY_REQUIRED.slug, RiskLevel.Low);
+
+      const list = await listServer(admin, '?limit=100').expect(200);
+      const unit = entryFor(list.body, plugin.slug)?.['unit'];
+
+      expect(unit).toEqual({
+        state: 'review_pending',
+        dormancy: null,
+        consent: {
+          outstanding: [
+            expect.objectContaining({ slug: POLICY_REQUIRED.slug, kind: 'risk_raised', riskLevel: RiskLevel.Medium }),
+          ],
+          optionalOff: [],
+        },
+      });
+
+      const features = await request(baseUrl)
+        .get(`/api/plugins/${plugin.slug}/features`)
+        .set(admin.headers)
+        .expect(200);
+      const { state, dormancy, consent } = features.body.featureState;
+
+      expect(unit).toEqual({ state, dormancy, consent });
+
+      const single = await readOne(admin, plugin.slug).expect(200);
+
+      expect(single.body.plugin.unit).toEqual(unit);
+    });
+
+    it('a page holding a plugin whose stored manifest cannot be read still answers 200, and that row reads unavailable with nothing owed (#1336)', async () => {
+      const admin = await actors.admin();
+      const broken = await arrangePlugin();
+      const sound = await arrangePlugin();
+      await db.client.plugin.update({ where: { id: broken.id }, data: { manifestJson: { nonsense: true } } });
+
+      const response = await listServer(admin, '?limit=100').expect(200);
+
+      expect(entryFor(response.body, broken.slug)?.['unit']).toEqual({
+        state: 'unavailable',
+        dormancy: 'unavailable',
+        consent: { outstanding: [], optionalOff: [] },
+      });
+      // The sound row's required manage:digest was never decided, so it owes
+      // that and nothing else: the broken row takes nothing from it.
+      expect(entryFor(response.body, sound.slug)?.['unit']).toMatchObject({
+        state: 'review_pending',
+        dormancy: null,
+        consent: { outstanding: [expect.objectContaining({ kind: 'never_asked' })] },
       });
     });
 

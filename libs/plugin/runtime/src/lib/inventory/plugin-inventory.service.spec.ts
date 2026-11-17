@@ -102,6 +102,7 @@ describe('PluginInventoryService', () => {
   const CEILING: Prisma.PluginWhereInput = { id: { in: ['within-the-ceiling'] } };
 
   let db: MockDatabaseService;
+  let standing: PluginConsentStandingService;
   let service: PluginInventoryService;
   let unitCeiling: jest.MockedFunction<PluginInventoryCeiling>;
   let serverCeiling: jest.MockedFunction<PluginServerInventoryCeiling>;
@@ -116,7 +117,7 @@ describe('PluginInventoryService', () => {
 
     // The real classifier over the mock database, so the standing assertions
     // exercise the consent rule itself rather than a stubbed answer.
-    const standing = new PluginConsentStandingService(
+    standing = new PluginConsentStandingService(
       new PluginConsentCheckClassifier(db as unknown as DatabaseService),
       options,
     );
@@ -131,6 +132,13 @@ describe('PluginInventoryService', () => {
   });
 
   afterEach(() => jest.clearAllMocks());
+
+  /**
+   * The required server-scope permission was granted at Low and its catalog
+   * risk has since risen, so the consent decision no longer covers (#1336).
+   */
+  const raiseManageRisk = () =>
+    db.pluginPermission.findMany.mockResolvedValue([{ slug: MANAGE_CANONICAL, riskLevel: RiskLevel.High }] as never);
 
   describe('listForServer', () => {
     it('reads the rows and the count in ONE RepeatableRead transaction (D-CD)', async () => {
@@ -336,6 +344,88 @@ describe('PluginInventoryService', () => {
         );
       });
     });
+
+    // The Server unit's standing is worked out on the read by the rule the
+    // feature-state read applies to it; the Server switch is its own switch,
+    // so it has no unit enablement to report (#1336).
+    describe("the Server unit's state, dormancy and consent standing (#1336)", () => {
+      it('a switched-on row with every server-scope permission granted reads on and owes nothing', async () => {
+        db.plugin.findMany.mockResolvedValue([row()] as never);
+        db.plugin.count.mockResolvedValue(1 as never);
+
+        const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
+
+        expect(rows[0].unit).toEqual({ state: 'on', dormancy: null, consent: { outstanding: [], optionalOff: [] } });
+      });
+
+      it('a risk-raised server-scope consent decision reads review_pending and lists the permission as risk_raised', async () => {
+        raiseManageRisk();
+        db.plugin.findMany.mockResolvedValue([row()] as never);
+        db.plugin.count.mockResolvedValue(1 as never);
+
+        const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
+
+        expect(rows[0].unit.state).toBe('review_pending');
+        expect(rows[0].unit.dormancy).toBeNull();
+        expect(rows[0].unit.consent.outstanding).toEqual([
+          expect.objectContaining({
+            slug: MANAGE_CANONICAL,
+            kind: 'risk_raised',
+            required: true,
+            riskLevel: RiskLevel.High,
+          }),
+        ]);
+      });
+
+      it('reads off while the Server switch is off, since that switch is its own', async () => {
+        db.plugin.findMany.mockResolvedValue([row({ enabled: false })] as never);
+        db.plugin.count.mockResolvedValue(1 as never);
+
+        const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
+
+        expect(rows[0].unit.state).toBe('off');
+      });
+
+      it('a row whose manifest cannot be read reads unavailable and owes nothing, and the rest of the page is unaffected', async () => {
+        raiseManageRisk();
+        db.plugin.findMany.mockResolvedValue([
+          row({ id: 'plugin-2', slug: 'broken-sink', manifestJson: { nonsense: true } }),
+          row(),
+        ] as never);
+        db.plugin.count.mockResolvedValue(2 as never);
+
+        const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
+
+        expect(rows[0].unit).toEqual({
+          state: 'unavailable',
+          dormancy: 'unavailable',
+          consent: { outstanding: [], optionalOff: [] },
+        });
+        expect(rows[1].unit.state).toBe('review_pending');
+      });
+
+      it('an uninstalled plugin listed on request reads off and resolves no consent standing', async () => {
+        const resolve = jest.spyOn(standing, 'resolve');
+        db.plugin.findMany.mockResolvedValue([row({ uninstalledAt: new Date('2026-08-22T00:00:00Z') })] as never);
+        db.plugin.count.mockResolvedValue(1 as never);
+
+        const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling, {
+          includeUninstalled: true,
+        });
+
+        expect(rows[0].unit).toEqual({ state: 'off', dormancy: null, consent: { outstanding: [], optionalOff: [] } });
+        expect(resolve).not.toHaveBeenCalled();
+      });
+
+      it('carries exactly three fields: the Server unit has no unit enablement', async () => {
+        db.plugin.findMany.mockResolvedValue([row()] as never);
+        db.plugin.count.mockResolvedValue(1 as never);
+
+        const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
+
+        expect(Object.keys(rows[0].unit).sort()).toEqual(['consent', 'dormancy', 'state']);
+      });
+    });
   });
 
   describe('listRunningOnServer (#78)', () => {
@@ -428,6 +518,22 @@ describe('PluginInventoryService', () => {
         },
       ]);
       expect(detail.manifestUnreadable).toBe(false);
+    });
+
+    it("carries the Server unit's state, dormancy and consent standing, as the list does (#1336)", async () => {
+      raiseManageRisk();
+      db.plugin.findUnique.mockResolvedValue(row({ executionMode: PluginExecutionMode.InProcess }) as never);
+
+      const detail = await service.getBySlug('demo-sink');
+
+      expect(detail.unit).toEqual({
+        state: 'review_pending',
+        dormancy: null,
+        consent: {
+          outstanding: [expect.objectContaining({ slug: MANAGE_CANONICAL, kind: 'risk_raised' })],
+          optionalOff: [],
+        },
+      });
     });
   });
 
