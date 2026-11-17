@@ -73,6 +73,22 @@ export class PluginModuleShapeError extends Error {
   }
 }
 
+/**
+ * The factory's product fails the check of the process hosting its category
+ * (#1083): the server can't serve it as that category, so it is never
+ * registered.
+ */
+export class PluginProductShapeError extends Error {
+  override readonly name = 'PluginProductShapeError';
+
+  constructor(
+    public readonly slug: string,
+    reason: string,
+  ) {
+    super(`Plugin '${slug}' product shape invalid: ${reason}`);
+  }
+}
+
 /** A plugin attempted to emit an event it did not declare in `events.emits`. */
 export class PluginEmitNotDeclaredError extends Error {
   override readonly name = 'PluginEmitNotDeclaredError';

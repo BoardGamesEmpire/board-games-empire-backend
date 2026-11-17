@@ -9,7 +9,7 @@ import { AuditLogApiModule } from '@bge/audit-log';
 import { AuthModule } from '@bge/auth';
 import { GatewayCoordinatorClientModule } from '@bge/coordinator';
 import { DataGatewayModule } from '@bge/data-gateway';
-import { DatabaseModule } from '@bge/database';
+import { DatabaseModule, PluginCategory } from '@bge/database';
 import { EventModule } from '@bge/event';
 import { FeedbackModule } from '@bge/feedback';
 import { FriendshipModule } from '@bge/friendship';
@@ -230,6 +230,9 @@ import { createThrottlers } from './lib/throttlers';
         // Labels this process's plugin load records (#1094); the worker apps
         // name their own role when they mount the runtime.
         processRole: 'api',
+        // The plugin categories this process hosts (#1083): each category's
+        // plugins load in exactly one process, the one that serves them.
+        loadCategories: Object.values(PluginCategory),
         // Build-time codegen constant (`@bge/version`) — the version is a
         // property of the artifact, not of the environment it runs in.
         bgeVersion: BGE_VERSION,

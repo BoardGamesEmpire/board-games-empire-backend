@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { PluginConfigService } from '../config/plugin-config.service';
 import { PluginContextFactory } from '../context/plugin-context.factory';
 import { PluginDisabledEvent, PluginLoadFailedEvent } from '../events/plugin.events';
+import type { PluginModuleOptions } from '../plugin-module.options';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './plugin-instance-registry';
@@ -110,7 +111,11 @@ describe('PluginLoaderService', () => {
       warnings: [],
     });
 
-    loader = new PluginLoaderService(
+    loader = buildLoader(options);
+  });
+
+  const buildLoader = (loaderOptions: PluginModuleOptions): PluginLoaderService =>
+    new PluginLoaderService(
       db as unknown as DatabaseService,
       directories as unknown as PluginDirectoryResolverService,
       importer,
@@ -121,9 +126,8 @@ describe('PluginLoaderService', () => {
       systemActorScope as unknown as SystemActorScope,
       pluginActorScope as unknown as PluginActorScope,
       recorder as unknown as PluginLoadRecorder,
-      options,
+      loaderOptions,
     );
-  });
 
   afterEach(async () => {
     await rm(workDir, { recursive: true, force: true });
@@ -141,7 +145,9 @@ describe('PluginLoaderService', () => {
 
       await loader.loadAllEnabled();
 
-      expect(db.plugin.findMany).toHaveBeenCalledWith({ where: { enabled: true, uninstalledAt: null } });
+      expect(db.plugin.findMany).toHaveBeenCalledWith({
+        where: { enabled: true, uninstalledAt: null, category: { in: Object.values(PluginCategory) } },
+      });
       expect(validateMock).toHaveBeenCalledWith(row.manifestJson, { bgeVersion: '0.1.0', defaultLocale: 'en' });
       expect(importer.importModule).toHaveBeenCalledWith(join(workDir, row.slug, 'dist', 'index.js'));
       expect(factory).toHaveBeenCalledWith(context);
@@ -543,6 +549,113 @@ describe('PluginLoaderService', () => {
 
       await expect(loader.loadAllEnabled()).resolves.toBeUndefined();
       expect(registry.isEnabled('healthy-sink')).toBe(true);
+    });
+  });
+
+  describe('the categories this process loads (#1083)', () => {
+    it('loads only the categories this process names (#1083)', async () => {
+      db.plugin.findMany.mockResolvedValue([]);
+      const narrowed = buildLoader(
+        buildPluginModuleOptions({ loadCategories: [PluginCategory.DataGateway, PluginCategory.EventHook] }),
+      );
+
+      await narrowed.loadAllEnabled();
+
+      expect(db.plugin.findMany).toHaveBeenCalledWith({
+        where: {
+          enabled: true,
+          uninstalledAt: null,
+          category: { in: [PluginCategory.DataGateway, PluginCategory.EventHook] },
+        },
+      });
+    });
+
+    it("quarantines a plugin whose product fails its category's check (#1083)", async () => {
+      const row = makePluginRow();
+      const product = { notASink: true };
+      const check = jest.fn().mockReturnValue('the product has no send method');
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
+      importer.importModule.mockResolvedValue({ default: jest.fn().mockReturnValue(product) });
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      const checked = buildLoader(
+        buildPluginModuleOptions({ productChecks: { [PluginCategory.FeedbackSink]: check } }),
+      );
+
+      await checked.loadAllEnabled();
+
+      expect(check).toHaveBeenCalledWith(product);
+      expect(db.plugin.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            enabled: false,
+            loadFailed: true,
+            loadError: expect.stringContaining('the product has no send method'),
+          },
+        }),
+      );
+      expect(registry.has(row.slug)).toBe(false);
+      error.mockRestore();
+    });
+
+    it('quarantines a plugin whose product check throws, and registers nothing (#1083)', async () => {
+      const row = makePluginRow();
+      const check = jest.fn(() => {
+        throw new Error('check exploded');
+      });
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
+      importer.importModule.mockResolvedValue({ default: jest.fn().mockReturnValue({}) });
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      const checked = buildLoader(
+        buildPluginModuleOptions({ productChecks: { [PluginCategory.FeedbackSink]: check } }),
+      );
+
+      await checked.loadAllEnabled();
+
+      expect(db.plugin.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { enabled: false, loadFailed: true, loadError: 'check exploded' },
+        }),
+      );
+      expect(registry.has(row.slug)).toBe(false);
+      error.mockRestore();
+    });
+
+    it('adopts a product its check accepts', async () => {
+      const row = makePluginRow();
+      const product = { sink: true };
+      const check = jest.fn().mockReturnValue(null);
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
+      importer.importModule.mockResolvedValue({ default: jest.fn().mockReturnValue(product) });
+      const checked = buildLoader(
+        buildPluginModuleOptions({ productChecks: { [PluginCategory.FeedbackSink]: check } }),
+      );
+
+      await checked.loadAllEnabled();
+
+      expect(check).toHaveBeenCalledWith(product);
+      expect(registry.resolve(row.slug).instance).toBe(product);
+      expect(db.plugin.update).not.toHaveBeenCalled();
+    });
+
+    it('runs no check for a category without one', async () => {
+      const row = makePluginRow();
+      const product = { sink: true };
+      const otherCategoryCheck = jest.fn().mockReturnValue('never adopted');
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
+      importer.importModule.mockResolvedValue({ default: jest.fn().mockReturnValue(product) });
+      const checked = buildLoader(
+        buildPluginModuleOptions({ productChecks: { [PluginCategory.DataGateway]: otherCategoryCheck } }),
+      );
+
+      await checked.loadAllEnabled();
+
+      expect(otherCategoryCheck).not.toHaveBeenCalled();
+      expect(registry.resolve(row.slug).instance).toBe(product);
+      expect(db.plugin.update).not.toHaveBeenCalled();
     });
   });
 

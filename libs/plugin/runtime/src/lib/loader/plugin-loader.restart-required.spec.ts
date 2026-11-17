@@ -130,7 +130,9 @@ describe('PluginLoaderService — restart-required and tombstones', () => {
 
     await loader.loadAllEnabled();
 
-    expect(db.plugin.findMany).toHaveBeenCalledWith({ where: { enabled: true, uninstalledAt: null } });
+    expect(db.plugin.findMany).toHaveBeenCalledWith({
+      where: { enabled: true, uninstalledAt: null, category: { in: Object.values(PluginCategory) } },
+    });
   });
 
   it('clears restartRequired on the boot that loads the matching disk version', async () => {

@@ -1,4 +1,8 @@
+import type { PluginCategory } from '@bge/database';
 import { ConfigurableModuleBuilder } from '@nestjs/common';
+
+/** Why a plugin factory's product can't be adopted, or null when it can. */
+export type PluginProductCheck = (product: unknown) => string | null;
 
 /**
  * Host-supplied configuration for `PluginModule`. All values are explicit —
@@ -22,6 +26,21 @@ export interface PluginModuleOptions {
   readonly processRole: string;
   /** Server default locale for manifest localization resolution. */
   readonly defaultLocale: string;
+
+  /**
+   * The plugin categories this process loads (#1083). Each category runs in
+   * the process that serves it, as one copy, so a process loads only the
+   * plugins of the categories it names; one that names none loads nothing.
+   */
+  readonly loadCategories: readonly PluginCategory[];
+
+  /**
+   * The server's check, per category, that a factory's product is what the
+   * process hosting that category can serve (#1083). It runs before the
+   * product is registered; a reason it returns quarantines the plugin like
+   * any other load failure. A category without a check adopts any product.
+   */
+  readonly productChecks?: Partial<Record<PluginCategory, PluginProductCheck>>;
 }
 
 export const { ConfigurableModuleClass, MODULE_OPTIONS_TOKEN } = new ConfigurableModuleBuilder<PluginModuleOptions>()

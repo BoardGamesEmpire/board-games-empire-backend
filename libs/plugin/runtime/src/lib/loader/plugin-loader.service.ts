@@ -17,20 +17,27 @@ import type { PluginModuleOptions } from '../plugin-module.options';
 import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import type { PluginPackageDescriptor } from './entrypoint-resolver';
 import { assertResolvedEntrypointContained, resolvePluginEntrypoint } from './entrypoint-resolver';
-import { PluginDiskVersionMismatchError, PluginEntrypointError, PluginModuleShapeError } from './loader.errors';
+import {
+  PluginDiskVersionMismatchError,
+  PluginEntrypointError,
+  PluginModuleShapeError,
+  PluginProductShapeError,
+} from './loader.errors';
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './plugin-instance-registry';
 import { PluginLoadRecorder } from './plugin-load-recorder.service';
 import { PLUGIN_MODULE_IMPORTER, type PluginModuleImporter } from './plugin-module-importer';
 
 /**
- * The boot path (#59 Phase B): loads every ENABLED plugin row, constructs
- * its context, invokes its factory inside a plugin-actor CLS scope, and
- * registers the product with `PluginInstanceRegistry`.
+ * The boot path (#59 Phase B): loads every ENABLED plugin row of the
+ * categories this process names (#1083), constructs its context, invokes its
+ * factory inside a plugin-actor CLS scope, checks the product against its
+ * category's product check, and registers it with `PluginInstanceRegistry`.
  *
  * Per-plugin isolation is the load-failure contract: a plugin whose
- * directory, manifest, entrypoint, import, or factory fails, or whose
- * artifact directory holds another version than the row's, is QUARANTINED
+ * directory, manifest, entrypoint, import, factory, or product check fails,
+ * whose product its category's check refuses (#1083), or whose artifact
+ * directory holds another version than the row's, is QUARANTINED
  * — `LoadFailed` provenance recorded, force-disabled in the DB (a
  * quarantined plugin must not auto-retry on every boot; re-enabling is an
  * explicit admin decision), logged at error level — and boot continues.
@@ -82,7 +89,11 @@ export class PluginLoaderService implements OnApplicationBootstrap {
     // `uninstalledAt: null` is belt-and-braces with the invariant that
     // uninstall force-disables: the tombstone predicate every C3+ query
     // carries is cheapest to keep locally true rather than provably implied.
-    const plugins = await this.db.plugin.findMany({ where: { enabled: true, uninstalledAt: null } });
+    // Each category loads in the one process that serves it (#1083), so a
+    // plugin of a category this process doesn't name is another process's.
+    const plugins = await this.db.plugin.findMany({
+      where: { enabled: true, uninstalledAt: null, category: { in: [...this.options.loadCategories] } },
+    });
 
     this.logger.log(`Loading ${plugins.length} enabled plugin(s)`);
 
@@ -152,6 +163,14 @@ export class PluginLoaderService implements OnApplicationBootstrap {
     const instance = await this.pluginActorScope.run(plugin.id, SERVER_PLUGIN_UNIT, 'plugin-boot-load', () =>
       Promise.resolve(factory(context)),
     );
+
+    // The server's check, not the plugin's: the plugin says what it built,
+    // and only the process hosting the category knows what it can serve.
+    const productFault = this.options.productChecks?.[plugin.category]?.(instance) ?? null;
+
+    if (productFault !== null) {
+      throw new PluginProductShapeError(plugin.slug, productFault);
+    }
 
     this.registry.register(
       plugin.slug,

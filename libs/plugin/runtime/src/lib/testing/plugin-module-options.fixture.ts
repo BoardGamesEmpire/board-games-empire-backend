@@ -1,3 +1,4 @@
+import { PluginCategory } from '@bge/database';
 import type { PluginModuleOptions } from '../plugin-module.options';
 
 /**
@@ -11,6 +12,7 @@ export function buildPluginModuleOptions(overrides: Partial<PluginModuleOptions>
     bgeVersion: '1.0.0',
     defaultLocale: 'en',
     processRole: 'api',
+    loadCategories: Object.values(PluginCategory),
     ...overrides,
   };
 }
