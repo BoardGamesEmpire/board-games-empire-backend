@@ -227,6 +227,8 @@ describe('PluginUpdateService', () => {
     ]);
     db.householdPlugin.findMany.mockResolvedValue([]);
     db.userPlugin.findMany.mockResolvedValue([]);
+    db.householdPlugin.count.mockResolvedValue(0);
+    db.userPlugin.count.mockResolvedValue(0);
     db.plugin.update.mockResolvedValue(makePlugin());
     // The staging write is conditional on the pending slot still being empty,
     // so it goes through updateMany rather than update.
@@ -1380,7 +1382,7 @@ describe('PluginUpdateService', () => {
       expect(db.pluginConsentAct.create).not.toHaveBeenCalled();
     });
 
-    it('activates: grants the required and the undecided server checks under the act, promotes pending, announces re-consent to unconsented units (#1149, #1336)', async () => {
+    it('activates: grants the required and the undecided server-scope requested permissions under the act, promotes pending, announces re-consent to unconsented units (#1149, #1336)', async () => {
       const next = nextManifest({
         scope: 'household',
         permissions: {
@@ -2646,6 +2648,104 @@ describe('PluginUpdateService', () => {
 
       expect(description.comparison.deniedRequiredSlugs).toEqual(['feedback:read']);
       expect(description.comparison.serverGating).toBe(true);
+    });
+
+    /**
+     * The approval surface counts, per scope, the switched-on units and the
+     * ones activation would ask nothing of (#1336). Both come from the one
+     * read activation uses to work out who owes re-consent, so the count the
+     * server admin reads and the units the approval then reports agree.
+     */
+    describe('unitAnswers (#1336)', () => {
+      const calendarRead = {
+        slug: 'calendar:read',
+        ...UNIT_BOUND_RULES.Household,
+        riskLevel: RiskLevel.Medium,
+      } as unknown as Permission;
+
+      /** v1.3.0 asking every household for calendar:read, and users for nothing new. */
+      const householdAsking = (): PluginManifest =>
+        nextManifest({
+          scope: 'household',
+          permissions: {
+            ...activeManifest.permissions,
+            checks: [
+              ...activeManifest.permissions.checks,
+              {
+                slug: 'calendar:read',
+                required: true,
+                reason: { en: 'Schedules digests around events.' },
+                consentScope: 'household' as const,
+              },
+            ],
+          },
+        });
+
+      const preConsent = makeGrant({
+        id: 'grant-pre',
+        scopeType: PluginGrantScope.Household,
+        scopeId: 'household-1',
+        permissionSlug: 'calendar:read',
+        decidedRiskLevel: RiskLevel.Medium,
+      });
+
+      beforeEach(() => {
+        db.plugin.findUnique.mockResolvedValue(stagedPlugin(householdAsking()));
+        db.permission.findMany.mockResolvedValue([feedbackRead, calendarRead]);
+        // Routed by the read's scope, as the database would answer it, so the
+        // read and the approval below see the same rows.
+        db.pluginGrant.findMany.mockImplementation(((args: {
+          where: { scopeType?: PluginGrantScope; scopeId?: string | { in: string[] } };
+        }) => {
+          const all = [makeGrant(), preConsent];
+          const { scopeType, scopeId } = args.where;
+          const inScope = (rowScopeId: string): boolean =>
+            scopeId === undefined ||
+            (typeof scopeId === 'string' ? rowScopeId === scopeId : scopeId.in.includes(rowScopeId));
+
+          return Promise.resolve(
+            all.filter((row) => (scopeType === undefined || row.scopeType === scopeType) && inScope(row.scopeId)),
+          );
+        }) as never);
+        db.householdPlugin.findMany.mockResolvedValue([
+          makeUnit(),
+          makeUnit({ id: 'hp-2', householdId: 'household-2' }),
+          makeUnit({ id: 'hp-3', householdId: 'household-3' }),
+        ]);
+        db.userPlugin.count.mockResolvedValue(2);
+      });
+
+      it('counts three switched-on households, one of which accepted the staged update ahead of time, as one covered (#1336)', async () => {
+        const description = await service.describePending('demo-sink');
+
+        expect(description.unitAnswers.household).toEqual({ switchedOn: 3, covered: 1 });
+        expect(db.householdPlugin.findMany).toHaveBeenCalledWith({ where: { pluginId: 'plugin-1', enabled: true } });
+      });
+
+      it('counts every switched-on user as covered when the staged update asks users nothing new (#1336)', async () => {
+        const description = await service.describePending('demo-sink');
+
+        expect(description.unitAnswers.user).toEqual({ switchedOn: 2, covered: 2 });
+        // A count, not a row read: there is nothing to judge per user.
+        expect(db.userPlugin.count).toHaveBeenCalledWith({ where: { pluginId: 'plugin-1', enabled: true } });
+        expect(db.userPlugin.findMany).not.toHaveBeenCalled();
+      });
+
+      it('names, on approval, exactly the households the read left uncovered (#1336)', async () => {
+        const description = await service.describePending('demo-sink');
+        const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
+
+        expect(result.reconsentHouseholdUnits).toEqual([
+          { householdId: 'household-2', outstanding: ['calendar:read'] },
+          { householdId: 'household-3', outstanding: ['calendar:read'] },
+        ]);
+        expect(result.reconsentHouseholdUnits).toHaveLength(
+          description.unitAnswers.household.switchedOn - description.unitAnswers.household.covered,
+        );
+        expect(result.reconsentUserUnits).toHaveLength(
+          description.unitAnswers.user.switchedOn - description.unitAnswers.user.covered,
+        );
+      });
     });
 
     it('enforces bgeCompat on the stored pending manifest, mirroring approve() — the 422 names the pending source', async () => {

@@ -13,6 +13,7 @@ import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { errorText } from '../support/error-text';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { readConsentSurface, reviewBody, sendReview } from './consent-act-fixtures';
 import { pluginAbilitySlugsForHousehold } from './plugin-ability-fixtures';
 import { FIXTURE_ACT_ID, INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
@@ -1052,6 +1053,65 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
       expect(response.body.deniedRequiredSlugs).toEqual(['read:safe_http_policy']);
       expect(response.body.serverGating).toBe(true);
+    });
+
+    it('the approval surface counts the households that already accepted the staged update, and approval asks exactly the rest (#1336)', async () => {
+      const admin = await actors.admin();
+      const owners = await Promise.all([actors.user(), actors.user(), actors.user()]);
+      const [accepting, ...waiting] = (
+        await Promise.all(owners.map((owner) => actors.householdWithMembers({ owner })))
+      ).map(({ household }) => household);
+      // v1.3.0 asks every household for a new required permission, and users
+      // for nothing new.
+      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, HOUSEHOLD_CHECK], undefined, {
+        scope: 'household',
+      });
+
+      await db.client.householdPlugin.createMany({
+        data: [accepting, ...waiting].map((household) => ({
+          householdId: household.id,
+          pluginId: plugin.id,
+          enabled: true,
+          config: {},
+        })),
+      });
+
+      const before = await readPending(admin, plugin.slug).expect(200);
+
+      expect(before.body.unitAnswers).toEqual({
+        household: { switchedOn: 3, covered: 0 },
+        user: { switchedOn: 0, covered: 0 },
+      });
+
+      // One household accepts the staged update ahead of time, through a
+      // review act against the staged sha.
+      const unit = { householdId: accepting.id };
+      const staged = await readConsentSurface(baseUrl, owners[0], unit, plugin.slug, { staged: true });
+
+      await sendReview(
+        baseUrl,
+        owners[0],
+        unit,
+        plugin.slug,
+        reviewBody(staged, { [HOUSEHOLD_CHECK.slug]: PluginGrantStatus.Granted }),
+      ).expect(200);
+
+      const after = await readPending(admin, plugin.slug).expect(200);
+
+      expect(after.body.unitAnswers).toEqual({
+        household: { switchedOn: 3, covered: 1 },
+        user: { switchedOn: 0, covered: 0 },
+      });
+
+      const approved = await approve(admin, plugin.slug).expect(200);
+      const owing = approved.body.reconsentHouseholdUnits as { householdId: string; outstanding: string[] }[];
+
+      expect(owing.map((entry) => entry.householdId).sort()).toEqual(waiting.map((household) => household.id).sort());
+      expect(owing).toHaveLength(
+        after.body.unitAnswers.household.switchedOn - after.body.unitAnswers.household.covered,
+      );
+      expect(owing.every((entry) => entry.outstanding.join() === HOUSEHOLD_CHECK.slug)).toBe(true);
+      expect(approved.body.reconsentUserUnits).toEqual([]);
     });
 
     it('draws the 404 / 410 / 409 distinctions', async () => {

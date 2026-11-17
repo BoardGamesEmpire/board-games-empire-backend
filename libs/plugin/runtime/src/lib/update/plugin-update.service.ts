@@ -303,6 +303,24 @@ export interface PluginUpdatePendingDescription {
    * instead.
    */
   readonly noLongerRequested: readonly string[];
+  /**
+   * Per scope, how many units have the plugin switched on and how many of
+   * them approving would ask nothing of (#1336). Worked out by the read
+   * activation uses to find who owes re-consent, so `switchedOn - covered`
+   * is the number of units the approval then reports, as the decisions stand.
+   */
+  readonly unitAnswers: {
+    readonly household: PluginUpdateUnitAnswers;
+    readonly user: PluginUpdateUnitAnswers;
+  };
+}
+
+/** How one scope's switched-on units stand against a staged update (#1336). */
+export interface PluginUpdateUnitAnswers {
+  /** Units with the plugin switched on at this scope. */
+  readonly switchedOn: number;
+  /** Of those, the units that would be asked nothing on activation. */
+  readonly covered: number;
 }
 
 /** Covering inputs for a slug the catalog has no row for: nothing confers. */
@@ -316,6 +334,18 @@ const NO_CATALOG_ROW: Omit<ConsentCheckDecisionInput, 'grant'> = {
 interface ReconsentCandidate<TUnit> {
   readonly unit: TUnit;
   readonly outstanding: readonly string[];
+}
+
+/** One scope's switched-on units, and those of them that owe re-consent (#1336). */
+interface ScopeReconsent<TUnit> {
+  readonly switchedOn: number;
+  readonly owing: ReconsentCandidate<TUnit>[];
+}
+
+/** Who owes re-consent under a manifest, at both unit scopes (#225, #1336). */
+interface UnitsOwingReconsent {
+  readonly household: ScopeReconsent<HouseholdPlugin>;
+  readonly user: ScopeReconsent<UserPlugin>;
 }
 
 /** What an approval brings to activation: the second factor it answers and the locale its consent act records (#1336). */
@@ -654,10 +684,16 @@ export class PluginUpdateService {
    * hide a staging the server admin may want to reject (#1117). A denied
    * permission the update requires is reported as
    * `comparison.deniedRequiredSlugs`: approving grants it (#1336).
+   *
+   * The units that already cover the staged update are counted by
+   * {@link unitsOwingReconsent}, the read activation announces re-consent
+   * from, so the count and the units an approval reports cannot disagree
+   * about the decisions they both read (#1336).
    */
   async describePending(slug: string): Promise<PluginUpdatePendingDescription> {
-    const { plugin, active, next, comparison } = await this.resolvePendingUpdate(slug);
+    const { plugin, active, next, corePermissions, comparison } = await this.resolvePendingUpdate(slug);
     const declares = declaredSlugDiff(active, next);
+    const owing = await this.unitsOwingReconsent(this.db, plugin.id, next, corePermissions, comparison);
 
     return {
       plugin,
@@ -665,6 +701,13 @@ export class PluginUpdateService {
       pendingSince: plugin.pendingSince,
       declares,
       noLongerRequested: requestedSlugsDropped(active, next, declares.removed),
+      unitAnswers: {
+        household: {
+          switchedOn: owing.household.switchedOn,
+          covered: owing.household.switchedOn - owing.household.owing.length,
+        },
+        user: { switchedOn: owing.user.switchedOn, covered: owing.user.switchedOn - owing.user.owing.length },
+      },
     };
   }
 
@@ -1551,93 +1594,9 @@ export class PluginUpdateService {
       // nothing is written to any unit enablement (#1149). A unit that has
       // not answered keeps running on the grants it gave, and its consent
       // standing is worked out when read, so there is no state here to keep
-      // current — and no lock on the enablement to take. Whether a Granted
-      // row still covers is `decideConsentCheck`, the rule the standing and
-      // the consent surface read, applied to the rows read below, so a unit
-      // the standing reads as owing is the unit announced here.
-      //
-      // Switched-on units only, whether or not they can currently run. A
-      // switched-off unit accepts the whole required set afresh when it
-      // switches on again, so the announcement would tell it nothing it is
-      // not asked then. A switched-on unit that cannot run under this
-      // manifest (its scope has no household surface, or its retained
-      // configuration fails the schema) is still switched on: whether it can
-      // run is worked out when read (#1151), it is asked nothing when that
-      // is cured, and it would otherwise read review_pending without ever
-      // having been told. Nothing is judged at switch-on: the standing is
-      // read whenever feature state, the inventory or the ability read it,
-      // so a unit switched on after activation shows review_pending but is
-      // never announced (#1149).
-      //
-      // Fixed query count regardless of how many units run the plugin: one
-      // unit read and one grant read per scope. A per-unit loop put this
-      // transaction's duration on the number of installs, and exceeding the
-      // interactive-transaction timeout would roll back the whole update —
-      // failing an activation because the plugin was POPULAR.
-      let reconsentHouseholdUnits: ReconsentCandidate<HouseholdPlugin>[] = [];
-
-      if (comparison.householdReconsentSlugs.length > 0) {
-        const units = await tx.householdPlugin.findMany({
-          where: { pluginId: plugin.id, enabled: true },
-        });
-
-        if (units.length > 0) {
-          const granted = await tx.pluginGrant.findMany({
-            where: {
-              pluginId: plugin.id,
-              scopeType: PluginGrantScope.Household,
-              scopeId: { in: units.map((unit) => unit.householdId) },
-              status: PluginGrantStatus.Granted,
-              permissionSlug: { in: [...comparison.householdReconsentSlugs] },
-            },
-            // decidedRiskLevel is load-bearing, not decoration: for a risk
-            // escalation the Granted row EXISTS by definition — its stale
-            // risk is what escalated — so treating presence as consent would
-            // silently skip every risk-escalated unit.
-            select: { scopeId: true, permissionSlug: true, decidedRiskLevel: true },
-          });
-
-          reconsentHouseholdUnits = this.reconsentCandidates({
-            units,
-            scopeIdOf: (unit) => unit.householdId,
-            granted,
-            reconsentSlugs: comparison.householdReconsentSlugs,
-            coverage: this.coverageInputs(next, corePermissions, PluginGrantScope.Household),
-          });
-        }
-      }
-
-      // The user-scope mirror (#225): identical shape against `UserPlugin`.
-      // Users with no unit enablement never appear in the unit read — no row
-      // means not enabled, so there is nobody to tell.
-      let reconsentUserUnits: ReconsentCandidate<UserPlugin>[] = [];
-
-      if (comparison.userReconsentSlugs.length > 0) {
-        const units = await tx.userPlugin.findMany({
-          where: { pluginId: plugin.id, enabled: true },
-        });
-
-        if (units.length > 0) {
-          const granted = await tx.pluginGrant.findMany({
-            where: {
-              pluginId: plugin.id,
-              scopeType: PluginGrantScope.User,
-              scopeId: { in: units.map((unit) => unit.userId) },
-              status: PluginGrantStatus.Granted,
-              permissionSlug: { in: [...comparison.userReconsentSlugs] },
-            },
-            select: { scopeId: true, permissionSlug: true, decidedRiskLevel: true },
-          });
-
-          reconsentUserUnits = this.reconsentCandidates({
-            units,
-            scopeIdOf: (unit) => unit.userId,
-            granted,
-            reconsentSlugs: comparison.userReconsentSlugs,
-            coverage: this.coverageInputs(next, corePermissions, PluginGrantScope.User),
-          });
-        }
-      }
+      // current — and no lock on the enablement to take. The approval
+      // surface counts its covered units with the same method (#1336).
+      const owing = await this.unitsOwingReconsent(tx, plugin.id, next, corePermissions, comparison);
 
       // The acts behind the deleted decisions, for the version each revocation
       // names. The act table is append-only, so every act a row names is still
@@ -1662,8 +1621,8 @@ export class PluginUpdateService {
         unrequestedGrants,
         scopeMovedGrants,
         revokedActVersions: new Map(revokedActs.map((revokedAct) => [revokedAct.id, revokedAct.manifestVersion])),
-        reconsentHouseholdUnits,
-        reconsentUserUnits,
+        reconsentHouseholdUnits: owing.household.owing,
+        reconsentUserUnits: owing.user.owing,
         retainedConfigReset: retainedConfig.reset,
       };
     });
@@ -1754,10 +1713,121 @@ export class PluginUpdateService {
   }
 
   /**
-   * Which units of one scope owe re-consent under this activation — a pure
-   * function, shared by the household and user blocks in
-   * `activateInTransaction()` so the covering predicate cannot drift between
-   * scopes. A slug is outstanding unless the unit's Granted row still
+   * Who owes re-consent under `next`, at both unit scopes, and how many units
+   * each scope has switched on. Activation calls it inside its transaction to
+   * announce re-consent, and the staged-update read calls it outside one to
+   * count the units already covered, so the two cannot disagree (#1336).
+   * Whether a Granted row still covers is `decideConsentCheck`, the rule the
+   * consent standing and the consent surface read, so a unit the standing
+   * reads as owing is a unit counted as owing here (#1149).
+   *
+   * Switched-on units only, whether or not they can currently run. A
+   * switched-off unit accepts the whole required set afresh when it switches
+   * on again, so the announcement would tell it nothing it is not asked then.
+   * A switched-on unit that cannot run under this manifest (its scope has no
+   * household surface, or its retained configuration fails the schema) is
+   * still switched on: whether it can run is worked out when read (#1151), it
+   * is asked nothing when that is cured, and it would otherwise read
+   * review_pending without ever having been told. Nothing is judged at
+   * switch-on: the standing is read whenever feature state, the inventory or
+   * the ability read it, so a unit switched on after activation shows
+   * review_pending but is never announced (#1149). Users with no unit
+   * enablement never appear: no row means not enabled, so there is nobody to
+   * tell (#225).
+   *
+   * A scope with no re-consent slugs owes nothing, so its units are counted,
+   * not read. Fixed query count regardless of how many units run the plugin:
+   * at most one unit read and one grant read per scope. A per-unit loop put
+   * activation's duration on the number of installs, and exceeding the
+   * interactive-transaction timeout would roll back the whole update —
+   * failing an activation because the plugin was POPULAR.
+   */
+  private async unitsOwingReconsent(
+    client: Prisma.TransactionClient | DatabaseService,
+    pluginId: string,
+    next: PluginManifestValidationResult,
+    corePermissions: ReadonlyMap<string, Permission>,
+    comparison: UpdateEscalationComparison,
+  ): Promise<UnitsOwingReconsent> {
+    const switchedOn = { pluginId, enabled: true };
+    // decidedRiskLevel is load-bearing, not decoration: for a risk
+    // escalation the Granted row EXISTS by definition — its stale risk is
+    // what escalated — so treating presence as consent would silently skip
+    // every risk-escalated unit.
+    const grantedSelect = { scopeId: true, permissionSlug: true, decidedRiskLevel: true } as const;
+
+    let household: ScopeReconsent<HouseholdPlugin>;
+
+    if (comparison.householdReconsentSlugs.length === 0) {
+      household = { switchedOn: await client.householdPlugin.count({ where: switchedOn }), owing: [] };
+    } else {
+      const units = await client.householdPlugin.findMany({ where: switchedOn });
+      const granted =
+        units.length === 0
+          ? []
+          : await client.pluginGrant.findMany({
+              where: {
+                pluginId,
+                scopeType: PluginGrantScope.Household,
+                scopeId: { in: units.map((unit) => unit.householdId) },
+                status: PluginGrantStatus.Granted,
+                permissionSlug: { in: [...comparison.householdReconsentSlugs] },
+              },
+              select: grantedSelect,
+            });
+
+      household = {
+        switchedOn: units.length,
+        owing: this.reconsentCandidates({
+          units,
+          scopeIdOf: (unit) => unit.householdId,
+          granted,
+          reconsentSlugs: comparison.householdReconsentSlugs,
+          coverage: this.coverageInputs(next, corePermissions, PluginGrantScope.Household),
+        }),
+      };
+    }
+
+    // The user-scope mirror (#225): identical shape against `UserPlugin`.
+    let user: ScopeReconsent<UserPlugin>;
+
+    if (comparison.userReconsentSlugs.length === 0) {
+      user = { switchedOn: await client.userPlugin.count({ where: switchedOn }), owing: [] };
+    } else {
+      const units = await client.userPlugin.findMany({ where: switchedOn });
+      const granted =
+        units.length === 0
+          ? []
+          : await client.pluginGrant.findMany({
+              where: {
+                pluginId,
+                scopeType: PluginGrantScope.User,
+                scopeId: { in: units.map((unit) => unit.userId) },
+                status: PluginGrantStatus.Granted,
+                permissionSlug: { in: [...comparison.userReconsentSlugs] },
+              },
+              select: grantedSelect,
+            });
+
+      user = {
+        switchedOn: units.length,
+        owing: this.reconsentCandidates({
+          units,
+          scopeIdOf: (unit) => unit.userId,
+          granted,
+          reconsentSlugs: comparison.userReconsentSlugs,
+          coverage: this.coverageInputs(next, corePermissions, PluginGrantScope.User),
+        }),
+      };
+    }
+
+    return { household, user };
+  }
+
+  /**
+   * Which units of one scope owe re-consent under `next` — a pure function,
+   * shared by the household and user halves of {@link unitsOwingReconsent}
+   * so the covering predicate cannot drift between scopes. A slug is outstanding unless the unit's Granted row still
    * confers under `decideConsentCheck`, the same rule the consent standing
    * reads (#1149): a unit that granted a new permission on the staged
    * manifest ahead of time, at a covering risk, owes nothing.

@@ -453,7 +453,10 @@ export class PluginsController {
       'requested permissions the update stops requesting, whose decisions approving deletes at every scope), ' +
       "and the staged manifest's " +
       'consent surface localized for the requester. deniedRequiredSlugs lists the server-scope permissions the ' +
-      'update requires that the Server unit denied: approving grants them.',
+      'update requires that the Server unit denied: approving grants them. unitAnswers gives, for the household ' +
+      'and the user scope, switchedOn (units with the plugin switched on) and covered (those of them approving ' +
+      'would ask nothing of, such as a household that already accepted the staged update); the rest are told ' +
+      'they owe re-consent when the update is approved.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
@@ -629,6 +632,10 @@ export class PluginsController {
       escalations: description.comparison.escalations,
       serverGating: description.comparison.serverGating,
       deniedRequiredSlugs: description.comparison.deniedRequiredSlugs,
+      // Per scope, the units with the plugin switched on and those approving
+      // would ask nothing of, by the rule activation announces re-consent by
+      // (#1336): the rest are the units the approval reports as owing.
+      unitAnswers: description.unitAnswers,
       // The catalog diff approving would apply. Separate from `escalations`
       // because no escalation kind describes a declaration change, and a
       // declaration the plugin never requests appears in neither the checks
