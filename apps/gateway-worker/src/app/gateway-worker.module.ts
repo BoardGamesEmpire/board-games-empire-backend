@@ -1,5 +1,6 @@
 import { AuditContextModule } from '@bge/actor-context';
 import { AuditLogModule } from '@bge/audit-log';
+import { PluginGatewayRelayModule } from '@bge/coordinator';
 import { DatabaseModule } from '@bge/database';
 import { GameImportFetchModule } from '@bge/game-import';
 import { GatewayRegistryModule, VocabularySectionConsumerModule } from '@bge/gateway-registry';
@@ -104,6 +105,11 @@ import { baseLogger } from './lib/logger';
     DbPoolMetricsRecorderModule,
 
     GatewayRegistryModule,
+
+    // The gateway registry's plugin driver source: a plugin DataGateway runs
+    // in the coordinator, and this reaches it there over the gateway gRPC
+    // protocol, at the coordinator's address (#1083).
+    PluginGatewayRelayModule,
 
     // Runs the list jobs that load each DataGateway's vocabulary after its
     // interview (#718). The coordinator only queues them.

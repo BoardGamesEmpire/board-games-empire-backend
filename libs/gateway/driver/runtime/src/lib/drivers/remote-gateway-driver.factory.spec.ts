@@ -1,6 +1,8 @@
 import { AuthType } from '@bge/database';
 import { pingWithRetry } from '@bge/utils';
-import { ClientProxyFactory, type ClientGrpcProxy } from '@nestjs/microservices';
+import type { Interceptor } from '@grpc/grpc-js';
+import type { ClientGrpcProxy } from '@nestjs/microservices';
+import { ClientProxyFactory, Transport } from '@nestjs/microservices';
 import { Test } from '@nestjs/testing';
 import { EMPTY, of } from 'rxjs';
 import { GatewayCredentialsFactory } from '../credentials/gateway-credentials.factory';
@@ -58,6 +60,38 @@ describe('RemoteGatewayDriverFactory', () => {
 
     await expect(factory.create(options)).rejects.toThrow('unreachable');
     expect(proxy.close).toHaveBeenCalledTimes(1);
+  });
+
+  // The gateway worker reaches a plugin DataGateway through the coordinator,
+  // and names the DataGateway and the actor in the metadata of every call,
+  // the connect ping among them: the coordinator refuses a call without them.
+  it('passes the interceptors it is given to the channel options of the client it pings and hands out (#1083)', async () => {
+    const serviceClient = { ping: jest.fn() };
+    const proxy = makeProxy(serviceClient);
+    const create = jest.spyOn(ClientProxyFactory, 'create').mockReturnValue(proxy as never);
+    (pingWithRetry as jest.Mock).mockResolvedValue({ status: 'SERVING' });
+    const interceptors: Interceptor[] = [jest.fn(), jest.fn()];
+
+    await factory.create(options, { interceptors });
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0][0]).toMatchObject({ options: { channelOptions: { interceptors } } });
+    expect(pingWithRetry).toHaveBeenLastCalledWith(serviceClient, 'bgg', expect.anything());
+  });
+
+  // A remote DataGateway is dialled with nothing added to its calls.
+  it('builds the client with no channel options when it is given no interceptors (#1083)', async () => {
+    const create = jest.spyOn(ClientProxyFactory, 'create').mockReturnValue(makeProxy({ ping: jest.fn() }) as never);
+    (pingWithRetry as jest.Mock).mockResolvedValue({ status: 'SERVING' });
+
+    await factory.create(options);
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0][0]).toMatchObject({
+      transport: Transport.GRPC,
+      options: { url: 'http://gateway:50051', package: 'bge.gateway.v1' },
+    });
+    expect(create.mock.calls[0][0].options).not.toHaveProperty('channelOptions');
   });
 
   describe('RemoteGatewayDriver delegation', () => {

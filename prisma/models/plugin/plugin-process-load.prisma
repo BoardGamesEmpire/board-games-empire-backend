@@ -17,7 +17,8 @@
 model PluginProcessLoad {
   processId String @map("process_id")
 
-  /// What kind of process wrote the row ('api', and the worker roles later).
+  /// What kind of process wrote the row: 'api', or 'coordinator' for the
+  /// data-gateway plugins it hosts (#1083).
   processRole String @map("process_role")
 
   slug String

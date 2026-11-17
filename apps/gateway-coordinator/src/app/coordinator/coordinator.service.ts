@@ -1,9 +1,17 @@
 import { AuthType, Prisma } from '@bge/database';
-import { GatewayRegistryService } from '@bge/gateway-registry';
+import { GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'node:crypto';
+
+/**
+ * The registry's reason when it refused the DataGateway, for the api to tell
+ * the admin which fix applies (#1083). Any other failure carries none.
+ */
+function refusalReasonOf(error: unknown): { refusalReason?: string } {
+  return error instanceof GatewayRoutingRefusedError ? { refusalReason: error.reason } : {};
+}
 
 @Injectable()
 export class CoordinatorService {
@@ -38,7 +46,7 @@ export class CoordinatorService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`ConnectGateway failed for ${request.gatewayId}: ${message}`);
-      return { success: false, error: message };
+      return { success: false, error: message, ...refusalReasonOf(error) };
     }
   }
 
@@ -55,8 +63,11 @@ export class CoordinatorService {
 
   /**
    * Interviews a DataGateway now, for an admin who asks (#715). The registry
-   * refuses one that's unknown, deleted or disabled, and records a failed
-   * interview on the row. Either way the error goes back for the api to log.
+   * refuses one that's unknown, deleted, disabled, or a plugin DataGateway
+   * whose plugin isn't served or loaded, before any interview runs. An
+   * interview that runs and fails is recorded on the row. Either way the
+   * error goes back for the api to log, and a refusal's reason with it
+   * (#1083).
    */
   async reinterviewGateway(request: proto.ReinterviewGatewayRequest): Promise<proto.ReinterviewGatewayResponse> {
     try {
@@ -65,7 +76,7 @@ export class CoordinatorService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`ReinterviewGateway failed for ${request.gatewayId}: ${message}`);
-      return { success: false, error: message };
+      return { success: false, error: message, ...refusalReasonOf(error) };
     }
   }
 

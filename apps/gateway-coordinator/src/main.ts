@@ -26,10 +26,10 @@ async function bootstrap(): Promise<void> {
     appModule: AppModule,
     displayName: 'BoardgamesEmpire Gateway Coordinator',
     addressConfig: coordinatorConfig,
-    protoPackage: 'bge.coordinator.v1',
-    // The shared proto tree also carries the gateway package — the coordinator
-    // serves only its own.
-    protoExclude: [/(^|[/\\])gateway([/\\]|$)/],
+    // Its own package, which the api calls, and the gateway's, which the
+    // gateway worker calls to reach the plugin DataGateways the coordinator
+    // hosts (#1083). The shared proto tree carries both.
+    protoPackage: ['bge.coordinator.v1', 'bge.gateway.v1'],
     protoDir: path.join(__dirname, 'proto'),
     bootstrapLogger,
     // Coordinator is OTel-instrumented: sequence app.close() → otel.shutdown().

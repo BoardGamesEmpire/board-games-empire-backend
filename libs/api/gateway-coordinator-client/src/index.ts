@@ -5,3 +5,5 @@ export {
 export * from './lib/constants';
 export * from './lib/coordinator.module';
 export * from './lib/coordinator.service';
+export * from './lib/plugin-gateway-relay.module';
+export * from './lib/plugin-gateway-relay.source';

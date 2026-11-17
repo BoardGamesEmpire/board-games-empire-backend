@@ -372,6 +372,69 @@ describe('DataGatewayController', () => {
     });
   });
 
+  // When the gateway registry refuses a plugin DataGateway, the fix differs
+  // by its reason: the plugin needs switching on or reinstalling, or the
+  // coordinator needs a restart. The answer names it, on the interview route
+  // and on a connect of a plugin's row, which is an interview too (#1083).
+  describe("the gateway registry's refusal of a plugin DataGateway", () => {
+    const pluginRow = makeGateway({ pluginId: 'plugin-1', connectionUrl: null, connectionPort: null, authType: null });
+    const routes = [
+      ['interview', async (c: DataGatewayController) => (await firstValueFrom(c.interview('gw-1'))).interview_response],
+      ['connect', async (c: DataGatewayController) => (await firstValueFrom(c.connect('gw-1'))).connection_response],
+    ] as const;
+
+    beforeEach(() => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      (service as unknown as jest.Mocked<DataGatewayService>).update.mockResolvedValue(pluginRow);
+      service.getById.mockResolvedValue(pluginRow);
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it.each(routes)(
+      "tells the admin to switch the plugin on when its plugin isn't served (#1083): %s",
+      async (_route, answer) => {
+        coordinator.reinterviewGateway.mockReturnValue(
+          of({ success: false, error: 'raw detail', refusalReason: 'plugin_not_served' }),
+        );
+
+        await expect(answer(controller)).resolves.toEqual({
+          success: false,
+          message: t('errors.data_gateway.plugin_not_served'),
+          code: 'DATA_GATEWAY_PLUGIN_NOT_SERVED',
+        });
+      },
+    );
+
+    it.each(routes)(
+      "tells the admin to restart the coordinator when its plugin isn't loaded (#1083): %s",
+      async (_route, answer) => {
+        coordinator.reinterviewGateway.mockReturnValue(
+          of({ success: false, error: 'raw detail', refusalReason: 'plugin_not_loaded' }),
+        );
+
+        await expect(answer(controller)).resolves.toEqual({
+          success: false,
+          message: t('errors.data_gateway.plugin_not_loaded'),
+          code: 'DATA_GATEWAY_PLUGIN_NOT_LOADED',
+        });
+      },
+    );
+
+    it.each(
+      routes.flatMap(([route, answer]) => [[route, 'disabled', answer] as const, [route, 'none', answer] as const]),
+    )('keeps the generic copy for any other failure (#1083): %s, reason %s', async (_route, reason, answer) => {
+      coordinator.reinterviewGateway.mockReturnValue(
+        of({ success: false, error: 'raw detail', ...(reason === 'none' ? {} : { refusalReason: reason }) }),
+      );
+
+      await expect(answer(controller)).resolves.toEqual({
+        success: false,
+        message: t('errors.data_gateway.interview_failed'),
+      });
+    });
+  });
+
   // The database holds a remote row to all three connection fields, and the
   // types can't (#1083). A row that reaches connect without them is answered
   // with the generic copy, and the coordinator is never dialled with nulls.

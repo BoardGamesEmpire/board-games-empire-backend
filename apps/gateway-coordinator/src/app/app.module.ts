@@ -2,14 +2,18 @@ import { AuditContextModule } from '@bge/actor-context';
 import { GrpcInternalActorInterceptor } from '@bge/actor-context-transport';
 import { AuditLogModule } from '@bge/audit-log';
 import { DatabaseModule } from '@bge/database';
+import { GatewayPluginHostModule } from '@bge/gateway-plugin-host';
 import { GatewayRegistryModule } from '@bge/gateway-registry';
 import { BullMQQueueDepthRecorderModule, createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
+import { PluginModule } from '@bge/plugin';
 import { QUEUE_REDIS_CLIENT, RedisModule } from '@bge/redis';
+import { SecureHttpModule } from '@bge/secure-http';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
 import type { RedisClient } from 'bullmq';
 import { ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
@@ -17,6 +21,7 @@ import * as crypto from 'node:crypto';
 import { configModuleOptions } from './configuration';
 import { CoordinatorModule } from './coordinator/coordinator.module';
 import { baseLogger } from './lib/logger';
+import { coordinatorPluginModuleOptions } from './plugin-module.options';
 
 @Module({
   imports: [
@@ -26,6 +31,16 @@ import { baseLogger } from './lib/logger';
       wildcard: true,
       global: true,
     }),
+
+    // Runs the plugin load recorder's heartbeat (#1083). Without it this
+    // process's plugin load records go stale after five minutes: the gateway
+    // worker, which asks them whether a plugin is loaded, stops routing to
+    // every plugin DataGateway, and the api's artifact sweep stops honouring
+    // them and may remove the directory of a plugin artifact this process
+    // loaded. It also runs the plugin config refresh and the outbound HTTP
+    // policy refresh, the backstops for a change whose Redis message this
+    // process missed.
+    ScheduleModule.forRoot(),
 
     // Shared Redis clients (iovalkey via @bge/redis). Coordinator needs both:
     //   - cache: gateway registry pub/sub (config event invalidation)
@@ -97,6 +112,24 @@ import { baseLogger } from './lib/logger';
 
     DatabaseModule,
     DbPoolMetricsRecorderModule,
+
+    // The outbound HTTP policy each plugin's HTTP client is held to.
+    SecureHttpModule,
+
+    // The plugin runtime, loading only the data-gateway plugins, which this
+    // process hosts (#1083). Its prerequisites (global CLS, the event
+    // emitter, Redis, the database, the scheduler and the outbound HTTP
+    // policy) are all mounted in this module.
+    PluginModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: coordinatorPluginModuleOptions,
+    }),
+
+    // Gives the gateway registry the plugin DataGateways' drivers, built from
+    // the plugins loaded above, and serves them over the gateway gRPC
+    // protocol, which `main.ts` serves beside the coordinator's own (#1083).
+    GatewayPluginHostModule,
+
     CoordinatorModule,
 
     // Audit capture (onAny listener) for MutationEvents emitted in this

@@ -64,6 +64,8 @@
     "disconnect_failed": "Failed to disconnect from the DataGateway.",
     "disabled": "DataGateway with ID {id} is disabled. Enable it before asking for an interview.",
     "interview_failed": "The DataGateway's interview failed.",
+    "plugin_not_served": "This DataGateway's plugin can't be used now: it is switched off, uninstalled, failed to load, or is no longer a data-gateway plugin. Switch the plugin on or reinstall it, or check why it failed to load.",
+    "plugin_not_loaded": "This DataGateway's plugin is installed and switched on, but the coordinator hasn't loaded it. Restart the coordinator.",
     "plugin_connection_fields": "This DataGateway comes from a plugin, so it has no connection address, port, authentication type or credentials to change. Leave those fields out.",
     "connection_field_required": "A remote DataGateway needs its connection address, port and authentication type. Enter a value instead of clearing it.",
     "plugin_row_delete": "This DataGateway comes from a plugin, so it can't be deleted. Uninstalling the plugin disables it and keeps it, so the games imported through it keep their source."

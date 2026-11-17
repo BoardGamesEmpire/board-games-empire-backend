@@ -1,5 +1,6 @@
 import { pingWithRetry, walkDir } from '@bge/utils';
 import { GatewayServiceClient, PROTO_PACKAGE_NAME } from '@boardgamesempire/proto-gateway';
+import type { ClientOptions, Interceptor } from '@grpc/grpc-js';
 import { Injectable, Logger } from '@nestjs/common';
 import { ClientGrpcProxy, ClientProxyFactory, Transport } from '@nestjs/microservices';
 import * as path from 'node:path';
@@ -28,8 +29,16 @@ export class RemoteGatewayDriverFactory {
    * when the ping handshake fails — the caller (registry) feeds that into
    * connection-failure tracking. The freshly-built channel is closed before
    * the failure propagates so an unverified proxy never leaks.
+   *
+   * `channel` is for a driver whose calls must carry metadata: the gateway
+   * worker's plugin driver source dials the coordinator, which refuses a call
+   * that names no DataGateway or no actor (#1083). Its interceptors run, in
+   * the order given, on every call the client makes, so on the ping here too.
    */
-  async create(options: GatewayConnectionOptions): Promise<RemoteGatewayDriver> {
+  async create(
+    options: GatewayConnectionOptions,
+    channel?: { interceptors?: Interceptor[] },
+  ): Promise<RemoteGatewayDriver> {
     const url = `${options.connectionUrl}:${options.connectionPort}`;
 
     this.logger.log(`Connecting to gateway ${options.gatewayId} at ${url} with auth type ${options.authType}`);
@@ -52,6 +61,14 @@ export class RemoteGatewayDriverFactory {
           enums: String,
         },
         credentials: channelCredentials,
+        // NestJS spreads `channelOptions` into the options of the grpc-js
+        // Client it constructs, and those take an `interceptors` array, which
+        // is what `satisfies` checks here. Left out when no interceptors are
+        // given, so a remote DataGateway's client is built with no channel
+        // options at all.
+        ...(channel?.interceptors && {
+          channelOptions: { interceptors: channel.interceptors } satisfies ClientOptions,
+        }),
       },
     }) as ClientGrpcProxy;
 

@@ -1,6 +1,9 @@
 import { env } from '@bge/env';
+import * as grpc from '@grpc/grpc-js';
+import * as protoLoader from '@grpc/proto-loader';
 import {
   ConsoleLogger,
+  Controller,
   Injectable,
   Logger,
   Module,
@@ -9,6 +12,7 @@ import {
   type Type,
 } from '@nestjs/common';
 import { ConfigModule, registerAs } from '@nestjs/config';
+import { GrpcMethod } from '@nestjs/microservices';
 import Joi from 'joi';
 import { LoggerModule } from 'nestjs-pino';
 import * as fs from 'node:fs';
@@ -60,6 +64,52 @@ const silentLogger = LoggerModule.forRoot({ pinoHttp: { level: 'silent' } });
   imports: [ConfigModule.forRoot({ ignoreEnvFile: true, load: [defaultedAddress] }), silentLogger],
 })
 class ServingAppModule {}
+
+/**
+ * Two packages, each in a file of its own, as the coordinator serves its own
+ * and the gateway's (#1083). Each reply names the service that answered.
+ */
+const SERVED_PROTOS = {
+  'first.proto': `syntax = "proto3";
+package bge.spec.first.v1;
+service FirstService { rpc Ping (PingRequest) returns (PingReply); }
+message PingRequest {}
+message PingReply { string from = 1; }
+`,
+  'second.proto': `syntax = "proto3";
+package bge.spec.second.v1;
+service SecondService { rpc Ping (PingRequest) returns (PingReply); }
+message PingRequest {}
+message PingReply { string from = 1; }
+`,
+};
+
+@Controller()
+class TwoServicesController {
+  first(): { from: string } {
+    return { from: 'first' };
+  }
+
+  second(): { from: string } {
+    return { from: 'second' };
+  }
+}
+
+// Applied by hand: this spec compiles standard decorators, under which Nest's
+// method decorators don't type, while its class decorators do.
+for (const [service, method] of [
+  ['FirstService', 'first'],
+  ['SecondService', 'second'],
+] as const) {
+  const prototype = TwoServicesController.prototype;
+  GrpcMethod(service, 'Ping')(prototype, method, Object.getOwnPropertyDescriptor(prototype, method) ?? {});
+}
+
+@Module({
+  imports: [ConfigModule.forRoot({ ignoreEnvFile: true, load: [defaultedAddress] }), silentLogger],
+  controllers: [TwoServicesController],
+})
+class TwoServicesAppModule {}
 
 const bootFailure = new Error('the token endpoint refused the connection');
 
@@ -147,6 +197,23 @@ function connects(host: string, port: number): Promise<void> {
   });
 }
 
+/** Calls `Ping` on the fully qualified `service` at `127.0.0.1:port`, and answers its reply. */
+async function ping(protoPath: string, service: string, port: number): Promise<unknown> {
+  const definition = protoLoader.loadSync(protoPath);
+  // The loader keys each service, message and enum by its fully qualified
+  // name, so the service's name picks out its definition.
+  const Client = grpc.makeClientConstructor(definition[service] as grpc.ServiceDefinition, service);
+  const client = new Client(`127.0.0.1:${port}`, grpc.credentials.createInsecure());
+
+  try {
+    return await new Promise((resolve, reject) => {
+      client['Ping']({}, (error: grpc.ServiceError | null, reply: unknown) => (error ? reject(error) : resolve(reply)));
+    });
+  } finally {
+    client.close();
+  }
+}
+
 describe('bootstrapGrpcMicroservice', () => {
   let protoDir: string;
 
@@ -216,6 +283,37 @@ describe('bootstrapGrpcMicroservice', () => {
 
     expect(onBootstrapError).not.toHaveBeenCalled();
     await expect(connects('::1', defaultPort)).resolves.toBeUndefined();
+  });
+
+  // The coordinator serves its own package and, for the plugin DataGateways
+  // it hosts, the gateway's.
+  it('serves every package it is given (#1083)', async () => {
+    const servedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bge-gateway-host-served-'));
+    for (const [file, proto] of Object.entries(SERVED_PROTOS)) {
+      fs.writeFileSync(path.join(servedDir, file), proto);
+    }
+
+    const packages: readonly string[] = ['bge.spec.first.v1', 'bge.spec.second.v1'];
+    const onBootstrapError = jest.fn();
+
+    try {
+      await bootstrap({
+        appModule: TwoServicesAppModule,
+        protoPackage: packages,
+        protoDir: servedDir,
+        onBootstrapError,
+      });
+
+      expect(onBootstrapError).not.toHaveBeenCalled();
+      await expect(
+        ping(path.join(servedDir, 'first.proto'), 'bge.spec.first.v1.FirstService', defaultPort),
+      ).resolves.toEqual({ from: 'first' });
+      await expect(
+        ping(path.join(servedDir, 'second.proto'), 'bge.spec.second.v1.SecondService', defaultPort),
+      ).resolves.toEqual({ from: 'second' });
+    } finally {
+      fs.rmSync(servedDir, { recursive: true, force: true });
+    }
   });
 
   describe('when the config fails validation', () => {
