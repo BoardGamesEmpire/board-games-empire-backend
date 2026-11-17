@@ -95,6 +95,8 @@ describe('PluginUpdateService', () => {
     pendingSha256: null,
     pendingSince: null,
     pendingStagingId: null,
+    pendingFromUrl: null,
+    pendingRegistrySlug: null,
     restartRequired: false,
     uninstalledAt: null,
     createdAt: new Date(0),
@@ -2568,6 +2570,8 @@ describe('PluginUpdateService', () => {
           pendingSha256: null,
           pendingSince: null,
           pendingStagingId: null,
+          pendingFromUrl: null,
+          pendingRegistrySlug: null,
         },
       });
       expect(emitter.emit).toHaveBeenCalledWith(

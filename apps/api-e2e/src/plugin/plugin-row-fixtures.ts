@@ -42,13 +42,21 @@ export function pluginRowData(
 
 type StagedUpdateColumns = Pick<
   Prisma.PluginUncheckedCreateInput,
-  'pendingVersion' | 'pendingManifestJson' | 'pendingSha256' | 'pendingSince' | 'pendingStagingId'
+  | 'pendingVersion'
+  | 'pendingManifestJson'
+  | 'pendingSha256'
+  | 'pendingSince'
+  | 'pendingStagingId'
+  | 'pendingFromUrl'
+  | 'pendingRegistrySlug'
 >;
 
 /**
  * The five columns of a staged update, all set. They are exactly the set the
  * `plugins_staged_update_all_or_nothing` CHECK requires: set some and not the
- * others, and Postgres refuses the row (#357).
+ * others, and Postgres refuses the row (#357). The artifact's link and
+ * registry (#1096) are null by default, as for an upload; they sit outside
+ * that set and may be set only while an update is staged.
  */
 export function stagedUpdateColumns(
   overrides: {
@@ -58,6 +66,10 @@ export function stagedUpdateColumns(
     readonly stagingId?: string;
     /** When the update was staged. Defaults to now. */
     readonly since?: Date;
+    /** The link the staged artifact was fetched from (#1096). Defaults to null, as for an upload. */
+    readonly url?: string;
+    /** The registry the staged artifact came from (#1096). Defaults to null, as for an upload. */
+    readonly registrySlug?: string;
   } = {},
 ): StagedUpdateColumns {
   const version = overrides.version ?? overrides.manifest?.version ?? '1.3.0';
@@ -69,5 +81,7 @@ export function stagedUpdateColumns(
     pendingSha256: overrides.sha256 ?? 'b'.repeat(64),
     pendingSince: overrides.since ?? new Date(),
     pendingStagingId: overrides.stagingId ?? INVENTORY_STAGING_ID,
+    pendingFromUrl: overrides.url ?? null,
+    pendingRegistrySlug: overrides.registrySlug ?? null,
   };
 }

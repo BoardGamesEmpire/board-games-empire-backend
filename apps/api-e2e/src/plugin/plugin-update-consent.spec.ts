@@ -1037,6 +1037,22 @@ describe('plugin update consent (approve/reject/pending)', () => {
       const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
       expect(row.pendingSha256).toBe(STAGED_SHA);
     });
+
+    it('the database refuses a staged link or registry on a plugin with no staged update (#1096)', async () => {
+      // The link and registry describe the staged artifact's provenance, so
+      // they mean nothing on a row with no staged update to describe.
+      const plugin = await db.client.plugin.create({ data: pluginRowData() });
+
+      const failure = await db.client.plugin
+        .update({ where: { id: plugin.id }, data: { pendingFromUrl: 'https://artifacts.example.test/x.tgz' } })
+        .catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(errorText(failure)).toContain('plugins_staged_provenance_needs_staging');
+      const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      expect(row.pendingFromUrl).toBeNull();
+      expect(row.pendingRegistrySlug).toBeNull();
+    });
   });
 
   describe('pending read', () => {
