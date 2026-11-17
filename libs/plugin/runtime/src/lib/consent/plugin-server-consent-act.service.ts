@@ -123,8 +123,10 @@ export class PluginServerConsentActService {
       await this.claimPluginForAct(tx, plugin.id, plugin.slug, plugin.installedSha256);
 
       // The catalog and the Server unit's decisions are read under the claim,
-      // through this transaction, so the risk an answer is judged against is
-      // the one the act commits beside.
+      // through this transaction. Nothing locks catalog rows, so an Owner's
+      // risk edit can still land before the commit; the decision then holds
+      // a risk below the catalog's, confers nothing (`riskCovers`) and leaves
+      // the unit owing a review, so a late edit fails closed (#1336).
       const classification = await this.classifier.classify(plugin.id, SERVER_PLUGIN_UNIT, validated.permissionChecks, {
         source: 'active',
         client: tx,

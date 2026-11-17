@@ -1209,7 +1209,8 @@ describe('consent acts (#1150)', () => {
   });
 
   // An act stores what the consent surface showed, localized text included,
-  // so its body may name the locale that surface was shown in (#1301). The
+  // so its body may name the locale that surface reported it was rendered in,
+  // its `presentation.locale` (#1301). The
   // e2e server ships one catalog, so its supported set is `en` alone: a test
   // here can name `en` against an `Accept-Language` the server cannot serve,
   // and the controller specs prove a named locale beats the request's own.

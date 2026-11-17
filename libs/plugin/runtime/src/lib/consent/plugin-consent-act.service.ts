@@ -262,7 +262,9 @@ export class PluginConsentActService {
 
         // The catalog and the unit's decisions are read under the claim and
         // the key, through this transaction, so the act judges against the
-        // risk and the decisions it writes over (#361).
+        // decisions it writes over (#361). Nothing locks catalog rows: a risk
+        // edit landing before the commit leaves the decision's risk below the
+        // catalog's, so it confers nothing (`riskCovers`) and fails closed.
         const classification = await this.classifier.classify(plugin.id, unit, named.validated.permissionChecks, {
           source: named.source,
           client: tx,

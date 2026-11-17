@@ -473,9 +473,10 @@ interface ActivationOutcome {
  * SAME consent gates as install (categorical exclusions, core-permission
  * existence, static analysis with its overridable forbidden-specifier
  * gate), runs the escalation comparison against the ACTIVE manifest, and
- * then either activates immediately (no server-gating escalation) or writes
- * the pending columns and emits `plugin.update_pending` for the admin
- * surface. Approving a staged update is the Server unit's consent to it,
+ * then either activates immediately (no server-gating escalation, and no
+ * refusal of a required server-scope permission found under the activation
+ * claim) or writes the pending columns and emits `plugin.update_pending` for
+ * the admin surface. Approving a staged update is the Server unit's consent to it,
  * recorded as one `UpdateApprove` consent act (#1336).
  *
  * ACTIVATION never hot-swaps running code: the transaction promotes
