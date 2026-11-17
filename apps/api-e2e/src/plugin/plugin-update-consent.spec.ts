@@ -14,7 +14,7 @@ import { requireBaseUrl } from '../support/e2e-env';
 import { errorText } from '../support/error-text';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { pluginAbilitySlugsForHousehold } from './plugin-ability-fixtures';
-import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
+import { FIXTURE_ACT_ID, INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
 /**
  * The wire half of #321: approve/reject/pending over a REAL staged row —
@@ -188,6 +188,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
         scopeType: PluginGrantScope.Server,
         scopeId: '',
         permissionSlug: 'read:safe_http_policy',
+        actId: FIXTURE_ACT_ID,
         decidedAt: new Date(),
         decidedRiskLevel: RiskLevel.Medium,
         ...overrides,
@@ -223,6 +224,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
         scopeId: '',
         permissionSlug: ownSlug,
         status: PluginGrantStatus.Granted,
+        actId: FIXTURE_ACT_ID,
         decidedAt: new Date(),
         decidedRiskLevel: RiskLevel.Low,
       },
@@ -239,6 +241,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
         scopeId: householdId,
         permissionSlug: HOUSEHOLD_CHECK.slug,
         status: PluginGrantStatus.Granted,
+        actId: FIXTURE_ACT_ID,
         decidedAt: new Date(),
         decidedRiskLevel: RiskLevel.Low,
       },

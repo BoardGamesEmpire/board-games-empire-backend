@@ -6,7 +6,7 @@ import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { readConsentSurface, sendSwitchOn, switchOnBody } from './consent-act-fixtures';
 import { pluginAbilitySlugsForHousehold } from './plugin-ability-fixtures';
-import { pluginRowData } from './plugin-row-fixtures';
+import { FIXTURE_ACT_ID, pluginRowData } from './plugin-row-fixtures';
 
 /**
  * The wire half of #323: household and user unit enablement plus the
@@ -194,6 +194,7 @@ describe('plugin unit enablement + feature state (#323)', () => {
         scopeId: householdId,
         permissionSlug,
         status,
+        actId: FIXTURE_ACT_ID,
         decidedAt: new Date(),
         decidedRiskLevel: RiskLevel.Low,
       },

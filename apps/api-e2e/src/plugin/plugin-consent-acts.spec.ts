@@ -30,7 +30,7 @@ import {
 } from './consent-act-fixtures';
 import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
 import { pluginAbilitySlugsForHousehold } from './plugin-ability-fixtures';
-import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
+import { FIXTURE_ACT_ID, INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
 /**
  * Consent acts end to end (#1150): a household or a user switches a plugin on
@@ -122,6 +122,7 @@ describe('consent acts (#1150)', () => {
         scopeId: '',
         permissionSlug: ownSlug,
         status: PluginGrantStatus.Granted,
+        actId: FIXTURE_ACT_ID,
         decidedAt: new Date(),
         decidedRiskLevel: RiskLevel.Low,
       },

@@ -128,7 +128,7 @@ describe('PluginUpdateService', () => {
     permissionSlug: 'feedback:read',
     status: PluginGrantStatus.Granted,
     decidedById: 'admin-1',
-    actId: null,
+    actId: 'act-1',
     decidedRiskLevel: RiskLevel.Medium,
     decidedAt: new Date(0),
     createdAt: new Date(0),
@@ -236,6 +236,9 @@ describe('PluginUpdateService', () => {
     // back as the row the upsert would return.
     db.pluginConsentAct.create.mockImplementation(((args: { data: Record<string, unknown> }) =>
       Promise.resolve({ id: 'act-approve', ...args.data })) as never);
+    // The acts behind revoked decisions, read for the version each revocation
+    // names; a test that asserts the version arranges them.
+    db.pluginConsentAct.findMany.mockResolvedValue([]);
     db.pluginGrant.upsert.mockImplementation(((args: { create: Partial<PluginGrant> }) =>
       Promise.resolve(makeGrant({ id: `grant-${String(args.create.permissionSlug)}`, ...args.create }))) as never);
 
@@ -674,10 +677,10 @@ describe('PluginUpdateService', () => {
       ]);
     });
 
-    it("names the version a revoked household decision's act answered, not the one the update replaces (#1150)", async () => {
-      // Consent given at 1.0.0 survived the unchanged 1.2.0. Its revocation
-      // names 1.0.0, read from its act; a server decision has no act until
-      // #1152 and names the outgoing 1.2.0.
+    it("names the version each revoked decision's act answered, not the one the update replaces (#1150, #1336)", async () => {
+      // Consent given at 1.0.0 and 1.1.0 survived the unchanged 1.2.0. Each
+      // revocation names the version read from its own act, the Server
+      // unit's decision included, never the outgoing 1.2.0.
       const server = makeGrant();
       const household = makeGrant({
         id: 'grant-hh',
@@ -688,7 +691,10 @@ describe('PluginUpdateService', () => {
       db.pluginGrant.findMany
         .mockResolvedValueOnce([server, household]) // comparison load
         .mockResolvedValueOnce([server, household]); // decisions on permissions no longer requested
-      db.pluginConsentAct.findMany.mockResolvedValue([{ id: 'act-hh', manifestVersion: '1.0.0' }] as never);
+      db.pluginConsentAct.findMany.mockResolvedValue([
+        { id: 'act-1', manifestVersion: '1.1.0' },
+        { id: 'act-hh', manifestVersion: '1.0.0' },
+      ] as never);
       await writeManifest(
         nextManifest({
           permissions: {
@@ -701,14 +707,14 @@ describe('PluginUpdateService', () => {
       await service.stage(input());
 
       expect(db.pluginConsentAct.findMany).toHaveBeenCalledWith({
-        where: { id: { in: ['act-hh'] } },
+        where: { id: { in: ['act-1', 'act-hh'] } },
         select: { id: true, manifestVersion: true },
       });
       const contexts = emitter.emit.mock.calls
         .filter(([eventName]) => eventName === PluginGrantRevokedEvent.eventName)
         .map(([, event]) => (event as PluginGrantRevokedEvent).context);
       expect(contexts).toEqual([
-        { manifestVersion: '1.2.0', actId: null },
+        { manifestVersion: '1.1.0', actId: 'act-1' },
         { manifestVersion: '1.0.0', actId: 'act-hh' },
       ]);
     });

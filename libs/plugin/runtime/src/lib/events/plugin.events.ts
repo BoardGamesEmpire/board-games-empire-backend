@@ -411,10 +411,11 @@ export class PluginUpdateApprovedEvent extends MutationEvent<Plugin> {
     before: PluginUpdateStagingSnapshot,
     after: PluginUpdateStagingSnapshot,
     /**
-     * Server-consentable permissions this approval granted — the update's
-     * NEW checks, seeded on activation. Approval IS the consent act, so the
-     * record rides the event the same way install's seed rides
-     * `plugin.installed`; per-grant events are deliberately not emitted.
+     * Every server-scope permission this approval granted under its
+     * `UpdateApprove` consent act (#1336), required ones that were already
+     * granted included. Approval IS the consent act, so the record rides the
+     * event the same way install's seed rides `plugin.installed`; per-grant
+     * events are deliberately not emitted.
      */
     public readonly grantedPermissions: readonly GrantedPermissionRecord[],
     /**
@@ -477,8 +478,8 @@ type PluginGrantSnapshot = Readonly<
 export interface PluginGrantEventContext {
   /** Version of the manifest the decision was made against. */
   readonly manifestVersion: string;
-  /** The consent act that wrote the decision; null for server-scope decisions until #1152. */
-  readonly actId: string | null;
+  /** The consent act that wrote the decision; every decision has one, the Server unit's included (#1336). */
+  readonly actId: string;
 }
 
 /**

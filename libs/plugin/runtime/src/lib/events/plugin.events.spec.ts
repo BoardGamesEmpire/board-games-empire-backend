@@ -219,7 +219,7 @@ describe('plugin lifecycle events', () => {
       status: PluginGrantStatus.Granted,
       decidedRiskLevel: RiskLevel.Low,
     };
-    const context = { manifestVersion: '1.2.0', actId: null };
+    const context = { manifestVersion: '1.2.0', actId: 'act_1' };
 
     it('first decision is create-shaped', () => {
       const event = new PluginGrantCreatedEvent(null, grantRow, context, initiatedAt);

@@ -41,10 +41,10 @@ model PluginGrant {
   /// id, no FK — decisions must survive principal deletion.
   decidedById String? @map("decided_by_id")
 
-  /// The consent act that wrote this decision (#1150). Plain String id, no
-  /// FK — the act table is append-only and outlives the row. Null for
-  /// server-scope decisions until #1152 records those as acts too.
-  actId String? @map("act_id")
+  /// The consent act that wrote this decision (#1150, #1336). Required: every
+  /// writer records an act first, the Server unit's included. Plain String
+  /// id, no FK — the act table is append-only and outlives the row.
+  actId String @map("act_id")
 
   /// `riskLevel` of the permission AT DECISION TIME. Makes the
   /// server-gating "risk escalated" comparison detectable: current risk >

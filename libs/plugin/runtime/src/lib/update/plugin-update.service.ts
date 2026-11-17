@@ -1643,11 +1643,7 @@ export class PluginUpdateService {
       // names. The act table is append-only, so every act a row names is still
       // there to read.
       const revokedActIds = [
-        ...new Set(
-          [...revokedGrants, ...unrequestedGrants, ...scopeMovedGrants].flatMap((grant) =>
-            grant.actId === null ? [] : [grant.actId],
-          ),
-        ),
+        ...new Set([...revokedGrants, ...unrequestedGrants, ...scopeMovedGrants].map((grant) => grant.actId)),
       ];
       const revokedActs =
         revokedActIds.length === 0
@@ -1718,11 +1714,10 @@ export class PluginUpdateService {
           reason,
           // The row does not store the manifest version (#1150), so a decision
           // names its act's: consent given at one version can outlive the next
-          // unchanged one. A decision with no act names the manifest this
-          // update replaces.
+          // unchanged one. The act table is append-only, so the act is there;
+          // the manifest this update replaces only answers if its read missed.
           {
-            manifestVersion:
-              (grant.actId === null ? undefined : outcome.revokedActVersions.get(grant.actId)) ?? before.version,
+            manifestVersion: outcome.revokedActVersions.get(grant.actId) ?? before.version,
             actId: grant.actId,
           },
           initiatedAt,

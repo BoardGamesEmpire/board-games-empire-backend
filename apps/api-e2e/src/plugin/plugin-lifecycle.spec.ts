@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
+import { FIXTURE_ACT_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
 /**
  * The wire half of #320: enable/disable, server config PATCH, and uninstall
@@ -176,6 +176,7 @@ describe('plugin lifecycle (server-level)', () => {
           scopeId: '',
           permissionSlug: 'feedback:read',
           status: PluginGrantStatus.Denied,
+          actId: FIXTURE_ACT_ID,
           decidedAt: new Date(),
           decidedRiskLevel: RiskLevel.Medium,
         },

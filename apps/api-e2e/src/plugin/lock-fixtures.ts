@@ -1,6 +1,6 @@
 import { PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel, type PrismaClient } from '@bge/database';
 import { randomUUID } from 'node:crypto';
-import { pluginRowData } from './plugin-row-fixtures';
+import { FIXTURE_ACT_ID, pluginRowData } from './plugin-row-fixtures';
 
 /**
  * Rows and probe statements for the plugin lock specs — the mechanics tier
@@ -73,9 +73,9 @@ export const FK_PLUGIN_LOCK = 'SELECT p.id FROM plugins p WHERE p.id = $1 FOR KE
  */
 export const SERVER_GRANT_INSERT =
   `INSERT INTO plugin_grants
-     (id, plugin_id, scope_type, scope_id, permission_slug, status, decided_risk_level,
+     (id, plugin_id, scope_type, scope_id, permission_slug, status, act_id, decided_risk_level,
       decided_at, updated_at)
-   VALUES ($1, $2, '${PluginGrantScope.Server}', '', $3, '${PluginGrantStatus.Granted}', ` +
+   VALUES ($1, $2, '${PluginGrantScope.Server}', '', $3, '${PluginGrantStatus.Granted}', '${FIXTURE_ACT_ID}', ` +
   `'${RiskLevel.Low}', now(), now())
    RETURNING id`;
 
@@ -193,6 +193,7 @@ export async function arrangeGrant(
       scopeId: options.scopeId ?? '',
       permissionSlug,
       status: options.status ?? PluginGrantStatus.Granted,
+      actId: FIXTURE_ACT_ID,
       decidedRiskLevel: RiskLevel.Low,
       decidedAt: new Date(),
     },

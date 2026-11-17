@@ -21,7 +21,7 @@ import {
   toggleBody,
   type ConsentAnswerStatus,
 } from './consent-act-fixtures';
-import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
+import { FIXTURE_ACT_ID, INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
 /**
  * The wire half of #322: consent acts and the consent-presentation read over
@@ -520,6 +520,7 @@ describe('plugin consent acts + consent presentation (#322, #1150, #1336)', () =
           scopeId: fixture.household.id,
           permissionSlug: 'read:game:public',
           status: PluginGrantStatus.Denied,
+          actId: FIXTURE_ACT_ID,
           decidedAt: new Date(),
           decidedRiskLevel: RiskLevel.Low,
         },

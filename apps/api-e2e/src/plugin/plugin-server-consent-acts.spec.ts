@@ -21,7 +21,7 @@ import {
   type ConsentSurface,
 } from './consent-act-fixtures';
 import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
-import { pluginRowData } from './plugin-row-fixtures';
+import { FIXTURE_ACT_ID, pluginRowData } from './plugin-row-fixtures';
 
 /**
  * The Server unit's consent acts end to end (#1336): a server admin grants or
@@ -101,6 +101,7 @@ describe('server consent acts (#1336)', () => {
         scopeId: '',
         permissionSlug,
         status,
+        actId: FIXTURE_ACT_ID,
         decidedAt: new Date(),
         decidedRiskLevel,
       },
@@ -403,5 +404,18 @@ describe('server consent acts (#1336)', () => {
     expect(second.body).toMatchObject({ changed: false, act: null });
     expect(await actsOf(plugin.id)).toHaveLength(1);
     expect(await decisionOf(plugin.id, POLICY_OPTIONAL.slug)).toEqual(decisionAfterFirst);
+  });
+
+  // Every consent decision is written by a consent act, the Server unit's
+  // included, so the database refuses a row that names none (#1336). Raw SQL,
+  // because the generated client's types already refuse to build one.
+  it('refuses a consent decision with no act at the database (#1336)', async () => {
+    const plugin = await arrangePlugin([POLICY_OPTIONAL]);
+
+    await expect(
+      db.client.$executeRaw`INSERT INTO plugin_grants
+          (id, plugin_id, scope_type, scope_id, permission_slug, status, decided_risk_level, decided_at, updated_at)
+        VALUES (${randomUUID()}, ${plugin.id}, 'Server', '', ${POLICY_OPTIONAL.slug}, 'Granted', 'Medium', now(), now())`,
+    ).rejects.toThrow(/act_id/);
   });
 });

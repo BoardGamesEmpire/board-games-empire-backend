@@ -120,7 +120,7 @@ describe('PluginInstallerService', () => {
     permissionSlug: 'plugin|demo-sink|manage:digest',
     status: PluginGrantStatus.Granted,
     decidedById: null,
-    actId: null,
+    actId: 'act-1',
     decidedRiskLevel: RiskLevel.Low,
     decidedAt: new Date(0),
     createdAt: new Date(0),
