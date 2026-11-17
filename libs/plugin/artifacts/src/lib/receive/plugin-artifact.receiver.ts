@@ -6,8 +6,10 @@ import {
   PluginGrantAuthorityService,
   PluginInstallAuthorityError,
   PluginInstallerService,
+  PluginUpdateService,
   type PluginInstallAssessment,
   type PluginModuleOptions,
+  type PluginUpdateAssessment,
 } from '@bge/plugin';
 import {
   InvalidRequestUrlError,
@@ -54,7 +56,8 @@ export const PLUGIN_ARTIFACT_DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 /**
  * What the server knows about a received plugin artifact (#1094): its row,
  * its directory, what installing it would ask the server admin to confirm,
- * and whether a plugin with its slug is installed already.
+ * whether a plugin with its slug is installed already, and what an update
+ * over that plugin would do (#1096).
  */
 export interface PluginArtifactReceipt {
   readonly artifact: PluginArtifact;
@@ -65,6 +68,13 @@ export interface PluginArtifactReceipt {
     readonly state: 'none' | 'installed' | 'uninstalled';
     readonly version: string | null;
   };
+
+  /**
+   * What staging the artifact as an update of the living plugin with its slug
+   * would do, or why it would be refused (#1096). Null when no living plugin
+   * has the slug: nobody installed it, or it is an uninstalled plugin.
+   */
+  readonly update: PluginUpdateAssessment | null;
 }
 
 export interface ReceivePluginArtifactByLinkInput {
@@ -245,6 +255,7 @@ export class PluginArtifactReceiver {
     private readonly http: SecureHttpService,
     private readonly store: PluginArtifactStore,
     private readonly installer: PluginInstallerService,
+    private readonly updates: PluginUpdateService,
     private readonly directories: PluginDirectoryResolverService,
     private readonly authority: PluginGrantAuthorityService,
     private readonly db: DatabaseService,
@@ -352,8 +363,10 @@ export class PluginArtifactReceiver {
 
     const directory = await this.locate(artifact.slug, checksum);
     const assessment = await this.installer.assess(directory);
+    // Assessed again, as the install is: the living plugin may have changed since the post (#1096).
+    const update = await this.updates.assess(directory);
 
-    return { artifact, directory, assessment, installedPlugin: await this.installedPlugin(artifact.slug) };
+    return { artifact, directory, assessment, installedPlugin: await this.installedPlugin(artifact.slug), update };
   }
 
   /** Before anything else, on every path: anyone but a server admin triggers no read, write or download (#1094). */
@@ -419,6 +432,8 @@ export class PluginArtifactReceiver {
     const directory = await this.directories.confirm(placedDirectory(this.options.pluginsRoot, slug, expected));
     const assessment = await this.installer.assess(directory);
     // Every read comes before the row is written, so any failure leaves no row.
+    // The install assessment above has already validated the manifest (#1096).
+    const update = await this.updates.assess(directory);
     const installedPlugin = await this.installedPlugin(slug);
 
     const artifact = await this.store.recordReceived(
@@ -434,7 +449,7 @@ export class PluginArtifactReceiver {
       new Date(),
     );
 
-    return { artifact, directory, assessment, installedPlugin };
+    return { artifact, directory, assessment, installedPlugin, update };
   }
 
   /** The artifact's directory, as the resolver finds and confirms it; a missing one is not found. */

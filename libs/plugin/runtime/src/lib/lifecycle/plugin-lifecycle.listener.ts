@@ -347,7 +347,9 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
         ...this.pluginRowIdentity(event.after),
         payload: {
           pendingVersion: event.after.pendingVersion,
-          pendingSha256: event.pendingSha256,
+          // The staged plugin artifact's checksum, link and registry, under
+          // the name install's row uses (#1096).
+          provenance: event.provenance,
           // The staging's identity (#357), which approve and reject must
           // name: the same artifact staged twice has the same version and
           // checksum, so only this tells the two rows apart.
@@ -370,6 +372,9 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
           // The staging this approval answered (#357); null when an update
           // with nothing to consent to activated as it was staged.
           stagingId: event.before.pendingStagingId,
+          // The plugin's provenance follows its active version (#1096), so
+          // this row says which plugin artifact became active.
+          provenance: event.provenance,
           grantedPermissions: event.grantedPermissions,
           // Whether activation dropped retained server config as
           // schema-invalid under the manifest just promoted (D-CN) — same

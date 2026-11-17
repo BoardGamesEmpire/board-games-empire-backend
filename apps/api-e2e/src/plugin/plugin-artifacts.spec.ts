@@ -1,16 +1,13 @@
 import { RiskLevel } from '@bge/database';
-import { buildPluginTarball, type PluginTarballEntry } from '@bge/plugin-artifacts';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
-import { createHash, randomBytes } from 'node:crypto';
-import { access, readdir } from 'node:fs/promises';
+import { createActors, type Actors } from '@bge/testing-e2e';
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import request from 'supertest';
 import { restoreShippedCatalog } from '../permission-catalog/shipped-catalog';
-import { deferredRequest } from '../support/deferred-request';
-import { E2E_PLUGINS_ROOT_VAR, requireBaseUrl } from '../support/e2e-env';
+import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { readArtifactShownRisks, shownServerRisks } from './consent-act-fixtures';
+import { shownServerRisks } from './consent-act-fixtures';
+import { ARTIFACTS_PATH, artifactRoutes, buildArtifact, exists, pluginsRoot } from './plugin-artifact-fixtures';
 
 /**
  * The install ingress end to end (#1094): a plugin artifact posted by upload,
@@ -22,18 +19,7 @@ import { readArtifactShownRisks, shownServerRisks } from './consent-act-fixtures
  */
 describe('plugin install ingress (#1094)', () => {
   const baseUrl = requireBaseUrl(process.env);
-  const pluginsRoot = (): string => {
-    const root = process.env[E2E_PLUGINS_ROOT_VAR]?.trim();
-
-    if (!root) {
-      throw new Error(`${E2E_PLUGINS_ROOT_VAR} is not set: did the e2e globalSetup run?`);
-    }
-
-    return root;
-  };
-
-  const ARTIFACTS_PATH = '/api/plugins/artifacts';
-  const INSTALL_PATH = '/api/plugins/install';
+  const { upload, readBack, install } = artifactRoutes(baseUrl);
 
   let db: TestDatabase;
   let actors: Actors;
@@ -46,84 +32,6 @@ describe('plugin install ingress (#1094)', () => {
   afterAll(async () => {
     await db.close();
   });
-
-  interface BuiltArtifact {
-    readonly slug: string;
-    readonly bytes: Buffer;
-    readonly sha256: string;
-  }
-
-  /**
-   * A plugin artifact the server accepts. Every name that carries the slug
-   * follows it, so each call is its own plugin and no test installs over
-   * another. The fixture's `feedback:read` is dropped for the reason the
-   * other plugin specs give: no seeded `Permission` row backs it.
-   * `bgeCompat` is widened to cover the server's build-time stamp. `indexJs`
-   * changes the bytes, so a second artifact for the same slug has its own
-   * checksum. `extraChecks` adds requested permissions after the fixture's.
-   */
-  const buildArtifact = async (
-    indexJs = 'module.exports = () => ({});\n',
-    slug = `ingress-${randomBytes(6).toString('hex')}`,
-    extraChecks: PluginManifest['permissions']['checks'] = [],
-  ): Promise<BuiltArtifact> => {
-    const [manageDigest] = buildPluginManifest().permissions.checks;
-    const manifest: PluginManifest = {
-      ...buildPluginManifest({
-        slug,
-        bgeCompat: '>=0.0.0',
-        permissions: {
-          declares: ['manage:digest'],
-          checks: [...(manageDigest === undefined ? [] : [manageDigest]), ...extraChecks],
-        },
-        events: { subscribes: ['feedback.created'], emits: [`plugin.${slug}.digest-sent`] },
-        storage: {
-          ownTables: [`plugin_${slug.replaceAll('-', '_')}_digests`],
-          readsCore: ['Feedback'],
-          writesCore: [],
-        },
-        jobs: { queues: [`plugin.${slug}.digest`], schedules: [{ name: 'weekly-digest', cron: '0 9 * * 1' }] },
-      }),
-    };
-    const entries: PluginTarballEntry[] = [
-      { name: 'package/manifest.json', content: JSON.stringify(manifest) },
-      {
-        name: 'package/package.json',
-        content: JSON.stringify({ name: slug, version: manifest.version, main: 'index.js' }),
-      },
-      { name: 'package/index.js', content: indexJs },
-    ];
-    const bytes = await buildPluginTarball(entries);
-
-    return { slug, bytes, sha256: createHash('sha256').update(bytes).digest('hex') };
-  };
-
-  const upload = (actor: SessionActor, artifact: BuiltArtifact, expectedSha256: string = artifact.sha256) =>
-    request(baseUrl)
-      .post(ARTIFACTS_PATH)
-      .set(actor.headers)
-      .field('sha256', expectedSha256)
-      .attach('file', artifact.bytes, { filename: `${artifact.slug}.tgz`, contentType: 'application/gzip' });
-
-  const readBack = (actor: SessionActor, sha256: string) =>
-    request(baseUrl).get(`${ARTIFACTS_PATH}/${sha256}`).set(actor.headers);
-
-  /** Sends the risks the artifact read shows, as a client would; a spec's body overrides them (#1336). */
-  const install = (actor: SessionActor, body: { readonly sha256: string } & Record<string, unknown>) =>
-    deferredRequest(
-      () => readArtifactShownRisks(baseUrl, actor, body.sha256),
-      (shownRisks) =>
-        request(baseUrl)
-          .post(INSTALL_PATH)
-          .set(actor.headers)
-          .send({ shownRisks, ...body }),
-    );
-
-  const exists = (path: string): Promise<boolean> =>
-    access(path).then(
-      () => true,
-      () => false,
-    );
 
   /** Where the api puts an upload while it arrives: empty once the request has ended. */
   const incoming = (): Promise<string[]> =>
@@ -211,14 +119,16 @@ describe('plugin install ingress (#1094)', () => {
     // A core permission, so the Owner can change its risk; the declared
     // manage:digest is locked Low.
     const POLICY_READ = 'read:safe_http_policy';
-    const artifact = await buildArtifact(undefined, undefined, [
-      {
-        slug: POLICY_READ,
-        required: false,
-        reason: { en: 'Inspects the outbound policy before scheduling digest delivery.' },
-        consentScope: 'server',
-      },
-    ]);
+    const artifact = await buildArtifact({
+      extraChecks: [
+        {
+          slug: POLICY_READ,
+          required: false,
+          reason: { en: 'Inspects the outbound policy before scheduling digest delivery.' },
+          consentScope: 'server',
+        },
+      ],
+    });
 
     const posted = await upload(admin, artifact).expect(200);
     // The one locale the read was rendered in, which the install may send back (#1301).
@@ -286,7 +196,7 @@ describe('plugin install ingress (#1094)', () => {
     await request(baseUrl).post(`/api/plugins/${artifact.slug}/uninstall`).set(admin.headers).send({}).expect(200);
 
     // A new artifact for the same slug: a reinstall, which keeps the plugin's id.
-    const again = await buildArtifact('module.exports = () => ({ again: true });\n', artifact.slug);
+    const again = await buildArtifact({ slug: artifact.slug, indexJs: 'module.exports = () => ({ again: true });\n' });
 
     await upload(admin, again).expect(200);
     await install(admin, { sha256: again.sha256 }).expect(201);
@@ -323,9 +233,9 @@ describe('plugin install ingress (#1094)', () => {
 
   it('a raw DatabaseService import must be accepted per specifier (#1094)', async () => {
     const admin = await actors.admin();
-    const artifact = await buildArtifact(
-      "const { DatabaseService } = require('@bge/database');\nmodule.exports = DatabaseService;\n",
-    );
+    const artifact = await buildArtifact({
+      indexJs: "const { DatabaseService } = require('@bge/database');\nmodule.exports = DatabaseService;\n",
+    });
 
     const posted = await upload(admin, artifact).expect(200);
 

@@ -6,6 +6,7 @@ import {
   PluginDirectoryResolverService,
   PluginGrantAuthorityService,
   PluginInstallerService,
+  PluginUpdateService,
 } from '@bge/plugin';
 import { SecureHttpService } from '@bge/secure-http';
 import { createMockDatabaseService } from '@bge/testing';
@@ -20,6 +21,7 @@ import { join } from 'node:path';
 import { PluginArtifactInstaller } from './install/plugin-artifact.installer';
 import { PluginArtifactsModule } from './plugin-artifacts.module';
 import { PluginArtifactReceiver } from './receive/plugin-artifact.receiver';
+import { PluginArtifactStager } from './stage/plugin-artifact.stager';
 import { PluginArtifactStore } from './store/plugin-artifact.store';
 import { PluginArtifactSweepService } from './sweep/plugin-artifact-sweep.service';
 
@@ -33,6 +35,7 @@ import { PluginArtifactSweepService } from './sweep/plugin-artifact-sweep.servic
   providers: [
     { provide: SecureHttpService, useValue: {} },
     { provide: PluginInstallerService, useValue: {} },
+    { provide: PluginUpdateService, useValue: {} },
     { provide: PluginDirectoryResolverService, useValue: {} },
     { provide: PluginGrantAuthorityService, useValue: {} },
     { provide: MODULE_OPTIONS_TOKEN, useValue: buildPluginModuleOptions() },
@@ -40,6 +43,7 @@ import { PluginArtifactSweepService } from './sweep/plugin-artifact-sweep.servic
   exports: [
     SecureHttpService,
     PluginInstallerService,
+    PluginUpdateService,
     PluginDirectoryResolverService,
     PluginGrantAuthorityService,
     MODULE_OPTIONS_TOKEN,
@@ -52,6 +56,7 @@ class ArtifactsConsumer {
   constructor(
     readonly receiver: PluginArtifactReceiver,
     readonly installer: PluginArtifactInstaller,
+    readonly stager: PluginArtifactStager,
     readonly store: PluginArtifactStore,
   ) {}
 }
@@ -83,6 +88,13 @@ describe('PluginArtifactsModule (#1094)', () => {
     expect(moduleRef.get(PluginArtifactReceiver)).toBeInstanceOf(PluginArtifactReceiver);
     expect(moduleRef.get(PluginArtifactInstaller)).toBeInstanceOf(PluginArtifactInstaller);
     expect(moduleRef.get(PluginArtifactStore)).toBeInstanceOf(PluginArtifactStore);
+    await moduleRef.close();
+  });
+
+  it('builds and exports the stager from the global runtime update service (#1096)', async () => {
+    const moduleRef = await compile(ConsumerModule);
+
+    expect(moduleRef.get(ArtifactsConsumer).stager).toBeInstanceOf(PluginArtifactStager);
     await moduleRef.close();
   });
 

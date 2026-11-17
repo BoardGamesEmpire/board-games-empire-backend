@@ -1,9 +1,11 @@
 import {
+  PLUGIN_PROCESS_ROLES,
   PLUGIN_UNIT_DORMANCY_CODES,
   PluginCategory,
   PluginExecutionMode,
   PluginScope,
   RiskLevel,
+  type PluginProcessRole,
   type PluginUnitDormancy,
 } from '@bge/database';
 import type {
@@ -248,6 +250,14 @@ export class PluginInventoryEntryDto extends PluginInventoryIdentityDto implemen
 
   @ApiProperty({ description: 'An update activated in the DB while the process still runs the prior code' })
   restartRequired!: boolean;
+
+  @ApiProperty({
+    enum: PLUGIN_PROCESS_ROLES,
+    isArray: true,
+    description:
+      'The process roles to restart so the server runs what it has recorded. Empty unless a restart is required',
+  })
+  restartProcessRoles!: PluginProcessRole[];
 
   @ApiProperty()
   installedAt!: Date;

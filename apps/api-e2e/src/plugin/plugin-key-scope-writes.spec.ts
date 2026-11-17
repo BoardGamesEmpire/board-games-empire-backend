@@ -8,6 +8,7 @@ import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { readStagedShownRisks } from './consent-act-fixtures';
 import { arrangeInventoryPlugin, INVENTORY_STAGING_ID } from './inventory-fixtures';
+import { INSTALLED_SHA256 } from './plugin-row-fixtures';
 
 /**
  * The server plugin writes gate on a type-level `can(manage, Plugin)`, which a
@@ -83,6 +84,8 @@ describe('server plugin writes through a key scoped to one plugin (#978)', () =>
         .post(`/api/plugins/${slug}/update/reject`)
         .set(actor.headers)
         .send({ stagingId: INVENTORY_STAGING_ID }),
+    'POST /plugins/:slug/update/stage': (actor, slug) =>
+      request(baseUrl).post(`/api/plugins/${slug}/update/stage`).set(actor.headers).send({ sha256: INSTALLED_SHA256 }),
   } as const satisfies Record<string, (actor: Caller, slug: string) => PromiseLike<request.Response>>;
 
   type Write = keyof typeof WRITES;
@@ -123,7 +126,7 @@ describe('server plugin writes through a key scoped to one plugin (#978)', () =>
     grants: await db.client.pluginGrant.count({ where: { pluginId: plugin.id } }),
   });
 
-  it('answers 404 on all seven for any other plugin, whatever its state, and leaves it unchanged', async () => {
+  it('answers 404 on all eight for any other plugin, whatever its state, and leaves it unchanged', async () => {
     const admin = await actors.admin();
     const [scoped, live, gone, staged] = await Promise.all([
       arrangeInventoryPlugin(db.client),
@@ -151,6 +154,7 @@ describe('server plugin writes through a key scoped to one plugin (#978)', () =>
       'POST /plugins/:slug/uninstall': [404, 'PLUGIN_LIFECYCLE_NOT_FOUND'],
       'POST /plugins/:slug/update/approve': [404, 'PLUGIN_UPDATE_PLUGIN_NOT_FOUND'],
       'POST /plugins/:slug/update/reject': [404, 'PLUGIN_UPDATE_PLUGIN_NOT_FOUND'],
+      'POST /plugins/:slug/update/stage': [404, 'PLUGIN_UPDATE_PLUGIN_NOT_FOUND'],
     });
 
     const others = { missing, live: live.slug, gone: gone.slug, staged: staged.slug };
@@ -164,17 +168,20 @@ describe('server plugin writes through a key scoped to one plugin (#978)', () =>
 
     // The controls, once nothing else needs the plugins as they were: the key
     // writes its own plugin, and an unpinned key from the same owner reaches
-    // the others on all seven writes, so the 404s above are the pin's.
+    // the others on all eight writes, so the 404s above are the pin's. Staging
+    // the checksum the plugin already runs answers it as it is (#1096).
     expect(
       await statusesOf(key, [
         ['POST /plugins/:slug/enable', scoped.slug],
         ['POST /plugins/:slug/disable', scoped.slug],
         ['PATCH /plugins/:slug/config', scoped.slug],
+        ['POST /plugins/:slug/update/stage', scoped.slug],
       ]),
     ).toEqual([
       ['POST /plugins/:slug/enable', 200],
       ['POST /plugins/:slug/disable', 200],
       ['PATCH /plugins/:slug/config', 200],
+      ['POST /plugins/:slug/update/stage', 200],
     ]);
 
     // An approval consumes its staged update, so the approval gets a plugin
@@ -189,6 +196,7 @@ describe('server plugin writes through a key scoped to one plugin (#978)', () =>
         ['PATCH /plugins/:slug/config', live.slug],
         ['POST /plugins/:slug/update/approve', approvable.slug],
         ['POST /plugins/:slug/update/reject', staged.slug],
+        ['POST /plugins/:slug/update/stage', live.slug],
         ['POST /plugins/:slug/enable', gone.slug],
         ['POST /plugins/:slug/uninstall', live.slug],
       ]),
@@ -199,6 +207,7 @@ describe('server plugin writes through a key scoped to one plugin (#978)', () =>
       ['PATCH /plugins/:slug/config', 200],
       ['POST /plugins/:slug/update/approve', 200],
       ['POST /plugins/:slug/update/reject', 200],
+      ['POST /plugins/:slug/update/stage', 200],
       ['POST /plugins/:slug/enable', 410],
       ['POST /plugins/:slug/uninstall', 200],
     ]);

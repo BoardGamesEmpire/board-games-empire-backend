@@ -23,10 +23,12 @@ import type { UpdateEscalation } from '../update/update-escalation.types';
  */
 
 /**
- * Where the installed plugin artifact came from: its link, checksum and
- * registry (#84). Every plugin is installed from one, so its checksum is
- * always set (#696). The names are the ones the client reads (#1117), so the
- * event, the lifecycle payload and the inventory read share one shape.
+ * Where a plugin artifact came from: its link, checksum and registry (#84).
+ * It describes the artifact a plugin was installed from, the one a staged
+ * update carries, and the one an update approval made active (#1096). A
+ * plugin artifact always has a checksum (#696). The names are the ones the
+ * client reads (#1117), so the event, the lifecycle payload and the inventory
+ * read share one shape.
  */
 export interface PluginProvenance {
   readonly sha256: PluginArtifactSha256;
@@ -392,8 +394,12 @@ export class PluginUpdatePendingEvent extends MutationEvent<Plugin> {
   constructor(
     before: PluginUpdateStagingSnapshot,
     after: PluginUpdateStagingSnapshot,
-    /** Checksum of the staged plugin artifact; every staged update has one (#696). */
-    public readonly pendingSha256: PluginArtifactSha256,
+    /**
+     * Where the staged plugin artifact came from: its checksum, which every
+     * staged update has (#696), and the link and registry an update approval
+     * makes the plugin's own (#1096).
+     */
+    public readonly provenance: PluginProvenance,
     /** What escalated — WHY this update needed staged consent. Context for the lifecycle row and the C4 surface. */
     public readonly escalations: readonly UpdateEscalation[],
     /** Forbidden import specifiers the staging admin explicitly accepted on the NEW version. */
@@ -417,6 +423,8 @@ export class PluginUpdateApprovedEvent extends MutationEvent<Plugin> {
   constructor(
     before: PluginUpdateStagingSnapshot,
     after: PluginUpdateStagingSnapshot,
+    /** The activated plugin artifact's provenance, which the plugin's row now names (#1096). */
+    public readonly provenance: PluginProvenance,
     /**
      * Every server-scope permission this approval granted under its
      * `UpdateApprove` consent act (#1336), required ones that were already

@@ -1,5 +1,5 @@
 import { AuditContextService, SERVER_PLUGIN_UNIT } from '@bge/actor-context';
-import { Action, ResourceType } from '@bge/database';
+import { Action, ResourceType, roleLoading } from '@bge/database';
 import { SupportedLocalesService, t } from '@bge/i18n';
 import { AbilityService, CheckPolicies, PoliciesGuard, ScopeComposer, Unscoped } from '@bge/permissions';
 import {
@@ -16,10 +16,12 @@ import {
   PluginUpdateNoPendingError,
   PluginUpdatePluginNotFoundError,
   PluginUpdateService,
+  restartProcessRoles,
 } from '@bge/plugin';
+import { PluginArtifactStager, type PluginArtifactStagingResult } from '@bge/plugin-artifacts';
 import { paginated, PaginatedResponseDto } from '@bge/shared';
 import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
@@ -27,6 +29,7 @@ import { consentActLocale } from './consent-act-locale';
 import {
   actSummary,
   ApprovePluginUpdateDto,
+  ApprovePluginUpdateResponseDto,
   ListPluginsQueryDto,
   PluginInventoryDetailResponseDto,
   PluginInventoryEntryDto,
@@ -34,6 +37,8 @@ import {
   ReviewConsentDto,
   serverConsentActResponse,
   ServerConsentActResponseDto,
+  StagePluginUpdateDto,
+  StagePluginUpdateResponseDto,
   ToggleConsentDto,
   UninstallPluginDto,
   UpdatePluginConfigDto,
@@ -99,6 +104,7 @@ export class PluginsController {
     private readonly auditContext: AuditContextService,
     private readonly scopeComposer: ScopeComposer,
     private readonly supportedLocales: SupportedLocalesService,
+    private readonly stager: PluginArtifactStager,
   ) {}
 
   // ─── Installed-plugin inventory (#354) ────────────────────────────────────
@@ -345,6 +351,76 @@ export class PluginsController {
   // ─── Update consent (#321): the C3 seam's first caller ────────────────────
 
   @ApiOperation({
+    summary: 'Stage an update of a plugin from a posted plugin artifact, by its checksum',
+    description:
+      'Stages the plugin artifact the checksum names, posted earlier, as an update of this plugin, with the ' +
+      'confirmations its read asked for (#1096). An update that needs nothing from the server admin is activated ' +
+      'at once; otherwise it is a staged update that waits for an update approval. Either way the answer is 200, ' +
+      'and `activated` says which. The plugin comes back as the inventory serves it, so a staged update shows ' +
+      'with the stagingId an update approval or a rejection names. Sending it again once it is done, as a retry ' +
+      'or a double click does, answers with what is recorded and changes nothing. A wrong or missing ' +
+      'acknowledgement is a 409 challenge carrying what it expected.',
+  })
+  @ApiOkResponse({ type: StagePluginUpdateResponseDto })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description: 'Insufficient permissions, or the update requests a permission no plugin may have',
+  })
+  @ApiResponse({
+    status: Http.NotFound,
+    description:
+      "Plugin not installed, or outside the actor's ceiling; or no plugin artifact with this checksum is waiting",
+  })
+  @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description:
+      'A forbidden import was not acknowledged exactly; the plugin artifact carries the version the plugin runs; ' +
+      'the plugin already has a staged update, which an update approval or a rejection must answer first; the ' +
+      'plugin artifact is for another plugin; another plugin artifact became active while the update was being ' +
+      'staged (PluginUpdateActiveArtifactMovedError — stage it again); or the update would be activated at once ' +
+      'and another DataGateway already has the name its DataGateway would take',
+  })
+  @ApiResponse({
+    status: Http.UnprocessableEntity,
+    description: "The update's plugin manifest is not valid, or requests a core permission that does not exist",
+  })
+  @ApiResponse({
+    status: Http.ServiceUnavailable,
+    description: 'Static analysis is unavailable on this server; an operator must fix the parser installation',
+  })
+  @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
+  @HttpCode(Http.Ok)
+  @Post(':slug/update/stage')
+  stageUpdate(@Param('slug') slug: string, @Body() dto: StagePluginUpdateDto) {
+    const locale = this.auditContext.getLocale() ?? undefined;
+
+    return from(
+      this.assertUnderCeiling(slug, Action.manage, PluginUpdatePluginNotFoundError)
+        .then(() =>
+          this.stager.stage({
+            slug,
+            sha256: dto.sha256,
+            actorId: this.abilityService.getActingUserId(),
+            acknowledgeForbiddenImports: dto.acknowledgeForbiddenImports,
+            deepScan: dto.deepScan,
+          }),
+        )
+        // Read back through the inventory, as the install route reads a new
+        // plugin, so a client gets one shape for it (#1096).
+        .then(async (staging) => ({ staging, plugin: await this.inventory.getBySlug(slug, locale) })),
+    ).pipe(
+      map(({ staging, plugin }) => ({
+        message: this.stagingMessage(slug, staging),
+        activated: staging.activated,
+        plugin,
+        dataGatewayNameConflict: staging.dataGatewayNameConflict,
+      })),
+    );
+  }
+
+  @ApiOperation({
     summary: 'Approve the staged pending update',
     description:
       "The Server unit's consent to the staged update, recorded as one UpdateApprove consent act (act on the " +
@@ -359,6 +435,7 @@ export class PluginsController {
       'challenge bodies carry the prompt inputs to re-submit verbatim. The body names the staging it answers with ' +
       'the stagingId the staged-update read reported (#357).',
   })
+  @ApiOkResponse({ type: ApprovePluginUpdateResponseDto })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
@@ -402,7 +479,13 @@ export class PluginsController {
       ),
     ).pipe(
       map((result) => ({
-        message: t('success.plugin.update_approved', { slug, version: result.plugin.version }),
+        // Activation always owes a restart, so the process role that loads
+        // the plugin is the one to name (#1096).
+        message: t('success.plugin.update_approved', {
+          slug,
+          version: result.plugin.version,
+          processRole: roleLoading(result.plugin.category),
+        }),
         plugin: result.plugin,
         comparison: result.comparison,
         act: actSummary(result.act),
@@ -411,6 +494,7 @@ export class PluginsController {
         // one operational instruction: nothing serves the new code until a
         // restart.
         restartRequired: result.plugin.restartRequired,
+        restartProcessRoles: restartProcessRoles(result.plugin),
         reconsentHouseholdUnits: result.reconsentHouseholdUnits,
         reconsentUserUnits: result.reconsentUserUnits,
       })),
@@ -423,8 +507,8 @@ export class PluginsController {
       'Clears the staged-update columns and emits plugin.update_rejected. Consent that households and users ' +
       'gave to this staged update ahead of time (pre-consent) is deleted with it, one plugin.grant_revoked ' +
       'each, so a later update that requests the same permission asks again. The staged plugin artifact stays on ' +
-      'disk until the planned artifact sweep (#1094) removes it: no living plugin names it, and no running plugin ' +
-      'was loaded from it; ' +
+      'disk until the plugin artifact sweep (#1094), which runs at boot and every hour, removes it: no living ' +
+      'plugin names it, and no running plugin was loaded from it; ' +
       'this endpoint never touches the filesystem. The body names the staging it answers with the stagingId the ' +
       'staged-update read, or the plugin read, reported (#357).',
   })
@@ -588,6 +672,33 @@ export class PluginsController {
   }
 
   /**
+   * The staging's message, stating what the row the staging produced or found
+   * shows rather than an event (#1096): a row can owe a restart for another
+   * reason, and a repeated request can find no restart owed at all, so the
+   * activated message says the version is active and names a process role
+   * only when one is owed a restart.
+   */
+  private stagingMessage(slug: string, { plugin, activated }: PluginArtifactStagingResult) {
+    if (!activated) {
+      // Unreachable in practice: the stager answers a staged update only from
+      // a row that holds one, and the staged columns are set as one set. A
+      // row without its version is mapped rather than interpolated.
+      if (plugin.pendingVersion === null) {
+        throw new PluginUpdateNoPendingError(slug);
+      }
+
+      return t('success.plugin.update_staged', { slug, version: plugin.pendingVersion });
+    }
+
+    const [processRole] = restartProcessRoles(plugin);
+    if (processRole === undefined) {
+      return t('success.plugin.update_already_active', { slug, version: plugin.version });
+    }
+
+    return t('success.plugin.update_activated', { slug, version: plugin.version, processRole });
+  }
+
+  /**
    * The read's composition: `describePending` draws the 404/410/409
    * distinctions and recomputes the comparison; the presentation service
    * renders the staged manifest's check surface for the Server unit,
@@ -653,6 +764,9 @@ export class PluginsController {
       // it deletes at every scope (#577). The staged consent surface only
       // omits them, and an omission is not a warning.
       noLongerRequested: description.noLongerRequested,
+      // The DataGateway name the update would take, when another holds it:
+      // the update approval is refused until it is free (#1096).
+      dataGatewayNameConflict: description.dataGatewayNameConflict,
       // The plugin envelope ({id, slug, enabled}) rides inside — one wire
       // name for one fact.
       presentation,

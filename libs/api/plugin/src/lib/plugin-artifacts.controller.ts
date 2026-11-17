@@ -1,12 +1,13 @@
 import { AuditContextService } from '@bge/actor-context';
 import { Action, ResourceType } from '@bge/database';
 import { SupportedLocalesService } from '@bge/i18n';
-import { AbilityService, CheckPolicies, PoliciesGuard } from '@bge/permissions';
+import { AbilityService, CheckPolicies, PoliciesGuard, ScopeComposer } from '@bge/permissions';
 import {
   MODULE_OPTIONS_TOKEN,
   PluginInventoryService,
   presentArtifactChecks,
   type PluginModuleOptions,
+  type PluginUpdateAssessment,
 } from '@bge/plugin';
 import { PluginArtifactInstaller, PluginArtifactReceiver, type PluginArtifactReceipt } from '@bge/plugin-artifacts';
 import { resolveLocalizedString } from '@boardgamesempire/plugin-manifest';
@@ -36,7 +37,7 @@ import {
 } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { map, switchMap } from 'rxjs/operators';
 import { consentActLocale } from './consent-act-locale';
 import {
   InstallPluginDto,
@@ -97,6 +98,7 @@ export class PluginArtifactsController {
     private readonly auditContext: AuditContextService,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
     private readonly supportedLocales: SupportedLocalesService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   @ApiOperation({
@@ -158,7 +160,7 @@ export class PluginArtifactsController {
           ? this.receiver.receiveByLink({ url, expectedSha256: dto.sha256, actorId })
           : Promise.reject(new PluginArtifactSourceError('none'));
 
-    return from(receipt).pipe(map((received) => this.present(received)));
+    return from(receipt).pipe(switchMap((received) => this.presentUnderCeiling(received)));
   }
 
   @ApiOperation({
@@ -188,7 +190,7 @@ export class PluginArtifactsController {
     const asked = sha256.slice(0, PLUGIN_ARTIFACT_SHA256_INPUT_MAX_LENGTH);
 
     return from(this.receiver.read(asked, this.abilityService.getActingUserId())).pipe(
-      map((received) => this.present(received)),
+      switchMap((received) => this.presentUnderCeiling(received)),
     );
   }
 
@@ -250,10 +252,36 @@ export class PluginArtifactsController {
     ).pipe(map((installed) => ({ plugin: installed })));
   }
 
+  /**
+   * The receipt as the actor may see it. The gates here are type-level, and
+   * the receiver checks only that the key's owner is a server admin, so a key
+   * whose scope names one plugin reaches these routes for an artifact of any
+   * plugin. The `update` block describes the installed plugin the artifact
+   * names, its grant decisions included, so it is presented only when that
+   * plugin lies under the actor's `manage` ceiling, as the staging route
+   * requires before it stages anything; otherwise it is null, as for a slug
+   * nobody installed (#1096). Admin's rules carry no conditions, so a server
+   * admin's own session always sees it. The rest of the receipt is the
+   * artifact's own, apart from `installedPlugin`'s state and version, which
+   * these routes served before the block.
+   */
+  private async presentUnderCeiling(receipt: PluginArtifactReceipt): Promise<PluginArtifactResponseDto> {
+    if (receipt.update === null) {
+      return this.present(receipt);
+    }
+
+    const { slug } = receipt.artifact;
+    const underCeiling = await this.inventory.existsUnderCeiling(slug, (scope) =>
+      this.scopeComposer.compose(ResourceType.Plugin, Action.manage, scope),
+    );
+
+    return this.present(underCeiling ? receipt : { ...receipt, update: null });
+  }
+
   private present(receipt: PluginArtifactReceipt): PluginArtifactResponseDto {
     const locale = this.auditContext.getLocale() ?? undefined;
     const { defaultLocale } = this.options;
-    const { artifact, assessment, installedPlugin } = receipt;
+    const { artifact, assessment, installedPlugin, update } = receipt;
     const { manifest, warnings } = assessment.validated;
     const text = (value: Parameters<typeof resolveLocalizedString>[0]): string =>
       resolveLocalizedString(value, { locale: locale ?? defaultLocale, defaultLocale });
@@ -296,6 +324,35 @@ export class PluginArtifactsController {
       },
       warnings: [...warnings],
       installedPlugin: { state: installedPlugin.state, version: installedPlugin.version },
+      update: update === null ? null : this.presentUpdate(update),
+    };
+  }
+
+  /**
+   * What staging the plugin artifact as an update would do (#1096). The
+   * comparison's three parts sit beside the rest, as the staged-update read
+   * spells them, so a client reads one shape before and after the staging.
+   */
+  private presentUpdate({
+    activeVersion,
+    refusal,
+    changes,
+  }: PluginUpdateAssessment): PluginArtifactResponseDto['update'] {
+    return {
+      activeVersion,
+      refusal,
+      changes:
+        changes === null
+          ? null
+          : {
+              activatesAtOnce: changes.activatesAtOnce,
+              escalations: changes.comparison.escalations,
+              serverGating: changes.comparison.serverGating,
+              deniedRequiredSlugs: [...changes.comparison.deniedRequiredSlugs],
+              declares: { added: [...changes.declares.added], removed: [...changes.declares.removed] },
+              noLongerRequested: [...changes.noLongerRequested],
+              dataGatewayNameConflict: changes.dataGatewayNameConflict,
+            },
     };
   }
 }

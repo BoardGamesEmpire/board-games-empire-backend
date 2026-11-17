@@ -57,6 +57,7 @@ import {
   PluginUnitPluginNotFoundError,
   PluginUnitPluginTombstonedError,
   PluginUnitScopeError,
+  PluginUpdateActiveArtifactMovedError,
   PluginUpdateAuthorityError,
   PluginUpdateCriticalConfirmationError,
   PluginUpdateDataGatewayNameConflictError,
@@ -73,6 +74,7 @@ import {
 } from '@bge/plugin';
 import {
   PluginArchiveRefusedError,
+  PluginArtifactBelongsToAnotherPluginError,
   PluginArtifactChecksumMismatchError,
   PluginArtifactDownloadFailedError,
   PluginArtifactLinkRefusedError,
@@ -442,6 +444,24 @@ function buildRenderers(): RendererMap {
     },
   }));
 
+  // Another plugin artifact became active while the update was being staged,
+  // and its version may be the same number, so the comparison is stale (#1096).
+  // The copy says that the active plugin artifact changed, by another update or
+  // a reinstall, which version is active now, and that staging again compares
+  // the update with what is active.
+  renders(PluginUpdateActiveArtifactMovedError, (exception) => ({
+    status: Http.Conflict,
+    message: t('errors.plugin.update_active_artifact_moved', {
+      slug: exception.slug,
+      activeVersion: exception.activeVersion,
+    }),
+    fields: {
+      slug: exception.slug,
+      comparedVersion: exception.comparedVersion,
+      activeVersion: exception.activeVersion,
+    },
+  }));
+
   // An update that makes the plugin a data-gateway plugin needs a DataGateway
   // name another row holds (#1083). Its own copy, because the next step is to
   // try the update again, where the install's says to install again.
@@ -688,6 +708,16 @@ function buildRenderers(): RendererMap {
     status: Http.NotFound,
     message: t('errors.plugin.artifact_not_found'),
     fields: { sha256: exception.sha256 },
+  }));
+
+  // An update staged from another plugin's artifact (#1096).
+  renders(PluginArtifactBelongsToAnotherPluginError, (exception) => ({
+    status: Http.Conflict,
+    message: t('errors.plugin.artifact_belongs_to_another_plugin', {
+      slug: exception.slug,
+      artifactSlug: exception.artifactSlug,
+    }),
+    fields: { slug: exception.slug, artifactSlug: exception.artifactSlug, sha256: exception.sha256 },
   }));
 
   renders(PluginArtifactSourceError, (exception) => ({

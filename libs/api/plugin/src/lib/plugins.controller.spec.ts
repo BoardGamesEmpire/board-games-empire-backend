@@ -4,6 +4,7 @@ import {
   Action,
   deriveReadCeilings,
   PERMISSION_CATALOG,
+  PluginCategory,
   PluginGrantStatus,
   ResourceType,
   RiskLevel,
@@ -31,7 +32,9 @@ import {
   PluginUnitPluginNotFoundError,
   PluginUpdateNoPendingError,
   PluginUpdatePluginNotFoundError,
+  PluginUpdateTombstonedError,
 } from '@bge/plugin';
+import type { PluginArtifactStager } from '@bge/plugin-artifacts';
 import { ListScopeNotComposedError } from '@bge/shared';
 import {
   createMockAbilityService,
@@ -49,7 +52,33 @@ import { SERVER_PLUGIN_COLUMN } from './policies/read-server-plugins.policy';
 const PLUGIN = { id: 'plugin-1', slug: 'demo-sink', enabled: true } as never;
 const AFFECTED_UNITS = [{ scopeType: 'Household', householdId: 'hh-1' }] as never[];
 
-const APPROVED_PLUGIN = { id: 'plugin-1', slug: 'demo-sink', version: '1.3.0', restartRequired: true } as never;
+const APPROVED_PLUGIN = {
+  id: 'plugin-1',
+  slug: 'demo-sink',
+  version: '1.3.0',
+  category: PluginCategory.EventHook,
+  restartRequired: true,
+} as never;
+const ARTIFACT_SHA = 'a'.repeat(64);
+// The plugin's row as the staging left it (#1096): staged, activated with a
+// restart owed, or found already running the checksum after the restart.
+const STAGED_ROW = {
+  id: 'plugin-1',
+  slug: 'demo-sink',
+  version: '1.2.0',
+  pendingVersion: '1.3.0',
+  category: PluginCategory.EventHook,
+  restartRequired: false,
+};
+const ACTIVATED_ROW = {
+  id: 'plugin-1',
+  slug: 'demo-sink',
+  version: '1.3.0',
+  pendingVersion: null,
+  category: PluginCategory.DataGateway,
+  restartRequired: true,
+};
+const ALREADY_ACTIVE_ROW = { ...ACTIVATED_ROW, restartRequired: false };
 const COMPARISON = {
   escalations: [],
   serverGating: true,
@@ -126,6 +155,7 @@ describe('PluginsController (delegation)', () => {
   let controller: PluginsController;
   let lifecycle: jest.Mocked<Pick<PluginLifecycleService, 'enable' | 'disable' | 'updateConfig' | 'uninstall'>>;
   let updates: jest.Mocked<Pick<PluginUpdateService, 'approve' | 'reject' | 'describePending'>>;
+  let stager: jest.Mocked<Pick<PluginArtifactStager, 'stage'>>;
   let presentation: jest.Mocked<
     Pick<PluginConsentPresentationService, 'presentPendingFromRow' | 'presentForUnitBySlug'>
   >;
@@ -216,6 +246,13 @@ describe('PluginsController (delegation)', () => {
       slugField: 'slug',
     },
     {
+      route: 'stageUpdate',
+      call: (): Observable<unknown> => controller.stageUpdate('demo-sink', { sha256: ARTIFACT_SHA }),
+      service: () => stager.stage,
+      notFound: PluginUpdatePluginNotFoundError,
+      slugField: 'slug',
+    },
+    {
       route: 'approveUpdate',
       call: (): Observable<unknown> =>
         controller.approveUpdate('demo-sink', { stagingId: 'staging-a', shownRisks: SHOWN_RISKS }),
@@ -256,7 +293,11 @@ describe('PluginsController (delegation)', () => {
         declares: DECLARES,
         noLongerRequested: NO_LONGER_REQUESTED,
         unitCoverage: UNIT_COVERAGE,
+        dataGatewayNameConflict: null,
       }),
+    };
+    stager = {
+      stage: jest.fn().mockResolvedValue({ plugin: STAGED_ROW, activated: false, dataGatewayNameConflict: null }),
     };
     presentation = {
       presentPendingFromRow: jest.fn().mockResolvedValue(PRESENTATION),
@@ -290,6 +331,7 @@ describe('PluginsController (delegation)', () => {
       auditContext as never,
       scopeComposer,
       { getSupportedTags: () => ['en', 'de'] } as unknown as SupportedLocalesService,
+      stager as never,
     );
   });
 
@@ -375,7 +417,7 @@ describe('PluginsController (delegation)', () => {
       expect(result).toEqual({
         message: expect.objectContaining({
           key: 'success.plugin.update_approved',
-          args: { slug: 'demo-sink', version: '1.3.0' },
+          args: { slug: 'demo-sink', version: '1.3.0', processRole: 'api' },
         }),
         plugin: APPROVED_PLUGIN,
         comparison: COMPARISON,
@@ -383,9 +425,35 @@ describe('PluginsController (delegation)', () => {
         act: { id: 'act-1', kind: 'UpdateApprove', decidedAt: new Date('2026-11-16T00:00:00Z') },
         seededGrants: SEEDED_GRANTS,
         restartRequired: true,
+        restartProcessRoles: ['api'],
         reconsentHouseholdUnits: RECONSENT_HOUSEHOLDS,
         reconsentUserUnits: [],
       });
+    });
+
+    it('approveUpdate names the process roles to restart (#1096)', async () => {
+      updates.approve.mockResolvedValue({
+        plugin: { ...ACTIVATED_ROW },
+        comparison: COMPARISON,
+        act: APPROVE_ACT,
+        seededGrants: [],
+        reconsentHouseholdUnits: [],
+        reconsentUserUnits: [],
+      } as never);
+
+      const result = await firstValueFrom(
+        controller.approveUpdate('demo-sink', { stagingId: 'staging-a', shownRisks: SHOWN_RISKS }),
+      );
+
+      // A data-gateway plugin is the coordinator's to load, so the message
+      // and the list both name it.
+      expect(result.restartProcessRoles).toEqual(['coordinator']);
+      expect(result.message).toEqual(
+        expect.objectContaining({
+          key: 'success.plugin.update_approved',
+          args: { slug: 'demo-sink', version: '1.3.0', processRole: 'coordinator' },
+        }),
+      );
     });
 
     it('an omitted confirmation set and an absent locale stay undefined — the service owns the expectation and the default', async () => {
@@ -466,8 +534,25 @@ describe('PluginsController (delegation)', () => {
         // So does the other destructive half: approving deletes every
         // decision on a permission the update stops requesting (#577).
         noLongerRequested: NO_LONGER_REQUESTED,
+        dataGatewayNameConflict: null,
         presentation: PRESENTATION,
       });
+    });
+
+    it('the staged-update read reports the DataGateway name conflict (#1096)', async () => {
+      updates.describePending.mockResolvedValue({
+        plugin: PENDING_PLUGIN,
+        comparison: COMPARISON,
+        pendingSince: new Date('2026-07-29T00:00:00Z'),
+        declares: DECLARES,
+        noLongerRequested: NO_LONGER_REQUESTED,
+        unitCoverage: UNIT_COVERAGE,
+        dataGatewayNameConflict: 'Demo Gateway',
+      });
+
+      const result = await firstValueFrom(controller.pendingUpdate('demo-sink'));
+
+      expect(result['dataGatewayNameConflict']).toBe('Demo Gateway');
     });
 
     it('an unresolved CLS locale is passed as undefined — the presentation falls back to the default locale', async () => {
@@ -482,6 +567,132 @@ describe('PluginsController (delegation)', () => {
       presentation.presentPendingFromRow.mockResolvedValue(null);
 
       await expect(firstValueFrom(controller.pendingUpdate('demo-sink'))).rejects.toThrow(PluginUpdateNoPendingError);
+    });
+  });
+
+  describe('staging an update from a plugin artifact (#1096)', () => {
+    it('stageUpdate resolves the slug under the manage ceiling before the staging service runs (#1096)', async () => {
+      inventory.existsUnderCeiling.mockResolvedValue(false);
+
+      const refused = firstValueFrom(controller.stageUpdate('demo-sink', { sha256: ARTIFACT_SHA }));
+
+      await expect(refused).rejects.toBeInstanceOf(PluginUpdatePluginNotFoundError);
+      await expect(refused).rejects.toMatchObject({ slug: 'demo-sink' });
+      expect(stager.stage).not.toHaveBeenCalled();
+      expect(inventory.getBySlug).not.toHaveBeenCalled();
+    });
+
+    it('stageUpdate forwards the slug, the actor from CLS and the confirmations, and answers the plugin as the inventory serves it', async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
+      const result = await firstValueFrom(
+        controller.stageUpdate('demo-sink', {
+          sha256: ARTIFACT_SHA,
+          acknowledgeForbiddenImports: ['axios'],
+          deepScan: true,
+        }),
+      );
+
+      expect(stager.stage).toHaveBeenCalledWith({
+        slug: 'demo-sink',
+        sha256: ARTIFACT_SHA,
+        actorId: MOCK_ACTING_USER_ID,
+        acknowledgeForbiddenImports: ['axios'],
+        deepScan: true,
+      });
+      expect(inventory.getBySlug).toHaveBeenCalledWith('demo-sink', 'de');
+      expect(result).toEqual({
+        message: expect.anything(),
+        activated: false,
+        plugin: DETAIL,
+        dataGatewayNameConflict: null,
+      });
+    });
+
+    it('says the update is active and names the process role when it was activated at once', async () => {
+      stager.stage.mockResolvedValue({
+        plugin: ACTIVATED_ROW,
+        activated: true,
+        dataGatewayNameConflict: null,
+      } as never);
+
+      const result = await firstValueFrom(controller.stageUpdate('demo-sink', { sha256: ARTIFACT_SHA }));
+
+      expect(result.activated).toBe(true);
+      expect(result.message).toEqual(
+        expect.objectContaining({
+          key: 'success.plugin.update_activated',
+          args: { slug: 'demo-sink', version: '1.3.0', processRole: 'coordinator' },
+        }),
+      );
+    });
+
+    it('says the update waits for approval when it was staged', async () => {
+      stager.stage.mockResolvedValue({
+        plugin: STAGED_ROW,
+        activated: false,
+        dataGatewayNameConflict: 'Demo Gateway',
+      } as never);
+
+      const result = await firstValueFrom(controller.stageUpdate('demo-sink', { sha256: ARTIFACT_SHA }));
+
+      expect(result.activated).toBe(false);
+      expect(result.dataGatewayNameConflict).toBe('Demo Gateway');
+      expect(result.message).toEqual(
+        expect.objectContaining({
+          key: 'success.plugin.update_staged',
+          args: { slug: 'demo-sink', version: '1.3.0' },
+        }),
+      );
+    });
+
+    // A repeated request finds the checksum already active. Once the restart
+    // has happened no process role is owed one, and the message must not name
+    // one it does not have.
+    it('says the version is already active when a repeated request finds no restart owed (#1096)', async () => {
+      stager.stage.mockResolvedValue({
+        plugin: ALREADY_ACTIVE_ROW,
+        activated: true,
+        dataGatewayNameConflict: null,
+      } as never);
+
+      const result = await firstValueFrom(controller.stageUpdate('demo-sink', { sha256: ARTIFACT_SHA }));
+
+      expect(result.activated).toBe(true);
+      expect(result.message).toEqual(
+        expect.objectContaining({
+          key: 'success.plugin.update_already_active',
+          args: { slug: 'demo-sink', version: '1.3.0' },
+        }),
+      );
+    });
+
+    // The ceiling check is mocked open here, so this shows only that the
+    // staging service's refusal for an uninstalled plugin reaches the caller
+    // and that the inventory is not read.
+    it("lets an uninstalled plugin's slug past the ceiling to the stager's own refusal (#1096)", async () => {
+      stager.stage.mockRejectedValue(new PluginUpdateTombstonedError('demo-sink', new Date('2026-11-01T00:00:00Z')));
+
+      await expect(
+        firstValueFrom(controller.stageUpdate('demo-sink', { sha256: ARTIFACT_SHA })),
+      ).rejects.toBeInstanceOf(PluginUpdateTombstonedError);
+      expect(inventory.getBySlug).not.toHaveBeenCalled();
+    });
+
+    it('refuses rather than describe a staged update the row does not have (#1096)', async () => {
+      stager.stage.mockResolvedValue({
+        plugin: ACTIVATED_ROW,
+        activated: false,
+        dataGatewayNameConflict: null,
+      } as never);
+
+      await expect(
+        firstValueFrom(controller.stageUpdate('demo-sink', { sha256: ARTIFACT_SHA })),
+      ).rejects.toBeInstanceOf(PluginUpdateNoPendingError);
+    });
+
+    it('answers 200 whether the update was activated or staged (#1096)', () => {
+      expect(Reflect.getMetadata('__httpCode__', PluginsController.prototype.stageUpdate)).toBe(200);
     });
   });
 
@@ -823,6 +1034,7 @@ describe('PluginsController (delegation)', () => {
       ['disable', Action.manage],
       ['updateConfig', Action.manage],
       ['uninstall', Action.manage],
+      ['stageUpdate', Action.manage],
       ['approveUpdate', Action.manage],
       ['rejectUpdate', Action.manage],
     ] as const)('%s gates on %s:Plugin', (handler, action) => {
@@ -867,6 +1079,7 @@ describe('PluginsController (delegation)', () => {
       ['disable', ':slug/disable', RequestMethod.POST],
       ['updateConfig', ':slug/config', RequestMethod.PATCH],
       ['uninstall', ':slug/uninstall', RequestMethod.POST],
+      ['stageUpdate', ':slug/update/stage', RequestMethod.POST],
       ['approveUpdate', ':slug/update/approve', RequestMethod.POST],
       ['rejectUpdate', ':slug/update/reject', RequestMethod.POST],
       ['pendingUpdate', ':slug/update/pending', RequestMethod.GET],
@@ -893,6 +1106,7 @@ describe('PluginsController (delegation)', () => {
         'disable',
         'updateConfig',
         'uninstall',
+        'stageUpdate',
         'approveUpdate',
         'rejectUpdate',
         'pendingUpdate',
@@ -917,7 +1131,7 @@ describe('PluginsController (delegation)', () => {
         .sort();
 
       expect(slugRoutes).toEqual([...reads, ...writes].map(({ route }) => route).sort());
-      expect(slugRoutes).toHaveLength(12);
+      expect(slugRoutes).toHaveLength(13);
     });
   });
 });

@@ -1,5 +1,6 @@
 import {
   PluginArchiveRefusedError,
+  PluginArtifactBelongsToAnotherPluginError,
   PluginArtifactChecksumMismatchError,
   PluginArtifactDownloadFailedError,
   PluginArtifactLinkRefusedError,
@@ -30,6 +31,11 @@ describe('plugin artifact errors (#1094)', () => {
       { reason: 'upstream-status', upstreamStatus: 503 },
     ],
     [new PluginArtifactNotFoundError(expected), 'PluginArtifactNotFoundError', { sha256: expected }],
+    [
+      new PluginArtifactBelongsToAnotherPluginError('demo-sink', 'other-sink', expected),
+      'PluginArtifactBelongsToAnotherPluginError',
+      { slug: 'demo-sink', artifactSlug: 'other-sink', sha256: expected },
+    ],
     [
       new PluginArchiveRefusedError('unsafe-path', 'package/../x'),
       'PluginArchiveRefusedError',

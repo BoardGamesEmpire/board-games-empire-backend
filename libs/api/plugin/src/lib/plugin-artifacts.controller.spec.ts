@@ -1,8 +1,8 @@
 import type { AuditContextService } from '@bge/actor-context';
 import { Action, ResourceType, RiskLevel } from '@bge/database';
 import type { SupportedLocalesService } from '@bge/i18n';
-import { CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
-import { PluginConsentActLocaleError, type PluginInventoryService } from '@bge/plugin';
+import { CHECK_POLICIES_KEY, PoliciesGuard, ScopeComposer, type AppAbility } from '@bge/permissions';
+import { PluginConsentActLocaleError, type PluginInventoryService, type PluginUpdateAssessment } from '@bge/plugin';
 import { createMockAbilityService, MOCK_ACTING_USER_ID, type MockAbilityService } from '@bge/testing';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
@@ -59,7 +59,31 @@ const receipt = (state: 'none' | 'installed' | 'uninstalled' = 'none') => ({
     dataGatewayNameConflict: null as string | null,
   },
   installedPlugin: { state, version: state === 'none' ? null : '1.0.0' },
+  // What staging it as an update would do (#1096): nothing, for a slug nobody installed.
+  update: null as PluginUpdateAssessment | null,
 });
+
+const ESCALATION = { kind: 'outbound-domain-added', domain: 'api.example.test' } as const;
+
+// An update of an installed 1.0.0 that server-gates on a new outbound domain (#1096).
+const UPDATE = {
+  activeVersion: '1.0.0',
+  refusal: null,
+  changes: {
+    comparison: {
+      escalations: [ESCALATION],
+      serverGating: true,
+      deniedRequiredSlugs: ['feedback:read'],
+      householdReconsentSlugs: ['calendar:read'],
+      serverRiskEscalatedSlugs: [],
+      userReconsentSlugs: [],
+    },
+    activatesAtOnce: false,
+    declares: { added: ['plugin|demo-sink|manage:digest'], removed: [] },
+    noLongerRequested: ['feedback:write'],
+    dataGatewayNameConflict: null,
+  },
+};
 
 const UPLOADED = { path: '/plugins/.incoming/x.tgz', size: 4096, sha256: 'b'.repeat(64) } as never;
 
@@ -67,9 +91,10 @@ describe('PluginArtifactsController (#1094)', () => {
   let controller: PluginArtifactsController;
   let receiver: { receiveByLink: jest.Mock; receiveUpload: jest.Mock; read: jest.Mock };
   let installer: { install: jest.Mock };
-  let inventory: jest.Mocked<Pick<PluginInventoryService, 'getBySlug'>>;
+  let inventory: jest.Mocked<Pick<PluginInventoryService, 'getBySlug' | 'existsUnderCeiling'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale'>>;
   let abilityService: MockAbilityService;
+  let scopeComposer: ScopeComposer;
 
   const build = (defaultLocale: string) =>
     new PluginArtifactsController(
@@ -80,6 +105,7 @@ describe('PluginArtifactsController (#1094)', () => {
       auditContext as never,
       { defaultLocale } as never,
       SUPPORTED_LOCALES,
+      scopeComposer,
     );
 
   beforeEach(() => {
@@ -89,9 +115,13 @@ describe('PluginArtifactsController (#1094)', () => {
       read: jest.fn().mockResolvedValue(receipt('installed')),
     };
     installer = { install: jest.fn().mockResolvedValue({ plugin: { slug: 'demo-sink' } }) };
-    inventory = { getBySlug: jest.fn().mockResolvedValue({ slug: 'demo-sink', executionMode: 'InProcess' } as never) };
+    inventory = {
+      getBySlug: jest.fn().mockResolvedValue({ slug: 'demo-sink', executionMode: 'InProcess' } as never),
+      existsUnderCeiling: jest.fn().mockResolvedValue(true),
+    };
     auditContext = { getLocale: jest.fn().mockReturnValue(null) };
     abilityService = createMockAbilityService();
+    scopeComposer = new ScopeComposer(abilityService as never);
     controller = new PluginArtifactsController(
       receiver as never,
       installer as never,
@@ -100,6 +130,7 @@ describe('PluginArtifactsController (#1094)', () => {
       auditContext as never,
       { defaultLocale: 'en' } as never,
       SUPPORTED_LOCALES,
+      scopeComposer,
     );
   });
 
@@ -217,6 +248,60 @@ describe('PluginArtifactsController (#1094)', () => {
       expect(result.dataGatewayNameConflict).toBe('Demo Gateway');
     });
 
+    it('presents the update block, spelling the comparison as the staged-update read does (#1096)', async () => {
+      const installed = receipt('installed');
+      installed.update = UPDATE;
+      receiver.receiveByLink.mockResolvedValue(installed);
+
+      const result = await firstValueFrom(controller.post({ url: 'https://example.test/x.tgz', sha256: SHA }));
+
+      // The comparison's three parts sit beside the rest, as on
+      // GET /plugins/:slug/update/pending; the re-consent slug lists stay out.
+      expect(result.update).toEqual({
+        activeVersion: '1.0.0',
+        refusal: null,
+        changes: {
+          activatesAtOnce: false,
+          escalations: [ESCALATION],
+          serverGating: true,
+          deniedRequiredSlugs: ['feedback:read'],
+          declares: { added: ['plugin|demo-sink|manage:digest'], removed: [] },
+          noLongerRequested: ['feedback:write'],
+          dataGatewayNameConflict: null,
+        },
+      });
+    });
+
+    it('presents no update block for a slug nobody installed', async () => {
+      const result = await firstValueFrom(controller.post({ url: 'https://example.test/x.tgz', sha256: SHA }));
+
+      expect(result.update).toBeNull();
+      // Nothing to withhold, so no ceiling is read.
+      expect(inventory.existsUnderCeiling).not.toHaveBeenCalled();
+    });
+
+    it('presents a taken DataGateway name as the refusal for an update that would be activated at once (#1096)', async () => {
+      const installed = receipt('installed');
+      installed.update = {
+        activeVersion: '1.0.0',
+        refusal: 'data_gateway_name_taken',
+        changes: {
+          ...UPDATE.changes,
+          comparison: { ...UPDATE.changes.comparison, escalations: [], serverGating: false, deniedRequiredSlugs: [] },
+          activatesAtOnce: true,
+          dataGatewayNameConflict: 'Demo Gateway',
+        },
+      };
+      receiver.read.mockResolvedValue(installed);
+
+      const result = await firstValueFrom(controller.read(SHA));
+
+      expect(result.update?.refusal).toBe('data_gateway_name_taken');
+      expect(result.update?.changes).toEqual(
+        expect.objectContaining({ activatesAtOnce: true, dataGatewayNameConflict: 'Demo Gateway' }),
+      );
+    });
+
     it.each([undefined, null, ''])('treats a url of %p beside a file as an upload (#1094)', async (url) => {
       await firstValueFrom(controller.post({ sha256: SHA, url: url as never }, UPLOADED));
 
@@ -322,6 +407,62 @@ describe('PluginArtifactsController (#1094)', () => {
     it('answers 201, the default for a POST that creates (#1094)', () => {
       expect(Reflect.getMetadata('__httpCode__', PluginArtifactsController.prototype.install)).toBeUndefined();
     });
+  });
+
+  // The gates are type-level and the receiver checks only that the key's owner
+  // is a server admin, so a key scoped to one plugin reaches these routes for
+  // any plugin's artifact. The update block describes the installed plugin,
+  // so it waits on that plugin's manage ceiling, as staging does (#1096).
+  describe("the update block under the artifact plugin's manage ceiling (#1096)", () => {
+    const routes = [
+      {
+        route: 'POST /plugins/artifacts',
+        call: () => controller.post({ url: 'https://example.test/x.tgz', sha256: SHA }),
+        received: () => receiver.receiveByLink,
+      },
+      { route: 'GET /plugins/artifacts/:sha256', call: () => controller.read(SHA), received: () => receiver.read },
+    ];
+
+    it.each(routes)('$route withholds the block for a plugin outside the ceiling', async ({ call, received }) => {
+      const installed = receipt('installed');
+      installed.update = UPDATE;
+      received().mockResolvedValue(installed);
+      inventory.existsUnderCeiling.mockResolvedValue(false);
+
+      const result = await firstValueFrom(call());
+
+      // Null, as for a slug nobody installed, so a key cannot tell them apart.
+      expect(result.update).toBeNull();
+      expect(result.artifact.sha256).toBe(SHA);
+    });
+
+    it.each(routes)('$route presents the block for a plugin under the ceiling', async ({ call, received }) => {
+      const installed = receipt('installed');
+      installed.update = UPDATE;
+      received().mockResolvedValue(installed);
+
+      const result = await firstValueFrom(call());
+
+      expect(result.update?.activeVersion).toBe('1.0.0');
+    });
+
+    it.each(routes)(
+      "$route composes the manage ceiling with the artifact's slug as its scope",
+      async ({ call, received }) => {
+        const installed = receipt('installed');
+        installed.update = UPDATE;
+        received().mockResolvedValue(installed);
+        const compose = jest.spyOn(scopeComposer, 'compose');
+        abilityService.getCurrentResourceConditions.mockReturnValue([{ id: 'p-1' }]);
+
+        await firstValueFrom(call());
+        const [slug, ceiling] = inventory.existsUnderCeiling.mock.calls[0] ?? [];
+
+        expect(slug).toBe('demo-sink');
+        expect(ceiling?.({ slug: 'demo-sink' })).toEqual({ slug: 'demo-sink', AND: [{ id: 'p-1' }] });
+        expect(compose).toHaveBeenCalledWith(ResourceType.Plugin, Action.manage, { slug: 'demo-sink' });
+      },
+    );
   });
 
   describe('policy gates', () => {

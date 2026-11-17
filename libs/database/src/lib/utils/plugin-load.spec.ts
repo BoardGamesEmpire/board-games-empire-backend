@@ -1,5 +1,11 @@
 import { PluginCategory } from '../client';
-import { categoriesLoadedBy, hasLivePluginLoad, PLUGIN_LOAD_STALE_MS, roleLoading } from './plugin-load';
+import {
+  categoriesLoadedBy,
+  hasLivePluginLoad,
+  PLUGIN_LOAD_STALE_MS,
+  PLUGIN_PROCESS_ROLES,
+  roleLoading,
+} from './plugin-load';
 import type { PluginLoadRecordRow } from './plugin-load.fixtures';
 import { fakePluginLoadRecords } from './plugin-load.fixtures';
 
@@ -94,6 +100,13 @@ describe('hasLivePluginLoad', () => {
 });
 
 describe('roleLoading', () => {
+  it('answers only the process roles that load plugins (#1096)', () => {
+    expect(PLUGIN_PROCESS_ROLES).toEqual(['api', 'coordinator']);
+    for (const category of Object.values(PluginCategory)) {
+      expect(PLUGIN_PROCESS_ROLES).toContain(roleLoading(category));
+    }
+  });
+
   it('names the coordinator for a data-gateway plugin (#1083)', () => {
     expect(roleLoading(PluginCategory.DataGateway)).toBe('coordinator');
   });

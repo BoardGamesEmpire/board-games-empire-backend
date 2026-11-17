@@ -13,6 +13,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PluginArtifactNotFoundError } from '../artifacts.errors';
 import { parseRequestedSha256 } from '../receive/requested-sha256';
 import { PluginArtifactStore } from '../store/plugin-artifact.store';
+import { removeArtifactRowBestEffort } from '../store/remove-artifact-row';
 
 export interface InstallPluginArtifactInput {
   /** The checksum of a received plugin artifact, as its receipt names it, in either case. */
@@ -150,17 +151,7 @@ export class PluginArtifactInstaller {
     return this.db.plugin.findFirst({ where: { installedSha256: sha256, uninstalledAt: null } });
   }
 
-  /**
-   * Deletes the artifact's row, best effort: the caller's answer does not
-   * depend on it, and a row left behind only waits out its expiry.
-   */
-  private async removeRow(sha256: PluginArtifactSha256, situation: string): Promise<void> {
-    await this.store.remove(sha256).catch((err: unknown) => {
-      this.logger.warn(
-        `${situation}; its artifact row ${sha256} could not be deleted and will wait out its expiry: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    });
+  private removeRow(sha256: PluginArtifactSha256, situation: string): Promise<void> {
+    return removeArtifactRowBestEffort(this.store, this.logger, sha256, situation);
   }
 }

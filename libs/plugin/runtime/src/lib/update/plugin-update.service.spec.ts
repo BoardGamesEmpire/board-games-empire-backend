@@ -42,9 +42,11 @@ import { PluginDirectoryResolverService } from '../loader/plugin-directory-resol
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginUpdateService, type PluginUpdateStageInput } from './plugin-update.service';
 import {
+  PluginUpdateActiveArtifactMovedError,
   PluginUpdateAuthorityError,
   PluginUpdateCriticalConfirmationError,
   PluginUpdateDataGatewayNameConflictError,
+  PluginUpdateForbiddenPermissionError,
   PluginUpdateManifestError,
   PluginUpdateNoPendingError,
   PluginUpdatePendingConflictError,
@@ -95,6 +97,8 @@ describe('PluginUpdateService', () => {
     pendingSha256: null,
     pendingSince: null,
     pendingStagingId: null,
+    pendingFromUrl: null,
+    pendingRegistrySlug: null,
     restartRequired: false,
     uninstalledAt: null,
     createdAt: new Date(0),
@@ -192,6 +196,24 @@ describe('PluginUpdateService', () => {
     initiatorId: 'admin-1',
     ...overrides,
   });
+
+  /** The link a plugin artifact was fetched from, for the provenance cases (#1096). */
+  const LINK = 'https://registry.example/demo-sink-1.3.0.tgz';
+
+  /**
+   * Answers the DataGateway lookups as a server where another row holds the
+   * name and the plugin kept no row of its own (#1083, #1096). `ownRow` makes
+   * the plugin's kept row the one answering both lookups instead.
+   */
+  const dataGatewayNameHeld = ({ ownRow = false } = {}): void => {
+    db.dataGateway.findUnique.mockImplementation((({ where }: { where: { pluginId?: string; name?: string } }) => {
+      if (where.pluginId !== undefined) {
+        return Promise.resolve(ownRow ? { id: 'gw-own' } : null);
+      }
+
+      return Promise.resolve({ id: ownRow ? 'gw-own' : 'gw-other' });
+    }) as never);
+  };
 
   beforeAll(() => {
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
@@ -399,7 +421,13 @@ describe('PluginUpdateService', () => {
           // take the whole activation with it) AND on the pending slot still
           // being empty — the immediate path must not clobber a concurrently
           // staged update with its cleared columns.
-          where: { id: 'plugin-1', uninstalledAt: null, pendingVersion: null, pendingStagingId: null },
+          where: {
+            id: 'plugin-1',
+            uninstalledAt: null,
+            pendingVersion: null,
+            pendingStagingId: null,
+            installedSha256: 'old-sha',
+          },
           data: expect.objectContaining({
             version: '1.3.0',
             restartRequired: true,
@@ -408,6 +436,8 @@ describe('PluginUpdateService', () => {
             pendingSha256: null,
             pendingSince: null,
             pendingStagingId: null,
+            pendingFromUrl: null,
+            pendingRegistrySlug: null,
           }),
         }),
       );
@@ -426,6 +456,43 @@ describe('PluginUpdateService', () => {
       expect(result.activated).toBe(true);
       expect(db.plugin.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ installedSha256: 'd'.repeat(64) }) }),
+      );
+    });
+
+    it("an update activated as it is staged records its artifact's link and registry (#1096)", async () => {
+      // The plugin's provenance follows its active version, so the link and
+      // registry the row names are the activated plugin artifact's.
+      await writeManifest(nextManifest());
+
+      const result = await service.stage(input({ url: LINK, registrySlug: 'bge-official' }));
+
+      expect(result.activated).toBe(true);
+      const [claim] = db.plugin.updateMany.mock.calls[0];
+      expect(claim.data).toMatchObject({
+        installedSha256: 'b'.repeat(64),
+        installedFromUrl: LINK,
+        registrySlug: 'bge-official',
+      });
+      expect(emitter.emit).toHaveBeenCalledWith(
+        PluginUpdateApprovedEvent.eventName,
+        expect.objectContaining({ provenance: { sha256: 'b'.repeat(64), url: LINK, registrySlug: 'bge-official' } }),
+      );
+    });
+
+    it("an uploaded update leaves the plugin with no link, not the first install's (#1096)", async () => {
+      // An uploaded plugin artifact has a checksum and no link. Keeping the
+      // first install's link would describe code that is no longer active.
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ installedFromUrl: LINK, registrySlug: 'bge-official' }));
+      await writeManifest(nextManifest());
+
+      const result = await service.stage(input());
+
+      expect(result.activated).toBe(true);
+      const [claim] = db.plugin.updateMany.mock.calls[0];
+      expect(claim.data).toMatchObject({ installedFromUrl: null, registrySlug: null });
+      expect(emitter.emit).toHaveBeenCalledWith(
+        PluginUpdateApprovedEvent.eventName,
+        expect.objectContaining({ provenance: { sha256: 'b'.repeat(64), url: null, registrySlug: null } }),
       );
     });
 
@@ -537,8 +604,14 @@ describe('PluginUpdateService', () => {
       });
 
       it("refuses with the update's own conflict when another DataGateway holds the name, from inside the transaction", async () => {
+        // The plugin kept no row. The name is free when staging's early check
+        // reads it (#1096) and taken by the time the transaction reads it, so
+        // the refusal that holds is the transaction's own.
         db.dataGateway.updateMany.mockResolvedValue({ count: 0 });
-        db.dataGateway.findUnique.mockResolvedValue({ id: 'gw-other' } as never);
+        db.dataGateway.findUnique
+          .mockResolvedValueOnce(null) // early check: the plugin's kept row
+          .mockResolvedValueOnce(null) // early check: the name's holder
+          .mockResolvedValue({ id: 'gw-other' } as never); // in the transaction: the name's holder
         await writeManifest(nextManifest({ category: 'data-gateway' }));
 
         const failure = await service.stage(input()).catch((err: unknown) => err);
@@ -549,6 +622,50 @@ describe('PluginUpdateService', () => {
         expect(db.$transaction).toHaveBeenCalledTimes(1);
         expect(db.dataGateway.create).not.toHaveBeenCalled();
         expect(emitter.emit).not.toHaveBeenCalledWith(PluginUpdateApprovedEvent.eventName, expect.anything());
+      });
+
+      // The assessment the server admin was shown says the name is taken, so
+      // staging refuses as install does, before it asks for an acknowledgement
+      // of anything static analysis finds. The transaction keeps its own
+      // refusal for a name taken after this read.
+      it('refuses an update that would be activated at once under a taken DataGateway name before it analyses the artifact (#1096)', async () => {
+        dataGatewayNameHeld();
+        await writeManifest(nextManifest({ category: 'data-gateway' }));
+
+        const failure = await service.stage(input()).catch((err: unknown) => err);
+
+        expect(failure).toBeInstanceOf(PluginUpdateDataGatewayNameConflictError);
+        expect(failure).toMatchObject({ slug: 'demo-sink', dataGatewayName: 'Demo Sink' });
+        expect(analyzer.analyze).not.toHaveBeenCalled();
+        expect(db.$transaction).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
+
+      // The name can be freed before the update approval, so a staged update
+      // is not refused over it; the response says it is taken.
+      it('stages an update that waits for approval under a taken DataGateway name, and reports the name (#1096)', async () => {
+        dataGatewayNameHeld();
+        await writeManifest(
+          nextManifest({ category: 'data-gateway', storage: { ...activeManifest.storage, writesCore: ['GameNight'] } }),
+        );
+
+        const result = await service.stage(input());
+
+        expect(result.activated).toBe(false);
+        expect(result.dataGatewayNameConflict).toBe('Demo Sink');
+        expect(db.dataGateway.create).not.toHaveBeenCalled();
+        expect(emitter.emit).toHaveBeenCalledWith(PluginUpdatePendingEvent.eventName, expect.anything());
+      });
+
+      it('reports no DataGateway name conflict for an update it activates (#1096)', async () => {
+        db.dataGateway.updateMany.mockResolvedValue({ count: 0 });
+        db.dataGateway.findUnique.mockResolvedValue(null);
+        await writeManifest(nextManifest({ category: 'data-gateway' }));
+
+        const result = await service.stage(input());
+
+        expect(result.activated).toBe(true);
+        expect(result.dataGatewayNameConflict).toBeNull();
       });
     });
 
@@ -596,6 +713,84 @@ describe('PluginUpdateService', () => {
       await writeManifest(nextManifest());
 
       await expect(service.stage(input())).rejects.toThrow(PluginUpdatePendingConflictError);
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // With nothing staged, the staged columns alone cannot tell two stagings
+    // of the same update apart, so the claim also holds the active plugin
+    // artifact the update was compared against, by its checksum: a version
+    // number can come back, a checksum of other content cannot (#1096).
+    it('an update activated as it is staged claims the active plugin artifact it was compared against (#1096)', async () => {
+      await writeManifest(nextManifest());
+
+      await service.stage(input());
+
+      const [claim] = db.plugin.updateMany.mock.calls[0];
+      expect(claim.where).toMatchObject({ installedSha256: 'old-sha' });
+      expect(claim.where).not.toHaveProperty('version');
+    });
+
+    it('answers the version as already active when a concurrent request activated it first (#1096)', async () => {
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin()) // the load: 1.2.0 active, nothing staged
+        // the claim's re-read: the winner activated 1.3.0 from its plugin artifact
+        .mockResolvedValue(makePlugin({ version: '1.3.0', installedSha256: 'b'.repeat(64) }));
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+      await writeManifest(nextManifest());
+
+      const failure = await service.stage(input()).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateVersionConflictError);
+      expect(failure).toMatchObject({ slug: 'demo-sink', version: '1.3.0' });
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('refuses when another version became active while this one was being staged (#1096)', async () => {
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin()) // the load: 1.2.0 active, nothing staged
+        // the claim's re-read: another update activated 1.4.0 from another plugin artifact
+        .mockResolvedValue(makePlugin({ version: '1.4.0', installedSha256: 'c'.repeat(64) }));
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+      await writeManifest(nextManifest());
+
+      const failure = await service.stage(input()).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateActiveArtifactMovedError);
+      expect(failure).toMatchObject({ slug: 'demo-sink', comparedVersion: '1.2.0', activeVersion: '1.4.0' });
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('answers a staged-update conflict it cannot name when nothing explains a lost claim (#1096)', async () => {
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin()) // the load: 1.2.0 active, nothing staged
+        // the claim's re-read: not uninstalled, nothing staged, the same checksum
+        .mockResolvedValue(makePlugin());
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+      await writeManifest(nextManifest());
+
+      const failure = await service.stage(input()).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdatePendingConflictError);
+      expect(failure).toMatchObject({ slug: 'demo-sink', pendingVersion: 'unknown' });
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // An update may move to any other version, an earlier one included, so
+    // 1.2.0 can be active again from another plugin artifact, with another
+    // manifest than the one this update was compared against (#1096).
+    it('a version number that came back does not pass for the artifact it was compared against (#1096)', async () => {
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin()) // the load: 1.2.0 active from 'old-sha', nothing staged
+        // the claim's re-read: 1.2.0 again, from another plugin artifact
+        .mockResolvedValue(makePlugin({ installedSha256: 'c'.repeat(64) }));
+      // The checksum guard matches no row.
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+      await writeManifest(nextManifest());
+
+      const failure = await service.stage(input()).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateActiveArtifactMovedError);
+      expect(failure).toMatchObject({ slug: 'demo-sink', comparedVersion: '1.2.0', activeVersion: '1.2.0' });
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
@@ -738,7 +933,7 @@ describe('PluginUpdateService', () => {
       expect(result.comparison.escalations).toEqual([{ kind: 'writes-core-added', model: 'GameNight' }]);
       // Conditional on the slot still being empty inside the transaction.
       expect(db.plugin.updateMany).toHaveBeenCalledWith({
-        where: { id: 'plugin-1', pendingVersion: null, uninstalledAt: null },
+        where: { id: 'plugin-1', pendingVersion: null, uninstalledAt: null, installedSha256: 'old-sha' },
         data: expect.objectContaining({
           pendingVersion: '1.3.0',
           pendingSha256: 'b'.repeat(64),
@@ -780,7 +975,26 @@ describe('PluginUpdateService', () => {
       );
       expect(emitter.emit).toHaveBeenCalledWith(
         PluginUpdatePendingEvent.eventName,
-        expect.objectContaining({ pendingSha256: 'd'.repeat(64) }),
+        expect.objectContaining({ provenance: { sha256: 'd'.repeat(64), url: null, registrySlug: null } }),
+      );
+    });
+
+    it("a staged update records its artifact's link and registry beside its checksum (#1096)", async () => {
+      // Update approval makes these the plugin's own, so the staging keeps
+      // them with the checksum they describe.
+      await writeManifest(nextManifest({ storage: { ...activeManifest.storage, writesCore: ['GameNight'] } }));
+
+      await service.stage(input({ url: LINK, registrySlug: 'bge-official' }));
+
+      const [claim] = db.plugin.updateMany.mock.calls[0];
+      expect(claim.data).toMatchObject({
+        pendingSha256: 'b'.repeat(64),
+        pendingFromUrl: LINK,
+        pendingRegistrySlug: 'bge-official',
+      });
+      expect(emitter.emit).toHaveBeenCalledWith(
+        PluginUpdatePendingEvent.eventName,
+        expect.objectContaining({ provenance: { sha256: 'b'.repeat(64), url: LINK, registrySlug: 'bge-official' } }),
       );
     });
 
@@ -795,6 +1009,41 @@ describe('PluginUpdateService', () => {
 
       expect(failure).toBeInstanceOf(PluginUpdatePendingConflictError);
       expect(failure).toMatchObject({ pendingVersion: '1.5.0', incomingVersion: '1.3.0' });
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    // A concurrent staging of the same version that activated at once leaves
+    // the slot empty, so the staged columns alone would let this staging
+    // through, its escalations worked out against a manifest no longer
+    // active. The claim holds the active plugin artifact, as the activation
+    // claim does (#1096).
+    it('a staging that loses the active plugin artifact to an activation of its version answers it as already active (#1096)', async () => {
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin()) // the load: 1.2.0 active from 'old-sha', nothing staged
+        // the claim's re-read: another artifact of 1.3.0 activated at once
+        .mockResolvedValue(makePlugin({ version: '1.3.0', installedSha256: 'c'.repeat(64) }));
+      await writeManifest(nextManifest({ storage: { ...activeManifest.storage, writesCore: ['GameNight'] } }));
+
+      const failure = await service.stage(input()).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateVersionConflictError);
+      expect(failure).toMatchObject({ slug: 'demo-sink', version: '1.3.0' });
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('a staging that loses the active plugin artifact to another version is told to stage again (#1096)', async () => {
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin()) // the load: 1.2.0 active from 'old-sha', nothing staged
+        // the claim's re-read: 1.4.0 activated from another plugin artifact
+        .mockResolvedValue(makePlugin({ version: '1.4.0', installedSha256: 'c'.repeat(64) }));
+      await writeManifest(nextManifest({ storage: { ...activeManifest.storage, writesCore: ['GameNight'] } }));
+
+      const failure = await service.stage(input()).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateActiveArtifactMovedError);
+      expect(failure).toMatchObject({ slug: 'demo-sink', comparedVersion: '1.2.0', activeVersion: '1.4.0' });
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
@@ -870,7 +1119,7 @@ describe('PluginUpdateService', () => {
         expect(result.comparison.serverGating).toBe(true);
         expect(result.comparison.deniedRequiredSlugs).toEqual(['feedback:read']);
         expect(db.plugin.updateMany).toHaveBeenLastCalledWith({
-          where: { id: 'plugin-1', pendingVersion: null, uninstalledAt: null },
+          where: { id: 'plugin-1', pendingVersion: null, uninstalledAt: null, installedSha256: 'old-sha' },
           data: expect.objectContaining({ pendingVersion: '1.3.0', pendingSha256: 'b'.repeat(64) }),
         });
         expect(db.pluginConsentAct.create).not.toHaveBeenCalled();
@@ -948,6 +1197,7 @@ describe('PluginUpdateService', () => {
         uninstalledAt: null,
         pendingVersion: '1.3.0',
         pendingStagingId: 'staging-a',
+        installedSha256: 'old-sha',
       });
     });
 
@@ -960,6 +1210,57 @@ describe('PluginUpdateService', () => {
 
       expect(db.plugin.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ installedSha256: 'e'.repeat(64) }) }),
+      );
+    });
+
+    it("approval makes the staged link and registry the plugin's own (#1096)", async () => {
+      // The plugin's provenance follows its active version: the first
+      // install's link and registry stop describing it once the staged
+      // plugin artifact activates.
+      db.plugin.findUnique.mockResolvedValue(
+        pendingPlugin(nextManifest(), {
+          installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
+          registrySlug: 'first-registry',
+          pendingSha256: 'e'.repeat(64),
+          pendingFromUrl: LINK,
+          pendingRegistrySlug: 'bge-official',
+        }),
+      );
+
+      await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
+
+      const [claim] = db.plugin.updateMany.mock.calls[0];
+      expect(claim.data).toMatchObject({
+        installedSha256: 'e'.repeat(64),
+        installedFromUrl: LINK,
+        registrySlug: 'bge-official',
+      });
+      expect(emitter.emit).toHaveBeenCalledWith(
+        PluginUpdateApprovedEvent.eventName,
+        expect.objectContaining({ provenance: { sha256: 'e'.repeat(64), url: LINK, registrySlug: 'bge-official' } }),
+      );
+    });
+
+    it("approving an uploaded staged update leaves the plugin with no link, not the first install's (#1096)", async () => {
+      // An uploaded plugin artifact has no link and no registry. Activating it
+      // must clear the first install's, which no longer describes the plugin.
+      db.plugin.findUnique.mockResolvedValue(
+        pendingPlugin(nextManifest(), {
+          installedFromUrl: 'https://registry.example/demo-sink-1.2.0.tgz',
+          registrySlug: 'first-registry',
+          pendingSha256: 'e'.repeat(64),
+          pendingFromUrl: null,
+          pendingRegistrySlug: null,
+        }),
+      );
+
+      await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
+
+      const [claim] = db.plugin.updateMany.mock.calls[0];
+      expect(claim.data).toMatchObject({ installedFromUrl: null, registrySlug: null });
+      expect(emitter.emit).toHaveBeenCalledWith(
+        PluginUpdateApprovedEvent.eventName,
+        expect.objectContaining({ provenance: { sha256: 'e'.repeat(64), url: null, registrySlug: null } }),
       );
     });
 
@@ -1084,6 +1385,7 @@ describe('PluginUpdateService', () => {
             uninstalledAt: null,
             pendingVersion: '1.3.0',
             pendingStagingId: 'staging-a',
+            installedSha256: 'old-sha',
           },
         }),
       );
@@ -2568,6 +2870,8 @@ describe('PluginUpdateService', () => {
           pendingSha256: null,
           pendingSince: null,
           pendingStagingId: null,
+          pendingFromUrl: null,
+          pendingRegistrySlug: null,
         },
       });
       expect(emitter.emit).toHaveBeenCalledWith(
@@ -2651,6 +2955,247 @@ describe('PluginUpdateService', () => {
   });
 
   /**
+   * What the server admin is shown before staging (#1096): the same changes
+   * `stage()` acts on, read without writing, emitting, or checking authority.
+   */
+  describe('assess() (#1096)', () => {
+    /** A version that server-gates, renames its declared permission and stops requesting `feedback:read`. */
+    const gatingManifest = (overrides: Parameters<typeof buildPluginManifest>[0] = {}): PluginManifest =>
+      nextManifest({
+        storage: { ...activeManifest.storage, writesCore: ['GameNight'] },
+        permissions: {
+          declares: ['manage:archive'],
+          checks: [
+            {
+              slug: 'manage:archive',
+              required: true,
+              reason: { en: 'Stores and manages the archive it owns.' },
+              consentScope: 'server',
+            },
+          ],
+        },
+        ...overrides,
+      });
+
+    it("answers null for a slug no living plugin has, an uninstalled plugin's included", async () => {
+      await writeManifest(nextManifest());
+      db.plugin.findUnique.mockResolvedValueOnce(null);
+
+      await expect(service.assess(directory())).resolves.toBeNull();
+
+      db.plugin.findUnique.mockResolvedValueOnce(makePlugin({ uninstalledAt: new Date('2026-08-01T00:00:00Z') }));
+
+      await expect(service.assess(directory())).resolves.toBeNull();
+    });
+
+    it('reports an update that would be activated at once', async () => {
+      await writeManifest(nextManifest());
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment).toMatchObject({ activeVersion: '1.2.0', refusal: null });
+      expect(assessment?.changes).toMatchObject({
+        activatesAtOnce: true,
+        comparison: { escalations: [], serverGating: false },
+        declares: { added: [], removed: [] },
+        noLongerRequested: [],
+        dataGatewayNameConflict: null,
+      });
+    });
+
+    it('reports a server-gating update as waiting for approval, with what it escalates, adds, removes and stops requesting', async () => {
+      await writeManifest(gatingManifest());
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment).toMatchObject({ activeVersion: '1.2.0', refusal: null });
+      expect(assessment?.changes?.activatesAtOnce).toBe(false);
+      expect(assessment?.changes?.comparison.serverGating).toBe(true);
+      expect(assessment?.changes?.comparison.escalations).toEqual(
+        expect.arrayContaining([{ kind: 'writes-core-added', model: 'GameNight' }]),
+      );
+      expect(assessment?.changes?.declares).toEqual({
+        added: ['plugin|demo-sink|manage:archive'],
+        removed: ['plugin|demo-sink|manage:digest'],
+      });
+      expect(assessment?.changes?.noLongerRequested).toEqual(['feedback:read']);
+    });
+
+    it('reports the active version as a refusal, with nothing to compare', async () => {
+      await writeManifest(buildPluginManifest());
+
+      await expect(service.assess(directory())).resolves.toEqual({
+        activeVersion: '1.2.0',
+        refusal: 'active_version',
+        changes: null,
+      });
+    });
+
+    it('reports a staged update already waiting, and still says what this one would change', async () => {
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'f'.repeat(64) }));
+      await writeManifest(gatingManifest({ version: '1.4.0' }));
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment).toMatchObject({ activeVersion: '1.2.0', refusal: 'staged_update_waiting' });
+      expect(assessment?.changes?.comparison.escalations).toEqual(
+        expect.arrayContaining([{ kind: 'writes-core-added', model: 'GameNight' }]),
+      );
+    });
+
+    // The assessment judges by version and by the staged slot, while staging
+    // answers a repeat by checksum: the very artifact the plugin runs, or has
+    // staged, is answered with 200 and the current record, not refused. These
+    // two pin both sides, so neither is changed alone (#1096).
+    it('reports the active version for the very artifact the plugin runs, which staging answers as already done (#1096)', async () => {
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ installedSha256: sha('b') }));
+      await writeManifest(buildPluginManifest());
+
+      await expect(service.assess(directory())).resolves.toMatchObject({
+        refusal: 'active_version',
+        changes: null,
+      });
+    });
+
+    it('reports a staged update waiting for the very artifact that is staged, which staging answers as already done (#1096)', async () => {
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ pendingVersion: '1.3.0', pendingSha256: sha('b') }));
+      await writeManifest(nextManifest());
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment).toMatchObject({ refusal: 'staged_update_waiting' });
+    });
+
+    it('still answers when the active plugin manifest cannot be read (#1096)', async () => {
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: { not: 'a manifest' } }));
+      await writeManifest(nextManifest());
+
+      await expect(service.assess(directory())).resolves.toEqual({
+        activeVersion: '1.2.0',
+        refusal: 'active_manifest_unreadable',
+        changes: null,
+      });
+    });
+
+    // Rejecting the staged update would not make this artifact stageable, so
+    // the unreadable active manifest is the cause the server admin has to
+    // deal with (#1096).
+    it('names the unreadable active manifest even while a staged update waits, since rejecting that update would not help', async () => {
+      db.plugin.findUnique.mockResolvedValue(
+        makePlugin({
+          manifestJson: { not: 'a manifest' },
+          pendingVersion: '1.3.0',
+          pendingSha256: 'f'.repeat(64),
+        }),
+      );
+      await writeManifest(nextManifest({ version: '1.4.0' }));
+
+      await expect(service.assess(directory())).resolves.toEqual({
+        activeVersion: '1.2.0',
+        refusal: 'active_manifest_unreadable',
+        changes: null,
+      });
+    });
+
+    // The assessment does not lean on its caller having screened the new
+    // manifest: the categorical exclusions staging applies, it applies (#1096).
+    it('refuses a new manifest that requests a forbidden permission, as staging does', async () => {
+      const manifest = nextManifest();
+      await writeManifest({
+        ...manifest,
+        permissions: { ...manifest.permissions, declares: [...manifest.permissions.declares, 'read:all'] },
+      });
+
+      await expect(service.assess(directory())).rejects.toBeInstanceOf(PluginUpdateForbiddenPermissionError);
+    });
+
+    it('reports the DataGateway name a move into data-gateway would take when another row holds it', async () => {
+      dataGatewayNameHeld();
+      await writeManifest(nextManifest({ category: 'data-gateway' }));
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment?.changes?.dataGatewayNameConflict).toBe('Demo Sink');
+    });
+
+    // Staging refuses this case, so the assessment says so itself; a client
+    // does not have to work the refusal out from the changes (#1096).
+    it('names a taken DataGateway name as the refusal when the update would be activated at once', async () => {
+      dataGatewayNameHeld();
+      await writeManifest(nextManifest({ category: 'data-gateway' }));
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment).toMatchObject({ activeVersion: '1.2.0', refusal: 'data_gateway_name_taken' });
+      expect(assessment?.changes).toMatchObject({ activatesAtOnce: true, dataGatewayNameConflict: 'Demo Sink' });
+    });
+
+    // Staging stages it, since the name can be freed before the update
+    // approval; the name is reported, not refused (#1096).
+    it('reports a taken DataGateway name without refusing an update that waits for approval', async () => {
+      dataGatewayNameHeld();
+      await writeManifest(gatingManifest({ category: 'data-gateway' }));
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment).toMatchObject({ activeVersion: '1.2.0', refusal: null });
+      expect(assessment?.changes).toMatchObject({ activatesAtOnce: false, dataGatewayNameConflict: 'Demo Sink' });
+    });
+
+    // Staging refuses over the staged update before it looks at the name, so
+    // the assessment names the same cause; the name still shows (#1096).
+    it('a staged update already waiting is the refusal even under a taken DataGateway name', async () => {
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'f'.repeat(64) }));
+      dataGatewayNameHeld();
+      await writeManifest(nextManifest({ version: '1.4.0', category: 'data-gateway' }));
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment).toMatchObject({ activeVersion: '1.2.0', refusal: 'staged_update_waiting' });
+      expect(assessment?.changes).toMatchObject({ activatesAtOnce: true, dataGatewayNameConflict: 'Demo Sink' });
+    });
+
+    it('reports none when the plugin kept its own row', async () => {
+      dataGatewayNameHeld({ ownRow: true });
+      await writeManifest(nextManifest({ category: 'data-gateway' }));
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment?.changes?.dataGatewayNameConflict).toBeNull();
+    });
+
+    it('reports none for an update that stays in data-gateway', async () => {
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ category: PluginCategory.DataGateway }));
+      dataGatewayNameHeld();
+      await writeManifest(nextManifest({ category: 'data-gateway' }));
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment?.changes?.dataGatewayNameConflict).toBeNull();
+      expect(db.dataGateway.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('writes nothing and emits nothing', async () => {
+      dataGatewayNameHeld();
+      await writeManifest(gatingManifest({ category: 'data-gateway' }));
+
+      await service.assess(directory());
+
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(db.plugin.update).not.toHaveBeenCalled();
+      expect(db.plugin.updateMany).not.toHaveBeenCalled();
+      expect(db.dataGateway.create).not.toHaveBeenCalled();
+      expect(db.dataGateway.updateMany).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+      // No consent act, so no authority; and no static analysis or directory
+      // confirmation, which the artifact step and staging own.
+      expect(authority.isServerAdmin).not.toHaveBeenCalled();
+      expect(analyzer.analyze).not.toHaveBeenCalled();
+      expect(directories.confirm).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
    * The pending-read seam (#321): the approval screen's data source.
    * Same load/validate/compare pipeline as `approve()` — RECOMPUTED against
    * today's decisions, so the screen and the approval cannot disagree — but
@@ -2686,6 +3231,26 @@ describe('PluginUpdateService', () => {
 
     it('throws the no-pending error when nothing is staged', async () => {
       await expect(service.describePending('demo-sink')).rejects.toThrow(PluginUpdateNoPendingError);
+    });
+
+    // The staging service answers a repeated staging from the row it read, so
+    // the description must be of that row's staging: a rejection or another
+    // staging landing since can neither refuse it nor be described in its
+    // place (#1096).
+    it('describes the staging in a row the caller read, without reading the row again (#1096)', async () => {
+      const row = stagedPlugin(nextManifest());
+
+      const description = await service.describeStaging(row);
+
+      expect(db.plugin.findUnique).not.toHaveBeenCalled();
+      expect(description.plugin).toBe(row);
+      expect(description.plugin.pendingStagingId).toBe('staging-a');
+    });
+
+    it('refuses a tombstoned row handed to it, as the read by slug does (#1096)', async () => {
+      const row = stagedPlugin(nextManifest(), { uninstalledAt: new Date('2026-08-01T00:00:00Z') });
+
+      await expect(service.describeStaging(row)).rejects.toThrow(PluginUpdateTombstonedError);
     });
 
     it('reads a staged update whose checksum is not a checksum, since only approval uses it (#1117)', async () => {
@@ -2933,6 +3498,18 @@ describe('PluginUpdateService', () => {
           description.unitCoverage.user.switchedOn - description.unitCoverage.user.covered,
         );
       });
+    });
+
+    // Not recorded at staging: the name can be freed, or taken, between the
+    // staging and the update approval, so the read asks the same question
+    // the assessment asks, now.
+    it('the staged-update read reports the DataGateway name conflict, worked out when read (#1096)', async () => {
+      db.plugin.findUnique.mockResolvedValue(stagedPlugin(nextManifest({ category: 'data-gateway' })));
+      dataGatewayNameHeld();
+
+      const description = await service.describePending('demo-sink');
+
+      expect(description.dataGatewayNameConflict).toBe('Demo Sink');
     });
 
     it('enforces bgeCompat on the stored pending manifest, mirroring approve() — the 422 names the pending source', async () => {

@@ -33,6 +33,7 @@ import {
   PluginUnitPluginNotFoundError,
   PluginUnitPluginTombstonedError,
   PluginUnitScopeError,
+  PluginUpdateActiveArtifactMovedError,
   PluginUpdateAuthorityError,
   PluginUpdateCriticalConfirmationError,
   PluginUpdateDataGatewayNameConflictError,
@@ -51,6 +52,7 @@ import {
 import * as pluginArtifacts from '@bge/plugin-artifacts';
 import {
   PluginArchiveRefusedError,
+  PluginArtifactBelongsToAnotherPluginError,
   PluginArtifactChecksumMismatchError,
   PluginArtifactDownloadFailedError,
   PluginArtifactLinkRefusedError,
@@ -291,6 +293,25 @@ describe('PluginExceptionFilter', () => {
       expect(body()['code']).toBe('PLUGIN_UPDATE_STAGING_REPLACED');
       expect(body()['slug']).toBe('sample');
       expect(body()['stagingId']).toBe('staging-a');
+    });
+
+    it('renders a staging that another activation overtook as 409, naming both versions (#1096)', () => {
+      filter.catch(new PluginUpdateActiveArtifactMovedError('sample', '2.0.0', '2.2.0'), host);
+
+      expect(rendered().getStatus()).toBe(Http.Conflict);
+      expect(body()).toEqual({
+        statusCode: 409,
+        error: 'Conflict',
+        message: 't:errors.plugin.update_active_artifact_moved',
+        code: 'PLUGIN_UPDATE_ACTIVE_ARTIFACT_MOVED',
+        slug: 'sample',
+        comparedVersion: '2.0.0',
+        activeVersion: '2.2.0',
+      });
+      expect(translate).toHaveBeenCalledWith(
+        'errors.plugin.update_active_artifact_moved',
+        expect.objectContaining({ args: { slug: 'sample', activeVersion: '2.2.0' } }),
+      );
     });
 
     it('carries staged and incoming versions on a pending conflict', () => {
@@ -727,6 +748,21 @@ describe('PluginExceptionFilter', () => {
       expect(body()['code']).toBe('PLUGIN_ARTIFACT_NOT_FOUND');
       expect(body()['message']).toBe('t:errors.plugin.artifact_not_found');
       expect(body()['sha256']).toBe('c'.repeat(64));
+    });
+
+    it("renders another plugin's artifact named for an update as 409, naming both plugins (#1096)", () => {
+      filter.catch(new PluginArtifactBelongsToAnotherPluginError('demo-sink', 'other-sink', 'c'.repeat(64)), host);
+
+      expect(rendered().getStatus()).toBe(Http.Conflict);
+      expect(body()['code']).toBe('PLUGIN_ARTIFACT_BELONGS_TO_ANOTHER_PLUGIN');
+      expect(body()['message']).toBe('t:errors.plugin.artifact_belongs_to_another_plugin');
+      expect(body()['slug']).toBe('demo-sink');
+      expect(body()['artifactSlug']).toBe('other-sink');
+      expect(body()['sha256']).toBe('c'.repeat(64));
+      expect(translate).toHaveBeenCalledWith(
+        expect.stringContaining('errors.plugin.artifact_belongs_to_another_plugin'),
+        expect.objectContaining({ args: { slug: 'demo-sink', artifactSlug: 'other-sink' } }),
+      );
     });
 
     it.each([

@@ -81,6 +81,15 @@ model Plugin {
   pendingSince        DateTime? @map("pending_since") @db.Timestamptz(3)
   /// The staging's identity (#357): written fresh by every staging, cleared with the rest of the staged columns.
   pendingStagingId    String?   @map("pending_staging_id")
+  /// Provenance of the staged update's plugin artifact (#1096): the link it
+  /// was fetched from, null for an upload. Set and cleared with the staged
+  /// columns, and promoted with the checksum at activation. The migration's
+  /// `plugins_staged_provenance_needs_staging` CHECK allows it only while an
+  /// update is staged.
+  pendingFromUrl      String?   @map("pending_from_url")
+  /// The registry the staged update's plugin artifact came from (#1096), null
+  /// for an upload. Carried and cleared like `pendingFromUrl`.
+  pendingRegistrySlug String?   @map("pending_registry_slug")
 
   /// An update ACTIVATED in the DB but the running instance still executes
   /// the prior code. Set by activation, cleared by the loader's
