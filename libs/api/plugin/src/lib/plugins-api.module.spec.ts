@@ -12,6 +12,7 @@ import {
   PluginInstallerService,
   PluginInventoryService,
   PluginLifecycleService,
+  PluginServerConsentActService,
   PluginUnitLifecycleService,
   PluginUpdateService,
 } from '@bge/plugin';
@@ -44,6 +45,7 @@ import { PluginsController } from './plugins.controller';
     { provide: PluginUpdateService, useValue: {} },
     { provide: PluginGrantService, useValue: {} },
     { provide: PluginConsentActService, useValue: {} },
+    { provide: PluginServerConsentActService, useValue: {} },
     { provide: PluginConsentPresentationService, useValue: {} },
     { provide: PluginUnitLifecycleService, useValue: {} },
     { provide: PluginFeatureStateService, useValue: {} },
@@ -65,6 +67,7 @@ import { PluginsController } from './plugins.controller';
     PluginUpdateService,
     PluginGrantService,
     PluginConsentActService,
+    PluginServerConsentActService,
     PluginConsentPresentationService,
     PluginUnitLifecycleService,
     PluginFeatureStateService,

@@ -13,6 +13,8 @@ import {
   PluginInventoryService,
   PluginLifecycleNotFoundError,
   PluginLifecycleService,
+  PluginServerConsentActService,
+  PluginUnitPluginNotFoundError,
   PluginUpdateNoPendingError,
   PluginUpdatePluginNotFoundError,
   PluginUpdateService,
@@ -30,6 +32,10 @@ import {
   PluginInventoryDetailResponseDto,
   PluginInventoryEntryDto,
   RejectPluginUpdateDto,
+  ReviewConsentDto,
+  serverConsentActResponse,
+  ServerConsentActResponseDto,
+  ToggleConsentDto,
   UninstallPluginDto,
   UpdatePluginConfigDto,
 } from './dto';
@@ -91,6 +97,7 @@ export class PluginsController {
     private readonly presentation: PluginConsentPresentationService,
     private readonly featureState: PluginFeatureStateService,
     private readonly inventory: PluginInventoryService,
+    private readonly serverConsentActs: PluginServerConsentActService,
     private readonly auditContext: AuditContextService,
     private readonly scopeComposer: ScopeComposer,
   ) {}
@@ -199,6 +206,100 @@ export class PluginsController {
         this.presentation.presentForUnitBySlug(slug, SERVER_PLUGIN_UNIT, this.auditContext.getLocale() ?? undefined),
       ),
     ).pipe(map((presentation) => ({ presentation })));
+  }
+
+  // ─── Server consent acts (#1336) ───────────────────────────────────────────
+  // A toggle and a review are each one recorded consent act for the Server
+  // unit. Each answers 200 whether or not it changed anything (changed: false
+  // and act: null when it did not), so repeating one is safe. Neither reads
+  // the Server switch: consenting before the plugin is switched on is a
+  // legitimate order.
+
+  @ApiOperation({
+    summary: 'Grant or refuse one optional server-scope requested permission',
+    description:
+      'One consent act for the Server unit that changes the answer to one optional requested permission the ' +
+      "server decides, as the active manifest's consent surface (GET …/consent) showed it. A required " +
+      'permission cannot be toggled: the server admin refuses one by switching the plugin off or uninstalling ' +
+      'it. Repeating the current answer answers changed: false.',
+  })
+  @ApiResponse({ status: Http.Ok, type: ServerConsentActResponseDto })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'You are not a server admin' })
+  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
+  @ApiResponse({ status: Http.Gone, description: 'The plugin was uninstalled' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description:
+      'PLUGIN_CONSENT_ACT_STALE: the plugin or the permission risk changed since the consent surface was read; ' +
+      'read it again and answer again. PLUGIN_CONSENT_ACT_UNGRANTABLE: the permission cannot be granted.',
+  })
+  @ApiResponse({
+    status: Http.UnprocessableEntity,
+    description:
+      'PLUGIN_CONSENT_ACT_ANSWER: the permission is not requested, is required, or is not decided by the ' +
+      'server (rule says which). Also a body that fails validation.',
+  })
+  @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
+  @HttpCode(Http.Ok)
+  @Post(':slug/consent/toggle')
+  toggleConsent(@Param('slug') slug: string, @Body() dto: ToggleConsentDto) {
+    return from(
+      this.assertUnderCeiling(slug, Action.manage, PluginUnitPluginNotFoundError).then(() =>
+        this.serverConsentActs.toggle({
+          slug,
+          actorId: this.abilityService.getActingUserId(),
+          manifestSha256: dto.manifestSha256,
+          answers: [dto.answer],
+          locale: this.auditContext.getLocale() ?? undefined,
+        }),
+      ),
+    ).pipe(map((result) => serverConsentActResponse(t('success.plugin.server_consent_toggled', { slug }), result)));
+  }
+
+  @ApiOperation({
+    summary: 'Accept what the active manifest still asks of the server',
+    description:
+      'One consent act for the Server unit that grants the server-scope requested permissions the active ' +
+      'manifest leaves outstanding, most often one whose risk rose since it was granted. A server review only ' +
+      'grants: an optional permission is refused with a toggle, and a required one by switching the plugin off ' +
+      'or uninstalling it. To consent to a staged update, approve it. Sending the same review again answers ' +
+      'changed: false.',
+  })
+  @ApiResponse({ status: Http.Ok, type: ServerConsentActResponseDto })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'You are not a server admin' })
+  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
+  @ApiResponse({ status: Http.Gone, description: 'The plugin was uninstalled' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description:
+      'PLUGIN_CONSENT_ACT_STALE: the plugin or a permission risk changed since the consent surface was read; ' +
+      'read it again and answer again. PLUGIN_CONSENT_ACT_UNGRANTABLE: a permission answered Granted cannot be ' +
+      'granted.',
+  })
+  @ApiResponse({
+    status: Http.UnprocessableEntity,
+    description:
+      'PLUGIN_CONSENT_ACT_ANSWER: an answer refuses a permission (rule server-refusal), or does not match what ' +
+      'the server decides (rule and permissionSlugs say which). Also a body that fails validation, such as an ' +
+      'empty answers list.',
+  })
+  @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
+  @HttpCode(Http.Ok)
+  @Post(':slug/consent/review')
+  reviewConsent(@Param('slug') slug: string, @Body() dto: ReviewConsentDto) {
+    return from(
+      this.assertUnderCeiling(slug, Action.manage, PluginUnitPluginNotFoundError).then(() =>
+        this.serverConsentActs.review({
+          slug,
+          actorId: this.abilityService.getActingUserId(),
+          manifestSha256: dto.manifestSha256,
+          answers: dto.answers,
+          locale: this.auditContext.getLocale() ?? undefined,
+        }),
+      ),
+    ).pipe(map((result) => serverConsentActResponse(t('success.plugin.server_consent_reviewed', { slug }), result)));
   }
 
   @ApiOperation({ summary: 'Enable a plugin (server-level switch)' })

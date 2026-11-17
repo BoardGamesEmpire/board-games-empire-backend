@@ -6,6 +6,7 @@ import {
   PERMISSION_CATALOG,
   PluginGrantStatus,
   ResourceType,
+  RiskLevel,
   ROLE_PERMISSION_CATALOG,
 } from '@bge/database';
 import { CHECK_POLICIES_KEY, ScopeComposer, type AppAbility } from '@bge/permissions';
@@ -17,6 +18,7 @@ import type {
   PluginGrantService,
   PluginInventoryService,
   PluginLifecycleService,
+  PluginServerConsentActService,
   PluginUpdateService,
   UpdateEscalationComparison,
 } from '@bge/plugin';
@@ -26,6 +28,7 @@ import {
   PluginGrantPluginNotFoundError,
   PluginInventoryNotFoundError,
   PluginLifecycleNotFoundError,
+  PluginUnitPluginNotFoundError,
   PluginUpdateNoPendingError,
   PluginUpdatePluginNotFoundError,
 } from '@bge/plugin';
@@ -77,6 +80,14 @@ const ACTIVE_PRESENTATION = {
   checks: [],
 } as unknown as PluginConsentPresentation;
 const GRANT = { id: 'grant-1', permissionSlug: 'feedback:read', status: PluginGrantStatus.Granted } as never;
+const SHA = 'b'.repeat(64);
+const ANSWER = {
+  permissionSlug: 'read:safe_http_policy',
+  status: PluginGrantStatus.Granted,
+  riskLevel: RiskLevel.Medium,
+};
+const DECIDED_AT = new Date('2026-11-16T00:00:00Z');
+const ACT = { id: 'act-1', kind: 'Toggle', decidedAt: DECIDED_AT, presentation: {} } as never;
 const INVENTORY_PAGE = {
   rows: [{ id: 'plugin-1', slug: 'demo-sink', displayName: 'Demo Sink', manifestUnreadable: false }],
   total: 1,
@@ -113,6 +124,7 @@ describe('PluginsController (delegation)', () => {
   let grants: jest.Mocked<Pick<PluginGrantService, 'decide'>>;
   let featureState: jest.Mocked<Pick<PluginFeatureStateService, 'resolveForUnitBySlug'>>;
   let inventory: jest.Mocked<Pick<PluginInventoryService, 'listForServer' | 'getBySlug' | 'existsUnderCeiling'>>;
+  let serverConsentActs: jest.Mocked<Pick<PluginServerConsentActService, 'toggle' | 'review'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale'>>;
   let abilityService: MockAbilityService;
   let scopeComposer: ScopeComposer;
@@ -162,6 +174,21 @@ describe('PluginsController (delegation)', () => {
         }),
       service: () => grants.decide,
       notFound: PluginGrantPluginNotFoundError,
+      slugField: 'pluginSlug',
+    },
+    {
+      route: 'toggleConsent',
+      call: (): Observable<unknown> => controller.toggleConsent('demo-sink', { manifestSha256: SHA, answer: ANSWER }),
+      service: () => serverConsentActs.toggle,
+      notFound: PluginUnitPluginNotFoundError,
+      slugField: 'pluginSlug',
+    },
+    {
+      route: 'reviewConsent',
+      call: (): Observable<unknown> =>
+        controller.reviewConsent('demo-sink', { manifestSha256: SHA, answers: [ANSWER] }),
+      service: () => serverConsentActs.review,
+      notFound: PluginUnitPluginNotFoundError,
       slugField: 'pluginSlug',
     },
     {
@@ -245,6 +272,10 @@ describe('PluginsController (delegation)', () => {
       // otherwise.
       existsUnderCeiling: jest.fn().mockResolvedValue(true),
     };
+    serverConsentActs = {
+      toggle: jest.fn().mockResolvedValue({ act: ACT, changed: true }),
+      review: jest.fn().mockResolvedValue({ act: ACT, changed: true }),
+    };
     auditContext = { getLocale: jest.fn().mockReturnValue(null) };
     abilityService = createMockAbilityService();
     // The REAL composer over the mocked ability service, so the list's ceiling
@@ -258,6 +289,7 @@ describe('PluginsController (delegation)', () => {
       presentation as never,
       featureState as never,
       inventory as never,
+      serverConsentActs as never,
       auditContext as never,
       scopeComposer,
     );
@@ -458,6 +490,65 @@ describe('PluginsController (delegation)', () => {
       await firstValueFrom(controller.consentPresentation('demo-sink'));
 
       expect(presentation.presentForUnitBySlug).toHaveBeenCalledWith('demo-sink', SERVER_PLUGIN_UNIT, undefined);
+    });
+  });
+
+  // The Server unit's consent acts (#1336): the server admin is the actor,
+  // resolved from CLS, and the service re-verifies that authority.
+  describe('server consent acts (#1336)', () => {
+    const actBody = { id: 'act-1', kind: 'Toggle', decidedAt: DECIDED_AT };
+
+    it('toggle records one answer with the actor, the sha and the locale (#1336)', async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
+      const result = await firstValueFrom(
+        controller.toggleConsent('demo-sink', { manifestSha256: SHA, answer: ANSWER }),
+      );
+
+      expect(serverConsentActs.toggle).toHaveBeenCalledWith({
+        slug: 'demo-sink',
+        actorId: MOCK_ACTING_USER_ID,
+        manifestSha256: SHA,
+        answers: [ANSWER],
+        locale: 'de',
+      });
+      expect(result).toEqual({
+        message: expect.objectContaining({ key: 'success.plugin.server_consent_toggled', args: { slug: 'demo-sink' } }),
+        changed: true,
+        act: actBody,
+      });
+    });
+
+    it('review records the answers with the actor, the sha and the locale (#1336)', async () => {
+      const result = await firstValueFrom(
+        controller.reviewConsent('demo-sink', { manifestSha256: SHA, answers: [ANSWER] }),
+      );
+
+      expect(serverConsentActs.review).toHaveBeenCalledWith({
+        slug: 'demo-sink',
+        actorId: MOCK_ACTING_USER_ID,
+        manifestSha256: SHA,
+        answers: [ANSWER],
+        locale: undefined,
+      });
+      expect(result).toEqual({
+        message: expect.objectContaining({
+          key: 'success.plugin.server_consent_reviewed',
+          args: { slug: 'demo-sink' },
+        }),
+        changed: true,
+        act: actBody,
+      });
+    });
+
+    it('an act that changed nothing answers changed: false with no act (#1336)', async () => {
+      serverConsentActs.toggle.mockResolvedValue({ act: null, changed: false });
+
+      const result = await firstValueFrom(
+        controller.toggleConsent('demo-sink', { manifestSha256: SHA, answer: ANSWER }),
+      );
+
+      expect(result).toEqual(expect.objectContaining({ changed: false, act: null }));
     });
   });
 
@@ -689,6 +780,8 @@ describe('PluginsController (delegation)', () => {
 
     it.each([
       ['decideGrant', Action.manage],
+      ['toggleConsent', Action.manage],
+      ['reviewConsent', Action.manage],
       ['enable', Action.manage],
       ['disable', Action.manage],
       ['updateConfig', Action.manage],
@@ -732,6 +825,8 @@ describe('PluginsController (delegation)', () => {
       ['list', '/', RequestMethod.GET],
       ['decideGrant', ':slug/grants', RequestMethod.POST],
       ['consentPresentation', ':slug/consent', RequestMethod.GET],
+      ['toggleConsent', ':slug/consent/toggle', RequestMethod.POST],
+      ['reviewConsent', ':slug/consent/review', RequestMethod.POST],
       ['enable', ':slug/enable', RequestMethod.POST],
       ['disable', ':slug/disable', RequestMethod.POST],
       ['updateConfig', ':slug/config', RequestMethod.PATCH],
@@ -757,6 +852,8 @@ describe('PluginsController (delegation)', () => {
         'list',
         'decideGrant',
         'consentPresentation',
+        'toggleConsent',
+        'reviewConsent',
         'enable',
         'disable',
         'updateConfig',
@@ -785,7 +882,7 @@ describe('PluginsController (delegation)', () => {
         .sort();
 
       expect(slugRoutes).toEqual([...reads, ...writes].map(({ route }) => route).sort());
-      expect(slugRoutes).toHaveLength(11);
+      expect(slugRoutes).toHaveLength(13);
     });
   });
 });

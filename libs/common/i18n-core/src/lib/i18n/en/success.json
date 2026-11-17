@@ -117,6 +117,8 @@
     "update_rejected": "Pending update for plugin '{slug}' rejected and cleared",
     "grant_decided": "Recorded the '{permissionSlug}' decision for plugin '{slug}'",
     "consent_recorded": "Your answers for plugin '{slug}' were saved",
-    "consent_refused_switched_off": "Plugin '{slug}' was switched off because a required permission was declined"
+    "consent_refused_switched_off": "Plugin '{slug}' was switched off because a required permission was declined",
+    "server_consent_toggled": "The server's answer for plugin '{slug}' was saved",
+    "server_consent_reviewed": "The server's review of plugin '{slug}' was saved"
   }
 }

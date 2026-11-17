@@ -52,16 +52,21 @@ export interface ConsentSurfaceCheck {
 }
 
 /**
- * The unit an act is addressed to: a household, or the signed-in user.
+ * The unit an act is addressed to: a household, the signed-in user, or the
+ * Server unit, whose acts a server admin records (#1336).
  *
- * The two route families differ only in their prefix, so a helper takes the
- * unit rather than a path, and a spec cannot pair a household's surface with
- * the user's act route by accident.
+ * The route families differ only in their prefix, so a helper takes the unit
+ * rather than a path, and a spec cannot pair one unit's surface with another
+ * unit's act route by accident.
  */
-export type ConsentActUnit = { readonly householdId: string } | 'me';
+export type ConsentActUnit = { readonly householdId: string } | 'me' | 'server';
 
 /** The plugins route prefix for a unit. */
 export function unitPluginsPath(unit: ConsentActUnit): string {
+  if (unit === 'server') {
+    return '/api/plugins';
+  }
+
   return unit === 'me' ? '/api/users/me/plugins' : `/api/households/${unit.householdId}/plugins`;
 }
 

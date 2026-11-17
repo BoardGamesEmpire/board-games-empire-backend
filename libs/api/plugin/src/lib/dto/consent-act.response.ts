@@ -1,12 +1,13 @@
 import type { PluginConsentAct } from '@bge/database';
-import type { ConsentActKind, ConsentActResult } from '@bge/plugin';
+import type { ConsentActKind, ConsentActResult, ServerConsentActResult } from '@bge/plugin';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
  * OpenAPI model for the answer to a consent act (#1150): switching a plugin
  * on, toggling one requested permission, or a review, at household or user
- * scope. As in `consent-surface.response.ts`, the act summary `implements`
- * the runtime shape it models, so a renamed field is a compile error here.
+ * scope, and a server admin's toggle or review for the Server unit (#1336).
+ * As in `consent-surface.response.ts`, the act summary `implements` the
+ * runtime shape it models, so a renamed field is a compile error here.
  * `ConsentActUnitDto` describes either unit enablement, a household's or a
  * user's, so it lists every field the two rows return by hand.
  */
@@ -78,17 +79,42 @@ export class ConsentActResponseDto {
 }
 
 /**
- * The body every consent act route answers with (#1150): the act's summary
- * rather than its stored presentation, which the client already showed.
+ * The answer to a server admin's toggle or review (#1336). The Server unit has
+ * no unit enablement to return and a server review never switches anything
+ * off, so it carries the act alone.
+ */
+export class ServerConsentActResponseDto {
+  @ApiProperty({ description: 'Plain-language confirmation, localized' })
+  message!: string;
+
+  @ApiProperty({
+    description:
+      'False when the answers matched what was already recorded: nothing was written, and act is null. The ' +
+      'route still answers 200, so repeating a consent act is safe.',
+  })
+  changed!: boolean;
+
+  @ApiProperty({ type: ConsentActSummaryDto, nullable: true, description: 'The recorded consent act, or null' })
+  act!: ConsentActSummaryDto | null;
+}
+
+/** The act's summary, rather than its stored presentation, which the client already showed. */
+function actSummary(act: ConsentActResult['act']) {
+  return act === null ? null : { id: act.id, kind: act.kind, decidedAt: act.decidedAt };
+}
+
+/**
+ * The body every household and user consent act route answers with (#1150):
+ * the act's summary rather than its stored presentation, which the client
+ * already showed.
  */
 export function consentActResponse<M>(message: M, result: ConsentActResult) {
   const { act, changed, switchedOff, unit } = result;
 
-  return {
-    message,
-    changed,
-    switchedOff,
-    act: act === null ? null : { id: act.id, kind: act.kind, decidedAt: act.decidedAt },
-    unit,
-  };
+  return { message, changed, switchedOff, act: actSummary(act), unit };
+}
+
+/** The body the server consent act routes answer with (#1336). */
+export function serverConsentActResponse<M>(message: M, result: ServerConsentActResult) {
+  return { message, changed: result.changed, act: actSummary(result.act) };
 }
