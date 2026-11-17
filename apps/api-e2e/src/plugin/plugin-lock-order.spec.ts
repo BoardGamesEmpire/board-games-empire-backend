@@ -17,6 +17,7 @@ import {
   arrangeServerGrant,
   GRANT_ROW_LOCK,
   SERVER_GRANT_INSERT,
+  SERVER_GRANT_RESTAMP,
   UNIT_ROW_LOCK,
 } from './lock-fixtures';
 import {
@@ -273,13 +274,12 @@ describe('the plugin consent path is one lock order (#360)', () => {
 
   /**
    * The stages above are matched from source, and Postgres takes locks no
-   * source mentions. The server's first decision writer is the proof: it
-   * claimed the two stages it wrote, took a third through the `plugin_grants`
-   * FK, and deadlocked against activation while every pin here stayed green
-   * (#398).
+   * source mentions. A writer whose first lock is an FK-child insert takes the
+   * plugin row last, after the tuple is written, and deadlocks against
+   * activation's `FOR UPDATE` while every pin here stays green (#398). Every
+   * consent act therefore claims the plugin row first.
    *
-   * This is the general form of that fix (#399) — not a fifth stage, but the
-   * requirement stated directly. A write to any table carrying an FK to
+   * This block states that requirement directly (#399) — not a fifth stage. A write to any table carrying an FK to
    * `plugins` must be preceded, on every path that reaches it, by a plugin-row
    * claim. Where it is not, an exemption has to say why that is safe.
    */
@@ -515,7 +515,9 @@ describe('the plugin consent path is one lock order (#360)', () => {
       // act's plugin-row claim (#398) and starts at its grant-row write, so the
       // grant row is where they meet: an approval holding a server-scope
       // decision it re-wrote holds that row to the end of its transaction
-      // (#1336), and an act's upsert of the same row waits for it.
+      // (#1336), and an act's upsert of the same row waits for it. The waiter
+      // replays the upsert's update arm, a non-key UPDATE, so the case fails
+      // if the mode that upsert takes does not conflict with the holder's.
       const plugin = await arrangeContendedPlugin();
 
       await withBarrier(async (barrier) => {
@@ -527,7 +529,7 @@ describe('the plugin consent path is one lock order (#360)', () => {
 
         await waiter.begin();
         const decision = waiter.issue(
-          grantRowLock.text,
+          SERVER_GRANT_RESTAMP,
           [plugin.pluginId],
           "the server consent act's upsert of the decision activation holds",
         );

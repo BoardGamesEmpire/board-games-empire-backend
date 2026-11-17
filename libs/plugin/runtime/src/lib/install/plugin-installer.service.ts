@@ -265,7 +265,8 @@ export class PluginInstallerService {
     );
     this.logger.log(
       `Installed plugin '${persisted.plugin.slug}'@${persisted.plugin.version}: ` +
-        `${persisted.declaredPermissions.length} declared permission(s), ${persisted.seededGrants.length} server grant(s) seeded` +
+        `${persisted.declaredPermissions.length} declared permission(s), ` +
+        `${persisted.seededGrants.length} server consent decision(s) written under act ${persisted.act.id}` +
         (retainedConfigReset ? '; retained server config was schema-invalid and reset' : ''),
     );
 

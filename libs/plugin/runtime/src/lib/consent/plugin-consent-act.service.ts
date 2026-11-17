@@ -1,11 +1,10 @@
 import { AuditContextService } from '@bge/actor-context';
-import type { HouseholdPlugin, Plugin, PluginConsentAct, PluginGrant, PluginScope, UserPlugin } from '@bge/database';
+import type { HouseholdPlugin, Plugin, PluginConsentAct, PluginScope, UserPlugin } from '@bge/database';
 import {
   DatabaseService,
   lockLiveHousehold,
   PluginConsentActKind,
   PluginGrantScope,
-  PluginGrantStatus,
   Prisma,
   retryOnDeadlock,
 } from '@bge/database';
@@ -14,13 +13,11 @@ import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
-import { grantSnapshot, householdSwitchSnapshot, userSwitchSnapshot } from '../events/plugin-event-snapshots';
+import { householdSwitchSnapshot, userSwitchSnapshot } from '../events/plugin-event-snapshots';
 import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginDisabledEvent,
   HouseholdPluginEnabledEvent,
-  PluginGrantCreatedEvent,
-  PluginGrantRejectedEvent,
   UserPluginDisabledEvent,
   UserPluginEnabledEvent,
 } from '../events/plugin.events';
@@ -40,6 +37,7 @@ import {
 } from '../units/unit.errors';
 import { planConsentAct } from './consent-act-plan';
 import { unitOwnsConsentScope, type ConsentManifestSource } from './consent-classification.types';
+import { emitDecisionEvents, type WrittenDecision } from './consent-decision-events';
 import { decisionsStand, decisionStands } from './consent-decision-stands';
 import {
   PluginConsentActNoUserScopeError,
@@ -94,11 +92,6 @@ interface ConsentActClaimRow {
   readonly scope: PluginScope;
   readonly installed_sha256: string;
   readonly pending_sha256: string | null;
-}
-
-interface WrittenDecision {
-  readonly before: PluginGrant | null;
-  readonly after: PluginGrant;
 }
 
 /** What a written act did to its unit enablement besides leaving it as `unit`. */
@@ -171,11 +164,12 @@ export class PluginConsentActService {
     const config = household && kind === 'SwitchOn' ? input.config : undefined;
 
     // The plugin is read once per request, before the transaction, and a
-    // deadlock replay judges against this same read (#361). A deadlock means a writer of this plugin row was live, most
-    // often an activation (#398); a replay that read again would record
-    // consent against a manifest that moved mid-request with nothing telling
-    // the client. Judged against the first read, the replay's claim sees the
-    // move and refuses it with the same stale refusal.
+    // deadlock replay judges against this same read (#361). A deadlock means a
+    // writer of this plugin row was live, most often an activation (#398); a
+    // replay that read again would record consent against a manifest that
+    // moved mid-request with nothing telling the client. Judged against the
+    // first read, the replay's claim sees the move and refuses it with the
+    // same stale refusal.
     const plugin = await loadLivingPlugin(this.db, input.slug);
     const named = this.nameManifest(plugin, input.manifestSha256);
 
@@ -225,8 +219,8 @@ export class PluginConsentActService {
     const locale = input.locale ?? this.options.defaultLocale;
 
     // Retried once if Postgres picks this attempt as the deadlock victim
-    // (#398): the abort took the transaction whole and the
-    // events emit below, after the commit, so a replay writes nothing twice.
+    // (#398): the abort took the transaction whole and the events emit below,
+    // after the commit, so a replay writes nothing twice.
     const outcome = await retryOnDeadlock(() =>
       this.db.$transaction(async (tx): Promise<ActOutcome> => {
         // The household row first, shared (#548): the admin check above took
@@ -596,15 +590,7 @@ export class PluginConsentActService {
   ): void {
     const context = { manifestVersion, actId: outcome.act.id };
 
-    for (const { before, after } of outcome.changedDecisions) {
-      const EventClass =
-        after.status === PluginGrantStatus.Granted ? PluginGrantCreatedEvent : PluginGrantRejectedEvent;
-
-      this.emitter.emit(
-        EventClass.eventName,
-        new EventClass(before === null ? null : grantSnapshot(before), grantSnapshot(after), context, initiatedAt),
-      );
-    }
+    emitDecisionEvents(this.emitter, outcome.changedDecisions, context, initiatedAt);
 
     const { unitBefore, unit } = outcome;
     const switchedOn = unit.enabled && (unitBefore === null || !unitBefore.enabled);

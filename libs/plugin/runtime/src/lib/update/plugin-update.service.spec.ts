@@ -605,6 +605,7 @@ describe('PluginUpdateService', () => {
       });
       db.pluginGrant.findMany
         .mockResolvedValueOnce([makeGrant(), removedGrant]) // comparison load
+        .mockResolvedValueOnce([makeGrant(), removedGrant]) // the Server unit's decisions, under the claim
         .mockResolvedValueOnce([removedGrant]); // grants on removed declares
       await writeManifest(
         nextManifest({
@@ -653,6 +654,7 @@ describe('PluginUpdateService', () => {
       });
       db.pluginGrant.findMany
         .mockResolvedValueOnce([granted, denied]) // comparison load
+        .mockResolvedValueOnce([granted]) // the Server unit's decisions, under the claim
         .mockResolvedValueOnce([granted, denied]); // decisions on permissions no longer requested
       await writeManifest(
         nextManifest({
@@ -692,6 +694,7 @@ describe('PluginUpdateService', () => {
       });
       db.pluginGrant.findMany
         .mockResolvedValueOnce([server, household]) // comparison load
+        .mockResolvedValueOnce([server]) // the Server unit's decisions, under the claim
         .mockResolvedValueOnce([server, household]); // decisions on permissions no longer requested
       db.pluginConsentAct.findMany.mockResolvedValue([
         { id: 'act-1', manifestVersion: '1.1.0' },
@@ -829,6 +832,85 @@ describe('PluginUpdateService', () => {
       expect(result.comparison.serverGating).toBe(true);
       expect(result.comparison.deniedRequiredSlugs).toEqual(['feedback:read']);
       expect(db.pluginConsentAct.create).not.toHaveBeenCalled();
+    });
+
+    describe('a denial that lands between the comparison and the activation (#1336)', () => {
+      // feedback:read is optional and granted in the active manifest, and the
+      // next one makes it required. A promotion does not server-gate, so the
+      // comparison chooses to activate at once. A server toggle that denies it
+      // can commit after that read and before activation claims the plugin row.
+      const promoted = (): PluginManifest =>
+        nextManifest({
+          permissions: {
+            ...activeManifest.permissions,
+            checks: activeManifest.permissions.checks.map((check) =>
+              check.slug === 'feedback:read' ? { ...check, required: true } : check,
+            ),
+          },
+        });
+      const digest = (): PluginGrant =>
+        makeGrant({ id: 'grant-2', permissionSlug: 'plugin|demo-sink|manage:digest', decidedRiskLevel: RiskLevel.Low });
+      const denied = (): PluginGrant => makeGrant({ status: PluginGrantStatus.Denied });
+
+      it('stages the update instead, writing no act and no decision, when the read under the claim finds the denial', async () => {
+        db.pluginGrant.findMany
+          .mockResolvedValueOnce([makeGrant(), digest()]) // the comparison, before the denial
+          .mockResolvedValueOnce([denied(), digest()]) // the Server unit's decisions, under the claim
+          .mockResolvedValueOnce([denied(), digest()]); // the comparison again, as it now stands
+        await writeManifest(promoted());
+
+        const result = await service.stage(input());
+
+        expect(result.activated).toBe(false);
+        expect(result.seededGrants).toEqual([]);
+        // The pending event and the result carry the second comparison.
+        expect(result.comparison.serverGating).toBe(true);
+        expect(result.comparison.deniedRequiredSlugs).toEqual(['feedback:read']);
+        expect(db.plugin.updateMany).toHaveBeenLastCalledWith({
+          where: { id: 'plugin-1', pendingVersion: null, uninstalledAt: null },
+          data: expect.objectContaining({ pendingVersion: '1.3.0', pendingSha256: 'b'.repeat(64) }),
+        });
+        expect(db.pluginConsentAct.create).not.toHaveBeenCalled();
+        expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+        expect(db.pluginGrant.create).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalledWith(PluginUpdateApprovedEvent.eventName, expect.anything());
+        expect(emitter.emit).toHaveBeenCalledWith(
+          PluginUpdatePendingEvent.eventName,
+          expect.objectContaining({ escalations: result.comparison.escalations }),
+        );
+      });
+
+      it('activates at once and writes no act when the read under the claim finds no such denial', async () => {
+        db.pluginGrant.findMany
+          .mockResolvedValueOnce([makeGrant(), digest()]) // the comparison
+          .mockResolvedValueOnce([makeGrant(), digest()]); // the Server unit's decisions, under the claim
+        await writeManifest(promoted());
+
+        const result = await service.stage(input());
+
+        expect(result.activated).toBe(true);
+        expect(result.seededGrants).toEqual([]);
+        expect(db.pluginConsentAct.create).not.toHaveBeenCalled();
+        expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+      });
+
+      it('does not retry the activation: the denial is not a deadlock, so the claim is taken once', async () => {
+        db.pluginGrant.findMany
+          .mockResolvedValueOnce([makeGrant(), digest()])
+          .mockResolvedValueOnce([denied(), digest()])
+          .mockResolvedValueOnce([denied(), digest()]);
+        await writeManifest(promoted());
+
+        const result = await service.stage(input());
+
+        expect(result.activated).toBe(false);
+        const pluginRowLocks = (db.$queryRaw.mock.calls as [TemplateStringsArray][]).filter(([strings]) =>
+          strings.join('').includes('FROM plugins'),
+        );
+        expect(pluginRowLocks).toHaveLength(1);
+        // One activation transaction and one staging transaction.
+        expect(db.$transaction).toHaveBeenCalledTimes(2);
+      });
     });
   });
 
@@ -1139,7 +1221,7 @@ describe('PluginUpdateService', () => {
         expect(result.seededGrants.map((grant) => grant.permissionSlug)).toEqual(['plugin|demo-sink|manage:digest']);
       });
 
-      it('approval leaves an optional decision granted at a risk that has since risen alone, and asks no second factor for it (#1336)', async () => {
+      it('approval leaves an optional decision granted at a risk that has since risen alone, and asks no Critical confirmation for it (#1336)', async () => {
         db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
         // feedback:read was granted at Medium and is Critical now. It is
         // optional, so it stays outstanding for a review act: approving
@@ -1197,6 +1279,22 @@ describe('PluginUpdateService', () => {
         });
         expect(db.pluginConsentAct.create).not.toHaveBeenCalled();
         expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+
+        // The same approval with the retype grants the denied permission under the act.
+        await service.approve(approveInput({ confirmCriticalSlugs: ['feedback:read'] }));
+
+        expect(db.pluginGrant.upsert).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: {
+              pluginId_scopeType_scopeId_permissionSlug: expect.objectContaining({ permissionSlug: 'feedback:read' }),
+            },
+            update: expect.objectContaining({
+              status: PluginGrantStatus.Granted,
+              decidedRiskLevel: RiskLevel.Critical,
+              actId: 'act-approve',
+            }),
+          }),
+        );
       });
 
       it("reads the Server unit's decisions inside the transaction, after the claim, with a plain read (#1336)", async () => {
@@ -1322,7 +1420,7 @@ describe('PluginUpdateService', () => {
     /**
      * A deadlock: nothing about this transaction was wrong, Postgres simply
      * chose it as the victim of a cycle. The abort took it whole, so the
-     * recovery is one whole retry, and one only (#398, D-398-2).
+     * recovery is one whole retry, and one only (#398).
      */
     describe('a deadlock that aborts the activation transaction', () => {
       it('retries the whole transaction when Postgres picks this one as the victim', async () => {
@@ -1668,7 +1766,7 @@ describe('PluginUpdateService', () => {
      * A required permission whose catalog risk rose since it was decided.
      * Approving re-writes it at today's risk under the act, so the stale
      * baseline does not re-fire the escalation on every future update, and the
-     * Critical second factor sees the reclassification (#1336).
+     * Critical confirmation sees the reclassification (#1336).
      */
     describe('risk-escalated required server decision', () => {
       beforeEach(() => {
@@ -1702,7 +1800,7 @@ describe('PluginUpdateService', () => {
         ]);
       });
 
-      it('demands the Critical second factor even though no permission is new', async () => {
+      it('demands the Critical confirmation even though no permission is new', async () => {
         const failure = await service
           .approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' })
           .catch((e: unknown) => e);
@@ -2094,8 +2192,8 @@ describe('PluginUpdateService', () => {
 
     it('a new required user check does NOT server-gate: the update activates in place and announces re-consent to uncovered user units', async () => {
       db.userPlugin.findMany.mockResolvedValue([makeUserUnit()]);
-      // stage(): compare() → immediate activation (nothing server-gates, so
-      // no approval reads the Server unit's decisions) → activate() reads user grants.
+      // stage(): compare() → immediate activation, which reads the Server
+      // unit's decisions under its claim → activate() reads user grants.
       db.pluginGrant.findMany
         .mockResolvedValueOnce([
           makeGrant(),
@@ -2105,6 +2203,7 @@ describe('PluginUpdateService', () => {
             decidedRiskLevel: RiskLevel.Low,
           }),
         ]) // compare()
+        .mockResolvedValueOnce([makeGrant()]) // activate() – the Server unit's decisions, under the claim
         .mockResolvedValueOnce([]); // activate() – user grants for the unit
       await writeManifest(nextWithUserCheck());
 
@@ -2190,6 +2289,7 @@ describe('PluginUpdateService', () => {
             decidedRiskLevel: RiskLevel.Low,
           }),
         ]) // compare()
+        .mockResolvedValueOnce([makeGrant()]) // activate() – the Server unit's decisions, under the claim
         .mockResolvedValueOnce([
           makeGrant({
             id: 'grant-u1',
@@ -2234,6 +2334,7 @@ describe('PluginUpdateService', () => {
       });
       db.pluginGrant.findMany
         .mockResolvedValueOnce([makeGrant(), staleUserGrant]) // compare()
+        .mockResolvedValueOnce([makeGrant()]) // activate() – the Server unit's decisions, under the claim
         .mockResolvedValueOnce([staleUserGrant]); // activate() – user grants
       db.userPlugin.findMany.mockResolvedValue([makeUserUnit()]);
       await writeManifest(shared);

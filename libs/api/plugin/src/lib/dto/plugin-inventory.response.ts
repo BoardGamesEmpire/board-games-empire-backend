@@ -202,7 +202,8 @@ class ServerUnitStateDto implements PluginInventoryServerUnitState {
     description:
       "The Server unit's state, a stable code a client can announce or rephrase, the same code " +
       'GET /plugins/:slug/features reports for the Server unit. off: the Server switch is off, or the plugin is ' +
-      'uninstalled. on: running with every server-scope permission the plugin asks for. review_pending: running ' +
+      'uninstalled; while the Server switch is off the unit reads off, even when the stored manifest cannot be ' +
+      'read. on: running with every server-scope permission the plugin asks for. review_pending: running ' +
       'on what was agreed while required server-scope permissions are outstanding, see consent; a server admin ' +
       'answers them with a review. unavailable: switched on, but the stored manifest cannot be read. Worked out on ' +
       'every read, never stored.',
@@ -235,13 +236,13 @@ export class PluginInventoryEntryDto extends PluginInventoryIdentityDto implemen
   @ApiProperty({ description: 'Currently ACTIVE manifest version' })
   version!: string;
 
-  @ApiProperty({ description: 'The server-level kill switch; unit enablement layers under it' })
+  @ApiProperty({ description: "The Server switch; each unit's own switch sits beneath it" })
   enabled!: boolean;
 
   @ApiProperty({
     type: Date,
     nullable: true,
-    description: 'Set only on tombstoned rows, which appear solely when includeUninstalled is requested',
+    description: 'Set only for an uninstalled plugin, listed only when includeUninstalled is requested',
   })
   uninstalledAt!: Date | null;
 

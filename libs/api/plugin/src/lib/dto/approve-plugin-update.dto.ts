@@ -24,9 +24,11 @@ export class ApprovePluginUpdateDto extends StagedUpdateAnswerDto {
 
   @ApiPropertyOptional({
     description:
-      "The locale the staged-update read presented its requested permissions in. The approval's consent act " +
-      'records its presentation in this locale, so it holds the text that was read. Without it, the request ' +
-      'locale is used. A locale this server does not support answers 422 PLUGIN_CONSENT_ACT_LOCALE (#1301).',
+      'The locale the staged-update read was requested in, one of the locales this server supports. Not the ' +
+      "locale a reason reports, which names the plugin's own text the reason came from. The approval's consent " +
+      'act records its presentation in this locale, so it holds the text that was read. Without it, the request ' +
+      "locale is used. The match is exact, since the supported tags are the server's own spelling; a locale this " +
+      'server does not support answers 422 PLUGIN_CONSENT_ACT_LOCALE (#1301).',
     maxLength: CONSENT_ACT_LOCALE_MAX_LENGTH,
   })
   @IsOptional()

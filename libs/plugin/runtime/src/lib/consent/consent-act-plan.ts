@@ -3,6 +3,7 @@ import { PluginGrantStatus, type RiskLevel } from '@bge/database';
 import { resolveLocalizedStringDetailed, type NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import type { ConsentCheckClassification, ConsentManifestSource } from './consent-classification.types';
 import { unitOwnsConsentScope } from './consent-classification.types';
+import { byPermissionSlugCodeUnit } from './decision-lock-order';
 import {
   PluginConsentActAnswerError,
   PluginConsentActRequiredSetError,
@@ -159,6 +160,7 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
       // only accepts; refusing is a toggle of an optional permission (#1336).
       if (unit.scopeType === 'Server') {
         const refusals = slugsWhere(isDenied);
+
         if (refusals.length > 0) {
           refuse('server-refusal', refusals);
         }
@@ -233,8 +235,7 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
       status: answer.status,
       decidedRiskLevel: answer.riskLevel,
     }))
-    // Code-unit order, not locale order: this is a lock order every process must agree on.
-    .sort((a, b) => (a.permissionSlug < b.permissionSlug ? -1 : a.permissionSlug > b.permissionSlug ? 1 : 0));
+    .sort(byPermissionSlugCodeUnit);
 
   const presentationChecks = own.map((check): ConsentActPresentationCheck => {
     const resolved = resolveLocalizedStringDetailed(check.reason, {

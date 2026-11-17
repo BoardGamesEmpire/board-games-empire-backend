@@ -226,10 +226,9 @@ export class PluginArtifactsController {
   @Post('install')
   install(@Body() dto: InstallPluginDto) {
     const locale = this.auditContext.getLocale() ?? undefined;
-    // The locale the artifact's read presented its requested permissions in,
-    // which the install's consent act records (#1336): the one the body
-    // names, refused unless this server supports it, else the request's own
-    // (#1301).
+    // The locale the artifact's read was requested in, which the install's
+    // consent act records its presentation in (#1336): the one the body names,
+    // refused unless this server supports it, else the request's own (#1301).
     const presentationLocale = consentActLocale(dto.locale, this.supportedLocales.getSupportedTags(), locale);
 
     return from(

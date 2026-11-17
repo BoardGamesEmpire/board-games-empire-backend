@@ -1212,7 +1212,7 @@ describe('consent acts (#1150)', () => {
     const presentationLocale = (act: { presentation: unknown } | undefined) =>
       (act?.presentation as { locale?: string } | undefined)?.locale;
 
-    it('an act naming a supported locale stores its presentation in that locale, whatever Accept-Language says (#1301)', async () => {
+    it('each act naming a supported locale stores its presentation in the locale it names (#1301)', async () => {
       const { owner, householdId, unit } = await household();
       const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK, HOUSEHOLD_REQUIRED, HOUSEHOLD_OPTIONAL]);
       const surface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);

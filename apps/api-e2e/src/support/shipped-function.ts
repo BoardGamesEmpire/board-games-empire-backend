@@ -33,9 +33,9 @@ import { readShippedSource } from './shipped-sql';
  *
  * Comments are blanked before anything is matched, and that is load-bearing
  * rather than tidy: these services discuss their own lock order in prose above
- * the code that takes it (`plugin-consent-act.service.ts` mentions
- * `FOR SHARE` and the advisory key in comments), so a matcher that read comments would pin
- * the order of the documentation.
+ * the code that takes it (`plugin-consent-act.service.ts` mentions `FOR SHARE`
+ * and the advisory key in comments), so a matcher that read comments would
+ * pin the order of the documentation.
  */
 
 /** A function lifted from source. */
@@ -417,8 +417,10 @@ function blankCommentRanges(source: string, file: ts.SourceFile): string {
  * because Postgres also takes locks nobody wrote: an INSERT into a table with
  * an FK takes `FOR KEY SHARE` on the parent row from the referential-integrity
  * trigger, and RI checks are AFTER ROW triggers, so that lock lands only once
- * the child tuple is written. The server's first decision writer deadlocked on
- * exactly that, with the order pins above green the whole time (#398).
+ * the child tuple is written. A writer whose first lock is an FK-child insert
+ * therefore takes the plugin row last, and deadlocks against activation's
+ * `FOR UPDATE` while every order pin above stays green (#398). Every consent
+ * act claims the plugin row first for that reason.
  *
  * The check that closes it is not another stage. A stage is a FIRST OCCURRENCE
  * in a body, and the implied lock's honest position is *after* the write, which
@@ -484,10 +486,9 @@ export interface WriteShape {
    * argument.
    *
    * Needed because the whole-argument text answers the wrong question. A Prisma
-   * update addressed by its compound unique key names the FK column in `where`
-   * — activation's grant re-stamp does exactly this — so a guard over the whole
-   * call reports every keyed child update as a re-parenting one, which is every
-   * child update there is.
+   * update addressed by its compound unique key names the FK column in
+   * `where`, so a guard over the whole call reports every keyed child update as
+   * a re-parenting one, which is every child update there is.
    *
    * A payload this cannot ENUMERATE is reported rather than skipped — the
    * argument is not an object literal, the property is shorthand or absent, or

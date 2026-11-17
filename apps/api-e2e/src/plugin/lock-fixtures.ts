@@ -95,6 +95,22 @@ export const SERVER_GRANT_INSERT =
 export const GRANT_ROW_LOCK = `SELECT id FROM plugin_grants WHERE plugin_id = $1 AND scope_type = '${PluginGrantScope.Server}' FOR UPDATE`;
 
 /**
+ * The update arm of a consent decision's upsert, on a Server unit row that
+ * already exists: a write of non-key columns only, so it takes the row
+ * `FOR NO KEY UPDATE`, the mode a consent act's `pluginGrant.upsert` takes
+ * when the decision has a row (#1336).
+ *
+ * The waiter's half of a grant-row barrier. {@link GRANT_ROW_LOCK} is the
+ * holder's: a waiter issuing that too would only show that `FOR UPDATE` blocks
+ * `FOR UPDATE`, and could not fail for the weaker mode the real upsert takes.
+ * It writes no key column, so it matches no stage of the claimed order and
+ * takes no lock on `plugins` through the foreign key.
+ */
+export const SERVER_GRANT_RESTAMP =
+  `UPDATE plugin_grants SET decided_at = now(), updated_at = now() ` +
+  `WHERE plugin_id = $1 AND scope_type = '${PluginGrantScope.Server}' RETURNING id`;
+
+/**
  * The `unit row` stage of the claimed lock order, as a statement a barrier can
  * hold open.
  *

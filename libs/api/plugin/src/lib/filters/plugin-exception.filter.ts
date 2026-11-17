@@ -742,8 +742,9 @@ export const PLUGIN_EXCEPTION_FILTER_CATCHES: readonly ErrorCtor<Error>[] = [...
  * hand-pinned string literal on every runtime error class, so the code
  * survives minification and class renames, letting clients dispatch without
  * parsing copy.
- * Prompt-bearing errors (Critical confirmation, static analysis) spread their own machine-readable fields into the body so the
- * confirmation prompt is rendered FROM the error, never recomputed.
+ * Prompt-bearing errors (Critical confirmation, static analysis) spread their
+ * own machine-readable fields into the body so the confirmation prompt is
+ * rendered FROM the error, never recomputed.
  * The raw English domain message is never surfaced — copy is a localized
  * `t()` marker — but the original error rides as `cause` for server-side
  * logs.

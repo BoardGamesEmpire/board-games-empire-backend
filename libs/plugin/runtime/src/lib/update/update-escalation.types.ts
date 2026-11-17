@@ -119,9 +119,9 @@ export interface UpdateEscalationComparison {
   /**
    * Server-scope slugs whose catalog risk now exceeds the risk recorded on
    * their granted consent decision. Approval re-writes a required one at
-   * today's risk, and one that reaches `Critical` joins the second-factor
-   * expectation. An optional one is left as it stands: approving confers
-   * nothing through it, and a review act answers it (#1336).
+   * today's risk, and one that reaches `Critical` joins what the Critical
+   * confirmation expects. An optional one is left as it stands: approving
+   * confers nothing through it, and a review act answers it (#1336).
    */
   readonly serverRiskEscalatedSlugs: readonly string[];
   /**

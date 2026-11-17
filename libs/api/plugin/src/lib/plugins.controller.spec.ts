@@ -473,7 +473,7 @@ describe('PluginsController (delegation)', () => {
     });
   });
 
-  describe('consent presentation (#322)', () => {
+  describe('consent surface (#322)', () => {
     it('consentPresentation renders the Server unit from the slug entry point, locale from CLS', async () => {
       auditContext.getLocale.mockReturnValue('de');
 

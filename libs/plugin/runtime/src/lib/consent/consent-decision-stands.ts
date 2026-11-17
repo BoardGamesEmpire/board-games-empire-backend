@@ -1,7 +1,7 @@
 import type { PluginGrant } from '@bge/database';
 import type { ConsentActDecision } from './plugin-consent-act.types';
 
-/**
+/*
  * Whether a consent act would change a consent decision, shared by the
  * household and user act and the server act (#1150, #1336). Pure: each act
  * reads its standing rows and writes its decisions in its own file, under its

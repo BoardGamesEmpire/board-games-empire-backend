@@ -25,6 +25,7 @@ import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { consentActLocale } from './consent-act-locale';
 import {
+  actSummary,
   ApprovePluginUpdateDto,
   ListPluginsQueryDto,
   PluginInventoryDetailResponseDto,
@@ -133,12 +134,12 @@ export class PluginsController {
     ).pipe(map((page) => paginated('plugins', page, query, ResourceType.Plugin)));
   }
 
-  // ─── Consent presentation (#322): Server scope ─────────────────────────────
+  // ─── Consent surface (#322): Server scope ──────────────────────────────────
 
   @ApiOperation({
     summary: "Present the active manifest's consent surface for the Server unit",
     description:
-      "The server admin's consent screen: every check the active manifest requests — riskLevel, required, " +
+      "The server admin's consent surface: every check the active manifest requests — riskLevel, required, " +
       'consentScope, localized reason, feature binding, and its decision state from this viewpoint (unit-scope ' +
       "checks read 'per-unit') — plus the localized features[] the checks group under.",
   })
@@ -393,8 +394,8 @@ export class PluginsController {
           approverId: this.abilityService.getActingUserId(),
           stagingId: dto.stagingId,
           confirmCriticalSlugs: dto.confirmCriticalSlugs,
-          // The locale the staged-update read presented the requested
-          // permissions in, which the approval's consent act records (#1336, #1301).
+          // The locale the staged-update read was requested in, which the
+          // approval's consent act records its presentation in (#1336, #1301).
           locale: this.presentationLocale(dto.locale),
         }),
       ),
@@ -403,8 +404,7 @@ export class PluginsController {
         message: t('success.plugin.update_approved', { slug, version: result.plugin.version }),
         plugin: result.plugin,
         comparison: result.comparison,
-        // The act's summary, as every consent act route answers with it.
-        act: { id: result.act.id, kind: result.act.kind, decidedAt: result.act.decidedAt },
+        act: actSummary(result.act),
         seededGrants: result.seededGrants,
         // Also on the row, surfaced top-level because it is the response's
         // one operational instruction: nothing serves the new code until a
@@ -598,11 +598,11 @@ export class PluginsController {
    * landing between describePending's comparison and the presentation's own
    * grant read can still leave `deniedRequiredSlugs` disagreeing with a
    * check's decision state. That window is cosmetic and self-limiting:
-   * approve works out what it grants, and the Critical second factor it asks,
+   * approve works out what it grants, and the Critical confirmation it asks,
    * from the decisions read inside its own transaction, whatever this screen
-   * rendered, so a stale screen cannot authorize anything — and closing it would mean one transaction
-   * threaded through the presentation service, a cross-service seam that is
-   * not worth a body re-derived on the next action.
+   * rendered, so a stale screen cannot authorize anything — and closing it
+   * would mean one transaction threaded through the presentation service, a
+   * cross-service seam that is not worth a body re-derived on the next action.
    */
   private async loadPendingPresentation(slug: string): Promise<Record<string, unknown>> {
     await this.assertUnderCeiling(slug, Action.read, PluginUpdatePluginNotFoundError);
@@ -638,8 +638,9 @@ export class PluginsController {
       serverGating: description.comparison.serverGating,
       deniedRequiredSlugs: description.comparison.deniedRequiredSlugs,
       // Per scope, the units with the plugin switched on and those approving
-      // would ask nothing of, by the rule activation announces re-consent by
-      // (#1336): the rest are the units the approval reports as owing.
+      // would ask nothing of, by the same rule activation uses to decide who
+      // owes re-consent (#1336): the rest are the units the approval reports
+      // as owing.
       unitAnswers: description.unitAnswers,
       // The catalog diff approving would apply. Separate from `escalations`
       // because no escalation kind describes a declaration change, and a

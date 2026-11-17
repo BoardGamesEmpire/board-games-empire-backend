@@ -18,7 +18,11 @@ import { PluginGrantCreatedEvent, PluginGrantRejectedEvent } from '../events/plu
 import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginLifecycleAuthorityError } from '../lifecycle/lifecycle.errors';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
-import { PluginUnitPluginNotFoundError, PluginUnitPluginTombstonedError } from '../units/unit.errors';
+import {
+  PluginUnitManifestError,
+  PluginUnitPluginNotFoundError,
+  PluginUnitPluginTombstonedError,
+} from '../units/unit.errors';
 import type { ConsentCheckClassification } from './consent-classification.types';
 import { PluginConsentActAnswerError, PluginConsentActStaleError } from './plugin-consent-act.errors';
 import type { ConsentActAnswer } from './plugin-consent-act.types';
@@ -301,6 +305,16 @@ describe('PluginServerConsentActService', () => {
       );
       expect(db.$transaction).not.toHaveBeenCalled();
     });
+
+    it('refuses a stored manifest that fails re-validation before opening a transaction (#1336)', async () => {
+      // The act judges answers against the stored manifest, so one that no
+      // longer validates cannot be consented to.
+      arrangePlugin({ manifestJson: { ...manifest, slug: 'other-plugin' } as unknown as Prisma.JsonValue });
+
+      await expect(service.toggle(input())).rejects.toBeInstanceOf(PluginUnitManifestError);
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(classifier.classify).not.toHaveBeenCalled();
+    });
   });
 
   describe('the transaction', () => {
@@ -357,6 +371,7 @@ describe('PluginServerConsentActService', () => {
         update: Record<string, unknown>;
       }[];
       expect(upserts).toHaveLength(2);
+
       for (const upsert of upserts) {
         expect(upsert.where).toEqual({
           pluginId_scopeType_scopeId_permissionSlug: expect.objectContaining({
@@ -456,11 +471,11 @@ describe('PluginServerConsentActService', () => {
       // The server act takes the plugin row and then the grant rows in
       // permission order, the order activation takes them in, so it carries
       // no deadlock retry: an aborted act reaches the caller as it is.
-      db.$transaction.mockImplementationOnce(() => Promise.reject(deadlock()));
+      const victim = deadlock();
+      db.$transaction.mockImplementationOnce(() => Promise.reject(victim));
 
-      await expect(service.toggle(input())).rejects.toThrow();
+      await expect(service.toggle(input())).rejects.toBe(victim);
       expect(db.$transaction).toHaveBeenCalledTimes(1);
-      expectNothingWritten();
     });
   });
 

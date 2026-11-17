@@ -34,15 +34,13 @@ import { readShippedTree, workspaceRoot } from '../support/shipped-sql';
  * other and the later reads what the earlier wrote. That was safe to move
  * because the act is the only writer that takes both: the unit paths take the
  * key and no grant row, and the server consent act, activation, a rejected
- * update and uninstall take grant rows and no key. With nothing holding a grant row while
- * it waits for a key, no cycle runs through the pair in either direction.
+ * update and uninstall take grant rows and no key. With nothing holding a
+ * grant row while it waits for a key, no cycle runs through the pair in either
+ * direction.
  *
- * Before this constant the order lived in prose, in three service doc comments
- * that had to be kept in agreement by hand. Pinning it in one place is what
- * gave #398 a single literal to amend when the server's decision writer gained
- * its plugin-row claim (below), and what makes a writer that disagrees with
- * the claim surface as a red test rather than as reasoning in a PR
- * description.
+ * The order is stated here and nowhere else, so a writer whose claim disagrees
+ * with it surfaces as a red test rather than as reasoning in a PR description,
+ * and a change to the order is one literal to amend (#398).
  *
  * The stages are LOCKS, not accesses, and the patterns are held to it. A unit
  * row READ under the advisory key is not a unit-row lock, so the two fused
@@ -64,13 +62,11 @@ import { readShippedTree, workspaceRoot } from '../support/shipped-sql';
  * can take a plugin-row lock this constant cannot observe, in the LAST
  * position rather than the first.
  *
- * The server's first decision writer is how that was found: it claimed
- * `['grant row', 'unit row']`, said outright that it took no plugin-row lock,
- * and deadlocked against activation's `FOR UPDATE` on every contended grant
- * INSERT while both the barrier suite and the pin suite stayed green (#398).
- * Every consent act — household and user (#1150), and the Server unit's
- * (#1336) — claims the plugin row first, before it writes its first consent
- * decision.
+ * A writer whose first lock is an FK-child insert therefore takes the plugin
+ * row last, after the tuple is written, and deadlocks against activation's
+ * `FOR UPDATE` while every source pin stays green (#398). So every consent act —
+ * household and user (#1150), and the Server unit's (#1336) — claims the
+ * plugin row first, before it writes its first consent decision.
  *
  * The rule that gap left in prose is now enforced (#399): every write to an
  * FK-child table must be preceded, on every path that reaches it, by a
@@ -365,10 +361,9 @@ export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
       'Activation takes the plugin row first via the `FOR UPDATE` server-config read (#370), ahead of the ' +
       'claiming write — both are the plugin row, and either dates it. Then an approval writes the Server ' +
       "unit's consent decisions through upserts, in permission order, which take the grant rows (#1336). It " +
-      'takes no `FOR UPDATE` on the grants table and refuses over no denial: the plugin-row lock is what ' +
-      'orders it against every writer of a server-scope decision, each of which claims that row first, so ' +
-      'its plain read of those decisions is stable. It ' +
-      'writes no unit enablement: whether a unit can run under the manifest it promotes is worked out when ' +
+      'takes no `FOR UPDATE` on the grants table: the plugin-row lock is what orders it against every writer ' +
+      'of a server-scope decision, each of which claims that row first, so its plain read of those decisions ' +
+      'is stable. It writes no unit enablement: whether a unit can run under the manifest it promotes is worked out when ' +
       'read (#1151), and so is the consent standing it announces (#1149). Its re-consent reads of the unit ' +
       'enablements write nothing and take no lock, so they are not a stage. Those unlocked reads are safe ' +
       'because every unit-enablement writer claims the plugin row before the advisory key, so a unit write ' +

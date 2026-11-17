@@ -98,8 +98,17 @@ export class ServerConsentActResponseDto {
   act!: ConsentActSummaryDto | null;
 }
 
-/** The act's summary, rather than its stored presentation, which the client already showed. */
-function actSummary(act: ConsentActResult['act']) {
+/** A consent act as every route that records one answers with it. */
+type ConsentActSummary = Pick<PluginConsentAct, 'id' | 'kind' | 'decidedAt'>;
+
+/**
+ * The act's summary, rather than its stored presentation, which the client
+ * already showed. Every route that records a consent act answers with it
+ * (#1150, #1336).
+ */
+export function actSummary(act: PluginConsentAct): ConsentActSummary;
+export function actSummary(act: PluginConsentAct | null): ConsentActSummary | null;
+export function actSummary(act: PluginConsentAct | null): ConsentActSummary | null {
   return act === null ? null : { id: act.id, kind: act.kind, decidedAt: act.decidedAt };
 }
 

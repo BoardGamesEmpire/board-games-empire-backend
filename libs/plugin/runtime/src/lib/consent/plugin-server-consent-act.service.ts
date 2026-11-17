@@ -1,18 +1,9 @@
 import { AuditContextService, SERVER_PLUGIN_UNIT } from '@bge/actor-context';
-import type { Plugin, PluginConsentAct, PluginGrant } from '@bge/database';
-import {
-  DatabaseService,
-  PluginConsentActKind,
-  PluginGrantScope,
-  PluginGrantStatus,
-  Prisma,
-  SERVER_SCOPE_SENTINEL,
-} from '@bge/database';
+import type { Plugin, PluginConsentAct } from '@bge/database';
+import { DatabaseService, PluginConsentActKind, PluginGrantScope, Prisma, SERVER_SCOPE_SENTINEL } from '@bge/database';
 import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { grantSnapshot } from '../events/plugin-event-snapshots';
-import { PluginGrantCreatedEvent, PluginGrantRejectedEvent } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginLifecycleAuthorityError } from '../lifecycle/lifecycle.errors';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
@@ -24,6 +15,7 @@ import {
   PluginUnitPluginTombstonedError,
 } from '../units/unit.errors';
 import { planConsentAct } from './consent-act-plan';
+import { emitDecisionEvents, type WrittenDecision } from './consent-decision-events';
 import { decisionStands, decisionsStand } from './consent-decision-stands';
 import { PluginConsentActStaleError } from './plugin-consent-act.errors';
 import type { ConsentActAnswer } from './plugin-consent-act.types';
@@ -51,11 +43,6 @@ type ServerConsentActKind = 'Toggle' | 'Review';
 interface ServerConsentActClaimRow {
   readonly uninstalled_at: Date | null;
   readonly installed_sha256: string;
-}
-
-interface WrittenDecision {
-  readonly before: PluginGrant | null;
-  readonly after: PluginGrant;
 }
 
 type ServerActOutcome =
@@ -231,7 +218,14 @@ export class PluginServerConsentActService {
       return { act: null, changed: false };
     }
 
-    this.emitEvents(outcome, plugin.version, initiatedAt);
+    // One event per decision whose row changed, each carrying the act, so
+    // every lifecycle row a server act leaves names it (#1336).
+    emitDecisionEvents(
+      this.emitter,
+      outcome.changedDecisions,
+      { manifestVersion: plugin.version, actId: outcome.act.id },
+      initiatedAt,
+    );
 
     return { act: outcome.act, changed: true };
   }
@@ -271,27 +265,5 @@ export class PluginServerConsentActService {
       this.options,
       (pluginSlug, detail, issues) => new PluginUnitManifestError(pluginSlug, detail, issues),
     );
-  }
-
-  /**
-   * One event per consent decision whose row changed, each carrying the act,
-   * so every lifecycle row a server act leaves names it (#1336).
-   */
-  private emitEvents(
-    outcome: Extract<ServerActOutcome, { changed: true }>,
-    manifestVersion: string,
-    initiatedAt: Date,
-  ): void {
-    const context = { manifestVersion, actId: outcome.act.id };
-
-    for (const { before, after } of outcome.changedDecisions) {
-      const EventClass =
-        after.status === PluginGrantStatus.Granted ? PluginGrantCreatedEvent : PluginGrantRejectedEvent;
-
-      this.emitter.emit(
-        EventClass.eventName,
-        new EventClass(before === null ? null : grantSnapshot(before), grantSnapshot(after), context, initiatedAt),
-      );
-    }
   }
 }

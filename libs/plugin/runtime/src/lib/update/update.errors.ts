@@ -194,7 +194,7 @@ export class PluginUpdateForbiddenPermissionError extends Error {
 }
 
 /**
- * The Critical second factor, update edition (#59): any Critical
+ * The Critical confirmation, update edition (#59): any Critical
  * permission approval newly confers (one with no consent decision, a denied
  * one, or one granted at a risk that no longer covers today's) demands exact
  * re-entry — every one, nothing else (#1336).

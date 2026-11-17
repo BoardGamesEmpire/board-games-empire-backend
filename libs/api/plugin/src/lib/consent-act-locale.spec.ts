@@ -28,8 +28,10 @@ describe('consentActLocale (#1301)', () => {
     expect(refusal).toMatchObject({ name: 'PluginConsentActLocaleError', locale: 'xx' });
   });
 
-  // The client sends back the locale the consent surface reported, which is a
-  // supported tag as the server spells it.
+  // The client sends the locale the consent surface was requested in, one of
+  // the locales this server supports, never the `locale` a reason reports
+  // (the key of the plugin's own text). The supported tags are the server's
+  // own spelling, so the match is exact.
   it('matches the supported tags exactly', () => {
     expect(() => consentActLocale('EN', ['en'], 'en')).toThrow(PluginConsentActLocaleError);
   });

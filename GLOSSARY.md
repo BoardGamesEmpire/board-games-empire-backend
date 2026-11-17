@@ -1161,7 +1161,7 @@ A permission a plugin defines in its own namespace for its own features. It is a
 _Avoid_: own-namespace permission, plugin-declared, plugin permission
 
 **Required permission**:
-A permission a plugin asks for and cannot work without: a server that refuses one blocks any update needing it, and a household or user cannot switch the plugin on without granting every one. A unit that later owes one keeps running on what it granted, with the plugin's state reported as review pending. Refusing an optional permission only switches off its feature.
+A permission a plugin asks for and cannot work without: a server admin cannot refuse one short of uninstalling the plugin, and approving an update that requires one grants it, an earlier refusal included; a household or user cannot switch the plugin on without granting every one. A unit that later owes one keeps running on what it granted, with the plugin's state reported as review pending. Refusing an optional permission only switches off its feature.
 _Avoid_: mandatory
 
 **Consent standing**:
@@ -1201,7 +1201,7 @@ Everything a consent unit is shown about a plugin's requested permissions: group
 _Avoid_: consent presentation, consent screen
 
 **Critical confirmation**:
-Retyping each Critical-risk permission that an install or update gives server consent to, or gives it again after its risk rose, to approve that install or update. Permissions households or users decide, and those already granted at their current risk, are not retyped.
+Retyping each Critical-risk permission that an install or update gives server consent to, one a server admin had refused included, or gives it again after its risk rose, to approve that install or update. Permissions households or users decide, and those already granted at their current risk, are not retyped.
 _Avoid_: second factor, typed confirmation
 
 **Unit enablement**:
@@ -1263,7 +1263,7 @@ A change in a new plugin version that widens what the plugin can reach or change
 _Avoid_: breaking change, permission escalation
 
 **Server-gating escalation**:
-An escalation the server must approve before an update can go live. Escalations that households or users own never wait for the server; those units go to review pending instead.
+An escalation the server must approve before an update can go live. An update that requires a server-scope permission a server admin refused waits for approval the same way, though that is not an escalation. Escalations that households or users own never wait for the server; those units go to review pending instead.
 _Avoid_: blocking escalation
 
 **Update approval**:

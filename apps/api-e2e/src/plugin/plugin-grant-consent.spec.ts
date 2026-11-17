@@ -45,7 +45,7 @@ import { FIXTURE_ACT_ID, INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumn
  * household and a user may consent to, #591), and `read:platform_game`
  * (Low, condition-free) as the trap a household decision must refuse.
  */
-describe('plugin consent acts + consent presentation (#322, #1150, #1336)', () => {
+describe('plugin consent acts + consent surface (#322, #1150, #1336)', () => {
   const baseUrl = requireBaseUrl(process.env);
   const PLUGINS_PATH = '/api/plugins';
   const STAGED_AT = new Date('2026-08-01T12:00:00Z');

@@ -74,7 +74,7 @@ export class ConsentAnswerDto implements ConsentActAnswer {
 
 /**
  * What every consent act names: the plugin artifact whose consent surface was
- * answered (#1150), and, optionally, the locale that surface was shown in
+ * answered (#1150), and, optionally, the locale that surface was requested in
  * (#1301). Whether the server supports the locale is the controller's call.
  */
 abstract class ConsentActBodyDto {
@@ -90,9 +90,11 @@ abstract class ConsentActBodyDto {
 
   @ApiPropertyOptional({
     description:
-      'The locale the consent surface was shown in, as its reasons reported it. The consent act records its ' +
+      'The locale the consent surface was requested in, one of the locales this server supports. Not the locale ' +
+      "a reason reports, which names the plugin's own text the reason came from. The consent act records its " +
       'presentation in this locale, so it holds the text that was read. Without it, the request locale is used. ' +
-      'A locale this server does not support answers 422 PLUGIN_CONSENT_ACT_LOCALE.',
+      "The match is exact, since the supported tags are the server's own spelling; a locale this server does not " +
+      'support answers 422 PLUGIN_CONSENT_ACT_LOCALE.',
     maxLength: CONSENT_ACT_LOCALE_MAX_LENGTH,
   })
   @IsOptional()

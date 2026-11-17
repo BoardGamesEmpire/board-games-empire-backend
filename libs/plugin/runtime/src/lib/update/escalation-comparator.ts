@@ -21,8 +21,8 @@ export interface EscalationComparatorInput {
 /**
  * The update-escalation comparison (#59 Phase C3). Pure and synchronous:
  * the service prepares the views, this decides what escalated, whether the
- * server admin must approve, which denied permissions the update requires, and which
- * slugs activation tells household and user units they owe re-consent on
+ * server admin must approve, which denied permissions the update requires, and
+ * which slugs activation tells household and user units they owe re-consent on
  * (#1149).
  *
  * Set semantics throughout — removal of a permission, a domain, or a
@@ -95,9 +95,8 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
     // (delete-to-pending) — routing it would ask re-consent of units that are
     // no longer the deciding principal and CANNOT become one: a consent act
     // answers only the permissions its unit's consent scope owns (#1150,
-    // #1336), so a unit asked this way has no action available to answer
-    // it. The
-    // scope change already forces consent from scratch at the new scope,
+    // #1336), so a unit asked this way has no action available to answer it.
+    // The scope change already forces consent from scratch at the new scope,
     // where it is stamped at today's risk.
     if (scopeChangedSlugs.has(grant.permissionSlug)) {
       continue;
@@ -134,19 +133,7 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
     }
   }
 
-  // A Server-scope Denied row on a permission the NEXT manifest marks
-  // required: approving the update grants it (#1336), so the server admin
-  // must be the one to approve, never an immediate activation. Keyed on
-  // next's required set, not on escalations: the denial may predate this
-  // update entirely.
-  const deniedServerSlugs = new Set(
-    input.grants
-      .filter((grant) => grant.scopeType === PluginGrantScope.Server && grant.status === PluginGrantStatus.Denied)
-      .map((grant) => grant.permissionSlug),
-  );
-  const deniedRequiredSlugs = input.next.checks
-    .filter((check) => check.consentScope === 'server' && check.required && deniedServerSlugs.has(check.canonicalSlug))
-    .map((check) => check.canonicalSlug);
+  const deniedRequiredSlugs = deniedRequiredServerSlugs(input.next.checks, input.grants);
 
   const serverGating =
     deniedRequiredSlugs.length > 0 ||
@@ -204,6 +191,29 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
     serverRiskEscalatedSlugs,
     userReconsentSlugs,
   };
+};
+
+/**
+ * The server-scope permissions the next manifest requires that the Server unit
+ * has denied, in manifest order (#1336). Approving the update grants them, so
+ * only a server admin's approval may activate it, never an immediate
+ * activation. Keyed on next's required set, not on escalations: the denial may
+ * predate the update entirely. The comparison gates on this, and activation
+ * asks it again of the decisions it reads under the plugin row's claim.
+ */
+export const deniedRequiredServerSlugs = (
+  nextChecks: ManifestComparisonView['checks'],
+  grants: readonly Pick<GrantComparisonView, 'permissionSlug' | 'scopeType' | 'status'>[],
+): string[] => {
+  const deniedServerSlugs = new Set(
+    grants
+      .filter((grant) => grant.scopeType === PluginGrantScope.Server && grant.status === PluginGrantStatus.Denied)
+      .map((grant) => grant.permissionSlug),
+  );
+
+  return nextChecks
+    .filter((check) => check.consentScope === 'server' && check.required && deniedServerSlugs.has(check.canonicalSlug))
+    .map((check) => check.canonicalSlug);
 };
 
 const compareOutboundDomains = (
