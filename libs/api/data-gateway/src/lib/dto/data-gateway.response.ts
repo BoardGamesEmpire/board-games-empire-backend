@@ -257,13 +257,34 @@ export class DataGatewayEnvelopeDto {
   dataGateway!: DataGatewayResponseDto;
 }
 
+/** The causes of a failed coordinator call that the admin can fix, each with its own copy (#1083). */
+export const GATEWAY_CALL_FAILURE_CODES = ['DATA_GATEWAY_PLUGIN_NOT_SERVED', 'DATA_GATEWAY_PLUGIN_NOT_LOADED'] as const;
+
+export type GatewayCallFailureCode = (typeof GATEWAY_CALL_FAILURE_CODES)[number];
+
 /** The coordinator's answer as a client sees it. A failure carries translated copy, never the coordinator's error. */
 export class GatewayCallAnswerDto {
   @ApiProperty()
   success!: boolean;
 
-  @ApiProperty({ required: false, description: 'Present on a failure: a generic, translated message' })
+  @ApiProperty({
+    required: false,
+    description:
+      'Present on a failure: a translated message, generic unless `code` names the cause. Never the ' +
+      "coordinator's error",
+  })
   message?: string;
+
+  @ApiProperty({
+    required: false,
+    enum: [...GATEWAY_CALL_FAILURE_CODES],
+    description:
+      'Present only when the failure has a known cause the admin can fix (#1083). ' +
+      "DATA_GATEWAY_PLUGIN_NOT_SERVED: the plugin DataGateway's plugin is switched off, uninstalled, failed to " +
+      'load, or is no longer a data-gateway plugin. DATA_GATEWAY_PLUGIN_NOT_LOADED: its plugin is installed and ' +
+      "switched on, but the coordinator hasn't loaded it; restarting the coordinator loads it",
+  })
+  code?: GatewayCallFailureCode;
 }
 
 /**
@@ -280,7 +301,8 @@ export class DataGatewayConnectAnswerDto extends DataGatewayEnvelopeDto {
     nullable: true,
     description:
       "For a remote DataGateway, the connect's answer. For a plugin DataGateway, which has no connection to " +
-      "make, the interview's answer, with the interview's generic copy on a failure (#1083).",
+      "make, the interview's answer, with the interview's generic copy on a failure unless a `code` names " +
+      'a cause the admin can fix (#1083).',
   })
   connection_response!: GatewayCallAnswerDto | null;
 }

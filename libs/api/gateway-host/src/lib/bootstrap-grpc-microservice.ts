@@ -34,10 +34,11 @@ export interface GrpcMicroserviceBootstrapConfig {
   readonly addressConfig: GrpcAddressConfig;
 
   /**
-   * gRPC package declared in the served protos, e.g. `PROTO_PACKAGE_NAME`
-   * (gateways) or `'bge.coordinator.v1'` (coordinator).
+   * The gRPC package, or packages, declared in the served protos, e.g.
+   * `PROTO_PACKAGE_NAME` (gateways). The coordinator serves two: its own and,
+   * for the plugin DataGateways it hosts, the gateway's (#1083).
    */
-  readonly protoPackage: string;
+  readonly protoPackage: string | readonly string[];
 
   /**
    * Absolute directory the service's `.proto` assets are copied into at build.
@@ -49,7 +50,7 @@ export interface GrpcMicroserviceBootstrapConfig {
   /**
    * Path patterns skipped while walking {@link protoDir} — used where a shared
    * proto tree also carries a sibling service's protos (a gateway excludes the
-   * coordinator package; the coordinator excludes the gateway package).
+   * coordinator package).
    */
   readonly protoExclude?: readonly RegExp[];
 
@@ -67,6 +68,15 @@ export interface GrpcMicroserviceBootstrapConfig {
    * flush pino via `@bge/logger`'s `registerLoggerShutdown`.
    */
   readonly registerShutdown: (app: INestMicroservice) => void;
+
+  /**
+   * Runs once the server listens, before the startup line is logged. Nest
+   * runs the app's bootstrap hooks before the server listens, so this is the
+   * first moment the service can say it is reachable: the coordinator marks
+   * its plugin load records ready here, which a gateway worker reads before
+   * it dials (#1083). A rejection fails the boot.
+   */
+  readonly afterListen?: (app: INestMicroservice) => Promise<void>;
 
   /**
    * Bootstrap-failure handler. When the bootstrap calls it, the error is
@@ -111,6 +121,7 @@ export async function bootstrapGrpcMicroservice(config: GrpcMicroserviceBootstra
     protoExclude = [],
     bootstrapLogger,
     registerShutdown,
+    afterListen,
     onBootstrapError,
   } = config;
 
@@ -138,7 +149,8 @@ export async function bootstrapGrpcMicroservice(config: GrpcMicroserviceBootstra
         transport: Transport.GRPC,
         options: {
           url: joinHostPort(host, port),
-          package: protoPackage,
+          // Nest's options take a mutable array, so it gets a copy.
+          package: typeof protoPackage === 'string' ? protoPackage : [...protoPackage],
           protoPath: protoPaths,
           loader: {
             includeDirs: [protoDir],
@@ -158,6 +170,7 @@ export async function bootstrapGrpcMicroservice(config: GrpcMicroserviceBootstra
     registerShutdown(app);
 
     await app.listen();
+    await afterListen?.(app);
     const { host, port } = app.get<GrpcListenAddress>(addressConfig.KEY);
     bootstrapLogger.info({ url: joinHostPort(host, port) }, '🚀 application is running on grpc');
   } catch (error) {

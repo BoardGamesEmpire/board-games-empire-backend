@@ -1,5 +1,6 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, ResourceType } from '@bge/database';
+import type { GatewayRefusalReason } from '@bge/gateway-registry';
 import { remoteConnectionOptions } from '@bge/gateway-registry';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
@@ -33,6 +34,7 @@ import { from, of } from 'rxjs';
 import { catchError, concatMap, map, tap } from 'rxjs/operators';
 import { DataGatewayService } from './data-gateway.service';
 import { toDataGatewayView, type DataGatewayWithSections } from './data-gateway.view';
+import type { GatewayCallFailureCode } from './dto';
 import {
   CreateDataGatewayDto,
   DataGatewayConnectAnswerDto,
@@ -44,6 +46,30 @@ import {
 } from './dto';
 
 const PaginatedDataGatewaysResponse = PaginatedResponseDto(DataGatewayResponseDto, 'dataGateways');
+
+/**
+ * The answer for a plugin DataGateway the gateway registry refused, when the
+ * admin can fix its reason: switch the plugin on or reinstall it, or restart
+ * the coordinator (#1083). Any other reason gets the caller's generic copy.
+ */
+function refusedPluginAnswer(reason: string | undefined) {
+  switch (reason) {
+    case 'plugin_not_served' satisfies GatewayRefusalReason:
+      return {
+        success: false,
+        message: t('errors.data_gateway.plugin_not_served'),
+        code: 'DATA_GATEWAY_PLUGIN_NOT_SERVED' satisfies GatewayCallFailureCode,
+      };
+    case 'plugin_not_loaded' satisfies GatewayRefusalReason:
+      return {
+        success: false,
+        message: t('errors.data_gateway.plugin_not_loaded'),
+        code: 'DATA_GATEWAY_PLUGIN_NOT_LOADED' satisfies GatewayCallFailureCode,
+      };
+    default:
+      return undefined;
+  }
+}
 
 @ApiBearerAuth()
 @ApiSecurity('api_key')
@@ -203,7 +229,7 @@ export class DataGatewayController {
       'Enables the DataGateway, then asks the coordinator for it: a remote DataGateway is connected through its ' +
       'connection fields, and a plugin DataGateway, whose driver the coordinator builds itself, is interviewed. ' +
       'Either way the answer carries the row read again and the outcome as `connection_response`, with generic ' +
-      "copy on a failure, never the coordinator's error (#1083).",
+      "copy on a failure, never the coordinator's error, unless a `code` names a cause the admin can fix (#1083).",
   })
   @ApiResponse({ status: Http.Created, type: DataGatewayConnectAnswerDto })
   @ApiResponse({ status: 401, description: 'Authentication required' })
@@ -221,7 +247,8 @@ export class DataGatewayController {
     description:
       'However recent its answers. Waits for the interview, and the call has no deadline yet (#722). Answers with ' +
       'the row read again, so `interview` shows the result. A failed interview is recorded on the row, and the ' +
-      "answer carries generic copy, never the coordinator's error.",
+      "answer carries generic copy, never the coordinator's error, unless a `code` names a cause the admin can " +
+      "fix, such as a plugin DataGateway's plugin that isn't served or loaded (#1083).",
   })
   @ApiResponse({ status: Http.Ok, type: DataGatewayInterviewAnswerDto })
   @ApiResponse({ status: 401, description: 'Authentication required' })
@@ -266,7 +293,9 @@ export class DataGatewayController {
           this.logger.error(
             `Coordinator could not interview gateway ${gatewayId}: ${response.error ?? 'No additional info'}`,
           );
-          return failed();
+          // A plugin DataGateway the gateway registry refused gets copy that
+          // names the admin's fix, which differs by the reason (#1083).
+          return refusedPluginAnswer(response.refusalReason) ?? failed();
         }
 
         return { success: true };

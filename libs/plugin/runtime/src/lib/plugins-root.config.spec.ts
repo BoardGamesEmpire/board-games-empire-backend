@@ -1,5 +1,5 @@
 import Joi from 'joi';
-import { pluginsConfigValidationSchema } from './plugins.config';
+import { pluginsConfig, pluginsConfigValidationSchema } from './plugins-root.config';
 
 interface PluginsEnvironment {
   PLUGINS_ROOT?: string;
@@ -56,5 +56,43 @@ describe('pluginsConfigValidationSchema', () => {
 
       expect(error).toBeDefined();
     });
+  });
+});
+
+// The api installs plugins under this root and the coordinator loads the
+// data-gateway plugins from it, so both read it from this one config (#1083).
+describe('pluginsConfig', () => {
+  const original = process.env;
+
+  beforeEach(() => {
+    process.env = { ...original };
+    delete process.env['PLUGINS_ROOT'];
+  });
+
+  afterEach(() => {
+    process.env = original;
+  });
+
+  it.each([
+    ['production', '/var/lib/bge/plugins'],
+    ['development', './data/plugins'],
+  ])('defaults, under NODE_ENV %s, to %s (#1083)', (nodeEnv, root) => {
+    process.env['NODE_ENV'] = nodeEnv;
+
+    expect(pluginsConfig().pluginsRoot).toBe(root);
+  });
+
+  it('is read from PLUGINS_ROOT (#1083)', () => {
+    process.env['PLUGINS_ROOT'] = '/srv/bge/plugins';
+
+    expect(pluginsConfig().pluginsRoot).toBe('/srv/bge/plugins');
+  });
+
+  // `.env.example` ships it empty, and `@bge/env` reads an empty variable as
+  // unset, so the schema lets it through and the config defaults it.
+  it('is defaulted when set empty, as when unset (#1083)', () => {
+    Object.assign(process.env, { PLUGINS_ROOT: '', NODE_ENV: 'production' });
+
+    expect(pluginsConfig().pluginsRoot).toBe('/var/lib/bge/plugins');
   });
 });

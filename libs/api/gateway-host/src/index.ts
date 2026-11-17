@@ -5,3 +5,4 @@ export * from './lib/data-gateway.controller';
 export * from './lib/driver-logger';
 export * from './lib/gateway-logger';
 export * from './lib/node-upstream-fetch';
+export * from './lib/relay-driver-answer';

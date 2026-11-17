@@ -246,7 +246,11 @@ export const DRIVER_DISPOSE_TIMEOUT_MS = 5_000;
  * plugin DataGateway. No config event tells of a plugin's state, so the
  * routing decision that finds a plugin's row disabled, as an uninstall
  * leaves it, or its plugin no longer loaded, also disposes the driver held
- * for it (#1083).
+ * for it (#1083). It disposes only what was built for the install its row
+ * names, or for an earlier one. A plugin can be installed again, and the
+ * new install's driver built, while a decision waits: that decision's row
+ * is stale by then, and it leaves the newer install's driver, cached or
+ * still being built, alone.
  *
  * State authority for DataGateway rows lives in the coordinator. Other
  * processes treat this service as a read-side: they react to config-update
@@ -275,8 +279,21 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
   // finds nothing cached to tear down, and connect() then caches a driver for a
   // gateway that is no longer valid (served indefinitely until the next event).
   // A routing decision that drops a plugin DataGateway's driver advances it
-  // too, for the same race with a build under way (#1083).
+  // too, for the same race with a build under way. A stale decision doesn't:
+  // one made on the row of an earlier install than this process holds a
+  // driver for, cached or being built, leaves the counter and that driver as
+  // they are (#1083).
   private readonly connectGeneration = new Map<string, number>();
+
+  // For each plugin DataGateway whose driver is being built, the install of
+  // its plugin that the build was begun for: the plugin's `installedAt`,
+  // which a reinstall rewrites. connectPlugin() records it where it captures
+  // the counter above, and clears it when the build settles, whichever way.
+  // ensureConnected() shares one connect per DataGateway, so there is at most
+  // one. Nothing is cached mid-build, so this is what tells a routing
+  // decision that a build is of a newer install than its row names (#1083).
+  private readonly installBeingBuilt = new Map<string, Date>();
+
   // DataGateways whose connection config changed since this process cached a
   // driver for them. Their stored answers came through the old connection,
   // so the next connect interviews them again, whatever the answers' age and
@@ -330,6 +347,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     this.failures.clear();
     this.connecting.clear();
     this.connectGeneration.clear();
+    this.installBeingBuilt.clear();
     this.connectionChanged.clear();
   }
 
@@ -340,17 +358,47 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
    * interview ({@link register}). Existing drivers are disposed and replaced.
    * Failures to connect contribute to the failure-tracking counter that can
    * trigger auto-disable; a failed interview doesn't.
+   *
+   * The options come from a caller who may not have read the row, so this
+   * reads whose row it is first, and refuses a plugin DataGateway's as
+   * unknown, with a {@link GatewayRoutingRefusedError} (#1083): the mirror of
+   * {@link pluginDriver} refusing a remote row. To whoever asks to dial it,
+   * no remote DataGateway by that id is there. The refusal comes before
+   * anything else, so the plugin's driver stays cached, nothing is dialled,
+   * and no connection failure is counted. An id with no row is not refused
+   * here: the options are dialled as given.
    */
   async connect(options: GatewayConnectionOptions): Promise<void> {
+    // Snapshot the invalidation counter before the first wait, the read of
+    // the row. If a 'disabled'/'deleted' event bumps it while we await that
+    // or the ping, we must discard the driver we're about to cache rather
+    // than serve a now-invalid DataGateway.
+    const generation = this.connectGeneration.get(options.gatewayId) ?? 0;
+
+    const row = await this.db.dataGateway.findFirst({
+      where: { id: options.gatewayId },
+      select: { pluginId: true },
+    });
+
+    if (row && row.pluginId !== null) {
+      throw new GatewayRoutingRefusedError(options.gatewayId, 'unknown');
+    }
+
+    await this.dial(options, generation);
+  }
+
+  /**
+   * Dials a remote DataGateway and caches its driver once it has passed its
+   * first interview: what {@link connect} does once the row is known to be a
+   * remote DataGateway's. The lazy connect calls it with the row it has
+   * read, so that one isn't read again to learn the same (#1083).
+   * `generation` is the invalidation counter as the caller snapshotted it.
+   */
+  private async dial(options: GatewayConnectionOptions, generation: number): Promise<void> {
     if (this.clients.has(options.gatewayId)) {
       this.logger.log(`Replacing existing connection for gateway ${options.gatewayId}`);
       this.disconnect(options.gatewayId);
     }
-
-    // Snapshot the invalidation counter before the async ping. If a
-    // 'disabled'/'deleted' event bumps it while we await, we must discard the
-    // driver we're about to cache rather than serve a now-invalid gateway.
-    const generation = this.connectGeneration.get(options.gatewayId) ?? 0;
 
     let driver: DataGatewayDriver;
     try {
@@ -770,6 +818,15 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
    * gone, and one built from an earlier install reaches that install's copy.
    * The next use builds a driver from the copy loaded then.
    *
+   * A decision can be overtaken. Its row was read before it ran, and it may
+   * wait on the source, and in that time the plugin can be installed again
+   * and the new install's driver built, or its build begun. What the
+   * decision found is true of the install its row names, so it drops only
+   * what is held for that install or an earlier one. When this process
+   * holds a newer install's driver, cached or being built, the decision is
+   * stale: it still answers its caller with its own refusal, and touches
+   * nothing.
+   *
    * No other answer touches the cache. A plugin that is only switched off
    * keeps its driver, unused, for when it is switched on again: disposing it
    * would fail the calls still under way, and those failures would count
@@ -784,7 +841,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     const unusable = routingRefusal(row);
     if (unusable || !row) {
       if (unusable === 'disabled' && row && row.pluginId !== null) {
-        this.dropPluginDriver(gatewayId);
+        this.dropPluginDriver(gatewayId, row.plugin);
       }
 
       return unusable;
@@ -796,7 +853,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       if (loaded !== true) {
         // A source that couldn't say leaves the driver: nothing says its copy is gone.
         if (loaded === false) {
-          this.dropPluginDriver(gatewayId);
+          this.dropPluginDriver(gatewayId, row.plugin);
         }
 
         return 'plugin_not_loaded';
@@ -806,8 +863,8 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       // between two uses that no decision saw, the row disabled and enabled
       // again, leaves the earlier install's driver cached, so it is dropped
       // here and the next use builds one from this install.
-      if (this.heldForAnotherInstall(gatewayId, row.plugin)) {
-        this.dropPluginDriver(gatewayId);
+      if (this.heldForEarlierInstall(gatewayId, row.plugin)) {
+        this.dropPluginDriver(gatewayId, row.plugin);
       }
     }
 
@@ -841,13 +898,20 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
 
   /**
    * Whether the driver cached for a plugin DataGateway was built from an
-   * install of its plugin other than `plugin`'s. Switching the plugin off and
-   * on keeps its install, and so its driver (#1083).
+   * earlier install of its plugin than `plugin`'s. Switching the plugin off
+   * and on keeps its install, and so its driver. One built from a later
+   * install stays as well: the row that names `plugin` is then the stale
+   * one (#1083).
    */
-  private heldForAnotherInstall(gatewayId: string, plugin: RoutedPlugin): boolean {
+  private heldForEarlierInstall(gatewayId: string, plugin: RoutedPlugin): boolean {
     const cached = this.clients.get(gatewayId);
 
-    return cached?.origin === 'plugin' && cached.installedAt?.getTime() !== plugin.installedAt.getTime();
+    if (cached?.origin !== 'plugin') {
+      return false;
+    }
+
+    // One cached without its install can't be matched to any, so it counts as earlier.
+    return cached.installedAt === undefined || cached.installedAt.getTime() < plugin.installedAt.getTime();
   }
 
   /**
@@ -858,13 +922,44 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
    * discarded when done instead of cached. That one was built from a copy of
    * the plugin this decision found gone, and cached, it would be served once
    * the plugin reads as loaded again.
+   *
+   * `plugin` is the plugin as the decision's row read it, and every drop a
+   * decision makes comes through here, so this is where a stale decision
+   * stops. When this process holds a driver of a newer install than
+   * `plugin`'s ({@link holdsNewerInstall}), nothing is dropped: the
+   * invalidation counter stays, so no build is discarded, no driver is
+   * disposed, and no interview is abandoned (#1083). A row read without its
+   * plugin names no install to compare, and drops.
    */
-  private dropPluginDriver(gatewayId: string): void {
+  private dropPluginDriver(gatewayId: string, plugin: RoutedPlugin | null): void {
+    if (plugin && this.holdsNewerInstall(gatewayId, plugin)) {
+      return;
+    }
+
     this.bumpConnectGeneration(gatewayId);
 
     if (this.clients.has(gatewayId)) {
       this.disconnect(gatewayId);
     }
+  }
+
+  /**
+   * Whether this process holds, for a plugin DataGateway, the driver of a
+   * later install of its plugin than `plugin`'s: one cached, or one whose
+   * build is under way.
+   *
+   * It takes `installedAt` to put installs in order, which is an assumption:
+   * the value is the clock of the process that installed. A reinstall
+   * stamped earlier than the install before it, by a clock set back or two
+   * processes' clocks apart, would make current decisions read as stale, and
+   * the earlier install's driver would stay held until a restart or a
+   * 'disabled' event.
+   */
+  private holdsNewerInstall(gatewayId: string, plugin: RoutedPlugin): boolean {
+    const newer = (held: Date | undefined): boolean =>
+      held !== undefined && held.getTime() > plugin.installedAt.getTime();
+
+    return newer(this.clients.get(gatewayId)?.installedAt) || newer(this.installBeingBuilt.get(gatewayId));
   }
 
   /**
@@ -946,7 +1041,10 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     }
 
     this.logger.log(`Lazily connecting to gateway '${gateway.name}' (${gatewayId}) on demand`);
-    await this.connect(options);
+
+    // The row read above is a remote DataGateway's, so this dials without
+    // connect()'s own read of it.
+    await this.dial(options, this.connectGeneration.get(gatewayId) ?? 0);
   }
 
   /**
@@ -959,48 +1057,68 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     const { id: gatewayId, plugin } = gateway;
 
     // Snapshot the invalidation counter before the first wait, as connect()
-    // does before its ping: a 'disabled' or 'deleted' event that arrives
-    // while the driver is being built finds nothing cached to tear down.
+    // does: a 'disabled' or 'deleted' event that arrives while the driver is
+    // being built finds nothing cached to tear down.
+    //
+    // It is taken here, after connectFromDb() has read the row, and must
+    // stay after that read. While the row is read nothing is on record for
+    // this build, so a routing decision made on an earlier install's row
+    // drops as usual and advances the counter. A snapshot from before the
+    // read would then be out of date, and this build, of the newer install,
+    // discarded for it (#1083).
     const generation = this.connectGeneration.get(gatewayId) ?? 0;
 
-    // Not every connect follows a routing decision: a 'reconnect-requested'
-    // event doesn't, and a search takes its route's driver after the route
-    // was read. So the same decision is made here, on the row just read, and
-    // no path builds a driver for a plugin the server doesn't serve or this
-    // process can't reach. A refusal counts as no failure, here as anywhere.
-    const refusal = await this.refusalFor(gatewayId, gateway);
-    const source = this.pluginDrivers;
-
-    // The decision passes a plugin's row only with its plugin read and a
-    // source that has it loaded, so the last two only narrow the types.
-    if (refusal || !plugin || !source) {
-      throw new GatewayRoutingRefusedError(gatewayId, refusal ?? 'plugin_not_loaded');
+    // The install this build is for goes on record at the same moment, and
+    // stays there until the build settles. Nothing is cached meanwhile to
+    // name it, and a routing decision made on an earlier install's row must
+    // leave this build alone (see dropPluginDriver). Such a decision can
+    // land as early as this build's own decision, next, which waits too.
+    if (plugin) {
+      this.installBeingBuilt.set(gatewayId, plugin.installedAt);
     }
 
-    this.logger.log(`Lazily building the driver of plugin DataGateway '${gateway.name}' (${gatewayId}) on demand`);
-
-    let driver: DataGatewayDriver;
     try {
-      driver = await source.build(gatewayId, plugin);
-    } catch (err) {
-      // A build that fails is a DataGateway that can't be reached, as a
-      // remote one's failed ping is. A source that refuses instead found the
-      // plugin's copy gone since it was asked, which is nothing the
-      // DataGateway did.
-      if (!(err instanceof GatewayRoutingRefusedError)) {
-        await this.reportFailure(gatewayId, err, 'repeated_connection_failure');
+      // Not every connect follows a routing decision: a 'reconnect-requested'
+      // event doesn't, and a search takes its route's driver after the route
+      // was read. So the same decision is made here, on the row just read, and
+      // no path builds a driver for a plugin the server doesn't serve or this
+      // process can't reach. A refusal counts as no failure, here as anywhere.
+      const refusal = await this.refusalFor(gatewayId, gateway);
+      const source = this.pluginDrivers;
+
+      // The decision passes a plugin's row only with its plugin read and a
+      // source that has it loaded, so the last two only narrow the types.
+      if (refusal || !plugin || !source) {
+        throw new GatewayRoutingRefusedError(gatewayId, refusal ?? 'plugin_not_loaded');
       }
 
-      throw err;
-    }
+      this.logger.log(`Lazily building the driver of plugin DataGateway '${gateway.name}' (${gatewayId}) on demand`);
 
-    // No config hash: no connection fields went into the driver, so no
-    // 'updated' event can outdate it. A reinstall can, so the install it was
-    // built from is kept with it.
-    await this.interviewAndCache(
-      { gatewayId, driver, configHash: '', origin: 'plugin', installedAt: plugin.installedAt },
-      generation,
-    );
+      let driver: DataGatewayDriver;
+      try {
+        driver = await source.build(gatewayId, plugin);
+      } catch (err) {
+        // A build that fails is a DataGateway that can't be reached, as a
+        // remote one's failed ping is. A source that refuses instead found the
+        // plugin's copy gone since it was asked, which is nothing the
+        // DataGateway did.
+        if (!(err instanceof GatewayRoutingRefusedError)) {
+          await this.reportFailure(gatewayId, err, 'repeated_connection_failure');
+        }
+
+        throw err;
+      }
+
+      // No config hash: no connection fields went into the driver, so no
+      // 'updated' event can outdate it. A reinstall can, so the install it was
+      // built from is kept with it.
+      await this.interviewAndCache(
+        { gatewayId, driver, configHash: '', origin: 'plugin', installedAt: plugin.installedAt },
+        generation,
+      );
+    } finally {
+      this.installBeingBuilt.delete(gatewayId);
+    }
   }
 
   /**

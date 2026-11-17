@@ -3,25 +3,28 @@ import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
 
 /**
- * Host configuration for the plugin runtime (`PluginModule`, #59 Phase B),
- * wired into this app per #212: the plugin root. The other
- * `PluginModuleOptions` values are not environment-sourced — `bgeVersion` is
- * a build-time codegen constant (`@bge/version`) and `defaultLocale` is the
- * i18n catalog fallback. There is no second root for plugins shipped inside
- * the server, because there are none (#696).
+ * Where the installed plugins live, for every process that loads plugins:
+ * the api, which installs and loads every category but one, and the
+ * coordinator, which loads the data-gateway plugins the api installs
+ * (#1083). Both must name the same directory, so both load this one config
+ * and validate with this one schema. The other `PluginModuleOptions` values
+ * are not environment-sourced: `bgeVersion` is a build-time codegen constant
+ * (`@bge/version`) and `defaultLocale` is the i18n catalog fallback. There
+ * is no second root for plugins shipped inside the server, because there are
+ * none (#696).
  */
 export interface PluginsConfig {
   /**
    * Root directory for installed plugins, one directory per plugin artifact
    * (`<pluginsRoot>/<slug>/<sha256>`, #224), which the install ingress
-   * populates (#1094). Must survive OS temp-cleaning: installed `Plugin` rows reference
-   * directories under this root, and a vanished root quarantines
+   * populates (#1094). Must survive OS temp-cleaning: installed `Plugin` rows
+   * reference directories under this root, and a vanished root quarantines
    * (force-disables) every installed plugin on the next boot.
    */
   pluginsRoot: string;
 }
 
-export default registerAs('plugins', () =>
+export const pluginsConfig = registerAs('plugins', () =>
   env.provideMany<PluginsConfig>([
     {
       keyTo: 'pluginsRoot',

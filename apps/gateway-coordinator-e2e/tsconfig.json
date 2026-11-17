@@ -1,0 +1,50 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "out-tsc/@boardgamesempire/gateway-coordinator-e2e",
+    "esModuleInterop": true,
+    "noUnusedLocals": false
+  },
+  "include": ["jest.config.ts", "src/**/*.ts"],
+  "references": [
+    {
+      "path": "../../libs/gateway/driver/runtime"
+    },
+    {
+      "path": "../../libs/api/gateway-coordinator-client"
+    },
+    {
+      "path": "../../libs/plugin/manifest"
+    },
+    {
+      "path": "../../libs/common/version"
+    },
+    {
+      "path": "../../libs/common/i18n"
+    },
+    {
+      "path": "../../libs/common/shared"
+    },
+    {
+      "path": "../../libs/database"
+    },
+    {
+      "path": "../../libs/common/actor-context"
+    },
+    {
+      "path": "../../libs/common/testing-e2e"
+    },
+    {
+      "path": "../../libs/proto/gateway"
+    },
+    {
+      "path": "../../libs/plugin/contract"
+    },
+    {
+      "path": "../../libs/gateway/driver/contract-testing"
+    },
+    {
+      "path": "../../libs/gateway/driver/contract"
+    }
+  ]
+}

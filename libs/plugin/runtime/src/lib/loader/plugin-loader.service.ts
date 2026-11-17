@@ -17,20 +17,27 @@ import type { PluginModuleOptions } from '../plugin-module.options';
 import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
 import type { PluginPackageDescriptor } from './entrypoint-resolver';
 import { assertResolvedEntrypointContained, resolvePluginEntrypoint } from './entrypoint-resolver';
-import { PluginDiskVersionMismatchError, PluginEntrypointError, PluginModuleShapeError } from './loader.errors';
+import {
+  PluginDiskVersionMismatchError,
+  PluginEntrypointError,
+  PluginModuleShapeError,
+  PluginProductShapeError,
+} from './loader.errors';
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './plugin-instance-registry';
 import { PluginLoadRecorder } from './plugin-load-recorder.service';
 import { PLUGIN_MODULE_IMPORTER, type PluginModuleImporter } from './plugin-module-importer';
 
 /**
- * The boot path (#59 Phase B): loads every ENABLED plugin row, constructs
- * its context, invokes its factory inside a plugin-actor CLS scope, and
- * registers the product with `PluginInstanceRegistry`.
+ * The boot path (#59 Phase B): loads every ENABLED plugin row of the
+ * categories this process names (#1083), constructs its context, invokes its
+ * factory inside a plugin-actor CLS scope, checks the product against its
+ * category's product check, and registers it with `PluginInstanceRegistry`.
  *
  * Per-plugin isolation is the load-failure contract: a plugin whose
- * directory, manifest, entrypoint, import, or factory fails, or whose
- * artifact directory holds another version than the row's, is QUARANTINED
+ * directory, manifest, entrypoint, import or factory fails, whose product its
+ * category's product check refuses (#1083), or whose artifact directory
+ * holds another version than the row's, is QUARANTINED
  * — `LoadFailed` provenance recorded, force-disabled in the DB (a
  * quarantined plugin must not auto-retry on every boot; re-enabling is an
  * explicit admin decision), logged at error level — and boot continues.
@@ -82,7 +89,11 @@ export class PluginLoaderService implements OnApplicationBootstrap {
     // `uninstalledAt: null` is belt-and-braces with the invariant that
     // uninstall force-disables: the tombstone predicate every C3+ query
     // carries is cheapest to keep locally true rather than provably implied.
-    const plugins = await this.db.plugin.findMany({ where: { enabled: true, uninstalledAt: null } });
+    // Each category loads in the one process that serves it (#1083), so a
+    // plugin of a category this process doesn't name is another process's.
+    const plugins = await this.db.plugin.findMany({
+      where: { enabled: true, uninstalledAt: null, category: { in: [...this.options.loadCategories] } },
+    });
 
     this.logger.log(`Loading ${plugins.length} enabled plugin(s)`);
 
@@ -117,7 +128,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
     // resolver refuses it.
     const sha256 = parsePluginArtifactSha256(plugin.installedSha256);
     if (sha256 !== null) {
-      await this.recordLoad(plugin.slug, sha256);
+      await this.recordLoad(plugin.slug, sha256, plugin.installedAt);
     }
 
     const directory = await this.directories.resolve(plugin.slug, plugin.installedSha256);
@@ -153,6 +164,14 @@ export class PluginLoaderService implements OnApplicationBootstrap {
       Promise.resolve(factory(context)),
     );
 
+    // The server's check, not the plugin's: the plugin says what it built,
+    // and only the process hosting the category knows what it can serve.
+    const productFault = this.options.productChecks?.[plugin.category]?.(instance) ?? null;
+
+    if (productFault !== null) {
+      throw new PluginProductShapeError(plugin.slug, productFault);
+    }
+
     this.registry.register(
       plugin.slug,
       {
@@ -161,11 +180,17 @@ export class PluginLoaderService implements OnApplicationBootstrap {
         category: plugin.category,
         scope: plugin.scope,
         sha256: directory.sha256,
+        installedAt: plugin.installedAt,
         manifest,
         instance,
       },
       { enabled: true },
     );
+
+    // Only now does the record say the load completed (#1083): until here a
+    // failure keeps the record, and with it the directory, but no other
+    // process may read the plugin as loaded.
+    await this.markReady(plugin.slug);
 
     // The code now running is the activated version — the disk check above
     // proved it — so a clean load is what clears both self-healing flags,
@@ -194,13 +219,29 @@ export class PluginLoaderService implements OnApplicationBootstrap {
    * never stops the load: it is logged, and the recorder's next heartbeat
    * writes the record again.
    */
-  private async recordLoad(slug: string, sha256: PluginArtifactSha256): Promise<void> {
+  private async recordLoad(slug: string, sha256: PluginArtifactSha256, installedAt: Date): Promise<void> {
     try {
-      await this.recorder.record(slug, sha256);
+      await this.recorder.record(slug, sha256, installedAt);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(
         `Failed to record the artifact plugin '${slug}' runs; the next heartbeat writes it again: ${message}`,
+      );
+    }
+  }
+
+  /**
+   * Records that the plugin is loaded (#1083). Its failure never fails the
+   * load, which has already succeeded: it is logged, and the recorder's next
+   * heartbeat writes it again.
+   */
+  private async markReady(slug: string): Promise<void> {
+    try {
+      await this.recorder.markReady(slug);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `Failed to record that plugin '${slug}' is loaded; the next heartbeat writes it again: ${message}`,
       );
     }
   }

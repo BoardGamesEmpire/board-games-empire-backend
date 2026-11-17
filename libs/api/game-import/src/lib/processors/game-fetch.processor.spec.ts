@@ -129,6 +129,18 @@ describe('GameFetchProcessor', () => {
       expect(gatewayRegistry.reportFailure).not.toHaveBeenCalled();
     });
 
+    // The coordinator makes its own routing decision on a call the gateway
+    // worker relays to a plugin DataGateway, and refuses one whose plugin or
+    // capability was switched off since this process's decision (#1083).
+    it('a refusal from the process the call was relayed to fails the job and reports nothing (#1083)', async () => {
+      const refusal = new GatewayRoutingRefusedError('bgg', 'switched_off', DataGatewayCapability.Fetch);
+      fetchGame.mockReturnValue(throwError(() => refusal));
+
+      await expect(processor.process(makeJob())).rejects.toBe(refusal);
+      expect(gatewayRegistry.reportSuccess).not.toHaveBeenCalled();
+      expect(gatewayRegistry.reportFailure).not.toHaveBeenCalled();
+    });
+
     // With a game it was found, whatever the status says (#925).
     it('keeps a game sent with RATE_LIMITED, and reports success', async () => {
       const game = { title: 'Catan', externalId: 'ext-1' } as proto.GameData;

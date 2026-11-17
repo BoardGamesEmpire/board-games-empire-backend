@@ -37,6 +37,12 @@
       "path": "../../libs/common/bootstrap/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/version/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/common/i18n/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/queue/actor-context/tsconfig.lib.json"
     },
     {
@@ -58,13 +64,22 @@
       "path": "../../libs/api/gateway-coordinator-client/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/secure-http/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/redis/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/plugin/runtime/tsconfig.lib.json"
     },
     {
       "path": "../../libs/common/otel/tsconfig.lib.json"
     },
     {
       "path": "../../libs/gateway/driver/runtime/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/gateway/plugin-host/tsconfig.lib.json"
     },
     {
       "path": "../../libs/database/tsconfig.lib.json"

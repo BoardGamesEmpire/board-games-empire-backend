@@ -10,6 +10,7 @@ export * from './keyed-create';
 export * from './permission-conditions';
 export * from './plugin-active-manifest-reader';
 export * from './plugin-grant.constants';
+export * from './plugin-load';
 export * from './plugin-unit-enablement';
 export * from './prisma-errors';
 export * from './risk-ordering';

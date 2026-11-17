@@ -134,6 +134,10 @@ services:
     environment:
       <<: *bge-environment
       BGE_ROLES: gateway-fetch
+      # A plugin DataGateway runs in the coordinator, and this role reaches it
+      # there (#1083).
+      GATEWAY_COORDINATOR_HOST: coordinator
+      GATEWAY_COORDINATOR_PORT: '50052'
 
   coordinator:
     <<: *bge
@@ -142,6 +146,12 @@ services:
       BGE_ROLES: coordinator
       COORDINATOR_GRPC_HOST: 0.0.0.0
       COORDINATOR_GRPC_PORT: '50052'
+    # It loads the data-gateway plugins the api installs, from the api's
+    # plugins root: the same volume at the same path, which is PLUGINS_ROOT's
+    # production default in both (#1083). Read-only: the api's install,
+    # update and artifact sweep are what write there.
+    volumes:
+      - plugins:/var/lib/bge/plugins:ro
     healthcheck:
       <<: *grpc-healthcheck
       test:

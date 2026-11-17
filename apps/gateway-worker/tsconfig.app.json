@@ -65,6 +65,9 @@
     },
     {
       "path": "../../libs/common/env/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/api/gateway-coordinator-client/tsconfig.lib.json"
     }
   ]
 }

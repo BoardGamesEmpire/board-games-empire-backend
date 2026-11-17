@@ -1,5 +1,5 @@
 import { DatabaseService, DataGatewayCapability, JobStatus, Prisma } from '@bge/database';
-import { GatewayRegistryService } from '@bge/gateway-registry';
+import { GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
 import { ActorAwareWorkerHost } from '@bge/queue-actor-context';
 import { guardWorkerEvent } from '@bge/utils';
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
@@ -136,6 +136,15 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
       // for BullMQ's retry to try again later, until #928 delays the job by
       // the wait the DataGateway asked for instead (#925).
       if (err instanceof DataGatewayThrottledError) {
+        this.logger.warn(`${job.name} jobId=${jobId} externalId=${externalId} — ${err.message}`);
+        throw err;
+      }
+
+      // The process the call was relayed to refused it after the routing
+      // decision above passed: the coordinator, for a plugin DataGateway whose
+      // plugin or capability was switched off in between (#1083). A refusal
+      // never counts toward auto-disable, here as at resolve().
+      if (err instanceof GatewayRoutingRefusedError) {
         this.logger.warn(`${job.name} jobId=${jobId} externalId=${externalId} — ${err.message}`);
         throw err;
       }

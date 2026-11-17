@@ -20,13 +20,7 @@ import { GameSearchModule } from '@bge/game-search';
 import { GatewayConfigEventsModule } from '@bge/gateway-registry';
 import { HealthModule } from '@bge/health';
 import { HouseholdModule } from '@bge/household';
-import {
-  FALLBACK_LOCALE,
-  I18nConfigModule,
-  I18nExceptionFilter,
-  I18nResponseInterceptor,
-  UnknownErrorFilter,
-} from '@bge/i18n';
+import { I18nConfigModule, I18nExceptionFilter, I18nResponseInterceptor, UnknownErrorFilter } from '@bge/i18n';
 import { LanguageModule } from '@bge/language';
 import { ListModule } from '@bge/list';
 import { MediaModule } from '@bge/media';
@@ -45,7 +39,6 @@ import { SafeHttpModule } from '@bge/safe-http';
 import { SecureHttpModule } from '@bge/secure-http';
 import { SystemSettingsModule } from '@bge/system-settings';
 import { UserModule } from '@bge/user';
-import { BGE_VERSION } from '@bge/version';
 import { WebhookSubscriptionModule } from '@bge/webhook-subscription';
 import { WellKnownModule } from '@bge/well-known';
 import { BullModule } from '@nestjs/bullmq';
@@ -72,6 +65,7 @@ import { baseLogger } from './lib/logger';
 import { RateLimitGuard } from './lib/rate-limit.guard';
 import { RedisThrottlerStorage } from './lib/redis-throttler.storage';
 import { createThrottlers } from './lib/throttlers';
+import { apiPluginModuleOptions } from './plugin-module.options';
 
 @Module({
   imports: [
@@ -223,20 +217,12 @@ import { createThrottlers } from './lib/throttlers';
     // RedisModule, global DatabaseService, ScheduleModule — are all mounted
     // above. With zero installed plugins the boot pass is a clean no-op; a
     // missing root only surfaces per-plugin through the quarantine path.
+    // It loads every plugin category but the data-gateway plugins, which the
+    // coordinator loads and serves (#1083); the api installs, updates and
+    // switches them, under the same plugins root.
     PluginModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        pluginsRoot: config.getOrThrow<string>('plugins.pluginsRoot'),
-        // Labels this process's plugin load records (#1094); the worker apps
-        // name their own role when they mount the runtime.
-        processRole: 'api',
-        // Build-time codegen constant (`@bge/version`) — the version is a
-        // property of the artifact, not of the environment it runs in.
-        bgeVersion: BGE_VERSION,
-        // Manifest localization bottoms out where the request-time resolver
-        // chain does — the shipped-catalog fallback, not a separate knob.
-        defaultLocale: FALLBACK_LOCALE,
-      }),
+      useFactory: apiPluginModuleOptions,
     }),
 
     // HTTP surface over the plugin runtime (#59 Phase C4, slices #319–#323):

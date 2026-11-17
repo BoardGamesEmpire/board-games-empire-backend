@@ -38,7 +38,7 @@ The process role that does a server's DataGateway work in the background, such a
 _Avoid_: gateway-fetch, fetcher
 
 **Coordinator**:
-The process role that carries live DataGateway traffic for the api, such as searches, fetching one game and starting imports. The api, not the coordinator, keeps the DataGateway records.
+The process role that carries live DataGateway traffic for the api, such as searches, fetching one game and starting imports, and that runs every plugin DataGateway, both for that live traffic and for the gateway workers. The api, not the coordinator, keeps the DataGateway records.
 
 **Worker**:
 The process role that runs a server's background jobs.
@@ -812,8 +812,12 @@ A DataGateway that runs as a separate service, which the server reaches over the
 _Avoid_: game gateway, gateway microservice, data adapter, tier 3
 
 **Plugin DataGateway**:
-Planned: a DataGateway installed as a plugin, rather than run as a separate service.
+A DataGateway installed as a plugin, rather than run as a separate service. Installing the plugin adds its one DataGateway, and the coordinator runs it, as a single copy the gateway workers reach over the network.
 _Avoid_: in-process DataGateway (a plugin need not run in the server's process), registered driver
+
+**Driver factory**:
+What a data-gateway plugin's factory returns: a function the server calls for a new driver for the plugin's DataGateway.
+_Avoid_: plugin factory (the plugin's own export, which returns the driver factory)
 
 **Shared DataGateway**:
 Planned: a remote DataGateway that serves many servers at once, combining their requests to a rate-limited service.
@@ -1106,6 +1110,9 @@ _Avoid_: installation scope, enablement level; consent scope (who must consent t
 **Execution mode**:
 How a plugin's code is run: inside the server's own process, or, planned, in a separate process. Further modes, such as remote, are added as they ship.
 _Avoid_: isolation tier, tier; isolation (the separate-process mode is not a security boundary); worker, for the separate-process mode
+
+**Plugin load record**:
+What a running process writes about a plugin it loaded: which install, from which plugin artifact, and whether the load completed.
 
 **Plugin context**:
 The deliberately narrow set of server services a plugin is handed: logging, its own settings, emitting its declared events, a read-only view of who triggered it, and an HTTP client held to its plugin manifest's outbound domains. It is the only way a plugin is meant to reach the server; nothing stops a plugin importing the server's internals directly, which is why such code is a forbidden import.

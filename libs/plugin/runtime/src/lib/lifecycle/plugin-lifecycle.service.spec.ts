@@ -1,4 +1,6 @@
 import { PluginCategory, PluginExecutionMode, PluginScope, Prisma, type Plugin } from '@bge/database';
+import type { PluginLoadRecordRow } from '@bge/database/testing';
+import { fakePluginLoadRecords } from '@bge/database/testing';
 import { createMockDatabaseService, rawQueryText, type MockDatabaseService } from '@bge/testing';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
@@ -244,6 +246,112 @@ describe('PluginLifecycleService', () => {
       expect(db.plugin.updateMany).toHaveBeenCalledWith({
         where: { id: 'plugin-1', enabled: false, uninstalledAt: null },
         data: { enabled: true },
+      });
+    });
+
+    describe('a plugin this process does not load (#1083)', () => {
+      const installedAt = new Date('2026-11-01T00:00:00Z');
+
+      // A table that answers the lookup's filter, so the specs assert what a
+      // record means rather than the query's shape.
+      const loads = fakePluginLoadRecords();
+      let apiService: PluginLifecycleService;
+
+      const loadRecord = (overrides: Partial<PluginLoadRecordRow> = {}): PluginLoadRecordRow => ({
+        slug: 'demo-gateway',
+        processRole: 'coordinator',
+        installedAt,
+        ready: true,
+        heartbeatAt: new Date(),
+        ...overrides,
+      });
+
+      const gateway = (overrides: Partial<Plugin> = {}): Plugin =>
+        makePlugin({ slug: 'demo-gateway', category: PluginCategory.DataGateway, installedAt, ...overrides });
+
+      /** The `data` of the guarded enable write. */
+      const enableWrite = () => db.plugin.updateMany.mock.calls[0]?.[0]?.data;
+
+      beforeEach(() => {
+        loads.rows = [];
+        // The api's categories: every one but data-gateway.
+        apiService = new PluginLifecycleService(
+          db as never,
+          authority as unknown as PluginGrantAuthorityService,
+          registry as unknown as PluginInstanceRegistry,
+          new PluginConfigSchemaService(),
+          emitter as never,
+          buildPluginModuleOptions({
+            loadCategories: Object.values(PluginCategory).filter((c) => c !== PluginCategory.DataGateway),
+          }),
+        );
+        // This process never registered it; only a load record can say it is loaded.
+        registry.has.mockReturnValue(false);
+        db.pluginProcessLoad.findFirst.mockImplementation(loads.findFirst as never);
+        db.plugin.findUnique.mockResolvedValue(gateway({ enabled: false }));
+        db.plugin.findUniqueOrThrow.mockResolvedValue(gateway({ enabled: true }));
+      });
+
+      it("enabling a plugin this process doesn't load needs no restart while a live load record names its install (#1083)", async () => {
+        loads.rows = [loadRecord()];
+
+        await apiService.enable({ slug: 'demo-gateway', actorId: 'admin-1' });
+
+        expect(enableWrite()).toEqual({ enabled: true });
+      });
+
+      it("enabling a plugin this process doesn't load needs one when no record does (#1083)", async () => {
+        await apiService.enable({ slug: 'demo-gateway', actorId: 'admin-1' });
+
+        expect(enableWrite()).toEqual({ enabled: true, restartRequired: true });
+      });
+
+      it("enabling a plugin this process doesn't load needs one after a reinstall, whatever the old copy's record says (#1083)", async () => {
+        loads.rows = [loadRecord({ installedAt: new Date('2026-10-01T00:00:00Z') })];
+
+        await apiService.enable({ slug: 'demo-gateway', actorId: 'admin-1' });
+
+        expect(enableWrite()).toEqual({ enabled: true, restartRequired: true });
+      });
+
+      it("enabling a plugin this process doesn't load needs a restart while its only record is of a load that failed (#1083)", async () => {
+        loads.rows = [loadRecord({ ready: false })];
+
+        await apiService.enable({ slug: 'demo-gateway', actorId: 'admin-1' });
+
+        expect(enableWrite()).toEqual({ enabled: true, restartRequired: true });
+      });
+
+      it("enabling a plugin updated into data-gateway needs a restart while only the api's old record names its install (#1083)", async () => {
+        loads.rows = [loadRecord({ processRole: 'api' })];
+
+        await apiService.enable({ slug: 'demo-gateway', actorId: 'admin-1' });
+
+        expect(enableWrite()).toEqual({ enabled: true, restartRequired: true });
+      });
+
+      it('a category this process loads still goes by its own memory', async () => {
+        // A feedback sink loads in the api; a live record of another api
+        // process says nothing about this one.
+        const sink = makePlugin({ slug: 'demo-gateway', installedAt, enabled: false });
+        db.plugin.findUnique.mockResolvedValue(sink);
+        db.plugin.findUniqueOrThrow.mockResolvedValue({ ...sink, enabled: true });
+        loads.rows = [loadRecord({ processRole: 'api' })];
+
+        await apiService.enable({ slug: 'demo-gateway', actorId: 'admin-1' });
+
+        expect(enableWrite()).toEqual({ enabled: true, restartRequired: true });
+        expect(db.pluginProcessLoad.findFirst).not.toHaveBeenCalled();
+      });
+
+      it("disabling a plugin this process doesn't load asks no load record (#1083)", async () => {
+        db.plugin.findUnique.mockResolvedValue(gateway({ enabled: true }));
+        db.plugin.findUniqueOrThrow.mockResolvedValue(gateway({ enabled: false }));
+
+        await apiService.disable({ slug: 'demo-gateway', actorId: 'admin-1' });
+
+        expect(enableWrite()).toEqual({ enabled: false });
+        expect(db.pluginProcessLoad.findFirst).not.toHaveBeenCalled();
       });
     });
 

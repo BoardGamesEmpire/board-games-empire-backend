@@ -10,7 +10,7 @@ import { GameImportEnqueuerService } from './services/game-import-enqueuer.servi
 
 describe('CoordinatorService', () => {
   let service: CoordinatorService;
-  let registry: jest.Mocked<Pick<GatewayRegistryService, 'reinterview'>>;
+  let registry: jest.Mocked<Pick<GatewayRegistryService, 'connect' | 'reinterview'>>;
 
   beforeEach(async () => {
     const { module } = await createTestingModuleWithDb({
@@ -65,6 +65,7 @@ describe('CoordinatorService', () => {
       await expect(service.reinterviewGateway({ gatewayId: 'gw-1' })).resolves.toEqual({
         success: false,
         error: 'DataGateway gw-1 is disabled',
+        refusalReason: 'disabled',
       });
       expect(logged).toHaveBeenCalledWith(expect.stringContaining('DataGateway gw-1 is disabled'));
     });
@@ -77,6 +78,58 @@ describe('CoordinatorService', () => {
         success: false,
         error: 'Describe failed',
       });
+    });
+
+    // The api turns the reason into copy that names the admin's fix, which
+    // differs between a plugin that isn't served and one that isn't loaded.
+    it('reports the refusal reason when the registry refuses an interview (#1083)', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      registry.reinterview.mockRejectedValue(new GatewayRoutingRefusedError('gw-1', 'plugin_not_loaded'));
+
+      const answer = await service.reinterviewGateway({ gatewayId: 'gw-1' });
+
+      expect(answer).toEqual(expect.objectContaining({ success: false, refusalReason: 'plugin_not_loaded' }));
+    });
+
+    it('reports no refusal reason when the interview fails for another cause (#1083)', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      registry.reinterview.mockRejectedValue(new Error('Describe failed'));
+
+      const answer = await service.reinterviewGateway({ gatewayId: 'gw-1' });
+
+      expect(answer).not.toHaveProperty('refusalReason');
+    });
+  });
+
+  describe('connectGateway', () => {
+    const request = {
+      gatewayId: 'gw-1',
+      connectionUrl: 'gateway.example',
+      connectionPort: 50051,
+      authType: 'None',
+    };
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('reports the refusal reason when the registry refuses a connect (#1083)', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      registry.connect.mockRejectedValue(new GatewayRoutingRefusedError('gw-1', 'unknown'));
+
+      await expect(service.connectGateway(request)).resolves.toEqual({
+        success: false,
+        error: "DataGateway gw-1 doesn't exist, or was deleted",
+        refusalReason: 'unknown',
+      });
+    });
+
+    it('reports no refusal reason when the connect fails for another cause (#1083)', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      registry.connect.mockRejectedValue(new Error('14 UNAVAILABLE'));
+
+      const answer = await service.connectGateway(request);
+
+      expect(answer).toEqual({ success: false, error: '14 UNAVAILABLE' });
+      expect(answer).not.toHaveProperty('refusalReason');
     });
   });
 });

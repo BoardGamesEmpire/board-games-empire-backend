@@ -64,9 +64,13 @@ message ConnectGatewayRequest {
   optional string auth_parameters_json = 5;
 }
 
+// The error is for the server's logs, never for a client.
 message ConnectGatewayResponse {
   bool success = 1;
   optional string error = 2;
+  // Set when the gateway registry refused the DataGateway, to the registry's
+  // reason for it, so the api can tell the admin which fix applies.
+  optional string refusal_reason = 3;
 }
 
 message DisconnectGatewayRequest {
@@ -86,6 +90,9 @@ message ReinterviewGatewayRequest {
 message ReinterviewGatewayResponse {
   bool success = 1;
   optional string error = 2;
+  // Set when the gateway registry refused the DataGateway, to the registry's
+  // reason for it, so the api can tell the admin which fix applies.
+  optional string refusal_reason = 3;
 }
 
 message SearchGamesRequest {

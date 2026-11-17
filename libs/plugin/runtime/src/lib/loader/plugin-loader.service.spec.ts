@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { PluginConfigService } from '../config/plugin-config.service';
 import { PluginContextFactory } from '../context/plugin-context.factory';
 import { PluginDisabledEvent, PluginLoadFailedEvent } from '../events/plugin.events';
+import type { PluginModuleOptions } from '../plugin-module.options';
 import { buildPluginModuleOptions } from '../testing/plugin-module-options.fixture';
 import { PluginDirectoryResolverService } from './plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './plugin-instance-registry';
@@ -39,7 +40,7 @@ describe('PluginLoaderService', () => {
   let emitter: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
   let systemActorScope: jest.Mocked<Pick<SystemActorScope, 'run'>>;
   let pluginActorScope: jest.Mocked<Pick<PluginActorScope, 'run'>>;
-  let recorder: jest.Mocked<Pick<PluginLoadRecorder, 'record'>>;
+  let recorder: jest.Mocked<Pick<PluginLoadRecorder, 'record' | 'markReady'>>;
   let loader: PluginLoaderService;
 
   const context: PluginContext = {} as PluginContext;
@@ -54,6 +55,7 @@ describe('PluginLoaderService', () => {
       scope: PluginScope.Server,
       enabled: true,
       installedSha256: 'a'.repeat(64),
+      installedAt: new Date('2026-10-01T00:00:00Z'),
       manifestJson: { slug: 'demo-sink' },
       config: { apiKey: 'k' },
       loadFailed: false,
@@ -101,7 +103,7 @@ describe('PluginLoaderService', () => {
     pluginActorScope = {
       run: jest.fn(<T>(_pluginId: string, _unit: unknown, _reason: string, fn: () => T): T => fn()),
     } as unknown as jest.Mocked<Pick<PluginActorScope, 'run'>>;
-    recorder = { record: jest.fn().mockResolvedValue(undefined) };
+    recorder = { record: jest.fn().mockResolvedValue(undefined), markReady: jest.fn().mockResolvedValue(undefined) };
     validateMock.mockReturnValue({
       manifest,
       permissionChecks: [],
@@ -110,7 +112,11 @@ describe('PluginLoaderService', () => {
       warnings: [],
     });
 
-    loader = new PluginLoaderService(
+    loader = buildLoader(options);
+  });
+
+  const buildLoader = (loaderOptions: PluginModuleOptions): PluginLoaderService =>
+    new PluginLoaderService(
       db as unknown as DatabaseService,
       directories as unknown as PluginDirectoryResolverService,
       importer,
@@ -121,9 +127,8 @@ describe('PluginLoaderService', () => {
       systemActorScope as unknown as SystemActorScope,
       pluginActorScope as unknown as PluginActorScope,
       recorder as unknown as PluginLoadRecorder,
-      options,
+      loaderOptions,
     );
-  });
 
   afterEach(async () => {
     await rm(workDir, { recursive: true, force: true });
@@ -141,7 +146,9 @@ describe('PluginLoaderService', () => {
 
       await loader.loadAllEnabled();
 
-      expect(db.plugin.findMany).toHaveBeenCalledWith({ where: { enabled: true, uninstalledAt: null } });
+      expect(db.plugin.findMany).toHaveBeenCalledWith({
+        where: { enabled: true, uninstalledAt: null, category: { in: Object.values(PluginCategory) } },
+      });
       expect(validateMock).toHaveBeenCalledWith(row.manifestJson, { bgeVersion: '0.1.0', defaultLocale: 'en' });
       expect(importer.importModule).toHaveBeenCalledWith(join(workDir, row.slug, 'dist', 'index.js'));
       expect(factory).toHaveBeenCalledWith(context);
@@ -156,6 +163,17 @@ describe('PluginLoaderService', () => {
           instance,
         }),
       );
+    });
+
+    it('registers the plugin with the install it loaded, as the row names it (#1083)', async () => {
+      const row = makePluginRow({ installedAt: new Date('2026-11-02T08:30:00Z') });
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
+      importer.importModule.mockResolvedValue({ default: jest.fn().mockReturnValue({}) });
+
+      await loader.loadAllEnabled();
+
+      expect(registry.resolve(row.slug).installedAt).toEqual(new Date('2026-11-02T08:30:00Z'));
     });
 
     it('primes the config snapshot BEFORE invoking the factory', async () => {
@@ -292,8 +310,53 @@ describe('PluginLoaderService', () => {
       // could remove it in the meantime.
       expect(atRecord).toEqual([{ resolved: 0, imported: 0, registered: false }]);
       expect(recorder.record).toHaveBeenCalledTimes(1);
-      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'));
+      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'), new Date('2026-10-01T00:00:00Z'));
       expect(registry.resolve(row.slug).sha256).toBe(sha('a'));
+    });
+
+    it('marks the record ready once the plugin is registered, and not before (#1083)', async () => {
+      const row = await loadDemo();
+      // Captured, not asserted, inside the mock, as above.
+      const atReady: boolean[] = [];
+      recorder.markReady.mockImplementation(() => {
+        atReady.push(registry.has(row.slug));
+        return Promise.resolve();
+      });
+
+      await loader.loadAllEnabled();
+
+      expect(recorder.markReady).toHaveBeenCalledTimes(1);
+      expect(recorder.markReady).toHaveBeenCalledWith(row.slug);
+      expect(atReady).toEqual([true]);
+    });
+
+    it('never marks ready a load that fails, which keeps its record (#1083)', async () => {
+      const row = await loadDemo();
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      const checked = buildLoader(
+        buildPluginModuleOptions({ productChecks: { [PluginCategory.FeedbackSink]: () => 'not a sink' } }),
+      );
+
+      await checked.loadAllEnabled();
+
+      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'), row.installedAt);
+      expect(recorder.markReady).not.toHaveBeenCalled();
+      error.mockRestore();
+    });
+
+    it('a failed readiness write is logged and neither fails the load nor quarantines it (#1083)', async () => {
+      const row = await loadDemo();
+      recorder.markReady.mockRejectedValue(new Error('db down'));
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+
+      await loader.loadAllEnabled();
+
+      expect(registry.isEnabled(row.slug)).toBe(true);
+      expect(configService.evict).not.toHaveBeenCalled();
+      expect(db.plugin.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(expect.stringContaining(`'${row.slug}'`));
+      error.mockRestore();
     });
 
     it('a failed record is logged and neither retried nor quarantined: the heartbeat writes it again (#1094)', async () => {
@@ -320,7 +383,7 @@ describe('PluginLoaderService', () => {
 
       await loader.loadAllEnabled();
 
-      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'));
+      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'), row.installedAt);
       expect(db.plugin.update).toHaveBeenCalled();
     });
 
@@ -331,7 +394,7 @@ describe('PluginLoaderService', () => {
 
       await loader.loadAllEnabled();
 
-      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'));
+      expect(recorder.record).toHaveBeenCalledWith(row.slug, sha('a'), row.installedAt);
       expect(db.plugin.update).toHaveBeenCalled();
     });
 
@@ -543,6 +606,113 @@ describe('PluginLoaderService', () => {
 
       await expect(loader.loadAllEnabled()).resolves.toBeUndefined();
       expect(registry.isEnabled('healthy-sink')).toBe(true);
+    });
+  });
+
+  describe('the categories this process loads (#1083)', () => {
+    it('loads only the categories this process names (#1083)', async () => {
+      db.plugin.findMany.mockResolvedValue([]);
+      const narrowed = buildLoader(
+        buildPluginModuleOptions({ loadCategories: [PluginCategory.DataGateway, PluginCategory.EventHook] }),
+      );
+
+      await narrowed.loadAllEnabled();
+
+      expect(db.plugin.findMany).toHaveBeenCalledWith({
+        where: {
+          enabled: true,
+          uninstalledAt: null,
+          category: { in: [PluginCategory.DataGateway, PluginCategory.EventHook] },
+        },
+      });
+    });
+
+    it("quarantines a plugin whose product fails its category's check (#1083)", async () => {
+      const row = makePluginRow();
+      const product = { notASink: true };
+      const check = jest.fn().mockReturnValue('the product has no send method');
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
+      importer.importModule.mockResolvedValue({ default: jest.fn().mockReturnValue(product) });
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      const checked = buildLoader(
+        buildPluginModuleOptions({ productChecks: { [PluginCategory.FeedbackSink]: check } }),
+      );
+
+      await checked.loadAllEnabled();
+
+      expect(check).toHaveBeenCalledWith(product);
+      expect(db.plugin.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            enabled: false,
+            loadFailed: true,
+            loadError: expect.stringContaining('the product has no send method'),
+          },
+        }),
+      );
+      expect(registry.has(row.slug)).toBe(false);
+      error.mockRestore();
+    });
+
+    it('quarantines a plugin whose product check throws, and registers nothing (#1083)', async () => {
+      const row = makePluginRow();
+      const check = jest.fn(() => {
+        throw new Error('check exploded');
+      });
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
+      importer.importModule.mockResolvedValue({ default: jest.fn().mockReturnValue({}) });
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      const checked = buildLoader(
+        buildPluginModuleOptions({ productChecks: { [PluginCategory.FeedbackSink]: check } }),
+      );
+
+      await checked.loadAllEnabled();
+
+      expect(db.plugin.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { enabled: false, loadFailed: true, loadError: 'check exploded' },
+        }),
+      );
+      expect(registry.has(row.slug)).toBe(false);
+      error.mockRestore();
+    });
+
+    it('adopts a product its check accepts', async () => {
+      const row = makePluginRow();
+      const product = { sink: true };
+      const check = jest.fn().mockReturnValue(null);
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
+      importer.importModule.mockResolvedValue({ default: jest.fn().mockReturnValue(product) });
+      const checked = buildLoader(
+        buildPluginModuleOptions({ productChecks: { [PluginCategory.FeedbackSink]: check } }),
+      );
+
+      await checked.loadAllEnabled();
+
+      expect(check).toHaveBeenCalledWith(product);
+      expect(registry.resolve(row.slug).instance).toBe(product);
+      expect(db.plugin.update).not.toHaveBeenCalled();
+    });
+
+    it('runs no check for a category without one', async () => {
+      const row = makePluginRow();
+      const product = { sink: true };
+      const otherCategoryCheck = jest.fn().mockReturnValue('never adopted');
+      db.plugin.findMany.mockResolvedValue([row]);
+      directories.resolve.mockResolvedValue(await scaffoldDirectory(row.slug));
+      importer.importModule.mockResolvedValue({ default: jest.fn().mockReturnValue(product) });
+      const checked = buildLoader(
+        buildPluginModuleOptions({ productChecks: { [PluginCategory.DataGateway]: otherCategoryCheck } }),
+      );
+
+      await checked.loadAllEnabled();
+
+      expect(otherCategoryCheck).not.toHaveBeenCalled();
+      expect(registry.resolve(row.slug).instance).toBe(product);
+      expect(db.plugin.update).not.toHaveBeenCalled();
     });
   });
 

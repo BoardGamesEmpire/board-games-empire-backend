@@ -22,3 +22,10 @@ export const CORRELATION_ID_HEADER = 'x-correlation-id' as const;
  * the receiver side.
  */
 export const BGE_ACTOR_HEADER = 'x-bge-actor' as const;
+
+/**
+ * Metadata key naming the plugin DataGateway a call is for. A call to the
+ * coordinator over the gateway gRPC protocol carries it, so the coordinator
+ * knows which plugin's driver answers the call (#1083).
+ */
+export const BGE_GATEWAY_ID_HEADER = 'x-bge-gateway-id' as const;

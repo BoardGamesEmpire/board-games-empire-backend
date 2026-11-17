@@ -1,5 +1,6 @@
 import type { PluginUnit } from '@bge/actor-context';
-import { DatabaseService, Prisma, type Plugin } from '@bge/database';
+import type { Plugin } from '@bge/database';
+import { DatabaseService, hasLivePluginLoad, Prisma, roleLoading } from '@bge/database';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
@@ -281,11 +282,18 @@ export class PluginLifecycleService {
     }
 
     // Cold enable: the loader boots only enabled rows, so a plugin disabled
-    // at boot (or quarantined) holds no in-process instance to flip — the DB
+    // at boot (or quarantined) has no loaded instance to flip, and the DB
     // will say enabled while nothing serves. restartRequired makes that gap
     // visible; the loader's success path clears it on the boot that loads
     // the plugin. A warm flip serves immediately and needs no flag.
-    const coldEnable = enabled && !this.registry.has(plugin.slug);
+    //
+    // A category this process loads is loaded when this process's registry
+    // holds it. Any other category loads in another process (#1083), which
+    // this one knows only through its load records: loaded means a running
+    // process of the process role that loads the category has this install
+    // ready.
+    // A disable asks neither.
+    const coldEnable = enabled && !(await this.isLoaded(plugin));
 
     const updated = await this.db.$transaction(async (tx) => {
       const claimed = await tx.plugin.updateMany({
@@ -326,6 +334,15 @@ export class PluginLifecycleService {
     }
 
     return updated;
+  }
+
+  /** Whether this install of the plugin is loaded where its category runs (#1083). */
+  private async isLoaded(plugin: Plugin): Promise<boolean> {
+    if (this.options.loadCategories.includes(plugin.category)) {
+      return this.registry.has(plugin.slug);
+    }
+
+    return hasLivePluginLoad(this.db, plugin, roleLoading(plugin.category));
   }
 
   private async assertServerAdmin(actorId: string): Promise<void> {

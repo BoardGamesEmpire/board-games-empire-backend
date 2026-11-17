@@ -17,4 +17,4 @@ The DataGateway is the only place that sees every call to its upstream. Searches
 
 - The contract gains the traffic class and the throttled answer. BGG and IGDB may ignore the class, and they get the throttled answer for free the first time they need it.
 - The budget lives in the DataGateway's process. Several running copies of one DataGateway would each keep their own budget. That isn't a goal. A DataGateway that rotates several upstream keys does so inside itself.
-- As a plugin (#194), a DataGateway loaded by several processes would split its budget the same way. The plugin conversion has to decide where the budget lives then.
+- As a plugin (#194), a DataGateway loaded by several processes would split its budget the same way. So a plugin DataGateway runs in the coordinator alone, as one copy that keeps the one budget ([ADR 0006](0006-plugin-datagateways-run-in-the-coordinator.md)).
