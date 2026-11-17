@@ -217,6 +217,10 @@ export class PluginArtifactsController {
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
   @Post('install')
   install(@Body() dto: InstallPluginDto) {
+    // The locale the artifact's read presented its requested permissions in,
+    // which the install's consent act records (#1336).
+    const locale = this.auditContext.getLocale() ?? undefined;
+
     return from(
       this.installer
         .install({
@@ -225,10 +229,11 @@ export class PluginArtifactsController {
           confirmCriticalSlugs: dto.confirmCriticalSlugs,
           acknowledgeForbiddenImports: dto.acknowledgeForbiddenImports,
           deepScan: dto.deepScan,
+          locale,
         })
         // Read back through the inventory, in the viewpoint the inventory's
         // own server read serves a server admin, so a client gets one shape for it.
-        .then(({ plugin }) => this.inventory.getBySlug(plugin.slug, this.auditContext.getLocale() ?? undefined)),
+        .then(({ plugin }) => this.inventory.getBySlug(plugin.slug, locale)),
     ).pipe(map((installed) => ({ plugin: installed })));
   }
 

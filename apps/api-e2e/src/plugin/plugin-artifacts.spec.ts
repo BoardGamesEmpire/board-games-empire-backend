@@ -54,10 +54,14 @@ describe('plugin install ingress (#1094)', () => {
    * follows it, so each call is its own plugin and no test installs over
    * another. The fixture's `feedback:read` is dropped for the reason the
    * other plugin specs give: no seeded `Permission` row backs it.
-   * `bgeCompat` is widened to cover the server's build-time stamp.
+   * `bgeCompat` is widened to cover the server's build-time stamp. `indexJs`
+   * changes the bytes, so a second artifact for the same slug has its own
+   * checksum.
    */
-  const buildArtifact = async (indexJs = 'module.exports = () => ({});\n'): Promise<BuiltArtifact> => {
-    const slug = `ingress-${randomBytes(6).toString('hex')}`;
+  const buildArtifact = async (
+    indexJs = 'module.exports = () => ({});\n',
+    slug = `ingress-${randomBytes(6).toString('hex')}`,
+  ): Promise<BuiltArtifact> => {
     const [manageDigest] = buildPluginManifest().permissions.checks;
     const manifest: PluginManifest = {
       ...buildPluginManifest({
@@ -148,6 +152,71 @@ describe('plugin install ingress (#1094)', () => {
     const replayed = await install(admin, { sha256: artifact.sha256 }).expect(201);
 
     expect(replayed.body.plugin).toEqual(installed.body.plugin);
+  });
+
+  it('an install records one InstallAccept consent act that every server-scope consent decision names (#1336)', async () => {
+    const admin = await actors.admin();
+    const artifact = await buildArtifact();
+
+    await upload(admin, artifact).expect(200);
+    await install(admin, { sha256: artifact.sha256 }).expect(201);
+
+    const plugin = await db.client.plugin.findUniqueOrThrow({ where: { slug: artifact.slug } });
+    const acts = await db.client.pluginConsentAct.findMany({ where: { pluginId: plugin.id } });
+
+    expect(acts).toEqual([
+      expect.objectContaining({
+        pluginSlug: artifact.slug,
+        kind: 'InstallAccept',
+        scopeType: 'Server',
+        manifestVersion: '1.2.0',
+        manifestSha256: artifact.sha256,
+        decidedById: admin.user.id,
+      }),
+    ]);
+
+    const decisions = await db.client.pluginGrant.findMany({ where: { pluginId: plugin.id } });
+
+    // The artifact requests `manage:digest` of the server, so there is one to name the act.
+    expect(decisions).toHaveLength(1);
+    expect(decisions.map((decision) => decision.actId)).toEqual([acts[0]?.id]);
+
+    // A retry installs nothing, so it records no second act (ADR-0002).
+    await install(admin, { sha256: artifact.sha256 }).expect(201);
+
+    expect(await db.client.pluginConsentAct.count({ where: { pluginId: plugin.id } })).toBe(1);
+  });
+
+  it('a reinstall over an uninstalled plugin records a second InstallAccept act, and its decisions name the second (#1336)', async () => {
+    const admin = await actors.admin();
+    const artifact = await buildArtifact();
+
+    await upload(admin, artifact).expect(200);
+    await install(admin, { sha256: artifact.sha256 }).expect(201);
+    await request(baseUrl).post(`/api/plugins/${artifact.slug}/uninstall`).set(admin.headers).send({}).expect(200);
+
+    // A new artifact for the same slug: a reinstall, which keeps the plugin's id.
+    const again = await buildArtifact('module.exports = () => ({ again: true });\n', artifact.slug);
+
+    await upload(admin, again).expect(200);
+    await install(admin, { sha256: again.sha256 }).expect(201);
+
+    const plugin = await db.client.plugin.findUniqueOrThrow({ where: { slug: artifact.slug } });
+    const acts = await db.client.pluginConsentAct.findMany({
+      where: { pluginId: plugin.id },
+      orderBy: { decidedAt: 'asc' },
+    });
+
+    // The append-only record keeps the first install's act through the uninstall.
+    expect(acts.map((act) => [act.kind, act.manifestSha256])).toEqual([
+      ['InstallAccept', artifact.sha256],
+      ['InstallAccept', again.sha256],
+    ]);
+
+    const decisions = await db.client.pluginGrant.findMany({ where: { pluginId: plugin.id } });
+
+    expect(decisions).toHaveLength(1);
+    expect(decisions.map((decision) => decision.actId)).toEqual([acts[1]?.id]);
   });
 
   it('a checksum mismatch by upload keeps nothing (#1094)', async () => {

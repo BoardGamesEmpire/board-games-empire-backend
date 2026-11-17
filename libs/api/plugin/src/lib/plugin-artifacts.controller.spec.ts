@@ -273,6 +273,14 @@ describe('PluginArtifactsController (#1094)', () => {
       });
     });
 
+    it("passes the request locale to the install, which records its consent act's presentation in it (#1336)", async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
+      await firstValueFrom(controller.install({ sha256: SHA }));
+
+      expect(installer.install).toHaveBeenCalledWith(expect.objectContaining({ locale: 'de' }));
+    });
+
     it('answers with the new plugin read back through the inventory, in the request locale (#1094)', async () => {
       auditContext.getLocale.mockReturnValue('de');
 

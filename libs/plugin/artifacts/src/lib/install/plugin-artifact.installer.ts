@@ -23,6 +23,8 @@ export interface InstallPluginArtifactInput {
   readonly acknowledgeForbiddenImports?: readonly string[];
   /** Extend static analysis into node_modules; its findings only advise. */
   readonly deepScan?: boolean;
+  /** The locale the server admin read the requested permissions in, which the install's consent act records (#1336). */
+  readonly locale?: string;
 }
 
 /**
@@ -118,6 +120,7 @@ export class PluginArtifactInstaller {
         confirmCriticalSlugs: input.confirmCriticalSlugs,
         acknowledgeForbiddenImports: input.acknowledgeForbiddenImports,
         deepScan: input.deepScan,
+        locale: input.locale,
       });
     } catch (err) {
       // A concurrent install of the same checksum, as from a double click,

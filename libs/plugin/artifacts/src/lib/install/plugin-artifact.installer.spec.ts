@@ -111,6 +111,12 @@ describe('PluginArtifactInstaller (#1094)', () => {
     expect(store.remove.mock.invocationCallOrder[0]).toBeGreaterThan(runtime.install.mock.invocationCallOrder[0] ?? 0);
   });
 
+  it("passes the server admin's locale to the install, which records its consent act's presentation in it (#1336)", async () => {
+    await installer.install({ sha256, actorId: 'admin-1', locale: 'fr' });
+
+    expect(runtime.install).toHaveBeenCalledWith(expect.objectContaining({ locale: 'fr' }));
+  });
+
   it('takes the checksum in either case, with spaces around it, as the post does (#1094)', async () => {
     await expect(installer.install({ sha256: ` ${sha256.toUpperCase()}\n`, actorId: 'admin-1' })).resolves.toBe(result);
 
