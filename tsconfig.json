@@ -260,6 +260,9 @@
     },
     {
       "path": "./libs/api/permission-catalog"
+    },
+    {
+      "path": "./libs/gateway/plugin-host"
     }
   ]
 }

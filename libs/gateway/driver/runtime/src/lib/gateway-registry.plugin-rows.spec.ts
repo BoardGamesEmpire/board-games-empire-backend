@@ -1,5 +1,5 @@
 import { SystemActorScope } from '@bge/actor-context';
-import { DatabaseService, DataGatewayCapability, PluginCategory } from '@bge/database';
+import { AuthType, DatabaseService, DataGatewayCapability, PluginCategory } from '@bge/database';
 import { CACHE_REDIS_CLIENT } from '@bge/redis';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
@@ -8,7 +8,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { Redis } from 'iovalkey';
 import { setTimeout as delay } from 'node:timers/promises';
-import { throwError } from 'rxjs';
+import { concatMap, from, throwError } from 'rxjs';
 import { FAILURE_THRESHOLD } from './constants/gateway-registry.constants';
 import { RemoteGatewayDriverFactory } from './drivers/remote-gateway-driver.factory';
 import { GatewayInterviewError } from './errors/gateway-interview.error';
@@ -44,6 +44,14 @@ const failingInterview = () =>
 
 /** Lets work under way go as far as it can without the test's next step. */
 const settle = () => delay(0);
+
+/** A promise the spec settles itself, to hold one wait open while another step runs. */
+const deferred = <T = void>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settled) => (resolve = settled));
+
+  return { promise, resolve };
+};
 
 /** A plugin the server serves: a data-gateway plugin, switched on, installed, and loaded without a failure. */
 const servedPlugin = (overrides: Partial<RoutedPlugin> = {}): RoutedPlugin => ({
@@ -474,6 +482,262 @@ describe("The gateway registry and a plugin DataGateway's row (#1083)", () => {
     expect(service.isConnected(GW)).toBe(false);
   });
 
+  // A routing decision reads the row and then may wait on the source. The
+  // plugin can be uninstalled, installed again and switched on, and the new
+  // install's driver built, all within that wait. What the decision then
+  // learns is about the install its own row names, so it drops nothing this
+  // process holds for a newer one (#1083).
+  describe('a routing decision that a reinstall overtakes', () => {
+    const REINSTALLED_AT = new Date('2026-11-02T00:00:00Z');
+
+    /** The plugin is installed again and switched on, and another request builds the new install's driver. */
+    const reinstallAndBuild = async () => {
+      table.patch(GW, { enabled: true, plugin: servedPlugin({ installedAt: REINSTALLED_AT }) });
+      const reinstalled = makeDriver();
+      source.build.mockResolvedValueOnce(reinstalled);
+      await expect(service.resolve(GW, Search)).resolves.toBe(reinstalled);
+
+      return reinstalled;
+    };
+
+    /**
+     * Holds back the reply to the next read of a row, as a slow one would
+     * be: the decision gets the row as it read then, once the spec lets it.
+     */
+    const holdNextRowRead = () => {
+      const reply = deferred();
+      const read = table.delegate.findFirst;
+      jest.spyOn(table.delegate, 'findFirst').mockImplementationOnce(async (query) => {
+        const row = await read(query);
+        await reply.promise;
+
+        return row;
+      });
+
+      return reply;
+    };
+
+    it("a decision on an older install's row leaves a newer install's cached driver (#1083)", async () => {
+      interviewedRow(GW);
+      const answer = deferred<boolean>();
+      source.isLoaded.mockReturnValueOnce(answer.promise);
+      const older = service.resolve(GW, Search);
+      await settle();
+      expect(source.isLoaded).toHaveBeenCalledTimes(1);
+
+      const reinstalled = await reinstallAndBuild();
+
+      // The earlier install's copy is gone, which is all this answer says.
+      answer.resolve(false);
+
+      await expect(older).rejects.toMatchObject({
+        name: GatewayRoutingRefusedError.name,
+        reason: 'plugin_not_loaded',
+      });
+      expect(reinstalled.dispose).not.toHaveBeenCalled();
+      await expect(service.resolve(GW, Search)).resolves.toBe(reinstalled);
+      expect(source.build).toHaveBeenCalledTimes(1);
+    });
+
+    // Nothing is cached mid-build, so only the install the build was begun
+    // for says that it is the newer one.
+    it("a decision on an older install's row leaves a newer install's build under way (#1083)", async () => {
+      interviewedRow(GW);
+      const answer = deferred<boolean>();
+      source.isLoaded.mockReturnValueOnce(answer.promise);
+      const older = service.searchRoute(GW, {});
+      await settle();
+      expect(source.isLoaded).toHaveBeenCalledTimes(1);
+
+      table.patch(GW, { plugin: servedPlugin({ installedAt: REINSTALLED_AT }) });
+      const build = deferred<DataGatewayDriver>();
+      source.build.mockReturnValueOnce(build.promise);
+      const resolving = service.resolve(GW, Search);
+      await settle();
+      expect(source.build).toHaveBeenCalledTimes(1);
+
+      answer.resolve(false);
+      await expect(older).resolves.toEqual({ routable: false });
+      const reinstalled = makeDriver();
+      build.resolve(reinstalled);
+
+      await expect(resolving).resolves.toBe(reinstalled);
+      expect(reinstalled.dispose).not.toHaveBeenCalled();
+      expect(service.isConnected(GW)).toBe(true);
+    });
+
+    // A build isn't done once the source hands over the driver: the first
+    // interview comes before the driver is cached, and is abandoned with a
+    // build that is dropped.
+    it("a decision on an older install's row leaves a newer install's first interview under way (#1083)", async () => {
+      table.seed({ id: GW, plugin: servedPlugin() });
+      const answer = deferred<boolean>();
+      source.isLoaded.mockReturnValueOnce(answer.promise);
+      const older = service.searchRoute(GW, {});
+      await settle();
+      expect(source.isLoaded).toHaveBeenCalledTimes(1);
+
+      table.patch(GW, { plugin: servedPlugin({ installedAt: REINSTALLED_AT }) });
+      const reinstalled = makeDriver();
+      const described = deferred();
+      const describe = reinstalled.describe.bind(reinstalled);
+      const asked = jest
+        .spyOn(reinstalled, 'describe')
+        .mockImplementation((request) => from(described.promise).pipe(concatMap(() => describe(request))));
+      source.build.mockResolvedValueOnce(reinstalled);
+      const resolving = service.resolve(GW, Search);
+      await settle();
+      expect(asked).toHaveBeenCalledTimes(1);
+
+      answer.resolve(false);
+      await expect(older).resolves.toEqual({ routable: false });
+      described.resolve();
+
+      await expect(resolving).resolves.toBe(reinstalled);
+      expect(reinstalled.dispose).not.toHaveBeenCalled();
+      expect(table.row(GW)?.firstInterviewedAt).toEqual(expect.any(Date));
+    });
+
+    // A build makes its own decision before it asks for the driver, and that
+    // decision waits on the source too. The build's install is on record
+    // from before that wait.
+    it("a decision on an older install's row leaves a newer install's build that still waits to hear its plugin is loaded (#1083)", async () => {
+      interviewedRow(GW);
+      const answer = deferred<boolean>();
+      const buildsAnswer = deferred<boolean>();
+      // In turn: the older decision's, the other request's, and its build's own.
+      source.isLoaded
+        .mockReturnValueOnce(answer.promise)
+        .mockResolvedValueOnce(true)
+        .mockReturnValueOnce(buildsAnswer.promise);
+      const older = service.searchRoute(GW, {});
+      await settle();
+
+      table.patch(GW, { plugin: servedPlugin({ installedAt: REINSTALLED_AT }) });
+      const reinstalled = makeDriver();
+      source.build.mockResolvedValueOnce(reinstalled);
+      const resolving = service.resolve(GW, Search);
+      await settle();
+      expect(source.isLoaded).toHaveBeenCalledTimes(3);
+      expect(source.build).not.toHaveBeenCalled();
+
+      answer.resolve(false);
+      await expect(older).resolves.toEqual({ routable: false });
+      buildsAnswer.resolve(true);
+
+      await expect(resolving).resolves.toBe(reinstalled);
+      expect(reinstalled.dispose).not.toHaveBeenCalled();
+    });
+
+    // While a connect still reads its row, nothing says a build is coming,
+    // so the older decision drops as usual and advances the invalidation
+    // counter. The build is none the worse only because it takes its
+    // snapshot of the counter after that read.
+    it("a decision on an older install's row leaves a newer install's build that still reads its row (#1083)", async () => {
+      interviewedRow(GW);
+      const answer = deferred<boolean>();
+      source.isLoaded.mockReturnValueOnce(answer.promise);
+      const older = service.searchRoute(GW, {});
+      await settle();
+      expect(source.isLoaded).toHaveBeenCalledTimes(1);
+
+      table.patch(GW, { plugin: servedPlugin({ installedAt: REINSTALLED_AT }) });
+      const reinstalled = makeDriver();
+      source.build.mockResolvedValueOnce(reinstalled);
+      const route = await service.searchRoute(GW, {});
+      const reply = holdNextRowRead();
+      const connecting = route.routable && route.driver();
+      await settle();
+      // The older decision's and the route's: the connect has yet to make its own.
+      expect(source.isLoaded).toHaveBeenCalledTimes(2);
+
+      answer.resolve(false);
+      await expect(older).resolves.toEqual({ routable: false });
+      reply.resolve();
+
+      await expect(connecting).resolves.toBe(reinstalled);
+      expect(reinstalled.dispose).not.toHaveBeenCalled();
+      expect(service.isConnected(GW)).toBe(true);
+    });
+
+    // The answer was true of the earlier install when the source gave it. The
+    // driver held is another install's than the row's, but a later one, so
+    // it is the one to hand out.
+    it("a decision on an older install's row that finds its plugin loaded takes a newer install's cached driver (#1083)", async () => {
+      interviewedRow(GW);
+      const answer = deferred<boolean>();
+      source.isLoaded.mockReturnValueOnce(answer.promise);
+      const older = service.resolve(GW, Search);
+      await settle();
+      expect(source.isLoaded).toHaveBeenCalledTimes(1);
+
+      const reinstalled = await reinstallAndBuild();
+
+      answer.resolve(true);
+
+      await expect(older).resolves.toBe(reinstalled);
+      expect(reinstalled.dispose).not.toHaveBeenCalled();
+      expect(source.build).toHaveBeenCalledTimes(1);
+    });
+
+    // A disabled row is refused with no wait on the source, so what the
+    // reinstall overtakes here is the reply to the read of the row.
+    it("a decision on an older install's disabled row leaves a newer install's cached driver (#1083)", async () => {
+      interviewedRow(GW);
+      // Uninstalling the plugin disabled its row.
+      table.patch(GW, { enabled: false, plugin: servedPlugin({ enabled: false, uninstalledAt: new Date() }) });
+      const reply = holdNextRowRead();
+      const older = service.resolve(GW, Search);
+      await settle();
+
+      const reinstalled = await reinstallAndBuild();
+
+      reply.resolve();
+
+      await expect(older).rejects.toMatchObject({ name: GatewayRoutingRefusedError.name, reason: 'disabled' });
+      expect(reinstalled.dispose).not.toHaveBeenCalled();
+      await expect(service.resolve(GW, Search)).resolves.toBe(reinstalled);
+      expect(source.build).toHaveBeenCalledTimes(1);
+    });
+
+    // The other way round, the decision is the one that knows: its row names
+    // the newer install, so what is held for the earlier one goes, as it
+    // does when both name the same install.
+    it("a decision on a newer install's row still drops an earlier install's cached driver (#1083)", async () => {
+      interviewedRow(GW);
+      const earlier = makeDriver();
+      source.build.mockResolvedValueOnce(earlier);
+      await service.resolve(GW, Search);
+
+      // Installed again, and this process can't reach the new install's copy yet.
+      table.patch(GW, { plugin: servedPlugin({ installedAt: REINSTALLED_AT }) });
+      source.isLoaded.mockResolvedValue(false);
+
+      await expect(service.resolve(GW, Search)).rejects.toMatchObject({ reason: 'plugin_not_loaded' });
+      expect(earlier.dispose).toHaveBeenCalledTimes(1);
+      expect(service.isConnected(GW)).toBe(false);
+    });
+
+    it("a decision on a newer install's row still discards an earlier install's build under way (#1083)", async () => {
+      interviewedRow(GW);
+      const build = deferred<DataGatewayDriver>();
+      source.build.mockReturnValueOnce(build.promise);
+      const resolving = service.resolve(GW, Search);
+      await settle();
+      expect(source.build).toHaveBeenCalledTimes(1);
+
+      table.patch(GW, { plugin: servedPlugin({ installedAt: REINSTALLED_AT }) });
+      source.isLoaded.mockResolvedValue(false);
+      await expect(service.searchRoute(GW, {})).resolves.toEqual({ routable: false });
+      const earlier = makeDriver();
+      build.resolve(earlier);
+
+      await expect(resolving).rejects.toThrow();
+      expect(earlier.dispose).toHaveBeenCalledTimes(1);
+      expect(service.isConnected(GW)).toBe(false);
+    });
+  });
+
   it('pluginDriver refuses a remote row as unknown', async () => {
     table.seed({
       id: 'remote',
@@ -521,6 +785,72 @@ describe("The gateway registry and a plugin DataGateway's row (#1083)", () => {
     await expect(service.pluginDriver('not-loaded', Search)).rejects.toMatchObject({ reason: 'plugin_not_loaded' });
     await expect(service.pluginDriver('gone')).rejects.toMatchObject({ reason: 'unknown' });
     expect(source.build).not.toHaveBeenCalled();
+  });
+
+  // The mirror of pluginDriver refusing a remote row: to whoever asks to dial
+  // it, no remote DataGateway by that id is there. A request that names a
+  // plugin's row has no connection fields to give, so nothing would answer.
+  it("connect refuses a plugin's row and builds no remote driver (#1083)", async () => {
+    table.seed({ id: GW, plugin: servedPlugin() });
+    const driver = makeDriver();
+    source.build.mockResolvedValueOnce(driver);
+    await service.resolve(GW, Search);
+    factory.create.mockRejectedValue(new Error('Nothing answers at an empty address'));
+    const counted = jest.spyOn(service, 'reportFailure');
+
+    await expect(
+      service.connect({ gatewayId: GW, connectionUrl: '', connectionPort: 0, authType: AuthType.None }),
+    ).rejects.toMatchObject({ name: GatewayRoutingRefusedError.name, reason: 'unknown' });
+
+    expect(factory.create).not.toHaveBeenCalled();
+    expect(counted).not.toHaveBeenCalled();
+    // The plugin's own driver is no connection of this one's to replace.
+    expect(driver.dispose).not.toHaveBeenCalled();
+    await expect(service.resolve(GW, Search)).resolves.toBe(driver);
+  });
+
+  it('connect still connects a remote row', async () => {
+    table.seed({ id: 'remote' });
+    const driver = makeDriver();
+    factory.create.mockResolvedValueOnce(driver);
+    const options = { gatewayId: 'remote', connectionUrl: 'localhost', connectionPort: 50051, authType: AuthType.None };
+
+    await service.connect(options);
+
+    expect(factory.create).toHaveBeenCalledWith(options);
+    await expect(service.resolve('remote', Search)).resolves.toBe(driver);
+  });
+
+  // connect() asks only whose row it is. With no row there is none to be a
+  // plugin's, so it dials the options given, and it is the first interview
+  // that then finds no DataGateway to ask.
+  it('connect does not refuse an id with no row: it dials the options given (#1083)', async () => {
+    factory.create.mockResolvedValueOnce(makeDriver());
+    const options = { gatewayId: 'no-row', connectionUrl: 'localhost', connectionPort: 50051, authType: AuthType.None };
+
+    await expect(service.connect(options)).rejects.toThrow("it isn't interviewed");
+
+    expect(factory.create).toHaveBeenCalledWith(options);
+  });
+
+  // connect() reads the row only to learn whose it is. A lazy connect has
+  // read it by then, so it dials without that read.
+  it('a lazy connect of a remote row reads it once to connect it (#1083)', async () => {
+    table.seed({
+      id: 'remote',
+      capabilities: [Search, Fetch],
+      gatewayVersion: IN_MEMORY_VERSION,
+      firstInterviewedAt: new Date(),
+      lastInterviewedAt: new Date(),
+    });
+    const driver = makeDriver();
+    factory.create.mockResolvedValueOnce(driver);
+    const reads = jest.spyOn(table.delegate, 'findFirst');
+
+    await expect(service.resolve('remote', Search)).resolves.toBe(driver);
+
+    // One read for the routing decision, and one for the connect.
+    expect(reads).toHaveBeenCalledTimes(2);
   });
 
   describe('every other routing decision applies the same refusals (#1083)', () => {

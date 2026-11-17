@@ -1,7 +1,20 @@
 import type { GatewayServiceClient } from '@boardgamesempire/proto-gateway';
 import type { DataGatewayDriver } from './data-gateway-driver.js';
 
-/** What a data-gateway plugin's factory returns. May be async: a driver may need starting before its first call. */
+/**
+ * What a data-gateway plugin's factory returns: the function the server
+ * calls each time it needs a driver. May be async: a driver may need
+ * starting before its first call.
+ *
+ * Each call returns a new driver, never one that another call returned. The
+ * server disposes every driver it is handed, including one that arrives
+ * after the server stopped waiting for it, so a driver two calls shared
+ * would be disposed while the server still used it (#1083).
+ *
+ * The server waits only so long for a driver. It can stop waiting, but it
+ * can't stop the driver factory, so one that waits on its upstream gives up
+ * by itself, on a time limit of its own.
+ */
 export type DataGatewayDriverFactory = () => DataGatewayDriver | Promise<DataGatewayDriver>;
 
 /**
