@@ -6,6 +6,7 @@ import {
   EventOccurrence,
   EventParticipationStatus,
   EventSchedulingMode,
+  liveEventWhere,
   OccurrenceStatus,
   Prisma,
   ResourceType,
@@ -802,7 +803,7 @@ describe('EventOccurrenceService', () => {
 
       expect(order.filter((label) => label !== 'other-raw')).toEqual(['mode-before-lock', 'lock', 'mode-under-lock']);
       expect(db.event.findUnique).toHaveBeenLastCalledWith({
-        where: { id: 'event-1', deletedAt: null },
+        where: { id: 'event-1', ...liveEventWhere() },
         select: { schedulingMode: true },
       });
       expect(rejection).toBeInstanceOf(CodedHttpException);

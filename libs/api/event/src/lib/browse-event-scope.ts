@@ -44,12 +44,12 @@ import {
  *   block veto is part of that condition, as the friends-of-friends arm's is.
  * - The household arm needs a membership in a live household,
  *   `liveHouseholdOf`'s. It checks no block: the event belongs to the
- *   household, which already shows it to the member. A soft-deleted
- *   household's event leaves the list only through this arm: one whose reach
- *   admits others stays on it through theirs, as it stays readable by id.
+ *   household, which already shows it to the member. A deleted household's
+ *   event leaves the list whatever its reach: `upcomingEventWhere` reads it
+ *   as gone, as a read by id does (#992).
  *
- * `deletedAt` and "upcoming" are `upcomingEventWhere`'s. This scope says
- * which events, and that one says when.
+ * Liveness and "upcoming" are `upcomingEventWhere`'s. This scope says which
+ * events, and that one says when.
  */
 export function browseEventScope(subjectId: string): Prisma.EventWhereInput {
   return {
