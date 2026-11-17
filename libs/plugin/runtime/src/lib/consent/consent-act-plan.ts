@@ -1,7 +1,9 @@
+import type { PluginUnit } from '@bge/actor-context';
 import { PluginGrantStatus, type RiskLevel } from '@bge/database';
 import { resolveLocalizedStringDetailed, type NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import type { ConsentCheckClassification, ConsentManifestSource } from './consent-classification.types';
 import { unitOwnsConsentScope } from './consent-classification.types';
+import { byPermissionSlugCodeUnit } from './decision-lock-order';
 import {
   PluginConsentActAnswerError,
   PluginConsentActRequiredSetError,
@@ -17,14 +19,13 @@ import type {
   ConsentActKind,
   ConsentActPlan,
   ConsentActPresentationCheck,
-  ConsentActUnit,
 } from './plugin-consent-act.types';
 import { presentedRiskLevel } from './presented-risk-level';
 
 export interface PlanConsentActInput {
   readonly kind: ConsentActKind;
   readonly pluginSlug: string;
-  readonly unit: ConsentActUnit;
+  readonly unit: PluginUnit;
   readonly source: ConsentManifestSource;
   /** permissionChecks of the manifest the sha names. */
   readonly checks: readonly NormalizedPermissionRequest[];
@@ -155,6 +156,16 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
       break;
     }
     case 'Review': {
+      // The server admin's approval is the Server unit's consent, so its review
+      // only accepts; refusing is a toggle of an optional permission (#1336).
+      if (unit.scopeType === 'Server') {
+        const refusals = slugsWhere(isDenied);
+
+        if (refusals.length > 0) {
+          refuse('server-refusal', refusals);
+        }
+      }
+
       if (source === 'staged') {
         const refusals = slugsWhere(isDenied);
         if (refusals.length > 0) {
@@ -224,8 +235,7 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
       status: answer.status,
       decidedRiskLevel: answer.riskLevel,
     }))
-    // Code-unit order, not locale order: this is a lock order every process must agree on.
-    .sort((a, b) => (a.permissionSlug < b.permissionSlug ? -1 : a.permissionSlug > b.permissionSlug ? 1 : 0));
+    .sort(byPermissionSlugCodeUnit);
 
   const presentationChecks = own.map((check): ConsentActPresentationCheck => {
     const resolved = resolveLocalizedStringDetailed(check.reason, {

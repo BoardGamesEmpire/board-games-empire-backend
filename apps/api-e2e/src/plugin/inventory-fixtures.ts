@@ -1,6 +1,7 @@
 import { PluginCategory, PluginScope, RiskLevel, type Plugin, type PrismaClient } from '@bge/database';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
+import type { Check } from './manifest-checks';
 import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
 /** Re-exported: the staging id (#357) on every update `arrangeInventoryPlugin` stages; approve and reject must send it. */
@@ -16,6 +17,8 @@ export interface InventoryPluginOptions {
    * `scope` follows the manifest's unless `row` names one.
    */
   readonly manifest?: { readonly scope?: PluginManifest['scope']; readonly config?: PluginManifest['config'] };
+  /** Requested permissions the manifest asks for beside its own required server-scope `manage:digest`. */
+  readonly checks?: readonly Check[];
   /** Stages an update to this version: the same manifest, pending approval. */
   readonly stagedVersion?: string;
 }
@@ -51,6 +54,7 @@ export const arrangeInventoryPlugin = async (
           consentScope: 'server',
           feature: 'weekly-digest',
         },
+        ...(options.checks ?? []),
       ],
     },
     ...options.manifest,

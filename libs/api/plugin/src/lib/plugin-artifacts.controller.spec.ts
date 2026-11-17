@@ -1,7 +1,8 @@
 import type { AuditContextService } from '@bge/actor-context';
-import { Action, ResourceType } from '@bge/database';
+import { Action, ResourceType, RiskLevel } from '@bge/database';
+import type { SupportedLocalesService } from '@bge/i18n';
 import { CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
-import type { PluginInventoryService } from '@bge/plugin';
+import { PluginConsentActLocaleError, type PluginInventoryService } from '@bge/plugin';
 import { createMockAbilityService, MOCK_ACTING_USER_ID, type MockAbilityService } from '@bge/testing';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
@@ -9,6 +10,8 @@ import { PluginArtifactSourceError } from './plugin-artifact-source.error';
 import { PluginArtifactsController } from './plugin-artifacts.controller';
 
 const SHA = 'a'.repeat(64);
+const SHOWN_RISKS = [{ permissionSlug: 'feedback:read', riskLevel: RiskLevel.Medium }];
+const SUPPORTED_LOCALES = { getSupportedTags: () => ['en', 'de'] } as unknown as SupportedLocalesService;
 const EXPIRES = new Date('2026-11-12T00:00:00.000Z');
 
 const manifest = {
@@ -76,6 +79,7 @@ describe('PluginArtifactsController (#1094)', () => {
       abilityService as never,
       auditContext as never,
       { defaultLocale } as never,
+      SUPPORTED_LOCALES,
     );
 
   beforeEach(() => {
@@ -95,6 +99,7 @@ describe('PluginArtifactsController (#1094)', () => {
       abilityService as never,
       auditContext as never,
       { defaultLocale: 'en' } as never,
+      SUPPORTED_LOCALES,
     );
   });
 
@@ -172,6 +177,8 @@ describe('PluginArtifactsController (#1094)', () => {
         description: 'Weekly',
       });
       expect(german.checks[0]?.reason.value).toBe('Hält Spiele aktuell');
+      // What an install sends back as its locale (#1301).
+      expect(german.locale).toBe('de');
     });
 
     it('falls back to the module default locale when the request has none (#1094)', async () => {
@@ -181,6 +188,7 @@ describe('PluginArtifactsController (#1094)', () => {
       expect(german.manifest.displayName).toBe('Demo-Senke');
       expect(german.checks[0]?.reason.value).toBe('Hält Spiele aktuell');
       expect(german.manifest.executionMode).toBe('in-process');
+      expect(german.locale).toBe('de');
     });
 
     it('answers the execution mode the manifest names (#1094)', async () => {
@@ -258,6 +266,7 @@ describe('PluginArtifactsController (#1094)', () => {
       await firstValueFrom(
         controller.install({
           sha256: SHA,
+          shownRisks: SHOWN_RISKS,
           confirmCriticalSlugs: ['manage:game'],
           acknowledgeForbiddenImports: ['axios'],
           deepScan: true,
@@ -267,16 +276,44 @@ describe('PluginArtifactsController (#1094)', () => {
       expect(installer.install).toHaveBeenCalledWith({
         sha256: SHA,
         actorId: MOCK_ACTING_USER_ID,
+        shownRisks: SHOWN_RISKS,
         confirmCriticalSlugs: ['manage:game'],
         acknowledgeForbiddenImports: ['axios'],
         deepScan: true,
       });
     });
 
+    it("passes the request locale to the install, which records its consent act's presentation in it (#1336)", async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
+      await firstValueFrom(controller.install({ sha256: SHA, shownRisks: SHOWN_RISKS }));
+
+      expect(installer.install).toHaveBeenCalledWith(expect.objectContaining({ locale: 'de' }));
+    });
+
+    // The install's consent act stores what the artifact's read showed, so it
+    // renders in the locale the body names (#1301). The answer's read-back
+    // stays in the request locale: it is this response's text, not the act's.
+    it('passes the supported locale the body names to the install, not the request locale (#1301)', async () => {
+      auditContext.getLocale.mockReturnValue('en');
+
+      await firstValueFrom(controller.install({ sha256: SHA, shownRisks: SHOWN_RISKS, locale: 'de' }));
+
+      expect(installer.install).toHaveBeenCalledWith(expect.objectContaining({ locale: 'de' }));
+      expect(inventory.getBySlug).toHaveBeenCalledWith('demo-sink', 'en');
+    });
+
+    it('refuses a locale the server does not support before anything is installed (#1301)', () => {
+      expect(() => controller.install({ sha256: SHA, shownRisks: SHOWN_RISKS, locale: 'xx' })).toThrow(
+        PluginConsentActLocaleError,
+      );
+      expect(installer.install).not.toHaveBeenCalled();
+    });
+
     it('answers with the new plugin read back through the inventory, in the request locale (#1094)', async () => {
       auditContext.getLocale.mockReturnValue('de');
 
-      const result = await firstValueFrom(controller.install({ sha256: SHA }));
+      const result = await firstValueFrom(controller.install({ sha256: SHA, shownRisks: SHOWN_RISKS }));
 
       expect(inventory.getBySlug).toHaveBeenCalledWith('demo-sink', 'de');
       expect(result).toEqual({ plugin: { slug: 'demo-sink', executionMode: 'InProcess' } });

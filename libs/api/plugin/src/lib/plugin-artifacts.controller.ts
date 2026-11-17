@@ -1,5 +1,6 @@
 import { AuditContextService } from '@bge/actor-context';
 import { Action, ResourceType } from '@bge/database';
+import { SupportedLocalesService } from '@bge/i18n';
 import { AbilityService, CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import {
   MODULE_OPTIONS_TOKEN,
@@ -36,6 +37,7 @@ import {
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { consentActLocale } from './consent-act-locale';
 import {
   InstallPluginDto,
   PLUGIN_ARTIFACT_SHA256_INPUT_MAX_LENGTH,
@@ -94,6 +96,7 @@ export class PluginArtifactsController {
     private readonly abilityService: AbilityService,
     private readonly auditContext: AuditContextService,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
+    private readonly supportedLocales: SupportedLocalesService,
   ) {}
 
   @ApiOperation({
@@ -211,24 +214,39 @@ export class PluginArtifactsController {
       "moment, or another DataGateway already has the name a data-gateway plugin's DataGateway would take",
   })
   @ApiResponse({
+    status: Http.UnprocessableEntity,
+    description:
+      'PLUGIN_CONSENT_ACT_LOCALE: locale is not one this server supports. Also a body that fails validation.',
+  })
+  @ApiResponse({
     status: Http.ServiceUnavailable,
     description: 'Static analysis is unavailable on this server; an operator must fix the parser installation',
   })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
   @Post('install')
   install(@Body() dto: InstallPluginDto) {
+    const locale = this.auditContext.getLocale() ?? undefined;
+    // The locale the artifact's read was requested in, which the install's
+    // consent act records its presentation in (#1336): the one the body names,
+    // refused unless this server supports it, else the request's own (#1301).
+    const presentationLocale = consentActLocale(dto.locale, this.supportedLocales.getSupportedTags(), locale);
+
     return from(
       this.installer
         .install({
           sha256: dto.sha256,
           actorId: this.abilityService.getActingUserId(),
+          shownRisks: dto.shownRisks,
           confirmCriticalSlugs: dto.confirmCriticalSlugs,
           acknowledgeForbiddenImports: dto.acknowledgeForbiddenImports,
           deepScan: dto.deepScan,
+          locale: presentationLocale,
         })
         // Read back through the inventory, in the viewpoint the inventory's
-        // own server read serves a server admin, so a client gets one shape for it.
-        .then(({ plugin }) => this.inventory.getBySlug(plugin.slug, this.auditContext.getLocale() ?? undefined)),
+        // own server read serves a server admin, so a client gets one shape
+        // for it. This is the response's own text, so it takes the request
+        // locale.
+        .then(({ plugin }) => this.inventory.getBySlug(plugin.slug, locale)),
     ).pipe(map((installed) => ({ plugin: installed })));
   }
 
@@ -267,6 +285,7 @@ export class PluginArtifactsController {
         })),
       },
       checks: [...presentArtifactChecks(assessment, locale, defaultLocale)] as PluginArtifactResponseDto['checks'],
+      locale: locale ?? defaultLocale,
       criticalSlugsToReenter: [...assessment.criticalSlugsToReenter],
       forbiddenImportsToAccept: [...assessment.forbiddenImportsToAccept],
       dataGatewayNameConflict: assessment.dataGatewayNameConflict,

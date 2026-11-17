@@ -2,7 +2,7 @@
  * Typed failures for config-payload validation against a manifest's
  * `config.schema` (#320). Domain errors, not HTTP exceptions — the API
  * filter owns the status mapping, same discipline as the install, update,
- * and grant errors.
+ * and consent act errors.
  *
  * The two classes deliberately split by who can act (the same contract as
  * `PluginUpdateManifestError.source`): a payload that violates the schema is

@@ -477,8 +477,10 @@ describe('shipped-function', () => {
     });
 
     it('checks only the stages a path claims, so a subset is a legitimate claim', () => {
-      // Not every writer takes every lock: `decide()` never locks the plugin
-      // row. What is refused is claiming a stage and not taking it.
+      // Not every writer takes every lock, so a path may claim part of the
+      // order: this one claims the advisory key and the unit row, takes both,
+      // and skips the plugin row. What is refused is claiming a stage and not
+      // taking it.
       const body = `
         await lockHouseholdUnitScope(tx);
         await this.claimHouseholdUnit(tx);
@@ -844,10 +846,10 @@ describe('shipped-function', () => {
     });
 
     it('asks the guard about `data` alone, not the key the row is addressed by', () => {
-      // Activation's grant re-stamp, in miniature: `where` names the FK because
-      // the row's unique key contains it, and `data` rewrites four other
-      // columns. Judging the whole call reports this — and with it every keyed
-      // child update in the tree, which is all of them.
+      // A consent decision updated by its compound unique key: `where` names
+      // the FK because the key contains it, and `data` rewrites another
+      // column. Judging the whole call would report this, and with it every
+      // keyed child update.
       const shapes = [
         { pattern: /pluginGrant\.update$/, withArguments: fieldNamed(['pluginId']), argumentProperty: 'data' },
       ];

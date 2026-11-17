@@ -1,11 +1,10 @@
 import { AuditContextService } from '@bge/actor-context';
-import type { HouseholdPlugin, Plugin, PluginConsentAct, PluginGrant, PluginScope, UserPlugin } from '@bge/database';
+import type { HouseholdPlugin, Plugin, PluginConsentAct, PluginScope, UserPlugin } from '@bge/database';
 import {
   DatabaseService,
   lockLiveHousehold,
   PluginConsentActKind,
   PluginGrantScope,
-  PluginGrantStatus,
   Prisma,
   retryOnDeadlock,
 } from '@bge/database';
@@ -14,13 +13,11 @@ import { Inject, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
-import { grantSnapshot, householdSwitchSnapshot, userSwitchSnapshot } from '../events/plugin-event-snapshots';
+import { householdSwitchSnapshot, userSwitchSnapshot } from '../events/plugin-event-snapshots';
 import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginDisabledEvent,
   HouseholdPluginEnabledEvent,
-  PluginGrantCreatedEvent,
-  PluginGrantRejectedEvent,
   UserPluginDisabledEvent,
   UserPluginEnabledEvent,
 } from '../events/plugin.events';
@@ -40,12 +37,14 @@ import {
 } from '../units/unit.errors';
 import { planConsentAct } from './consent-act-plan';
 import { unitOwnsConsentScope, type ConsentManifestSource } from './consent-classification.types';
+import { emitDecisionEvents, type WrittenDecision } from './consent-decision-events';
+import { decisionsStand, decisionStands } from './consent-decision-stands';
 import {
   PluginConsentActNoUserScopeError,
   PluginConsentActStaleError,
   PluginConsentActUnitOffError,
 } from './plugin-consent-act.errors';
-import type { ConsentActAnswer, ConsentActDecision, ConsentActKind, ConsentActUnit } from './plugin-consent-act.types';
+import type { ConsentActAnswer, ConsentActKind, ConsentActUnit } from './plugin-consent-act.types';
 import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
 
 export interface ConsentActInput {
@@ -95,11 +94,6 @@ interface ConsentActClaimRow {
   readonly pending_sha256: string | null;
 }
 
-interface WrittenDecision {
-  readonly before: PluginGrant | null;
-  readonly after: PluginGrant;
-}
-
 /** What a written act did to its unit enablement besides leaving it as `unit`. */
 interface UnitEffects {
   readonly switchedOff: boolean;
@@ -127,7 +121,7 @@ type ActOutcome =
  *
  * It takes the total lock order every per-unit writer of the plugin runtime
  * takes (`apps/api-e2e/src/plugin/lock-order.ts`): household row, plugin row,
- * the unit's advisory key, grant rows, the unit enablement. `decide()` and
+ * the unit's advisory key, grant rows, the unit enablement. That file and
  * `PluginUnitLifecycleService` explain each stage; the comments in `commit`
  * say only what is particular to an act.
  */
@@ -170,12 +164,12 @@ export class PluginConsentActService {
     const config = household && kind === 'SwitchOn' ? input.config : undefined;
 
     // The plugin is read once per request, before the transaction, and a
-    // deadlock replay judges against this same read (#361, as `decide()`
-    // does). A deadlock means a writer of this plugin row was live, most
-    // often an activation (#398); a replay that read again would record
-    // consent against a manifest that moved mid-request with nothing telling
-    // the client. Judged against the first read, the replay's claim sees the
-    // move and refuses it with the same stale refusal.
+    // deadlock replay judges against this same read (#361). A deadlock means a
+    // writer of this plugin row was live, most often an activation (#398); a
+    // replay that read again would record consent against a manifest that
+    // moved mid-request with nothing telling the client. Judged against the
+    // first read, the replay's claim sees the move and refuses it with the
+    // same stale refusal.
     const plugin = await loadLivingPlugin(this.db, input.slug);
     const named = this.nameManifest(plugin, input.manifestSha256);
 
@@ -224,9 +218,9 @@ export class PluginConsentActService {
     const correlationId = this.auditContext.getCorrelationId() ?? null;
     const locale = input.locale ?? this.options.defaultLocale;
 
-    // Retried once if Postgres picks this attempt as the deadlock victim, as
-    // `decide()` is (#398): the abort took the transaction whole and the
-    // events emit below, after the commit, so a replay writes nothing twice.
+    // Retried once if Postgres picks this attempt as the deadlock victim
+    // (#398): the abort took the transaction whole and the events emit below,
+    // after the commit, so a replay writes nothing twice.
     const outcome = await retryOnDeadlock(() =>
       this.db.$transaction(async (tx): Promise<ActOutcome> => {
         // The household row first, shared (#548): the admin check above took
@@ -267,8 +261,10 @@ export class PluginConsentActService {
         }
 
         // The catalog and the unit's decisions are read under the claim and
-        // the key, through this transaction, for the reason `decide()` reads
-        // the risk there (#361).
+        // the key, through this transaction, so the act judges against the
+        // decisions it writes over (#361). Nothing locks catalog rows: a risk
+        // edit landing before the commit leaves the decision's risk below the
+        // catalog's, so it confers nothing (`riskCovers`) and fails closed.
         const classification = await this.classifier.classify(plugin.id, unit, named.validated.permissionChecks, {
           source: named.source,
           client: tx,
@@ -479,7 +475,7 @@ export class PluginConsentActService {
    * The plugin-row claim of a consent act: the row `FOR SHARE`, as every
    * per-unit writer takes it (#398), and the check that the manifest the act
    * names is still the one the row holds (#1150). The sha pins the exact
-   * bytes, so it replaces `decide()`'s content comparison.
+   * bytes, so no comparison of the manifest's content is needed.
    *
    * A staged review pins BOTH shas: the staged one it names, and the active
    * one the request read, because the planner judged which staged
@@ -596,15 +592,7 @@ export class PluginConsentActService {
   ): void {
     const context = { manifestVersion, actId: outcome.act.id };
 
-    for (const { before, after } of outcome.changedDecisions) {
-      const EventClass =
-        after.status === PluginGrantStatus.Granted ? PluginGrantCreatedEvent : PluginGrantRejectedEvent;
-
-      this.emitter.emit(
-        EventClass.eventName,
-        new EventClass(before === null ? null : grantSnapshot(before), grantSnapshot(after), context, initiatedAt),
-      );
-    }
+    emitDecisionEvents(this.emitter, outcome.changedDecisions, context, initiatedAt);
 
     const { unitBefore, unit } = outcome;
     const switchedOn = unit.enabled && (unitBefore === null || !unitBefore.enabled);
@@ -677,19 +665,6 @@ export class PluginConsentActService {
       );
     }
   }
-}
-
-/** The row already holds this decision: same status, same risk. */
-function decisionStands(decision: ConsentActDecision, row: PluginGrant | null | undefined): boolean {
-  return row != null && row.status === decision.status && row.decidedRiskLevel === decision.decidedRiskLevel;
-}
-
-/** Every planned decision already stands at the unit's coordinates. */
-function decisionsStand(
-  decisions: readonly ConsentActDecision[],
-  standingBySlug: ReadonlyMap<string, PluginGrant>,
-): boolean {
-  return decisions.every((decision) => decisionStands(decision, standingBySlug.get(decision.permissionSlug)));
 }
 
 function isHouseholdEnablement(row: UnitEnablement): row is HouseholdPlugin {

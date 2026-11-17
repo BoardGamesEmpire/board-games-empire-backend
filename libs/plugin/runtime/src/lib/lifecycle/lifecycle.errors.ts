@@ -5,7 +5,7 @@ import { describeManifestMove, type PluginChangeKind } from '../manifest/manifes
  * Typed failures for the server lifecycle surface (#320): enable, disable,
  * server config write, uninstall. Domain errors, not HTTP exceptions — the
  * API filter owns the status mapping, the same discipline as the install,
- * update, and grant errors.
+ * update, and consent act errors.
  */
 
 /** The actor is not a server admin. Lifecycle control is a server-admin act, exactly as install and update consent are. */

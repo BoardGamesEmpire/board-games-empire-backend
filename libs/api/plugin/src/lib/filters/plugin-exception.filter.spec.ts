@@ -1,4 +1,4 @@
-import { Action, PluginGrantScope, ResourceType, RiskLevel } from '@bge/database';
+import { Action, ResourceType, RiskLevel } from '@bge/database';
 import { toErrorCode } from '@bge/i18n';
 import * as pluginRuntime from '@bge/plugin';
 import {
@@ -12,15 +12,6 @@ import {
   PluginFeatureStateManifestError,
   PluginFeatureStateNotFoundError,
   PluginFeatureStateTombstonedError,
-  PluginGrantAuthorityError,
-  PluginGrantConsentScopeMismatchError,
-  PluginGrantExclusionError,
-  PluginGrantManifestInvalidError,
-  PluginGrantPluginChangedError,
-  PluginGrantPluginNotFoundError,
-  PluginGrantPluginTombstonedError,
-  PluginGrantRequiredDenialError,
-  PluginGrantUnknownPermissionError,
   PluginInstallAuthorityError,
   PluginInstallConflictError,
   PluginInstallCriticalConfirmationError,
@@ -43,7 +34,6 @@ import {
   PluginUnitPluginTombstonedError,
   PluginUnitScopeError,
   PluginUpdateAuthorityError,
-  PluginUpdateBlockedByDenialError,
   PluginUpdateCriticalConfirmationError,
   PluginUpdateDataGatewayNameConflictError,
   PluginUpdateForbiddenPermissionError,
@@ -139,20 +129,16 @@ describe('PluginExceptionFilter', () => {
 
   describe('the error envelope (#1260)', () => {
     it('derives the code from the error class name', () => {
-      filter.catch(
-        new PluginGrantConsentScopeMismatchError('read:household', PluginGrantScope.Household, PluginGrantScope.Server),
-        host,
-      );
+      filter.catch(new PluginUnitScopeError('sample', 'server'), host);
 
       expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
       expect(body()).toEqual({
         statusCode: 422,
         error: 'Unprocessable Entity',
-        message: 't:errors.plugin.grant_consent_scope_mismatch',
-        code: 'PLUGIN_GRANT_CONSENT_SCOPE_MISMATCH',
-        permissionSlug: 'read:household',
-        expected: PluginGrantScope.Household,
-        received: PluginGrantScope.Server,
+        message: 't:errors.plugin.unit_scope',
+        code: 'PLUGIN_UNIT_SCOPE',
+        slug: 'sample',
+        scope: 'server',
       });
     });
   });
@@ -161,7 +147,6 @@ describe('PluginExceptionFilter', () => {
     it.each([
       [new PluginInstallAuthorityError('user-1'), 'install_authority'],
       [new PluginUpdateAuthorityError('user-1'), 'update_authority'],
-      [new PluginGrantAuthorityError('user-1', 'not a household admin'), 'grant_authority'],
     ] as const)('maps %s to 403 with localized copy', (exception, key) => {
       filter.catch(exception, host);
 
@@ -172,10 +157,6 @@ describe('PluginExceptionFilter', () => {
     });
 
     it.each([
-      [
-        new PluginGrantExclusionError('manage:plugin', 'plugin-administration slugs are never grantable'),
-        'grant_exclusion',
-      ],
       [
         new PluginInstallForbiddenPermissionError('sample', 'manage:plugin', 'is a plugin-administration slug'),
         'install_forbidden_permission',
@@ -203,16 +184,16 @@ describe('PluginExceptionFilter', () => {
     });
 
     // Slug-addressed since D-BO: every not-found body carries `slug`.
-    it.each([
-      [new PluginGrantPluginNotFoundError('sample'), 'grant_plugin_not_found'],
-      [new PluginConsentPresentationNotFoundError('sample'), 'presentation_not_found'],
-    ] as const)('maps %s to 404 with the slug', (exception, key) => {
-      filter.catch(exception, host);
+    it.each([[new PluginConsentPresentationNotFoundError('sample'), 'presentation_not_found']] as const)(
+      'maps %s to 404 with the slug',
+      (exception, key) => {
+        filter.catch(exception, host);
 
-      expect(rendered().getStatus()).toBe(Http.NotFound);
-      expect(body()['message']).toBe(`t:errors.plugin.${key}`);
-      expect(body()['slug']).toBe('sample');
-    });
+        expect(rendered().getStatus()).toBe(Http.NotFound);
+        expect(body()['message']).toBe(`t:errors.plugin.${key}`);
+        expect(body()['slug']).toBe('sample');
+      },
+    );
 
     it('maps a staged consent surface with nothing staged to 404 with its stable code (#1150)', () => {
       filter.catch(new PluginConsentPresentationNoStagedUpdateError('sample'), host);
@@ -231,7 +212,6 @@ describe('PluginExceptionFilter', () => {
     // whatever the runtime error calls it — one client 410 handler for both.
     it.each([
       [new PluginUpdateTombstonedError('sample', uninstalledAt), 'update_tombstoned'],
-      [new PluginGrantPluginTombstonedError('sample', uninstalledAt), 'grant_tombstoned'],
       [new PluginConsentPresentationTombstonedError('sample', uninstalledAt), 'presentation_tombstoned'],
     ] as const)('maps %s to 410 with the tombstone timestamp', (exception, key) => {
       filter.catch(exception, host);
@@ -355,24 +335,6 @@ describe('PluginExceptionFilter', () => {
       expect(body()['unacknowledgedSpecifiers']).toEqual(['axios']);
       expect(body()['unexpectedSpecifiers']).toEqual(exception.unexpectedSpecifiers);
     });
-
-    it('maps the D-AV required-denial refusal to 409 with the slug and permission — the lever prompt renders from this body', () => {
-      filter.catch(new PluginGrantRequiredDenialError('sample', 'plugin|sample|manage:digest'), host);
-
-      expect(rendered().getStatus()).toBe(Http.Conflict);
-      expect(body()['message']).toBe('t:errors.plugin.grant_required_denial');
-      expect(body()['slug']).toBe('sample');
-      expect(body()['permissionSlug']).toBe('plugin|sample|manage:digest');
-      expect(body()['code']).toBe('PLUGIN_GRANT_REQUIRED_DENIAL');
-    });
-
-    it('renders the blocking denials on PluginUpdateBlockedByDenialError', () => {
-      filter.catch(new PluginUpdateBlockedByDenialError('sample', ['read:household']), host);
-
-      expect(rendered().getStatus()).toBe(Http.Conflict);
-      expect(body()['message']).toBe('t:errors.plugin.update_blocked_by_denial');
-      expect(body()['deniedRequiredSlugs']).toEqual(['read:household']);
-    });
   });
 
   describe('422 — manifest and semantic validation', () => {
@@ -421,23 +383,6 @@ describe('PluginExceptionFilter', () => {
       expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
       expect(body()['message']).toBe(`t:errors.plugin.${key}`);
       expect(body()['missingSlugs']).toEqual(['read:nope']);
-    });
-
-    it.each([
-      [
-        new PluginGrantUnknownPermissionError('sample', 'read:nope', 'not requested by the manifest'),
-        'grant_unknown_permission',
-      ],
-      [
-        new PluginGrantConsentScopeMismatchError('read:household', PluginGrantScope.Household, PluginGrantScope.User),
-        'grant_consent_scope_mismatch',
-      ],
-    ] as const)('maps %s to 422', (exception, key) => {
-      filter.catch(exception, host);
-
-      expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
-      expect(body()['message']).toBe(`t:errors.plugin.${key}`);
-      expect(body()['code']).toBe(toErrorCode(exception.name));
     });
   });
 
@@ -601,17 +546,6 @@ describe('PluginExceptionFilter', () => {
       expect(body()['actualVersion']).toBe('1.2.0');
     });
 
-    it('maps a decision against a moved plugin manifest to 409 naming the kind (#361)', () => {
-      filter.catch(new PluginGrantPluginChangedError('sample', 'version-activated', '1.2.0', '1.3.0'), host);
-
-      expect(rendered().getStatus()).toBe(Http.Conflict);
-      expect(body()['message']).toBe('t:errors.plugin.grant_plugin_changed');
-      expect(body()['slug']).toBe('sample');
-      expect(body()['kind']).toBe('version-activated');
-      expect(body()['expectedVersion']).toBe('1.2.0');
-      expect(body()['actualVersion']).toBe('1.3.0');
-    });
-
     it('maps the scope refusal to 422 with the offending scope', () => {
       filter.catch(new PluginUnitScopeError('sample', 'server'), host);
 
@@ -631,7 +565,6 @@ describe('PluginExceptionFilter', () => {
 
   describe('500 — corrupted server state, logged loud, generic copy', () => {
     it.each([
-      [new PluginGrantManifestInvalidError('sample', 'schema drift', [SCHEMA_ISSUE])],
       [new PluginFeatureStateManifestError('sample', 'schema drift', [SCHEMA_ISSUE])],
       [new PluginConsentPresentationManifestError('sample', 'schema drift', [SCHEMA_ISSUE])],
     ])('maps stored-manifest corruption %s to 500 carrying the issues', (exception) => {
@@ -906,6 +839,15 @@ describe('PluginExceptionFilter', () => {
         code: 'PLUGIN_CONSENT_ACT_UNIT_OFF',
         key: 'consent_act_unit_off',
         fields: { slug: 'sample', scopeType: 'Household' },
+      },
+      // A write that stores a presentation named a locale this server does
+      // not support (#1301).
+      {
+        exception: new pluginRuntime.PluginConsentActLocaleError('xx'),
+        status: Http.UnprocessableEntity,
+        code: 'PLUGIN_CONSENT_ACT_LOCALE',
+        key: 'consent_act_locale',
+        fields: { locale: 'xx' },
       },
     ])('renders $code with its status and fields (#1150)', ({ exception, status, code, key, fields }) => {
       filter.catch(exception, host);

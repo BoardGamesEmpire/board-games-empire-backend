@@ -354,6 +354,23 @@ describe('PluginConsentPresentationService', () => {
       });
     });
 
+    it('reports the one locale it was rendered in, apart from the locale each reason came from (#1301)', async () => {
+      // A consent write sends this back, so the act records the text read.
+      // The plugin has no German reason for feedback:read: that reason falls
+      // back to English, and the surface is still the German one.
+      const german = await service.presentForUnit('plg_1', SERVER_UNIT, 'de');
+      const feedback = german?.checks.find((check) => check.slug === 'feedback:read');
+
+      expect(german?.locale).toBe('de');
+      expect(feedback?.reason).toMatchObject({ locale: 'en', usedFallback: true });
+    });
+
+    it('reports the host default as its locale when the request names none (#1301)', async () => {
+      const presentation = await service.presentForUnit('plg_1', SERVER_UNIT);
+
+      expect(presentation?.locale).toBe('en');
+    });
+
     it('a regional variant falls back to its base language before the default', async () => {
       const presentation = await service.presentForUnit('plg_1', SERVER_UNIT, 'de-AT');
 

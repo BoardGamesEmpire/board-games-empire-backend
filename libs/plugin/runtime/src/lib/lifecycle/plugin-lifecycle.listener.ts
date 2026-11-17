@@ -209,6 +209,8 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
           // Whether a reinstall dropped retained server config as
           // schema-invalid — same "asked of this table directly" contract.
           retainedConfigReset: event.retainedConfigReset,
+          // The InstallAccept act that holds what the server admin was shown (#1336).
+          actId: event.actId,
         },
       };
     }
@@ -361,9 +363,9 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
     if (event instanceof PluginUpdateApprovedEvent) {
       return {
         ...this.pluginRowIdentity(event.after),
-        // Approval is the consent act for the update's new server checks;
-        // per-grant events are deliberately not emitted (install parity),
-        // so this payload is where the seed's provenance lives.
+        // Approval is the consent act for the update's server checks, so this
+        // payload is where a fresh grant's provenance lives: only a decision
+        // changed on an existing row gets its own grant event (#1336).
         payload: {
           // The staging this approval answered (#357); null when an update
           // with nothing to consent to activated as it was staged.
@@ -373,6 +375,8 @@ export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutd
           // schema-invalid under the manifest just promoted (D-CN) — same
           // "asked of this table directly" contract as install's field.
           retainedConfigReset: event.retainedConfigReset,
+          // The UpdateApprove act; null when nothing needed approval (#1336).
+          actId: event.actId,
         },
       };
     }

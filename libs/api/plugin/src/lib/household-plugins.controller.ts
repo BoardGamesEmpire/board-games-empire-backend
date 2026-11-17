@@ -6,7 +6,7 @@ import {
   HouseholdLivenessGuard,
   HouseholdPathParam,
 } from '@bge/household';
-import { t } from '@bge/i18n';
+import { SupportedLocalesService, t } from '@bge/i18n';
 import { AbilityService, CheckPolicies, PoliciesGuard, ScopeComposer } from '@bge/permissions';
 import {
   PluginConsentActService,
@@ -35,6 +35,7 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTag
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { consentActLocale } from './consent-act-locale';
 import {
   consentActResponse,
   ConsentActResponseDto,
@@ -98,6 +99,7 @@ export class HouseholdPluginsController {
     private readonly auditContext: AuditContextService,
     private readonly db: DatabaseService,
     private readonly scopeComposer: ScopeComposer,
+    private readonly supportedLocales: SupportedLocalesService,
   ) {}
 
   // ─── Installed-plugin inventory for this household (#354) ─────────────────
@@ -233,7 +235,8 @@ export class HouseholdPluginsController {
       'PLUGIN_CONSENT_ACT_REQUIRED_SET: a required permission was left out (missingSlugs) or Denied ' +
       '(refusedSlugs). PLUGIN_CONSENT_ACT_ANSWER: an answer does not match what the plugin asks for (rule and ' +
       "permissionSlugs say which). PLUGIN_CONFIG_VALIDATION: config does not match the plugin's schema. " +
-      'PLUGIN_UNIT_SCOPE: the plugin cannot be switched on per household. Also a body that fails validation.',
+      'PLUGIN_UNIT_SCOPE: the plugin cannot be switched on per household. PLUGIN_CONSENT_ACT_LOCALE: locale is ' +
+      'not one this server supports. Also a body that fails validation.',
   })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.HouseholdPlugin))
   @HttpCode(Http.Ok)
@@ -247,7 +250,7 @@ export class HouseholdPluginsController {
 
     return from(
       this.consentActs.switchOn({
-        ...this.actInput(householdId, slug, dto.manifestSha256, dto.answers),
+        ...this.actInput(householdId, slug, dto, dto.answers),
         config: dto.config,
       }),
     ).pipe(map((result) => consentActResponse(t('success.plugin.enabled', { slug }), result)));
@@ -280,7 +283,8 @@ export class HouseholdPluginsController {
     status: Http.UnprocessableEntity,
     description:
       'PLUGIN_CONSENT_ACT_ANSWER: the permission is not requested, is required, or is not decided by this ' +
-      'household (rule says which). Also a body that fails validation.',
+      'household (rule says which). PLUGIN_CONSENT_ACT_LOCALE: locale is not one this server supports. Also a ' +
+      'body that fails validation.',
   })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.HouseholdPlugin))
   @HttpCode(Http.Ok)
@@ -288,7 +292,7 @@ export class HouseholdPluginsController {
   toggleConsent(@Param('householdId') householdId: string, @Param('slug') slug: string, @Body() dto: ToggleConsentDto) {
     this.abilityService.assertCurrentActorCan(Action.manage, ResourceType.HouseholdPlugin, { householdId });
 
-    return from(this.consentActs.toggle(this.actInput(householdId, slug, dto.manifestSha256, [dto.answer]))).pipe(
+    return from(this.consentActs.toggle(this.actInput(householdId, slug, dto, [dto.answer]))).pipe(
       map((result) => consentActResponse(t('success.plugin.consent_recorded', { slug }), result)),
     );
   }
@@ -321,7 +325,8 @@ export class HouseholdPluginsController {
     status: Http.UnprocessableEntity,
     description:
       'PLUGIN_CONSENT_ACT_ANSWER: an answer does not match what is outstanding (rule and permissionSlugs say ' +
-      'which). Also a body that fails validation, such as an empty answers list.',
+      'which). PLUGIN_CONSENT_ACT_LOCALE: locale is not one this server supports. Also a body that fails ' +
+      'validation, such as an empty answers list.',
   })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.HouseholdPlugin))
   @HttpCode(Http.Ok)
@@ -329,7 +334,7 @@ export class HouseholdPluginsController {
   reviewConsent(@Param('householdId') householdId: string, @Param('slug') slug: string, @Body() dto: ReviewConsentDto) {
     this.abilityService.assertCurrentActorCan(Action.manage, ResourceType.HouseholdPlugin, { householdId });
 
-    return from(this.consentActs.review(this.actInput(householdId, slug, dto.manifestSha256, dto.answers))).pipe(
+    return from(this.consentActs.review(this.actInput(householdId, slug, dto, dto.answers))).pipe(
       map((result) =>
         consentActResponse(
           result.switchedOff
@@ -480,23 +485,28 @@ export class HouseholdPluginsController {
   /**
    * What every household consent act hands the service (#1150): the route
    * household as the unit, the acting user, and the locale the consent
-   * surface was shown in, as the consent read passes it. The service verifies
-   * the actor's authority again before its transaction; inside it, only the
-   * household's liveness is locked.
+   * surface was shown in: the one the body names, refused unless this server
+   * supports it, else the request's own, as the consent read resolves it
+   * (#1301). The service verifies the actor's authority again before its
+   * transaction; inside it, only the household's liveness is locked.
    */
   private actInput(
     householdId: string,
     slug: string,
-    manifestSha256: string,
+    body: { readonly manifestSha256: string; readonly locale?: string },
     answers: readonly ConsentActAnswer[],
   ): ConsentActInput {
     return {
       slug,
       unit: { scopeType: 'Household', householdId },
       actorId: this.abilityService.getActingUserId(),
-      manifestSha256,
+      manifestSha256: body.manifestSha256,
       answers,
-      locale: this.auditContext.getLocale() ?? undefined,
+      locale: consentActLocale(
+        body.locale,
+        this.supportedLocales.getSupportedTags(),
+        this.auditContext.getLocale() ?? undefined,
+      ),
     };
   }
 

@@ -150,6 +150,7 @@ describe('PluginLifecycleListener', () => {
           auditFindings: null,
           staticAnalysis: [],
           acknowledgedForbiddenImports: [],
+          actId: 'act-install',
         },
         initiatedAt,
       );
@@ -174,6 +175,8 @@ describe('PluginLifecycleListener', () => {
             auditFindings: null,
             staticAnalysis: [],
             acknowledgedForbiddenImports: [],
+            // The InstallAccept act that holds what the server admin was shown (#1336).
+            actId: 'act-install',
           }),
         }),
       );
@@ -185,12 +188,13 @@ describe('PluginLifecycleListener', () => {
     });
 
     /** D-CN on #59/#370: the reset flag rides the same payload the seeded grants already do. */
-    it('persists an UpdateApproved row carrying granted permissions and the retained-config reset flag', async () => {
+    it('persists an UpdateApproved row carrying granted permissions, the retained-config reset flag and the act (#1336)', async () => {
       const event = new PluginUpdateApprovedEvent(
         { id: 'plugin-1', slug: 'demo-sink', version: '1.2.0', pendingVersion: '1.3.0', pendingStagingId: 'staging-1' },
         { id: 'plugin-1', slug: 'demo-sink', version: '1.3.0', pendingVersion: null, pendingStagingId: null },
         [{ slug: 'plugin.demo-sink.send', required: true, consentScope: 'server', reason: 'Send digests' }],
         true,
+        'act-approve',
         initiatedAt,
       );
 
@@ -207,6 +211,7 @@ describe('PluginLifecycleListener', () => {
               { slug: 'plugin.demo-sink.send', required: true, consentScope: 'server', reason: 'Send digests' },
             ],
             retainedConfigReset: true,
+            actId: 'act-approve',
           }),
         }),
       );
@@ -226,6 +231,7 @@ describe('PluginLifecycleListener', () => {
           { id: 'plugin-1', slug: 'demo-sink', version: '1.3.0', pendingVersion: null, pendingStagingId: null },
           [],
           false,
+          null,
           initiatedAt,
         ),
       );
@@ -322,7 +328,7 @@ describe('PluginLifecycleListener', () => {
           status: PluginGrantStatus.Granted,
           decidedRiskLevel: RiskLevel.Low,
         },
-        { manifestVersion: '1.2.3', actId: null },
+        { manifestVersion: '1.2.3', actId: 'act-1' },
         initiatedAt,
       );
       db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
@@ -342,7 +348,7 @@ describe('PluginLifecycleListener', () => {
             permissionSlug: 'plugin.demo-sink.send',
             status: PluginGrantStatus.Granted,
             decidedRiskLevel: RiskLevel.Low,
-            actId: null,
+            actId: 'act-1',
           },
         }),
       );
@@ -378,7 +384,9 @@ describe('PluginLifecycleListener', () => {
       );
     });
 
-    it("records a server-scope grant event's manifest version with a null act id (#1150)", async () => {
+    // A server admin's decision is written by a consent act too, so its row
+    // names the act as a household's or user's does (#1336).
+    it("records a server-scope grant event's manifest version and act id from the event's context (#1336)", async () => {
       const event = new PluginGrantCreatedEvent(
         null,
         {
@@ -390,7 +398,7 @@ describe('PluginLifecycleListener', () => {
           status: PluginGrantStatus.Granted,
           decidedRiskLevel: RiskLevel.Low,
         },
-        { manifestVersion: '2.0.0', actId: null },
+        { manifestVersion: '2.0.0', actId: 'act-server' },
         initiatedAt,
       );
       db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
@@ -401,7 +409,7 @@ describe('PluginLifecycleListener', () => {
       expect(createdRow()).toEqual(
         expect.objectContaining({
           manifestVersion: '2.0.0',
-          payload: expect.objectContaining({ actId: null }),
+          payload: expect.objectContaining({ actId: 'act-server' }),
         }),
       );
     });
@@ -418,7 +426,7 @@ describe('PluginLifecycleListener', () => {
           status: PluginGrantStatus.Granted,
           decidedRiskLevel: RiskLevel.Low,
         },
-        { manifestVersion: '1.0.0', actId: null },
+        { manifestVersion: '1.0.0', actId: 'act-1' },
         initiatedAt,
       );
       db.plugin.findUnique.mockResolvedValue(null);

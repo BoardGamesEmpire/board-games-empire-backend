@@ -88,8 +88,7 @@ export function isDeadlockError(error: unknown): boolean {
  *
  * Safe to replay because a deadlock aborts the victim's transaction WHOLE: nothing
  * is half-written, and a caller whose accumulators live inside the transaction has
- * nothing to unwind. That is the same argument `PluginUpdateService`'s P2002 retry
- * makes, and the same bound: once, not until-success. A second deadlock means a
+ * nothing to unwind. The bound is once, not until-success. A second deadlock means a
  * contender is sustaining the contention, and answering that with a loop would hold
  * the claim open against it — so the error propagates, and the edge renders it as a
  * typed, retryable refusal rather than a bare 500.

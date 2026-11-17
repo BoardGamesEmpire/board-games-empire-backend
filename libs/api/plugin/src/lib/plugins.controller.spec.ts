@@ -6,26 +6,29 @@ import {
   PERMISSION_CATALOG,
   PluginGrantStatus,
   ResourceType,
+  RiskLevel,
   ROLE_PERMISSION_CATALOG,
 } from '@bge/database';
+import type { SupportedLocalesService } from '@bge/i18n';
 import { CHECK_POLICIES_KEY, ScopeComposer, type AppAbility } from '@bge/permissions';
 import type {
   PluginConsentPresentation,
   PluginConsentPresentationService,
   PluginFeatureStateService,
   PluginFeatureUnitState,
-  PluginGrantService,
   PluginInventoryService,
   PluginLifecycleService,
+  PluginServerConsentActService,
   PluginUpdateService,
   UpdateEscalationComparison,
 } from '@bge/plugin';
 import {
+  PluginConsentActLocaleError,
   PluginConsentPresentationNotFoundError,
   PluginFeatureStateNotFoundError,
-  PluginGrantPluginNotFoundError,
   PluginInventoryNotFoundError,
   PluginLifecycleNotFoundError,
+  PluginUnitPluginNotFoundError,
   PluginUpdateNoPendingError,
   PluginUpdatePluginNotFoundError,
 } from '@bge/plugin';
@@ -50,9 +53,16 @@ const APPROVED_PLUGIN = { id: 'plugin-1', slug: 'demo-sink', version: '1.3.0', r
 const COMPARISON = {
   escalations: [],
   serverGating: true,
-  blockedByDenial: [],
+  deniedRequiredSlugs: ['read:household'],
 } as unknown as UpdateEscalationComparison;
 const SEEDED_GRANTS = [{ id: 'grant-1', permissionSlug: 'user:impersonate' }] as never[];
+const APPROVE_ACT = {
+  id: 'act-1',
+  kind: 'UpdateApprove',
+  decidedAt: new Date('2026-11-16T00:00:00Z'),
+  presentation: { locale: 'de', source: 'staged', checks: [] },
+  manifestSha256: 'f'.repeat(64),
+};
 const RECONSENT_HOUSEHOLDS = [{ householdId: 'hh-1', outstanding: ['calendar:read'] }];
 const PENDING_PLUGIN = {
   id: 'plugin-1',
@@ -64,6 +74,8 @@ const PENDING_PLUGIN = {
 } as never;
 const DECLARES = { added: ['plugin|demo-sink|manage:digest'], removed: ['plugin|demo-sink|read:legacy'] };
 const NO_LONGER_REQUESTED = ['feedback:read'];
+const SHOWN_RISKS = [{ permissionSlug: 'feedback:read', riskLevel: RiskLevel.Medium }];
+const UNIT_COVERAGE = { household: { switchedOn: 3, covered: 1 }, user: { switchedOn: 2, covered: 2 } };
 const PRESENTATION = {
   plugin: { id: 'plugin-1', slug: 'demo-sink', enabled: true },
   manifestVersion: '1.3.0',
@@ -76,7 +88,14 @@ const ACTIVE_PRESENTATION = {
   source: 'active',
   checks: [],
 } as unknown as PluginConsentPresentation;
-const GRANT = { id: 'grant-1', permissionSlug: 'feedback:read', status: PluginGrantStatus.Granted } as never;
+const SHA = 'b'.repeat(64);
+const ANSWER = {
+  permissionSlug: 'read:safe_http_policy',
+  status: PluginGrantStatus.Granted,
+  riskLevel: RiskLevel.Medium,
+};
+const DECIDED_AT = new Date('2026-11-16T00:00:00Z');
+const ACT = { id: 'act-1', kind: 'Toggle', decidedAt: DECIDED_AT, presentation: {} } as never;
 const INVENTORY_PAGE = {
   rows: [{ id: 'plugin-1', slug: 'demo-sink', displayName: 'Demo Sink', manifestUnreadable: false }],
   total: 1,
@@ -110,9 +129,9 @@ describe('PluginsController (delegation)', () => {
   let presentation: jest.Mocked<
     Pick<PluginConsentPresentationService, 'presentPendingFromRow' | 'presentForUnitBySlug'>
   >;
-  let grants: jest.Mocked<Pick<PluginGrantService, 'decide'>>;
   let featureState: jest.Mocked<Pick<PluginFeatureStateService, 'resolveForUnitBySlug'>>;
   let inventory: jest.Mocked<Pick<PluginInventoryService, 'listForServer' | 'getBySlug' | 'existsUnderCeiling'>>;
+  let serverConsentActs: jest.Mocked<Pick<PluginServerConsentActService, 'toggle' | 'review'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale'>>;
   let abilityService: MockAbilityService;
   let scopeComposer: ScopeComposer;
@@ -154,14 +173,18 @@ describe('PluginsController (delegation)', () => {
 
   const writes = [
     {
-      route: 'decideGrant',
+      route: 'toggleConsent',
+      call: (): Observable<unknown> => controller.toggleConsent('demo-sink', { manifestSha256: SHA, answer: ANSWER }),
+      service: () => serverConsentActs.toggle,
+      notFound: PluginUnitPluginNotFoundError,
+      slugField: 'pluginSlug',
+    },
+    {
+      route: 'reviewConsent',
       call: (): Observable<unknown> =>
-        controller.decideGrant('demo-sink', {
-          permissionSlug: 'plugin|demo-sink|manage:digest',
-          status: PluginGrantStatus.Granted,
-        }),
-      service: () => grants.decide,
-      notFound: PluginGrantPluginNotFoundError,
+        controller.reviewConsent('demo-sink', { manifestSha256: SHA, answers: [ANSWER] }),
+      service: () => serverConsentActs.review,
+      notFound: PluginUnitPluginNotFoundError,
       slugField: 'pluginSlug',
     },
     {
@@ -194,7 +217,8 @@ describe('PluginsController (delegation)', () => {
     },
     {
       route: 'approveUpdate',
-      call: (): Observable<unknown> => controller.approveUpdate('demo-sink', { stagingId: 'staging-a' }),
+      call: (): Observable<unknown> =>
+        controller.approveUpdate('demo-sink', { stagingId: 'staging-a', shownRisks: SHOWN_RISKS }),
       service: () => updates.approve,
       notFound: PluginUpdatePluginNotFoundError,
       slugField: 'slug',
@@ -219,6 +243,7 @@ describe('PluginsController (delegation)', () => {
       approve: jest.fn().mockResolvedValue({
         plugin: APPROVED_PLUGIN,
         comparison: COMPARISON,
+        act: APPROVE_ACT,
         seededGrants: SEEDED_GRANTS,
         reconsentHouseholdUnits: RECONSENT_HOUSEHOLDS,
         reconsentUserUnits: [],
@@ -230,13 +255,13 @@ describe('PluginsController (delegation)', () => {
         pendingSince: new Date('2026-07-29T00:00:00Z'),
         declares: DECLARES,
         noLongerRequested: NO_LONGER_REQUESTED,
+        unitCoverage: UNIT_COVERAGE,
       }),
     };
     presentation = {
       presentPendingFromRow: jest.fn().mockResolvedValue(PRESENTATION),
       presentForUnitBySlug: jest.fn().mockResolvedValue(ACTIVE_PRESENTATION),
     };
-    grants = { decide: jest.fn().mockResolvedValue({ grant: GRANT, changed: true }) };
     featureState = { resolveForUnitBySlug: jest.fn().mockResolvedValue(FEATURE_STATE) };
     inventory = {
       listForServer: jest.fn().mockResolvedValue(INVENTORY_PAGE as never),
@@ -244,6 +269,10 @@ describe('PluginsController (delegation)', () => {
       // Every slug here lies under the actor's ceiling unless a test says
       // otherwise.
       existsUnderCeiling: jest.fn().mockResolvedValue(true),
+    };
+    serverConsentActs = {
+      toggle: jest.fn().mockResolvedValue({ act: ACT, changed: true }),
+      review: jest.fn().mockResolvedValue({ act: ACT, changed: true }),
     };
     auditContext = { getLocale: jest.fn().mockReturnValue(null) };
     abilityService = createMockAbilityService();
@@ -254,12 +283,13 @@ describe('PluginsController (delegation)', () => {
       lifecycle as never,
       abilityService as never,
       updates as never,
-      grants as never,
       presentation as never,
       featureState as never,
       inventory as never,
+      serverConsentActs as never,
       auditContext as never,
       scopeComposer,
+      { getSupportedTags: () => ['en', 'de'] } as unknown as SupportedLocalesService,
     );
   });
 
@@ -323,16 +353,24 @@ describe('PluginsController (delegation)', () => {
   });
 
   describe('update consent endpoints (#321)', () => {
-    it('approveUpdate forwards slug, actor, and the confirmation set; the response surfaces the consequences', async () => {
+    it('approveUpdate forwards slug, actor, the confirmation set and the locale; the response surfaces the act and the consequences (#1336)', async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
       const result = await firstValueFrom(
-        controller.approveUpdate('demo-sink', { stagingId: 'staging-a', confirmCriticalSlugs: ['user:impersonate'] }),
+        controller.approveUpdate('demo-sink', {
+          stagingId: 'staging-a',
+          shownRisks: SHOWN_RISKS,
+          confirmCriticalSlugs: ['user:impersonate'],
+        }),
       );
 
       expect(updates.approve).toHaveBeenCalledWith({
         slug: 'demo-sink',
         approverId: MOCK_ACTING_USER_ID,
         stagingId: 'staging-a',
+        shownRisks: SHOWN_RISKS,
         confirmCriticalSlugs: ['user:impersonate'],
+        locale: 'de',
       });
       expect(result).toEqual({
         message: expect.objectContaining({
@@ -341,6 +379,8 @@ describe('PluginsController (delegation)', () => {
         }),
         plugin: APPROVED_PLUGIN,
         comparison: COMPARISON,
+        // The act's summary, not its stored presentation.
+        act: { id: 'act-1', kind: 'UpdateApprove', decidedAt: new Date('2026-11-16T00:00:00Z') },
         seededGrants: SEEDED_GRANTS,
         restartRequired: true,
         reconsentHouseholdUnits: RECONSENT_HOUSEHOLDS,
@@ -348,15 +388,38 @@ describe('PluginsController (delegation)', () => {
       });
     });
 
-    it('an omitted confirmation set stays undefined — the service owns the expectation', async () => {
-      await firstValueFrom(controller.approveUpdate('demo-sink', { stagingId: 'staging-a' }));
+    it('an omitted confirmation set and an absent locale stay undefined — the service owns the expectation and the default', async () => {
+      await firstValueFrom(controller.approveUpdate('demo-sink', { stagingId: 'staging-a', shownRisks: SHOWN_RISKS }));
 
       expect(updates.approve).toHaveBeenCalledWith({
         slug: 'demo-sink',
         approverId: MOCK_ACTING_USER_ID,
         stagingId: 'staging-a',
+        shownRisks: SHOWN_RISKS,
         confirmCriticalSlugs: undefined,
+        locale: undefined,
       });
+    });
+
+    // The approval's consent act stores what the staged-update read showed,
+    // so it renders in the locale the body names (#1301).
+    it('approveUpdate renders in the supported locale the body names, not the request locale (#1301)', async () => {
+      auditContext.getLocale.mockReturnValue('en');
+
+      await firstValueFrom(
+        controller.approveUpdate('demo-sink', { stagingId: 'staging-a', shownRisks: SHOWN_RISKS, locale: 'de' }),
+      );
+
+      expect(updates.approve).toHaveBeenCalledWith(expect.objectContaining({ locale: 'de' }));
+    });
+
+    it('approveUpdate refuses a locale the server does not support before the service is called (#1301)', async () => {
+      await expect(
+        firstValueFrom(
+          controller.approveUpdate('demo-sink', { stagingId: 'staging-a', shownRisks: SHOWN_RISKS, locale: 'xx' }),
+        ),
+      ).rejects.toBeInstanceOf(PluginConsentActLocaleError);
+      expect(updates.approve).not.toHaveBeenCalled();
     });
 
     it('rejectUpdate forwards slug, actorId and the staging it answers, wrapping with a success message (#357)', async () => {
@@ -392,7 +455,11 @@ describe('PluginsController (delegation)', () => {
         stagingId: 'staging-a',
         escalations: COMPARISON.escalations,
         serverGating: true,
-        blockedByDenial: [],
+        // The denied permissions approving would grant (#1336).
+        deniedRequiredSlugs: ['read:household'],
+        // Per scope, the switched-on units and the ones approving would ask
+        // nothing of (#1336).
+        unitCoverage: UNIT_COVERAGE,
         // The catalog diff rides the body: no escalation kind describes a
         // declaration change, so a client cannot reconstruct it.
         declares: DECLARES,
@@ -418,31 +485,7 @@ describe('PluginsController (delegation)', () => {
     });
   });
 
-  describe('grant decide + consent presentation (#322)', () => {
-    it('decideGrant records a Server-scope decision with the CLS actor as decider — never the body', async () => {
-      const result = await firstValueFrom(
-        controller.decideGrant('demo-sink', {
-          permissionSlug: 'feedback:read',
-          status: PluginGrantStatus.Granted,
-        }),
-      );
-
-      expect(grants.decide).toHaveBeenCalledWith({
-        slug: 'demo-sink',
-        permissionSlug: 'feedback:read',
-        status: PluginGrantStatus.Granted,
-        deciderId: MOCK_ACTING_USER_ID,
-      });
-      expect(result).toEqual({
-        message: expect.objectContaining({
-          key: 'success.plugin.grant_decided',
-          args: { slug: 'demo-sink', permissionSlug: 'feedback:read' },
-        }),
-        grant: GRANT,
-        changed: true,
-      });
-    });
-
+  describe('consent surface (#322)', () => {
     it('consentPresentation renders the Server unit from the slug entry point, locale from CLS', async () => {
       auditContext.getLocale.mockReturnValue('de');
 
@@ -458,6 +501,92 @@ describe('PluginsController (delegation)', () => {
       await firstValueFrom(controller.consentPresentation('demo-sink'));
 
       expect(presentation.presentForUnitBySlug).toHaveBeenCalledWith('demo-sink', SERVER_PLUGIN_UNIT, undefined);
+    });
+  });
+
+  // The Server unit's consent acts (#1336): the server admin is the actor,
+  // resolved from CLS, and the service re-verifies that authority.
+  describe('server consent acts (#1336)', () => {
+    const actBody = { id: 'act-1', kind: 'Toggle', decidedAt: DECIDED_AT };
+
+    it('toggle records one answer with the actor, the sha and the locale (#1336)', async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
+      const result = await firstValueFrom(
+        controller.toggleConsent('demo-sink', { manifestSha256: SHA, answer: ANSWER }),
+      );
+
+      expect(serverConsentActs.toggle).toHaveBeenCalledWith({
+        slug: 'demo-sink',
+        actorId: MOCK_ACTING_USER_ID,
+        manifestSha256: SHA,
+        answers: [ANSWER],
+        locale: 'de',
+      });
+      expect(result).toEqual({
+        message: expect.objectContaining({ key: 'success.plugin.server_consent_toggled', args: { slug: 'demo-sink' } }),
+        changed: true,
+        act: actBody,
+      });
+    });
+
+    it('review records the answers with the actor, the sha and the locale (#1336)', async () => {
+      const result = await firstValueFrom(
+        controller.reviewConsent('demo-sink', { manifestSha256: SHA, answers: [ANSWER] }),
+      );
+
+      expect(serverConsentActs.review).toHaveBeenCalledWith({
+        slug: 'demo-sink',
+        actorId: MOCK_ACTING_USER_ID,
+        manifestSha256: SHA,
+        answers: [ANSWER],
+        locale: undefined,
+      });
+      expect(result).toEqual({
+        message: expect.objectContaining({
+          key: 'success.plugin.server_consent_reviewed',
+          args: { slug: 'demo-sink' },
+        }),
+        changed: true,
+        act: actBody,
+      });
+    });
+
+    it('an act that changed nothing answers changed: false with no act (#1336)', async () => {
+      serverConsentActs.toggle.mockResolvedValue({ act: null, changed: false });
+
+      const result = await firstValueFrom(
+        controller.toggleConsent('demo-sink', { manifestSha256: SHA, answer: ANSWER }),
+      );
+
+      expect(result).toEqual(expect.objectContaining({ changed: false, act: null }));
+    });
+
+    // The act stores what the consent surface showed, so it renders in the
+    // locale the body names rather than the one this request resolved (#1301).
+    it('toggle and review render in the supported locale the body names, not the request locale (#1301)', async () => {
+      auditContext.getLocale.mockReturnValue('en');
+
+      await firstValueFrom(
+        controller.toggleConsent('demo-sink', { manifestSha256: SHA, answer: ANSWER, locale: 'de' }),
+      );
+      await firstValueFrom(
+        controller.reviewConsent('demo-sink', { manifestSha256: SHA, answers: [ANSWER], locale: 'de' }),
+      );
+
+      expect(serverConsentActs.toggle).toHaveBeenCalledWith(expect.objectContaining({ locale: 'de' }));
+      expect(serverConsentActs.review).toHaveBeenCalledWith(expect.objectContaining({ locale: 'de' }));
+    });
+
+    it('toggle and review refuse a locale the server does not support before the service is called (#1301)', async () => {
+      await expect(
+        firstValueFrom(controller.toggleConsent('demo-sink', { manifestSha256: SHA, answer: ANSWER, locale: 'xx' })),
+      ).rejects.toBeInstanceOf(PluginConsentActLocaleError);
+      await expect(
+        firstValueFrom(controller.reviewConsent('demo-sink', { manifestSha256: SHA, answers: [ANSWER], locale: 'xx' })),
+      ).rejects.toBeInstanceOf(PluginConsentActLocaleError);
+      expect(serverConsentActs.toggle).not.toHaveBeenCalled();
+      expect(serverConsentActs.review).not.toHaveBeenCalled();
     });
   });
 
@@ -688,7 +817,8 @@ describe('PluginsController (delegation)', () => {
     );
 
     it.each([
-      ['decideGrant', Action.manage],
+      ['toggleConsent', Action.manage],
+      ['reviewConsent', Action.manage],
       ['enable', Action.manage],
       ['disable', Action.manage],
       ['updateConfig', Action.manage],
@@ -730,8 +860,9 @@ describe('PluginsController (delegation)', () => {
     // is what forces that decision to be made rather than discovered.
     it.each([
       ['list', '/', RequestMethod.GET],
-      ['decideGrant', ':slug/grants', RequestMethod.POST],
       ['consentPresentation', ':slug/consent', RequestMethod.GET],
+      ['toggleConsent', ':slug/consent/toggle', RequestMethod.POST],
+      ['reviewConsent', ':slug/consent/review', RequestMethod.POST],
       ['enable', ':slug/enable', RequestMethod.POST],
       ['disable', ':slug/disable', RequestMethod.POST],
       ['updateConfig', ':slug/config', RequestMethod.PATCH],
@@ -746,7 +877,7 @@ describe('PluginsController (delegation)', () => {
       expect(Reflect.getMetadata('method', PluginsController.prototype[handler])).toBe(method);
     });
 
-    it('registers exactly the lifecycle, update-consent, and grant-consent routes', () => {
+    it('registers exactly the lifecycle, update-consent, and consent routes', () => {
       const handlers = Object.getOwnPropertyNames(PluginsController.prototype).filter(
         (name) =>
           name !== 'constructor' &&
@@ -755,8 +886,9 @@ describe('PluginsController (delegation)', () => {
 
       expect(handlers).toEqual([
         'list',
-        'decideGrant',
         'consentPresentation',
+        'toggleConsent',
+        'reviewConsent',
         'enable',
         'disable',
         'updateConfig',
@@ -785,7 +917,7 @@ describe('PluginsController (delegation)', () => {
         .sort();
 
       expect(slugRoutes).toEqual([...reads, ...writes].map(({ route }) => route).sort());
-      expect(slugRoutes).toHaveLength(11);
+      expect(slugRoutes).toHaveLength(12);
     });
   });
 });

@@ -1,3 +1,4 @@
+import { RiskLevel } from '@bge/database';
 import { buildPluginTarball, type PluginTarballEntry } from '@bge/plugin-artifacts';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
@@ -5,8 +6,11 @@ import { createHash, randomBytes } from 'node:crypto';
 import { access, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import request from 'supertest';
+import { restoreShippedCatalog } from '../permission-catalog/shipped-catalog';
+import { deferredRequest } from '../support/deferred-request';
 import { E2E_PLUGINS_ROOT_VAR, requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { readArtifactShownRisks, shownServerRisks } from './consent-act-fixtures';
 
 /**
  * The install ingress end to end (#1094): a plugin artifact posted by upload,
@@ -54,16 +58,24 @@ describe('plugin install ingress (#1094)', () => {
    * follows it, so each call is its own plugin and no test installs over
    * another. The fixture's `feedback:read` is dropped for the reason the
    * other plugin specs give: no seeded `Permission` row backs it.
-   * `bgeCompat` is widened to cover the server's build-time stamp.
+   * `bgeCompat` is widened to cover the server's build-time stamp. `indexJs`
+   * changes the bytes, so a second artifact for the same slug has its own
+   * checksum. `extraChecks` adds requested permissions after the fixture's.
    */
-  const buildArtifact = async (indexJs = 'module.exports = () => ({});\n'): Promise<BuiltArtifact> => {
-    const slug = `ingress-${randomBytes(6).toString('hex')}`;
+  const buildArtifact = async (
+    indexJs = 'module.exports = () => ({});\n',
+    slug = `ingress-${randomBytes(6).toString('hex')}`,
+    extraChecks: PluginManifest['permissions']['checks'] = [],
+  ): Promise<BuiltArtifact> => {
     const [manageDigest] = buildPluginManifest().permissions.checks;
     const manifest: PluginManifest = {
       ...buildPluginManifest({
         slug,
         bgeCompat: '>=0.0.0',
-        permissions: { declares: ['manage:digest'], checks: manageDigest === undefined ? [] : [manageDigest] },
+        permissions: {
+          declares: ['manage:digest'],
+          checks: [...(manageDigest === undefined ? [] : [manageDigest]), ...extraChecks],
+        },
         events: { subscribes: ['feedback.created'], emits: [`plugin.${slug}.digest-sent`] },
         storage: {
           ownTables: [`plugin_${slug.replaceAll('-', '_')}_digests`],
@@ -96,8 +108,16 @@ describe('plugin install ingress (#1094)', () => {
   const readBack = (actor: SessionActor, sha256: string) =>
     request(baseUrl).get(`${ARTIFACTS_PATH}/${sha256}`).set(actor.headers);
 
-  const install = (actor: SessionActor, body: Record<string, unknown>) =>
-    request(baseUrl).post(INSTALL_PATH).set(actor.headers).send(body);
+  /** Sends the risks the artifact read shows, as a client would; a spec's body overrides them (#1336). */
+  const install = (actor: SessionActor, body: { readonly sha256: string } & Record<string, unknown>) =>
+    deferredRequest(
+      () => readArtifactShownRisks(baseUrl, actor, body.sha256),
+      (shownRisks) =>
+        request(baseUrl)
+          .post(INSTALL_PATH)
+          .set(actor.headers)
+          .send({ shownRisks, ...body }),
+    );
 
   const exists = (path: string): Promise<boolean> =>
     access(path).then(
@@ -148,6 +168,145 @@ describe('plugin install ingress (#1094)', () => {
     const replayed = await install(admin, { sha256: artifact.sha256 }).expect(201);
 
     expect(replayed.body.plugin).toEqual(installed.body.plugin);
+  });
+
+  it('an install records one InstallAccept consent act that every server-scope consent decision names (#1336)', async () => {
+    const admin = await actors.admin();
+    const artifact = await buildArtifact();
+
+    await upload(admin, artifact).expect(200);
+    await install(admin, { sha256: artifact.sha256 }).expect(201);
+
+    const plugin = await db.client.plugin.findUniqueOrThrow({ where: { slug: artifact.slug } });
+    const acts = await db.client.pluginConsentAct.findMany({ where: { pluginId: plugin.id } });
+
+    expect(acts).toEqual([
+      expect.objectContaining({
+        pluginSlug: artifact.slug,
+        kind: 'InstallAccept',
+        scopeType: 'Server',
+        manifestVersion: '1.2.0',
+        manifestSha256: artifact.sha256,
+        decidedById: admin.user.id,
+      }),
+    ]);
+
+    const decisions = await db.client.pluginGrant.findMany({ where: { pluginId: plugin.id } });
+
+    // The artifact requests `manage:digest` of the server, so there is one to name the act.
+    expect(decisions).toHaveLength(1);
+    expect(decisions.map((decision) => decision.actId)).toEqual([acts[0]?.id]);
+
+    // A retry installs nothing, so it records no second act (ADR-0002).
+    await install(admin, { sha256: artifact.sha256 }).expect(201);
+
+    expect(await db.client.pluginConsentAct.count({ where: { pluginId: plugin.id } })).toBe(1);
+  });
+
+  // Installing stamps today's risk on every server-scope permission it grants
+  // and records it as shown, so a risk that changed after the read refuses it.
+  it('refuses with 409 an install whose read showed a risk the Owner has since changed, and installs nothing (#1336)', async () => {
+    const admin = await actors.admin();
+    const catalogOwner = await actors.owner();
+    // A core permission, so the Owner can change its risk; the declared
+    // manage:digest is locked Low.
+    const POLICY_READ = 'read:safe_http_policy';
+    const artifact = await buildArtifact(undefined, undefined, [
+      {
+        slug: POLICY_READ,
+        required: false,
+        reason: { en: 'Inspects the outbound policy before scheduling digest delivery.' },
+        consentScope: 'server',
+      },
+    ]);
+
+    const posted = await upload(admin, artifact).expect(200);
+    // The one locale the read was rendered in, which the install may send back (#1301).
+    expect(posted.body.locale).toBe('en');
+    const shownRisks = shownServerRisks(posted.body.checks);
+    const shown = shownRisks.find((risk) => risk.permissionSlug === POLICY_READ)?.riskLevel;
+    expect(shown).toBeDefined();
+    const changed = shown === RiskLevel.Critical ? RiskLevel.High : RiskLevel.Critical;
+
+    try {
+      await request(baseUrl)
+        .patch(`/api/permission-catalog/permissions/${POLICY_READ}`)
+        .set(catalogOwner.headers)
+        .send({ riskLevel: changed })
+        .expect(200);
+
+      const refused = await install(admin, { sha256: artifact.sha256, shownRisks }).expect(409);
+
+      expect(refused.body).toMatchObject({
+        code: 'PLUGIN_CONSENT_ACT_STALE',
+        slug: artifact.slug,
+        kind: 'risk',
+        staleRisks: [{ permissionSlug: POLICY_READ, shownRiskLevel: shown, currentRiskLevel: changed }],
+      });
+      expect(await db.client.plugin.findUnique({ where: { slug: artifact.slug } })).toBeNull();
+      // The artifact waits, so the server admin can read it again and install.
+      await readBack(admin, artifact.sha256).expect(200);
+    } finally {
+      await restoreShippedCatalog(db.client);
+    }
+  });
+
+  // The e2e server supports `en` alone, so the install names `en` against an
+  // `Accept-Language` the server cannot serve; the controller spec proves a
+  // named locale beats the request's own (#1301).
+  it("an install stores its act's presentation in the locale it names, and refuses one the server doesn't support (#1301)", async () => {
+    const admin = await actors.admin();
+    const artifact = await buildArtifact();
+    const installNaming = (locale: string) =>
+      install(admin, { sha256: artifact.sha256, locale }).set('Accept-Language', 'de');
+
+    await upload(admin, artifact).expect(200);
+
+    const refused = await installNaming('xx').expect(422);
+
+    expect(refused.body).toMatchObject({ code: 'PLUGIN_CONSENT_ACT_LOCALE', locale: 'xx' });
+    expect(await db.client.plugin.findUnique({ where: { slug: artifact.slug } })).toBeNull();
+    expect(await db.client.pluginArtifact.findUnique({ where: { sha256: artifact.sha256 } })).not.toBeNull();
+
+    await installNaming('en').expect(201);
+
+    const plugin = await db.client.plugin.findUniqueOrThrow({ where: { slug: artifact.slug } });
+    const [act] = await db.client.pluginConsentAct.findMany({ where: { pluginId: plugin.id } });
+
+    expect(act).toMatchObject({ kind: 'InstallAccept' });
+    expect((act?.presentation as { locale?: string }).locale).toBe('en');
+  });
+
+  it('a reinstall over an uninstalled plugin records a second InstallAccept act, and its decisions name the second (#1336)', async () => {
+    const admin = await actors.admin();
+    const artifact = await buildArtifact();
+
+    await upload(admin, artifact).expect(200);
+    await install(admin, { sha256: artifact.sha256 }).expect(201);
+    await request(baseUrl).post(`/api/plugins/${artifact.slug}/uninstall`).set(admin.headers).send({}).expect(200);
+
+    // A new artifact for the same slug: a reinstall, which keeps the plugin's id.
+    const again = await buildArtifact('module.exports = () => ({ again: true });\n', artifact.slug);
+
+    await upload(admin, again).expect(200);
+    await install(admin, { sha256: again.sha256 }).expect(201);
+
+    const plugin = await db.client.plugin.findUniqueOrThrow({ where: { slug: artifact.slug } });
+    const acts = await db.client.pluginConsentAct.findMany({
+      where: { pluginId: plugin.id },
+      orderBy: { decidedAt: 'asc' },
+    });
+
+    // The append-only record keeps the first install's act through the uninstall.
+    expect(acts.map((act) => [act.kind, act.manifestSha256])).toEqual([
+      ['InstallAccept', artifact.sha256],
+      ['InstallAccept', again.sha256],
+    ]);
+
+    const decisions = await db.client.pluginGrant.findMany({ where: { pluginId: plugin.id } });
+
+    expect(decisions).toHaveLength(1);
+    expect(decisions.map((decision) => decision.actId)).toEqual([acts[1]?.id]);
   });
 
   it('a checksum mismatch by upload keeps nothing (#1094)', async () => {

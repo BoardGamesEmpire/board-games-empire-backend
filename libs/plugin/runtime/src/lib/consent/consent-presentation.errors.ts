@@ -3,8 +3,8 @@ import type { ManifestIssue } from '@boardgamesempire/plugin-manifest';
 /**
  * A stored `Plugin` manifest that fails re-validation — or disagrees with
  * the row's slug/version — while assembling a consent presentation. The same
- * never-trust-a-stored-manifest contract as the grant write path and
- * feature-state (`revalidateStoredManifest`), typed per surface so the C4
+ * never-trust-a-stored-manifest contract as the consent act write path
+ * and feature-state (`revalidateStoredManifest`), typed per surface so the C4
  * boundary can map it and render the issues without casting.
  */
 export class PluginConsentPresentationManifestError extends Error {
@@ -35,7 +35,7 @@ export class PluginConsentPresentationNotFoundError extends Error {
 
 /**
  * The requested plugin is tombstoned (#322): its grants are purged, and
- * neither `decide()` nor a consent act (#1150) records new ones, so no
+ * no consent act (#1150, #1336) records new ones, so no
  * consent surface exists — but the
  * record exists and says so, which is D-AY's 410, never a 404.
  */

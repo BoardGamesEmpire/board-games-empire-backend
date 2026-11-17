@@ -84,8 +84,11 @@ export interface UpdateEscalationComparison {
   /**
    * True when activation needs the server admin's explicit approval: a new
    * server-consentable permission, a permission moving TO server consent, a
-   * risk escalation on a SERVER-scope decision, an outbound-domain
-   * broadening, or a `writesCore` addition.
+   * risk escalation on a SERVER-scope decision on a permission the next
+   * manifest requires (an optional one waits for a review act and confers
+   * nothing until then, #1336), an outbound-domain
+   * broadening, a `writesCore` addition, or a denied server-scope permission
+   * the next manifest requires (`deniedRequiredSlugs`).
    *
    * Escalations belonging to a unit deliberately do NOT server-gate — their
    * consent is not the server admin's to give, and gating on them
@@ -96,10 +99,12 @@ export interface UpdateEscalationComparison {
   readonly serverGating: boolean;
   /**
    * Server-scope `Denied` rows on permissions the next manifest marks
-   * required. Non-empty BLOCKS activation entirely — staging is
-   * still permitted, approval is refused until the denial is reversed.
+   * required. Non-empty gates the update on approval, and approving it grants
+   * each of them at today's risk, under the approval's consent act (#1336):
+   * the server admin who approves a version that requires a permission
+   * consents to it.
    */
-  readonly blockedByDenial: readonly string[];
+  readonly deniedRequiredSlugs: readonly string[];
   /**
    * Household-scope slugs a unit must decide again: newly required, promoted
    * to required, risk-escalated above the risk the unit consented under, or
@@ -115,10 +120,10 @@ export interface UpdateEscalationComparison {
   readonly householdReconsentSlugs: readonly string[];
   /**
    * Server-scope slugs whose catalog risk now exceeds the risk recorded on
-   * their grant. Approval re-stamps these (approval IS that consent act),
-   * and any that reach `Critical` join the second-factor expectation —
-   * without the re-stamp the same escalation would re-fire on every future
-   * update and the second factor would never see it.
+   * their granted consent decision. Approval re-writes a required one at
+   * today's risk, and one that reaches `Critical` joins what the Critical
+   * confirmation expects. An optional one is left as it stands: approving
+   * confers nothing through it, and a review act answers it (#1336).
    */
   readonly serverRiskEscalatedSlugs: readonly string[];
   /**

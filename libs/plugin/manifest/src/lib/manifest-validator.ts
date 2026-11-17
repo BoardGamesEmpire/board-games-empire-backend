@@ -47,8 +47,9 @@ export interface ManifestValidationOptions {
   /**
    * When false, the bgeCompat SATISFACTION check is skipped (the range's
    * shape is still validated). Consent-time re-validation uses this
-   * (`PluginGrantService`): whether the plugin can LOAD under the current
-   * BGE is irrelevant to recording a decision about it, and a BGE upgrade
+   * (`revalidateStoredManifest` in the plugin runtime): whether the plugin
+   * can LOAD under the current BGE is irrelevant to recording a decision
+   * about it, and a BGE upgrade
    * past a plugin's declared range must not make its grants undecidable —
    * not even a denial could be recorded otherwise. Default true.
    */

@@ -14,6 +14,7 @@ import {
   PluginConfigSchemaUnusableError,
   PluginConfigValidationError,
   PluginConsentActAnswerError,
+  PluginConsentActLocaleError,
   PluginConsentActNoUserScopeError,
   PluginConsentActRequiredSetError,
   PluginConsentActStaleError,
@@ -28,15 +29,6 @@ import {
   PluginFeatureStateManifestError,
   PluginFeatureStateNotFoundError,
   PluginFeatureStateTombstonedError,
-  PluginGrantAuthorityError,
-  PluginGrantConsentScopeMismatchError,
-  PluginGrantExclusionError,
-  PluginGrantManifestInvalidError,
-  PluginGrantPluginChangedError,
-  PluginGrantPluginNotFoundError,
-  PluginGrantPluginTombstonedError,
-  PluginGrantRequiredDenialError,
-  PluginGrantUnknownPermissionError,
   PluginInstallAuthorityError,
   PluginInstallConflictError,
   PluginInstallCriticalConfirmationError,
@@ -66,7 +58,6 @@ import {
   PluginUnitPluginTombstonedError,
   PluginUnitScopeError,
   PluginUpdateAuthorityError,
-  PluginUpdateBlockedByDenialError,
   PluginUpdateCriticalConfirmationError,
   PluginUpdateDataGatewayNameConflictError,
   PluginUpdateForbiddenPermissionError,
@@ -107,10 +98,9 @@ import { PluginArtifactUploadInvalidError } from '../upload/plugin-artifact-uplo
  *
  * Wire naming: when a body names the plugin's slug, the field is `slug`,
  * whatever the runtime error calls it (`slug` on install/update,
- * `pluginSlug` on grant/read errors) — one 410/422 client handler must work
- * for all of them. Since D-BO made the grant/consent paths slug-addressed,
- * every not-found body carries `slug` too; only the scope-shape errors
- * identify no plugin at all.
+ * `pluginSlug` on consent and read errors) — one 410/422 client handler must
+ * work for all of them. The consent paths are slug-addressed, so every
+ * not-found body carries `slug` too.
  *
  * `operatorActionable: true` marks errors an operator must act on —
  * server-state failures the caller cannot fix (stored-manifest
@@ -227,9 +217,7 @@ function buildRenderers(): RendererMap {
   // catches, so `kind` is what says whether consent survived.
   const manifestMoveConflict =
     (key: I18nPath) =>
-    (
-      exception: PluginUnitPluginChangedError | PluginLifecyclePluginChangedError | PluginGrantPluginChangedError,
-    ): PluginErrorRendering => ({
+    (exception: PluginUnitPluginChangedError | PluginLifecyclePluginChangedError): PluginErrorRendering => ({
       status: Http.Conflict,
       message: t(key, { slug: exception.pluginSlug }),
       fields: {
@@ -266,7 +254,6 @@ function buildRenderers(): RendererMap {
   // the three stored-manifest errors say exactly this).
   const storedManifestInvalid = (
     exception:
-      | PluginGrantManifestInvalidError
       | PluginFeatureStateManifestError
       | PluginConsentPresentationManifestError
       | PluginLifecycleManifestError
@@ -291,11 +278,6 @@ function buildRenderers(): RendererMap {
     message: t('errors.plugin.update_authority'),
   }));
 
-  renders(PluginGrantAuthorityError, () => ({
-    status: Http.Forbidden,
-    message: t('errors.plugin.grant_authority'),
-  }));
-
   renders(PluginLifecycleAuthorityError, () => ({
     status: Http.Forbidden,
     message: t('errors.plugin.lifecycle_authority'),
@@ -304,12 +286,6 @@ function buildRenderers(): RendererMap {
   renders(PluginUnitAuthorityError, () => ({
     status: Http.Forbidden,
     message: t('errors.plugin.unit_authority'),
-  }));
-
-  renders(PluginGrantExclusionError, (exception) => ({
-    status: Http.Forbidden,
-    message: t('errors.plugin.grant_exclusion', { permissionSlug: exception.permissionSlug }),
-    fields: { permissionSlug: exception.permissionSlug },
   }));
 
   renders(PluginInstallForbiddenPermissionError, forbiddenPermission('errors.plugin.install_forbidden_permission'));
@@ -321,12 +297,6 @@ function buildRenderers(): RendererMap {
     status: Http.NotFound,
     message: t('errors.plugin.update_not_found', { slug: exception.slug }),
     fields: { slug: exception.slug },
-  }));
-
-  renders(PluginGrantPluginNotFoundError, (exception) => ({
-    status: Http.NotFound,
-    message: t('errors.plugin.grant_plugin_not_found', { slug: exception.pluginSlug }),
-    fields: { slug: exception.pluginSlug },
   }));
 
   renders(PluginConsentPresentationNotFoundError, (exception) => ({
@@ -385,12 +355,6 @@ function buildRenderers(): RendererMap {
     status: Http.Gone,
     message: t('errors.plugin.update_tombstoned', { slug: exception.slug }),
     fields: { slug: exception.slug, uninstalledAt: exception.uninstalledAt },
-  }));
-
-  renders(PluginGrantPluginTombstonedError, (exception) => ({
-    status: Http.Gone,
-    message: t('errors.plugin.grant_tombstoned', { slug: exception.pluginSlug }),
-    fields: { slug: exception.pluginSlug, uninstalledAt: exception.uninstalledAt },
   }));
 
   renders(PluginConsentPresentationTombstonedError, (exception) => ({
@@ -522,7 +486,6 @@ function buildRenderers(): RendererMap {
 
   renders(PluginUnitPluginChangedError, manifestMoveConflict('errors.plugin.unit_plugin_changed'));
   renders(PluginLifecyclePluginChangedError, manifestMoveConflict('errors.plugin.lifecycle_plugin_changed'));
-  renders(PluginGrantPluginChangedError, manifestMoveConflict('errors.plugin.grant_plugin_changed'));
 
   // ─── consent acts (#1150) ─────────────────────────────────────────────────
   // A household or user switching a plugin on, toggling one requested
@@ -575,6 +538,15 @@ function buildRenderers(): RendererMap {
     fields: { slug: exception.pluginSlug, scopeType: exception.scopeType },
   }));
 
+  // A write that stores a presentation (a consent act at any scope, an
+  // install, an update approval) named a locale this server does not support
+  // (#1301). `locale` echoes what was sent, so a client can say which.
+  renders(PluginConsentActLocaleError, (exception) => ({
+    status: Http.UnprocessableEntity,
+    message: t('errors.plugin.consent_act_locale', { locale: exception.locale }),
+    fields: { locale: exception.locale },
+  }));
+
   // ─── 409 — confirmation challenges (prompt inputs come FROM the error) ───
 
   renders(PluginInstallCriticalConfirmationError, criticalConfirmation('errors.plugin.install_critical_confirmation'));
@@ -582,26 +554,6 @@ function buildRenderers(): RendererMap {
 
   renders(PluginInstallStaticAnalysisError, staticAnalysisChallenge('errors.plugin.install_static_analysis'));
   renders(PluginUpdateStaticAnalysisError, staticAnalysisChallenge('errors.plugin.update_static_analysis'));
-
-  renders(PluginUpdateBlockedByDenialError, (exception) => ({
-    status: Http.Conflict,
-    message: t('errors.plugin.update_blocked_by_denial'),
-    fields: { slug: exception.slug, deniedRequiredSlugs: exception.deniedRequiredSlugs },
-  }));
-
-  // The decide()-side sibling of the denial block above (D-AV/D-BP, #322):
-  // not a challenge — there is nothing to re-submit — but the same kind of
-  // curable state conflict, and the client renders the two honest levers
-  // (disable, uninstall) FROM this body, so its `code` and fields are
-  // pinned (client repo #237).
-  renders(PluginGrantRequiredDenialError, (exception) => ({
-    status: Http.Conflict,
-    message: t('errors.plugin.grant_required_denial', {
-      slug: exception.pluginSlug,
-      permissionSlug: exception.permissionSlug,
-    }),
-    fields: { slug: exception.pluginSlug, permissionSlug: exception.permissionSlug },
-  }));
 
   // ─── 422 — manifest and semantic validation ───────────────────────────────
 
@@ -643,26 +595,6 @@ function buildRenderers(): RendererMap {
     unknownCorePermissions('errors.plugin.update_unknown_core_permissions'),
   );
 
-  renders(PluginGrantUnknownPermissionError, (exception) => ({
-    status: Http.UnprocessableEntity,
-    message: t('errors.plugin.grant_unknown_permission', { permissionSlug: exception.permissionSlug }),
-    fields: { slug: exception.pluginSlug, permissionSlug: exception.permissionSlug },
-  }));
-
-  renders(PluginGrantConsentScopeMismatchError, (exception) => ({
-    status: Http.UnprocessableEntity,
-    message: t('errors.plugin.grant_consent_scope_mismatch', {
-      permissionSlug: exception.permissionSlug,
-      expected: exception.expected,
-      received: exception.received,
-    }),
-    fields: {
-      permissionSlug: exception.permissionSlug,
-      expected: exception.expected,
-      received: exception.received,
-    },
-  }));
-
   renders(PluginUnitScopeError, (exception) => ({
     status: Http.UnprocessableEntity,
     message: t('errors.plugin.unit_scope', { slug: exception.pluginSlug, scope: exception.scope }),
@@ -677,7 +609,6 @@ function buildRenderers(): RendererMap {
 
   // ─── 500 — corrupted server state (never a caller error; logged loud) ────
 
-  renders(PluginGrantManifestInvalidError, storedManifestInvalid);
   renders(PluginFeatureStateManifestError, storedManifestInvalid);
   renders(PluginConsentPresentationManifestError, storedManifestInvalid);
   renders(PluginLifecycleManifestError, storedManifestInvalid);
@@ -807,13 +738,13 @@ export const PLUGIN_EXCEPTION_FILTER_CATCHES: readonly ErrorCtor<Error>[] = [...
  *
  * Response bodies are the error envelope (`{ statusCode, error, message,
  * code, …fields }`, #1260). `code` is derived from the domain error's `name`
- * (`PluginGrantExclusionError` → `PLUGIN_GRANT_EXCLUSION`); the name is a
+ * (`PluginConsentActStaleError` → `PLUGIN_CONSENT_ACT_STALE`); the name is a
  * hand-pinned string literal on every runtime error class, so the code
  * survives minification and class renames, letting clients dispatch without
  * parsing copy.
- * Prompt-bearing errors (Critical confirmation, static analysis, denial
- * blocks) spread their own machine-readable fields into the body so the
- * confirmation prompt is rendered FROM the error, never recomputed.
+ * Prompt-bearing errors (Critical confirmation, static analysis) spread their
+ * own machine-readable fields into the body so the confirmation prompt is
+ * rendered FROM the error, never recomputed.
  * The raw English domain message is never surfaced — copy is a localized
  * `t()` marker — but the original error rides as `cause` for server-side
  * logs.

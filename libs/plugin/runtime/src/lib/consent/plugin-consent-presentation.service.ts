@@ -78,8 +78,8 @@ const PRESENTABLE_PLUGIN_SELECT = {
  * untranslated surface honestly.
  *
  * Returns `null` when there is nothing to present: no `Plugin` row, a
- * tombstoned plugin (its grants are purged, and neither `decide()` nor a
- * consent act (#1150) records new ones — no consent surface exists, and the tombstone check runs BEFORE
+ * tombstoned plugin (its grants are purged, and no consent act
+ * (#1150, #1336) records new ones — no consent surface exists, and the tombstone check runs BEFORE
  * manifest re-validation so a stale stored manifest cannot turn
  * "uninstalled" into a 5xx), or (`presentPendingForUnit`) no staged update.
  */
@@ -276,9 +276,10 @@ export class PluginConsentPresentationService {
           )
         : null;
 
+    const renderedLocale = locale ?? this.options.defaultLocale;
     const resolveText = (value: LocalizedString): ResolvedLocalizedString =>
       resolveLocalizedStringDetailed(value, {
-        locale: locale ?? this.options.defaultLocale,
+        locale: renderedLocale,
         defaultLocale: this.options.defaultLocale,
       });
 
@@ -315,6 +316,7 @@ export class PluginConsentPresentationService {
         source === 'active' && plugin.pendingVersion !== null && plugin.pendingSha256 !== null
           ? { manifestVersion: plugin.pendingVersion, manifestSha256: plugin.pendingSha256 }
           : null,
+      locale: renderedLocale,
       unit,
       displayName: resolveText(validated.manifest.displayName),
       description: resolveText(validated.manifest.description),

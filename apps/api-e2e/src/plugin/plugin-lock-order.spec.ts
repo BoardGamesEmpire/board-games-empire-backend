@@ -1,4 +1,3 @@
-import { PluginGrantStatus } from '@bge/database';
 import { randomUUID } from 'node:crypto';
 import { expectBlocked, withBarrier } from '../support/lock-barrier';
 import { childRelationsOf } from '../support/schema-relations';
@@ -16,8 +15,9 @@ import {
   arrangeHouseholdUnit,
   arrangePlugin,
   arrangeServerGrant,
-  GRANT_DECISION_CLAIM,
+  GRANT_ROW_LOCK,
   SERVER_GRANT_INSERT,
+  SERVER_GRANT_RESTAMP,
   UNIT_ROW_LOCK,
 } from './lock-fixtures';
 import {
@@ -55,18 +55,18 @@ import {
  * caught in review rather than by a test. Ship only the pins and the order is
  * proven written, never proven safe.
  *
- * Why this is not a race over HTTP. Firing a decision and an approval at each
- * other would exercise the real code, but a deadlock is probabilistic: a green
+ * Why this is not a race over HTTP. Firing a consent act and an approval at
+ * each other would exercise the real code, but a deadlock is probabilistic: a green
  * run proves nothing, and making contention reliable enough to prove something
  * is the shape #330 tracks. So the two application transactions are replayed as
  * the statements they ship — every stage below is lifted from source except the
- * unit enablement, which no shipped statement locks by raw SQL any more (#1149), and
- * only the sequencing is this spec's — and the sequencing itself is pinned back
- * against the shipped text.
+ * grant row and the unit enablement, which no shipped statement locks by raw
+ * SQL (#1336, #1149), and only the sequencing is this spec's — and the
+ * sequencing itself is pinned back against the shipped text.
  */
 describe('the plugin consent path is one lock order (#360)', () => {
   const { unitLifecycle: UNIT_LIFECYCLE, unitScopeLock: UNIT_SCOPE_LOCK } = LOCK_SOURCES;
-  const { grantService: GRANT_SERVICE, updateService: UPDATE_SERVICE } = LOCK_SOURCES;
+  const { serverConsentActService: SERVER_CONSENT_ACT_SERVICE, updateService: UPDATE_SERVICE } = LOCK_SOURCES;
 
   /**
    * Stage 0: the household row, as a household-scope write takes it (#548).
@@ -100,27 +100,24 @@ describe('the plugin consent path is one lock order (#360)', () => {
   });
 
   /**
-   * Stage 3: the server grant rows, as activation takes them (#356).
-   * Anchored on the declaration — D-CN (#370) added a second `FOR UPDATE`
-   * statement to this file (the plugin-config lock), so a bare
-   * `/FOR UPDATE/` no longer resolves to one statement without help.
+   * Stage 3: the server grant rows, as an approval takes them. Replayed from a
+   * fixture rather than lifted: activation writes the Server unit's decisions
+   * through `pluginGrant.upsert` and takes no raw lock on the grants table
+   * (#1336). `GRANT_ROW_LOCK` says why it may stand in for the upserts.
    */
-  const grantRowLock = readShippedSql(UPDATE_SERVICE, ['plugin.id'], {
-    after: 'lockedGrantRows',
-    matching: /FOR UPDATE/,
-  });
+  const grantRowLock = { text: GRANT_ROW_LOCK };
 
   /**
-   * Stage 1, as `decide()` now takes it (#398). Lifted from the grant service
-   * rather than reusing `pluginShareLock` above: the two statements are the same
-   * MODE on the same row but not the same text — each carries its own plugin
-   * manifest comparison (#368, #361) and they select different columns — and a
-   * barrier case that replayed the wrong file's statement would report a lock the
-   * decision path does not actually take. Bound with `NO_SNAPSHOT` like the
-   * others: what the comparison answers does not change which lock it takes.
+   * Stage 1, as the server consent act takes it before it writes the Server
+   * unit's consent decisions (#398, #1336). Lifted from that service rather
+   * than reusing `pluginShareLock` above: the two statements are the same MODE
+   * on the same row but not the same text — they select different columns, and
+   * the act compares the sha in code, not in the statement — and a barrier case
+   * that replayed the wrong file's statement would report a lock the act does
+   * not actually take.
    */
-  const decisionPluginClaim = readShippedSql(GRANT_SERVICE, ['bindManifest(plugin.manifestJson)', 'plugin.id'], {
-    after: 'const attempt = async ()',
+  const serverActPluginClaim = readShippedSql(SERVER_CONSENT_ACT_SERVICE, ['pluginId'], {
+    after: 'private async claimPluginForAct',
     matching: /FOR SHARE/,
   });
 
@@ -164,13 +161,12 @@ describe('the plugin consent path is one lock order (#360)', () => {
   const arrangeContendedPlugin = async () => {
     const plugin = await arrangePlugin(db.client);
     const { householdId } = await arrangeHouseholdFor(db.client);
-    const grant = await arrangeServerGrant(db.client, plugin.pluginId);
+    await arrangeServerGrant(db.client, plugin.pluginId);
     await arrangeHouseholdUnit(db.client, householdId, plugin.pluginId);
 
     return {
       ...plugin,
       householdId,
-      grantId: grant.grantId,
       advisoryKey: bindTemplate(advisoryKeyFormat, [householdId, plugin.pluginId]),
     };
   };
@@ -278,12 +274,12 @@ describe('the plugin consent path is one lock order (#360)', () => {
 
   /**
    * The stages above are matched from source, and Postgres takes locks no
-   * source mentions. `decide()` is the proof: it claimed the two stages it
-   * wrote, took a third through the `plugin_grants` FK, and deadlocked against
-   * activation while every pin here stayed green (#398).
+   * source mentions. A writer whose first lock is an FK-child insert takes the
+   * plugin row last, after the tuple is written, and deadlocks against
+   * activation's `FOR UPDATE` while every pin here stays green (#398). Every
+   * consent act therefore claims the plugin row first.
    *
-   * This is the general form of that fix (#399) — not a fifth stage, but the
-   * requirement stated directly. A write to any table carrying an FK to
+   * This block states that requirement directly (#399) — not a fifth stage. A write to any table carrying an FK to
    * `plugins` must be preceded, on every path that reaches it, by a plugin-row
    * claim. Where it is not, an exemption has to say why that is safe.
    */
@@ -307,7 +303,9 @@ describe('the plugin consent path is one lock order (#360)', () => {
       { file: CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'pluginGrant.upsert', claimed: true },
       { file: CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'householdPlugin.create', claimed: true },
       { file: CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'userPlugin.upsert', claimed: true },
-      { file: GRANT_SERVICE, enclosing: 'attempt', write: 'pluginGrant.upsert', claimed: true },
+      // The server act writes the Server unit's decisions under its own
+      // `claimPluginForAct` the same way (#1336).
+      { file: SERVER_CONSENT_ACT_SERVICE, enclosing: 'commit', write: 'pluginGrant.upsert', claimed: true },
       // The one write that sets `data_gateways.plugin_id` (#1083). Unclaimed
       // where the audit reads it and exempt on the strength of its caller,
       // which the placement case below pins.
@@ -315,7 +313,7 @@ describe('the plugin consent path is one lock order (#360)', () => {
       { file: INSTALLER_SERVICE, enclosing: 'persist', write: 'pluginPermission.create', claimed: false },
       { file: INSTALLER_SERVICE, enclosing: 'persist', write: 'pluginGrant.create', claimed: false },
       { file: UPDATE_SERVICE, enclosing: 'activateInTransaction', write: 'pluginPermission.create', claimed: true },
-      { file: UPDATE_SERVICE, enclosing: 'activateInTransaction', write: 'pluginGrant.create', claimed: true },
+      { file: UPDATE_SERVICE, enclosing: 'activateInTransaction', write: 'pluginGrant.upsert', claimed: true },
       // The FK-child writes outside the plugin runtime (#1083). Most
       // `data_gateways` rows belong to no plugin, and the DataGateway routes
       // and the interview write them in their own libraries. None of the three
@@ -512,11 +510,14 @@ describe('the plugin consent path is one lock order (#360)', () => {
       });
     });
 
-    it('queues a decision behind an activation that got to the grant row first', async () => {
-      // A decision-vs-activation, order one. The replay leaves out the
-      // decision's plugin-row claim (#398) and starts at its grant-row write, so
-      // the grant row is where they meet, which is the whole reason #356 put a
-      // lock there.
+    it('queues a server consent act behind an activation that got to the grant row first', async () => {
+      // A server consent act against an activation. The replay leaves out the
+      // act's plugin-row claim (#398) and starts at its grant-row write, so the
+      // grant row is where they meet: an approval holding a server-scope
+      // decision it re-wrote holds that row to the end of its transaction
+      // (#1336), and an act's upsert of the same row waits for it. The waiter
+      // replays the upsert's update arm, a non-key UPDATE, so the case fails
+      // if the mode that upsert takes does not conflict with the holder's.
       const plugin = await arrangeContendedPlugin();
 
       await withBarrier(async (barrier) => {
@@ -528,9 +529,9 @@ describe('the plugin consent path is one lock order (#360)', () => {
 
         await waiter.begin();
         const decision = waiter.issue(
-          GRANT_DECISION_CLAIM,
-          [plugin.grantId, PluginGrantStatus.Denied],
-          'a decision flipping the grant it locked',
+          SERVER_GRANT_RESTAMP,
+          [plugin.pluginId],
+          "the server consent act's upsert of the decision activation holds",
         );
 
         await expectBlocked(barrier, decision);
@@ -538,39 +539,6 @@ describe('the plugin consent path is one lock order (#360)', () => {
         await holder.commit();
 
         await expect(decision.result()).resolves.toHaveLength(1);
-        await waiter.commit();
-      });
-    });
-
-    it('queues an activation behind a decision that got to the grant row first', async () => {
-      // Order two, and not a mirror image for free: `FOR UPDATE` and the
-      // decision's non-key UPDATE have to conflict in BOTH directions for the
-      // pair to serialize, and only one of those directions is the one #356's
-      // comment reasons about.
-      const plugin = await arrangeContendedPlugin();
-
-      await withBarrier(async (barrier) => {
-        const { holder, waiter } = barrier;
-
-        await holder.begin();
-        await holder.query(GRANT_DECISION_CLAIM, [plugin.grantId, PluginGrantStatus.Denied]);
-
-        await waiter.begin();
-        await waiter.query(ACTIVATION_VERSION_BUMP, [plugin.pluginId, '2.0.0']);
-        const activation = waiter.issue(grantRowLock.text, [plugin.pluginId], "the activation's server-grant lock");
-
-        await expectBlocked(barrier, activation);
-
-        await holder.commit();
-
-        // EvalPlanQual: the activation's re-read returns the row as the
-        // decision left it, not as its own snapshot saw it. That is the
-        // property #356's refusal depends on — it must SEE the denial to
-        // refuse over it.
-        const rows = await activation.result();
-
-        expect(rows).toContainEqual(expect.objectContaining({ status: PluginGrantStatus.Denied }));
-
         await waiter.commit();
       });
     });
@@ -625,18 +593,19 @@ describe('the plugin consent path is one lock order (#360)', () => {
      * The cycle #398 reported, and the reason the two source pins below could
      * both be green while it existed.
      *
-     * `decide()`'s upsert takes a plugin-row lock nobody wrote: `plugin_grants`
-     * has an FK to `plugins`, referential-integrity checks are AFTER ROW
-     * triggers, and the mode is `FOR KEY SHARE` — which conflicts with the
-     * `FOR UPDATE` activation is holding. Because the trigger fires after the
-     * row is written, the decision ends up holding the grant tuple while it
-     * waits for the plugin row, and activation's own seeding INSERT of the same
-     * key then waits on that tuple. Neither can finish.
+     * A consent decision's upsert takes a plugin-row lock nobody wrote:
+     * `plugin_grants` has an FK to `plugins`, referential-integrity checks are
+     * AFTER ROW triggers, and the mode is `FOR KEY SHARE` — which conflicts
+     * with the `FOR UPDATE` activation is holding. Because the trigger fires
+     * after the row is written, a writer that has not claimed the plugin row
+     * ends up holding the grant tuple while it waits for the plugin row, and
+     * activation's own INSERT of the same key (the insert arm of an approval's
+     * upsert) then waits on that tuple. Neither can finish.
      *
      * The INSERT arm specifically: a decision on a slug that already has a row
      * takes the UPDATE arm and collides on the row lock instead, which queues.
      */
-    it('deadlocks when a decision writes its grant row before claiming the plugin row (#398)', async () => {
+    it('deadlocks when a server consent act writes its grant row before claiming the plugin row (#398, #1336)', async () => {
       const plugin = await arrangeContendedPlugin();
       const undecidedSlug = `probe:${randomUUID()}`;
 
@@ -653,7 +622,7 @@ describe('the plugin consent path is one lock order (#360)', () => {
         const decision = waiter.issue(
           SERVER_GRANT_INSERT,
           [randomUUID(), plugin.pluginId, undecidedSlug],
-          "the decision's grant INSERT",
+          "the act's grant INSERT",
         );
 
         await expectBlocked(barrier, decision);
@@ -661,12 +630,12 @@ describe('the plugin consent path is one lock order (#360)', () => {
         // Closing it. Deliberately NOT asserted as blocked: from here Postgres
         // aborts a victim it chooses, and an assertion that both are waiting
         // races that abort (#330).
-        const seeding = holder.issue(
+        const approvalWrite = holder.issue(
           SERVER_GRANT_INSERT,
           [randomUUID(), plugin.pluginId, undecidedSlug],
-          "activation's seeding INSERT",
+          "activation's grant INSERT",
         );
-        const outcomes = await Promise.allSettled([decision.result(), seeding.result()]);
+        const outcomes = await Promise.allSettled([decision.result(), approvalWrite.result()]);
         const victims = outcomes.filter(
           (outcome) => outcome.status === 'rejected' && (outcome.reason as { code?: string }).code === '40P01',
         );
@@ -680,15 +649,15 @@ describe('the plugin consent path is one lock order (#360)', () => {
     /**
      * The control that makes the case above about the ORDER rather than about
      * these two statements. Identical fixtures, identical INSERTs, identical
-     * interleaving — the decision simply claims the plugin row before writing
-     * anything, which is what the fix ships.
+     * interleaving — the writer simply claims the plugin row before writing
+     * anything, as the server consent act's `claimPluginForAct` does.
      *
      * The loser still loses; what changes is HOW. It waits before it has written
      * anything, so nothing can be waiting on it, and when activation commits it
-     * finds a committed row and raises a unique violation — the failure
-     * activation's bounded retry already exists to answer.
+     * finds a committed row: the raw INSERT raises a unique violation, where
+     * the upsert it stands for takes its update arm.
      */
-    it('does not deadlock when the decision claims the plugin row first, same contention (#398)', async () => {
+    it('does not deadlock when the server consent act claims the plugin row first, same contention (#398, #1336)', async () => {
       const plugin = await arrangeContendedPlugin();
       const undecidedSlug = `probe:${randomUUID()}`;
 
@@ -700,15 +669,11 @@ describe('the plugin consent path is one lock order (#360)', () => {
 
         await waiter.begin();
 
-        const claim = waiter.issue(
-          decisionPluginClaim.text,
-          [NO_SNAPSHOT, plugin.pluginId],
-          "the decision's plugin-row claim",
-        );
+        const claim = waiter.issue(serverActPluginClaim.text, [plugin.pluginId], "the server act's plugin-row claim");
 
         await expectBlocked(barrier, claim);
 
-        // Free, and that is the whole difference: the decision holds no grant
+        // Free, and that is the whole difference: the act holds no grant
         // tuple for this to wait on.
         await holder.query(SERVER_GRANT_INSERT, [randomUUID(), plugin.pluginId, undecidedSlug]);
         await holder.commit();
@@ -719,8 +684,8 @@ describe('the plugin consent path is one lock order (#360)', () => {
           .then(() => undefined)
           .catch((error: unknown) => error);
 
-        // unique_violation, not deadlock_detected: P2002, which the activation
-        // service retries and `decide()`'s upsert resolves in place.
+        // unique_violation, not deadlock_detected: the conflict the act's
+        // upsert resolves in place.
         expect((collision as { code?: string } | undefined)?.code).toBe('23505');
       });
     });

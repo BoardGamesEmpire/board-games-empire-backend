@@ -1,6 +1,6 @@
 import { PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel, type PrismaClient } from '@bge/database';
 import { randomUUID } from 'node:crypto';
-import { pluginRowData } from './plugin-row-fixtures';
+import { FIXTURE_ACT_ID, pluginRowData } from './plugin-row-fixtures';
 
 /**
  * Rows and probe statements for the plugin lock specs — the mechanics tier
@@ -54,31 +54,16 @@ export const ACTIVATION_VERSION_BUMP =
 export const FK_PLUGIN_LOCK = 'SELECT p.id FROM plugins p WHERE p.id = $1 FOR KEY SHARE';
 
 /**
- * What `decide()` and a consent act (#1150) do to an existing grant row, as a
- * statement a barrier can hold open.
+ * The insert arm of a consent decision's upsert: a decision on a permission
+ * slug that has no grant row yet.
  *
- * Prisma issues the real one as an upsert — `INSERT … ON CONFLICT DO UPDATE` —
- * and its update arm is this write. Standing in for it follows the
- * `UNINSTALL_CLAIM` precedent, and what matters for every ordering question is
- * unchanged: it writes non-key columns, so it takes `FOR NO KEY UPDATE`, which
- * is the mode activation's `FOR UPDATE` on the same row conflicts with in both
- * directions. The insert arm is not a claim and is not modelled here: a row
- * that does not exist cannot be locked. {@link SERVER_GRANT_INSERT} exists to
- * show exactly that.
- */
-export const GRANT_DECISION_CLAIM =
-  'UPDATE plugin_grants SET status = $2, decided_at = now(), updated_at = now() WHERE id = $1 RETURNING id';
-
-/**
- * The other arm of the same upsert: a decision on a permission slug that has no
- * grant row yet.
- *
- * A control rather than a claim, and the counterpart to
- * {@link GRANT_DECISION_CLAIM}. A `FOR UPDATE` matching zero rows locks
+ * A control rather than a claim, and the counterpart to {@link GRANT_ROW_LOCK},
+ * which stands in for the update arm. A `FOR UPDATE` matching zero rows locks
  * nothing, so this insert walks straight past a holder with every EXISTING
- * grant row for the plugin locked. That is not a defect: it is the gap #356's
- * comment hands to the unique index and the retry, and the reason unit writers
- * take an advisory key rather than trusting a row lock.
+ * grant row for the plugin locked. That is not a defect: it is why every
+ * writer of a server-scope decision claims the plugin row before it writes
+ * (#398, #1336), and why unit writers take an advisory key rather than
+ * trusting a row lock.
  *
  * Named rather than typed at its one call site, and the enum values are the
  * enum members rather than quoted literals. The column list and the vocabulary
@@ -88,11 +73,42 @@ export const GRANT_DECISION_CLAIM =
  */
 export const SERVER_GRANT_INSERT =
   `INSERT INTO plugin_grants
-     (id, plugin_id, scope_type, scope_id, permission_slug, status, decided_risk_level,
+     (id, plugin_id, scope_type, scope_id, permission_slug, status, act_id, decided_risk_level,
       decided_at, updated_at)
-   VALUES ($1, $2, '${PluginGrantScope.Server}', '', $3, '${PluginGrantStatus.Granted}', ` +
+   VALUES ($1, $2, '${PluginGrantScope.Server}', '', $3, '${PluginGrantStatus.Granted}', '${FIXTURE_ACT_ID}', ` +
   `'${RiskLevel.Low}', now(), now())
    RETURNING id`;
+
+/**
+ * The `grant row` stage of the claimed lock order, as activation takes it, as
+ * a statement a barrier can hold open.
+ *
+ * No shipped statement locks a consent decision by raw SQL: an approval takes
+ * the Server unit's rows through its `pluginGrant.upsert` writes (#1336), and
+ * the update arm of an upsert is a row lock Prisma cannot express as a held
+ * one. So this states the stage in the form the `grant row` pattern
+ * recognises, the way {@link UNIT_ROW_LOCK} stands in for the unit writers.
+ * `FOR UPDATE` is at least as strong as the `FOR NO KEY UPDATE` the upsert's
+ * update arm takes, so a barrier holding it waits out every writer the real
+ * write would.
+ */
+export const GRANT_ROW_LOCK = `SELECT id FROM plugin_grants WHERE plugin_id = $1 AND scope_type = '${PluginGrantScope.Server}' FOR UPDATE`;
+
+/**
+ * The update arm of a consent decision's upsert, on a Server unit row that
+ * already exists: a write of non-key columns only, so it takes the row
+ * `FOR NO KEY UPDATE`, the mode a consent act's `pluginGrant.upsert` takes
+ * when the decision has a row (#1336).
+ *
+ * The waiter's half of a grant-row barrier. {@link GRANT_ROW_LOCK} is the
+ * holder's: a waiter issuing that too would only show that `FOR UPDATE` blocks
+ * `FOR UPDATE`, and could not fail for the weaker mode the real upsert takes.
+ * It writes no key column, so it matches no stage of the claimed order and
+ * takes no lock on `plugins` through the foreign key.
+ */
+export const SERVER_GRANT_RESTAMP =
+  `UPDATE plugin_grants SET decided_at = now(), updated_at = now() ` +
+  `WHERE plugin_id = $1 AND scope_type = '${PluginGrantScope.Server}' RETURNING id`;
 
 /**
  * The `unit row` stage of the claimed lock order, as a statement a barrier can
@@ -193,6 +209,7 @@ export async function arrangeGrant(
       scopeId: options.scopeId ?? '',
       permissionSlug,
       status: options.status ?? PluginGrantStatus.Granted,
+      actId: FIXTURE_ACT_ID,
       decidedRiskLevel: RiskLevel.Low,
       decidedAt: new Date(),
     },
@@ -203,7 +220,7 @@ export async function arrangeGrant(
 }
 
 /**
- * A server-scope grant row, so activation's `FOR UPDATE` has something to lock.
+ * A server-scope grant row, so {@link GRANT_ROW_LOCK} has something to lock.
  *
  * The lock covers EXISTING rows only, which is a claim the specs test in both
  * directions — so a fixture that quietly created the row for a case about its

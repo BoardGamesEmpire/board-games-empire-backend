@@ -1,4 +1,4 @@
-import type { HouseholdPluginUnit } from '@bge/actor-context';
+import { SERVER_PLUGIN_UNIT, type HouseholdPluginUnit } from '@bge/actor-context';
 import { PluginGrantStatus, RiskLevel } from '@bge/database';
 import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import type { ConsentUngrantableCause } from '../grants/consent-grantability';
@@ -401,6 +401,71 @@ describe('planConsentAct (#1150)', () => {
 
       expect(error).toBeInstanceOf(PluginConsentActUngrantableError);
       expect(error).toMatchObject({ permissions: [{ permissionSlug: OPTIONAL_CORE, cause: 'no_catalog_row' }] });
+    });
+  });
+
+  describe('the Server unit (#1336)', () => {
+    const SERVER_OPTIONAL = 'read:game:public';
+    const SERVER_RAISED = 'read:household:public';
+    const HOUSEHOLD_ONLY = 'read:game_collection:public';
+    const SERVER_CHECKS: readonly NormalizedPermissionRequest[] = [
+      check(SERVER_OPTIONAL, { consentScope: 'server' }),
+      check(SERVER_RAISED, { consentScope: 'server', required: true }),
+      check(HOUSEHOLD_ONLY),
+    ];
+    const serverPlan = (overrides: Partial<PlanInput> & Pick<PlanInput, 'kind' | 'answers'>) =>
+      plan({
+        unit: SERVER_PLUGIN_UNIT,
+        checks: SERVER_CHECKS,
+        activeChecks: SERVER_CHECKS,
+        classification: classification({
+          slugs: [SERVER_OPTIONAL, SERVER_RAISED, HOUSEHOLD_ONLY],
+          risks: { [SERVER_RAISED]: RiskLevel.High },
+        }),
+        ...overrides,
+      });
+
+    it('plans a toggle of an optional server-scope permission (#1336)', () => {
+      const result = serverPlan({ kind: 'Toggle', answers: [denied(SERVER_OPTIONAL, RiskLevel.Low)] });
+
+      expect(result.decisions).toEqual([
+        { permissionSlug: SERVER_OPTIONAL, status: PluginGrantStatus.Denied, decidedRiskLevel: RiskLevel.Low },
+      ]);
+      expect(result.switchesOff).toBe(false);
+    });
+
+    it('plans a review that grants a risk-raised server-scope permission at the risk shown (#1336)', () => {
+      const result = serverPlan({ kind: 'Review', answers: [granted(SERVER_RAISED, RiskLevel.High)] });
+
+      expect(result.decisions[0]).toMatchObject({
+        status: PluginGrantStatus.Granted,
+        decidedRiskLevel: RiskLevel.High,
+      });
+    });
+
+    it('refuses a server review that denies a required or an optional permission with the rule server-refusal (#1336)', () => {
+      expectAnswerError(
+        () => serverPlan({ kind: 'Review', answers: [denied(SERVER_RAISED, RiskLevel.High)] }),
+        'server-refusal',
+        [SERVER_RAISED],
+      );
+      expectAnswerError(
+        () => serverPlan({ kind: 'Review', answers: [denied(SERVER_OPTIONAL, RiskLevel.Low)] }),
+        'server-refusal',
+        [SERVER_OPTIONAL],
+      );
+    });
+
+    it('never reports switchesOff for the Server unit, since a server review cannot refuse (#1336)', () => {
+      const result = serverPlan({ kind: 'Review', answers: [granted(SERVER_RAISED, RiskLevel.High)] });
+
+      expect(result.switchesOff).toBe(false);
+    });
+
+    it('lists only server-scope permissions in the presentation (#1336)', () => {
+      const result = serverPlan({ kind: 'Toggle', answers: [denied(SERVER_OPTIONAL, RiskLevel.Low)] });
+
+      expect(result.presentation.checks.map((c) => c.slug)).toEqual([SERVER_OPTIONAL, SERVER_RAISED]);
     });
   });
 

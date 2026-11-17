@@ -6,6 +6,14 @@ import { randomUUID } from 'node:crypto';
 export const INVENTORY_STAGING_ID = 'e2e-staging-1';
 
 /**
+ * The consent act a consent decision arranged directly on its row names
+ * (#1336). Every decision names the act that wrote it, but `act_id` has no
+ * foreign key, so a suite that arranges the decision rather than the act needs
+ * only an id, not a `plugin_consent_acts` row.
+ */
+export const FIXTURE_ACT_ID = 'e2e-fixture-act';
+
+/**
  * An installed plugin row, enabled-false, for `plugin.create({ data })` (#1118).
  *
  * Every e2e suite that arranges a plugin row goes through here, so a column

@@ -10,7 +10,8 @@ import type { ConsentUngrantableCause } from '../grants/consent-grantability';
 
 export interface ConsentActStaleRisk {
   readonly permissionSlug: string;
-  readonly shownRiskLevel: RiskLevel;
+  /** Null when an install or approval named no risk for a permission it would grant (#1336). */
+  readonly shownRiskLevel: RiskLevel | null;
   readonly currentRiskLevel: RiskLevel;
 }
 
@@ -64,6 +65,8 @@ export type ConsentActAnswerRule =
   | 'staged-kind'
   | 'staged-refusal'
   | 'staged-not-new'
+  /** A server review may only accept. */
+  | 'server-refusal'
   /** A toggle without exactly one answer, or a review with none. */
   | 'answer-count';
 
@@ -115,6 +118,20 @@ export class PluginConsentActNoUserScopeError extends Error {
 
   constructor(public readonly pluginSlug: string) {
     super(`Plugin '${pluginSlug}' requests nothing at user scope, so a user has nothing to switch on`);
+  }
+}
+
+/**
+ * A write that stores a presentation (a consent act, an install or an update
+ * approval) named a locale this server does not support (#1301). The write
+ * would otherwise record text in a language nobody was shown, so it is
+ * refused before anything is read or written. The filter answers 422.
+ */
+export class PluginConsentActLocaleError extends Error {
+  override readonly name = 'PluginConsentActLocaleError';
+
+  constructor(public readonly locale: string) {
+    super(`'${locale}' is not a locale this server supports`);
   }
 }
 

@@ -8,10 +8,10 @@ import { PluginConsentActService } from './consent/plugin-consent-act.service';
 import { PluginConsentCheckClassifier } from './consent/plugin-consent-check-classifier.service';
 import { PluginConsentPresentationService } from './consent/plugin-consent-presentation.service';
 import { PluginConsentStandingService } from './consent/plugin-consent-standing.service';
+import { PluginServerConsentActService } from './consent/plugin-server-consent-act.service';
 import { PluginContextFactory } from './context/plugin-context.factory';
 import { PluginFeatureStateService } from './features/plugin-feature-state.service';
 import { PluginGrantAuthorityService } from './grants/plugin-grant-authority.service';
-import { PluginGrantService } from './grants/plugin-grant.service';
 import { PluginInstallerService } from './install/plugin-installer.service';
 import { PluginStaticAnalysisService } from './install/plugin-static-analysis.service';
 import { PluginInventoryService } from './inventory/plugin-inventory.service';
@@ -64,6 +64,7 @@ import { PluginUpdateService } from './update/plugin-update.service';
     PluginConsentCheckClassifier,
     PluginConsentPresentationService,
     PluginConsentStandingService,
+    PluginServerConsentActService,
     PluginDirectoryResolverService,
     PluginFeatureStateService,
     PluginInstanceRegistry,
@@ -72,7 +73,6 @@ import { PluginUpdateService } from './update/plugin-update.service';
     PluginConfigSchemaService,
     PluginConfigService,
     PluginGrantAuthorityService,
-    PluginGrantService,
     PluginInstallerService,
     PluginInventoryService,
     PluginLifecycleListener,
@@ -87,6 +87,9 @@ import { PluginUpdateService } from './update/plugin-update.service';
     // #1150's consent act writer: switch-on, toggle and review, for the API
     // edges of household and user units.
     PluginConsentActService,
+    // #1336's consent act writer for the Server unit: a server admin's
+    // toggle and review.
+    PluginServerConsentActService,
     PluginConsentPresentationService,
     // #1149's read-time consent standing: what a unit still owes, for the
     // API edges that report a unit's state code.
@@ -95,7 +98,6 @@ import { PluginUpdateService } from './update/plugin-update.service';
     PluginInstanceRegistry,
     PluginConfigService,
     PluginContextFactory,
-    PluginGrantService,
     PluginInstallerService,
     // #354's endpoint-facing inventory reader — the only read surface that
     // answers before a slug is known.

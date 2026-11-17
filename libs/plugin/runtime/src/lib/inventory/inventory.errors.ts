@@ -41,7 +41,7 @@ export class PluginInventoryTombstonedError extends Error {
  * a single-plugin read has no other subject and nothing honest to return.
  *
  * Same never-trust-a-stored-manifest contract as its siblings
- * (`PluginFeatureStateManifestError`, `PluginGrantManifestInvalidError`),
+ * (`PluginFeatureStateManifestError`, `PluginUnitManifestError`),
  * typed per surface so the C4 boundary can map it without casting.
  */
 export class PluginInventoryManifestError extends Error {

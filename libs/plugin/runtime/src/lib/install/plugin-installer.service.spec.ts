@@ -1,5 +1,7 @@
+import type { AuditContextService } from '@bge/actor-context';
 import {
   PluginCategory,
+  PluginConsentActKind,
   PluginExecutionMode,
   PluginGrantScope,
   PluginGrantStatus,
@@ -23,6 +25,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
+import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
 import { PluginInstalledEvent } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
@@ -118,7 +121,7 @@ describe('PluginInstallerService', () => {
     permissionSlug: 'plugin|demo-sink|manage:digest',
     status: PluginGrantStatus.Granted,
     decidedById: null,
-    actId: null,
+    actId: 'act-1',
     decidedRiskLevel: RiskLevel.Low,
     decidedAt: new Date(0),
     createdAt: new Date(0),
@@ -186,6 +189,8 @@ describe('PluginInstallerService', () => {
     db.pluginPermission.findMany.mockResolvedValue([]);
     db.pluginPermission.create.mockResolvedValue(makePluginPermission());
     db.pluginGrant.create.mockResolvedValue(makePluginGrant());
+    db.pluginConsentAct.create.mockImplementation((({ data }: { data: Record<string, unknown> }) =>
+      Promise.resolve({ id: 'act-1', createdAt: new Date(0), ...data })) as never);
     db.permission.findMany.mockResolvedValue([feedbackRead]);
     db.householdPlugin.findMany.mockResolvedValue([]);
 
@@ -212,6 +217,7 @@ describe('PluginInstallerService', () => {
       emitter as unknown as EventEmitter2,
       options,
       directories as unknown as PluginDirectoryResolverService,
+      { getCorrelationId: () => 'corr-1' } as unknown as AuditContextService,
     );
   });
 
@@ -386,6 +392,126 @@ describe('PluginInstallerService', () => {
 
       const [{ data }] = db.plugin.create.mock.calls[0] as [{ data: Record<string, unknown> }];
       expect('executionMode' in data).toBe(false);
+    });
+  });
+
+  describe('the InstallAccept consent act (#1336)', () => {
+    it('writes one InstallAccept act naming the artifact sha, and every seeded decision names it (#1336)', async () => {
+      const result = await service.install(input());
+
+      expect(db.pluginConsentAct.create).toHaveBeenCalledTimes(1);
+      expect(db.pluginConsentAct.create).toHaveBeenCalledWith({
+        data: {
+          pluginId: 'plugin-1',
+          pluginSlug: 'demo-sink',
+          kind: PluginConsentActKind.InstallAccept,
+          scopeType: PluginGrantScope.Server,
+          scopeId: SERVER_SCOPE_SENTINEL,
+          manifestVersion: '1.2.0',
+          manifestSha256: sha('a'),
+          presentation: expect.any(Object),
+          decidedById: 'admin-1',
+          decidedAt: expect.any(Date),
+          correlationId: 'corr-1',
+        },
+      });
+      expect(result.act.id).toBe('act-1');
+      expect(db.pluginGrant.create).toHaveBeenCalledTimes(2);
+
+      for (const [{ data }] of db.pluginGrant.create.mock.calls as unknown as [{ data: { actId: string } }][]) {
+        expect(data.actId).toBe(result.act.id);
+      }
+    });
+
+    it('names the act on plugin.installed, so its lifecycle row can find what the server admin was shown (#1336)', async () => {
+      const result = await service.install(input());
+
+      expect(installedEvent().actId).toBe(result.act.id);
+    });
+
+    it('records the act and its decisions at the same instant, the install time (#1336)', async () => {
+      await service.install(input());
+
+      const [[{ data: act }]] = db.pluginConsentAct.create.mock.calls as unknown as [[{ data: { decidedAt: Date } }]];
+      const [{ data: decision }] = db.pluginGrant.create.mock.calls[0] as unknown as [{ data: { decidedAt: Date } }];
+      const [{ data: plugin }] = db.plugin.create.mock.calls[0] as unknown as [{ data: { installedAt: Date } }];
+      expect(decision.decidedAt).toBe(act.decidedAt);
+      expect(plugin.installedAt).toBe(act.decidedAt);
+    });
+
+    it('records what the server admin was shown: every server-scope requested permission, granted, in the default locale (#1336)', async () => {
+      await service.install(input());
+
+      const [[{ data }]] = db.pluginConsentAct.create.mock.calls as unknown as [[{ data: { presentation: unknown } }]];
+      expect(data.presentation).toEqual({
+        locale: options.defaultLocale,
+        source: 'active',
+        checks: [
+          {
+            slug: 'plugin|demo-sink|manage:digest',
+            required: true,
+            feature: null,
+            riskLevel: RiskLevel.Low,
+            reason: 'Stores and manages the digest configuration it owns.',
+            usedFallback: false,
+            outcome: 'granted',
+          },
+          {
+            slug: 'feedback:read',
+            required: false,
+            feature: 'weekly-digest',
+            riskLevel: RiskLevel.Medium,
+            reason: 'Reads submitted feedback to compose the weekly digest.',
+            usedFallback: false,
+            outcome: 'granted',
+          },
+        ],
+      });
+    });
+
+    it("records the presentation in the installing server admin's locale when one is given (#1336)", async () => {
+      await service.install(input({ locale: 'fr' }));
+
+      const [[{ data }]] = db.pluginConsentAct.create.mock.calls as unknown as [
+        [{ data: { presentation: { locale: string; checks: { usedFallback: boolean }[] } } }],
+      ];
+      expect(data.presentation.locale).toBe('fr');
+      // The fixture's reasons are English only, so each fell back.
+      expect(data.presentation.checks.every((shown) => shown.usedFallback)).toBe(true);
+    });
+
+    it('seeds the decisions in code-unit order of slug, the lock order every writer of the Server unit takes (#1336)', async () => {
+      await service.install(input());
+
+      const slugs = (db.pluginGrant.create.mock.calls as unknown as [{ data: { permissionSlug: string } }][]).map(
+        ([{ data }]) => data.permissionSlug,
+      );
+      expect(slugs).toEqual(['feedback:read', 'plugin|demo-sink|manage:digest']);
+    });
+
+    it('writes the act even when the manifest requests nothing of the server (#1336)', async () => {
+      const manifest = buildPluginManifest();
+      manifest.permissions = { declares: [], checks: [] };
+      await writeManifest(manifest);
+
+      const result = await service.install(input());
+
+      expect(db.pluginConsentAct.create).toHaveBeenCalledTimes(1);
+      expect(db.pluginConsentAct.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          kind: PluginConsentActKind.InstallAccept,
+          presentation: { locale: options.defaultLocale, source: 'active', checks: [] },
+        }),
+      });
+      expect(db.pluginGrant.create).not.toHaveBeenCalled();
+      expect(result.act.id).toBe('act-1');
+    });
+
+    it('writes no act when the install is refused inside the transaction (#1336)', async () => {
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ id: 'existing' }));
+
+      await expect(service.install(input())).rejects.toBeInstanceOf(PluginInstallConflictError);
+      expect(db.pluginConsentAct.create).not.toHaveBeenCalled();
     });
   });
 
@@ -656,6 +782,63 @@ describe('PluginInstallerService', () => {
     });
   });
 
+  /**
+   * Install grants every server-scope requested permission at today's risk,
+   * so the risks the artifact read showed are checked against today's (#1336).
+   */
+  describe('the risks the artifact read showed', () => {
+    const withCriticalRisk = async (): Promise<void> => {
+      const manifest = buildPluginManifest();
+      manifest.permissions.checks = [
+        ...manifest.permissions.checks,
+        { slug: 'read:audit_log', required: true, reason: { en: 'Mirrors audit rows into the external sink.' } },
+      ];
+      await writeManifest(manifest);
+      db.permission.findMany.mockResolvedValue([
+        feedbackRead,
+        { slug: 'read:audit_log', subject: 'audit_log', riskLevel: RiskLevel.Critical } as Permission,
+      ]);
+    };
+
+    const CURRENT = [
+      { permissionSlug: 'plugin|demo-sink|manage:digest', riskLevel: RiskLevel.Low },
+      { permissionSlug: 'feedback:read', riskLevel: RiskLevel.Medium },
+    ];
+
+    it("installs when every risk shown is today's (#1336)", async () => {
+      await expect(service.install(input({ shownRisks: CURRENT }))).resolves.toBeDefined();
+    });
+
+    it('refuses as stale a risk that changed after the read, ahead of the Critical confirmation, writing nothing (#1336)', async () => {
+      // read:audit_log was shown High and is Critical now: the Critical set
+      // the read named is stale too, so stale is what the admin hears.
+      await withCriticalRisk();
+      const shown = [...CURRENT, { permissionSlug: 'read:audit_log', riskLevel: RiskLevel.High }];
+
+      const failure = await service.install(input({ shownRisks: shown })).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginConsentActStaleError);
+      expect(failure).toMatchObject({
+        pluginSlug: 'demo-sink',
+        kind: 'risk',
+        staleRisks: [
+          { permissionSlug: 'read:audit_log', shownRiskLevel: RiskLevel.High, currentRiskLevel: RiskLevel.Critical },
+        ],
+      });
+      expect(db.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('refuses as stale a server-scope permission it was sent no risk for (#1336)', async () => {
+      const failure = await service.install(input({ shownRisks: CURRENT.slice(0, 1) })).catch((err: unknown) => err);
+
+      expect(failure).toMatchObject({
+        name: 'PluginConsentActStaleError',
+        staleRisks: [{ permissionSlug: 'feedback:read', shownRiskLevel: null, currentRiskLevel: RiskLevel.Medium }],
+      });
+      expect(db.$transaction).not.toHaveBeenCalled();
+    });
+  });
+
   describe('static-analysis gate', () => {
     const forbidden: StaticAnalysisFinding = {
       file: 'index.js',
@@ -851,6 +1034,28 @@ describe('PluginInstallerService', () => {
         expect(db.pluginGrant.create).toHaveBeenCalledWith(
           expect.objectContaining({ data: expect.objectContaining({ pluginId: 'existing' }) }),
         );
+      });
+
+      it('a reinstall over an uninstalled plugin writes a new act for its decisions (#1336)', async () => {
+        db.pluginConsentAct.create.mockImplementation((({ data }: { data: Record<string, unknown> }) =>
+          Promise.resolve({ id: 'act-reinstall', createdAt: new Date(0), ...data })) as never);
+
+        const result = await service.install(input());
+
+        expect(db.pluginConsentAct.create).toHaveBeenCalledTimes(1);
+        expect(db.pluginConsentAct.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            pluginId: 'existing',
+            kind: PluginConsentActKind.InstallAccept,
+            manifestSha256: sha('a'),
+          }),
+        });
+        expect(result.act.id).toBe('act-reinstall');
+        expect(db.pluginGrant.create).toHaveBeenCalledTimes(2);
+
+        for (const [{ data }] of db.pluginGrant.create.mock.calls as unknown as [{ data: { actId: string } }][]) {
+          expect(data.actId).toBe('act-reinstall');
+        }
       });
 
       it('carries retained server config forward when it still satisfies the new schema', async () => {

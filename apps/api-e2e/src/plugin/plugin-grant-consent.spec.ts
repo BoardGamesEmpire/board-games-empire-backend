@@ -1,4 +1,11 @@
-import { PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel, type Plugin } from '@bge/database';
+import {
+  PluginConsentActKind,
+  PluginGrantScope,
+  PluginGrantStatus,
+  PluginScope,
+  RiskLevel,
+  type Plugin,
+} from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import request from 'supertest';
@@ -6,26 +13,29 @@ import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import {
   readConsentSurface,
+  readStagedShownRisks,
   reviewBody,
   sendReview,
   sendSwitchOn,
+  sendToggle,
   switchOnBody,
+  toggleBody,
   type ConsentAnswerStatus,
 } from './consent-act-fixtures';
-import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
+import { FIXTURE_ACT_ID, INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
 /**
- * The wire half of #322: grant decisions and the consent-presentation read
- * over real rows, on all three unit axes. The D-AV required-denial rule is
- * pinned as its 409 (and its pending-manifest exception as the C4.3
- * integration: the denial lands, and it is APPROVE that refuses), the
- * authority matrix per scope including the household instance gate, the
- * user's unit enablement a switch-on creates (#1150), the household refusal
- * of condition-free core checks, the consent standing the feature read
- * derives from the grants without a unit-enablement write (#1149), and the
- * presentation's decision states (`per-unit`, `staleRisk`) from each
- * viewpoint. Household and user decisions are consent acts (#1150); the
- * server's stay on the operator's grants route.
+ * The wire half of #322: consent acts and the consent-presentation read over
+ * real rows, on all three unit axes. Every consent decision here is written by
+ * a consent act (#1150, #1336), or arranged on the rows. Pinned: a toggle
+ * cannot refuse a required server-scope permission, and approving an update
+ * grants a permission it requires that the Server unit had refused; the
+ * authority matrix per scope including the household instance gate; the
+ * user's unit enablement a switch-on creates (#1150); the household refusal
+ * of condition-free core checks; the refusals every unit's acts share; the
+ * consent standing the feature read derives from the consent decisions
+ * without a unit-enablement write (#1149); and the presentation's decision
+ * states (`per-unit`, `staleRisk`) from each viewpoint.
  *
  * Plugin state is arranged directly on the rows (the install ingress is
  * #84's; no endpoint exists), including the `PluginPermission` catalog rows
@@ -36,7 +46,7 @@ import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plug
  * household and a user may consent to, #591), and `read:platform_game`
  * (Low, condition-free) as the trap a household decision must refuse.
  */
-describe('plugin grant decisions + consent presentation (#322)', () => {
+describe('plugin consent acts + consent surface (#322, #1150, #1336)', () => {
   const baseUrl = requireBaseUrl(process.env);
   const PLUGINS_PATH = '/api/plugins';
   const STAGED_AT = new Date('2026-08-01T12:00:00Z');
@@ -55,7 +65,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
 
   type Check = PluginManifest['permissions']['checks'][number];
 
-  /** The fixture's own declared permission — origin `plugin`, locked Low; decide() needs its catalog row. */
+  /** The fixture's own declared permission — origin `plugin`, locked Low; it is grantable only with its catalog row. */
   const MANAGE_DIGEST_CHECK: Check = {
     slug: 'manage:digest',
     required: true,
@@ -99,8 +109,8 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
   /**
    * An installed plugin with the given active checks, plus the
    * `PluginPermission` catalog row the install pipeline (#59 C2) creates
-   * for the declared permission — decide() refuses declared slugs without
-   * one, fail-loud.
+   * for the declared permission — without one, the consent surface shows it
+   * as a permission that cannot be granted.
    */
   const arrangePlugin = async (
     checks: readonly Check[] = DEFAULT_CHECKS,
@@ -125,8 +135,66 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
     return plugin;
   };
 
-  const decideServer = (actor: SessionActor, slug: string, body: Record<string, unknown>) =>
-    request(baseUrl).post(`${PLUGINS_PATH}/${slug}/grants`).set(actor.headers).send(body);
+  /** A Server-unit toggle (#1336), its body built from the Server unit's consent surface, asserted to answer `expected`. */
+  const toggleServer = async (
+    actor: SessionActor,
+    slug: string,
+    permissionSlug: string,
+    status: ConsentAnswerStatus,
+    expected: number,
+  ) => {
+    const surface = await readConsentSurface(baseUrl, actor, 'server', slug);
+
+    return sendToggle(baseUrl, actor, 'server', slug, toggleBody(surface, permissionSlug, status)).expect(expected);
+  };
+
+  /**
+   * A Server-unit consent decision arranged on the rows, with the toggle act
+   * that would have written it (#1336). The act row only needs to exist and
+   * to name the plugin manifest: nothing here reads what it presented.
+   */
+  const seedServerDecision = async (
+    plugin: Plugin,
+    permissionSlug: string,
+    decision: { readonly status: PluginGrantStatus; readonly decidedRiskLevel: RiskLevel; readonly decidedAt: Date },
+  ) => {
+    const act = await db.client.pluginConsentAct.create({
+      data: {
+        pluginId: plugin.id,
+        pluginSlug: plugin.slug,
+        scopeType: PluginGrantScope.Server,
+        scopeId: '',
+        kind: PluginConsentActKind.Toggle,
+        manifestVersion: plugin.version,
+        manifestSha256: plugin.installedSha256,
+        presentation: { checks: [] },
+        decidedAt: decision.decidedAt,
+      },
+    });
+
+    return db.client.pluginGrant.create({
+      data: {
+        pluginId: plugin.id,
+        scopeType: PluginGrantScope.Server,
+        scopeId: '',
+        permissionSlug,
+        ...decision,
+        actId: act.id,
+      },
+    });
+  };
+
+  const serverDecisionOf = (pluginId: string, permissionSlug: string) =>
+    db.client.pluginGrant.findUniqueOrThrow({
+      where: {
+        pluginId_scopeType_scopeId_permissionSlug: {
+          pluginId,
+          scopeType: PluginGrantScope.Server,
+          scopeId: '',
+          permissionSlug,
+        },
+      },
+    });
 
   /**
    * A household switch-on (#1150), its body built from the household's
@@ -185,60 +253,32 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
   const readHouseholdFeatures = (actor: SessionActor, householdId: string, slug: string) =>
     request(baseUrl).get(`/api/households/${householdId}/plugins/${slug}/features`).set(actor.headers);
 
-  const granted = (permissionSlug: string) => ({ permissionSlug, status: PluginGrantStatus.Granted });
-  const denied = (permissionSlug: string) => ({ permissionSlug, status: PluginGrantStatus.Denied });
-
-  describe('D-AV — the required-denial rule', () => {
-    it('refuses a Denied decision on an active-manifest required server check with the typed 409 naming the levers', async () => {
+  describe('required server-scope permissions (#1336)', () => {
+    it('a toggle naming a required server-scope permission is refused 422 with rule toggle-required (#1336)', async () => {
       const admin = await actors.admin();
       const plugin = await arrangePlugin();
+      const required = `plugin|${plugin.slug}|manage:digest`;
 
-      const response = await decideServer(admin, plugin.slug, denied(`plugin|${plugin.slug}|manage:digest`)).expect(
-        409,
-      );
+      const response = await toggleServer(admin, plugin.slug, required, PluginGrantStatus.Denied, 422);
 
-      // The client renders the disable/uninstall levers FROM this body
-      // (client repo #237) — code and fields are contract, not decoration.
-      expect(response.body.code).toBe('PLUGIN_GRANT_REQUIRED_DENIAL');
-      expect(response.body.slug).toBe(plugin.slug);
-      expect(response.body.permissionSlug).toBe(`plugin|${plugin.slug}|manage:digest`);
-      expect(response.body.message).toMatch(/disable or uninstall/i);
+      // A server admin refuses a required permission by switching the plugin
+      // off or uninstalling it; a toggle answers optional ones only.
+      expect(response.body).toMatchObject({
+        code: 'PLUGIN_CONSENT_ACT_ANSWER',
+        slug: plugin.slug,
+        rule: 'toggle-required',
+        permissionSlugs: [required],
+      });
 
-      // Refused, not recorded: the grant table never sees the contradiction.
+      // Refused, not recorded: neither an act nor a consent decision.
+      expect(await db.client.pluginConsentAct.count({ where: { pluginId: plugin.id } })).toBe(0);
       expect(await db.client.pluginGrant.count({ where: { pluginId: plugin.id } })).toBe(0);
     });
 
-    it('keeps an OPTIONAL server check durably deniable, idempotent on re-statement, and re-decidable', async () => {
+    it('approving an update that requires a denied permission grants it (#1336)', async () => {
       const admin = await actors.admin();
-      const plugin = await arrangePlugin();
-
-      const first = await decideServer(admin, plugin.slug, denied('read:safe_http_policy')).expect(200);
-      expect(first.body.changed).toBe(true);
-      expect(first.body.grant).toMatchObject({
-        permissionSlug: 'read:safe_http_policy',
-        scopeType: PluginGrantScope.Server,
-        status: PluginGrantStatus.Denied,
-        decidedRiskLevel: RiskLevel.Medium,
-      });
-
-      const restatement = await decideServer(admin, plugin.slug, denied('read:safe_http_policy')).expect(200);
-      expect(restatement.body.changed).toBe(false);
-
-      // The durable denial is a decision, not a dead end: a later Granted
-      // flips the SAME row in place.
-      const flip = await decideServer(admin, plugin.slug, granted('read:safe_http_policy')).expect(200);
-      expect(flip.body.changed).toBe(true);
-      expect(flip.body.grant.id).toBe(first.body.grant.id);
-
-      expect(await db.client.pluginGrant.count({ where: { pluginId: plugin.id } })).toBe(1);
-    });
-
-    it('a denial against a check only the PENDING manifest requires lands — and APPROVE is what refuses (D-AB)', async () => {
-      const admin = await actors.admin();
-      // Active: policy read OPTIONAL. Pending: the same check promoted to
-      // required — the D-AV fixture correction locked 2026-08-21: a slug the
-      // pending manifest introduces FRESH would be undecidable (422), not
-      // legal-then-blocked.
+      // Active: policy read OPTIONAL, so a toggle can refuse it now. Pending:
+      // the same requested permission made required.
       const pending = manifestWithChecks('1.3.0', [
         MANAGE_DIGEST_CHECK,
         { ...POLICY_READ_CHECK, required: true },
@@ -247,37 +287,31 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       ]);
       const plugin = await arrangePlugin(DEFAULT_CHECKS, stagedUpdateColumns({ manifest: pending, since: STAGED_AT }));
 
-      await decideServer(admin, plugin.slug, denied('read:safe_http_policy')).expect(200);
+      await toggleServer(admin, plugin.slug, 'read:safe_http_policy', PluginGrantStatus.Denied, 200);
+      const denial = await serverDecisionOf(plugin.id, 'read:safe_http_policy');
+      expect(denial.status).toBe(PluginGrantStatus.Denied);
 
-      const refusal = await request(baseUrl)
+      // The server admin who approves a version that requires the permission
+      // consents to it: the approval grants it under its UpdateApprove act.
+      const approval = await request(baseUrl)
         .post(`${PLUGINS_PATH}/${plugin.slug}/update/approve`)
         .set(admin.headers)
-        .send({ stagingId: INVENTORY_STAGING_ID })
-        .expect(409);
+        .send({ stagingId: INVENTORY_STAGING_ID, shownRisks: await readStagedShownRisks(baseUrl, admin, plugin.slug) })
+        .expect(200);
 
-      expect(refusal.body.code).toBe('PLUGIN_UPDATE_BLOCKED_BY_DENIAL');
-      expect(refusal.body.deniedRequiredSlugs).toEqual(['read:safe_http_policy']);
+      expect(approval.body.comparison.deniedRequiredSlugs).toEqual(['read:safe_http_policy']);
+      expect(approval.body.act.kind).toBe('UpdateApprove');
 
-      // The installed version keeps serving under its approved state — the
-      // upgrade coerced nothing.
+      const decision = await db.client.pluginGrant.findUniqueOrThrow({ where: { id: denial.id } });
+      expect(decision).toMatchObject({ status: PluginGrantStatus.Granted, actId: approval.body.act.id });
+
       const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
-      expect(row.version).toBe('1.2.0');
-      expect(row.pendingVersion).toBe('1.3.0');
+      expect(row.version).toBe('1.3.0');
+      expect(row.pendingVersion).toBeNull();
     });
   });
 
   describe('authority matrix', () => {
-    it('server decide: 403 for a plain user at the manage:plugin gate, 401 unauthenticated', async () => {
-      const user = await actors.user();
-      const plugin = await arrangePlugin();
-
-      await decideServer(user, plugin.slug, granted('read:safe_http_policy')).expect(403);
-      await request(baseUrl)
-        .post(`${PLUGINS_PATH}/${plugin.slug}/grants`)
-        .send(granted('read:safe_http_policy'))
-        .expect(401);
-    });
-
     it('household switch-on: owner passes; a plain member and an admin of ANOTHER household are both refused (#1150)', async () => {
       const ownerA = await actors.user();
       const memberA = await actors.user();
@@ -359,8 +393,8 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
     });
   });
 
-  describe('decide — shared semantics the endpoints inherit', () => {
-    it('refuses a tombstoned plugin with 410 at every scope', async () => {
+  describe("refusals every unit's consent acts share (#1150, #1336)", () => {
+    it('refuses an uninstalled plugin with 410 at every scope', async () => {
       const admin = await actors.admin();
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner });
@@ -368,6 +402,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       const unit = { householdId: fixture.household.id };
       // Read while the plugin is installed: a tombstone has no consent surface
       // to read, and the act names what the unit was shown before (#1150).
+      const serverSurface = await readConsentSurface(baseUrl, admin, 'server', plugin.slug);
       const householdSurface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
       const userSurface = await readConsentSurface(baseUrl, owner, 'me', plugin.slug);
 
@@ -376,8 +411,14 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
         data: { uninstalledAt: new Date('2026-08-10T00:00:00Z'), enabled: false },
       });
 
-      const server = await decideServer(admin, plugin.slug, granted('read:safe_http_policy')).expect(410);
-      expect(server.body.code).toBe('PLUGIN_GRANT_PLUGIN_TOMBSTONED');
+      const server = await sendToggle(
+        baseUrl,
+        admin,
+        'server',
+        plugin.slug,
+        toggleBody(serverSurface, 'read:safe_http_policy', PluginGrantStatus.Granted),
+      ).expect(410);
+      expect(server.body.code).toBe('PLUGIN_UNIT_PLUGIN_TOMBSTONED');
 
       const household = await sendSwitchOn(
         baseUrl,
@@ -398,28 +439,37 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       expect(user.body.code).toBe('PLUGIN_UNIT_PLUGIN_TOMBSTONED');
     });
 
-    it('does NOT gate on Plugin.enabled — consent-before-enable is a legitimate ordering', async () => {
-      const admin = await actors.admin();
-      const plugin = await arrangePlugin(DEFAULT_CHECKS, { enabled: false });
-
-      await decideServer(admin, plugin.slug, granted('read:safe_http_policy')).expect(200);
-    });
-
-    it('404s an unknown slug with the slug in the body; 422s an unrequested permission and a scope mismatch', async () => {
+    it('404s an unknown slug with the slug in the body; 422s an unrequested permission and one another unit decides (#1336)', async () => {
       const admin = await actors.admin();
       const plugin = await arrangePlugin();
+      const surface = await readConsentSurface(baseUrl, admin, 'server', plugin.slug);
+      const body = toggleBody(surface, 'read:safe_http_policy', PluginGrantStatus.Granted);
+      const answering = (permissionSlug: string) => ({
+        ...body,
+        answer: { permissionSlug, status: PluginGrantStatus.Granted, riskLevel: RiskLevel.Low },
+      });
 
-      const missing = await decideServer(admin, 'ghost-plugin', granted('read:safe_http_policy')).expect(404);
-      expect(missing.body.code).toBe('PLUGIN_GRANT_PLUGIN_NOT_FOUND');
+      const missing = await sendToggle(baseUrl, admin, 'server', 'ghost-plugin', body).expect(404);
+      expect(missing.body.code).toBe('PLUGIN_UNIT_PLUGIN_NOT_FOUND');
       expect(missing.body.slug).toBe('ghost-plugin');
 
-      const unrequested = await decideServer(admin, plugin.slug, granted('read:game')).expect(422);
-      expect(unrequested.body.code).toBe('PLUGIN_GRANT_UNKNOWN_PERMISSION');
+      const unrequested = await sendToggle(baseUrl, admin, 'server', plugin.slug, answering('read:game')).expect(422);
+      expect(unrequested.body).toMatchObject({ code: 'PLUGIN_CONSENT_ACT_ANSWER', rule: 'not-requested' });
 
-      // A household-consented check decided at server scope: the manifest
-      // owns the scope, and the decision must address it there.
-      const mismatched = await decideServer(admin, plugin.slug, granted('read:game:public')).expect(422);
-      expect(mismatched.body.code).toBe('PLUGIN_GRANT_CONSENT_SCOPE_MISMATCH');
+      // A household-scope requested permission answered by the Server unit:
+      // the manifest names the unit that decides it, and the Server unit
+      // answers only what it requests at server scope.
+      const otherUnit = await sendToggle(baseUrl, admin, 'server', plugin.slug, answering('read:game:public')).expect(
+        422,
+      );
+      expect(otherUnit.body).toMatchObject({
+        code: 'PLUGIN_CONSENT_ACT_ANSWER',
+        rule: 'not-requested',
+        permissionSlugs: ['read:game:public'],
+      });
+
+      expect(await db.client.pluginConsentAct.count({ where: { pluginId: plugin.id } })).toBe(0);
+      expect(await db.client.pluginGrant.count({ where: { pluginId: plugin.id } })).toBe(0);
     });
   });
 
@@ -471,6 +521,7 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
           scopeId: fixture.household.id,
           permissionSlug: 'read:game:public',
           status: PluginGrantStatus.Denied,
+          actId: FIXTURE_ACT_ID,
           decidedAt: new Date(),
           decidedRiskLevel: RiskLevel.Low,
         },
@@ -492,9 +543,17 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner });
       const plugin = await arrangePlugin();
-      // The server-consented requirement is a server admin's to answer; with
-      // it granted, the household check is the only one left outstanding.
-      await decideServer(admin, plugin.slug, granted(`plugin|${plugin.slug}|manage:digest`)).expect(200);
+      // The server-scope requirement is a server admin's to answer, with a
+      // review act; with it granted, the household check is the only one
+      // left outstanding.
+      const serverSurface = await readConsentSurface(baseUrl, admin, 'server', plugin.slug);
+      await sendReview(
+        baseUrl,
+        admin,
+        'server',
+        plugin.slug,
+        reviewBody(serverSurface, { [`plugin|${plugin.slug}|manage:digest`]: PluginGrantStatus.Granted }),
+      ).expect(200);
       const unit = await arrangeEnabledHouseholdUnit(fixture.household.id, plugin.id);
 
       const before = await readHouseholdFeatures(owner, fixture.household.id, plugin.slug).expect(200);
@@ -529,16 +588,10 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       const plugin = await arrangePlugin();
       // Granted when the catalog said Low; the catalog says Medium today —
       // consent on record was given for a different classification.
-      await db.client.pluginGrant.create({
-        data: {
-          pluginId: plugin.id,
-          scopeType: PluginGrantScope.Server,
-          scopeId: '',
-          permissionSlug: 'read:safe_http_policy',
-          status: PluginGrantStatus.Granted,
-          decidedAt: new Date('2026-07-01T00:00:00Z'),
-          decidedRiskLevel: RiskLevel.Low,
-        },
+      await seedServerDecision(plugin, 'read:safe_http_policy', {
+        status: PluginGrantStatus.Granted,
+        decidedRiskLevel: RiskLevel.Low,
+        decidedAt: new Date('2026-07-01T00:00:00Z'),
       });
 
       const response = await readServerConsent(admin, plugin.slug).expect(200);

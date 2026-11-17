@@ -1,13 +1,15 @@
+import { AuditContextService } from '@bge/actor-context';
 import {
   DatabaseService,
   PluginCategory,
+  PluginConsentActKind,
   PluginGrantScope,
-  PluginGrantStatus,
   Prisma,
   RiskLevel,
   SERVER_SCOPE_SENTINEL,
   type Permission,
   type Plugin,
+  type PluginConsentAct,
   type PluginGrant,
   type PluginPermission,
 } from '@bge/database';
@@ -26,6 +28,9 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { readFile } from 'node:fs/promises';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { retainedServerConfig } from '../config/retained-server-config';
+import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
+import type { ShownRisk } from '../consent/plugin-consent-act.types';
+import { planServerAcceptance, staleShownRisks } from '../consent/server-acceptance';
 import { PluginInstalledEvent, type GrantedPermissionRecord, type PluginProvenance } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
@@ -78,6 +83,13 @@ export interface PluginInstallInput {
   readonly registrySlug?: string;
   /** The installing admin — server-admin authority is verified, never assumed. */
   readonly installerId: string;
+  /**
+   * The risk the artifact read showed for each server-scope requested
+   * permission (#1336). A missing one, or one that is not today's, refuses
+   * the install as stale: it grants them all at today's risk. The HTTP route
+   * always sends it; a caller that showed nothing omits it and is not checked.
+   */
+  readonly shownRisks?: readonly ShownRisk[];
   /** Exact re-entry of every Critical + required permission slug. */
   readonly confirmCriticalSlugs?: readonly string[];
   /** Admin opt-in: extend static analysis into node_modules; findings advisory only. */
@@ -95,6 +107,12 @@ export interface PluginInstallInput {
    * violation appearing in a later tarball cannot ride an old acceptance.
    */
   readonly acknowledgeForbiddenImports?: readonly string[];
+  /**
+   * The locale the server admin read the install's requested permissions in,
+   * which the `InstallAccept` consent act records them in (#1336). Defaults to
+   * the server's default locale.
+   */
+  readonly locale?: string;
 }
 
 /**
@@ -122,7 +140,13 @@ export interface PluginInstallAssessment {
 export interface PluginInstallResult {
   readonly plugin: Plugin;
   readonly declaredPermissions: readonly PluginPermission[];
-  /** Server-scope grants seeded by this install; per-unit consent starts empty. */
+  /**
+   * The `InstallAccept` consent act the install recorded for the Server unit
+   * (#1336). Written on every install, even one whose manifest requests
+   * nothing of the server, and named by every seeded consent decision.
+   */
+  readonly act: PluginConsentAct;
+  /** Server-scope consent decisions seeded by this install; per-unit consent starts empty. */
   readonly seededGrants: readonly PluginGrant[];
   /** Full analysis report — warnings and deep-scan advisories for the install response. */
   readonly analysis: StaticAnalysisReport;
@@ -156,10 +180,12 @@ export interface PluginInstallResult {
  * authority, permission existence, and the Critical second factor are
  * invariants of the consent model, not advice about code quality.
  *
- * Every server-consentable check is seeded `Granted`: completing the
- * install — with Critical slugs doubly confirmed — IS the server-scope
- * consent act. Household/user-consentable permissions are seeded NOTHING;
- * those decisions belong to their units via `PluginGrantService.decide`.
+ * Every server-scope requested permission is seeded `Granted`: completing
+ * the install, with Critical slugs doubly confirmed, is the Server unit's
+ * consent, recorded as one `InstallAccept` consent act that every seeded
+ * consent decision names (#1336). Household- and user-scope requested
+ * permissions are seeded nothing; those decisions belong to their units,
+ * through their own consent acts.
  */
 @Injectable()
 export class PluginInstallerService {
@@ -173,6 +199,7 @@ export class PluginInstallerService {
     private readonly emitter: EventEmitter2,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
     private readonly directories: PluginDirectoryResolverService,
+    private readonly auditContext: AuditContextService,
   ) {}
 
   async install(input: PluginInstallInput): Promise<PluginInstallResult> {
@@ -208,6 +235,20 @@ export class PluginInstallerService {
       throw new PluginInstallDataGatewayNameConflictError(validated.manifest.slug, assessment.dataGatewayNameConflict);
     }
 
+    // Before the Critical confirmation: a read whose risks are stale named a
+    // Critical set that may be stale too, and reading again cures both.
+    const staleRisks =
+      input.shownRisks === undefined
+        ? []
+        : staleShownRisks(
+            serverChecks,
+            (check) => this.riskFor(validated.manifest.slug, check, corePermissions),
+            input.shownRisks,
+          );
+    if (staleRisks.length > 0) {
+      throw new PluginConsentActStaleError(validated.manifest.slug, 'risk', staleRisks);
+    }
+
     this.assertCriticalConfirmation(validated, assessment.criticalSlugsToReenter, input.confirmCriticalSlugs ?? []);
     const acknowledgedForbiddenImports = this.resolveForbiddenAcknowledgement(
       directory.slug,
@@ -231,6 +272,7 @@ export class PluginInstallerService {
       serverChecks,
       corePermissions,
       initiatedAt,
+      input.locale ?? this.options.defaultLocale,
     );
 
     const { retainedConfigReset, ...persistedResult } = persisted;
@@ -242,11 +284,13 @@ export class PluginInstallerService {
       analysis,
       acknowledgedForbiddenImports,
       retainedConfigReset,
+      persisted.act.id,
       initiatedAt,
     );
     this.logger.log(
       `Installed plugin '${persisted.plugin.slug}'@${persisted.plugin.version}: ` +
-        `${persisted.declaredPermissions.length} declared permission(s), ${persisted.seededGrants.length} server grant(s) seeded` +
+        `${persisted.declaredPermissions.length} declared permission(s), ` +
+        `${persisted.seededGrants.length} server consent decision(s) written under act ${persisted.act.id}` +
         (retainedConfigReset ? '; retained server config was schema-invalid and reset' : ''),
     );
 
@@ -324,7 +368,7 @@ export class PluginInstallerService {
 
   /**
    * Full-enforcement validation — unlike consent-time re-validation
-   * (`PluginGrantService`), install DOES gate on `bgeCompat`: a plugin that
+   * (`revalidateStoredManifest`), install DOES gate on `bgeCompat`: a plugin that
    * cannot load under the running BGE must not be installable.
    */
   private async validateManifest(directory: PluginArtifactDirectory): Promise<PluginManifestValidationResult> {
@@ -509,12 +553,24 @@ export class PluginInstallerService {
     serverChecks: readonly NormalizedPermissionRequest[],
     corePermissions: ReadonlyMap<string, Permission>,
     initiatedAt: Date,
+    locale: string,
   ): Promise<
-    Pick<PluginInstallResult, 'plugin' | 'declaredPermissions' | 'seededGrants'> & {
+    Pick<PluginInstallResult, 'plugin' | 'declaredPermissions' | 'act' | 'seededGrants'> & {
       retainedConfigReset: boolean;
     }
   > {
     const manifest = validated.manifest;
+    const correlationId = this.auditContext.getCorrelationId() ?? null;
+    // Installing grants every server-scope requested permission of the
+    // manifest, so what was accepted and what was shown are the same list.
+    const acceptance = planServerAcceptance({
+      accepted: serverChecks,
+      shown: serverChecks,
+      riskOf: (check) => this.riskFor(manifest.slug, check, corePermissions),
+      source: 'active',
+      locale,
+      defaultLocale: this.options.defaultLocale,
+    });
 
     return this.db.$transaction(async (tx) => {
       const existing = await tx.plugin.findUnique({
@@ -658,26 +714,48 @@ export class PluginInstallerService {
         );
       }
 
+      // The Server unit's consent to this install, one act whatever the
+      // manifest requests of the server, so every install leaves a record of
+      // what the server admin accepted and under which sha (#1336).
+      const act = await tx.pluginConsentAct.create({
+        data: {
+          pluginId: plugin.id,
+          pluginSlug: manifest.slug,
+          scopeType: PluginGrantScope.Server,
+          scopeId: SERVER_SCOPE_SENTINEL,
+          kind: PluginConsentActKind.InstallAccept,
+          manifestVersion: manifest.version,
+          manifestSha256: provenance.sha256,
+          presentation: acceptance.presentation as unknown as Prisma.InputJsonValue,
+          decidedById: installerId,
+          decidedAt: initiatedAt,
+          correlationId,
+        },
+      });
+
+      // In permission order, which the acceptance sorts by code unit: the
+      // order every writer of the Server unit's consent decisions takes them.
       const seededGrants: PluginGrant[] = [];
 
-      for (const check of serverChecks) {
+      for (const decision of acceptance.decisions) {
         seededGrants.push(
           await tx.pluginGrant.create({
             data: {
               pluginId: plugin.id,
               scopeType: PluginGrantScope.Server,
               scopeId: SERVER_SCOPE_SENTINEL,
-              permissionSlug: check.canonicalSlug,
-              status: PluginGrantStatus.Granted,
+              permissionSlug: decision.permissionSlug,
+              status: decision.status,
               decidedById: installerId,
               decidedAt: initiatedAt,
-              decidedRiskLevel: this.riskFor(manifest.slug, check, corePermissions),
+              decidedRiskLevel: decision.decidedRiskLevel,
+              actId: act.id,
             },
           }),
         );
       }
 
-      return { plugin, declaredPermissions, seededGrants, retainedConfigReset };
+      return { plugin, declaredPermissions, act, seededGrants, retainedConfigReset };
     });
   }
 
@@ -703,10 +781,11 @@ export class PluginInstallerService {
   /**
    * Post-commit, matching the commit-then-emit discipline everywhere else.
    * The installed event carries the full grant summary; per-grant
-   * `plugin.grant_created` events are deliberately NOT emitted for the seed
-   * — those record decisions made through the consent surface, and the
-   * seeded rows' provenance (including `decidedRiskLevel`) already lives on
-   * the rows themselves and in this event's payload.
+   * `plugin.grant_created` events are deliberately NOT emitted for the seed:
+   * it creates every row, so no decision stood before it for a grant event to
+   * carry, and the seeded rows' provenance (including `decidedRiskLevel`)
+   * already lives on the rows themselves and in this event's payload, with
+   * the act that recorded them (#1336).
    */
   private emitInstalled(
     plugin: Plugin,
@@ -715,6 +794,7 @@ export class PluginInstallerService {
     analysis: StaticAnalysisReport,
     acknowledgedForbiddenImports: readonly string[],
     retainedConfigReset: boolean,
+    actId: string,
     initiatedAt: Date,
   ): void {
     const grantedPermissions: GrantedPermissionRecord[] = serverChecks.map((check) => ({
@@ -748,6 +828,7 @@ export class PluginInstallerService {
         staticAnalysis: analysis.findings,
         acknowledgedForbiddenImports,
         retainedConfigReset,
+        actId,
       },
       initiatedAt,
     );

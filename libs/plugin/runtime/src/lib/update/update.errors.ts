@@ -5,7 +5,7 @@ import type { StaticAnalysisFinding } from '../install/static-analysis.types';
  * Typed failures for the update pipeline (#59 Phase C3). Domain errors, not
  * HTTP exceptions — the C4 update endpoints (and the #84 pipeline wrapping
  * this seam) own the status-code mapping, the same discipline as the
- * install, loader, and grant errors. Every rejection leaves NO partial
+ * install, loader, and consent act errors. Every rejection leaves NO partial
  * state: staging and activation are each a single transaction, and every
  * check runs before it.
  */
@@ -83,7 +83,7 @@ export class PluginUpdateAuthorityError extends Error {
  *   update, which clears the state either way — but drift here is
  *   corruption, so it also warrants a loud log.
  * - `'active'` — the STORED active manifest: corrupted server state, never
- *   a caller error (the same contract as `PluginGrantManifestInvalidError`).
+ *   a caller error (the same contract as `PluginUnitManifestError`).
  */
 export type PluginUpdateManifestSource = 'new' | 'pending' | 'active';
 
@@ -194,30 +194,10 @@ export class PluginUpdateForbiddenPermissionError extends Error {
 }
 
 /**
- * A surviving Server-scope `Denied` row exists on a permission the
- * pending manifest marks required. Activation is refused until the denial
- * is reversed through the consent surface — a durable refusal is not
- * steamrolled by a version bump. Carries the blocking slugs so the C4
- * surface renders the resolution prompt from the error itself.
- */
-export class PluginUpdateBlockedByDenialError extends Error {
-  override readonly name = 'PluginUpdateBlockedByDenialError';
-
-  constructor(
-    public readonly slug: string,
-    public readonly deniedRequiredSlugs: readonly string[],
-  ) {
-    super(
-      `Plugin '${slug}' update cannot activate: ${deniedRequiredSlugs.length} required permission(s) carry a durable ` +
-        `server-scope denial [${deniedRequiredSlugs.join(', ')}] — reverse the denial or reject the update`,
-    );
-  }
-}
-
-/**
- * The Critical second factor, update edition (#59): approval
- * grants the update's NEW server-consentable permissions, so any Critical
- * ones demand exact re-entry — every one, nothing else.
+ * The Critical confirmation, update edition (#59): any Critical
+ * permission approval newly confers (one with no consent decision, a denied
+ * one, or one granted at a risk that no longer covers today's) demands exact
+ * re-entry — every one, nothing else (#1336).
  */
 export class PluginUpdateCriticalConfirmationError extends Error {
   override readonly name = 'PluginUpdateCriticalConfirmationError';

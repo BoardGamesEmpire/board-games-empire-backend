@@ -5,11 +5,15 @@ import type { ConsentManifestSource } from './consent-classification.types';
 /**
  * Vocabulary of a consent act (#1150): the one recorded step in which a
  * household or user switches a plugin on, toggles one optional permission, or
- * reviews what an update left outstanding. Types only, so the planner, the
+ * reviews what an update left outstanding, and in which a server admin toggles
+ * or reviews for the Server unit. Types only, so the planner, the
  * transactional service and the HTTP edge can share them.
  */
 
-/** The units that give consent themselves; the server unit consents by operator approval. */
+/**
+ * The units whose acts `PluginConsentActService` writes: a household or a
+ * user. The Server unit's acts are written by `PluginServerConsentActService`.
+ */
 export type ConsentActUnit = HouseholdPluginUnit | UserPluginUnit;
 
 export type ConsentActKind = 'SwitchOn' | 'Toggle' | 'Review';
@@ -19,6 +23,17 @@ export interface ConsentActAnswer {
   readonly permissionSlug: string;
   readonly status: PluginGrantStatus;
   /** The risk the consent surface showed for this requested permission. */
+  readonly riskLevel: RiskLevel;
+}
+
+/**
+ * The risk a server admin's install or approval read showed for one
+ * server-scope requested permission (#1336), sent back with the install or
+ * approval as a toggle's answer sends its own.
+ */
+export interface ShownRisk {
+  /** Canonical slug. */
+  readonly permissionSlug: string;
   readonly riskLevel: RiskLevel;
 }
 

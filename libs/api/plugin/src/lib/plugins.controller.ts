@@ -1,18 +1,18 @@
 import { AuditContextService, SERVER_PLUGIN_UNIT } from '@bge/actor-context';
 import { Action, ResourceType } from '@bge/database';
-import { t } from '@bge/i18n';
+import { SupportedLocalesService, t } from '@bge/i18n';
 import { AbilityService, CheckPolicies, PoliciesGuard, ScopeComposer, Unscoped } from '@bge/permissions';
 import {
   PluginConsentPresentationNotFoundError,
   PluginConsentPresentationService,
   PluginFeatureStateNotFoundError,
   PluginFeatureStateService,
-  PluginGrantPluginNotFoundError,
-  PluginGrantService,
   PluginInventoryNotFoundError,
   PluginInventoryService,
   PluginLifecycleNotFoundError,
   PluginLifecycleService,
+  PluginServerConsentActService,
+  PluginUnitPluginNotFoundError,
   PluginUpdateNoPendingError,
   PluginUpdatePluginNotFoundError,
   PluginUpdateService,
@@ -23,13 +23,18 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { consentActLocale } from './consent-act-locale';
 import {
+  actSummary,
   ApprovePluginUpdateDto,
-  DecidePluginGrantDto,
   ListPluginsQueryDto,
   PluginInventoryDetailResponseDto,
   PluginInventoryEntryDto,
   RejectPluginUpdateDto,
+  ReviewConsentDto,
+  serverConsentActResponse,
+  ServerConsentActResponseDto,
+  ToggleConsentDto,
   UninstallPluginDto,
   UpdatePluginConfigDto,
 } from './dto';
@@ -87,12 +92,13 @@ export class PluginsController {
     private readonly lifecycle: PluginLifecycleService,
     private readonly abilityService: AbilityService,
     private readonly updates: PluginUpdateService,
-    private readonly grants: PluginGrantService,
     private readonly presentation: PluginConsentPresentationService,
     private readonly featureState: PluginFeatureStateService,
     private readonly inventory: PluginInventoryService,
+    private readonly serverConsentActs: PluginServerConsentActService,
     private readonly auditContext: AuditContextService,
     private readonly scopeComposer: ScopeComposer,
+    private readonly supportedLocales: SupportedLocalesService,
   ) {}
 
   // ─── Installed-plugin inventory (#354) ────────────────────────────────────
@@ -128,60 +134,12 @@ export class PluginsController {
     ).pipe(map((page) => paginated('plugins', page, query, ResourceType.Plugin)));
   }
 
-  // ─── Grant decisions + consent presentation (#322): Server scope ──────────
-
-  @ApiOperation({
-    summary: 'Record a server-scope consent decision for one requested permission',
-    description:
-      'Grant or durably deny a permission the active manifest requests at server consent scope. Idempotent on ' +
-      'exact re-statement (changed: false). Denying a permission the active manifest REQUIRES is refused with a ' +
-      '409 naming the honest levers — disable or uninstall (D-AV); a permission only a staged update requires ' +
-      'stays deniable, and blocks at approve instead.',
-  })
-  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
-  @ApiResponse({
-    status: Http.Forbidden,
-    description: 'Insufficient permissions, or a categorically ungrantable permission',
-  })
-  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
-  @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
-  @ApiResponse({
-    status: Http.Conflict,
-    description:
-      'Denial refused: the active plugin manifest requires this permission (disable or uninstall instead). Also ' +
-      'returned when the plugin manifest was replaced while the decision was in flight, so it was not recorded; ' +
-      "reload the plugin's permissions and decide again",
-  })
-  @ApiResponse({
-    status: Http.UnprocessableEntity,
-    description: 'Not requested by the manifest, or decided at the wrong consent scope',
-  })
-  @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
-  @HttpCode(Http.Ok)
-  @Post(':slug/grants')
-  decideGrant(@Param('slug') slug: string, @Body() dto: DecidePluginGrantDto) {
-    return from(
-      this.assertUnderCeiling(slug, Action.manage, PluginGrantPluginNotFoundError).then(() =>
-        this.grants.decide({
-          slug,
-          permissionSlug: dto.permissionSlug,
-          status: dto.status,
-          deciderId: this.abilityService.getActingUserId(),
-        }),
-      ),
-    ).pipe(
-      map(({ grant, changed }) => ({
-        message: t('success.plugin.grant_decided', { slug, permissionSlug: dto.permissionSlug }),
-        grant,
-        changed,
-      })),
-    );
-  }
+  // ─── Consent surface (#322): Server scope ──────────────────────────────────
 
   @ApiOperation({
     summary: "Present the active manifest's consent surface for the Server unit",
     description:
-      "The server admin's consent screen: every check the active manifest requests — riskLevel, required, " +
+      "The server admin's consent surface: every check the active manifest requests — riskLevel, required, " +
       'consentScope, localized reason, feature binding, and its decision state from this viewpoint (unit-scope ' +
       "checks read 'per-unit') — plus the localized features[] the checks group under.",
   })
@@ -191,7 +149,7 @@ export class PluginsController {
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies(canReadServerPlugins)
   // Must stay out of the response cache: it exists to be read right before a
-  // decide POST, and the decide's write must be visible on the re-read.
+  // consent act, and the act's writes must be visible on the re-read.
   @Get(':slug/consent')
   consentPresentation(@Param('slug') slug: string) {
     return from(
@@ -199,6 +157,101 @@ export class PluginsController {
         this.presentation.presentForUnitBySlug(slug, SERVER_PLUGIN_UNIT, this.auditContext.getLocale() ?? undefined),
       ),
     ).pipe(map((presentation) => ({ presentation })));
+  }
+
+  // ─── Server consent acts (#1336) ───────────────────────────────────────────
+  // A toggle and a review are each one recorded consent act for the Server
+  // unit. Each answers 200 whether or not it changed anything (changed: false
+  // and act: null when it did not), so repeating one is safe. Neither reads
+  // the Server switch: consenting before the plugin is switched on is a
+  // legitimate order.
+
+  @ApiOperation({
+    summary: 'Grant or refuse one optional server-scope requested permission',
+    description:
+      'One consent act for the Server unit that changes the answer to one optional requested permission the ' +
+      "server decides, as the active manifest's consent surface (GET …/consent) showed it. A required " +
+      'permission cannot be toggled: the server admin refuses one by switching the plugin off or uninstalling ' +
+      'it. Repeating the current answer answers changed: false.',
+  })
+  @ApiResponse({ status: Http.Ok, type: ServerConsentActResponseDto })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'You are not a server admin' })
+  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
+  @ApiResponse({ status: Http.Gone, description: 'The plugin was uninstalled' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description:
+      'PLUGIN_CONSENT_ACT_STALE: the plugin or the permission risk changed since the consent surface was read; ' +
+      'read it again and answer again. PLUGIN_CONSENT_ACT_UNGRANTABLE: the permission cannot be granted.',
+  })
+  @ApiResponse({
+    status: Http.UnprocessableEntity,
+    description:
+      'PLUGIN_CONSENT_ACT_ANSWER: the permission is not requested, is required, or is not decided by the ' +
+      'server (rule says which). PLUGIN_CONSENT_ACT_LOCALE: locale is not one this server supports. Also a body ' +
+      'that fails validation.',
+  })
+  @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
+  @HttpCode(Http.Ok)
+  @Post(':slug/consent/toggle')
+  toggleConsent(@Param('slug') slug: string, @Body() dto: ToggleConsentDto) {
+    return from(
+      this.assertUnderCeiling(slug, Action.manage, PluginUnitPluginNotFoundError).then(() =>
+        this.serverConsentActs.toggle({
+          slug,
+          actorId: this.abilityService.getActingUserId(),
+          manifestSha256: dto.manifestSha256,
+          answers: [dto.answer],
+          locale: this.presentationLocale(dto.locale),
+        }),
+      ),
+    ).pipe(map((result) => serverConsentActResponse(t('success.plugin.server_consent_toggled', { slug }), result)));
+  }
+
+  @ApiOperation({
+    summary: 'Accept what the active manifest still asks of the server',
+    description:
+      'One consent act for the Server unit that grants the server-scope requested permissions the active ' +
+      'manifest leaves outstanding, most often one whose risk rose since it was granted. A server review only ' +
+      'grants: an optional permission is refused with a toggle, and a required one by switching the plugin off ' +
+      'or uninstalling it. To consent to a staged update, approve it. Sending the same review again answers ' +
+      'changed: false.',
+  })
+  @ApiResponse({ status: Http.Ok, type: ServerConsentActResponseDto })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'You are not a server admin' })
+  @ApiResponse({ status: Http.NotFound, description: "Plugin not installed, or outside the actor's ceiling" })
+  @ApiResponse({ status: Http.Gone, description: 'The plugin was uninstalled' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description:
+      'PLUGIN_CONSENT_ACT_STALE: the plugin or a permission risk changed since the consent surface was read; ' +
+      'read it again and answer again. PLUGIN_CONSENT_ACT_UNGRANTABLE: a permission answered Granted cannot be ' +
+      'granted.',
+  })
+  @ApiResponse({
+    status: Http.UnprocessableEntity,
+    description:
+      'PLUGIN_CONSENT_ACT_ANSWER: an answer refuses a permission (rule server-refusal), or does not match what ' +
+      'the server decides (rule and permissionSlugs say which). PLUGIN_CONSENT_ACT_LOCALE: locale is not one ' +
+      'this server supports. Also a body that fails validation, such as an empty answers list.',
+  })
+  @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
+  @HttpCode(Http.Ok)
+  @Post(':slug/consent/review')
+  reviewConsent(@Param('slug') slug: string, @Body() dto: ReviewConsentDto) {
+    return from(
+      this.assertUnderCeiling(slug, Action.manage, PluginUnitPluginNotFoundError).then(() =>
+        this.serverConsentActs.review({
+          slug,
+          actorId: this.abilityService.getActingUserId(),
+          manifestSha256: dto.manifestSha256,
+          answers: dto.answers,
+          locale: this.presentationLocale(dto.locale),
+        }),
+      ),
+    ).pipe(map((result) => serverConsentActResponse(t('success.plugin.server_consent_reviewed', { slug }), result)));
   }
 
   @ApiOperation({ summary: 'Enable a plugin (server-level switch)' })
@@ -294,8 +347,11 @@ export class PluginsController {
   @ApiOperation({
     summary: 'Approve the staged pending update',
     description:
-      'The server-scope consent act: seeds the new server-consentable grants, re-stamps risk-escalated ones, ' +
-      'applies the declares[] catalog diff, and reports the household and user units owing a fresh decision per axis on the ' +
+      "The Server unit's consent to the staged update, recorded as one UpdateApprove consent act (act on the " +
+      "response). It grants every server-scope permission the new manifest requires, at today's risk, a denied " +
+      'one included: approving a version that requires a permission consents to it. It also grants each optional ' +
+      'server-scope permission the Server unit has not decided, and leaves an optional decision that exists as it ' +
+      'stands. It applies the declares[] catalog diff, and reports the household and user units owing a fresh decision per axis on the ' +
       'response (reconsentHouseholdUnits, reconsentUserUnits). Those units keep whatever they were running: one ' +
       'owing a required permission reads review_pending until its owner decides, and one owing only a risk-raised ' +
       'optional permission has that feature off (#1149). Activation is DB-side — the running instance keeps the prior code until the ' +
@@ -317,13 +373,15 @@ export class PluginsController {
     description:
       'No staged update; the staging named by stagingId was replaced since it was read ' +
       '(PluginUpdateStagingReplacedError — read it again); or a challenge: Critical confirmation required ' +
-      '(expectedSlugs), or activation is blocked by a durable denial (deniedRequiredSlugs); or the update makes ' +
-      'the plugin a data-gateway plugin and another DataGateway already has the name its DataGateway would take ' +
+      '(expectedSlugs, every Critical permission the approval newly confers, a denied one included); or the ' +
+      'update makes the plugin a data-gateway plugin and another DataGateway already has the name its DataGateway would take ' +
       '(dataGatewayName — rename that DataGateway, then approve again)',
   })
   @ApiResponse({
     status: Http.UnprocessableEntity,
-    description: 'Stored PENDING manifest failed re-validation (a corrupt ACTIVE manifest renders as 500 by design)',
+    description:
+      'Stored PENDING manifest failed re-validation (a corrupt ACTIVE manifest renders as 500 by design), or ' +
+      'PLUGIN_CONSENT_ACT_LOCALE: locale is not one this server supports',
   })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
   @HttpCode(Http.Ok)
@@ -335,7 +393,11 @@ export class PluginsController {
           slug,
           approverId: this.abilityService.getActingUserId(),
           stagingId: dto.stagingId,
+          shownRisks: dto.shownRisks,
           confirmCriticalSlugs: dto.confirmCriticalSlugs,
+          // The locale the staged-update read was requested in, which the
+          // approval's consent act records its presentation in (#1336, #1301).
+          locale: this.presentationLocale(dto.locale),
         }),
       ),
     ).pipe(
@@ -343,6 +405,7 @@ export class PluginsController {
         message: t('success.plugin.update_approved', { slug, version: result.plugin.version }),
         plugin: result.plugin,
         comparison: result.comparison,
+        act: actSummary(result.act),
         seededGrants: result.seededGrants,
         // Also on the row, surfaced top-level because it is the response's
         // one operational instruction: nothing serves the new code until a
@@ -390,13 +453,16 @@ export class PluginsController {
     summary: 'Present the staged pending update for approval',
     description:
       "The approval screen's data source: the escalation comparison recomputed against today's decisions " +
-      '(escalations, serverGating, blockedByDenial), pendingSince, stagingId (which approve and reject send back, ' +
+      '(escalations, serverGating, deniedRequiredSlugs), pendingSince, stagingId (which approve and reject send back, ' +
       'so neither answers a staging the admin was not shown, #357), the declares[] catalog diff approving would ' +
       'apply (added/removed plugin-namespaced permissions — removed takes their grants), noLongerRequested (the ' +
       'requested permissions the update stops requesting, whose decisions approving deletes at every scope), ' +
       "and the staged manifest's " +
-      'consent surface localized for the requester. A durable denial renders as blockedByDenial state here; only ' +
-      'approve refuses over it.',
+      'consent surface localized for the requester. deniedRequiredSlugs lists the server-scope permissions the ' +
+      'update requires that the Server unit denied: approving grants them. unitCoverage gives, for the household ' +
+      'and the user scope, switchedOn (units with the plugin switched on) and covered (those of them approving ' +
+      'would ask nothing of, such as a household that already accepted the staged update); the rest are told ' +
+      'they owe re-consent when the update is approved.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
@@ -529,15 +595,15 @@ export class PluginsController {
    * comparison and the consent surface describe one staging by
    * construction, whatever resolves or re-stages concurrently.
    *
-   * The row is the only shared snapshot, deliberately. A grant decision
+   * The row is the only shared snapshot, deliberately. A consent decision
    * landing between describePending's comparison and the presentation's own
-   * grant read can still leave `blockedByDenial` disagreeing with a check's
-   * decision state. That window is cosmetic and self-limiting: approve
-   * recomputes the comparison against TODAY's decisions and refuses over a
-   * denial regardless of what this screen rendered, so a stale screen
-   * cannot authorize anything — and closing it would mean one transaction
-   * threaded through the presentation service, a cross-service seam that is
-   * not worth a body re-derived on the next action.
+   * grant read can still leave `deniedRequiredSlugs` disagreeing with a
+   * check's decision state. That window is cosmetic and self-limiting:
+   * approve works out what it grants, and the Critical confirmation it asks,
+   * from the decisions read inside its own transaction, whatever this screen
+   * rendered, so a stale screen cannot authorize anything — and closing it
+   * would mean one transaction threaded through the presentation service, a
+   * cross-service seam that is not worth a body re-derived on the next action.
    */
   private async loadPendingPresentation(slug: string): Promise<Record<string, unknown>> {
     await this.assertUnderCeiling(slug, Action.read, PluginUpdatePluginNotFoundError);
@@ -571,7 +637,12 @@ export class PluginsController {
       stagingId: description.plugin.pendingStagingId,
       escalations: description.comparison.escalations,
       serverGating: description.comparison.serverGating,
-      blockedByDenial: description.comparison.blockedByDenial,
+      deniedRequiredSlugs: description.comparison.deniedRequiredSlugs,
+      // Per scope, the units with the plugin switched on and those approving
+      // would ask nothing of, by the same rule activation uses to decide who
+      // owes re-consent (#1336): the rest are the units the approval reports
+      // as owing.
+      unitCoverage: description.unitCoverage,
       // The catalog diff approving would apply. Separate from `escalations`
       // because no escalation kind describes a declaration change, and a
       // declaration the plugin never requests appears in neither the checks
@@ -586,5 +657,19 @@ export class PluginsController {
       // name for one fact.
       presentation,
     };
+  }
+
+  /**
+   * The locale a server write that stores a presentation renders it in
+   * (#1301): the one the body names, refused unless this server supports it,
+   * else the request's own. Each route calls it after its ceiling check, so a
+   * plugin outside the actor's ceiling still answers as not installed.
+   */
+  private presentationLocale(named: string | undefined): string | undefined {
+    return consentActLocale(
+      named,
+      this.supportedLocales.getSupportedTags(),
+      this.auditContext.getLocale() ?? undefined,
+    );
   }
 }

@@ -1,5 +1,6 @@
 import { AuditContextModule } from '@bge/actor-context';
 import { DatabaseModule } from '@bge/database';
+import { I18nConfigModule } from '@bge/i18n';
 import { PluginArtifactsModule } from '@bge/plugin-artifacts';
 import { Module } from '@nestjs/common';
 import { PluginExceptionFilter } from './filters/plugin-exception.filter';
@@ -40,6 +41,11 @@ import { UserPluginsController } from './user-plugins.controller';
     DatabaseModule,
     // The receiver and the installer behind the install ingress's routes (#1094).
     PluginArtifactsModule,
+    // Supplies SupportedLocalesService to the controllers, which refuse a
+    // write that stores a presentation in a locale this server does not
+    // support (#1301). The module is not global; the app imports it too, and
+    // Nest builds it once.
+    I18nConfigModule,
     // No import for the controller's other dependencies: PermissionsModule
     // (PoliciesGuard, AbilityService) and the runtime `@bge/plugin`
     // (PluginLifecycleService) are both global modules, the latter

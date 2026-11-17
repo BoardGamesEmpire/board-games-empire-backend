@@ -25,10 +25,9 @@ export type ConsentUngrantableCause =
 
 /**
  * The one rule that says whether a requested permission can be granted at all.
- * `PluginGrantService.resolveRiskLevel` throws on the same cases while it
- * resolves risk for a decision; this returns the cause instead, so the consent
- * surface and the consent act planner can report and refuse it without
- * writing anything (#1150).
+ * It returns the cause rather than throwing, so the consent surface and the
+ * consent act planner can report and refuse it without writing anything
+ * (#1150).
  *
  * Causes are tested in a fixed order: categorical exclusion, no catalog row,
  * wildcard subject, unbound unit scope.

@@ -1,6 +1,6 @@
 import { AuditContextService, requireSessionUserId, type UserPluginUnit } from '@bge/actor-context';
 import { Action, ResourceType } from '@bge/database';
-import { t } from '@bge/i18n';
+import { SupportedLocalesService, t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard, ScopeComposer } from '@bge/permissions';
 import {
   PluginConsentActService,
@@ -17,6 +17,7 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { consentActLocale } from './consent-act-locale';
 import {
   consentActResponse,
   ConsentActResponseDto,
@@ -63,6 +64,7 @@ export class UserPluginsController {
     private readonly inventory: PluginInventoryService,
     private readonly auditContext: AuditContextService,
     private readonly scopeComposer: ScopeComposer,
+    private readonly supportedLocales: SupportedLocalesService,
   ) {}
 
   // ─── Installed-plugin inventory for the acting user (#354) ────────────────
@@ -167,12 +169,13 @@ export class UserPluginsController {
     description:
       'PLUGIN_CONSENT_ACT_REQUIRED_SET: a required permission was left out (missingSlugs) or Denied ' +
       '(refusedSlugs). PLUGIN_CONSENT_ACT_ANSWER: an answer does not match what the plugin asks for (rule and ' +
-      'permissionSlugs say which). Also a body that fails validation.',
+      'permissionSlugs say which). PLUGIN_CONSENT_ACT_LOCALE: locale is not one this server supports. Also a ' +
+      'body that fails validation.',
   })
   @HttpCode(Http.Ok)
   @Post(':slug/enable')
   enable(@Param('slug') slug: string, @Body() dto: SwitchOnUserPluginDto) {
-    return from(this.consentActs.switchOn(this.actInput(slug, dto.manifestSha256, dto.answers))).pipe(
+    return from(this.consentActs.switchOn(this.actInput(slug, dto, dto.answers))).pipe(
       map((result) => consentActResponse(t('success.plugin.enabled', { slug }), result)),
     );
   }
@@ -203,12 +206,13 @@ export class UserPluginsController {
     status: Http.UnprocessableEntity,
     description:
       'PLUGIN_CONSENT_ACT_ANSWER: the permission is not requested, is required, or is not yours to decide ' +
-      '(rule says which). Also a body that fails validation.',
+      '(rule says which). PLUGIN_CONSENT_ACT_LOCALE: locale is not one this server supports. Also a body that ' +
+      'fails validation.',
   })
   @HttpCode(Http.Ok)
   @Post(':slug/consent/toggle')
   toggleConsent(@Param('slug') slug: string, @Body() dto: ToggleConsentDto) {
-    return from(this.consentActs.toggle(this.actInput(slug, dto.manifestSha256, [dto.answer]))).pipe(
+    return from(this.consentActs.toggle(this.actInput(slug, dto, [dto.answer]))).pipe(
       map((result) => consentActResponse(t('success.plugin.consent_recorded', { slug }), result)),
     );
   }
@@ -240,12 +244,13 @@ export class UserPluginsController {
     status: Http.UnprocessableEntity,
     description:
       'PLUGIN_CONSENT_ACT_ANSWER: an answer does not match what is outstanding (rule and permissionSlugs say ' +
-      'which). Also a body that fails validation, such as an empty answers list.',
+      'which). PLUGIN_CONSENT_ACT_LOCALE: locale is not one this server supports. Also a body that fails ' +
+      'validation, such as an empty answers list.',
   })
   @HttpCode(Http.Ok)
   @Post(':slug/consent/review')
   reviewConsent(@Param('slug') slug: string, @Body() dto: ReviewConsentDto) {
-    return from(this.consentActs.review(this.actInput(slug, dto.manifestSha256, dto.answers))).pipe(
+    return from(this.consentActs.review(this.actInput(slug, dto, dto.answers))).pipe(
       map((result) =>
         consentActResponse(
           result.switchedOff
@@ -310,19 +315,28 @@ export class UserPluginsController {
   /**
    * What every consent act of your own hands the service (#1150): you are
    * both the unit and the actor, and the locale is the one the consent
-   * surface was shown in. The actor-kind check runs here, before the service
-   * is asked.
+   * surface was shown in: the one the body names, refused unless this server
+   * supports it, else the request's own (#1301). The actor-kind check runs
+   * here first, before the locale is judged or the service is asked.
    */
-  private actInput(slug: string, manifestSha256: string, answers: readonly ConsentActAnswer[]): ConsentActInput {
+  private actInput(
+    slug: string,
+    body: { readonly manifestSha256: string; readonly locale?: string },
+    answers: readonly ConsentActAnswer[],
+  ): ConsentActInput {
     const userId = this.selfUserId();
 
     return {
       slug,
       unit: { scopeType: 'User', userId },
       actorId: userId,
-      manifestSha256,
+      manifestSha256: body.manifestSha256,
       answers,
-      locale: this.auditContext.getLocale() ?? undefined,
+      locale: consentActLocale(
+        body.locale,
+        this.supportedLocales.getSupportedTags(),
+        this.auditContext.getLocale() ?? undefined,
+      ),
     };
   }
 }

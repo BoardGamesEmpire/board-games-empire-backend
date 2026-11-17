@@ -1,9 +1,9 @@
+import { AuditContextService } from '@bge/actor-context';
 import {
-  constraintIdentity,
   DatabaseService,
-  identifiesConstraint,
   isDeadlockError,
   PluginCategory,
+  PluginConsentActKind,
   PluginGrantScope,
   PluginGrantStatus,
   Prisma,
@@ -12,6 +12,7 @@ import {
   type HouseholdPlugin,
   type Permission,
   type Plugin,
+  type PluginConsentAct,
   type PluginGrant,
   type UserPlugin,
 } from '@bge/database';
@@ -34,11 +35,16 @@ import { createId } from '@paralleldrive/cuid2';
 import { readFile } from 'node:fs/promises';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { retainedServerConfig } from '../config/retained-server-config';
+import { emitDecisionEvents, type WrittenDecision } from '../consent/consent-decision-events';
+import { decisionStands } from '../consent/consent-decision-stands';
+import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
+import type { ShownRisk } from '../consent/plugin-consent-act.types';
 import {
   consentCatalogFlags,
   decideConsentCheck,
   type ConsentCheckDecisionInput,
 } from '../consent/plugin-consent-check-classifier.service';
+import { planServerAcceptance, planServerApproval, staleShownRisks } from '../consent/server-acceptance';
 import { grantSnapshot, householdSwitchSnapshot, userSwitchSnapshot } from '../events/plugin-event-snapshots';
 import {
   HouseholdPluginReconsentRequestedEvent,
@@ -72,12 +78,11 @@ import { PluginDirectoryLayoutError } from '../loader/loader.errors';
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
-import { compareForEscalations } from './escalation-comparator';
+import { compareForEscalations, deniedRequiredServerSlugs } from './escalation-comparator';
 import { CLEARED_STAGED_UPDATE } from './staged-update.columns';
 import type { ManifestComparisonView, UpdateEscalation, UpdateEscalationComparison } from './update-escalation.types';
 import {
   PluginUpdateAuthorityError,
-  PluginUpdateBlockedByDenialError,
   PluginUpdateCriticalConfirmationError,
   PluginUpdateDataGatewayNameConflictError,
   PluginUpdateForbiddenPermissionError,
@@ -92,38 +97,6 @@ import {
   PluginUpdateUnknownCorePermissionError,
   PluginUpdateVersionConflictError,
 } from './update.errors';
-
-/**
- * `PluginGrant`'s decision unique, in every spelling `constraintIdentity` can
- * report it: the index name the driver adapter reports since
- * `@prisma/adapter-pg@7.10` (the shape that ships), the raw columns it reported
- * before, and Prisma field names in case a release restores `meta.target`.
- *
- * The index name is Prisma's default for the `@@unique`, as created in
- * `20260722232927_plugins`; naming it in the schema with `map:` would change it.
- */
-const GRANT_DECISION_UNIQUE_INDEX = 'plugin_grants_plugin_id_scope_type_scope_id_permission_slug_key';
-const GRANT_DECISION_UNIQUE_COLUMNS = ['plugin_id', 'scope_type', 'scope_id', 'permission_slug'] as const;
-const GRANT_DECISION_UNIQUE_FIELDS = ['pluginId', 'scopeType', 'scopeId', 'permissionSlug'] as const;
-
-/**
- * True when a failure is a grant-decision collision — the only failure the
- * activation transaction retries.
- *
- * An unidentifiable P2002 answers FALSE. `constraintIdentity` cannot tell
- * "not that constraint" from "could not tell", and the safe reading here is
- * the second: retrying a violation this transaction cannot explain would
- * replay a deterministic write that fails identically, turning one honest
- * error into the same error, later.
- */
-function isGrantDecisionCollision(error: unknown): boolean {
-  return identifiesConstraint(
-    constraintIdentity(error),
-    [GRANT_DECISION_UNIQUE_INDEX],
-    GRANT_DECISION_UNIQUE_COLUMNS,
-    GRANT_DECISION_UNIQUE_FIELDS,
-  );
-}
 
 /**
  * The `declares[]` catalog diff, shared by the read that RENDERS it and the
@@ -176,6 +149,8 @@ interface ResolvedPendingUpdate {
   readonly next: PluginManifestValidationResult;
   readonly corePermissions: ReadonlyMap<string, Permission>;
   readonly comparison: UpdateEscalationComparison;
+  /** Every consent decision of the plugin, all scopes, as the comparison read them. */
+  readonly decisions: readonly PluginGrant[];
 }
 
 /** What a guarded write on a plugin's staged update was doing when it matched no row (#1116). */
@@ -220,7 +195,11 @@ export interface PluginUpdateStageResult {
   readonly analysis: StaticAnalysisReport;
   readonly warnings: readonly ManifestWarning[];
   readonly acknowledgedForbiddenImports: readonly string[];
-  /** Populated on immediate activation; empty when the update was staged pending. */
+  /**
+   * The server-scope consent decisions the activation wrote. Empty on both
+   * paths `stage()` takes: an update that activates without approval writes
+   * none, and a staged one waits for `approve()` (#1336).
+   */
   readonly seededGrants: readonly PluginGrant[];
 }
 
@@ -234,8 +213,27 @@ export interface PluginUpdateApproveInput {
    * staging its approver didn't review.
    */
   readonly stagingId: string;
-  /** Exact re-entry of every Critical permission slug this approval will GRANT — the same second factor install demands (#59). */
+  /**
+   * The risk the staged-update read showed for each server-scope permission
+   * the staged manifest requests (#1336). A missing one, or one that is not
+   * today's, refuses the approval as stale: it grants at today's risk. The
+   * HTTP route always sends it; a caller that showed nothing omits it and is
+   * not checked.
+   */
+  readonly shownRisks?: readonly ShownRisk[];
+  /**
+   * Exact re-entry of every Critical permission slug this approval newly
+   * confers: one with no consent decision, a denied one, or one granted at a
+   * risk that no longer covers today's. The same Critical confirmation
+   * install demands (#59, #1336).
+   */
   readonly confirmCriticalSlugs?: readonly string[];
+  /**
+   * The locale the server admin read the staged update's requested
+   * permissions in, which the `UpdateApprove` consent act records them in
+   * (#1336). Defaults to the server's default locale.
+   */
+  readonly locale?: string;
 }
 
 /** One household unit an approval told it owes re-consent, with the slugs it has not yet granted (#321, #1149). */
@@ -253,7 +251,13 @@ export interface PluginUpdateReconsentUserUnit {
 export interface PluginUpdateApproveResult {
   readonly plugin: Plugin;
   readonly comparison: UpdateEscalationComparison;
-  /** Server-scope grants seeded by this approval — the new server-consentable checks. */
+  /** The `UpdateApprove` consent act this approval recorded for the Server unit (#1336). */
+  readonly act: PluginConsentAct;
+  /**
+   * Every server-scope consent decision this approval wrote, each naming the
+   * act: the required permissions at today's risk and the optional ones the
+   * Server unit had not decided (#1336).
+   */
   readonly seededGrants: readonly PluginGrant[];
   /**
    * Enabled units that do not cover every re-consent slug of their scope
@@ -311,6 +315,40 @@ export interface PluginUpdatePendingDescription {
    * instead.
    */
   readonly noLongerRequested: readonly string[];
+  /**
+   * Per scope, how many units have the plugin switched on and how many of
+   * them approving would ask nothing of (#1336). Worked out by the read
+   * activation uses to find who owes re-consent, so `switchedOn - covered`
+   * is the number of units the approval then reports, as the decisions stand.
+   */
+  readonly unitCoverage: {
+    readonly household: PluginUpdateUnitCoverage;
+    readonly user: PluginUpdateUnitCoverage;
+  };
+}
+
+/** How one scope's switched-on units stand against a staged update (#1336). */
+export interface PluginUpdateUnitCoverage {
+  /** Units with the plugin switched on at this scope. */
+  readonly switchedOn: number;
+  /** Of those, the units that would be asked nothing on activation. */
+  readonly covered: number;
+}
+
+/**
+ * Raised inside an activation with no approval when the Server unit's
+ * decisions, read under the plugin row's claim, deny a server-scope
+ * permission the next manifest requires (#1336). The throw rolls the
+ * transaction back whole, the claim included, and `stage()` catches it and
+ * stages the update for approval instead. Never rendered and never leaves this
+ * file: it is a signal between two methods, not a refusal.
+ */
+class ActivationNeedsApprovalSignal extends Error {
+  override readonly name = 'ActivationNeedsApprovalSignal';
+
+  constructor(slug: string) {
+    super(`Plugin '${slug}': a required server-scope permission is denied, so the update needs approval`);
+  }
 }
 
 /** Covering inputs for a slug the catalog has no row for: nothing confers. */
@@ -327,6 +365,31 @@ interface ReconsentCandidate<TUnit> {
 }
 
 /**
+ * One scope's switched-on units, and those of them that owe re-consent
+ * (#1336). `switchedOn` is null when the scope owes nothing, so no unit was
+ * read and none was counted.
+ */
+interface ScopeReconsent<TUnit> {
+  readonly switchedOn: number | null;
+  readonly owing: ReconsentCandidate<TUnit>[];
+}
+
+/** Who owes re-consent under a manifest, at both unit scopes (#225, #1336). */
+interface UnitsOwingReconsent {
+  readonly household: ScopeReconsent<HouseholdPlugin>;
+  readonly user: ScopeReconsent<UserPlugin>;
+}
+
+/**
+ * What an approval brings to activation: the Critical confirmation it answers
+ * and the locale its consent act records (#1336).
+ */
+interface ActivationApproval {
+  readonly confirmCriticalSlugs: readonly string[];
+  readonly locale: string;
+}
+
+/**
  * What one activation needs, shared by `activate()` and
  * `activateInTransaction()` so the two cannot drift apart (#1116).
  */
@@ -338,27 +401,41 @@ interface ActivationInput {
   /** The checksum of the plugin artifact being activated, which becomes `installedSha256` (#224). */
   readonly artifactSha256: PluginArtifactSha256;
   readonly comparison: UpdateEscalationComparison;
-  readonly checksToSeed: readonly NormalizedPermissionRequest[];
   readonly corePermissions: ReadonlyMap<string, Permission>;
   readonly actorId: string;
   readonly initiatedAt: Date;
 
   /**
-   * `approve()`'s second-factor inputs, re-verified inside the transaction
-   * against the tx-local seed set. Absent on the immediate `stage()` path,
-   * which never seeds through an approval: nothing escalated to confirm.
+   * `approve()`'s Critical confirmation and locale. Absent on the immediate
+   * `stage()` path, which activates without approval: nothing server-gated,
+   * so no server admin consented to anything and no act is recorded. That
+   * path still reads the Server unit's decisions under the claim, and a
+   * denial there of a permission `next` requires sends the update back to
+   * `stage()` to be staged.
    */
-  readonly reentry?: {
-    readonly confirmCriticalSlugs: readonly string[];
-    readonly riskEscalatedChecks: readonly NormalizedPermissionRequest[];
-  };
+  readonly approval?: ActivationApproval;
 }
 
 interface ActivationOutcome {
   readonly plugin: Plugin;
-  /** The checks actually seeded — the caller's set re-filtered against the tx-local decisions (see `activate()`). */
-  readonly seededChecks: readonly NormalizedPermissionRequest[];
-  readonly seededGrants: readonly PluginGrant[];
+  /**
+   * The server-scope requested permissions the approval granted, worked out
+   * inside the transaction from the decisions read there (#1336). Empty when
+   * the update activated without approval.
+   */
+  readonly acceptedChecks: readonly NormalizedPermissionRequest[];
+  /** The consent decisions written for `acceptedChecks`, in permission order. */
+  readonly acceptedGrants: readonly PluginGrant[];
+  /**
+   * The accepted decisions that changed a row that already stood: a denial
+   * the approval overturned, or a grant it re-stamped at today's risk. Each
+   * gets its grant event, which carries the row as it stood before; a
+   * decision written where none stood is announced by the approval's own
+   * event (#1336).
+   */
+  readonly changedDecisions: readonly WrittenDecision[];
+  /** The approval's `UpdateApprove` consent act; null when the update activated without approval. */
+  readonly act: PluginConsentAct | null;
   readonly revokedGrants: readonly PluginGrant[];
   /** Decisions deleted because the next manifest stopped requesting their permission (#577). */
   readonly unrequestedGrants: readonly PluginGrant[];
@@ -370,8 +447,6 @@ interface ActivationOutcome {
    * its revocation names the act's version, not the one this update replaces.
    */
   readonly revokedActVersions: ReadonlyMap<string, string>;
-  /** Server-scope grants whose `decidedRiskLevel` this approval refreshed (#59). */
-  readonly reStampedGrants: readonly PluginGrant[];
   /** Enabled household units that owe re-consent — announced after commit, never written (#1149). */
   readonly reconsentHouseholdUnits: readonly ReconsentCandidate<HouseholdPlugin>[];
   /** The user-scope mirror (#225). */
@@ -398,9 +473,11 @@ interface ActivationOutcome {
  * SAME consent gates as install (categorical exclusions, core-permission
  * existence, static analysis with its overridable forbidden-specifier
  * gate), runs the escalation comparison against the ACTIVE manifest, and
- * then either activates immediately (no server-gating escalation, no
- * denial block) or writes the pending columns and emits
- * `plugin.update_pending` for the admin surface.
+ * then either activates immediately (no server-gating escalation, and no
+ * refusal of a required server-scope permission found under the activation
+ * claim) or writes the pending columns and emits `plugin.update_pending` for
+ * the admin surface. Approving a staged update is the Server unit's consent to it,
+ * recorded as one `UpdateApprove` consent act (#1336).
  *
  * ACTIVATION never hot-swaps running code: the transaction promotes
  * the DB state — version, manifest, the `declares[]` catalog diff with
@@ -432,6 +509,7 @@ export class PluginUpdateService {
     private readonly emitter: EventEmitter2,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
     private readonly directories: PluginDirectoryResolverService,
+    private readonly auditContext: AuditContextService,
   ) {}
 
   async stage(input: PluginUpdateStageInput): Promise<PluginUpdateStageResult> {
@@ -470,39 +548,55 @@ export class PluginUpdateService {
     );
 
     const active = this.validateActiveManifest(plugin);
-    const comparison = await this.compare(plugin, active, next, corePermissions);
+    let { comparison } = await this.compare(plugin, active, next, corePermissions);
 
-    // Immediate activation: nothing server-gates and no denial
-    // blocks. New household/user-scope permissions do not hold this path —
-    // their consent is the units', and activation announces the re-consent
-    // they owe (#1149).
-    if (!comparison.serverGating && comparison.blockedByDenial.length === 0) {
+    // Immediate activation: nothing server-gates, a denied permission the
+    // new manifest requires included (#1336). New household/user-scope
+    // permissions do not hold this path — their consent is the units', and
+    // activation announces the re-consent they owe (#1149).
+    if (!comparison.serverGating) {
       const outcome = await this.activate({
         plugin,
         active,
         next,
         artifactSha256: directory.sha256,
         comparison,
-        checksToSeed: [],
         corePermissions,
         actorId: input.initiatorId,
         initiatedAt,
-      });
-      this.emitActivation(plugin, outcome, next, initiatedAt);
-      this.logger.log(
-        `Plugin '${plugin.slug}' updated ${plugin.version} → ${next.manifest.version} without staged consent ` +
-          `(no server-gating escalation); restart required to load the new code`,
-      );
+      }).catch((error: unknown) => {
+        if (error instanceof ActivationNeedsApprovalSignal) {
+          return null;
+        }
 
-      return {
-        plugin: outcome.plugin,
-        activated: true,
-        comparison,
-        analysis,
-        warnings: next.warnings,
-        acknowledgedForbiddenImports,
-        seededGrants: outcome.seededGrants,
-      };
+        throw error;
+      });
+
+      if (outcome !== null) {
+        this.emitActivation(plugin, outcome, next, initiatedAt);
+        this.logger.log(
+          `Plugin '${plugin.slug}' updated ${plugin.version} → ${next.manifest.version} without staged consent ` +
+            `(no server-gating escalation); restart required to load the new code`,
+        );
+
+        return {
+          plugin: outcome.plugin,
+          activated: true,
+          comparison,
+          analysis,
+          warnings: next.warnings,
+          acknowledgedForbiddenImports,
+          seededGrants: outcome.acceptedGrants,
+        };
+      }
+
+      // A server admin denied a permission this update requires after the
+      // comparison above was read, and activation found the denial under its
+      // claim and rolled back (#1336). The update is staged for approval, with
+      // the comparison as it now stands for the pending event. Whatever that
+      // second comparison says, it is staged: an update staged that needed no
+      // approval is harmless, and a loop back to activation is not.
+      ({ comparison } = await this.compare(plugin, active, next, corePermissions));
     }
 
     const staged = await this.db.$transaction(async (tx) => {
@@ -547,10 +641,7 @@ export class PluginUpdateService {
     );
     this.logger.log(
       `Plugin '${plugin.slug}' update ${plugin.version} → ${next.manifest.version} staged pending consent: ` +
-        `${comparison.escalations.length} escalation(s)` +
-        (comparison.blockedByDenial.length > 0
-          ? `, activation blocked by ${comparison.blockedByDenial.length} durable denial(s)`
-          : ''),
+        `${comparison.escalations.length} escalation(s)`,
     );
 
     return {
@@ -571,34 +662,37 @@ export class PluginUpdateService {
       throw new PluginUpdateAuthorityError(input.approverId);
     }
 
-    const { plugin, active, next, corePermissions, comparison, pendingSha256 } = await this.resolvePendingUpdate(
-      input.slug,
-      { stagingId: input.stagingId },
-    );
+    const { plugin, active, next, corePermissions, comparison, decisions, pendingSha256 } =
+      await this.resolvePendingUpdate(input.slug, { stagingId: input.stagingId });
 
-    if (comparison.blockedByDenial.length > 0) {
-      throw new PluginUpdateBlockedByDenialError(plugin.slug, comparison.blockedByDenial);
+    // Before the Critical confirmation, whose set a stale read may also have
+    // named wrong. The catalog risks here are the ones the transaction stamps,
+    // so this one check covers the write (#1336).
+    const staleRisks =
+      input.shownRisks === undefined
+        ? []
+        : staleShownRisks(
+            next.permissionChecks.filter((check) => check.consentScope === 'server'),
+            this.riskOf(next, corePermissions),
+            input.shownRisks,
+          );
+    if (staleRisks.length > 0) {
+      throw new PluginConsentActStaleError(plugin.slug, 'risk', staleRisks);
     }
 
-    // Approval IS the server-scope consent act for the update's NEW
-    // server-consentable checks — seeded Granted, mirroring install's
-    // posture. Checks with ANY existing row are left alone: a Granted row
-    // is already consent, and a Denied row on an optional check is a
-    // durable refusal this approval must not overwrite.
-    const checksToSeed = await this.serverChecksToSeed(plugin, next);
-
-    // The second factor tracks the authority this approval CONFERS, which is
-    // the newly seeded checks plus any server-scope permission whose risk
-    // rose since it was decided (#59). Re-approving a Low permission that
-    // became Critical hands over Critical authority just as surely as
-    // granting it fresh, so it demands the same re-entry.
-    const riskEscalatedChecks = next.permissionChecks.filter((check) =>
-      comparison.serverRiskEscalatedSlugs.includes(check.canonicalSlug),
-    );
-    const expectedCritical = criticalConfirmationExpectation(
-      [...checksToSeed, ...riskEscalatedChecks],
-      corePermissions,
-    );
+    // The Critical confirmation tracks the authority this approval CONFERS
+    // (#59): a requested permission with no decision, a denied one the new
+    // manifest requires, and one granted at a risk that no longer covers
+    // today's. Re-approving a Low permission that became Critical hands over
+    // Critical authority just as surely as granting it fresh. Judged here on
+    // the decisions the comparison read, and again inside the transaction on
+    // the ones read there, by the same rule (#1336).
+    const { newlyConferred } = planServerApproval({
+      requested: next.permissionChecks,
+      decisions: decisions.filter((decision) => decision.scopeType === PluginGrantScope.Server),
+      riskOf: this.riskOf(next, corePermissions),
+    });
+    const expectedCritical = criticalConfirmationExpectation(newlyConferred, corePermissions);
     const reentry = compareExactReentry(expectedCritical, input.confirmCriticalSlugs ?? []);
 
     if (!reentry.exact) {
@@ -611,20 +705,28 @@ export class PluginUpdateService {
       next,
       artifactSha256: pendingSha256,
       comparison,
-      checksToSeed,
       corePermissions,
       actorId: input.approverId,
       initiatedAt,
-      reentry: { confirmCriticalSlugs: input.confirmCriticalSlugs ?? [], riskEscalatedChecks },
+      approval: {
+        confirmCriticalSlugs: input.confirmCriticalSlugs ?? [],
+        locale: input.locale ?? this.options.defaultLocale,
+      },
     });
+    const { act } = outcome;
 
-    // The tx-local seeded set, not the pre-transaction one: a concurrent
-    // decision may have shrunk it, and the event must describe what was
-    // actually granted.
+    // activate() records the act on every approval; null is the path that
+    // activates without one, which approve() never takes.
+    if (act === null) {
+      throw new Error(`Plugin '${plugin.slug}': the approval activated without recording its consent act`);
+    }
+
+    // The set worked out inside the transaction, not the one above: the
+    // event must describe what was actually granted.
     this.emitActivation(plugin, outcome, next, initiatedAt);
     this.logger.log(
       `Plugin '${plugin.slug}' update approved: ${plugin.version} → ${next.manifest.version}, ` +
-        `${outcome.seededGrants.length} server grant(s) seeded, ${outcome.reStampedGrants.length} re-stamped, ` +
+        `${outcome.acceptedGrants.length} server consent decision(s) written under act ${act.id}, ` +
         `${outcome.revokedGrants.length + outcome.unrequestedGrants.length + outcome.scopeMovedGrants.length} revoked, ` +
         `${outcome.reconsentHouseholdUnits.length} household and ${outcome.reconsentUserUnits.length} user ` +
         `unit(s) owe re-consent; restart required`,
@@ -633,7 +735,8 @@ export class PluginUpdateService {
     return {
       plugin: outcome.plugin,
       comparison,
-      seededGrants: outcome.seededGrants,
+      act,
+      seededGrants: outcome.acceptedGrants,
       // The same candidate lists emitActivation announces, so the result and
       // the events cannot name different units or slugs (#1149).
       reconsentHouseholdUnits: outcome.reconsentHouseholdUnits.map((candidate) => ({
@@ -653,18 +756,28 @@ export class PluginUpdateService {
    * pipeline, via {@link resolvePendingUpdate} — so the screen and the
    * approval cannot disagree about what the update escalates.
    *
-   * A pure read with three deliberate asymmetries from `approve()`: no
+   * A pure read with two deliberate asymmetries from `approve()`: no
    * server-admin re-verification (reading is not a consent act — the edge
-   * guards it with `read:plugin`); a durable denial is RENDERED as
-   * `comparison.blockedByDenial` rather than thrown — the screen's job is
-   * to show the block, the approval's job is to refuse over it; and the
-   * staged checksum is not checked, because only activation uses it, and
-   * refusing a corrupt one here would hide a staging the server admin may
-   * want to reject (#1117).
+   * guards it with `read:plugin`); and the staged checksum is not checked,
+   * because only activation uses it, and refusing a corrupt one here would
+   * hide a staging the server admin may want to reject (#1117). A denied
+   * permission the update requires is reported as
+   * `comparison.deniedRequiredSlugs`: approving grants it (#1336).
+   *
+   * The units that already cover the staged update are counted by
+   * {@link unitsOwingReconsent}, the read activation announces re-consent
+   * from, so the count and the units an approval reports cannot disagree
+   * about the decisions they both read (#1336).
    */
   async describePending(slug: string): Promise<PluginUpdatePendingDescription> {
-    const { plugin, active, next, comparison } = await this.resolvePendingUpdate(slug);
+    const { plugin, active, next, corePermissions, comparison } = await this.resolvePendingUpdate(slug);
     const declares = declaredSlugDiff(active, next);
+    const owing = await this.unitsOwingReconsent(this.db, plugin.id, next, corePermissions, comparison);
+    // A scope that owes nothing had its units neither read nor counted, and
+    // every one of them covers the staged update.
+    const switchedOn = { pluginId: plugin.id, enabled: true };
+    const household = owing.household.switchedOn ?? (await this.db.householdPlugin.count({ where: switchedOn }));
+    const user = owing.user.switchedOn ?? (await this.db.userPlugin.count({ where: switchedOn }));
 
     return {
       plugin,
@@ -672,6 +785,10 @@ export class PluginUpdateService {
       pendingSince: plugin.pendingSince,
       declares,
       noLongerRequested: requestedSlugsDropped(active, next, declares.removed),
+      unitCoverage: {
+        household: { switchedOn: household, covered: household - owing.household.owing.length },
+        user: { switchedOn: user, covered: user - owing.user.owing.length },
+      },
     };
   }
 
@@ -890,9 +1007,9 @@ export class PluginUpdateService {
     });
     const active = this.validateActiveManifest(plugin);
     const corePermissions = await this.loadCorePermissions(next);
-    const comparison = await this.compare(plugin, active, next, corePermissions);
+    const { comparison, decisions } = await this.compare(plugin, active, next, corePermissions);
 
-    return { plugin, active, next, corePermissions, comparison, pendingSha256 };
+    return { plugin, active, next, corePermissions, comparison, decisions, pendingSha256 };
   }
 
   /**
@@ -1126,19 +1243,20 @@ export class PluginUpdateService {
     return resolution.reported;
   }
 
+  /** The escalation comparison, and the consent decisions it was computed from. */
   private async compare(
     plugin: Plugin,
     active: PluginManifestValidationResult,
     next: PluginManifestValidationResult,
     corePermissions: ReadonlyMap<string, Permission>,
-  ): Promise<UpdateEscalationComparison> {
-    const grants = await this.db.pluginGrant.findMany({ where: { pluginId: plugin.id } });
+  ): Promise<{ readonly comparison: UpdateEscalationComparison; readonly decisions: readonly PluginGrant[] }> {
+    const decisions = await this.db.pluginGrant.findMany({ where: { pluginId: plugin.id } });
     const currentRiskBySlug = this.currentRiskBySlug(next, corePermissions);
 
-    return compareForEscalations({
+    const comparison = compareForEscalations({
       active: this.comparisonView(active),
       next: this.comparisonView(next),
-      grants: grants.map((grant) => ({
+      grants: decisions.map((grant) => ({
         permissionSlug: grant.permissionSlug,
         scopeType: grant.scopeType,
         status: grant.status,
@@ -1146,6 +1264,8 @@ export class PluginUpdateService {
       })),
       currentRiskBySlug,
     });
+
+    return { comparison, decisions };
   }
 
   /**
@@ -1171,6 +1291,16 @@ export class PluginUpdateService {
     return bySlug;
   }
 
+  /** Today's catalog risk of a requested permission of `next`, as {@link currentRiskBySlug} reads it. */
+  private riskOf(
+    next: PluginManifestValidationResult,
+    corePermissions: ReadonlyMap<string, Permission>,
+  ): (check: NormalizedPermissionRequest) => RiskLevel {
+    const bySlug = this.currentRiskBySlug(next, corePermissions);
+
+    return (check) => bySlug.get(check.canonicalSlug) ?? RiskLevel.Low;
+  }
+
   private comparisonView(validated: PluginManifestValidationResult): ManifestComparisonView {
     return {
       outboundDomains: validated.manifest.network.outboundDomains,
@@ -1183,32 +1313,9 @@ export class PluginUpdateService {
     };
   }
 
-  private async serverChecksToSeed(
-    plugin: Plugin,
-    next: PluginManifestValidationResult,
-  ): Promise<readonly NormalizedPermissionRequest[]> {
-    const serverChecks = next.permissionChecks.filter((check) => check.consentScope === 'server');
-
-    if (serverChecks.length === 0) {
-      return [];
-    }
-
-    const existing = await this.db.pluginGrant.findMany({
-      where: {
-        pluginId: plugin.id,
-        scopeType: PluginGrantScope.Server,
-        permissionSlug: { in: serverChecks.map((check) => check.canonicalSlug) },
-      },
-      select: { permissionSlug: true },
-    });
-    const decided = new Set(existing.map((row) => row.permissionSlug));
-
-    return serverChecks.filter((check) => !decided.has(check.canonicalSlug));
-  }
-
   /**
    * The activation entry point: one bounded retry around the transaction,
-   * for the one race the transaction's own reads cannot close.
+   * for a deadlock that aborts it.
    */
   private async activate(input: ActivationInput): Promise<ActivationOutcome> {
     const { next } = input;
@@ -1228,31 +1335,25 @@ export class PluginUpdateService {
     try {
       return await attempt();
     } catch (error) {
-      // A deadlock joins the collision on this path (#398, D-398-2). It is not
-      // this transaction being wrong about anything — Postgres chose a victim
-      // of a cycle — but the recovery is identical: the abort took the whole
-      // transaction with it, so the honest answer is to run it again. Sharing
-      // the ONE retry rather than nesting a second is deliberate: two bounded
-      // retries compose into four attempts, and the bound is the point.
-      if (!isGrantDecisionCollision(error) && !isDeadlockError(error)) {
+      // A deadlock is not this transaction being wrong about anything —
+      // Postgres chose a victim of a cycle (#398). The abort took the whole
+      // transaction with it, every accumulator lives inside it, and the events
+      // emit only after it commits, so the honest answer is to run it again.
+      //
+      // Nothing else is retried. The signal that an update needs approval goes
+      // straight back to `stage()`, which stages it (#1336). A unique violation
+      // is not retried either. The consent decisions are upserts under the
+      // plugin row's `FOR UPDATE`, which every writer of a server-scope
+      // decision claims first, so no decision can land between this
+      // transaction's read and its writes: a violation has nothing a second
+      // attempt could see differently (#1336).
+      if (!isDeadlockError(error)) {
         throw error;
       }
 
-      // The transaction's decision read is a snapshot, not a lock on keys
-      // that do not exist yet: a decision committing between that read and
-      // the seeding write still collides on the grant unique. Nothing is
-      // half-done when it does — the violation aborts the transaction
-      // whole, every accumulator lives inside it, and the events emit only
-      // after it commits — so the honest answer is to run the whole thing
-      // again against a snapshot that can SEE the decision. The second
-      // attempt then reaches the verdict on its own terms: a durable denial
-      // refuses, a decided check drops out of the seed set, and a shrunken
-      // authority re-challenges the second factor.
-      //
-      // Once, not until-success. A second collision means a decider is
-      // committing faster than an approval can, and answering that with an
-      // unbounded loop would hold the claim open against it; the violation
-      // propagates instead, exactly as it does today.
+      // Once, not until-success. A second deadlock means the contention is
+      // still there, and answering it with an unbounded loop would hold the
+      // claim open against it; the error propagates instead.
       return await attempt();
     }
   }
@@ -1264,25 +1365,19 @@ export class PluginUpdateService {
    * declares with `'permission-removed'` provenance, delete the rows),
    * revoke and delete decisions on permissions the next manifest stops
    * requesting with `'permission-no-longer-requested'` provenance (#577),
-   * seed the approval's server grants, work out which enabled household AND
+   * record an approval's `UpdateApprove` consent act and the server-scope
+   * consent decisions it grants (#1336), work out which enabled household AND
    * user units do not cover their scope's re-consent slugs (#225) — a read,
    * never a write to their rows (#1149) — and set `restartRequired`. Events,
    * the re-consent announcements among them, are collected inside and
    * emitted by the caller AFTER commit.
    */
   private async activateInTransaction(input: ActivationInput): Promise<ActivationOutcome> {
-    const {
-      plugin,
-      active,
-      next,
-      artifactSha256,
-      comparison,
-      checksToSeed,
-      corePermissions,
-      actorId,
-      initiatedAt,
-      reentry,
-    } = input;
+    const { plugin, active, next, artifactSha256, comparison, corePermissions, actorId, initiatedAt, approval } = input;
+
+    // Outside the transaction: none of it reads the database.
+    const correlationId = approval === undefined ? null : (this.auditContext.getCorrelationId() ?? null);
+    const riskOf = this.riskOf(next, corePermissions);
 
     return this.db.$transaction(async (tx) => {
       // Row-LOCKED, not a plain read (D-CN). `PluginLifecycleService.updateConfig`
@@ -1293,14 +1388,16 @@ export class PluginUpdateService {
       // silently overwrite the admin's fresh document with the stale one —
       // worse than ordinary last-writer-wins, since the write that "wins"
       // was never the actual last writer's intent. `FOR UPDATE` makes the two
-      // mutually exclusive, same reasoning as the grant lock below: the
-      // PATCH's UPDATE either commits before this SELECT (and is read here)
-      // or blocks until this transaction commits (and lands after
-      // activation). Raw SQL because Prisma's query API cannot express FOR
-      // UPDATE; unqualified table name so the search_path (per-worker test
-      // schemas) resolves it. Placed first in the transaction, ahead of the
-      // grant lock below, matching the plugin row → advisory → grant row →
-      // unit row total order `unit-scope-lock.ts` documents.
+      // mutually exclusive: the PATCH's UPDATE either commits before this
+      // SELECT (and is read here) or blocks until this transaction commits
+      // (and lands after activation). The same lock is what orders every
+      // writer of a server-scope consent decision behind this transaction:
+      // each claims this row `FOR SHARE` first (#398, #1336). Raw SQL because
+      // Prisma's query API cannot express FOR UPDATE; unqualified table name
+      // so the search_path (per-worker test schemas) resolves it. Placed
+      // first in the transaction, ahead of the grant rows the approval
+      // writes, matching the plugin row → advisory → grant row → unit row
+      // total order `unit-scope-lock.ts` documents.
       const [current] = await tx.$queryRaw<{ config: Prisma.JsonValue; category: PluginCategory }[]>`
         SELECT config, category FROM plugins WHERE id = ${plugin.id} FOR UPDATE`;
 
@@ -1405,75 +1502,52 @@ export class PluginUpdateService {
         await disablePluginDataGatewayRow(tx, plugin.id);
       }
 
-      // The server-scope decisions re-read under the SAME transaction as
-      // the claim, and everything downstream of them re-derived. The gates
-      // in approve() ran before this transaction opened, and a decision —
-      // #322's decide() seam — can land in between: a fresh durable denial
-      // on a required check must refuse HERE, where the throw takes the
-      // claim back with it, and a check decided since the caller computed
-      // its seed set must drop out of the seeding rather than collide on
-      // the grant unique index as an untyped 500.
+      // The Server unit's decisions as they stand under the claim, read on
+      // both paths (#1336). The caller decided from the comparison's read,
+      // taken before this transaction opened, and a server consent act can
+      // land in between. Without an approval, a denial on a server-scope
+      // permission the next manifest requires means the update needs one: the
+      // signal rolls this transaction back and `stage()` stages the update
+      // instead. With an approval, the approval's rule is applied to these
+      // decisions, and here is where its answer is decided.
       //
-      // LOCKED, not just re-read (#356). `decide()` UPDATEs an existing row
-      // from its own transaction, and an update raises no unique violation,
-      // so the bounded retry below never sees a Granted → Denied flip
-      // landing after a plain snapshot — activation would commit a manifest
-      // the required-denial rule (D-AV) should have refused. `FOR UPDATE`
-      // takes a row lock on every server grant, and Postgres row locks are
-      // mutual. `decide()` waits earlier than its upsert, though: it claims
-      // the plugin row `FOR SHARE` before writing anything (#398), and that
-      // claim waits on this transaction's `FOR UPDATE` of the same row. So the
-      // flip either committed before this transaction's claim (and this read
-      // refuses below) or serializes after activation, where that claim
-      // compares the plugin manifest `decide()` judged against with the
-      // then-active one and refuses the flip itself (#361). Raw SQL because
-      // Prisma's query API cannot express FOR UPDATE; unqualified table name
-      // so the search_path (per-worker test schemas) resolves it. The lock covers EXISTING rows
-      // only — a row that does not exist cannot be locked — so the
-      // insert-half race stays with the unique index and the retry.
-      const lockedGrantRows = await tx.$queryRaw<{ permission_slug: string; status: PluginGrantStatus }[]>`
-        SELECT permission_slug, status
-        FROM plugin_grants
-        WHERE plugin_id = ${plugin.id} AND scope_type = 'Server'
-        FOR UPDATE`;
-      const serverGrants = lockedGrantRows.map((row) => ({
-        permissionSlug: row.permission_slug,
-        status: row.status,
-      }));
-      const deniedServerSlugs = new Set(
-        serverGrants.filter((grant) => grant.status === PluginGrantStatus.Denied).map((grant) => grant.permissionSlug),
-      );
-      // Same rule the comparator applies: a Server-scope denial blocks only
-      // a check the NEXT manifest requires at server consent.
-      const blockedByDenial = next.permissionChecks
-        .filter(
-          (check) => check.consentScope === 'server' && check.required && deniedServerSlugs.has(check.canonicalSlug),
-        )
-        .map((check) => check.canonicalSlug);
+      // A plain read is stable: this transaction holds the plugin row
+      // `FOR UPDATE`, and every other writer of a server-scope decision (a
+      // server consent act) claims that row `FOR SHARE` before it writes, so
+      // it either committed before the claim above, and is read here, or waits
+      // for this transaction to commit, and its own claim then compares the
+      // sha and refuses the moved manifest (#361, #1336).
+      const serverDecisions = await tx.pluginGrant.findMany({
+        where: { pluginId: plugin.id, scopeType: PluginGrantScope.Server, scopeId: SERVER_SCOPE_SENTINEL },
+      });
+      const serverDecisionsBySlug = new Map(serverDecisions.map((row) => [row.permissionSlug, row]));
+      let acceptedChecks: readonly NormalizedPermissionRequest[] = [];
 
-      if (blockedByDenial.length > 0) {
-        throw new PluginUpdateBlockedByDenialError(plugin.slug, blockedByDenial);
-      }
+      if (approval === undefined) {
+        if (deniedRequiredServerSlugs(next.permissionChecks, serverDecisions).length > 0) {
+          throw new ActivationNeedsApprovalSignal(plugin.slug);
+        }
+      } else {
+        const serverApproval = planServerApproval({
+          requested: next.permissionChecks,
+          decisions: serverDecisions,
+          riskOf,
+        });
 
-      const decidedServerSlugs = new Set(serverGrants.map((grant) => grant.permissionSlug));
-      const seededChecks = checksToSeed.filter((check) => !decidedServerSlugs.has(check.canonicalSlug));
-
-      // The second factor, re-verified against what this transaction will
-      // actually GRANT: a concurrent decision that shrank the seed set
-      // shrank the authority this approval confers, and a confirmation for
-      // the old, larger set no longer matches — re-challenging with the
-      // current expectation is the same exact-re-entry answer approve()
-      // gives before the transaction.
-      if (reentry !== undefined) {
-        const expectedCritical = criticalConfirmationExpectation(
-          [...seededChecks, ...reentry.riskEscalatedChecks],
-          corePermissions,
-        );
-        const confirmation = compareExactReentry(expectedCritical, reentry.confirmCriticalSlugs);
+        // The Critical confirmation, asked again of what this transaction
+        // confers: a decision that landed since approve() asked it can grow or
+        // shrink that set, and a confirmation for another set no longer
+        // matches, so the approval is re-challenged with the current
+        // expectation, the same exact-re-entry answer approve() gives before
+        // the transaction.
+        const expectedCritical = criticalConfirmationExpectation(serverApproval.newlyConferred, corePermissions);
+        const confirmation = compareExactReentry(expectedCritical, approval.confirmCriticalSlugs);
 
         if (!confirmation.exact) {
           throw new PluginUpdateCriticalConfirmationError(plugin.slug, confirmation.expected, confirmation.received);
         }
+
+        acceptedChecks = serverApproval.accepted;
       }
 
       const { added: addedDeclares, removed: removedDeclares } = declaredSlugDiff(active, next);
@@ -1500,7 +1574,7 @@ export class PluginUpdateService {
       // provenance (#577). Left in place, a later version that requests the
       // permission again would inherit a consent decision nobody made for
       // it. Read before the delete, for the same reason as the declares diff.
-      // A decide() or a consent act (#1150) that judged against the outgoing
+      // A consent act (#1150, #1336) that judged against the outgoing
       // plugin manifest cannot write one back afterwards: its claim waits for
       // this transaction and then refuses the moved plugin manifest (#361).
       const droppedRequests = requestedSlugsDropped(active, next, removedDeclares);
@@ -1518,32 +1592,6 @@ export class PluginUpdateService {
           // Explicit Low, never the manifest and never a schema default (#59).
           data: { pluginId: plugin.id, slug, riskLevel: RiskLevel.Low },
         });
-      }
-
-      // Re-stamp: approval is the consent act for a server-scope risk
-      // escalation, so the row records TODAY's risk and this version. Without
-      // it the stale baseline re-fires the same escalation on every future
-      // update and the Critical second factor never sees the reclassification.
-      const reStampedGrants: PluginGrant[] = [];
-
-      for (const slug of comparison.serverRiskEscalatedSlugs) {
-        reStampedGrants.push(
-          await tx.pluginGrant.update({
-            where: {
-              pluginId_scopeType_scopeId_permissionSlug: {
-                pluginId: plugin.id,
-                scopeType: PluginGrantScope.Server,
-                scopeId: SERVER_SCOPE_SENTINEL,
-                permissionSlug: slug,
-              },
-            },
-            data: {
-              decidedRiskLevel: corePermissions.get(slug)?.riskLevel ?? RiskLevel.Low,
-              decidedById: actorId,
-              decidedAt: initiatedAt,
-            },
-          }),
-        );
       }
 
       // A permission that moved consent scope leaves a decision made by a
@@ -1572,26 +1620,75 @@ export class PluginUpdateService {
         scopeMovedGrants.push(...stale);
       }
 
-      const seededGrants: PluginGrant[] = [];
+      // The approval's consent act and the decisions it carries, after the
+      // deletion passes: a decision on a permission whose consent scope moved
+      // to server is written here, on the row the old scope's deletion left
+      // free. Every accepted decision is written, one that already stood
+      // included, so each row's actId names the act that last set it.
+      let act: PluginConsentAct | null = null;
+      const acceptedGrants: PluginGrant[] = [];
+      const changedDecisions: WrittenDecision[] = [];
 
-      for (const check of seededChecks) {
-        seededGrants.push(
-          await tx.pluginGrant.create({
-            data: {
-              pluginId: plugin.id,
-              scopeType: PluginGrantScope.Server,
-              scopeId: SERVER_SCOPE_SENTINEL,
-              permissionSlug: check.canonicalSlug,
-              status: PluginGrantStatus.Granted,
-              decidedById: actorId,
-              decidedAt: initiatedAt,
-              decidedRiskLevel:
-                check.origin === 'plugin'
-                  ? RiskLevel.Low
-                  : (corePermissions.get(check.canonicalSlug)?.riskLevel ?? RiskLevel.Low),
-            },
-          }),
-        );
+      if (approval !== undefined) {
+        const acceptance = planServerAcceptance({
+          accepted: acceptedChecks,
+          shown: next.permissionChecks.filter((check) => check.consentScope === 'server'),
+          riskOf,
+          source: 'staged',
+          locale: approval.locale,
+          defaultLocale: this.options.defaultLocale,
+        });
+
+        act = await tx.pluginConsentAct.create({
+          data: {
+            pluginId: plugin.id,
+            pluginSlug: plugin.slug,
+            scopeType: PluginGrantScope.Server,
+            scopeId: SERVER_SCOPE_SENTINEL,
+            kind: PluginConsentActKind.UpdateApprove,
+            manifestVersion: next.manifest.version,
+            manifestSha256: artifactSha256,
+            presentation: acceptance.presentation as unknown as Prisma.InputJsonValue,
+            decidedById: actorId,
+            decidedAt: initiatedAt,
+            correlationId,
+          },
+        });
+
+        // In permission order, which the acceptance sorts by code unit: the
+        // order every writer of the Server unit's consent decisions takes
+        // their rows in.
+        for (const decision of acceptance.decisions) {
+          const fields = {
+            status: decision.status,
+            decidedRiskLevel: decision.decidedRiskLevel,
+            decidedById: actorId,
+            decidedAt: initiatedAt,
+            actId: act.id,
+          };
+          const coordinates = {
+            pluginId: plugin.id,
+            scopeType: PluginGrantScope.Server,
+            scopeId: SERVER_SCOPE_SENTINEL,
+            permissionSlug: decision.permissionSlug,
+          };
+
+          const after = await tx.pluginGrant.upsert({
+            where: { pluginId_scopeType_scopeId_permissionSlug: coordinates },
+            create: { ...coordinates, ...fields },
+            update: fields,
+          });
+          // The rows read under the claim, before the deletion passes: those
+          // passes delete only permissions `next` stops requesting or moves
+          // out of server scope, never one the approval accepts here.
+          const before = serverDecisionsBySlug.get(decision.permissionSlug);
+
+          acceptedGrants.push(after);
+
+          if (before !== undefined && !decisionStands(decision, before)) {
+            changedDecisions.push({ before, after });
+          }
+        }
       }
 
       const updated = await tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
@@ -1600,103 +1697,15 @@ export class PluginUpdateService {
       // nothing is written to any unit enablement (#1149). A unit that has
       // not answered keeps running on the grants it gave, and its consent
       // standing is worked out when read, so there is no state here to keep
-      // current — and no lock on the enablement to take. Whether a Granted
-      // row still covers is `decideConsentCheck`, the rule the standing and
-      // the consent surface read, applied to the rows read below, so a unit
-      // the standing reads as owing is the unit announced here.
-      //
-      // Switched-on units only, whether or not they can currently run. A
-      // switched-off unit accepts the whole required set afresh when it
-      // switches on again, so the announcement would tell it nothing it is
-      // not asked then. A switched-on unit that cannot run under this
-      // manifest (its scope has no household surface, or its retained
-      // configuration fails the schema) is still switched on: whether it can
-      // run is worked out when read (#1151), it is asked nothing when that
-      // is cured, and it would otherwise read review_pending without ever
-      // having been told. Nothing is judged at switch-on: the standing is
-      // read whenever feature state, the inventory or the ability read it,
-      // so a unit switched on after activation shows review_pending but is
-      // never announced (#1149).
-      //
-      // Fixed query count regardless of how many units run the plugin: one
-      // unit read and one grant read per scope. A per-unit loop put this
-      // transaction's duration on the number of installs, and exceeding the
-      // interactive-transaction timeout would roll back the whole update —
-      // failing an activation because the plugin was POPULAR.
-      let reconsentHouseholdUnits: ReconsentCandidate<HouseholdPlugin>[] = [];
-
-      if (comparison.householdReconsentSlugs.length > 0) {
-        const units = await tx.householdPlugin.findMany({
-          where: { pluginId: plugin.id, enabled: true },
-        });
-
-        if (units.length > 0) {
-          const granted = await tx.pluginGrant.findMany({
-            where: {
-              pluginId: plugin.id,
-              scopeType: PluginGrantScope.Household,
-              scopeId: { in: units.map((unit) => unit.householdId) },
-              status: PluginGrantStatus.Granted,
-              permissionSlug: { in: [...comparison.householdReconsentSlugs] },
-            },
-            // decidedRiskLevel is load-bearing, not decoration: for a risk
-            // escalation the Granted row EXISTS by definition — its stale
-            // risk is what escalated — so treating presence as consent would
-            // silently skip every risk-escalated unit.
-            select: { scopeId: true, permissionSlug: true, decidedRiskLevel: true },
-          });
-
-          reconsentHouseholdUnits = this.reconsentCandidates({
-            units,
-            scopeIdOf: (unit) => unit.householdId,
-            granted,
-            reconsentSlugs: comparison.householdReconsentSlugs,
-            coverage: this.coverageInputs(next, corePermissions, PluginGrantScope.Household),
-          });
-        }
-      }
-
-      // The user-scope mirror (#225): identical shape against `UserPlugin`.
-      // Users with no unit enablement never appear in the unit read — no row
-      // means not enabled, so there is nobody to tell.
-      let reconsentUserUnits: ReconsentCandidate<UserPlugin>[] = [];
-
-      if (comparison.userReconsentSlugs.length > 0) {
-        const units = await tx.userPlugin.findMany({
-          where: { pluginId: plugin.id, enabled: true },
-        });
-
-        if (units.length > 0) {
-          const granted = await tx.pluginGrant.findMany({
-            where: {
-              pluginId: plugin.id,
-              scopeType: PluginGrantScope.User,
-              scopeId: { in: units.map((unit) => unit.userId) },
-              status: PluginGrantStatus.Granted,
-              permissionSlug: { in: [...comparison.userReconsentSlugs] },
-            },
-            select: { scopeId: true, permissionSlug: true, decidedRiskLevel: true },
-          });
-
-          reconsentUserUnits = this.reconsentCandidates({
-            units,
-            scopeIdOf: (unit) => unit.userId,
-            granted,
-            reconsentSlugs: comparison.userReconsentSlugs,
-            coverage: this.coverageInputs(next, corePermissions, PluginGrantScope.User),
-          });
-        }
-      }
+      // current — and no lock on the enablement to take. The approval
+      // surface counts its covered units with the same method (#1336).
+      const owing = await this.unitsOwingReconsent(tx, plugin.id, next, corePermissions, comparison);
 
       // The acts behind the deleted decisions, for the version each revocation
       // names. The act table is append-only, so every act a row names is still
       // there to read.
       const revokedActIds = [
-        ...new Set(
-          [...revokedGrants, ...unrequestedGrants, ...scopeMovedGrants].flatMap((grant) =>
-            grant.actId === null ? [] : [grant.actId],
-          ),
-        ),
+        ...new Set([...revokedGrants, ...unrequestedGrants, ...scopeMovedGrants].map((grant) => grant.actId)),
       ];
       const revokedActs =
         revokedActIds.length === 0
@@ -1708,15 +1717,16 @@ export class PluginUpdateService {
 
       return {
         plugin: updated,
-        seededChecks,
-        seededGrants,
+        acceptedChecks,
+        acceptedGrants,
+        changedDecisions,
+        act,
         revokedGrants,
         unrequestedGrants,
         scopeMovedGrants,
-        revokedActVersions: new Map(revokedActs.map((act) => [act.id, act.manifestVersion])),
-        reStampedGrants,
-        reconsentHouseholdUnits,
-        reconsentUserUnits,
+        revokedActVersions: new Map(revokedActs.map((revokedAct) => [revokedAct.id, revokedAct.manifestVersion])),
+        reconsentHouseholdUnits: owing.household.owing,
+        reconsentUserUnits: owing.user.owing,
         retainedConfigReset: retainedConfig.reset,
       };
     });
@@ -1729,9 +1739,10 @@ export class PluginUpdateService {
     next: PluginManifestValidationResult,
     initiatedAt: Date,
   ): void {
-    // The tx-local seeded set: a concurrent decision may have shrunk the
-    // caller's, and the event must describe what was actually granted.
-    const grantedPermissions: GrantedPermissionRecord[] = outcome.seededChecks.map((check) => ({
+    // The set worked out inside the transaction: a decision that landed since
+    // approve()'s own read may have changed it, and the event must describe
+    // what was actually granted (#1336).
+    const grantedPermissions: GrantedPermissionRecord[] = outcome.acceptedChecks.map((check) => ({
       slug: check.canonicalSlug,
       required: check.required,
       consentScope: check.consentScope,
@@ -1748,9 +1759,23 @@ export class PluginUpdateService {
         this.stagingSnapshot(outcome.plugin),
         grantedPermissions,
         outcome.retainedConfigReset,
+        outcome.act?.id ?? null,
         initiatedAt,
       ),
     );
+
+    // A decision the approval changed on a row that already stood, a denial
+    // overturned above all, is a decision change like any server consent
+    // act's, and announces itself the same way (#1336). Only an approval
+    // writes decisions, so there is an act whenever there is one to announce.
+    if (outcome.act !== null) {
+      emitDecisionEvents(
+        this.emitter,
+        outcome.changedDecisions,
+        { manifestVersion: next.manifest.version, actId: outcome.act.id },
+        initiatedAt,
+      );
+    }
 
     const revocations: readonly { grant: PluginGrant; reason: PluginGrantRevocationReason }[] = [
       ...outcome.revokedGrants.map((grant) => ({ grant, reason: 'permission-removed' as const })),
@@ -1764,13 +1789,12 @@ export class PluginUpdateService {
         new PluginGrantRevokedEvent(
           grantSnapshot(grant),
           reason,
-          // The row no longer stores the manifest version (#1150), so a
-          // household or user decision names its act's: consent given at one
-          // version can outlive the next unchanged one. A server decision has
-          // no act until #1152 and names the manifest this update replaces.
+          // The row does not store the manifest version (#1150), so a decision
+          // names its act's: consent given at one version can outlive the next
+          // unchanged one. The act table is append-only, so the act is there;
+          // the manifest this update replaces only answers if its read missed.
           {
-            manifestVersion:
-              (grant.actId === null ? undefined : outcome.revokedActVersions.get(grant.actId)) ?? before.version,
+            manifestVersion: outcome.revokedActVersions.get(grant.actId) ?? before.version,
             actId: grant.actId,
           },
           initiatedAt,
@@ -1807,13 +1831,127 @@ export class PluginUpdateService {
   }
 
   /**
-   * Which units of one scope owe re-consent under this activation — a pure
-   * function, shared by the household and user blocks in
-   * `activateInTransaction()` so the covering predicate cannot drift between
-   * scopes. A slug is outstanding unless the unit's Granted row still
-   * confers under `decideConsentCheck`, the same rule the consent standing
-   * reads (#1149): a unit that granted a new permission on the staged
-   * manifest ahead of time, at a covering risk, owes nothing.
+   * Who owes re-consent under `next`, at both unit scopes, and how many units
+   * each scope has switched on. Activation calls it inside its transaction to
+   * announce re-consent, and the staged-update read calls it outside one to
+   * count the units already covered, so the two cannot disagree (#1336).
+   * Whether a Granted row still covers is `decideConsentCheck`, the rule the
+   * consent standing and the consent surface read, so a unit the standing
+   * reads as owing is a unit counted as owing here (#1149).
+   *
+   * Switched-on units only, whether or not they can currently run. A
+   * switched-off unit accepts the whole required set afresh when it switches
+   * on again, so the announcement would tell it nothing it is not asked then.
+   * A switched-on unit that cannot run under this manifest (its scope has no
+   * household surface, or its retained configuration fails the schema) is
+   * still switched on: whether it can run is worked out when read (#1151), it
+   * is asked nothing when that is cured, and it would otherwise read
+   * review_pending without ever having been told. Nothing is judged at
+   * switch-on: the standing is read whenever feature state, the inventory or
+   * the ability read it, so a unit switched on after activation shows
+   * review_pending but is never announced (#1149). Users with no unit
+   * enablement never appear: no row means not enabled, so there is nobody to
+   * tell (#225).
+   *
+   * A scope with no re-consent slugs owes nothing, so its units are neither
+   * read nor counted here: activation holds the plugin row `FOR UPDATE` and
+   * has no use for the count, so the staged-update read counts them itself.
+   * Fixed query count regardless of how many units run the plugin: at most
+   * one unit read and one grant read per scope. A per-unit loop put
+   * activation's duration on the number of installs, and exceeding the
+   * interactive-transaction timeout would roll back the whole update —
+   * failing an activation because the plugin was POPULAR.
+   */
+  private async unitsOwingReconsent(
+    client: Prisma.TransactionClient | DatabaseService,
+    pluginId: string,
+    next: PluginManifestValidationResult,
+    corePermissions: ReadonlyMap<string, Permission>,
+    comparison: UpdateEscalationComparison,
+  ): Promise<UnitsOwingReconsent> {
+    const switchedOn = { pluginId, enabled: true };
+    // decidedRiskLevel is load-bearing, not decoration: for a risk
+    // escalation the Granted row EXISTS by definition — its stale risk is
+    // what escalated — so treating presence as consent would silently skip
+    // every risk-escalated unit.
+    const grantedSelect = { scopeId: true, permissionSlug: true, decidedRiskLevel: true } as const;
+
+    let household: ScopeReconsent<HouseholdPlugin>;
+
+    if (comparison.householdReconsentSlugs.length === 0) {
+      household = { switchedOn: null, owing: [] };
+    } else {
+      const units = await client.householdPlugin.findMany({ where: switchedOn });
+      const granted =
+        units.length === 0
+          ? []
+          : await client.pluginGrant.findMany({
+              where: {
+                pluginId,
+                scopeType: PluginGrantScope.Household,
+                scopeId: { in: units.map((unit) => unit.householdId) },
+                status: PluginGrantStatus.Granted,
+                permissionSlug: { in: [...comparison.householdReconsentSlugs] },
+              },
+              select: grantedSelect,
+            });
+
+      household = {
+        switchedOn: units.length,
+        owing: this.reconsentCandidates({
+          units,
+          scopeIdOf: (unit) => unit.householdId,
+          granted,
+          reconsentSlugs: comparison.householdReconsentSlugs,
+          coverage: this.coverageInputs(next, corePermissions, PluginGrantScope.Household),
+        }),
+      };
+    }
+
+    // The user-scope mirror (#225): identical shape against `UserPlugin`.
+    let user: ScopeReconsent<UserPlugin>;
+
+    if (comparison.userReconsentSlugs.length === 0) {
+      user = { switchedOn: null, owing: [] };
+    } else {
+      const units = await client.userPlugin.findMany({ where: switchedOn });
+      const granted =
+        units.length === 0
+          ? []
+          : await client.pluginGrant.findMany({
+              where: {
+                pluginId,
+                scopeType: PluginGrantScope.User,
+                scopeId: { in: units.map((unit) => unit.userId) },
+                status: PluginGrantStatus.Granted,
+                permissionSlug: { in: [...comparison.userReconsentSlugs] },
+              },
+              select: grantedSelect,
+            });
+
+      user = {
+        switchedOn: units.length,
+        owing: this.reconsentCandidates({
+          units,
+          scopeIdOf: (unit) => unit.userId,
+          granted,
+          reconsentSlugs: comparison.userReconsentSlugs,
+          coverage: this.coverageInputs(next, corePermissions, PluginGrantScope.User),
+        }),
+      };
+    }
+
+    return { household, user };
+  }
+
+  /**
+   * Which units of one scope owe re-consent under `next` — a pure function,
+   * shared by the household and user halves of {@link unitsOwingReconsent}
+   * so the covering predicate cannot drift between scopes. A slug is
+   * outstanding unless the unit's Granted row still confers under
+   * `decideConsentCheck`, the same rule the consent standing reads (#1149): a
+   * unit that granted a new permission on the staged manifest ahead of time,
+   * at a covering risk, owes nothing.
    */
   private reconsentCandidates<TUnit>(args: {
     readonly units: readonly TUnit[];

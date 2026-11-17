@@ -91,6 +91,11 @@ export interface PluginInstallAuditContext {
    * so pre-reinstall construction sites need no churn.
    */
   readonly retainedConfigReset?: boolean;
+  /**
+   * The `InstallAccept` consent act the install recorded (#1336), so the
+   * lifecycle row names the act that holds what the server admin was shown.
+   */
+  readonly actId: string;
 }
 
 export class PluginInstalledEvent extends MutationEvent<Plugin> {
@@ -108,6 +113,7 @@ export class PluginInstalledEvent extends MutationEvent<Plugin> {
   readonly staticAnalysis: readonly StaticAnalysisFinding[];
   readonly acknowledgedForbiddenImports: readonly string[];
   readonly retainedConfigReset: boolean;
+  readonly actId: string;
 
   constructor(after: PluginInstalledSnapshot, context: PluginInstallAuditContext, initiatedAt: Date) {
     super(null, after, initiatedAt);
@@ -118,6 +124,7 @@ export class PluginInstalledEvent extends MutationEvent<Plugin> {
     this.staticAnalysis = context.staticAnalysis;
     this.acknowledgedForbiddenImports = context.acknowledgedForbiddenImports;
     this.retainedConfigReset = context.retainedConfigReset ?? false;
+    this.actId = context.actId;
   }
 }
 
@@ -411,10 +418,13 @@ export class PluginUpdateApprovedEvent extends MutationEvent<Plugin> {
     before: PluginUpdateStagingSnapshot,
     after: PluginUpdateStagingSnapshot,
     /**
-     * Server-consentable permissions this approval granted — the update's
-     * NEW checks, seeded on activation. Approval IS the consent act, so the
-     * record rides the event the same way install's seed rides
-     * `plugin.installed`; per-grant events are deliberately not emitted.
+     * Every server-scope permission this approval granted under its
+     * `UpdateApprove` consent act (#1336), required ones that were already
+     * granted included. Approval IS the consent act, so the record rides the
+     * event the same way install's seed rides `plugin.installed`. A decision
+     * the approval writes where none stood gets no per-grant event. One it
+     * changes on an existing row, a denial overturned or a risk re-stamped,
+     * also emits its grant event, which carries the row as it stood before.
      */
     public readonly grantedPermissions: readonly GrantedPermissionRecord[],
     /**
@@ -425,6 +435,13 @@ export class PluginUpdateApprovedEvent extends MutationEvent<Plugin> {
      * one manifest-replacing path that leaves it unanswered.
      */
     public readonly retainedConfigReset: boolean,
+    /**
+     * The approval's `UpdateApprove` consent act (#1336), so the lifecycle row
+     * names the act that holds what the server admin was shown. Null when an
+     * update with nothing to consent to activated without approval: no act
+     * was recorded.
+     */
+    public readonly actId: string | null,
     initiatedAt: Date,
   ) {
     super(before, after, initiatedAt);
@@ -477,8 +494,8 @@ type PluginGrantSnapshot = Readonly<
 export interface PluginGrantEventContext {
   /** Version of the manifest the decision was made against. */
   readonly manifestVersion: string;
-  /** The consent act that wrote the decision; null for server-scope decisions until #1152. */
-  readonly actId: string | null;
+  /** The consent act that wrote the decision; every decision has one, the Server unit's included (#1336). */
+  readonly actId: string;
 }
 
 /**
