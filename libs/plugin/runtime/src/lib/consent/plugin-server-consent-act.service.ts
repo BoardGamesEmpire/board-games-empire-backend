@@ -62,12 +62,15 @@ type ServerActOutcome =
  * act and the consent decisions it carries, and the events go out after it
  * commits.
  *
- * The Server unit has no household row, no advisory key and no unit
- * enablement, so of the total lock order every plugin-runtime writer takes
- * (`apps/api-e2e/src/plugin/lock-order.ts`) it takes the plugin row and then
- * the grant rows. It answers only the active manifest: the server admin
- * consents to a staged update by approving it. It never reads the Server
- * switch: consenting before the plugin is switched on is a legitimate order.
+ * The Server unit has no household row and no unit enablement, so its
+ * transaction takes the plugin row, shared, on the sha the act names, and then
+ * the consent decisions, in permission order. Two acts on the Server unit are
+ * not ordered against each other: the later write wins on each permission and
+ * both acts stay on record (#1152).
+ *
+ * It answers only the active manifest: the server admin consents to a staged
+ * update by approving it. It never reads the Server switch: consenting before
+ * the plugin is switched on is a legitimate order.
  */
 @Injectable()
 export class PluginServerConsentActService {

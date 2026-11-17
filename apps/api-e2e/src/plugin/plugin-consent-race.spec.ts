@@ -33,8 +33,14 @@ import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plug
  * VIOLATED during PR #359's review rounds, and none was caught by a test,
  * because no test at this tier existed. Since #1150 every household and user
  * consent decision is written by a consent act, so the household cases race
- * two acts on one unit: opposite answers are both recorded and the surviving
- * decision is the one the later act gave, and identical answers record one act.
+ * two acts on one unit. Nothing orders two acts on one unit against each other
+ * (#1152): each claims the plugin row shared on the sha it names and writes its
+ * decisions in permission order, by upsert, so the later write wins on each
+ * permission and both acts stay on record. Two opposite toggles both commit,
+ * and two first switch-ons both answer 2xx and leave one unit enablement. What
+ * does order an act is an activation, which holds the plugin row exclusively
+ * while it replaces the manifest: an act ahead of it lands under the old sha,
+ * and an act behind it is refused stale.
  *
  * Two rules these cases follow, and both are about staying useful rather than
  * becoming flaky (#330):
@@ -61,11 +67,11 @@ describe('consent decisions under concurrency (#360)', () => {
 
   /**
    * Generous on purpose. A request has to clear a session lookup, a policy
-   * guard and a manifest revalidation before it reaches the lock, and the
-   * harness concedes first-touch latency is seconds-scale, so a budget sized
-   * for a barrier statement would report a cold start as a lock defect. A
-   * request that answers early is reported at once rather than at the
-   * deadline, so the long deadline only costs time on a stuck run.
+   * guard and a manifest revalidation before it reaches the lock, and a cold
+   * start takes seconds, so a budget sized for a barrier statement would
+   * report a cold start as a lock defect. A request that answers early is
+   * reported at once rather than at the deadline, so the long deadline only
+   * costs time on a stuck run.
    */
   const REQUEST_REACHES_LOCK_MS = 20_000;
 
@@ -305,14 +311,100 @@ describe('consent decisions under concurrency (#360)', () => {
     });
   });
 
+  describe('two first switch-ons on one unit', () => {
+    it('both answer 2xx and leave one unit enablement, switched on, with every decision naming one of the acts (#1152)', async () => {
+      // Two household admins switch the plugin on for a household that has no
+      // unit enablement yet. Nothing orders two acts on one unit (#1152), so
+      // both read no unit enablement and no decision, and both write. The
+      // decisions and the unit enablement are written by upsert, so the later
+      // write updates the row the earlier one inserted rather than colliding
+      // with it, and both acts stay on record. Whether one act or two is
+      // recorded, and which wrote last, are the race's business and never
+      // asserted: the later act records nothing when the earlier one committed
+      // before it read.
+      const owner = await actors.user();
+      const second = await actors.user();
+      const { household } = await actors.householdWithMembers({
+        owner,
+        members: [{ actor: second, role: 'HouseholdAdmin' }],
+      });
+      const plugin = await arrangePlugin();
+      const unit = { householdId: household.id };
+      const surface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
+      const body = switchOnBody(surface, { [HOUSEHOLD_CHECK.slug]: PluginGrantStatus.Granted });
+
+      const [first, other] = await withBarrier(async (barrier) => {
+        const { holder } = barrier;
+
+        // The plugin row held as activation holds it, so both switch-ons queue
+        // at their claim and are released together. That makes the overlap
+        // likely, not certain: each still runs its own statements at its own
+        // pace once the row comes free.
+        await holder.begin();
+        await holder.query('SELECT id FROM plugins WHERE id = $1 FOR UPDATE', [plugin.id]);
+
+        const ownerSwitchOn = fire(() => sendSwitchOn(baseUrl, owner, unit, plugin.slug, body));
+        const secondSwitchOn = fire(() => sendSwitchOn(baseUrl, second, unit, plugin.slug, body));
+
+        await expectBackendsQueuedBehind(barrier, {
+          heldBy: holder.pid,
+          count: 2,
+          description: 'the two switch-ons',
+          timeoutMs: REQUEST_REACHES_LOCK_MS,
+        });
+
+        // Released before anything else is asked of the database: both
+        // requests wait inside a Prisma interactive transaction on its default
+        // budget, and every question asked while the row is held spends it.
+        await holder.commit();
+
+        return Promise.all([ownerSwitchOn.settled, secondSwitchOn.settled]);
+      });
+
+      // Asserted as a pair rather than chained, so a 500 reports its status.
+      expect([first.status, other.status]).toEqual([200, 200]);
+
+      const units = await db.client.householdPlugin.findMany({
+        where: { householdId: household.id, pluginId: plugin.id },
+      });
+
+      expect(units).toHaveLength(1);
+      expect(units[0]?.enabled).toBe(true);
+
+      const acts = await db.client.pluginConsentAct.findMany({
+        where: {
+          pluginId: plugin.id,
+          scopeType: PluginGrantScope.Household,
+          scopeId: household.id,
+          kind: PluginConsentActKind.SwitchOn,
+        },
+      });
+
+      expect(acts.length).toBeGreaterThanOrEqual(1);
+      expect(acts.length).toBeLessThanOrEqual(2);
+
+      const decisions = await db.client.pluginGrant.findMany({
+        where: { pluginId: plugin.id, scopeType: PluginGrantScope.Household, scopeId: household.id },
+      });
+
+      // An empty list would pass the `every` check below for nothing.
+      expect(decisions).not.toHaveLength(0);
+      expect(decisions.every((decision) => acts.some((act) => act.id === decision.actId))).toBe(true);
+    });
+  });
+
   describe('an act against an activation', () => {
-    it('an act against a manifest a concurrent activation replaces lands under the old sha or is refused (#1150)', async () => {
-      // The act's plugin-row claim compares the sha the consent surface named
-      // with the row it locks (#1150). Activation holds that row FOR UPDATE
-      // while it replaces the manifest, so an act naming the OLD sha either
-      // claims the row first and commits under the old sha ahead of the
-      // activation, or waits behind it and finds the sha moved. What must never
-      // happen is an act recorded under a sha the plugin no longer held.
+    // The act's plugin-row claim compares the sha the consent surface named
+    // with the row it locks (#1150). Activation holds that row FOR UPDATE while
+    // it replaces the manifest. Both cases hold the row as activation does and
+    // queue the two requests behind it one at a time, and Postgres grants a
+    // queued row lock in arrival order, so each case has one outcome: the act
+    // queued first claims the row first and commits under the old sha, and the
+    // act queued after the approval finds the sha moved. What must never happen
+    // is an act recorded under a sha the plugin no longer held.
+
+    /** A household with a plugin whose update is staged, and the consent surface its owner reads. */
+    const arrangeStagedUpdate = async () => {
       const owner = await actors.user();
       const approver = await actors.admin();
       const { household } = await actors.householdWithMembers({ owner });
@@ -320,19 +412,93 @@ describe('consent decisions under concurrency (#360)', () => {
       const plugin = await arrangePlugin(undefined, stagedUpdateColumns({ manifest: staged, since: STAGED_AT }));
       const unit = { householdId: household.id };
       const surface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
-      const oldSha = surface.manifestSha256;
 
-      expect(oldSha).toBe(plugin.installedSha256);
+      expect(surface.manifestSha256).toBe(plugin.installedSha256);
+
+      const sendOldShaSwitchOn = () =>
+        sendSwitchOn(
+          baseUrl,
+          owner,
+          unit,
+          plugin.slug,
+          switchOnBody(surface, { [HOUSEHOLD_CHECK.slug]: PluginGrantStatus.Granted }),
+        );
+
+      return { approver, household, plugin, oldSha: surface.manifestSha256, sendOldShaSwitchOn };
+    };
+
+    /** The household's acts: the approval records its own, for the Server unit (#1336). */
+    const householdActs = (pluginId: string, householdId: string) =>
+      db.client.pluginConsentAct.findMany({
+        where: { pluginId, scopeType: PluginGrantScope.Household, scopeId: householdId },
+      });
+
+    it('an act that reaches the plugin row before an activation lands under the old sha, ahead of the activation (#1152)', async () => {
+      const { approver, household, plugin, oldSha, sendOldShaSwitchOn } = await arrangeStagedUpdate();
 
       const { switchOn, activation } = await withBarrier(async (barrier) => {
         const { holder } = barrier;
 
-        // Activation's own plugin-row lock mode, held so both requests queue
-        // behind it in a known order: the approval first, then the act. That
-        // is the order that puts the act's claim AFTER the manifest moved, so
-        // it is the one that exercises the sha comparison; the other order
-        // only shows the act committing first, which a missing comparison
-        // would pass too.
+        // The act queues first, then the approval behind it.
+        const shownRisks = await readStagedShownRisks(baseUrl, approver, plugin.slug);
+        await holder.begin();
+        await holder.query('SELECT id FROM plugins WHERE id = $1 FOR UPDATE', [plugin.id]);
+
+        const act = fire(sendOldShaSwitchOn);
+
+        await expectLockWaiter(barrier, {
+          heldBy: holder.pid,
+          description: 'the switch-on naming the old sha',
+          timeoutMs: REQUEST_REACHES_LOCK_MS,
+          exclude: [barrier.waiter.pid, barrier.observer.pid],
+          settledEarly: act.settledEarly,
+        });
+
+        const approval = fire(() => approve(approver, plugin.slug, shownRisks));
+
+        await expectBackendsQueuedBehind(barrier, {
+          heldBy: holder.pid,
+          count: 2,
+          description: 'the switch-on naming the old sha and the approval',
+          timeoutMs: REQUEST_REACHES_LOCK_MS,
+        });
+
+        // Released before anything else is asked of the database: both
+        // requests wait inside a Prisma interactive transaction on its default
+        // budget, and every question asked while the row is held spends it.
+        await holder.commit();
+
+        return { switchOn: await act.settled, activation: await approval.settled };
+      });
+
+      expect(switchOn.status).toBe(200);
+      expect(activation.status).toBe(200);
+
+      const activated = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+
+      expect(activated.installedSha256).not.toBe(oldSha);
+
+      const acts = await householdActs(plugin.id, household.id);
+
+      expect(acts).toHaveLength(1);
+      expect(acts[0]?.manifestSha256).toBe(oldSha);
+      expect(switchOn.body.act?.id).toBe(acts[0]?.id);
+      // Not after the activation's write to the plugin row. Both stamps are the
+      // api's clock, taken as each statement is built, so an act whose claim
+      // waited behind the activation would carry the later stamp; the two can
+      // share a millisecond, so equal is allowed.
+      expect(acts[0]?.createdAt.getTime()).toBeLessThanOrEqual(activated.updatedAt.getTime());
+    });
+
+    it('an act that reaches the plugin row after an activation is refused stale and records nothing (#1150)', async () => {
+      const { approver, household, plugin, oldSha, sendOldShaSwitchOn } = await arrangeStagedUpdate();
+
+      const { switchOn, activation } = await withBarrier(async (barrier) => {
+        const { holder } = barrier;
+
+        // The approval queues first, then the act behind it. This is the order
+        // that puts the act's claim AFTER the manifest moved, so it is the one
+        // that exercises the sha comparison.
         const shownRisks = await readStagedShownRisks(baseUrl, approver, plugin.slug);
         await holder.begin();
         await holder.query('SELECT id FROM plugins WHERE id = $1 FOR UPDATE', [plugin.id]);
@@ -347,15 +513,7 @@ describe('consent decisions under concurrency (#360)', () => {
           settledEarly: approval.settledEarly,
         });
 
-        const act = fire(() =>
-          sendSwitchOn(
-            baseUrl,
-            owner,
-            unit,
-            plugin.slug,
-            switchOnBody(surface, { [HOUSEHOLD_CHECK.slug]: PluginGrantStatus.Granted }),
-          ),
-        );
+        const act = fire(sendOldShaSwitchOn);
 
         await expectBackendsQueuedBehind(barrier, {
           heldBy: holder.pid,
@@ -377,27 +535,9 @@ describe('consent decisions under concurrency (#360)', () => {
       const activated = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
 
       expect(activated.installedSha256).not.toBe(oldSha);
-
-      // The household's acts: the approval records its own, for the Server unit (#1336).
-      const acts = await db.client.pluginConsentAct.findMany({
-        where: { pluginId: plugin.id, scopeType: PluginGrantScope.Household, scopeId: household.id },
-      });
-
-      // Either legal outcome is accepted, and neither is required.
-      if (switchOn.status === 200) {
-        // Landed under the old sha, and its insert came ahead of the
-        // activation's write to the plugin row. Both stamps are the api's
-        // clock, taken as each statement is built, so an act whose claim
-        // waited behind the activation would carry the later stamp.
-        expect(acts).toHaveLength(1);
-        expect(acts[0]?.manifestSha256).toBe(oldSha);
-        expect(switchOn.body.act?.id).toBe(acts[0]?.id);
-        expect(acts[0]?.createdAt.getTime()).toBeLessThan(activated.updatedAt.getTime());
-      } else {
-        expect(switchOn.status).toBe(409);
-        expect(switchOn.body.code).toBe('PLUGIN_CONSENT_ACT_STALE');
-        expect(acts).toHaveLength(0);
-      }
+      expect(switchOn.status).toBe(409);
+      expect(switchOn.body.code).toBe('PLUGIN_CONSENT_ACT_STALE');
+      expect(await householdActs(plugin.id, household.id)).toHaveLength(0);
     });
   });
 

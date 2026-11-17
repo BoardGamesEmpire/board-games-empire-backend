@@ -323,8 +323,8 @@ describe('PluginServerConsentActService', () => {
     it('claims the plugin row, classifies, reads what stands, then writes one act and its decisions in permission order (#1336)', async () => {
       const result = await service.review(input({ answers: [granted(SECOND_OPTIONAL), granted(OPTIONAL)] }));
 
-      // No household row, no advisory key and no unit enablement: the Server
-      // unit has none of them.
+      // No household row and no unit enablement: the Server unit has
+      // neither.
       expect(order).toEqual([
         'plugin claim',
         'classify',

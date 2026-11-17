@@ -1146,7 +1146,7 @@ describe('PluginUpdateService', () => {
         expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
       });
 
-      it('does not retry the activation: the denial is not a deadlock, so the claim is taken once', async () => {
+      it('takes the activation claim once: the denial rolls the activation back and the update is staged (#1336)', async () => {
         db.pluginGrant.findMany
           .mockResolvedValueOnce([makeGrant(), digest()])
           .mockResolvedValueOnce([denied(), digest()])
@@ -1800,35 +1800,21 @@ describe('PluginUpdateService', () => {
 
     /**
      * A deadlock: nothing about this transaction was wrong, Postgres simply
-     * chose it as the victim of a cycle. The abort took it whole, so the
-     * recovery is one whole retry, and one only (#398).
+     * chose it as the victim of a cycle. The abort took it whole, and the API
+     * answers it as a retryable 409, so the approval is not replayed here
+     * (#398, #1152).
      */
     describe('a deadlock that aborts the activation transaction', () => {
-      it('retries the whole transaction when Postgres picks this one as the victim', async () => {
+      it('propagates the deadlock as it is: the transaction runs once (#1152)', async () => {
         db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
-        db.pluginGrant.upsert.mockRejectedValueOnce(deadlock());
-
-        const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' });
-
-        // The retry writes the act and the required decision again: the
-        // aborted attempt's writes went with it.
-        expect(result.seededGrants.map((grant) => grant.permissionSlug)).toEqual(['plugin|demo-sink|manage:digest']);
-        expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(2);
-        expect(db.pluginConsentAct.create).toHaveBeenCalledTimes(2);
-        // Re-claimed, not carried over: the aborted attempt released it.
-        expect(db.plugin.updateMany).toHaveBeenCalledTimes(2);
-        expect(emitter.emit).toHaveBeenCalledTimes(1);
-      });
-
-      it('propagates a second deadlock rather than looping on the contention', async () => {
-        db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
-        const second = deadlock();
-        db.pluginGrant.upsert.mockRejectedValueOnce(deadlock()).mockRejectedValueOnce(second);
+        const victim = deadlock();
+        db.pluginGrant.upsert.mockRejectedValueOnce(victim);
 
         await expect(
           service.approve({ slug: 'demo-sink', approverId: 'admin-1', stagingId: 'staging-a' }),
-        ).rejects.toBe(second);
-        expect(db.plugin.updateMany).toHaveBeenCalledTimes(2);
+        ).rejects.toBe(victim);
+        expect(db.plugin.updateMany).toHaveBeenCalledTimes(1);
+        expect(db.pluginConsentAct.create).toHaveBeenCalledTimes(1);
         expect(emitter.emit).not.toHaveBeenCalled();
       });
     });

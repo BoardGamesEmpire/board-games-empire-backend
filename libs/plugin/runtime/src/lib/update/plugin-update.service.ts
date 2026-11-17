@@ -1,7 +1,6 @@
 import { AuditContextService } from '@bge/actor-context';
 import {
   DatabaseService,
-  isDeadlockError,
   PluginCategory,
   PluginConsentActKind,
   PluginGrantScope,
@@ -1680,8 +1679,11 @@ export class PluginUpdateService {
   }
 
   /**
-   * The activation entry point: one bounded retry around the transaction,
-   * for a deadlock that aborts it.
+   * The activation entry point: warms the next manifest's config schema, then
+   * runs the activation transaction once. Nothing is retried. The signal that
+   * an update needs approval goes straight back to `stage()`, which stages it
+   * (#1336), and a deadlock reaches the client as the API's retryable 409
+   * (#1152).
    */
   private async activate(input: ActivationInput): Promise<ActivationOutcome> {
     const { next } = input;
@@ -1696,32 +1698,7 @@ export class PluginUpdateService {
       schema: next.manifest.config.schema,
     });
 
-    const attempt = (): Promise<ActivationOutcome> => this.activateInTransaction(input);
-
-    try {
-      return await attempt();
-    } catch (error) {
-      // A deadlock is not this transaction being wrong about anything —
-      // Postgres chose a victim of a cycle (#398). The abort took the whole
-      // transaction with it, every accumulator lives inside it, and the events
-      // emit only after it commits, so the honest answer is to run it again.
-      //
-      // Nothing else is retried. The signal that an update needs approval goes
-      // straight back to `stage()`, which stages it (#1336). A unique violation
-      // is not retried either. The consent decisions are upserts under the
-      // plugin row's `FOR UPDATE`, which every writer of a server-scope
-      // decision claims first, so no decision can land between this
-      // transaction's read and its writes: a violation has nothing a second
-      // attempt could see differently (#1336).
-      if (!isDeadlockError(error)) {
-        throw error;
-      }
-
-      // Once, not until-success. A second deadlock means the contention is
-      // still there, and answering it with an unbounded loop would hold the
-      // claim open against it; the error propagates instead.
-      return await attempt();
-    }
+    return this.activateInTransaction(input);
   }
 
   /**
@@ -1762,8 +1739,8 @@ export class PluginUpdateService {
       // Prisma's query API cannot express FOR UPDATE; unqualified table name
       // so the search_path (per-worker test schemas) resolves it. Placed
       // first in the transaction, ahead of the grant rows the approval
-      // writes, matching the plugin row → advisory → grant row → unit row
-      // total order `unit-scope-lock.ts` documents.
+      // writes: every writer of consent decisions takes the plugin row
+      // before them.
       const [current] = await tx.$queryRaw<{ config: Prisma.JsonValue; category: PluginCategory }[]>`
         SELECT config, category FROM plugins WHERE id = ${plugin.id} FOR UPDATE`;
 

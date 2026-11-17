@@ -129,7 +129,7 @@ export function extractSqlTemplate(
  * an advisory lock is keyed on, rather than a statement.
  *
  * Same contract as {@link extractSqlTemplate}, and the same reason: a spec that
- * rebuilds `plugin_grant:household_unit:${id}:${pluginId}` by hand is asserting
+ * rebuilds `quota:${resource}:${scope}:${scopeId}` by hand is asserting
  * its own format. Lift the format, bind values into it with
  * {@link bindTemplate}, and a change to it either fails the lift or produces
  * the new key.
@@ -433,9 +433,8 @@ function isOnACommentLine(source: string, offset: number): boolean {
  *
  * Doc comments in this repo quote code, and a quoted key format is
  * indistinguishable from a real one to a pattern that only inspects the
- * character before the backtick — `unit-scope-lock.ts` already carries such a
- * mention. Counted, it inflates the ambiguity check; anchored past, it is
- * lifted in preference to the statement the spec meant.
+ * character before the backtick. Counted, it inflates the ambiguity check;
+ * anchored past, it is lifted in preference to the statement the spec meant.
  */
 function templateStarts(source: string, pattern: RegExp): number[] {
   const starts: number[] = [];

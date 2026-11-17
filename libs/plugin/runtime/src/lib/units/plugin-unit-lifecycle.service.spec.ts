@@ -191,15 +191,14 @@ describe('PluginUnitLifecycleService', () => {
   describe('the household unit transaction', () => {
     const configInput = { ...enableInput, config: { webhookUrl: 'https://x' } };
 
-    it('opens the transaction household row first: share lock, plugin-row re-read, scope lock, unit row', async () => {
+    it('opens the transaction household row first: share lock, plugin-row re-read, then the unit enablement, with no lock of its own on the unit (#1152)', async () => {
       db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow());
       db.householdPlugin.update.mockResolvedValue(makeHouseholdRow());
 
       await service.updateHouseholdConfig(configInput);
 
-      const [advisoryStrings, ...advisoryValues] = db.$executeRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
-      expect(rawQueryText(advisoryStrings)).toContain('pg_advisory_xact_lock(hashtextextended(');
-      expect(advisoryValues).toContain('plugin_grant:household_unit:hh-1:plugin-1');
+      // Nothing orders two writers of one unit enablement: the later write wins.
+      expect(db.$executeRaw).not.toHaveBeenCalled();
 
       const householdAt = rawCallIndex(HOUSEHOLD_LOCK);
       const livenessAt = rawCallIndex(PLUGIN_ROW);
@@ -211,18 +210,16 @@ describe('PluginUnitLifecycleService', () => {
       // The household row comes first (#548): a soft-delete holds it while it
       // runs and touches no plugin table, so taking it first can only queue.
       //
-      // The plugin row MUST precede the advisory lock. Uninstall and
-      // activation claim that row before touching grant rows, and a consent
-      // act holds grant rows while taking this advisory (#1150) —
-      // advisory-first would close the cycle advisory → plugin → grant →
-      // advisory, which Postgres resolves by aborting a caller.
+      // The plugin row precedes the unit enablement, the order a consent act
+      // takes them in too, with its decisions between: no two of these writers
+      // can each hold a row the other waits on.
       const householdOrder = db.$queryRaw.mock.invocationCallOrder[householdAt];
       const livenessOrder = db.$queryRaw.mock.invocationCallOrder[livenessAt];
-      const advisoryOrder = db.$executeRaw.mock.invocationCallOrder[0];
       const readOrder = db.householdPlugin.findUnique.mock.invocationCallOrder[0];
+      const writeOrder = db.householdPlugin.update.mock.invocationCallOrder[0];
       expect(householdOrder).toBeLessThan(livenessOrder);
-      expect(livenessOrder).toBeLessThan(advisoryOrder);
-      expect(advisoryOrder).toBeLessThan(readOrder);
+      expect(livenessOrder).toBeLessThan(readOrder);
+      expect(readOrder).toBeLessThan(writeOrder);
     });
 
     it('refuses when a concurrent activation promoted a new version after the manifest was read', async () => {
@@ -236,7 +233,6 @@ describe('PluginUnitLifecycleService', () => {
         kind: 'version-activated',
       });
       expect(db.householdPlugin.update).not.toHaveBeenCalled();
-      expect(db.$executeRaw).not.toHaveBeenCalled();
     });
 
     it('refuses a SAME-VERSION reinstall — a tombstone reinstall replaces the manifest in place', async () => {
@@ -291,7 +287,6 @@ describe('PluginUnitLifecycleService', () => {
         actualVersion: '1.2.0',
       });
       expect(db.householdPlugin.update).not.toHaveBeenCalled();
-      expect(db.$executeRaw).not.toHaveBeenCalled();
     });
 
     it('says a re-activation REPLACED the content rather than reporting a move from a version to itself', async () => {
@@ -372,8 +367,8 @@ describe('PluginUnitLifecycleService', () => {
 
       await expect(service.updateHouseholdConfig(configInput)).rejects.toBeInstanceOf(PluginUnitScopeError);
       expect(db.householdPlugin.update).not.toHaveBeenCalled();
-      // Refused before serializing anyone else on this unit's advisory key.
-      expect(db.$executeRaw).not.toHaveBeenCalled();
+      // Refused on the re-read, before the unit enablement is read.
+      expect(db.householdPlugin.findUnique).not.toHaveBeenCalled();
     });
 
     it('refuses inside the transaction when a concurrent uninstall tombstoned the plugin after the pre-read', async () => {
@@ -543,9 +538,9 @@ describe('PluginUnitLifecycleService', () => {
 
       await expect(write()).rejects.toBeInstanceOf(PluginUnitHouseholdNotFoundError);
 
-      // Refused before it took anything else: no plugin-row claim, no key, no write.
+      // Refused before it took anything else: no plugin-row claim, no unit read, no write.
       expect(rawCallIndex(PLUGIN_ROW)).toBe(-1);
-      expect(db.$executeRaw).not.toHaveBeenCalled();
+      expect(db.householdPlugin.findUnique).not.toHaveBeenCalled();
       expect(db.householdPlugin.create).not.toHaveBeenCalled();
       expect(db.householdPlugin.update).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();
@@ -564,16 +559,16 @@ describe('PluginUnitLifecycleService', () => {
   describe('user switch-off', () => {
     const userInput = { slug: 'demo-sink', userId: 'user-1' };
 
-    it('disables under the user advisory lock, writing only the enabled flag, and emits the user disabled event (#1149)', async () => {
+    it('disables under the plugin row share lock, writing only the enabled flag, and emits the user disabled event (#1149, #1152)', async () => {
       const before = makeUserRow();
       db.userPlugin.findUnique.mockResolvedValue(before);
       db.userPlugin.update.mockResolvedValue({ ...before, enabled: false });
 
       const row = await service.disableUser(userInput);
 
-      const [strings, ...values] = db.$executeRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
-      expect(rawQueryText(strings)).toContain('pg_advisory_xact_lock(hashtextextended(');
-      expect(values).toContain('plugin_grant:user_unit:user-1:plugin-1');
+      const livenessOrder = db.$queryRaw.mock.invocationCallOrder[rawCallIndex(PLUGIN_ROW)];
+      expect(livenessOrder).toBeLessThan(db.userPlugin.findUnique.mock.invocationCallOrder[0]);
+      expect(db.$executeRaw).not.toHaveBeenCalled();
 
       expect(db.userPlugin.update).toHaveBeenCalledWith({ where: { id: 'up-1' }, data: { enabled: false } });
       expect(row.enabled).toBe(false);
