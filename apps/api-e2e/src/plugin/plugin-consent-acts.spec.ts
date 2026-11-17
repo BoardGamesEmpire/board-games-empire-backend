@@ -1202,6 +1202,138 @@ describe('consent acts (#1150)', () => {
     });
   });
 
+  // An act stores what the consent surface showed, localized text included,
+  // so its body may name the locale that surface was shown in (#1301). The
+  // e2e server ships one catalog, so its supported set is `en` alone: a test
+  // here can name `en` against an `Accept-Language` the server cannot serve,
+  // and the controller specs prove a named locale beats the request's own.
+  describe('the locale an act renders in (#1301)', () => {
+    /** The locale an act's stored presentation names. */
+    const presentationLocale = (act: { presentation: unknown } | undefined) =>
+      (act?.presentation as { locale?: string } | undefined)?.locale;
+
+    it('an act naming a supported locale stores its presentation in that locale, whatever Accept-Language says (#1301)', async () => {
+      const { owner, householdId, unit } = await household();
+      const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK, HOUSEHOLD_REQUIRED, HOUSEHOLD_OPTIONAL]);
+      const surface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
+
+      await sendSwitchOn(baseUrl, owner, unit, plugin.slug, {
+        ...switchOnBody(surface, { [HOUSEHOLD_REQUIRED.slug]: PluginGrantStatus.Granted }),
+        locale: 'en',
+      })
+        .set('Accept-Language', 'de')
+        .expect(200);
+      await sendReview(baseUrl, owner, unit, plugin.slug, {
+        ...reviewBody(surface, { [HOUSEHOLD_OPTIONAL.slug]: PluginGrantStatus.Granted }),
+        locale: 'en',
+      })
+        .set('Accept-Language', 'de')
+        .expect(200);
+      await sendToggle(baseUrl, owner, unit, plugin.slug, {
+        ...toggleBody(surface, HOUSEHOLD_OPTIONAL.slug, PluginGrantStatus.Denied),
+        locale: 'en',
+      })
+        .set('Accept-Language', 'de')
+        .expect(200);
+
+      const acts = await actsAt(plugin.id, PluginGrantScope.Household, householdId);
+
+      expect(acts).toHaveLength(3);
+      expect(acts.map((act) => [act.kind, presentationLocale(act)])).toEqual(
+        expect.arrayContaining([
+          [PluginConsentActKind.SwitchOn, 'en'],
+          [PluginConsentActKind.Review, 'en'],
+          [PluginConsentActKind.Toggle, 'en'],
+        ]),
+      );
+    });
+
+    it('an act naming an unsupported locale is refused 422 PLUGIN_CONSENT_ACT_LOCALE and writes nothing (#1301)', async () => {
+      const { owner, householdId, unit } = await household();
+      const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK, HOUSEHOLD_REQUIRED]);
+      const surface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
+
+      const refused = await sendSwitchOn(baseUrl, owner, unit, plugin.slug, {
+        ...switchOnBody(surface, { [HOUSEHOLD_REQUIRED.slug]: PluginGrantStatus.Granted }),
+        locale: 'xx',
+      }).expect(422);
+
+      expect(refused.body).toMatchObject({ code: 'PLUGIN_CONSENT_ACT_LOCALE', locale: 'xx' });
+      await expectNothingWritten(plugin.id, householdId);
+    });
+
+    it("a user's act takes the same locale rules: an unsupported one is refused and writes nothing, a supported one is stored (#1301)", async () => {
+      const user = await actors.user();
+      const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK, USER_REQUIRED]);
+      const surface = await readConsentSurface(baseUrl, user, 'me', plugin.slug);
+      const switchOnNaming = (locale: string) =>
+        sendSwitchOn(baseUrl, user, 'me', plugin.slug, {
+          ...switchOnBody(surface, { [USER_REQUIRED.slug]: PluginGrantStatus.Granted }),
+          locale,
+        }).set('Accept-Language', 'de');
+
+      const refused = await switchOnNaming('xx').expect(422);
+
+      expect(refused.body).toMatchObject({ code: 'PLUGIN_CONSENT_ACT_LOCALE', locale: 'xx' });
+      expect(await actsAt(plugin.id, PluginGrantScope.User, user.user.id)).toEqual([]);
+      expect(await decisionsAt(plugin.id, PluginGrantScope.User, user.user.id)).toEqual([]);
+      expect(
+        await db.client.userPlugin.findUnique({
+          where: { userId_pluginId: { userId: user.user.id, pluginId: plugin.id } },
+        }),
+      ).toBeNull();
+
+      await switchOnNaming('en').expect(200);
+
+      const [act] = await actsAt(plugin.id, PluginGrantScope.User, user.user.id);
+
+      expect(presentationLocale(act)).toBe('en');
+    });
+
+    it("an act without a locale behaves as before: it renders in the request's own (#1301)", async () => {
+      const { owner, householdId, unit } = await household();
+      const plugin = await arrangePlugin([MANAGE_DIGEST_CHECK, HOUSEHOLD_REQUIRED]);
+      const surface = await readConsentSurface(baseUrl, owner, unit, plugin.slug);
+
+      await sendSwitchOn(
+        baseUrl,
+        owner,
+        unit,
+        plugin.slug,
+        switchOnBody(surface, { [HOUSEHOLD_REQUIRED.slug]: PluginGrantStatus.Granted }),
+      ).expect(200);
+
+      const [act] = await actsAt(plugin.id, PluginGrantScope.Household, householdId);
+
+      expect(presentationLocale(act)).toBe('en');
+    });
+
+    it("an update approval stores its presentation in the locale it names, and refuses one the server doesn't support (#1301)", async () => {
+      const admin = await actors.admin();
+      const plugin = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK], [MANAGE_DIGEST_CHECK]);
+      const approveNaming = (locale: string) =>
+        request(baseUrl)
+          .post(`/api/plugins/${plugin.slug}/update/approve`)
+          .set(admin.headers)
+          .set('Accept-Language', 'de')
+          .send({ stagingId: INVENTORY_STAGING_ID, locale });
+
+      const refused = await approveNaming('xx').expect(422);
+
+      expect(refused.body).toMatchObject({ code: 'PLUGIN_CONSENT_ACT_LOCALE', locale: 'xx' });
+      expect(await actsAt(plugin.id, PluginGrantScope.Server, '')).toEqual([]);
+      expect(await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } })).toMatchObject({
+        version: plugin.version,
+      });
+
+      const approved = await approveNaming('en').expect(200);
+      const [act] = await actsAt(plugin.id, PluginGrantScope.Server, '');
+
+      expect(act).toMatchObject({ id: approved.body.act.id, kind: PluginConsentActKind.UpdateApprove });
+      expect(presentationLocale(act)).toBe('en');
+    });
+  });
+
   describe('the act table', () => {
     // The rule lives in a hand-written migration, which Prisma cannot model,
     // so only a real database can show it is there. Rows are written

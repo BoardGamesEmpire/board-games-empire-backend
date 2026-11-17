@@ -187,6 +187,32 @@ describe('plugin install ingress (#1094)', () => {
     expect(await db.client.pluginConsentAct.count({ where: { pluginId: plugin.id } })).toBe(1);
   });
 
+  // The e2e server supports `en` alone, so the install names `en` against an
+  // `Accept-Language` the server cannot serve; the controller spec proves a
+  // named locale beats the request's own (#1301).
+  it("an install stores its act's presentation in the locale it names, and refuses one the server doesn't support (#1301)", async () => {
+    const admin = await actors.admin();
+    const artifact = await buildArtifact();
+    const installNaming = (locale: string) =>
+      install(admin, { sha256: artifact.sha256, locale }).set('Accept-Language', 'de');
+
+    await upload(admin, artifact).expect(200);
+
+    const refused = await installNaming('xx').expect(422);
+
+    expect(refused.body).toMatchObject({ code: 'PLUGIN_CONSENT_ACT_LOCALE', locale: 'xx' });
+    expect(await db.client.plugin.findUnique({ where: { slug: artifact.slug } })).toBeNull();
+    expect(await db.client.pluginArtifact.findUnique({ where: { sha256: artifact.sha256 } })).not.toBeNull();
+
+    await installNaming('en').expect(201);
+
+    const plugin = await db.client.plugin.findUniqueOrThrow({ where: { slug: artifact.slug } });
+    const [act] = await db.client.pluginConsentAct.findMany({ where: { pluginId: plugin.id } });
+
+    expect(act).toMatchObject({ kind: 'InstallAccept' });
+    expect((act?.presentation as { locale?: string }).locale).toBe('en');
+  });
+
   it('a reinstall over an uninstalled plugin records a second InstallAccept act, and its decisions name the second (#1336)', async () => {
     const admin = await actors.admin();
     const artifact = await buildArtifact();

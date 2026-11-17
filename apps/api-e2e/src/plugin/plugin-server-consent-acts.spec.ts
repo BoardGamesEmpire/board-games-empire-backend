@@ -175,6 +175,32 @@ describe('server consent acts (#1336)', () => {
       (check) => check.slug === slug,
     )?.riskLevel;
 
+  // The e2e server supports `en` alone, so the toggle names `en` against an
+  // `Accept-Language` the server cannot serve; the controller spec proves a
+  // named locale beats the request's own (#1301).
+  it("a server toggle stores its presentation in the locale it names, and refuses one the server doesn't support (#1301)", async () => {
+    const admin = await actors.admin();
+    const plugin = await arrangePlugin([POLICY_OPTIONAL]);
+    const surface = await readConsentSurface(baseUrl, admin, 'server', plugin.slug);
+    const toggleNaming = (locale: string) =>
+      sendToggle(baseUrl, admin, 'server', plugin.slug, {
+        ...toggleBody(surface, POLICY_OPTIONAL.slug, PluginGrantStatus.Granted),
+        locale,
+      }).set('Accept-Language', 'de');
+
+    const refused = await toggleNaming('xx').expect(422);
+
+    expect(refused.body).toMatchObject({ code: 'PLUGIN_CONSENT_ACT_LOCALE', locale: 'xx' });
+    expect(await actsOf(plugin.id)).toEqual([]);
+    expect(await decisionOf(plugin.id, POLICY_OPTIONAL.slug)).toBeNull();
+
+    const toggled = await toggleNaming('en').expect(200);
+    const [act] = await actsOf(plugin.id);
+
+    expect(act).toMatchObject({ id: toggled.body.act.id, kind: PluginConsentActKind.Toggle });
+    expect((act?.presentation as { locale?: string }).locale).toBe('en');
+  });
+
   it('a server admin refuses, then grants, an optional server-scope permission: two acts, each naming the sha and the risk shown (#1336)', async () => {
     const admin = await actors.admin();
     const plugin = await arrangePlugin([POLICY_OPTIONAL]);

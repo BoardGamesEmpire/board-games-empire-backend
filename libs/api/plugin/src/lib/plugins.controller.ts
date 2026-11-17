@@ -1,6 +1,6 @@
 import { AuditContextService, SERVER_PLUGIN_UNIT } from '@bge/actor-context';
 import { Action, ResourceType } from '@bge/database';
-import { t } from '@bge/i18n';
+import { SupportedLocalesService, t } from '@bge/i18n';
 import { AbilityService, CheckPolicies, PoliciesGuard, ScopeComposer, Unscoped } from '@bge/permissions';
 import {
   PluginConsentPresentationNotFoundError,
@@ -23,6 +23,7 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { consentActLocale } from './consent-act-locale';
 import {
   ApprovePluginUpdateDto,
   ListPluginsQueryDto,
@@ -96,6 +97,7 @@ export class PluginsController {
     private readonly serverConsentActs: PluginServerConsentActService,
     private readonly auditContext: AuditContextService,
     private readonly scopeComposer: ScopeComposer,
+    private readonly supportedLocales: SupportedLocalesService,
   ) {}
 
   // ─── Installed-plugin inventory (#354) ────────────────────────────────────
@@ -186,7 +188,8 @@ export class PluginsController {
     status: Http.UnprocessableEntity,
     description:
       'PLUGIN_CONSENT_ACT_ANSWER: the permission is not requested, is required, or is not decided by the ' +
-      'server (rule says which). Also a body that fails validation.',
+      'server (rule says which). PLUGIN_CONSENT_ACT_LOCALE: locale is not one this server supports. Also a body ' +
+      'that fails validation.',
   })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
   @HttpCode(Http.Ok)
@@ -199,7 +202,7 @@ export class PluginsController {
           actorId: this.abilityService.getActingUserId(),
           manifestSha256: dto.manifestSha256,
           answers: [dto.answer],
-          locale: this.auditContext.getLocale() ?? undefined,
+          locale: this.presentationLocale(dto.locale),
         }),
       ),
     ).pipe(map((result) => serverConsentActResponse(t('success.plugin.server_consent_toggled', { slug }), result)));
@@ -230,8 +233,8 @@ export class PluginsController {
     status: Http.UnprocessableEntity,
     description:
       'PLUGIN_CONSENT_ACT_ANSWER: an answer refuses a permission (rule server-refusal), or does not match what ' +
-      'the server decides (rule and permissionSlugs say which). Also a body that fails validation, such as an ' +
-      'empty answers list.',
+      'the server decides (rule and permissionSlugs say which). PLUGIN_CONSENT_ACT_LOCALE: locale is not one ' +
+      'this server supports. Also a body that fails validation, such as an empty answers list.',
   })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
   @HttpCode(Http.Ok)
@@ -244,7 +247,7 @@ export class PluginsController {
           actorId: this.abilityService.getActingUserId(),
           manifestSha256: dto.manifestSha256,
           answers: dto.answers,
-          locale: this.auditContext.getLocale() ?? undefined,
+          locale: this.presentationLocale(dto.locale),
         }),
       ),
     ).pipe(map((result) => serverConsentActResponse(t('success.plugin.server_consent_reviewed', { slug }), result)));
@@ -375,7 +378,9 @@ export class PluginsController {
   })
   @ApiResponse({
     status: Http.UnprocessableEntity,
-    description: 'Stored PENDING manifest failed re-validation (a corrupt ACTIVE manifest renders as 500 by design)',
+    description:
+      'Stored PENDING manifest failed re-validation (a corrupt ACTIVE manifest renders as 500 by design), or ' +
+      'PLUGIN_CONSENT_ACT_LOCALE: locale is not one this server supports',
   })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
   @HttpCode(Http.Ok)
@@ -389,8 +394,8 @@ export class PluginsController {
           stagingId: dto.stagingId,
           confirmCriticalSlugs: dto.confirmCriticalSlugs,
           // The locale the staged-update read presented the requested
-          // permissions in, which the approval's consent act records (#1336).
-          locale: this.auditContext.getLocale() ?? undefined,
+          // permissions in, which the approval's consent act records (#1336, #1301).
+          locale: this.presentationLocale(dto.locale),
         }),
       ),
     ).pipe(
@@ -650,5 +655,19 @@ export class PluginsController {
       // name for one fact.
       presentation,
     };
+  }
+
+  /**
+   * The locale a server write that stores a presentation renders it in
+   * (#1301): the one the body names, refused unless this server supports it,
+   * else the request's own. Each route calls it after its ceiling check, so a
+   * plugin outside the actor's ceiling still answers as not installed.
+   */
+  private presentationLocale(named: string | undefined): string | undefined {
+    return consentActLocale(
+      named,
+      this.supportedLocales.getSupportedTags(),
+      this.auditContext.getLocale() ?? undefined,
+    );
   }
 }

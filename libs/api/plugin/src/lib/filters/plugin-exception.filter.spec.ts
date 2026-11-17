@@ -840,6 +840,15 @@ describe('PluginExceptionFilter', () => {
         key: 'consent_act_unit_off',
         fields: { slug: 'sample', scopeType: 'Household' },
       },
+      // A write that stores a presentation named a locale this server does
+      // not support (#1301).
+      {
+        exception: new pluginRuntime.PluginConsentActLocaleError('xx'),
+        status: Http.UnprocessableEntity,
+        code: 'PLUGIN_CONSENT_ACT_LOCALE',
+        key: 'consent_act_locale',
+        fields: { locale: 'xx' },
+      },
     ])('renders $code with its status and fields (#1150)', ({ exception, status, code, key, fields }) => {
       filter.catch(exception, host);
 

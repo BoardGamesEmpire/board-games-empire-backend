@@ -121,6 +121,20 @@ export class PluginConsentActNoUserScopeError extends Error {
 }
 
 /**
+ * A write that stores a presentation (a consent act, an install or an update
+ * approval) named a locale this server does not support (#1301). The write
+ * would otherwise record text in a language nobody was shown, so it is
+ * refused before anything is read or written. The filter answers 422.
+ */
+export class PluginConsentActLocaleError extends Error {
+  override readonly name = 'PluginConsentActLocaleError';
+
+  constructor(public readonly locale: string) {
+    super(`'${locale}' is not a locale this server supports`);
+  }
+}
+
+/**
  * A toggle or review addressed a unit with no unit enablement, or one whose
  * switch is off. Thrown by the consent act service, not the planner. The
  * filter answers 409.

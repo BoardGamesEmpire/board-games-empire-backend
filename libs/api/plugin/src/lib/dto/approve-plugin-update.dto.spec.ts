@@ -16,4 +16,9 @@ describe('ApprovePluginUpdateDto', () => {
       invalidProperties({ stagingId: 'staging-a', confirmCriticalSlugs: ['user:impersonate'] }),
     ).resolves.toEqual([]);
   });
+
+  it('takes an optional locale, a string of at most 35 characters (#1301)', async () => {
+    await expect(invalidProperties({ stagingId: 'staging-a', locale: 'de' })).resolves.toEqual([]);
+    await expect(invalidProperties({ stagingId: 'staging-a', locale: 'x'.repeat(36) })).resolves.toEqual(['locale']);
+  });
 });

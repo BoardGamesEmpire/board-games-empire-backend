@@ -1,6 +1,7 @@
 import type { AuditContextService } from '@bge/actor-context';
 import { Action, PluginGrantStatus, ResourceType, RiskLevel, type DatabaseService } from '@bge/database';
 import { HouseholdLivenessGuard } from '@bge/household';
+import type { SupportedLocalesService } from '@bge/i18n';
 import {
   CHECK_POLICIES_KEY,
   PoliciesGuard,
@@ -8,14 +9,15 @@ import {
   type AbilityService,
   type AppAbility,
 } from '@bge/permissions';
-import type {
-  PluginConsentActService,
-  PluginConsentPresentation,
-  PluginConsentPresentationService,
-  PluginFeatureStateService,
-  PluginFeatureUnitState,
-  PluginInventoryService,
-  PluginUnitLifecycleService,
+import {
+  PluginConsentActLocaleError,
+  type PluginConsentActService,
+  type PluginConsentPresentation,
+  type PluginConsentPresentationService,
+  type PluginFeatureStateService,
+  type PluginFeatureUnitState,
+  type PluginInventoryService,
+  type PluginUnitLifecycleService,
 } from '@bge/plugin';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { createMockAbilityService, MOCK_ACTING_USER_ID, type MockAbilityService } from '@bge/testing';
@@ -144,6 +146,7 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
       auditContext as never,
       { household: { count: householdCount } } as unknown as DatabaseService,
       scopeComposer,
+      { getSupportedTags: () => ['en', 'de'] } as unknown as SupportedLocalesService,
     );
   });
 
@@ -301,6 +304,39 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
       expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.manage, ResourceType.HouseholdPlugin, {
         householdId: 'hh-other',
       });
+      expect(consentActs.switchOn).not.toHaveBeenCalled();
+      expect(consentActs.toggle).not.toHaveBeenCalled();
+      expect(consentActs.review).not.toHaveBeenCalled();
+    });
+
+    // The act stores what the consent surface showed, so it renders in the
+    // locale the body names rather than the one this request resolved (#1301).
+    it('each act renders in the supported locale the body names, not the request locale (#1301)', async () => {
+      auditContext.getLocale.mockReturnValue('en');
+
+      await firstValueFrom(controller.enable('hh-1', 'demo-sink', { manifestSha256: SHA, answers: [], locale: 'de' }));
+      await firstValueFrom(
+        controller.toggleConsent('hh-1', 'demo-sink', { manifestSha256: SHA, answer: ANSWER, locale: 'de' }),
+      );
+      await firstValueFrom(
+        controller.reviewConsent('hh-1', 'demo-sink', { manifestSha256: SHA, answers: [ANSWER], locale: 'de' }),
+      );
+
+      expect(consentActs.switchOn).toHaveBeenCalledWith(expect.objectContaining({ locale: 'de' }));
+      expect(consentActs.toggle).toHaveBeenCalledWith(expect.objectContaining({ locale: 'de' }));
+      expect(consentActs.review).toHaveBeenCalledWith(expect.objectContaining({ locale: 'de' }));
+    });
+
+    it('each act refuses a locale the server does not support before the service is called (#1301)', () => {
+      expect(() => controller.enable('hh-1', 'demo-sink', { manifestSha256: SHA, answers: [], locale: 'xx' })).toThrow(
+        PluginConsentActLocaleError,
+      );
+      expect(() =>
+        controller.toggleConsent('hh-1', 'demo-sink', { manifestSha256: SHA, answer: ANSWER, locale: 'xx' }),
+      ).toThrow(PluginConsentActLocaleError);
+      expect(() =>
+        controller.reviewConsent('hh-1', 'demo-sink', { manifestSha256: SHA, answers: [ANSWER], locale: 'xx' }),
+      ).toThrow(PluginConsentActLocaleError);
       expect(consentActs.switchOn).not.toHaveBeenCalled();
       expect(consentActs.toggle).not.toHaveBeenCalled();
       expect(consentActs.review).not.toHaveBeenCalled();

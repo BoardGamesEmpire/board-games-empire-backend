@@ -9,6 +9,7 @@ import {
   RiskLevel,
   ROLE_PERMISSION_CATALOG,
 } from '@bge/database';
+import type { SupportedLocalesService } from '@bge/i18n';
 import { CHECK_POLICIES_KEY, ScopeComposer, type AppAbility } from '@bge/permissions';
 import type {
   PluginConsentPresentation,
@@ -22,6 +23,7 @@ import type {
   UpdateEscalationComparison,
 } from '@bge/plugin';
 import {
+  PluginConsentActLocaleError,
   PluginConsentPresentationNotFoundError,
   PluginFeatureStateNotFoundError,
   PluginInventoryNotFoundError,
@@ -285,6 +287,7 @@ describe('PluginsController (delegation)', () => {
       serverConsentActs as never,
       auditContext as never,
       scopeComposer,
+      { getSupportedTags: () => ['en', 'de'] } as unknown as SupportedLocalesService,
     );
   });
 
@@ -388,6 +391,23 @@ describe('PluginsController (delegation)', () => {
         confirmCriticalSlugs: undefined,
         locale: undefined,
       });
+    });
+
+    // The approval's consent act stores what the staged-update read showed,
+    // so it renders in the locale the body names (#1301).
+    it('approveUpdate renders in the supported locale the body names, not the request locale (#1301)', async () => {
+      auditContext.getLocale.mockReturnValue('en');
+
+      await firstValueFrom(controller.approveUpdate('demo-sink', { stagingId: 'staging-a', locale: 'de' }));
+
+      expect(updates.approve).toHaveBeenCalledWith(expect.objectContaining({ locale: 'de' }));
+    });
+
+    it('approveUpdate refuses a locale the server does not support before the service is called (#1301)', async () => {
+      await expect(
+        firstValueFrom(controller.approveUpdate('demo-sink', { stagingId: 'staging-a', locale: 'xx' })),
+      ).rejects.toBeInstanceOf(PluginConsentActLocaleError);
+      expect(updates.approve).not.toHaveBeenCalled();
     });
 
     it('rejectUpdate forwards slug, actorId and the staging it answers, wrapping with a success message (#357)', async () => {
@@ -528,6 +548,33 @@ describe('PluginsController (delegation)', () => {
       );
 
       expect(result).toEqual(expect.objectContaining({ changed: false, act: null }));
+    });
+
+    // The act stores what the consent surface showed, so it renders in the
+    // locale the body names rather than the one this request resolved (#1301).
+    it('toggle and review render in the supported locale the body names, not the request locale (#1301)', async () => {
+      auditContext.getLocale.mockReturnValue('en');
+
+      await firstValueFrom(
+        controller.toggleConsent('demo-sink', { manifestSha256: SHA, answer: ANSWER, locale: 'de' }),
+      );
+      await firstValueFrom(
+        controller.reviewConsent('demo-sink', { manifestSha256: SHA, answers: [ANSWER], locale: 'de' }),
+      );
+
+      expect(serverConsentActs.toggle).toHaveBeenCalledWith(expect.objectContaining({ locale: 'de' }));
+      expect(serverConsentActs.review).toHaveBeenCalledWith(expect.objectContaining({ locale: 'de' }));
+    });
+
+    it('toggle and review refuse a locale the server does not support before the service is called (#1301)', async () => {
+      await expect(
+        firstValueFrom(controller.toggleConsent('demo-sink', { manifestSha256: SHA, answer: ANSWER, locale: 'xx' })),
+      ).rejects.toBeInstanceOf(PluginConsentActLocaleError);
+      await expect(
+        firstValueFrom(controller.reviewConsent('demo-sink', { manifestSha256: SHA, answers: [ANSWER], locale: 'xx' })),
+      ).rejects.toBeInstanceOf(PluginConsentActLocaleError);
+      expect(serverConsentActs.toggle).not.toHaveBeenCalled();
+      expect(serverConsentActs.review).not.toHaveBeenCalled();
     });
   });
 

@@ -11,8 +11,10 @@ import {
   IsIn,
   IsNotEmpty,
   IsObject,
+  IsOptional,
   IsString,
   Matches,
+  MaxLength,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
@@ -26,6 +28,13 @@ import {
 export const CONSENT_ACT_MAX_ANSWERS = 512;
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/**
+ * The longest locale a write that stores a presentation takes (#1301): room
+ * for any BCP 47 tag a server could support, with a bound on what the 422
+ * echoes back.
+ */
+export const CONSENT_ACT_LOCALE_MAX_LENGTH = 35;
 
 /** A consent decision answers with one of these; there is no "unset" (#1150). */
 const ANSWER_STATUSES = [PluginGrantStatus.Granted, PluginGrantStatus.Denied] as const;
@@ -63,17 +72,33 @@ export class ConsentAnswerDto implements ConsentActAnswer {
   riskLevel!: RiskLevel;
 }
 
-/** What every consent act names: the plugin artifact whose consent surface was answered (#1150). */
+/**
+ * What every consent act names: the plugin artifact whose consent surface was
+ * answered (#1150), and, optionally, the locale that surface was shown in
+ * (#1301). Whether the server supports the locale is the controller's call.
+ */
 abstract class ConsentActBodyDto {
   @ApiProperty({
     description:
-      'manifestSha256 from the consent surface the answers were read from: the active one, or with ' +
-      "manifest=staged the staged update's. A sha that is neither answers 409 PLUGIN_CONSENT_ACT_STALE.",
+      'manifestSha256 from the consent surface the answers were read from: the active one, or, at household or ' +
+      "user scope, the staged update's (manifest=staged). Any other sha answers 409 PLUGIN_CONSENT_ACT_STALE.",
     pattern: SHA256_HEX.source,
   })
   @IsString({ message: i18nValidationMessage('validation.isString') })
   @Matches(SHA256_HEX, { message: i18nValidationMessage('validation.isSha256') })
   manifestSha256!: string;
+
+  @ApiPropertyOptional({
+    description:
+      'The locale the consent surface was shown in, as its reasons reported it. The consent act records its ' +
+      'presentation in this locale, so it holds the text that was read. Without it, the request locale is used. ' +
+      'A locale this server does not support answers 422 PLUGIN_CONSENT_ACT_LOCALE.',
+    maxLength: CONSENT_ACT_LOCALE_MAX_LENGTH,
+  })
+  @IsOptional()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @MaxLength(CONSENT_ACT_LOCALE_MAX_LENGTH, { message: i18nValidationMessage('validation.maxLength') })
+  locale?: string;
 }
 
 /**
@@ -123,13 +148,18 @@ export class SwitchOnHouseholdPluginDto extends SwitchOnPluginDto {
   config?: Record<string, unknown>;
 }
 
-/** Granting or refusing one optional requested permission of a unit that is switched on (#1150). */
+/**
+ * Granting or refusing one optional requested permission (#1150), at
+ * household, user or Server scope (#1336). A household or user unit must be
+ * switched on; the Server unit's toggle does not read the Server switch.
+ */
 export class ToggleConsentDto extends ConsentActBodyDto {
   @ApiProperty({
     type: ConsentAnswerDto,
     description:
-      'The one answer. A required permission cannot be toggled (422 PLUGIN_CONSENT_ACT_ANSWER); refusing one ' +
-      'goes through switching the plugin off or a review.',
+      'The one answer, to an optional requested permission. A required permission cannot be toggled ' +
+      '(422 PLUGIN_CONSENT_ACT_ANSWER). A household or user refuses one by switching the plugin off or in a ' +
+      'review; a server admin by switching the plugin off or uninstalling it.',
   })
   @IsObject({ message: i18nValidationMessage('validation.isObject') })
   @ValidateNested()
@@ -137,15 +167,20 @@ export class ToggleConsentDto extends ConsentActBodyDto {
   answer!: ConsentAnswerDto;
 }
 
-/** Answering what the active manifest or a staged update leaves outstanding (#1150). */
+/**
+ * Answering what the active manifest leaves outstanding (#1150), at
+ * household, user or Server scope (#1336), or, at household or user scope
+ * only, what a staged update adds.
+ */
 export class ReviewConsentDto extends ConsentActBodyDto {
   @ApiProperty({
     type: [ConsentAnswerDto],
     minItems: 1,
     maxItems: CONSENT_ACT_MAX_ANSWERS,
     description:
-      'At least one answer. Refusing a required permission switches the unit off in the same consent act ' +
-      '(switchedOff: true in the response).',
+      'At least one answer. In a household or user review, refusing a required permission switches the unit ' +
+      'off in the same consent act (switchedOff: true in the response). A server review only grants: an answer ' +
+      'that refuses is 422 PLUGIN_CONSENT_ACT_ANSWER (rule server-refusal).',
   })
   @IsArray({ message: i18nValidationMessage('validation.isArray') })
   @ArrayNotEmpty({ message: i18nValidationMessage('validation.arrayNotEmpty') })

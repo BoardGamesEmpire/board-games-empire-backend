@@ -2,6 +2,7 @@ import { i18nValidationMessage } from '@bge/i18n';
 import { TransformBoolean } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsBoolean, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { CONSENT_ACT_LOCALE_MAX_LENGTH } from './consent-act.dto';
 import { PLUGIN_ARTIFACT_SHA256_INPUT_MAX_LENGTH } from './post-plugin-artifact.dto';
 
 /**
@@ -53,4 +54,16 @@ export class InstallPluginDto {
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @IsOptional()
   deepScan?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      "The locale the artifact's read presented its requested permissions in. The install's consent act records " +
+      'its presentation in this locale, so it holds the text that was read. Without it, the request locale is ' +
+      'used. A locale this server does not support answers 422 PLUGIN_CONSENT_ACT_LOCALE (#1301).',
+    maxLength: CONSENT_ACT_LOCALE_MAX_LENGTH,
+  })
+  @IsOptional()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @MaxLength(CONSENT_ACT_LOCALE_MAX_LENGTH, { message: i18nValidationMessage('validation.maxLength') })
+  locale?: string;
 }

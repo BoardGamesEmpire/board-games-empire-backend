@@ -14,6 +14,7 @@ import {
   PluginConfigSchemaUnusableError,
   PluginConfigValidationError,
   PluginConsentActAnswerError,
+  PluginConsentActLocaleError,
   PluginConsentActNoUserScopeError,
   PluginConsentActRequiredSetError,
   PluginConsentActStaleError,
@@ -535,6 +536,15 @@ function buildRenderers(): RendererMap {
     status: Http.Conflict,
     message: t('errors.plugin.consent_act_unit_off', { slug: exception.pluginSlug }),
     fields: { slug: exception.pluginSlug, scopeType: exception.scopeType },
+  }));
+
+  // A write that stores a presentation (a consent act at any scope, an
+  // install, an update approval) named a locale this server does not support
+  // (#1301). `locale` echoes what was sent, so a client can say which.
+  renders(PluginConsentActLocaleError, (exception) => ({
+    status: Http.UnprocessableEntity,
+    message: t('errors.plugin.consent_act_locale', { locale: exception.locale }),
+    fields: { locale: exception.locale },
   }));
 
   // ─── 409 — confirmation challenges (prompt inputs come FROM the error) ───

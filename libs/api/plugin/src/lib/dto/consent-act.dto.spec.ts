@@ -82,4 +82,21 @@ describe('consent act bodies (#1150)', () => {
   it('accepts a toggle with one answer', async () => {
     await expect(invalidProperties(ToggleConsentDto, { manifestSha256: SHA, answer: ANSWER })).resolves.toEqual([]);
   });
+
+  // Whether the server supports the locale is the controller's call, answered
+  // with its own stable code; the body checks only its shape (#1301).
+  it('every act body takes an optional locale, a string of at most 35 characters (#1301)', async () => {
+    const bodies: readonly (readonly [new () => object, Record<string, unknown>])[] = [
+      [SwitchOnHouseholdPluginDto, { manifestSha256: SHA, answers: [] }],
+      [SwitchOnUserPluginDto, { manifestSha256: SHA, answers: [] }],
+      [ToggleConsentDto, { manifestSha256: SHA, answer: ANSWER }],
+      [ReviewConsentDto, { manifestSha256: SHA, answers: [ANSWER] }],
+    ];
+
+    for (const [Dto, body] of bodies) {
+      await expect(invalidProperties(Dto, body)).resolves.toEqual([]);
+      await expect(invalidProperties(Dto, { ...body, locale: 'de' })).resolves.toEqual([]);
+      await expect(invalidProperties(Dto, { ...body, locale: 'x'.repeat(36) })).resolves.toEqual(['locale']);
+    }
+  });
 });
