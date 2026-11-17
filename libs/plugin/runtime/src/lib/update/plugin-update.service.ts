@@ -66,6 +66,7 @@ import {
 import { MANIFEST_SCOPE_TO_PRISMA } from '../install/manifest-enum.maps';
 import {
   disablePluginDataGatewayRow,
+  findDataGatewayNameHolder,
   placePluginDataGatewayRow,
   pluginDataGatewayName,
 } from '../install/plugin-data-gateway-row';
@@ -212,6 +213,13 @@ export interface PluginUpdateStageResult {
    * none, and a staged one waits for `approve()` (#1336).
    */
   readonly seededGrants: readonly PluginGrant[];
+
+  /**
+   * The assessment's DataGateway name conflict when the update was staged
+   * (#1096, #1083): the name is taken now and may be freed before the update
+   * approval. Null when the update was activated, which a taken name refuses.
+   */
+  readonly dataGatewayNameConflict: string | null;
 }
 
 export interface PluginUpdateApproveInput {
@@ -336,6 +344,14 @@ export interface PluginUpdatePendingDescription {
     readonly household: PluginUpdateUnitCoverage;
     readonly user: PluginUpdateUnitCoverage;
   };
+
+  /**
+   * The DataGateway name the update's move into data-gateway would take, when
+   * another row holds it (#1083). Worked out when read, not at staging: the
+   * name can be freed or taken between the staging and the update approval
+   * (#1096).
+   */
+  readonly dataGatewayNameConflict: string | null;
 }
 
 /** How one scope's switched-on units stand against a staged update (#1336). */
@@ -344,6 +360,59 @@ export interface PluginUpdateUnitCoverage {
   readonly switchedOn: number;
   /** Of those, the units that would be asked nothing on activation. */
   readonly covered: number;
+}
+
+/** Every staging refusal an assessment can name, for the API layer to list without a second copy (#1096). */
+export const PLUGIN_UPDATE_STAGING_REFUSALS = [
+  'active_version',
+  'staged_update_waiting',
+  'active_manifest_unreadable',
+  'data_gateway_name_taken',
+] as const;
+
+/**
+ * Why staging an artifact would be refused as things stand.
+ *
+ * - `active_version`: the artifact is the plugin's active version.
+ * - `staged_update_waiting`: the plugin already has a staged update, which an
+ *   update approval or a rejection must answer first.
+ * - `active_manifest_unreadable`: the plugin's stored active manifest cannot
+ *   be read, so nothing can be compared against it.
+ * - `data_gateway_name_taken`: the update would be activated at once, and its
+ *   move into data-gateway would take a DataGateway name another row holds.
+ */
+export type PluginUpdateStagingRefusal = (typeof PLUGIN_UPDATE_STAGING_REFUSALS)[number];
+
+/** What an update would change, as staging, the artifact step and the staged-update read all report it. */
+export interface PluginUpdateChanges {
+  readonly comparison: UpdateEscalationComparison;
+  /**
+   * True when nothing server-gates: staging activates the update at once,
+   * unless activation then finds a required server-scope permission denied
+   * under its claim and stages it for approval instead (#1336).
+   */
+  readonly activatesAtOnce: boolean;
+  readonly declares: PluginUpdateDeclaresDiff;
+  readonly noLongerRequested: readonly string[];
+  /** The DataGateway name a move into data-gateway would take, when another row holds it (#1083). */
+  readonly dataGatewayNameConflict: string | null;
+}
+
+/**
+ * The taken DataGateway name staging refuses the update over, else null: an
+ * update that would be activated at once leaves no update approval in which
+ * to free the name (#1096, #1083). One expression for the refusal `stage()`
+ * throws and the one `assess()` reports, so the two cannot disagree.
+ */
+function dataGatewayNameRefusedOver(changes: PluginUpdateChanges): string | null {
+  return changes.activatesAtOnce ? changes.dataGatewayNameConflict : null;
+}
+
+export interface PluginUpdateAssessment {
+  readonly activeVersion: string;
+  readonly refusal: PluginUpdateStagingRefusal | null;
+  /** Null when nothing can be compared: the artifact is the active version, or the active manifest cannot be read. */
+  readonly changes: PluginUpdateChanges | null;
 }
 
 /**
@@ -486,13 +555,18 @@ interface ActivationOutcome {
  * `stage()` validates the new manifest (with `bgeCompat` ENFORCED — a
  * version that cannot load must not be activatable), screens it through the
  * SAME consent gates as install (categorical exclusions, core-permission
- * existence, static analysis with its overridable forbidden-specifier
- * gate), runs the escalation comparison against the ACTIVE manifest, and
- * then either activates immediately (no server-gating escalation, and no
- * refusal of a required server-scope permission found under the activation
- * claim) or writes the pending columns and emits `plugin.update_pending` for
- * the admin surface. Approving a staged update is the Server unit's consent to it,
- * recorded as one `UpdateApprove` consent act (#1336).
+ * existence), and works out what the update would change exactly as
+ * `assess()` reports it to the server admin: the escalation comparison
+ * against the ACTIVE manifest, and whether a move into data-gateway would
+ * take a DataGateway name another row holds (#1096). An update that would be
+ * activated at once under a taken name is refused there, as install refuses
+ * it. Only then does static analysis run, with its overridable
+ * forbidden-specifier gate, and staging either activates immediately (no
+ * server-gating escalation, and no refusal of a required server-scope
+ * permission found under the activation claim) or writes the staged update's
+ * columns and emits `plugin.update_pending` for the admin surface. Approving a
+ * staged update is the Server unit's consent to it, recorded as one
+ * `UpdateApprove` consent act (#1336).
  *
  * ACTIVATION never hot-swaps running code: the transaction promotes
  * the DB state — version, manifest, the `declares[]` catalog diff with
@@ -561,9 +635,23 @@ export class PluginUpdateService {
       throw new PluginUpdatePendingConflictError(plugin.slug, plugin.pendingVersion, next.manifest.version);
     }
 
-    this.assertNoForbiddenPermissions(next);
+    // The same changes `assess()` reported to the server admin, worked out by
+    // the same steps, so what they were shown and what staging does cannot
+    // disagree (#1096).
+    const { active, corePermissions, changes } = await this.workOutChanges(plugin, next);
+    let { comparison } = changes;
 
-    const corePermissions = await this.loadCorePermissions(next);
+    // A taken name refuses an update that would be activated at once, before
+    // any acknowledgement is asked for, as install refuses it (#1096, #1083).
+    // An update that waits for approval is staged, since the name can be freed
+    // before the approval. The activation transaction keeps its own refusal,
+    // which is the one that holds against a name taken after this read.
+    const takenDataGatewayName = dataGatewayNameRefusedOver(changes);
+
+    if (takenDataGatewayName !== null) {
+      throw new PluginUpdateDataGatewayNameConflictError(plugin.slug, takenDataGatewayName);
+    }
+
     const analysis = await this.staticAnalysis.analyze(directory, { deepScan: input.deepScan ?? false });
     const acknowledgedForbiddenImports = this.resolveAnalysisGate(
       directory.slug,
@@ -571,14 +659,11 @@ export class PluginUpdateService {
       input.acknowledgeForbiddenImports ?? [],
     );
 
-    const active = this.validateActiveManifest(plugin);
-    let { comparison } = await this.compare(plugin, active, next, corePermissions);
-
     // Immediate activation: nothing server-gates, a denied permission the
     // new manifest requires included (#1336). New household/user-scope
     // permissions do not hold this path — their consent is the units', and
     // activation announces the re-consent they owe (#1149).
-    if (!comparison.serverGating) {
+    if (changes.activatesAtOnce) {
       const outcome = await this.activate({
         plugin,
         active,
@@ -611,6 +696,7 @@ export class PluginUpdateService {
           warnings: next.warnings,
           acknowledgedForbiddenImports,
           seededGrants: outcome.acceptedGrants,
+          dataGatewayNameConflict: null,
         };
       }
 
@@ -680,7 +766,87 @@ export class PluginUpdateService {
       warnings: next.warnings,
       acknowledgedForbiddenImports,
       seededGrants: [],
+      dataGatewayNameConflict: changes.dataGatewayNameConflict,
     };
+  }
+
+  /**
+   * What staging this plugin artifact would do as things stand (#1096): the
+   * active version and the escalation comparison against it, whether staging
+   * would activate the update at once or leave it waiting for update
+   * approval, the catalog and requested-permission changes, a DataGateway
+   * name a move into data-gateway would take from another row (#1083), and
+   * what would refuse the staging. Null when no living plugin has the
+   * directory's slug: that artifact is an install, not an update.
+   *
+   * The changes come from {@link changesFrom}, which `stage()` and the
+   * staged-update read run too, so what the server admin is shown and what
+   * staging does cannot disagree.
+   *
+   * The refusal follows `stage()`'s precedence: a staged update already
+   * waiting first, then a taken DataGateway name for an update that would be
+   * activated at once. An update that waits for approval under a taken name
+   * is not refused, since the name can be freed before the update approval;
+   * the name is reported in the changes.
+   *
+   * A read and nothing else: no actor (the caller checks authority, as for
+   * `PluginInstallerService.assess`), no directory confirmation, no static
+   * analysis, no transaction, no event. The new manifest is read, validated
+   * and screened as `stage()` does it, without relying on the caller to have
+   * screened it, so an error about it propagates. Only an active stored
+   * manifest that cannot be read becomes a refusal, since the server admin
+   * still needs an answer about the artifact they hold. Where the two orders
+   * differ, both still refuse: with a staged update waiting, an unreadable
+   * active manifest is reported here while staging answers the staged-update
+   * conflict, and a new manifest that requests a forbidden permission throws
+   * the forbidden-permission refusal here while staging answers the
+   * staged-update conflict.
+   */
+  async assess(directory: PluginArtifactDirectory): Promise<PluginUpdateAssessment | null> {
+    const plugin = await this.db.plugin.findUnique({ where: { slug: directory.slug } });
+
+    if (plugin === null || plugin.uninstalledAt !== null) {
+      return null;
+    }
+
+    const next = await this.readNextManifest(directory, plugin);
+
+    if (next.manifest.version === plugin.version) {
+      return { activeVersion: plugin.version, refusal: 'active_version', changes: null };
+    }
+
+    let changes: PluginUpdateChanges;
+
+    try {
+      ({ changes } = await this.workOutChanges(plugin, next));
+    } catch (err) {
+      // Only the ACTIVE stored manifest's failure is an answer; an error about
+      // the new manifest propagates, as it does from staging.
+      if (!(err instanceof PluginUpdateManifestError) || err.source !== 'active') {
+        throw err;
+      }
+
+      // Named even while a staged update waits, where staging would refuse
+      // over the staged update first: rejecting that update would not make
+      // this artifact stageable, so the unreadable active manifest is the
+      // cause the server admin has to deal with (#1096).
+      return { activeVersion: plugin.version, refusal: 'active_manifest_unreadable', changes: null };
+    }
+
+    return { activeVersion: plugin.version, refusal: this.stagingRefusal(plugin, changes), changes };
+  }
+
+  /** The refusal staging would answer, in `stage()`'s order, for an update whose changes could be worked out (#1096). */
+  private stagingRefusal(plugin: Plugin, changes: PluginUpdateChanges): PluginUpdateStagingRefusal | null {
+    if (plugin.pendingVersion !== null) {
+      return 'staged_update_waiting';
+    }
+
+    if (dataGatewayNameRefusedOver(changes) !== null) {
+      return 'data_gateway_name_taken';
+    }
+
+    return null;
   }
 
   async approve(input: PluginUpdateApproveInput): Promise<PluginUpdateApproveResult> {
@@ -799,7 +965,7 @@ export class PluginUpdateService {
    */
   async describePending(slug: string): Promise<PluginUpdatePendingDescription> {
     const { plugin, active, next, corePermissions, comparison } = await this.resolvePendingUpdate(slug);
-    const declares = declaredSlugDiff(active, next);
+    const changes = await this.changesFrom(plugin, active, next, comparison);
     const owing = await this.unitsOwingReconsent(this.db, plugin.id, next, corePermissions, comparison);
     // A scope that owes nothing had its units neither read nor counted, and
     // every one of them covers the staged update.
@@ -809,14 +975,84 @@ export class PluginUpdateService {
 
     return {
       plugin,
-      comparison,
+      comparison: changes.comparison,
       pendingSince: plugin.pendingSince,
-      declares,
-      noLongerRequested: requestedSlugsDropped(active, next, declares.removed),
+      declares: changes.declares,
+      noLongerRequested: changes.noLongerRequested,
       unitCoverage: {
         household: { switchedOn: household, covered: household - owing.household.owing.length },
         user: { switchedOn: user, covered: user - owing.user.owing.length },
       },
+      dataGatewayNameConflict: changes.dataGatewayNameConflict,
+    };
+  }
+
+  /**
+   * The steps `stage()` and `assess()` both take from a validated new
+   * manifest to what the update would change, in one place so the two walk
+   * the same sequence (#1096): the categorical permission exclusions, the
+   * core permissions, the active stored manifest, the escalation comparison
+   * against it, and {@link changesFrom}. An active manifest that cannot be
+   * read throws `PluginUpdateManifestError` with source `'active'`, which
+   * staging lets refuse and the assessment reports.
+   */
+  private async workOutChanges(
+    plugin: Plugin,
+    next: PluginManifestValidationResult,
+  ): Promise<{
+    readonly active: PluginManifestValidationResult;
+    readonly corePermissions: ReadonlyMap<string, Permission>;
+    readonly comparison: UpdateEscalationComparison;
+    readonly changes: PluginUpdateChanges;
+  }> {
+    this.assertNoForbiddenPermissions(next);
+
+    const corePermissions = await this.loadCorePermissions(next);
+    const active = this.validateActiveManifest(plugin);
+    const { comparison } = await this.compare(plugin, active, next, corePermissions);
+    const changes = await this.changesFrom(plugin, active, next, comparison);
+
+    return { active, corePermissions, comparison, changes };
+  }
+
+  /**
+   * What an update would change, given its comparison against the active
+   * manifest: the one function `stage()`, `assess()` and the staged-update
+   * read all build their answer from (#1096), so what the server admin is
+   * shown and what staging does cannot disagree. The catalog and
+   * requested-permission changes come from the functions activation applies.
+   *
+   * The DataGateway name conflict (#1083) is asked only for a move into
+   * data-gateway, since only that move places a row; a plugin that kept its
+   * own row from an earlier time in the category has none. It is worked out
+   * now, never stored: the name can be freed or taken at any time.
+   */
+  private async changesFrom(
+    plugin: Plugin,
+    active: PluginManifestValidationResult,
+    next: PluginManifestValidationResult,
+    comparison: UpdateEscalationComparison,
+  ): Promise<PluginUpdateChanges> {
+    const declares = declaredSlugDiff(active, next);
+    const movesIntoDataGateway =
+      MANIFEST_CATEGORY_TO_PRISMA[next.manifest.category] === PluginCategory.DataGateway &&
+      plugin.category !== PluginCategory.DataGateway;
+    let dataGatewayNameConflict: string | null = null;
+
+    if (movesIntoDataGateway) {
+      const name = pluginDataGatewayName(next.manifest, this.options.defaultLocale);
+
+      if ((await findDataGatewayNameHolder(this.db, name, plugin.id)) !== null) {
+        dataGatewayNameConflict = name;
+      }
+    }
+
+    return {
+      comparison,
+      activatesAtOnce: !comparison.serverGating,
+      declares,
+      noLongerRequested: requestedSlugsDropped(active, next, declares.removed),
+      dataGatewayNameConflict,
     };
   }
 
@@ -1125,7 +1361,28 @@ export class PluginUpdateService {
     return plugin;
   }
 
+  /** `stage()`'s reading of the new manifest: {@link readNextManifest}, and the active version refused. */
   private async validateNextManifest(
+    directory: PluginArtifactDirectory,
+    plugin: Plugin,
+  ): Promise<PluginManifestValidationResult> {
+    const next = await this.readNextManifest(directory, plugin);
+
+    if (next.manifest.version === plugin.version) {
+      throw new PluginUpdateVersionConflictError(plugin.slug, plugin.version);
+    }
+
+    return next;
+  }
+
+  /**
+   * Reads and validates the new version's manifest from its plugin artifact
+   * directory, with `bgeCompat` ENFORCED, and refuses a slug that renames the
+   * plugin. One reader for `stage()` and `assess()`, so the assessment judges
+   * the manifest staging would (#1096); the active version is left to each,
+   * since staging refuses it and the assessment reports it.
+   */
+  private async readNextManifest(
     directory: PluginArtifactDirectory,
     plugin: Plugin,
   ): Promise<PluginManifestValidationResult> {
@@ -1149,10 +1406,6 @@ export class PluginUpdateService {
         'new',
         `manifest slug '${next.manifest.slug}' does not match the installed plugin — updates replace in place, never rename`,
       );
-    }
-
-    if (next.manifest.version === plugin.version) {
-      throw new PluginUpdateVersionConflictError(plugin.slug, plugin.version);
     }
 
     return next;

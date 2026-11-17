@@ -45,6 +45,7 @@ import {
   PluginUpdateAuthorityError,
   PluginUpdateCriticalConfirmationError,
   PluginUpdateDataGatewayNameConflictError,
+  PluginUpdateForbiddenPermissionError,
   PluginUpdateManifestError,
   PluginUpdateNoPendingError,
   PluginUpdatePendingConflictError,
@@ -197,6 +198,21 @@ describe('PluginUpdateService', () => {
 
   /** The link a plugin artifact was fetched from, for the provenance cases (#1096). */
   const LINK = 'https://registry.example/demo-sink-1.3.0.tgz';
+
+  /**
+   * Answers the DataGateway lookups as a server where another row holds the
+   * name and the plugin kept no row of its own (#1083, #1096). `ownRow` makes
+   * the plugin's kept row the one answering both lookups instead.
+   */
+  const dataGatewayNameHeld = ({ ownRow = false } = {}): void => {
+    db.dataGateway.findUnique.mockImplementation((({ where }: { where: { pluginId?: string; name?: string } }) => {
+      if (where.pluginId !== undefined) {
+        return Promise.resolve(ownRow ? { id: 'gw-own' } : null);
+      }
+
+      return Promise.resolve({ id: ownRow ? 'gw-own' : 'gw-other' });
+    }) as never);
+  };
 
   beforeAll(() => {
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
@@ -581,8 +597,14 @@ describe('PluginUpdateService', () => {
       });
 
       it("refuses with the update's own conflict when another DataGateway holds the name, from inside the transaction", async () => {
+        // The plugin kept no row. The name is free when staging's early check
+        // reads it (#1096) and taken by the time the transaction reads it, so
+        // the refusal that holds is the transaction's own.
         db.dataGateway.updateMany.mockResolvedValue({ count: 0 });
-        db.dataGateway.findUnique.mockResolvedValue({ id: 'gw-other' } as never);
+        db.dataGateway.findUnique
+          .mockResolvedValueOnce(null) // early check: the plugin's kept row
+          .mockResolvedValueOnce(null) // early check: the name's holder
+          .mockResolvedValue({ id: 'gw-other' } as never); // in the transaction: the name's holder
         await writeManifest(nextManifest({ category: 'data-gateway' }));
 
         const failure = await service.stage(input()).catch((err: unknown) => err);
@@ -593,6 +615,50 @@ describe('PluginUpdateService', () => {
         expect(db.$transaction).toHaveBeenCalledTimes(1);
         expect(db.dataGateway.create).not.toHaveBeenCalled();
         expect(emitter.emit).not.toHaveBeenCalledWith(PluginUpdateApprovedEvent.eventName, expect.anything());
+      });
+
+      // The assessment the server admin was shown says the name is taken, so
+      // staging refuses as install does, before it asks for an acknowledgement
+      // of anything static analysis finds. The transaction keeps its own
+      // refusal for a name taken after this read.
+      it('refuses an update that would be activated at once under a taken DataGateway name before it analyses the artifact (#1096)', async () => {
+        dataGatewayNameHeld();
+        await writeManifest(nextManifest({ category: 'data-gateway' }));
+
+        const failure = await service.stage(input()).catch((err: unknown) => err);
+
+        expect(failure).toBeInstanceOf(PluginUpdateDataGatewayNameConflictError);
+        expect(failure).toMatchObject({ slug: 'demo-sink', dataGatewayName: 'Demo Sink' });
+        expect(analyzer.analyze).not.toHaveBeenCalled();
+        expect(db.$transaction).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
+
+      // The name can be freed before the update approval, so a staged update
+      // is not refused over it; the response says it is taken.
+      it('stages an update that waits for approval under a taken DataGateway name, and reports the name (#1096)', async () => {
+        dataGatewayNameHeld();
+        await writeManifest(
+          nextManifest({ category: 'data-gateway', storage: { ...activeManifest.storage, writesCore: ['GameNight'] } }),
+        );
+
+        const result = await service.stage(input());
+
+        expect(result.activated).toBe(false);
+        expect(result.dataGatewayNameConflict).toBe('Demo Sink');
+        expect(db.dataGateway.create).not.toHaveBeenCalled();
+        expect(emitter.emit).toHaveBeenCalledWith(PluginUpdatePendingEvent.eventName, expect.anything());
+      });
+
+      it('reports no DataGateway name conflict for an update it activates (#1096)', async () => {
+        db.dataGateway.updateMany.mockResolvedValue({ count: 0 });
+        db.dataGateway.findUnique.mockResolvedValue(null);
+        await writeManifest(nextManifest({ category: 'data-gateway' }));
+
+        const result = await service.stage(input());
+
+        expect(result.activated).toBe(true);
+        expect(result.dataGatewayNameConflict).toBeNull();
       });
     });
 
@@ -2767,6 +2833,224 @@ describe('PluginUpdateService', () => {
   });
 
   /**
+   * What the server admin is shown before staging (#1096): the same changes
+   * `stage()` acts on, read without writing, emitting, or checking authority.
+   */
+  describe('assess() (#1096)', () => {
+    /** A version that server-gates, renames its declared permission and stops requesting `feedback:read`. */
+    const gatingManifest = (overrides: Parameters<typeof buildPluginManifest>[0] = {}): PluginManifest =>
+      nextManifest({
+        storage: { ...activeManifest.storage, writesCore: ['GameNight'] },
+        permissions: {
+          declares: ['manage:archive'],
+          checks: [
+            {
+              slug: 'manage:archive',
+              required: true,
+              reason: { en: 'Stores and manages the archive it owns.' },
+              consentScope: 'server',
+            },
+          ],
+        },
+        ...overrides,
+      });
+
+    it("answers null for a slug no living plugin has, an uninstalled plugin's included", async () => {
+      await writeManifest(nextManifest());
+      db.plugin.findUnique.mockResolvedValueOnce(null);
+
+      await expect(service.assess(directory())).resolves.toBeNull();
+
+      db.plugin.findUnique.mockResolvedValueOnce(makePlugin({ uninstalledAt: new Date('2026-08-01T00:00:00Z') }));
+
+      await expect(service.assess(directory())).resolves.toBeNull();
+    });
+
+    it('reports an update that would be activated at once', async () => {
+      await writeManifest(nextManifest());
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment).toMatchObject({ activeVersion: '1.2.0', refusal: null });
+      expect(assessment?.changes).toMatchObject({
+        activatesAtOnce: true,
+        comparison: { escalations: [], serverGating: false },
+        declares: { added: [], removed: [] },
+        noLongerRequested: [],
+        dataGatewayNameConflict: null,
+      });
+    });
+
+    it('reports a server-gating update as waiting for approval, with what it escalates, adds, removes and stops requesting', async () => {
+      await writeManifest(gatingManifest());
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment).toMatchObject({ activeVersion: '1.2.0', refusal: null });
+      expect(assessment?.changes?.activatesAtOnce).toBe(false);
+      expect(assessment?.changes?.comparison.serverGating).toBe(true);
+      expect(assessment?.changes?.comparison.escalations).toEqual(
+        expect.arrayContaining([{ kind: 'writes-core-added', model: 'GameNight' }]),
+      );
+      expect(assessment?.changes?.declares).toEqual({
+        added: ['plugin|demo-sink|manage:archive'],
+        removed: ['plugin|demo-sink|manage:digest'],
+      });
+      expect(assessment?.changes?.noLongerRequested).toEqual(['feedback:read']);
+    });
+
+    it('reports the active version as a refusal, with nothing to compare', async () => {
+      await writeManifest(buildPluginManifest());
+
+      await expect(service.assess(directory())).resolves.toEqual({
+        activeVersion: '1.2.0',
+        refusal: 'active_version',
+        changes: null,
+      });
+    });
+
+    it('reports a staged update already waiting, and still says what this one would change', async () => {
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'f'.repeat(64) }));
+      await writeManifest(gatingManifest({ version: '1.4.0' }));
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment).toMatchObject({ activeVersion: '1.2.0', refusal: 'staged_update_waiting' });
+      expect(assessment?.changes?.comparison.escalations).toEqual(
+        expect.arrayContaining([{ kind: 'writes-core-added', model: 'GameNight' }]),
+      );
+    });
+
+    it('still answers when the active plugin manifest cannot be read (#1096)', async () => {
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: { not: 'a manifest' } }));
+      await writeManifest(nextManifest());
+
+      await expect(service.assess(directory())).resolves.toEqual({
+        activeVersion: '1.2.0',
+        refusal: 'active_manifest_unreadable',
+        changes: null,
+      });
+    });
+
+    // Rejecting the staged update would not make this artifact stageable, so
+    // the unreadable active manifest is the cause the server admin has to
+    // deal with (#1096).
+    it('names the unreadable active manifest even while a staged update waits, since rejecting that update would not help', async () => {
+      db.plugin.findUnique.mockResolvedValue(
+        makePlugin({
+          manifestJson: { not: 'a manifest' },
+          pendingVersion: '1.3.0',
+          pendingSha256: 'f'.repeat(64),
+        }),
+      );
+      await writeManifest(nextManifest({ version: '1.4.0' }));
+
+      await expect(service.assess(directory())).resolves.toEqual({
+        activeVersion: '1.2.0',
+        refusal: 'active_manifest_unreadable',
+        changes: null,
+      });
+    });
+
+    // The assessment does not lean on its caller having screened the new
+    // manifest: the categorical exclusions staging applies, it applies (#1096).
+    it('refuses a new manifest that requests a forbidden permission, as staging does', async () => {
+      const manifest = nextManifest();
+      await writeManifest({
+        ...manifest,
+        permissions: { ...manifest.permissions, declares: [...manifest.permissions.declares, 'read:all'] },
+      });
+
+      await expect(service.assess(directory())).rejects.toBeInstanceOf(PluginUpdateForbiddenPermissionError);
+    });
+
+    it('reports the DataGateway name a move into data-gateway would take when another row holds it', async () => {
+      dataGatewayNameHeld();
+      await writeManifest(nextManifest({ category: 'data-gateway' }));
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment?.changes?.dataGatewayNameConflict).toBe('Demo Sink');
+    });
+
+    // Staging refuses this case, so the assessment says so itself; a client
+    // does not have to work the refusal out from the changes (#1096).
+    it('names a taken DataGateway name as the refusal when the update would be activated at once', async () => {
+      dataGatewayNameHeld();
+      await writeManifest(nextManifest({ category: 'data-gateway' }));
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment).toMatchObject({ activeVersion: '1.2.0', refusal: 'data_gateway_name_taken' });
+      expect(assessment?.changes).toMatchObject({ activatesAtOnce: true, dataGatewayNameConflict: 'Demo Sink' });
+    });
+
+    // Staging stages it, since the name can be freed before the update
+    // approval; the name is reported, not refused (#1096).
+    it('reports a taken DataGateway name without refusing an update that waits for approval', async () => {
+      dataGatewayNameHeld();
+      await writeManifest(gatingManifest({ category: 'data-gateway' }));
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment).toMatchObject({ activeVersion: '1.2.0', refusal: null });
+      expect(assessment?.changes).toMatchObject({ activatesAtOnce: false, dataGatewayNameConflict: 'Demo Sink' });
+    });
+
+    // Staging refuses over the staged update before it looks at the name, so
+    // the assessment names the same cause; the name still shows (#1096).
+    it('a staged update already waiting is the refusal even under a taken DataGateway name', async () => {
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'f'.repeat(64) }));
+      dataGatewayNameHeld();
+      await writeManifest(nextManifest({ version: '1.4.0', category: 'data-gateway' }));
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment).toMatchObject({ activeVersion: '1.2.0', refusal: 'staged_update_waiting' });
+      expect(assessment?.changes).toMatchObject({ activatesAtOnce: true, dataGatewayNameConflict: 'Demo Sink' });
+    });
+
+    it('reports none when the plugin kept its own row', async () => {
+      dataGatewayNameHeld({ ownRow: true });
+      await writeManifest(nextManifest({ category: 'data-gateway' }));
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment?.changes?.dataGatewayNameConflict).toBeNull();
+    });
+
+    it('reports none for an update that stays in data-gateway', async () => {
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ category: PluginCategory.DataGateway }));
+      dataGatewayNameHeld();
+      await writeManifest(nextManifest({ category: 'data-gateway' }));
+
+      const assessment = await service.assess(directory());
+
+      expect(assessment?.changes?.dataGatewayNameConflict).toBeNull();
+      expect(db.dataGateway.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('writes nothing and emits nothing', async () => {
+      dataGatewayNameHeld();
+      await writeManifest(gatingManifest({ category: 'data-gateway' }));
+
+      await service.assess(directory());
+
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(db.plugin.update).not.toHaveBeenCalled();
+      expect(db.plugin.updateMany).not.toHaveBeenCalled();
+      expect(db.dataGateway.create).not.toHaveBeenCalled();
+      expect(db.dataGateway.updateMany).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+      // No consent act, so no authority; and no static analysis or directory
+      // confirmation, which the artifact step and staging own.
+      expect(authority.isServerAdmin).not.toHaveBeenCalled();
+      expect(analyzer.analyze).not.toHaveBeenCalled();
+      expect(directories.confirm).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
    * The pending-read seam (#321): the approval screen's data source.
    * Same load/validate/compare pipeline as `approve()` — RECOMPUTED against
    * today's decisions, so the screen and the approval cannot disagree — but
@@ -3049,6 +3333,18 @@ describe('PluginUpdateService', () => {
           description.unitCoverage.user.switchedOn - description.unitCoverage.user.covered,
         );
       });
+    });
+
+    // Not recorded at staging: the name can be freed, or taken, between the
+    // staging and the update approval, so the read asks the same question
+    // the assessment asks, now.
+    it('the staged-update read reports the DataGateway name conflict, worked out when read (#1096)', async () => {
+      db.plugin.findUnique.mockResolvedValue(stagedPlugin(nextManifest({ category: 'data-gateway' })));
+      dataGatewayNameHeld();
+
+      const description = await service.describePending('demo-sink');
+
+      expect(description.dataGatewayNameConflict).toBe('Demo Sink');
     });
 
     it('enforces bgeCompat on the stored pending manifest, mirroring approve() — the 422 names the pending source', async () => {
