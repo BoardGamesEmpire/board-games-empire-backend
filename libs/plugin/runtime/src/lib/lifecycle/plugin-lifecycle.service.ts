@@ -69,8 +69,10 @@ export interface PluginUninstallResult {
  *
  * Uninstall (tombstone, not delete): purges every `PluginGrant` (durable
  * denials included — reinstall is fresh consent) and the `PluginPermission`
- * catalog, retains the row and, by default, unit config rows; clears any
- * staged update (once cleared, no row names the staged artifact's directory,
+ * catalog, retains the row and, by default, unit config rows; switches every
+ * household and user unit enablement off, so a reinstall finds each unit off
+ * and switching one on again is a consent act (#1328); clears any staged
+ * update (once cleared, no row names the staged artifact's directory,
  * so the plugin artifact sweep, #1094, removes it); force-disables in
  * the same write — the
  * loader's boot query treats that as an invariant — and sets

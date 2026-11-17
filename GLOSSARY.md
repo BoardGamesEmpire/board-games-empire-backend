@@ -1189,7 +1189,7 @@ A grant given when the permission carried a lower risk level than it does now. I
 _Avoid_: stale risk, risk-stale grant
 
 **Revocation**:
-A consent decision undone without anyone choosing to undo it. An update removed the permission, stopped requesting it, or moved it to another consent scope, or the staged update a pre-consent was given to was rejected. A decision is never revoked because whoever gave it left or lost their role. The permission goes back to awaiting an answer, and the reason is kept.
+A consent decision undone without anyone choosing to undo it: the staged update a pre-consent was given to was rejected. An update never revokes a decision: one the active manifest does not request is kept and confers nothing, and confers again if a later manifest requests it. A decision is never revoked because whoever gave it left or lost their role. The permission goes back to awaiting an answer, and the reason is kept.
 _Avoid_: invalidation; durable denial (a refusal someone chose)
 
 **Categorical exclusion**:
@@ -1235,7 +1235,7 @@ A change the server has recorded but will act on only after its next restart, su
 _Avoid_: pending restart, hot reload
 
 **Uninstalled plugin**:
-What remains when a plugin is uninstalled: every consent is discarded so a reinstall starts afresh, while unit settings are kept, unless purged, so a reinstall restores them.
+What remains when a plugin is uninstalled: every consent is discarded and every unit is switched off, so a reinstall starts afresh and each unit is switched on again by whoever decides for it, while unit settings are kept, unless purged, so a reinstall restores them.
 _Avoid_: tombstone, deleted, removed
 
 **Lifecycle event**:

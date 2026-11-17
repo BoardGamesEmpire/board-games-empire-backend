@@ -64,23 +64,23 @@ type LivingPluginRef = Pick<Plugin, 'id' | 'slug' | 'scope'>;
  * refuses a unit that has none. One hardening rides these writes (from the
  * #322/PR #359 review rounds, recorded on #59):
  *
- * - **The household row, then the plugin row**: every transaction here opens the same way
- *   (`openHouseholdUnit` / `openUserUnit`). A household transaction takes
- *   the household row's share lock first (#548), so a soft-deleted
- *   household refuses the write; then the plugin row under `FOR SHARE`;
- *   then the write to the unit enablement itself, which locks only that
- *   row. That is the order a consent act takes them in too, with its
- *   consent decisions between the plugin row and the unit enablement, so
- *   no two of these writers can each hold a row the other waits on. Nothing
- *   orders two writers of one unit enablement against each other (#1152):
- *   the later write wins.
+ * - **The household row, then the plugin row**: every transaction here
+ *   opens the same way (`openHouseholdUnit` / `openUserUnit`). A household
+ *   transaction takes the household row's share lock first (#548), so a
+ *   soft-deleted household refuses the write; then the plugin row under
+ *   `FOR SHARE`; then the write to the unit enablement itself, which locks
+ *   only that row. That is the order a consent act takes them in too, with
+ *   its consent decisions between the plugin row and the unit enablement,
+ *   so no two of these writers can each hold a row the other waits on.
+ *   Nothing orders two writers of one unit enablement against each other
+ *   (#1152): the later write wins.
  *
  *   The `FOR SHARE` exists because uninstall's purge deletes unit
- *   enablements after claiming the plugin row exclusively: reading the plugin row
- *   shared blocks a concurrent tombstone until this transaction commits
- *   (so the purge sweeps the row it wrote), and a tombstone that committed
- *   first is seen and refused — without it, a write here could commit
- *   against a plugin whose purge had already promised its unit
+ *   enablements after claiming the plugin row exclusively: reading the
+ *   plugin row shared blocks a concurrent tombstone until this transaction
+ *   commits (so the purge sweeps the row it wrote), and a tombstone that
+ *   committed first is seen and refused — without it, a write here could
+ *   commit against a plugin whose purge had already promised its unit
  *   enablements gone.
  *   It blocks a concurrent ACTIVATION the same way, which is why the
  *   re-read also returns `scope` and `version`: activation rewrites

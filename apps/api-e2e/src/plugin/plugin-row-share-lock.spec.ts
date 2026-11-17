@@ -11,12 +11,13 @@ import {
 } from './lock-fixtures';
 
 /**
- * `assertStillLiving`'s share lock on the `plugins` row (#323), the head of the
- * plugin runtime's lock order and the one mechanism #383 exists to prove.
+ * `assertStillLiving`'s share lock on the `plugins` row (#323): the plugin-row
+ * claim every unit transaction takes, and the one mechanism #383 exists to
+ * prove.
  *
  * Every unit transaction opens by re-reading the plugin row `FOR SHARE`, and the
- * comment at `plugin-unit-lifecycle.service.ts:492` states exactly why that mode
- * and not `FOR UPDATE`: concurrent unit writes for the same plugin must proceed
+ * comment on `assertStillLiving` in `plugin-unit-lifecycle.service.ts` states
+ * exactly why that mode and not `FOR UPDATE`: concurrent unit writes for the same plugin must proceed
  * in parallel while an uninstall is blocked. That is a claim about two cells of
  * the Postgres lock-conflict matrix, and until now it was asserted nowhere —
  * the unit suite mocks `$queryRaw` and pins the statement's text.

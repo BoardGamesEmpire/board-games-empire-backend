@@ -1142,13 +1142,12 @@ export class PluginUpdateService {
         throw await this.refusalForLostStagedWrite(tx, plugin, { answeredStagingId: input.stagingId });
       }
 
-      // Read back INSIDE the claim, like the staging and activation writes.
-      // The clear leaves `pendingVersion` null, which is exactly the slot
-      // stage() claims on, so an outside read-back can observe a NEWLY
-      // staged version — handing this response, and the rejected event's
-      // `after` snapshot, a staged update nobody rejected. The atomic
-      // single-statement update this replaced could not express that state;
-      // the guarded updateMany can.
+      // Read back INSIDE the claim, like the staging and activation writes:
+      // the guarded updateMany returns a count, not the row. The clear leaves
+      // `pendingVersion` null, which is exactly the slot stage() claims on,
+      // so an outside read-back can observe a NEWLY staged version — handing
+      // this response, and the rejected event's `after` snapshot, a staged
+      // update nobody rejected.
       const rejected = await tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
 
       // The pre-consents households and users gave to this staged update go

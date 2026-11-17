@@ -33,8 +33,9 @@ describe('role transitions racing a soft-delete (#386)', () => {
 
   /**
    * Generous on purpose: the request clears a session lookup and the route
-   * guards before it reaches the lock, and a cold start is seconds-scale. A request that answers is reported at
-   * once by `settledEarly`, so the long budget only costs time on a stuck run.
+   * guards before it reaches the lock, and a cold start is seconds-scale. A
+   * request that answers is reported at once by `settledEarly`, so the long
+   * budget only costs time on a stuck run.
    */
   const REQUEST_REACHES_LOCK_MS = 20_000;
 

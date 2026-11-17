@@ -51,8 +51,9 @@ export class TransactionDeadlockError extends CodedHttpException {
  *
  * Coverage, stated precisely rather than generously. Every controller and every
  * service reached through one is covered. No call site retries a deadlock
- * itself (#1152), so this is how a deadlock victim in an HTTP handler answers: a typed
- * refusal the client can retry, which is not the same as a retry.
+ * itself (#1152), so this is how a deadlock victim in an HTTP handler
+ * answers: a typed refusal the client can retry, which is not the same as a
+ * retry.
  *
  * What it does NOT cover: middleware and guards, which Nest runs BEFORE the
  * interceptor chain. `HttpActorMiddleware`, `AbilityContextMiddleware`, and
