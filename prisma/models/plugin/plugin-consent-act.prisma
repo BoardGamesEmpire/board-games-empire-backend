@@ -58,5 +58,9 @@ model PluginConsentAct {
 
   /// A unit's act history for one plugin, newest last.
   @@index([pluginId, scopeType, scopeId, decidedAt])
+  /// The acts that answered one staging, which its rejection reads while it
+  /// holds the plugin row (#1152). The index above leads with the unit, so
+  /// without this one that read walks every act the plugin ever recorded.
+  @@index([pluginId, stagingId])
   @@map("plugin_consent_acts")
 }

@@ -94,12 +94,17 @@ type LivingPluginRef = Pick<Plugin, 'id' | 'slug' | 'scope'>;
  *   an A→B→A activation pair replaces the content and returns the version
  *   to where the caller found it.
  *
- * Switch-off is idempotent: a request matching current state returns it
- * unchanged — no write, no event. Config writes are last-writer-wins
- * between callers — no precondition on the DOCUMENT, matching the server
- * config PATCH — but they do carry the manifest precondition above, because
- * the document was judged against one specific schema. Events are emitted
- * post-commit, one per real transition.
+ * Switch-off is idempotent: a request that finds the unit already off
+ * returns it unchanged — no write, no event. Config writes are
+ * last-writer-wins between callers — no precondition on the DOCUMENT,
+ * matching the server config PATCH — but they do carry the manifest
+ * precondition above, because the document was judged against one specific
+ * schema. Events are emitted post-commit, one per transition the write
+ * found. Two switch-offs sent at once can both find the unit on, so both
+ * write and both announce it, and a config event's `before` can be a
+ * document another write has since replaced: the unit ends as a sequence of
+ * the same requests would leave it, and the events are the ones #1153
+ * replaces (#1152).
  */
 @Injectable()
 export class PluginUnitLifecycleService {
@@ -208,7 +213,7 @@ export class PluginUnitLifecycleService {
 
   /**
    * Switch off the user's own unit. 404 without a unit enablement — the
-   * user's switch-on, a consent act, is its only creator (#1150). Already
+   * user's switch-on, a consent act, is its only creator (#1150). Found
    * off: no write, no event.
    */
   async disableUser(input: UserUnitActionInput): Promise<UserPlugin> {

@@ -2782,6 +2782,8 @@ describe('PluginUpdateService', () => {
 
       await service.reject({ slug: 'demo-sink', rejectorId: 'admin-1', stagingId: 'staging-a' });
 
+      // No staged review names the staging, so no decision is read either (#1152).
+      expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
       expect(db.pluginGrant.deleteMany).not.toHaveBeenCalled();
       expect(revokedEvents()).toEqual([]);
     });

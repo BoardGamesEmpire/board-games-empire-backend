@@ -1186,6 +1186,13 @@ export class PluginUpdateService {
         },
         select: { id: true },
       });
+
+      // Most stagings are rejected with no staged review on record, and
+      // then no decision can name one of their acts.
+      if (stagingActs.length === 0) {
+        return { rejected, preConsents: [] };
+      }
+
       const preConsents = await tx.pluginGrant.findMany({
         where: { pluginId: plugin.id, actId: { in: stagingActs.map((act) => act.id) } },
       });
