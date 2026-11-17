@@ -1173,7 +1173,7 @@ An answer to a plugin's request for a permission, given for the server, a househ
 _Avoid_: grant, plugin grant (for the record itself)
 
 **Consent act**:
-One recorded answer a household or user gives about a plugin: switching it on, changing one optional permission, or reviewing what an update or a risk change left outstanding. The record keeps which version of the plugin was shown and what it showed, and is never changed afterwards.
+One recorded answer a server admin, household or user gives about a plugin: installing it or approving an update, switching it on, changing one optional permission, or reviewing what an update or a risk change left outstanding. The record keeps which version of the plugin was shown and what it showed, and is never changed afterwards.
 _Avoid_: consent event, decision batch
 
 **Pending decision**:
