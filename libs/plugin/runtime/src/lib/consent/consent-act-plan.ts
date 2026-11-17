@@ -1,3 +1,4 @@
+import type { PluginUnit } from '@bge/actor-context';
 import { PluginGrantStatus, type RiskLevel } from '@bge/database';
 import { resolveLocalizedStringDetailed, type NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import type { ConsentCheckClassification, ConsentManifestSource } from './consent-classification.types';
@@ -17,14 +18,13 @@ import type {
   ConsentActKind,
   ConsentActPlan,
   ConsentActPresentationCheck,
-  ConsentActUnit,
 } from './plugin-consent-act.types';
 import { presentedRiskLevel } from './presented-risk-level';
 
 export interface PlanConsentActInput {
   readonly kind: ConsentActKind;
   readonly pluginSlug: string;
-  readonly unit: ConsentActUnit;
+  readonly unit: PluginUnit;
   readonly source: ConsentManifestSource;
   /** permissionChecks of the manifest the sha names. */
   readonly checks: readonly NormalizedPermissionRequest[];
@@ -155,6 +155,15 @@ export function planConsentAct(input: PlanConsentActInput): ConsentActPlan {
       break;
     }
     case 'Review': {
+      // The server admin's approval is the Server unit's consent, so its review
+      // only accepts; refusing is a toggle of an optional permission (#1336).
+      if (unit.scopeType === 'Server') {
+        const refusals = slugsWhere(isDenied);
+        if (refusals.length > 0) {
+          refuse('server-refusal', refusals);
+        }
+      }
+
       if (source === 'staged') {
         const refusals = slugsWhere(isDenied);
         if (refusals.length > 0) {

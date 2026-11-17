@@ -64,6 +64,8 @@ export type ConsentActAnswerRule =
   | 'staged-kind'
   | 'staged-refusal'
   | 'staged-not-new'
+  /** A server review may only accept. */
+  | 'server-refusal'
   /** A toggle without exactly one answer, or a review with none. */
   | 'answer-count';
 
