@@ -393,6 +393,7 @@ export class PluginsController {
           slug,
           approverId: this.abilityService.getActingUserId(),
           stagingId: dto.stagingId,
+          shownRisks: dto.shownRisks,
           confirmCriticalSlugs: dto.confirmCriticalSlugs,
           // The locale the staged-update read was requested in, which the
           // approval's consent act records its presentation in (#1336, #1301).

@@ -35,12 +35,14 @@ import { createId } from '@paralleldrive/cuid2';
 import { readFile } from 'node:fs/promises';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { retainedServerConfig } from '../config/retained-server-config';
+import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
+import type { ShownRisk } from '../consent/plugin-consent-act.types';
 import {
   consentCatalogFlags,
   decideConsentCheck,
   type ConsentCheckDecisionInput,
 } from '../consent/plugin-consent-check-classifier.service';
-import { planServerAcceptance, planServerApproval } from '../consent/server-acceptance';
+import { planServerAcceptance, planServerApproval, staleShownRisks } from '../consent/server-acceptance';
 import { grantSnapshot, householdSwitchSnapshot, userSwitchSnapshot } from '../events/plugin-event-snapshots';
 import {
   HouseholdPluginReconsentRequestedEvent,
@@ -209,6 +211,14 @@ export interface PluginUpdateApproveInput {
    * staging its approver didn't review.
    */
   readonly stagingId: string;
+  /**
+   * The risk the staged-update read showed for each server-scope permission
+   * the staged manifest requests (#1336). A missing one, or one that is not
+   * today's, refuses the approval as stale: it grants at today's risk. The
+   * HTTP route always sends it; a caller that showed nothing omits it and is
+   * not checked.
+   */
+  readonly shownRisks?: readonly ShownRisk[];
   /**
    * Exact re-entry of every Critical permission slug this approval newly
    * confers: one with no consent decision, a denied one, or one granted at a
@@ -639,6 +649,21 @@ export class PluginUpdateService {
 
     const { plugin, active, next, corePermissions, comparison, decisions, pendingSha256 } =
       await this.resolvePendingUpdate(input.slug, { stagingId: input.stagingId });
+
+    // Before the Critical confirmation, whose set a stale read may also have
+    // named wrong. The catalog risks here are the ones the transaction stamps,
+    // so this one check covers the write (#1336).
+    const staleRisks =
+      input.shownRisks === undefined
+        ? []
+        : staleShownRisks(
+            next.permissionChecks.filter((check) => check.consentScope === 'server'),
+            this.riskOf(next, corePermissions),
+            input.shownRisks,
+          );
+    if (staleRisks.length > 0) {
+      throw new PluginConsentActStaleError(plugin.slug, 'risk', staleRisks);
+    }
 
     // The Critical confirmation tracks the authority this approval CONFERS
     // (#59): a requested permission with no decision, a denied one the new

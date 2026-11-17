@@ -90,7 +90,7 @@ abstract class ConsentActBodyDto {
 
   @ApiPropertyOptional({
     description:
-      'The locale the consent surface was requested in, one of the locales this server supports. Not the locale ' +
+      "The consent surface's `presentation.locale`: the locale it was rendered in, one this server supports. Not the locale " +
       "a reason reports, which names the plugin's own text the reason came from. The consent act records its " +
       'presentation in this locale, so it holds the text that was read. Without it, the request locale is used. ' +
       "The match is exact, since the supported tags are the server's own spelling; a locale this server does not " +

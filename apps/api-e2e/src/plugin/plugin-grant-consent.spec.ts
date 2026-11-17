@@ -13,6 +13,7 @@ import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import {
   readConsentSurface,
+  readStagedShownRisks,
   reviewBody,
   sendReview,
   sendSwitchOn,
@@ -295,7 +296,7 @@ describe('plugin consent acts + consent surface (#322, #1150, #1336)', () => {
       const approval = await request(baseUrl)
         .post(`${PLUGINS_PATH}/${plugin.slug}/update/approve`)
         .set(admin.headers)
-        .send({ stagingId: INVENTORY_STAGING_ID })
+        .send({ stagingId: INVENTORY_STAGING_ID, shownRisks: await readStagedShownRisks(baseUrl, admin, plugin.slug) })
         .expect(200);
 
       expect(approval.body.comparison.deniedRequiredSlugs).toEqual(['read:safe_http_policy']);

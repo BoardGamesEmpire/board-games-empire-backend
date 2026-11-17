@@ -236,6 +236,7 @@ export class PluginArtifactsController {
         .install({
           sha256: dto.sha256,
           actorId: this.abilityService.getActingUserId(),
+          shownRisks: dto.shownRisks,
           confirmCriticalSlugs: dto.confirmCriticalSlugs,
           acknowledgeForbiddenImports: dto.acknowledgeForbiddenImports,
           deepScan: dto.deepScan,
@@ -284,6 +285,7 @@ export class PluginArtifactsController {
         })),
       },
       checks: [...presentArtifactChecks(assessment, locale, defaultLocale)] as PluginArtifactResponseDto['checks'],
+      locale: locale ?? defaultLocale,
       criticalSlugsToReenter: [...assessment.criticalSlugsToReenter],
       forbiddenImportsToAccept: [...assessment.forbiddenImportsToAccept],
       dataGatewayNameConflict: assessment.dataGatewayNameConflict,

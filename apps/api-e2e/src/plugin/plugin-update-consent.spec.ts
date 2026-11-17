@@ -1,4 +1,5 @@
 import {
+  PluginConsentActKind,
   PluginGrantScope,
   PluginGrantStatus,
   PluginLifecycleEventType,
@@ -10,10 +11,18 @@ import { createActors, pollUntil, type Actors, type SessionActor } from '@bge/te
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
+import { restoreShippedCatalog } from '../permission-catalog/shipped-catalog';
+import { deferredRequest } from '../support/deferred-request';
 import { requireBaseUrl } from '../support/e2e-env';
 import { errorText } from '../support/error-text';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { readConsentSurface, reviewBody, sendReview } from './consent-act-fixtures';
+import {
+  readConsentSurface,
+  readStagedShownRisks,
+  reviewBody,
+  sendReview,
+  shownServerRisks,
+} from './consent-act-fixtures';
 import { pluginAbilitySlugsForHousehold } from './plugin-ability-fixtures';
 import { FIXTURE_ACT_ID, INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
@@ -168,12 +177,20 @@ describe('plugin update consent (approve/reject/pending)', () => {
     return { plugin, pending };
   };
 
-  /** Approve and reject answer one staging, named the way the staged-update read reports it (#357). */
+  /**
+   * Approve and reject answer one staging, named the way the staged-update
+   * read reports it (#357). An approval also sends the risks that read shows,
+   * as a client would; a spec's body overrides them (#1336).
+   */
   const approve = (actor: SessionActor, slug: string, body: Record<string, unknown> = {}) =>
-    request(baseUrl)
-      .post(`${PLUGINS_PATH}/${slug}/update/approve`)
-      .set(actor.headers)
-      .send({ stagingId: STAGING_ID, ...body });
+    deferredRequest(
+      () => readStagedShownRisks(baseUrl, actor, slug),
+      (shownRisks) =>
+        request(baseUrl)
+          .post(`${PLUGINS_PATH}/${slug}/update/approve`)
+          .set(actor.headers)
+          .send({ stagingId: STAGING_ID, shownRisks, ...body }),
+    );
 
   const reject = (actor: SessionActor, slug: string, stagingId: string = STAGING_ID) =>
     request(baseUrl).post(`${PLUGINS_PATH}/${slug}/update/reject`).set(actor.headers).send({ stagingId });
@@ -645,6 +662,50 @@ describe('plugin update consent (approve/reject/pending)', () => {
       expect(grants).toEqual([
         expect.objectContaining({ status: PluginGrantStatus.Granted, decidedRiskLevel: RiskLevel.Critical }),
       ]);
+    });
+
+    it('refuses with 409 an approval whose read showed a risk the Owner has since changed, and activates nothing (#1336)', async () => {
+      // Approving stamps today's risk on what it grants, and records it as
+      // shown; a risk that changed after the read must not ride along.
+      const admin = await actors.admin();
+      const catalogOwner = await actors.owner();
+      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK]);
+
+      const pending = await readPending(admin, plugin.slug).expect(200);
+      // The one locale the read was rendered in, which the approval may send back (#1301).
+      expect(pending.body.presentation.locale).toBe('en');
+      const shownRisks = shownServerRisks(pending.body.presentation.checks);
+      const shown = shownRisks.find((risk) => risk.permissionSlug === NEW_SERVER_CHECK.slug);
+      const changed = shown?.riskLevel === RiskLevel.Critical ? RiskLevel.High : RiskLevel.Critical;
+
+      try {
+        await request(baseUrl)
+          .patch(`/api/permission-catalog/permissions/${NEW_SERVER_CHECK.slug}`)
+          .set(catalogOwner.headers)
+          .send({ riskLevel: changed })
+          .expect(200);
+
+        const refused = await approve(admin, plugin.slug, { shownRisks }).expect(409);
+
+        expect(refused.body).toMatchObject({
+          code: 'PLUGIN_CONSENT_ACT_STALE',
+          slug: plugin.slug,
+          kind: 'risk',
+          staleRisks: [
+            { permissionSlug: NEW_SERVER_CHECK.slug, shownRiskLevel: shown?.riskLevel, currentRiskLevel: changed },
+          ],
+        });
+        const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+        expect(row.version).toBe('1.2.0');
+        expect(row.pendingVersion).toBe('1.3.0');
+        await expect(
+          db.client.pluginConsentAct.count({
+            where: { pluginId: plugin.id, kind: PluginConsentActKind.UpdateApprove },
+          }),
+        ).resolves.toBe(0);
+      } finally {
+        await restoreShippedCatalog(db.client);
+      }
     });
 
     it('grants a denied permission the update marks required, under the UpdateApprove act (#1336)', async () => {

@@ -218,6 +218,14 @@ export class PluginArtifactResponseDto {
   checks!: PluginArtifactCheckDto[];
 
   @ApiProperty({
+    description:
+      'The one locale this server rendered the read in, a tag it supports. Send it back as `locale` when ' +
+      "installing, so the install's consent act records the text that was read. Not a list: a reason reports its " +
+      "own `locale`, the key of the plugin's text it came from, which falls back when the plugin has none in this one.",
+  })
+  locale!: string;
+
+  @ApiProperty({
     type: [String],
     description: 'Critical permission slugs to re-enter as `confirmCriticalSlugs` when installing',
   })

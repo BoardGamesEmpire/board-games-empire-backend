@@ -103,6 +103,15 @@ export interface PluginConsentPresentation {
   readonly manifestSha256: string;
   /** On the active surface: the staged update a unit may pre-consent to, or null. Always null on a staged surface (#1150). */
   readonly stagedUpdate: { readonly manifestVersion: string; readonly manifestSha256: string } | null;
+  /**
+   * The one server locale the surface was rendered in: the request's
+   * resolved locale, a tag this server supports. A consent write sends it
+   * back as its `locale`, so the act records the text that was read (#1301).
+   * Each reason's own `locale` differs: it names the key of the plugin's text
+   * the reason came from, which falls back when the plugin has none in this
+   * locale.
+   */
+  readonly locale: string;
   readonly unit: PluginUnit;
   readonly displayName: ResolvedLocalizedString;
   readonly description: ResolvedLocalizedString;

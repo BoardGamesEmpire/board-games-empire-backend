@@ -14,10 +14,12 @@ import { inspect } from 'node:util';
 import request from 'supertest';
 import { createMemberClient } from '../household/household-request';
 import { restoreShippedCatalog } from '../permission-catalog/shipped-catalog';
+import { deferredRequest } from '../support/deferred-request';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import {
   readConsentSurface,
+  readStagedShownRisks,
   reviewBody,
   sendReview,
   sendSwitchOn,
@@ -160,10 +162,14 @@ describe('consent acts (#1150)', () => {
     ).body.featureState;
 
   const approve = (actor: SessionActor, slug: string) =>
-    request(baseUrl)
-      .post(`/api/plugins/${slug}/update/approve`)
-      .set(actor.headers)
-      .send({ stagingId: INVENTORY_STAGING_ID });
+    deferredRequest(
+      () => readStagedShownRisks(baseUrl, actor, slug),
+      (shownRisks) =>
+        request(baseUrl)
+          .post(`/api/plugins/${slug}/update/approve`)
+          .set(actor.headers)
+          .send({ stagingId: INVENTORY_STAGING_ID, shownRisks }),
+    );
 
   const reject = (actor: SessionActor, slug: string) =>
     request(baseUrl)
@@ -1312,11 +1318,15 @@ describe('consent acts (#1150)', () => {
       const admin = await actors.admin();
       const plugin = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK], [MANAGE_DIGEST_CHECK]);
       const approveNaming = (locale: string) =>
-        request(baseUrl)
-          .post(`/api/plugins/${plugin.slug}/update/approve`)
-          .set(admin.headers)
-          .set('Accept-Language', 'de')
-          .send({ stagingId: INVENTORY_STAGING_ID, locale });
+        deferredRequest(
+          () => readStagedShownRisks(baseUrl, admin, plugin.slug),
+          (shownRisks) =>
+            request(baseUrl)
+              .post(`/api/plugins/${plugin.slug}/update/approve`)
+              .set(admin.headers)
+              .set('Accept-Language', 'de')
+              .send({ stagingId: INVENTORY_STAGING_ID, shownRisks, locale }),
+        );
 
       const refused = await approveNaming('xx').expect(422);
 

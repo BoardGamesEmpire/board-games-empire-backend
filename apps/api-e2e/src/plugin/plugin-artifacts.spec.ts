@@ -1,3 +1,4 @@
+import { RiskLevel } from '@bge/database';
 import { buildPluginTarball, type PluginTarballEntry } from '@bge/plugin-artifacts';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
@@ -5,8 +6,11 @@ import { createHash, randomBytes } from 'node:crypto';
 import { access, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import request from 'supertest';
+import { restoreShippedCatalog } from '../permission-catalog/shipped-catalog';
+import { deferredRequest } from '../support/deferred-request';
 import { E2E_PLUGINS_ROOT_VAR, requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { readArtifactShownRisks, shownServerRisks } from './consent-act-fixtures';
 
 /**
  * The install ingress end to end (#1094): a plugin artifact posted by upload,
@@ -56,18 +60,22 @@ describe('plugin install ingress (#1094)', () => {
    * other plugin specs give: no seeded `Permission` row backs it.
    * `bgeCompat` is widened to cover the server's build-time stamp. `indexJs`
    * changes the bytes, so a second artifact for the same slug has its own
-   * checksum.
+   * checksum. `extraChecks` adds requested permissions after the fixture's.
    */
   const buildArtifact = async (
     indexJs = 'module.exports = () => ({});\n',
     slug = `ingress-${randomBytes(6).toString('hex')}`,
+    extraChecks: PluginManifest['permissions']['checks'] = [],
   ): Promise<BuiltArtifact> => {
     const [manageDigest] = buildPluginManifest().permissions.checks;
     const manifest: PluginManifest = {
       ...buildPluginManifest({
         slug,
         bgeCompat: '>=0.0.0',
-        permissions: { declares: ['manage:digest'], checks: manageDigest === undefined ? [] : [manageDigest] },
+        permissions: {
+          declares: ['manage:digest'],
+          checks: [...(manageDigest === undefined ? [] : [manageDigest]), ...extraChecks],
+        },
         events: { subscribes: ['feedback.created'], emits: [`plugin.${slug}.digest-sent`] },
         storage: {
           ownTables: [`plugin_${slug.replaceAll('-', '_')}_digests`],
@@ -100,8 +108,16 @@ describe('plugin install ingress (#1094)', () => {
   const readBack = (actor: SessionActor, sha256: string) =>
     request(baseUrl).get(`${ARTIFACTS_PATH}/${sha256}`).set(actor.headers);
 
-  const install = (actor: SessionActor, body: Record<string, unknown>) =>
-    request(baseUrl).post(INSTALL_PATH).set(actor.headers).send(body);
+  /** Sends the risks the artifact read shows, as a client would; a spec's body overrides them (#1336). */
+  const install = (actor: SessionActor, body: { readonly sha256: string } & Record<string, unknown>) =>
+    deferredRequest(
+      () => readArtifactShownRisks(baseUrl, actor, body.sha256),
+      (shownRisks) =>
+        request(baseUrl)
+          .post(INSTALL_PATH)
+          .set(actor.headers)
+          .send({ shownRisks, ...body }),
+    );
 
   const exists = (path: string): Promise<boolean> =>
     access(path).then(
@@ -185,6 +201,54 @@ describe('plugin install ingress (#1094)', () => {
     await install(admin, { sha256: artifact.sha256 }).expect(201);
 
     expect(await db.client.pluginConsentAct.count({ where: { pluginId: plugin.id } })).toBe(1);
+  });
+
+  // Installing stamps today's risk on every server-scope permission it grants
+  // and records it as shown, so a risk that changed after the read refuses it.
+  it('refuses with 409 an install whose read showed a risk the Owner has since changed, and installs nothing (#1336)', async () => {
+    const admin = await actors.admin();
+    const catalogOwner = await actors.owner();
+    // A core permission, so the Owner can change its risk; the declared
+    // manage:digest is locked Low.
+    const POLICY_READ = 'read:safe_http_policy';
+    const artifact = await buildArtifact(undefined, undefined, [
+      {
+        slug: POLICY_READ,
+        required: false,
+        reason: { en: 'Inspects the outbound policy before scheduling digest delivery.' },
+        consentScope: 'server',
+      },
+    ]);
+
+    const posted = await upload(admin, artifact).expect(200);
+    // The one locale the read was rendered in, which the install may send back (#1301).
+    expect(posted.body.locale).toBe('en');
+    const shownRisks = shownServerRisks(posted.body.checks);
+    const shown = shownRisks.find((risk) => risk.permissionSlug === POLICY_READ)?.riskLevel;
+    expect(shown).toBeDefined();
+    const changed = shown === RiskLevel.Critical ? RiskLevel.High : RiskLevel.Critical;
+
+    try {
+      await request(baseUrl)
+        .patch(`/api/permission-catalog/permissions/${POLICY_READ}`)
+        .set(catalogOwner.headers)
+        .send({ riskLevel: changed })
+        .expect(200);
+
+      const refused = await install(admin, { sha256: artifact.sha256, shownRisks }).expect(409);
+
+      expect(refused.body).toMatchObject({
+        code: 'PLUGIN_CONSENT_ACT_STALE',
+        slug: artifact.slug,
+        kind: 'risk',
+        staleRisks: [{ permissionSlug: POLICY_READ, shownRiskLevel: shown, currentRiskLevel: changed }],
+      });
+      expect(await db.client.plugin.findUnique({ where: { slug: artifact.slug } })).toBeNull();
+      // The artifact waits, so the server admin can read it again and install.
+      await readBack(admin, artifact.sha256).expect(200);
+    } finally {
+      await restoreShippedCatalog(db.client);
+    }
   });
 
   // The e2e server supports `en` alone, so the install names `en` against an

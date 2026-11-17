@@ -276,9 +276,10 @@ export class PluginConsentPresentationService {
           )
         : null;
 
+    const renderedLocale = locale ?? this.options.defaultLocale;
     const resolveText = (value: LocalizedString): ResolvedLocalizedString =>
       resolveLocalizedStringDetailed(value, {
-        locale: locale ?? this.options.defaultLocale,
+        locale: renderedLocale,
         defaultLocale: this.options.defaultLocale,
       });
 
@@ -315,6 +316,7 @@ export class PluginConsentPresentationService {
         source === 'active' && plugin.pendingVersion !== null && plugin.pendingSha256 !== null
           ? { manifestVersion: plugin.pendingVersion, manifestSha256: plugin.pendingSha256 }
           : null,
+      locale: renderedLocale,
       unit,
       displayName: resolveText(validated.manifest.displayName),
       description: resolveText(validated.manifest.description),

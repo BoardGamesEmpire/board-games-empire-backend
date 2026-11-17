@@ -3,8 +3,10 @@ import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { mintApiKey, type Caller } from '../support/api-key';
+import { deferredRequest } from '../support/deferred-request';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { readStagedShownRisks } from './consent-act-fixtures';
 import { arrangeInventoryPlugin, INVENTORY_STAGING_ID } from './inventory-fixtures';
 
 /**
@@ -68,16 +70,20 @@ describe('server plugin writes through a key scoped to one plugin (#978)', () =>
     'POST /plugins/:slug/uninstall': (actor, slug) =>
       request(baseUrl).post(`/api/plugins/${slug}/uninstall`).set(actor.headers).send({}),
     'POST /plugins/:slug/update/approve': (actor, slug) =>
-      request(baseUrl)
-        .post(`/api/plugins/${slug}/update/approve`)
-        .set(actor.headers)
-        .send({ stagingId: INVENTORY_STAGING_ID }),
+      deferredRequest(
+        () => readStagedShownRisks(baseUrl, actor, slug),
+        (shownRisks) =>
+          request(baseUrl)
+            .post(`/api/plugins/${slug}/update/approve`)
+            .set(actor.headers)
+            .send({ stagingId: INVENTORY_STAGING_ID, shownRisks }),
+      ),
     'POST /plugins/:slug/update/reject': (actor, slug) =>
       request(baseUrl)
         .post(`/api/plugins/${slug}/update/reject`)
         .set(actor.headers)
         .send({ stagingId: INVENTORY_STAGING_ID }),
-  } as const satisfies Record<string, (actor: Caller, slug: string) => request.Test>;
+  } as const satisfies Record<string, (actor: Caller, slug: string) => PromiseLike<request.Response>>;
 
   type Write = keyof typeof WRITES;
 

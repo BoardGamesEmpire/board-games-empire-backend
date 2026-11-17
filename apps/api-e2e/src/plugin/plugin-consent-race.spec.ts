@@ -15,6 +15,7 @@ import { bindTemplate, readShippedSql, readShippedValue } from '../support/shipp
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import {
   readConsentSurface,
+  readStagedShownRisks,
   reviewBody,
   sendReview,
   sendSwitchOn,
@@ -22,6 +23,7 @@ import {
   switchOnBody,
   toggleBody,
   type ConsentAnswerStatus,
+  type ShownRiskBody,
 } from './consent-act-fixtures';
 import { LOCK_SOURCES } from './lock-order';
 import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
@@ -174,11 +176,12 @@ describe('consent decisions under concurrency (#360)', () => {
   const unitRow = (householdId: string, pluginId: string) =>
     db.client.householdPlugin.findFirstOrThrow({ where: { householdId, pluginId } });
 
-  const approve = (actor: SessionActor, slug: string) =>
+  /** `shownRisks` is read before the race starts, so the read never waits behind a held lock (#1336). */
+  const approve = (actor: SessionActor, slug: string, shownRisks: readonly ShownRiskBody[]) =>
     request(baseUrl)
       .post(`${PLUGINS_PATH}/${slug}/update/approve`)
       .set(actor.headers)
-      .send({ stagingId: INVENTORY_STAGING_ID });
+      .send({ stagingId: INVENTORY_STAGING_ID, shownRisks });
 
   /**
    * A plugin whose household check is optional, switched on for the household
@@ -517,10 +520,11 @@ describe('consent decisions under concurrency (#360)', () => {
         // it is the one that exercises the sha comparison; the other order
         // only shows the act committing first, which a missing comparison
         // would pass too.
+        const shownRisks = await readStagedShownRisks(baseUrl, approver, plugin.slug);
         await holder.begin();
         await holder.query('SELECT id FROM plugins WHERE id = $1 FOR UPDATE', [plugin.id]);
 
-        const approval = fire(() => approve(approver, plugin.slug));
+        const approval = fire(() => approve(approver, plugin.slug, shownRisks));
 
         await expectLockWaiter(barrier, {
           heldBy: holder.pid,
@@ -616,10 +620,11 @@ describe('consent decisions under concurrency (#360)', () => {
         // moved, so it is the one that exercises the sha comparison; the
         // other order only shows the toggle committing first, which a missing
         // comparison would pass too.
+        const shownRisks = await readStagedShownRisks(baseUrl, approver, plugin.slug);
         await holder.begin();
         await holder.query('SELECT id FROM plugins WHERE id = $1 FOR UPDATE', [plugin.id]);
 
-        const approval = fire(() => approve(approver, plugin.slug));
+        const approval = fire(() => approve(approver, plugin.slug, shownRisks));
 
         await expectLockWaiter(barrier, {
           heldBy: holder.pid,

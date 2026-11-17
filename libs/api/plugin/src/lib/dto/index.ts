@@ -9,5 +9,6 @@ export * from './plugin-artifact.response';
 export * from './plugin-inventory.response';
 export * from './post-plugin-artifact.dto';
 export * from './reject-plugin-update.dto';
+export * from './shown-risk.dto';
 export * from './uninstall-plugin.dto';
 export * from './update-plugin-config.dto';

@@ -28,7 +28,9 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { readFile } from 'node:fs/promises';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { retainedServerConfig } from '../config/retained-server-config';
-import { planServerAcceptance } from '../consent/server-acceptance';
+import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
+import type { ShownRisk } from '../consent/plugin-consent-act.types';
+import { planServerAcceptance, staleShownRisks } from '../consent/server-acceptance';
 import { PluginInstalledEvent, type GrantedPermissionRecord, type PluginProvenance } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginDirectoryResolverService } from '../loader/plugin-directory-resolver.service';
@@ -81,6 +83,13 @@ export interface PluginInstallInput {
   readonly registrySlug?: string;
   /** The installing admin — server-admin authority is verified, never assumed. */
   readonly installerId: string;
+  /**
+   * The risk the artifact read showed for each server-scope requested
+   * permission (#1336). A missing one, or one that is not today's, refuses
+   * the install as stale: it grants them all at today's risk. The HTTP route
+   * always sends it; a caller that showed nothing omits it and is not checked.
+   */
+  readonly shownRisks?: readonly ShownRisk[];
   /** Exact re-entry of every Critical + required permission slug. */
   readonly confirmCriticalSlugs?: readonly string[];
   /** Admin opt-in: extend static analysis into node_modules; findings advisory only. */
@@ -224,6 +233,20 @@ export class PluginInstallerService {
     // transaction's own check is the one that holds; this one is early.
     if (assessment.dataGatewayNameConflict !== null) {
       throw new PluginInstallDataGatewayNameConflictError(validated.manifest.slug, assessment.dataGatewayNameConflict);
+    }
+
+    // Before the Critical confirmation: a read whose risks are stale named a
+    // Critical set that may be stale too, and reading again cures both.
+    const staleRisks =
+      input.shownRisks === undefined
+        ? []
+        : staleShownRisks(
+            serverChecks,
+            (check) => this.riskFor(validated.manifest.slug, check, corePermissions),
+            input.shownRisks,
+          );
+    if (staleRisks.length > 0) {
+      throw new PluginConsentActStaleError(validated.manifest.slug, 'risk', staleRisks);
     }
 
     this.assertCriticalConfirmation(validated, assessment.criticalSlugsToReenter, input.confirmCriticalSlugs ?? []);

@@ -205,3 +205,55 @@ export function sendReview(
     .set(actor.headers)
     .send(body);
 }
+
+/** One `shownRisks` entry of an install or approval body (#1336). */
+export interface ShownRiskBody {
+  readonly permissionSlug: string;
+  readonly riskLevel: RiskLevel;
+}
+
+/** A requested permission as an install or approval read lists it: the fields `shownRisks` is built from. */
+export interface ReadCheck {
+  readonly slug: string;
+  readonly consentScope: string;
+  readonly riskLevel: RiskLevel | null;
+}
+
+/**
+ * An install's or approval's `shownRisks`, read off the checks its read listed
+ * (#1336): every server-scope one with a risk to show.
+ */
+export function shownServerRisks(checks: readonly ReadCheck[]): ShownRiskBody[] {
+  return checks.flatMap((check) =>
+    check.consentScope === 'server' && check.riskLevel !== null
+      ? [{ permissionSlug: check.slug, riskLevel: check.riskLevel }]
+      : [],
+  );
+}
+
+/**
+ * The `shownRisks` an approval of `slug` sends, read off the staged-update
+ * read the way a client reads it (#1336). Empty when that read is refused: the
+ * approval is then refused for the same reason before any risk is compared,
+ * and a spec asserting that refusal should not fail on the read instead.
+ */
+export async function readStagedShownRisks(baseUrl: string, actor: ActCaller, slug: string): Promise<ShownRiskBody[]> {
+  const response = await request(baseUrl).get(`/api/plugins/${slug}/update/pending`).set(actor.headers);
+
+  return response.status === 200 ? shownServerRisks(response.body.presentation.checks) : [];
+}
+
+/**
+ * The `shownRisks` an install of `sha256` sends, read off the artifact read
+ * the way a client reads it (#1336). Empty when that read is refused, for the
+ * reason `readStagedShownRisks` gives.
+ */
+export async function readArtifactShownRisks(
+  baseUrl: string,
+  actor: ActCaller,
+  sha256: string,
+): Promise<ShownRiskBody[]> {
+  const response = await request(baseUrl).get(`/api/plugins/artifacts/${sha256}`).set(actor.headers);
+
+  return response.status === 200 ? shownServerRisks(response.body.checks) : [];
+}

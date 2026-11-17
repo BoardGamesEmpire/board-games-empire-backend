@@ -158,6 +158,14 @@ export class ConsentSurfaceDto implements PluginConsentPresentation {
   stagedUpdate!: ConsentSurfaceStagedUpdateDto | null;
 
   @ApiProperty({
+    description:
+      'The one locale this server rendered the consent surface in, a tag it supports. Send it back as `locale` ' +
+      'on the consent write, so the act records the text that was read. Not a list: a reason reports its own ' +
+      "`locale`, the key of the plugin's text it came from, which falls back when the plugin has none in this one.",
+  })
+  locale!: string;
+
+  @ApiProperty({
     type: 'object',
     properties: {
       scopeType: { type: 'string', enum: ['Server', 'Household', 'User'] },

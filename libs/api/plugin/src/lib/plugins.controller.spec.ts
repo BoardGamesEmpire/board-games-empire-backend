@@ -74,6 +74,7 @@ const PENDING_PLUGIN = {
 } as never;
 const DECLARES = { added: ['plugin|demo-sink|manage:digest'], removed: ['plugin|demo-sink|read:legacy'] };
 const NO_LONGER_REQUESTED = ['feedback:read'];
+const SHOWN_RISKS = [{ permissionSlug: 'feedback:read', riskLevel: RiskLevel.Medium }];
 const UNIT_COVERAGE = { household: { switchedOn: 3, covered: 1 }, user: { switchedOn: 2, covered: 2 } };
 const PRESENTATION = {
   plugin: { id: 'plugin-1', slug: 'demo-sink', enabled: true },
@@ -216,7 +217,8 @@ describe('PluginsController (delegation)', () => {
     },
     {
       route: 'approveUpdate',
-      call: (): Observable<unknown> => controller.approveUpdate('demo-sink', { stagingId: 'staging-a' }),
+      call: (): Observable<unknown> =>
+        controller.approveUpdate('demo-sink', { stagingId: 'staging-a', shownRisks: SHOWN_RISKS }),
       service: () => updates.approve,
       notFound: PluginUpdatePluginNotFoundError,
       slugField: 'slug',
@@ -355,13 +357,18 @@ describe('PluginsController (delegation)', () => {
       auditContext.getLocale.mockReturnValue('de');
 
       const result = await firstValueFrom(
-        controller.approveUpdate('demo-sink', { stagingId: 'staging-a', confirmCriticalSlugs: ['user:impersonate'] }),
+        controller.approveUpdate('demo-sink', {
+          stagingId: 'staging-a',
+          shownRisks: SHOWN_RISKS,
+          confirmCriticalSlugs: ['user:impersonate'],
+        }),
       );
 
       expect(updates.approve).toHaveBeenCalledWith({
         slug: 'demo-sink',
         approverId: MOCK_ACTING_USER_ID,
         stagingId: 'staging-a',
+        shownRisks: SHOWN_RISKS,
         confirmCriticalSlugs: ['user:impersonate'],
         locale: 'de',
       });
@@ -382,12 +389,13 @@ describe('PluginsController (delegation)', () => {
     });
 
     it('an omitted confirmation set and an absent locale stay undefined — the service owns the expectation and the default', async () => {
-      await firstValueFrom(controller.approveUpdate('demo-sink', { stagingId: 'staging-a' }));
+      await firstValueFrom(controller.approveUpdate('demo-sink', { stagingId: 'staging-a', shownRisks: SHOWN_RISKS }));
 
       expect(updates.approve).toHaveBeenCalledWith({
         slug: 'demo-sink',
         approverId: MOCK_ACTING_USER_ID,
         stagingId: 'staging-a',
+        shownRisks: SHOWN_RISKS,
         confirmCriticalSlugs: undefined,
         locale: undefined,
       });
@@ -398,14 +406,18 @@ describe('PluginsController (delegation)', () => {
     it('approveUpdate renders in the supported locale the body names, not the request locale (#1301)', async () => {
       auditContext.getLocale.mockReturnValue('en');
 
-      await firstValueFrom(controller.approveUpdate('demo-sink', { stagingId: 'staging-a', locale: 'de' }));
+      await firstValueFrom(
+        controller.approveUpdate('demo-sink', { stagingId: 'staging-a', shownRisks: SHOWN_RISKS, locale: 'de' }),
+      );
 
       expect(updates.approve).toHaveBeenCalledWith(expect.objectContaining({ locale: 'de' }));
     });
 
     it('approveUpdate refuses a locale the server does not support before the service is called (#1301)', async () => {
       await expect(
-        firstValueFrom(controller.approveUpdate('demo-sink', { stagingId: 'staging-a', locale: 'xx' })),
+        firstValueFrom(
+          controller.approveUpdate('demo-sink', { stagingId: 'staging-a', shownRisks: SHOWN_RISKS, locale: 'xx' }),
+        ),
       ).rejects.toBeInstanceOf(PluginConsentActLocaleError);
       expect(updates.approve).not.toHaveBeenCalled();
     });

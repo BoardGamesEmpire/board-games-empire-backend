@@ -26,6 +26,17 @@ export interface ConsentActAnswer {
   readonly riskLevel: RiskLevel;
 }
 
+/**
+ * The risk a server admin's install or approval read showed for one
+ * server-scope requested permission (#1336), sent back with the install or
+ * approval as a toggle's answer sends its own.
+ */
+export interface ShownRisk {
+  /** Canonical slug. */
+  readonly permissionSlug: string;
+  readonly riskLevel: RiskLevel;
+}
+
 export interface ConsentActPresentationCheck {
   readonly slug: string;
   readonly required: boolean;

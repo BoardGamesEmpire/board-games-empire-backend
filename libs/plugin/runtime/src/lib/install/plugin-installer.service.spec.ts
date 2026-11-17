@@ -25,6 +25,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
+import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
 import { PluginInstalledEvent } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { PluginDirectoryLayoutError } from '../loader/loader.errors';
@@ -772,6 +773,63 @@ describe('PluginInstallerService', () => {
 
     it('demands nothing when no Critical permission is requested at all', async () => {
       await expect(service.install(input())).resolves.toBeDefined();
+    });
+  });
+
+  /**
+   * Install grants every server-scope requested permission at today's risk,
+   * so the risks the artifact read showed are checked against today's (#1336).
+   */
+  describe('the risks the artifact read showed', () => {
+    const withCriticalRisk = async (): Promise<void> => {
+      const manifest = buildPluginManifest();
+      manifest.permissions.checks = [
+        ...manifest.permissions.checks,
+        { slug: 'read:audit_log', required: true, reason: { en: 'Mirrors audit rows into the external sink.' } },
+      ];
+      await writeManifest(manifest);
+      db.permission.findMany.mockResolvedValue([
+        feedbackRead,
+        { slug: 'read:audit_log', subject: 'audit_log', riskLevel: RiskLevel.Critical } as Permission,
+      ]);
+    };
+
+    const CURRENT = [
+      { permissionSlug: 'plugin|demo-sink|manage:digest', riskLevel: RiskLevel.Low },
+      { permissionSlug: 'feedback:read', riskLevel: RiskLevel.Medium },
+    ];
+
+    it("installs when every risk shown is today's (#1336)", async () => {
+      await expect(service.install(input({ shownRisks: CURRENT }))).resolves.toBeDefined();
+    });
+
+    it('refuses as stale a risk that changed after the read, ahead of the Critical confirmation, writing nothing (#1336)', async () => {
+      // read:audit_log was shown High and is Critical now: the Critical set
+      // the read named is stale too, so stale is what the admin hears.
+      await withCriticalRisk();
+      const shown = [...CURRENT, { permissionSlug: 'read:audit_log', riskLevel: RiskLevel.High }];
+
+      const failure = await service.install(input({ shownRisks: shown })).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginConsentActStaleError);
+      expect(failure).toMatchObject({
+        pluginSlug: 'demo-sink',
+        kind: 'risk',
+        staleRisks: [
+          { permissionSlug: 'read:audit_log', shownRiskLevel: RiskLevel.High, currentRiskLevel: RiskLevel.Critical },
+        ],
+      });
+      expect(db.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('refuses as stale a server-scope permission it was sent no risk for (#1336)', async () => {
+      const failure = await service.install(input({ shownRisks: CURRENT.slice(0, 1) })).catch((err: unknown) => err);
+
+      expect(failure).toMatchObject({
+        name: 'PluginConsentActStaleError',
+        staleRisks: [{ permissionSlug: 'feedback:read', shownRiskLevel: null, currentRiskLevel: RiskLevel.Medium }],
+      });
+      expect(db.$transaction).not.toHaveBeenCalled();
     });
   });
 

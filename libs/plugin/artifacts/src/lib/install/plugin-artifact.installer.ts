@@ -6,6 +6,7 @@ import {
   PluginInstallAuthorityError,
   PluginInstallerService,
   type PluginInstallResult,
+  type ShownRisk,
 } from '@bge/plugin';
 import type { PluginArtifactDirectory, PluginArtifactSha256 } from '@boardgamesempire/plugin-contract';
 import { Injectable, Logger } from '@nestjs/common';
@@ -17,6 +18,8 @@ export interface InstallPluginArtifactInput {
   /** The checksum of a received plugin artifact, as its receipt names it, in either case. */
   readonly sha256: string;
   readonly actorId: string;
+  /** The risk the artifact read showed for each server-scope requested permission (#1336). */
+  readonly shownRisks?: readonly ShownRisk[];
   /** Exact re-entry of every Critical permission slug the install will grant. */
   readonly confirmCriticalSlugs?: readonly string[];
   /** Exact re-entry of every forbidden import static analysis reported. */
@@ -117,6 +120,7 @@ export class PluginArtifactInstaller {
         url: artifact.url ?? undefined,
         registrySlug: artifact.registrySlug ?? undefined,
         installerId: input.actorId,
+        shownRisks: input.shownRisks,
         confirmCriticalSlugs: input.confirmCriticalSlugs,
         acknowledgeForbiddenImports: input.acknowledgeForbiddenImports,
         deepScan: input.deepScan,

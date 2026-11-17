@@ -2,10 +2,12 @@ import { PluginGrantStatus, riskCovers, type RiskLevel } from '@bge/database';
 import { resolveLocalizedStringDetailed, type NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import type { ConsentManifestSource } from './consent-classification.types';
 import { byPermissionSlugCodeUnit } from './decision-lock-order';
+import type { ConsentActStaleRisk } from './plugin-consent-act.errors';
 import type {
   ConsentActDecision,
   ConsentActPresentation,
   ConsentActPresentationCheck,
+  ShownRisk,
 } from './plugin-consent-act.types';
 
 export interface ServerAcceptanceInput {
@@ -116,4 +118,33 @@ export function planServerApproval(input: ServerApprovalInput): ServerApproval {
   });
 
   return { accepted, newlyConferred };
+}
+
+/**
+ * The server-scope requested permissions whose risk the install or approval
+ * read showed differently from today's, or did not show at all (#1336). The
+ * acceptance stamps today's risk on what it grants, so a risk that rose
+ * between the read and the write would be recorded as shown when it was not.
+ * Toggles and reviews refuse the same way, through their answers.
+ *
+ * Every server-scope permission the manifest requests is checked, not only
+ * what the acceptance grants: which ones approval grants depends on decisions
+ * that can change under it, and the read showed them all. A risk named for a
+ * permission outside `shown` is ignored. Empty means the read is current.
+ */
+export function staleShownRisks(
+  shown: readonly NormalizedPermissionRequest[],
+  riskOf: (check: NormalizedPermissionRequest) => RiskLevel,
+  shownRisks: readonly ShownRisk[],
+): ConsentActStaleRisk[] {
+  const named = new Map(shownRisks.map((risk) => [risk.permissionSlug, risk.riskLevel]));
+
+  return shown.flatMap((check) => {
+    const currentRiskLevel = riskOf(check);
+    const shownRiskLevel = named.get(check.canonicalSlug) ?? null;
+
+    return shownRiskLevel === currentRiskLevel
+      ? []
+      : [{ permissionSlug: check.canonicalSlug, shownRiskLevel, currentRiskLevel }];
+  });
 }

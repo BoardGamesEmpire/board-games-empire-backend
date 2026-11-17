@@ -1,6 +1,6 @@
 import { PluginGrantStatus, RiskLevel } from '@bge/database';
 import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
-import { planServerAcceptance, planServerApproval } from './server-acceptance';
+import { planServerAcceptance, planServerApproval, staleShownRisks } from './server-acceptance';
 
 const check = (
   canonicalSlug: string,
@@ -226,5 +226,53 @@ describe('planServerApproval (#1336)', () => {
 
   it('accepts nothing for a manifest that requests nothing of the server', () => {
     expect(approve({ requested: [HOUSEHOLD_READ] })).toEqual({ accepted: [], newlyConferred: [] });
+  });
+});
+
+describe('staleShownRisks (#1336)', () => {
+  const SHOWN = [WRITE_GAME, READ_PLAY, MANAGE_DIGEST];
+  const current = SHOWN.map((permission) => ({
+    permissionSlug: permission.canonicalSlug,
+    riskLevel: riskOf(permission),
+  }));
+
+  it("finds nothing stale when every risk named is today's", () => {
+    expect(staleShownRisks(SHOWN, riskOf, current)).toEqual([]);
+  });
+
+  it('names a risk that rose after the read, with what was shown and what stands', () => {
+    // Install and approval stamp today's risk: without this, High would be
+    // recorded as the risk shown when Medium was.
+    const shown = current.map((risk) =>
+      risk.permissionSlug === 'write:game:public' ? { ...risk, riskLevel: RiskLevel.Medium } : risk,
+    );
+
+    expect(staleShownRisks(SHOWN, riskOf, shown)).toEqual([
+      { permissionSlug: 'write:game:public', shownRiskLevel: RiskLevel.Medium, currentRiskLevel: RiskLevel.High },
+    ]);
+  });
+
+  it('names a risk that fell too: what was shown is not what stands', () => {
+    const shown = current.map((risk) =>
+      risk.permissionSlug === 'read:play:public' ? { ...risk, riskLevel: RiskLevel.Critical } : risk,
+    );
+
+    expect(staleShownRisks(SHOWN, riskOf, shown)).toEqual([
+      { permissionSlug: 'read:play:public', shownRiskLevel: RiskLevel.Critical, currentRiskLevel: RiskLevel.Medium },
+    ]);
+  });
+
+  it('names a requested permission the request gave no risk for, as shown nothing', () => {
+    const shown = current.filter((risk) => risk.permissionSlug !== 'plug:manage:digest');
+
+    expect(staleShownRisks(SHOWN, riskOf, shown)).toEqual([
+      { permissionSlug: 'plug:manage:digest', shownRiskLevel: null, currentRiskLevel: RiskLevel.Low },
+    ]);
+  });
+
+  it('ignores a risk named for a permission the manifest does not request at server scope', () => {
+    const shown = [...current, { permissionSlug: 'read:household', riskLevel: RiskLevel.Critical }];
+
+    expect(staleShownRisks(SHOWN, riskOf, shown)).toEqual([]);
   });
 });

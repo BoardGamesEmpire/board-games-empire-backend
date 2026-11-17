@@ -4,9 +4,11 @@ import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { createHash, randomBytes } from 'node:crypto';
 import request from 'supertest';
+import { deferredRequest } from '../support/deferred-request';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectErrorEnvelope } from '../support/error-envelope';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { readArtifactShownRisks, readStagedShownRisks } from './consent-act-fixtures';
 import { pluginRowData, stagedUpdateColumns } from './plugin-row-fixtures';
 
 /**
@@ -109,8 +111,13 @@ describe('a data-gateway plugin’s DataGateway row (#1083)', () => {
       .field('sha256', artifact.sha256)
       .attach('file', artifact.bytes, { filename: `${artifact.slug}.tgz`, contentType: 'application/gzip' });
 
+  /** Sends the risks the artifact read shows, as a client would (#1336). */
   const install = (actor: SessionActor, artifact: BuiltArtifact) =>
-    request(baseUrl).post(INSTALL_PATH).set(actor.headers).send({ sha256: artifact.sha256 });
+    deferredRequest(
+      () => readArtifactShownRisks(baseUrl, actor, artifact.sha256),
+      (shownRisks) =>
+        request(baseUrl).post(INSTALL_PATH).set(actor.headers).send({ sha256: artifact.sha256, shownRisks }),
+    );
 
   /** The artifact step, then the install, each answered as a success. */
   const uploadAndInstall = async (actor: SessionActor, artifact: BuiltArtifact) => {
@@ -243,7 +250,12 @@ describe('a data-gateway plugin’s DataGateway row (#1083)', () => {
         }),
       });
 
-      return request(baseUrl).post(`/api/plugins/${plugin.slug}/update/approve`).set(actor.headers).send({ stagingId });
+      const shownRisks = await readStagedShownRisks(baseUrl, actor, plugin.slug);
+
+      return request(baseUrl)
+        .post(`/api/plugins/${plugin.slug}/update/approve`)
+        .set(actor.headers)
+        .send({ stagingId, shownRisks });
     };
 
     it('creates the row when an approved update makes the plugin a data-gateway plugin, and disables and keeps it when the next moves it out (#1083)', async () => {

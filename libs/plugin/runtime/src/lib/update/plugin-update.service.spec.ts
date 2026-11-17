@@ -24,6 +24,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
+import { PluginConsentActStaleError } from '../consent/plugin-consent-act.errors';
 import {
   HouseholdPluginReconsentRequestedEvent,
   PluginGrantRevokedEvent,
@@ -1122,6 +1123,51 @@ describe('PluginUpdateService', () => {
         (db.pluginGrant.upsert.mock.calls as [{ create: { permissionSlug: string } }][]).map(
           ([args]) => args.create.permissionSlug,
         );
+
+      it("approval passes when the risks the read showed are today's (#1336)", async () => {
+        db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextRequiringFeedbackRead()));
+        db.pluginGrant.findMany.mockResolvedValue([deniedFeedbackRead(), grantedDigest()]);
+
+        const result = await service.approve(
+          approveInput({
+            shownRisks: [
+              { permissionSlug: 'feedback:read', riskLevel: RiskLevel.Medium },
+              { permissionSlug: 'plugin|demo-sink|manage:digest', riskLevel: RiskLevel.Low },
+            ],
+          }),
+        );
+
+        expect(result.act).toMatchObject({ kind: PluginConsentActKind.UpdateApprove });
+      });
+
+      it('approval is refused as stale when a risk rose after the read, before the Critical confirmation and before anything is written (#1336)', async () => {
+        // feedback:read is Medium today; the read showed Low. Approving would
+        // stamp Medium and record it as shown.
+        db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextRequiringFeedbackRead()));
+        db.pluginGrant.findMany.mockResolvedValue([deniedFeedbackRead(), grantedDigest()]);
+
+        const error = await service
+          .approve(
+            approveInput({
+              shownRisks: [
+                { permissionSlug: 'feedback:read', riskLevel: RiskLevel.Low },
+                { permissionSlug: 'plugin|demo-sink|manage:digest', riskLevel: RiskLevel.Low },
+              ],
+            }),
+          )
+          .catch((caught: unknown) => caught);
+
+        expect(error).toBeInstanceOf(PluginConsentActStaleError);
+        expect(error).toMatchObject({
+          kind: 'risk',
+          staleRisks: [
+            { permissionSlug: 'feedback:read', shownRiskLevel: RiskLevel.Low, currentRiskLevel: RiskLevel.Medium },
+          ],
+        });
+        expect(db.pluginConsentAct.create).not.toHaveBeenCalled();
+        expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+        expect(db.plugin.updateMany).not.toHaveBeenCalled();
+      });
 
       it('approval grants a required server-scope permission that was denied, under the UpdateApprove act (#1336)', async () => {
         db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextRequiringFeedbackRead()));
