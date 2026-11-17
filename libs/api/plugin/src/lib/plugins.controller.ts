@@ -395,8 +395,11 @@ export class PluginsController {
   @ApiOperation({
     summary: 'Approve the staged pending update',
     description:
-      'The server-scope consent act: seeds the new server-consentable grants, re-stamps risk-escalated ones, ' +
-      'applies the declares[] catalog diff, and reports the household and user units owing a fresh decision per axis on the ' +
+      "The Server unit's consent to the staged update, recorded as one UpdateApprove consent act (act on the " +
+      "response). It grants every server-scope permission the new manifest requires, at today's risk, a denied " +
+      'one included: approving a version that requires a permission consents to it. It also grants each optional ' +
+      'server-scope permission the Server unit has not decided, and leaves an optional decision that exists as it ' +
+      'stands. It applies the declares[] catalog diff, and reports the household and user units owing a fresh decision per axis on the ' +
       'response (reconsentHouseholdUnits, reconsentUserUnits). Those units keep whatever they were running: one ' +
       'owing a required permission reads review_pending until its owner decides, and one owing only a risk-raised ' +
       'optional permission has that feature off (#1149). Activation is DB-side — the running instance keeps the prior code until the ' +
@@ -418,8 +421,8 @@ export class PluginsController {
     description:
       'No staged update; the staging named by stagingId was replaced since it was read ' +
       '(PluginUpdateStagingReplacedError — read it again); or a challenge: Critical confirmation required ' +
-      '(expectedSlugs), or activation is blocked by a durable denial (deniedRequiredSlugs); or the update makes ' +
-      'the plugin a data-gateway plugin and another DataGateway already has the name its DataGateway would take ' +
+      '(expectedSlugs, every Critical permission the approval newly confers, a denied one included); or the ' +
+      'update makes the plugin a data-gateway plugin and another DataGateway already has the name its DataGateway would take ' +
       '(dataGatewayName — rename that DataGateway, then approve again)',
   })
   @ApiResponse({
@@ -437,6 +440,9 @@ export class PluginsController {
           approverId: this.abilityService.getActingUserId(),
           stagingId: dto.stagingId,
           confirmCriticalSlugs: dto.confirmCriticalSlugs,
+          // The locale the staged-update read presented the requested
+          // permissions in, which the approval's consent act records (#1336).
+          locale: this.auditContext.getLocale() ?? undefined,
         }),
       ),
     ).pipe(
@@ -444,6 +450,8 @@ export class PluginsController {
         message: t('success.plugin.update_approved', { slug, version: result.plugin.version }),
         plugin: result.plugin,
         comparison: result.comparison,
+        // The act's summary, as every consent act route answers with it.
+        act: { id: result.act.id, kind: result.act.kind, decidedAt: result.act.decidedAt },
         seededGrants: result.seededGrants,
         // Also on the row, surfaced top-level because it is the response's
         // one operational instruction: nothing serves the new code until a
@@ -491,13 +499,13 @@ export class PluginsController {
     summary: 'Present the staged pending update for approval',
     description:
       "The approval screen's data source: the escalation comparison recomputed against today's decisions " +
-      '(escalations, serverGating, blockedByDenial), pendingSince, stagingId (which approve and reject send back, ' +
+      '(escalations, serverGating, deniedRequiredSlugs), pendingSince, stagingId (which approve and reject send back, ' +
       'so neither answers a staging the admin was not shown, #357), the declares[] catalog diff approving would ' +
       'apply (added/removed plugin-namespaced permissions — removed takes their grants), noLongerRequested (the ' +
       'requested permissions the update stops requesting, whose decisions approving deletes at every scope), ' +
       "and the staged manifest's " +
-      'consent surface localized for the requester. A durable denial renders as blockedByDenial state here; only ' +
-      'approve refuses over it.',
+      'consent surface localized for the requester. deniedRequiredSlugs lists the server-scope permissions the ' +
+      'update requires that the Server unit denied: approving grants them.',
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
@@ -630,13 +638,13 @@ export class PluginsController {
    * comparison and the consent surface describe one staging by
    * construction, whatever resolves or re-stages concurrently.
    *
-   * The row is the only shared snapshot, deliberately. A grant decision
+   * The row is the only shared snapshot, deliberately. A consent decision
    * landing between describePending's comparison and the presentation's own
-   * grant read can still leave `blockedByDenial` disagreeing with a check's
-   * decision state. That window is cosmetic and self-limiting: approve
-   * recomputes the comparison against TODAY's decisions and refuses over a
-   * denial regardless of what this screen rendered, so a stale screen
-   * cannot authorize anything — and closing it would mean one transaction
+   * grant read can still leave `deniedRequiredSlugs` disagreeing with a
+   * check's decision state. That window is cosmetic and self-limiting:
+   * approve works out what it grants, and the Critical second factor it asks,
+   * from the decisions read inside its own transaction, whatever this screen
+   * rendered, so a stale screen cannot authorize anything — and closing it would mean one transaction
    * threaded through the presentation service, a cross-service seam that is
    * not worth a body re-derived on the next action.
    */
@@ -672,7 +680,7 @@ export class PluginsController {
       stagingId: description.plugin.pendingStagingId,
       escalations: description.comparison.escalations,
       serverGating: description.comparison.serverGating,
-      blockedByDenial: description.comparison.blockedByDenial,
+      deniedRequiredSlugs: description.comparison.deniedRequiredSlugs,
       // The catalog diff approving would apply. Separate from `escalations`
       // because no escalation kind describes a declaration change, and a
       // declaration the plugin never requests appears in neither the checks

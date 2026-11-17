@@ -410,7 +410,6 @@
     "update_critical_confirmation": "This update grants Critical permissions that must be explicitly confirmed — re-enter each listed permission exactly",
     "install_static_analysis": "Static analysis found forbidden imports — re-enter each listed specifier to accept the risk and install anyway",
     "update_static_analysis": "Static analysis found forbidden imports in the new version — re-enter each listed specifier to accept the risk and proceed",
-    "update_blocked_by_denial": "The update cannot activate: required permissions carry a durable server-scope denial — reverse the denial or reject the update",
     "install_manifest": "The manifest for plugin '{slug}' failed validation",
     "update_manifest": "The update manifest for plugin '{slug}' failed validation",
     "install_unknown_core_permissions": "The manifest requests core permissions that do not exist",

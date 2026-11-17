@@ -1,4 +1,4 @@
-import { PluginGrantStatus, type RiskLevel } from '@bge/database';
+import { PluginGrantStatus, riskCovers, type RiskLevel } from '@bge/database';
 import { resolveLocalizedStringDetailed, type NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import type { ConsentManifestSource } from './consent-classification.types';
 import type {
@@ -64,4 +64,63 @@ export function planServerAcceptance(input: ServerAcceptanceInput): ServerAccept
   });
 
   return { decisions, presentation: { locale: input.locale, source: input.source, checks } };
+}
+
+/** One of the Server unit's consent decisions, as the approval rule reads it. */
+export interface ServerApprovalDecision {
+  readonly permissionSlug: string;
+  readonly status: PluginGrantStatus;
+  readonly decidedRiskLevel: RiskLevel;
+}
+
+export interface ServerApprovalInput {
+  /** Every requested permission of the staged manifest, in manifest order; the rule reads the server-scope ones. */
+  readonly requested: readonly NormalizedPermissionRequest[];
+  /** The Server unit's consent decisions on record for the plugin. */
+  readonly decisions: readonly ServerApprovalDecision[];
+  /** Today's catalog risk of a requested permission. */
+  readonly riskOf: (check: NormalizedPermissionRequest) => RiskLevel;
+}
+
+export interface ServerApproval {
+  /** What approving grants at today's risk, in manifest order: every required permission and every undecided optional one. */
+  readonly accepted: readonly NormalizedPermissionRequest[];
+  /**
+   * The part of `accepted` that confers authority the Server unit does not
+   * hold today: no decision, a denial, or a grant at a risk that no longer
+   * covers today's. The Critical second factor is asked of these.
+   */
+  readonly newlyConferred: readonly NormalizedPermissionRequest[];
+}
+
+/**
+ * What approving a staged update grants for the Server unit (#1336). Pure, so
+ * the one rule is applied before the transaction, for the Critical second
+ * factor, and again inside it against the decisions read under the plugin
+ * row's lock.
+ *
+ * The server admin who approves a version that requires a permission consents
+ * to it, so every required server-scope permission is accepted, a denied one
+ * included. An optional one is accepted only when the Server unit has not
+ * decided it: an existing optional decision is left as it stands, a denial or
+ * a grant at a risk that has since risen, and a toggle or review act answers it.
+ */
+export function planServerApproval(input: ServerApprovalInput): ServerApproval {
+  const decided = new Map(input.decisions.map((decision) => [decision.permissionSlug, decision]));
+
+  const accepted = input.requested.filter(
+    (check) => check.consentScope === 'server' && (check.required || !decided.has(check.canonicalSlug)),
+  );
+
+  const newlyConferred = accepted.filter((check) => {
+    const decision = decided.get(check.canonicalSlug);
+
+    return (
+      decision === undefined ||
+      decision.status !== PluginGrantStatus.Granted ||
+      !riskCovers(decision.decidedRiskLevel, input.riskOf(check))
+    );
+  });
+
+  return { accepted, newlyConferred };
 }

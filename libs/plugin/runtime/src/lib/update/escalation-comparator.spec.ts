@@ -44,7 +44,7 @@ describe('compareForEscalations', () => {
 
     expect(result.escalations).toEqual([]);
     expect(result.serverGating).toBe(false);
-    expect(result.blockedByDenial).toEqual([]);
+    expect(result.deniedRequiredSlugs).toEqual([]);
     expect(result.householdReconsentSlugs).toEqual([]);
     expect(result.serverRiskEscalatedSlugs).toEqual([]);
     expect(result.userReconsentSlugs).toEqual([]);
@@ -212,9 +212,10 @@ describe('compareForEscalations', () => {
     });
 
     it('ignores a DENIED row whose risk rose — a refusal confers nothing to re-consent or re-stamp', () => {
+      // Optional: a denial of a required permission gates for its own reason (#1336).
       const result = compare({
-        active: view({ checks: [check('feedback:read')] }),
-        next: view({ checks: [check('feedback:read')] }),
+        active: view({ checks: [check('feedback:read', 'server', false)] }),
+        next: view({ checks: [check('feedback:read', 'server', false)] }),
         grants: [grant({ status: PluginGrantStatus.Denied, decidedRiskLevel: RiskLevel.Low })],
         currentRiskBySlug: new Map([['feedback:read', RiskLevel.Critical]]),
       });
@@ -404,30 +405,46 @@ describe('compareForEscalations', () => {
     });
   });
 
-  describe('denial block', () => {
-    it('blocks on a server-scope Denied row for a permission the next manifest requires', () => {
+  /**
+   * A server-scope denial on a permission the next manifest requires is
+   * reported, and it gates: approving the update grants the permission, so the
+   * server admin is the one to answer it (#1336).
+   */
+  describe('a denied required server-scope permission', () => {
+    it('lists the slug in deniedRequiredSlugs and server-gates on it, with no other escalation (#1336)', () => {
+      const shared = view({ checks: [check('feedback:read', 'server', true)] });
+      const result = compare({ active: shared, next: shared, grants: [grant({ status: PluginGrantStatus.Denied })] });
+
+      expect(result.escalations).toEqual([]);
+      expect(result.deniedRequiredSlugs).toEqual(['feedback:read']);
+      expect(result.serverGating).toBe(true);
+    });
+
+    it('lists a denial the update makes required, alongside its promotion (#1336)', () => {
       const result = compare({
         active: view({ checks: [check('feedback:read', 'server', false)] }),
         next: view({ checks: [check('feedback:read', 'server', true)] }),
         grants: [grant({ status: PluginGrantStatus.Denied })],
       });
 
-      expect(result.blockedByDenial).toEqual(['feedback:read']);
+      expect(result.deniedRequiredSlugs).toEqual(['feedback:read']);
+      expect(result.serverGating).toBe(true);
     });
 
-    it('blocks even when the denial predates the update and nothing else escalated', () => {
-      const shared = view({ checks: [check('feedback:read', 'server', true)] });
+    it('neither lists nor gates on a denied optional server-scope permission (#1336)', () => {
+      const shared = view({ checks: [check('feedback:read', 'server', false)] });
       const result = compare({ active: shared, next: shared, grants: [grant({ status: PluginGrantStatus.Denied })] });
 
-      expect(result.escalations).toEqual([]);
-      expect(result.blockedByDenial).toEqual(['feedback:read']);
+      expect(result.deniedRequiredSlugs).toEqual([]);
+      expect(result.serverGating).toBe(false);
     });
 
-    it('does not block on optional-check denials or household-scope denials', () => {
+    it('neither lists nor gates on a household-scope denial of a required permission (#1336)', () => {
+      const shared = view({ checks: [check('calendar:read', 'household', true)] });
       const result = compare({
-        next: view({ checks: [check('feedback:read', 'server', false), check('calendar:read', 'household', true)] }),
+        active: shared,
+        next: shared,
         grants: [
-          grant({ status: PluginGrantStatus.Denied }),
           grant({
             permissionSlug: 'calendar:read',
             scopeType: PluginGrantScope.Household,
@@ -436,7 +453,8 @@ describe('compareForEscalations', () => {
         ],
       });
 
-      expect(result.blockedByDenial).toEqual([]);
+      expect(result.deniedRequiredSlugs).toEqual([]);
+      expect(result.serverGating).toBe(false);
     });
   });
 });

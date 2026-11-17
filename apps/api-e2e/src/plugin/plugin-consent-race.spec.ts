@@ -171,9 +171,6 @@ describe('consent decisions under concurrency (#360)', () => {
     return { settled, settledEarly: () => outcome };
   };
 
-  const decideServer = (actor: SessionActor, slug: string, body: Record<string, unknown>) =>
-    request(baseUrl).post(`${PLUGINS_PATH}/${slug}/grants`).set(actor.headers).send(body);
-
   const unitRow = (householdId: string, pluginId: string) =>
     db.client.householdPlugin.findFirstOrThrow({ where: { householdId, pluginId } });
 
@@ -564,7 +561,10 @@ describe('consent decisions under concurrency (#360)', () => {
 
       expect(activated.installedSha256).not.toBe(oldSha);
 
-      const acts = await db.client.pluginConsentAct.findMany({ where: { pluginId: plugin.id } });
+      // The household's acts: the approval records its own, for the Server unit (#1336).
+      const acts = await db.client.pluginConsentAct.findMany({
+        where: { pluginId: plugin.id, scopeType: PluginGrantScope.Household, scopeId: household.id },
+      });
 
       // Either legal outcome is accepted, and neither is required.
       if (switchOn.status === 200) {
@@ -584,84 +584,119 @@ describe('consent decisions under concurrency (#360)', () => {
     });
   });
 
-  describe('an approval against a server-scope denial', () => {
-    it('never activates a manifest over a denial that is already durable', async () => {
-      // The pair #356's lock exists for. The active manifest has the policy
-      // read OPTIONAL and the staged one requires it, so the denial is legal
-      // right up until the approval commits — and illegal under the
-      // required-denial rule immediately after. Exactly one of them can win.
+  describe('an approval against a server toggle', () => {
+    it('a toggle on an optional server-scope permission lands before the approval, which leaves it alone, or is refused stale after it (#1336)', async () => {
+      // The approval grants every optional server-scope permission the Server
+      // unit has not decided, and leaves one it has decided as it stands. A
+      // server admin's refusal racing the approval must therefore end one of
+      // two ways: it commits first, under the active sha, and the approval
+      // reads it and leaves it; or the approval commits first, granting the
+      // permission under its own act, and the toggle, whose claim waits behind
+      // activation's FOR UPDATE, finds the sha moved and is refused. What must
+      // never happen is a refusal recorded under a sha the plugin no longer
+      // holds, or an approval that overwrote a refusal it could have read.
       // Two admins, for the reason the household case above gives: one session
       // issuing both requests leaves "something above the service serialized
-      // them" as a live explanation for a green run, and this case is the one
-      // 356's row lock exists for.
+      // them" as a live explanation for a green run.
       const admin = await actors.admin();
       const approver = await actors.admin();
-      const staged = manifestWith('1.3.0', [
-        MANAGE_DIGEST_CHECK,
-        { ...POLICY_READ_CHECK, required: true },
-        HOUSEHOLD_CHECK,
-      ]);
+      const staged = manifestWith('1.3.0', [MANAGE_DIGEST_CHECK, POLICY_READ_CHECK, HOUSEHOLD_CHECK]);
       const plugin = await arrangePlugin(undefined, stagedUpdateColumns({ manifest: staged, since: STAGED_AT }));
+      const surface = await readConsentSurface(baseUrl, admin, 'server', plugin.slug);
+      const activeSha = surface.manifestSha256;
 
-      const [denial, activation] = await Promise.all([
-        decideServer(admin, plugin.slug, {
-          permissionSlug: POLICY_READ_CHECK.slug,
-          status: PluginGrantStatus.Denied,
-        }),
-        approve(approver, plugin.slug),
-      ]);
+      expect(activeSha).toBe(plugin.installedSha256);
+
+      const { toggle, activation } = await withBarrier(async (barrier) => {
+        const { holder } = barrier;
+
+        // Activation's own plugin-row lock mode, held so both requests queue
+        // behind it in a known order: the approval first, then the toggle.
+        // That is the order that puts the toggle's claim AFTER the manifest
+        // moved, so it is the one that exercises the sha comparison; the
+        // other order only shows the toggle committing first, which a missing
+        // comparison would pass too.
+        await holder.begin();
+        await holder.query('SELECT id FROM plugins WHERE id = $1 FOR UPDATE', [plugin.id]);
+
+        const approval = fire(() => approve(approver, plugin.slug));
+
+        await expectLockWaiter(barrier, {
+          heldBy: holder.pid,
+          description: 'the approval',
+          timeoutMs: REQUEST_REACHES_LOCK_MS,
+          exclude: [barrier.waiter.pid, barrier.observer.pid],
+          settledEarly: approval.settledEarly,
+        });
+
+        const refusal = fire(() =>
+          sendToggle(
+            baseUrl,
+            admin,
+            'server',
+            plugin.slug,
+            toggleBody(surface, POLICY_READ_CHECK.slug, PluginGrantStatus.Denied),
+          ),
+        );
+
+        await expectBackendsQueuedBehind(barrier, {
+          heldBy: holder.pid,
+          count: 2,
+          description: 'the approval and the toggle naming the active sha',
+          timeoutMs: REQUEST_REACHES_LOCK_MS,
+        });
+
+        // Released before anything else is asked of the database: both
+        // requests wait inside a Prisma interactive transaction on its default
+        // budget, and every question asked while the row is held spends it.
+        await holder.commit();
+
+        return { toggle: await refusal.settled, activation: await approval.settled };
+      });
+
+      // The approval wins either way: a toggle never refuses it.
+      expect(activation.status).toBe(200);
 
       const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
-      const denialLanded =
-        (await db.client.pluginGrant.count({
-          where: {
+
+      expect(row.version).toBe(staged.version);
+
+      const decision = await db.client.pluginGrant.findUniqueOrThrow({
+        where: {
+          pluginId_scopeType_scopeId_permissionSlug: {
             pluginId: plugin.id,
+            scopeType: PluginGrantScope.Server,
+            scopeId: '',
             permissionSlug: POLICY_READ_CHECK.slug,
-            status: PluginGrantStatus.Denied,
           },
-        })) > 0;
-      const activated = row.version === staged.version;
+        },
+      });
+      const acts = await db.client.pluginConsentAct.findMany({ where: { pluginId: plugin.id } });
+      const approvalAct = acts.find((act) => act.kind === PluginConsentActKind.UpdateApprove);
 
-      // The pair is pinned to the two outcomes that are legal, and nothing
-      // else. A weaker form of this — "they were not both 200" — is satisfied
-      // by ANY refusal, including a request rejected by a gate in front of the
-      // service, so the case could go green having raced nothing at all and
-      // stay green with #356's row lock deleted.
-      //
-      // Which of the two happened is still the race's business, and is never
-      // asserted.
-      expect([denial.status, activation.status]).toEqual(activation.status === 200 ? [409, 200] : [200, 409]);
+      expect(approvalAct?.id).toBe(activation.body.act.id);
 
-      // THE invariant: an activated manifest and a durable denial of one of its
-      // required checks cannot both be true. This is the state the required-
-      // denial rule exists to make unreachable, and the one a snapshot read
-      // instead of a row lock would have let through.
-      expect(activated && denialLanded).toBe(false);
+      // Either legal outcome is accepted, and neither is required.
+      if (toggle.status === 200) {
+        // The refusal landed first, under the active sha, and the approval
+        // read it inside its transaction and left it as it stands.
+        const toggleAct = acts.find((act) => act.kind === PluginConsentActKind.Toggle);
 
-      // And the durable state agrees with what each caller was told — a 200
-      // that left nothing behind would satisfy the line above for the wrong
-      // reason.
-      expect(denialLanded).toBe(denial.status === 200);
-      expect(activated).toBe(activation.status === 200);
-
-      // Whichever lost, it lost for the documented reason and said so in the
-      // typed body the client renders its next step from. A losing denial has
-      // two legal codes, by interleaving (#361): one that read the plugin
-      // BEFORE activation committed waits on the claim behind activation's
-      // FOR UPDATE, finds the plugin manifest moved, and is refused as
-      // PluginGrantPluginChangedError; one whose read came AFTER the commit
-      // sees the required check at the front door and gets
-      // PluginGrantRequiredDenialError.
-      const refusal = activation.status === 409 ? activation : denial;
-
-      if (activation.status === 409) {
-        expect(refusal.body.code).toBe('PLUGIN_UPDATE_BLOCKED_BY_DENIAL');
+        expect(acts).toHaveLength(2);
+        expect(toggleAct?.id).toBe(toggle.body.act.id);
+        expect(toggleAct?.manifestSha256).toBe(activeSha);
+        // Ahead of the approval's act, not after it: both stamps are the api's
+        // clock, so a toggle whose claim waited behind the activation would
+        // carry the later one.
+        expect(toggleAct?.createdAt.getTime()).toBeLessThan(approvalAct?.createdAt.getTime() ?? 0);
+        expect(decision).toMatchObject({ status: PluginGrantStatus.Denied, actId: toggleAct?.id });
       } else {
-        expect(['PLUGIN_GRANT_REQUIRED_DENIAL', 'PLUGIN_GRANT_PLUGIN_CHANGED']).toContain(refusal.body.code);
-      }
-
-      if (!activated) {
-        expect(row.pendingVersion).toBe(staged.version);
+        // The approval landed first and granted the undecided permission; the
+        // toggle then found the sha it named no longer installed.
+        expect(toggle.status).toBe(409);
+        expect(toggle.body.code).toBe('PLUGIN_CONSENT_ACT_STALE');
+        expect(acts).toHaveLength(1);
+        expect(decision).toMatchObject({ status: PluginGrantStatus.Granted, actId: approvalAct?.id });
       }
     });
   });

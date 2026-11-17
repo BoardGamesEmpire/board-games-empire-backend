@@ -163,12 +163,14 @@ export const CLAIMED_LOCK_ORDER = [
   },
   {
     /**
-     * The upserts of `decide()` and of a consent act take it (#1150);
-     * activation's `FOR UPDATE` takes it. The idempotency pre-reads — the
-     * `findUnique` in `decide()`, the standing-decision `findMany` in a consent
-     * act — are deliberately NOT matched: they run before the upsert and lock
-     * nothing, so counting them would date the stage to a read that orders
-     * nothing.
+     * The upserts of `decide()`, of a consent act (#1150) and of an approval
+     * (#1336) take it. No shipped statement takes it by raw `FOR UPDATE`; the
+     * raw alternative stays for the replayed statement and for any raw lock
+     * someone writes later. The pre-reads — the `findUnique` in `decide()`,
+     * the standing-decision `findMany` in a consent act, an approval's read of
+     * the Server unit's decisions — are deliberately NOT matched: they run
+     * before the upsert and lock nothing, so counting them would date the
+     * stage to a read that orders nothing.
      */
     name: 'grant row',
     pattern: anyOf(/pluginGrant\.upsert\(/, relationLock('plugin_grants', 'FOR UPDATE')),
@@ -375,7 +377,11 @@ export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
     stages: ['plugin row', 'grant row'],
     because:
       'Activation takes the plugin row first via the `FOR UPDATE` server-config read (#370), ahead of the ' +
-      'claiming write — both are the plugin row, and either dates it. Then it locks server grants (#356). It ' +
+      'claiming write — both are the plugin row, and either dates it. Then an approval writes the Server ' +
+      "unit's consent decisions through upserts, in permission order, which take the grant rows (#1336). It " +
+      'takes no `FOR UPDATE` on the grants table and refuses over no denial: the plugin-row lock is what ' +
+      'orders it against every writer of a server-scope decision, each of which claims that row first, so ' +
+      'its plain read of those decisions is stable. It ' +
       'writes no unit enablement: whether a unit can run under the manifest it promotes is worked out when ' +
       'read (#1151), and so is the consent standing it announces (#1149). Its re-consent reads of the unit ' +
       'enablements write nothing and take no lock, so they are not a stage. Those unlocked reads are safe ' +

@@ -18,7 +18,8 @@ import { INVENTORY_STAGING_ID, pluginRowData, stagedUpdateColumns } from './plug
 
 /**
  * The wire half of #321: approve/reject/pending over a REAL staged row —
- * grants seeded and re-stamped as persisted rows, the 409 challenge
+ * the approval's consent act and the consent decisions it writes as
+ * persisted rows (#1336), the 409 challenge
  * round-trip driven from the error body, the units owing re-consent reported
  * on the response and announced without a write to their rows (#1149), and
  * the 404/410/409 distinctions the pending read draws.
@@ -545,9 +546,15 @@ describe('plugin update consent (approve/reject/pending)', () => {
       );
     });
 
-    it('re-stamps a risk-escalated server grant at today’s risk', async () => {
+    it('re-writes a risk-escalated required server decision at today’s risk, under the approval’s act (#1336)', async () => {
       const admin = await actors.admin();
-      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK]);
+      const { plugin } = await arrangeStagedPlugin(
+        [MANAGE_DIGEST_CHECK, { ...NEW_SERVER_CHECK, required: true }],
+        undefined,
+        {
+          activeChecks: [MANAGE_DIGEST_CHECK, { ...NEW_SERVER_CHECK, required: true }],
+        },
+      );
       // Decided when the catalog said Low; the catalog says Medium today.
       const stale = await seedPolicyGrant(plugin, {
         status: PluginGrantStatus.Granted,
@@ -564,6 +571,26 @@ describe('plugin update consent (approve/reject/pending)', () => {
       const reStamped = await db.client.pluginGrant.findUniqueOrThrow({ where: { id: stale.id } });
       expect(reStamped.decidedRiskLevel).toBe(RiskLevel.Medium);
       expect(reStamped.decidedById).toBe(admin.user.id);
+      expect(reStamped.actId).toBe(response.body.act.id);
+    });
+
+    it('leaves an optional server decision granted at a risk that has since risen as it stands (#1336)', async () => {
+      // Approving confers nothing through an optional decision that exists:
+      // it stays outstanding for a review act.
+      const admin = await actors.admin();
+      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK], undefined, {
+        activeChecks: [MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK],
+      });
+      const stale = await seedPolicyGrant(plugin, {
+        status: PluginGrantStatus.Granted,
+        decidedAt: new Date('2026-07-01T00:00:00Z'),
+        decidedRiskLevel: RiskLevel.Low,
+      });
+
+      await approve(admin, plugin.slug).expect(200);
+
+      const untouched = await db.client.pluginGrant.findUniqueOrThrow({ where: { id: stale.id } });
+      expect(untouched).toEqual(stale);
     });
 
     it('revokes the decision on a permission the update stops requesting, and records why (#577)', async () => {
@@ -616,19 +643,69 @@ describe('plugin update consent (approve/reject/pending)', () => {
       ]);
     });
 
-    it('refuses over a durable denial on a permission the update marks required', async () => {
+    it('grants a denied permission the update marks required, under the UpdateApprove act (#1336)', async () => {
+      // Approving a version that requires a permission consents to it, so the
+      // server admin's earlier refusal does not stand in its way.
       const admin = await actors.admin();
       const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, { ...NEW_SERVER_CHECK, required: true }]);
-      await seedPolicyGrant(plugin, { status: PluginGrantStatus.Denied });
+      const denied = await seedPolicyGrant(plugin, { status: PluginGrantStatus.Denied });
 
-      const response = await approve(admin, plugin.slug).expect(409);
+      const response = await approve(admin, plugin.slug).expect(200);
 
-      expect(response.body.code).toBe('PLUGIN_UPDATE_BLOCKED_BY_DENIAL');
-      expect(response.body.deniedRequiredSlugs).toEqual(['read:safe_http_policy']);
+      expect(response.body.comparison.deniedRequiredSlugs).toEqual(['read:safe_http_policy']);
+      expect(response.body.act).toEqual({
+        id: expect.any(String),
+        kind: 'UpdateApprove',
+        decidedAt: expect.any(String),
+      });
+
+      const decision = await db.client.pluginGrant.findUniqueOrThrow({ where: { id: denied.id } });
+      expect(decision).toMatchObject({
+        status: PluginGrantStatus.Granted,
+        decidedRiskLevel: RiskLevel.Medium,
+        decidedById: admin.user.id,
+        actId: response.body.act.id,
+      });
 
       const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
-      expect(row.version).toBe('1.2.0');
-      expect(row.pendingVersion).toBe('1.3.0');
+      expect(row.version).toBe('1.3.0');
+      expect(row.pendingVersion).toBeNull();
+    });
+
+    it('approval records one UpdateApprove act holding the staged sha (#1336)', async () => {
+      const admin = await actors.admin();
+      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, NEW_SERVER_CHECK]);
+
+      const response = await approve(admin, plugin.slug).set('Accept-Language', 'en').expect(200);
+
+      const acts = await db.client.pluginConsentAct.findMany({ where: { pluginId: plugin.id } });
+      expect(acts).toEqual([
+        expect.objectContaining({
+          id: response.body.act.id,
+          kind: 'UpdateApprove',
+          scopeType: PluginGrantScope.Server,
+          scopeId: '',
+          pluginSlug: plugin.slug,
+          manifestVersion: '1.3.0',
+          manifestSha256: STAGED_SHA,
+          decidedById: admin.user.id,
+        }),
+      ]);
+      // What the server admin was shown: every server-scope requested
+      // permission of the staged manifest, in the locale it was read in.
+      expect(acts[0].presentation).toEqual(
+        expect.objectContaining({
+          locale: 'en',
+          source: 'staged',
+          checks: [
+            expect.objectContaining({ slug: `plugin|${plugin.slug}|manage:digest`, outcome: 'granted' }),
+            expect.objectContaining({ slug: 'read:safe_http_policy', outcome: 'granted' }),
+          ],
+        }),
+      );
+      // Every decision the approval wrote names it.
+      const decisions = await db.client.pluginGrant.findMany({ where: { pluginId: plugin.id } });
+      expect(decisions.map((decision) => decision.actId)).toEqual([acts[0].id, acts[0].id]);
     });
 
     it('reports user units owing the new decision on the response, announces them, and writes nothing to their rows', async () => {
@@ -908,7 +985,7 @@ describe('plugin update consent (approve/reject/pending)', () => {
       expect(response.body.pendingVersion).toBe('1.3.0');
       expect(response.body.pendingSince).toBe(STAGED_AT.toISOString());
       expect(response.body.serverGating).toBe(true);
-      expect(response.body.blockedByDenial).toEqual([]);
+      expect(response.body.deniedRequiredSlugs).toEqual([]);
       expect(response.body.escalations).toEqual([
         expect.objectContaining({ kind: 'new-permission', slug: 'read:safe_http_policy', consentScope: 'server' }),
       ]);
@@ -963,14 +1040,15 @@ describe('plugin update consent (approve/reject/pending)', () => {
       expect(response.body.declares).toEqual({ added: [], removed: [] });
     });
 
-    it('renders a durable denial as blockedByDenial state — the read reports, only approve refuses', async () => {
+    it('reports a denied permission the update requires as deniedRequiredSlugs, which approving grants (#1336)', async () => {
       const admin = await actors.admin();
       const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK, { ...NEW_SERVER_CHECK, required: true }]);
       await seedPolicyGrant(plugin, { status: PluginGrantStatus.Denied });
 
       const response = await readPending(admin, plugin.slug).expect(200);
 
-      expect(response.body.blockedByDenial).toEqual(['read:safe_http_policy']);
+      expect(response.body.deniedRequiredSlugs).toEqual(['read:safe_http_policy']);
+      expect(response.body.serverGating).toBe(true);
     });
 
     it('draws the 404 / 410 / 409 distinctions', async () => {

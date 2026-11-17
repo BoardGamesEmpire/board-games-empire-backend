@@ -21,7 +21,7 @@ export interface EscalationComparatorInput {
 /**
  * The update-escalation comparison (#59 Phase C3). Pure and synchronous:
  * the service prepares the views, this decides what escalated, whether the
- * server admin must approve, what a surviving denial blocks, and which
+ * server admin must approve, which denied permissions the update requires, and which
  * slugs activation tells household and user units they owe re-consent on
  * (#1149).
  *
@@ -134,31 +134,33 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
     }
   }
 
-  const serverGating = escalations.some(
-    (escalation) =>
-      (escalation.kind === 'new-permission' && escalation.consentScope === 'server') ||
-      (escalation.kind === 'consent-scope-changed' && escalation.to === 'server') ||
-      // Only a SERVER-scope decision's risk escalation is the server admin's
-      // to re-approve; a household's stale consent is the household's.
-      (escalation.kind === 'risk-escalated' && escalation.scopeType === PluginGrantScope.Server) ||
-      escalation.kind === 'outbound-domain-added' ||
-      escalation.kind === 'outbound-domains-configured' ||
-      escalation.kind === 'writes-core-added',
-  );
-
-  // A surviving Server-scope Denied row on a permission the NEXT
-  // manifest marks required blocks activation — required means the plugin
-  // cannot honestly run without it, and a durable refusal must not be
-  // steamrolled by a version bump. Keyed on next's required set, not on
-  // escalations: the denial may predate this update entirely.
+  // A Server-scope Denied row on a permission the NEXT manifest marks
+  // required: approving the update grants it (#1336), so the server admin
+  // must be the one to approve, never an immediate activation. Keyed on
+  // next's required set, not on escalations: the denial may predate this
+  // update entirely.
   const deniedServerSlugs = new Set(
     input.grants
       .filter((grant) => grant.scopeType === PluginGrantScope.Server && grant.status === PluginGrantStatus.Denied)
       .map((grant) => grant.permissionSlug),
   );
-  const blockedByDenial = input.next.checks
+  const deniedRequiredSlugs = input.next.checks
     .filter((check) => check.consentScope === 'server' && check.required && deniedServerSlugs.has(check.canonicalSlug))
     .map((check) => check.canonicalSlug);
+
+  const serverGating =
+    deniedRequiredSlugs.length > 0 ||
+    escalations.some(
+      (escalation) =>
+        (escalation.kind === 'new-permission' && escalation.consentScope === 'server') ||
+        (escalation.kind === 'consent-scope-changed' && escalation.to === 'server') ||
+        // Only a SERVER-scope decision's risk escalation is the server admin's
+        // to re-approve; a household's stale consent is the household's.
+        (escalation.kind === 'risk-escalated' && escalation.scopeType === PluginGrantScope.Server) ||
+        escalation.kind === 'outbound-domain-added' ||
+        escalation.kind === 'outbound-domains-configured' ||
+        escalation.kind === 'writes-core-added',
+    );
 
   const householdReconsentSlugs: string[] = [];
   const serverRiskEscalatedSlugs: string[] = [];
@@ -197,7 +199,7 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
   return {
     escalations,
     serverGating,
-    blockedByDenial,
+    deniedRequiredSlugs,
     householdReconsentSlugs,
     serverRiskEscalatedSlugs,
     userReconsentSlugs,

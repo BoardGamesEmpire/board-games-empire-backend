@@ -1,6 +1,6 @@
 import { PluginGrantStatus, RiskLevel } from '@bge/database';
 import type { NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
-import { planServerAcceptance } from './server-acceptance';
+import { planServerAcceptance, planServerApproval } from './server-acceptance';
 
 const check = (
   canonicalSlug: string,
@@ -125,5 +125,106 @@ describe('planServerAcceptance (#1336)', () => {
       decisions: [],
       presentation: { locale: 'en', source: 'active', checks: [] },
     });
+  });
+});
+
+describe('planServerApproval (#1336)', () => {
+  type ApprovalInput = Parameters<typeof planServerApproval>[0];
+  type Decision = ApprovalInput['decisions'][number];
+
+  const decision = (permissionSlug: string, status: PluginGrantStatus, decidedRiskLevel: RiskLevel): Decision => ({
+    permissionSlug,
+    status,
+    decidedRiskLevel,
+  });
+
+  const HOUSEHOLD_READ = check('read:household', { consentScope: 'household', required: true });
+
+  const approve = (overrides: Partial<ApprovalInput> = {}) =>
+    planServerApproval({
+      requested: [WRITE_GAME, READ_PLAY, MANAGE_DIGEST, HOUSEHOLD_READ],
+      decisions: [],
+      riskOf,
+      ...overrides,
+    });
+
+  const slugs = (checks: readonly NormalizedPermissionRequest[]) => checks.map((one) => one.canonicalSlug);
+
+  it('accepts every server-scope requested permission when the Server unit has decided nothing, and confers them all', () => {
+    const plan = approve();
+
+    // Manifest order; the household-scope one is not the server's to accept.
+    expect(slugs(plan.accepted)).toEqual(['write:game:public', 'read:play:public', 'plug:manage:digest']);
+    expect(slugs(plan.newlyConferred)).toEqual(['write:game:public', 'read:play:public', 'plug:manage:digest']);
+  });
+
+  it('accepts a required permission that was denied, and counts it as newly conferred', () => {
+    const plan = approve({
+      decisions: [
+        decision('write:game:public', PluginGrantStatus.Denied, RiskLevel.High),
+        decision('read:play:public', PluginGrantStatus.Granted, RiskLevel.Medium),
+        decision('plug:manage:digest', PluginGrantStatus.Granted, RiskLevel.Low),
+      ],
+    });
+
+    expect(slugs(plan.accepted)).toEqual(['write:game:public']);
+    expect(slugs(plan.newlyConferred)).toEqual(['write:game:public']);
+  });
+
+  it('re-accepts a required permission granted at a covering risk, and confers nothing new through it', () => {
+    const plan = approve({
+      decisions: [
+        // Granted above today's risk still covers it.
+        decision('write:game:public', PluginGrantStatus.Granted, RiskLevel.Critical),
+        decision('read:play:public', PluginGrantStatus.Granted, RiskLevel.Medium),
+        decision('plug:manage:digest', PluginGrantStatus.Granted, RiskLevel.Low),
+      ],
+    });
+
+    expect(slugs(plan.accepted)).toEqual(['write:game:public']);
+    expect(plan.newlyConferred).toEqual([]);
+  });
+
+  it('confers a required permission granted at a risk that no longer covers today', () => {
+    const plan = approve({
+      decisions: [
+        decision('write:game:public', PluginGrantStatus.Granted, RiskLevel.Medium),
+        decision('read:play:public', PluginGrantStatus.Granted, RiskLevel.Medium),
+        decision('plug:manage:digest', PluginGrantStatus.Granted, RiskLevel.Low),
+      ],
+    });
+
+    expect(slugs(plan.newlyConferred)).toEqual(['write:game:public']);
+  });
+
+  it('leaves an existing optional decision alone when it is a denial', () => {
+    const plan = approve({
+      decisions: [
+        decision('write:game:public', PluginGrantStatus.Granted, RiskLevel.High),
+        decision('read:play:public', PluginGrantStatus.Denied, RiskLevel.Medium),
+      ],
+    });
+
+    // MANAGE_DIGEST is optional with no decision yet, so it is accepted.
+    expect(slugs(plan.accepted)).toEqual(['write:game:public', 'plug:manage:digest']);
+    expect(slugs(plan.newlyConferred)).toEqual(['plug:manage:digest']);
+  });
+
+  it('leaves an existing optional decision alone when it is granted at a risk that has since risen, so it is not in what the approval confers', () => {
+    const plan = approve({
+      decisions: [
+        decision('write:game:public', PluginGrantStatus.Granted, RiskLevel.High),
+        decision('read:play:public', PluginGrantStatus.Granted, RiskLevel.Low),
+        decision('plug:manage:digest', PluginGrantStatus.Granted, RiskLevel.Low),
+      ],
+    });
+
+    // Outstanding for a review act, not for this approval.
+    expect(slugs(plan.accepted)).toEqual(['write:game:public']);
+    expect(plan.newlyConferred).toEqual([]);
+  });
+
+  it('accepts nothing for a manifest that requests nothing of the server', () => {
+    expect(approve({ requested: [HOUSEHOLD_READ] })).toEqual({ accepted: [], newlyConferred: [] });
   });
 });

@@ -43,7 +43,6 @@ import {
   PluginUnitPluginTombstonedError,
   PluginUnitScopeError,
   PluginUpdateAuthorityError,
-  PluginUpdateBlockedByDenialError,
   PluginUpdateCriticalConfirmationError,
   PluginUpdateDataGatewayNameConflictError,
   PluginUpdateForbiddenPermissionError,
@@ -364,14 +363,6 @@ describe('PluginExceptionFilter', () => {
       expect(body()['slug']).toBe('sample');
       expect(body()['permissionSlug']).toBe('plugin|sample|manage:digest');
       expect(body()['code']).toBe('PLUGIN_GRANT_REQUIRED_DENIAL');
-    });
-
-    it('renders the blocking denials on PluginUpdateBlockedByDenialError', () => {
-      filter.catch(new PluginUpdateBlockedByDenialError('sample', ['read:household']), host);
-
-      expect(rendered().getStatus()).toBe(Http.Conflict);
-      expect(body()['message']).toBe('t:errors.plugin.update_blocked_by_denial');
-      expect(body()['deniedRequiredSlugs']).toEqual(['read:household']);
     });
   });
 

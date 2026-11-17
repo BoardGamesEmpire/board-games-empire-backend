@@ -53,9 +53,16 @@ const APPROVED_PLUGIN = { id: 'plugin-1', slug: 'demo-sink', version: '1.3.0', r
 const COMPARISON = {
   escalations: [],
   serverGating: true,
-  blockedByDenial: [],
+  deniedRequiredSlugs: ['read:household'],
 } as unknown as UpdateEscalationComparison;
 const SEEDED_GRANTS = [{ id: 'grant-1', permissionSlug: 'user:impersonate' }] as never[];
+const APPROVE_ACT = {
+  id: 'act-1',
+  kind: 'UpdateApprove',
+  decidedAt: new Date('2026-11-16T00:00:00Z'),
+  presentation: { locale: 'de', source: 'staged', checks: [] },
+  manifestSha256: 'f'.repeat(64),
+};
 const RECONSENT_HOUSEHOLDS = [{ householdId: 'hh-1', outstanding: ['calendar:read'] }];
 const PENDING_PLUGIN = {
   id: 'plugin-1',
@@ -246,6 +253,7 @@ describe('PluginsController (delegation)', () => {
       approve: jest.fn().mockResolvedValue({
         plugin: APPROVED_PLUGIN,
         comparison: COMPARISON,
+        act: APPROVE_ACT,
         seededGrants: SEEDED_GRANTS,
         reconsentHouseholdUnits: RECONSENT_HOUSEHOLDS,
         reconsentUserUnits: [],
@@ -355,7 +363,9 @@ describe('PluginsController (delegation)', () => {
   });
 
   describe('update consent endpoints (#321)', () => {
-    it('approveUpdate forwards slug, actor, and the confirmation set; the response surfaces the consequences', async () => {
+    it('approveUpdate forwards slug, actor, the confirmation set and the locale; the response surfaces the act and the consequences (#1336)', async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
       const result = await firstValueFrom(
         controller.approveUpdate('demo-sink', { stagingId: 'staging-a', confirmCriticalSlugs: ['user:impersonate'] }),
       );
@@ -365,6 +375,7 @@ describe('PluginsController (delegation)', () => {
         approverId: MOCK_ACTING_USER_ID,
         stagingId: 'staging-a',
         confirmCriticalSlugs: ['user:impersonate'],
+        locale: 'de',
       });
       expect(result).toEqual({
         message: expect.objectContaining({
@@ -373,6 +384,8 @@ describe('PluginsController (delegation)', () => {
         }),
         plugin: APPROVED_PLUGIN,
         comparison: COMPARISON,
+        // The act's summary, not its stored presentation.
+        act: { id: 'act-1', kind: 'UpdateApprove', decidedAt: new Date('2026-11-16T00:00:00Z') },
         seededGrants: SEEDED_GRANTS,
         restartRequired: true,
         reconsentHouseholdUnits: RECONSENT_HOUSEHOLDS,
@@ -380,7 +393,7 @@ describe('PluginsController (delegation)', () => {
       });
     });
 
-    it('an omitted confirmation set stays undefined — the service owns the expectation', async () => {
+    it('an omitted confirmation set and an absent locale stay undefined — the service owns the expectation and the default', async () => {
       await firstValueFrom(controller.approveUpdate('demo-sink', { stagingId: 'staging-a' }));
 
       expect(updates.approve).toHaveBeenCalledWith({
@@ -388,6 +401,7 @@ describe('PluginsController (delegation)', () => {
         approverId: MOCK_ACTING_USER_ID,
         stagingId: 'staging-a',
         confirmCriticalSlugs: undefined,
+        locale: undefined,
       });
     });
 
@@ -424,7 +438,8 @@ describe('PluginsController (delegation)', () => {
         stagingId: 'staging-a',
         escalations: COMPARISON.escalations,
         serverGating: true,
-        blockedByDenial: [],
+        // The denied permissions approving would grant (#1336).
+        deniedRequiredSlugs: ['read:household'],
         // The catalog diff rides the body: no escalation kind describes a
         // declaration change, so a client cannot reconstruct it.
         declares: DECLARES,

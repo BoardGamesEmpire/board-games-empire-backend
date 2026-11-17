@@ -66,7 +66,6 @@ import {
   PluginUnitPluginTombstonedError,
   PluginUnitScopeError,
   PluginUpdateAuthorityError,
-  PluginUpdateBlockedByDenialError,
   PluginUpdateCriticalConfirmationError,
   PluginUpdateDataGatewayNameConflictError,
   PluginUpdateForbiddenPermissionError,
@@ -583,13 +582,7 @@ function buildRenderers(): RendererMap {
   renders(PluginInstallStaticAnalysisError, staticAnalysisChallenge('errors.plugin.install_static_analysis'));
   renders(PluginUpdateStaticAnalysisError, staticAnalysisChallenge('errors.plugin.update_static_analysis'));
 
-  renders(PluginUpdateBlockedByDenialError, (exception) => ({
-    status: Http.Conflict,
-    message: t('errors.plugin.update_blocked_by_denial'),
-    fields: { slug: exception.slug, deniedRequiredSlugs: exception.deniedRequiredSlugs },
-  }));
-
-  // The decide()-side sibling of the denial block above (D-AV/D-BP, #322):
+  // decide()'s refusal of a denial on a required permission (#322):
   // not a challenge — there is nothing to re-submit — but the same kind of
   // curable state conflict, and the client renders the two honest levers
   // (disable, uninstall) FROM this body, so its `code` and fields are

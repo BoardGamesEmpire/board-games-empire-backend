@@ -233,12 +233,11 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       expect(await db.client.pluginGrant.count({ where: { pluginId: plugin.id } })).toBe(1);
     });
 
-    it('a denial against a check only the PENDING manifest requires lands — and APPROVE is what refuses (D-AB)', async () => {
+    it('a denial against a check only the PENDING manifest requires lands, and approving the update grants it (#1336)', async () => {
       const admin = await actors.admin();
-      // Active: policy read OPTIONAL. Pending: the same check promoted to
-      // required — the D-AV fixture correction locked 2026-08-21: a slug the
-      // pending manifest introduces FRESH would be undecidable (422), not
-      // legal-then-blocked.
+      // Active: policy read OPTIONAL, so the denial is legal now. Pending: the
+      // same check promoted to required. A slug the pending manifest
+      // introduces fresh would be undecidable (422) against the active one.
       const pending = manifestWithChecks('1.3.0', [
         MANAGE_DIGEST_CHECK,
         { ...POLICY_READ_CHECK, required: true },
@@ -247,22 +246,25 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       ]);
       const plugin = await arrangePlugin(DEFAULT_CHECKS, stagedUpdateColumns({ manifest: pending, since: STAGED_AT }));
 
-      await decideServer(admin, plugin.slug, denied('read:safe_http_policy')).expect(200);
+      const denial = await decideServer(admin, plugin.slug, denied('read:safe_http_policy')).expect(200);
 
-      const refusal = await request(baseUrl)
+      // The server admin who approves a version that requires the permission
+      // consents to it: the approval grants it under its UpdateApprove act.
+      const approval = await request(baseUrl)
         .post(`${PLUGINS_PATH}/${plugin.slug}/update/approve`)
         .set(admin.headers)
         .send({ stagingId: INVENTORY_STAGING_ID })
-        .expect(409);
+        .expect(200);
 
-      expect(refusal.body.code).toBe('PLUGIN_UPDATE_BLOCKED_BY_DENIAL');
-      expect(refusal.body.deniedRequiredSlugs).toEqual(['read:safe_http_policy']);
+      expect(approval.body.comparison.deniedRequiredSlugs).toEqual(['read:safe_http_policy']);
+      expect(approval.body.act.kind).toBe('UpdateApprove');
 
-      // The installed version keeps serving under its approved state — the
-      // upgrade coerced nothing.
+      const decision = await db.client.pluginGrant.findUniqueOrThrow({ where: { id: denial.body.grant.id } });
+      expect(decision).toMatchObject({ status: PluginGrantStatus.Granted, actId: approval.body.act.id });
+
       const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
-      expect(row.version).toBe('1.2.0');
-      expect(row.pendingVersion).toBe('1.3.0');
+      expect(row.version).toBe('1.3.0');
+      expect(row.pendingVersion).toBeNull();
     });
   });
 

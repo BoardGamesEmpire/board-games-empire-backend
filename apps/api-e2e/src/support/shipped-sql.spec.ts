@@ -74,9 +74,8 @@ describe('extractSqlTemplate', () => {
   });
 
   it('picks the template that follows a named anchor', () => {
-    // A file can hold several locks (`plugin-update.service.ts` ships two
-    // `FOR UPDATE` statements), and any file this suite reads is free to grow
-    // another. The anchor is the function name, so a spec says which statement
+    // A file can hold several locks, and any file this suite reads is free to
+    // grow another. The anchor is the function name, so a spec says which statement
     // it means instead of relying on there being only one.
     const two = `${wrap('SELECT 1 FROM only_this')}\n${wrap('SELECT 2 FROM not_this')}`.replace(
       'lockSomething',
