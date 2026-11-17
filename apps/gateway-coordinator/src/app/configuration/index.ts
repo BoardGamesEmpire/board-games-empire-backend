@@ -1,8 +1,8 @@
 import { env, environments } from '@bge/env';
+import { pluginsConfig, pluginsConfigValidationSchema } from '@bge/plugin';
 import type { ConfigModuleOptions } from '@nestjs/config';
 import Joi from 'joi';
 import coordinatorConfig, { coordinatorConfigValidationSchema } from './coordinator.config';
-import pluginsConfig, { pluginsConfigValidationSchema } from './plugins.config';
 import redisQueueConfig, { redisQueueConfigValidationSchema } from './redis-queue.config';
 import redisConfig, { redisConfigValidationSchema } from './redis.config';
 

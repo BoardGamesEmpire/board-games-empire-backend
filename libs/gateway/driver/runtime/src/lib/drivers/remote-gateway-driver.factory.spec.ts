@@ -49,7 +49,14 @@ describe('RemoteGatewayDriverFactory', () => {
 
     const driver = await factory.create(options);
 
-    expect(pingWithRetry).toHaveBeenCalledWith(serviceClient, 'bgg', expect.anything());
+    expect(pingWithRetry).toHaveBeenCalledWith(
+      serviceClient,
+      'bgg',
+      expect.anything(),
+      undefined,
+      undefined,
+      undefined,
+    );
     expect(driver.gatewayId).toBe('bgg');
     expect(proxy.close).not.toHaveBeenCalled();
   });
@@ -77,7 +84,14 @@ describe('RemoteGatewayDriverFactory', () => {
 
     expect(create).toHaveBeenCalledTimes(1);
     expect(create.mock.calls[0][0]).toMatchObject({ options: { channelOptions: { interceptors } } });
-    expect(pingWithRetry).toHaveBeenLastCalledWith(serviceClient, 'bgg', expect.anything());
+    expect(pingWithRetry).toHaveBeenLastCalledWith(
+      serviceClient,
+      'bgg',
+      expect.anything(),
+      undefined,
+      undefined,
+      undefined,
+    );
   });
 
   // The gateway worker's ping of the coordinator retries only while the
@@ -103,7 +117,11 @@ describe('RemoteGatewayDriverFactory', () => {
 
     await factory.create(options, { interceptors: [jest.fn()] });
 
-    expect(pingWithRetry).toHaveBeenLastCalledWith(serviceClient, 'bgg', expect.anything());
+    // Left undefined, the rule takes `pingWithRetry`'s default.
+    const [client, gatewayId, , , , rule] = (pingWithRetry as jest.Mock).mock.lastCall;
+    expect(client).toBe(serviceClient);
+    expect(gatewayId).toBe('bgg');
+    expect(rule).toBeUndefined();
   });
 
   // A remote DataGateway is dialled with nothing added to its calls.

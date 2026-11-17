@@ -49,6 +49,7 @@ export * from './lib/manifest/manifest-move';
 export * from './lib/manifest/stored-manifest';
 export * from './lib/plugin-module.options';
 export * from './lib/plugin.module';
+export * from './lib/plugins-root.config';
 export * from './lib/registry/plugin-category.map';
 export * from './lib/testing/plugin-module-options.fixture';
 export * from './lib/units/plugin-unit-lifecycle.service';

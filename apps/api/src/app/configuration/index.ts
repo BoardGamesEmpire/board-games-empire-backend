@@ -3,12 +3,12 @@ import { coordinatorClientConfigValidationSchema } from '@bge/coordinator';
 import { env } from '@bge/env';
 import { healthConfigValidationSchema } from '@bge/health';
 import { prometheusConfigValidationSchema } from '@bge/metrics';
+import { pluginsConfig, pluginsConfigValidationSchema } from '@bge/plugin';
 import { mediaConfig, mediaConfigValidationSchema } from '@bge/storage';
 import { bgeIdentityConfigValidationSchema, securityTxtConfigValidationSchema } from '@bge/well-known';
 import type { ConfigModuleOptions } from '@nestjs/config';
 import Joi from 'joi';
 import cache, { cacheConfigValidationSchema } from './cache.config';
-import plugins, { pluginsConfigValidationSchema } from './plugins.config';
 import redisBullmq, { redisQueueConfigValidationSchema } from './redis-queue.config';
 import redisWebsocket, { redisWebsocketConfigValidationSchema } from './redis-sockets.config';
 import redis, { redisConfigValidationSchema } from './redis.config';
@@ -20,7 +20,7 @@ export { API_CACHE_NAMESPACE } from './cache.config';
 export const configuration = {
   cache,
   mediaConfig,
-  plugins,
+  plugins: pluginsConfig,
   redis,
   redisBullmq,
   redisWebsocket,

@@ -12,12 +12,22 @@ export const PLUGIN_LOAD_STALE_MS = 5 * 60_000;
 /**
  * The process role that loads plugins of this category (#1083): the
  * coordinator runs data-gateway plugins, and the api runs every other
- * category. Each app's `loadCategories` must agree with it, or a process
- * that doesn't load a plugin asks about the wrong process role's load
- * records.
+ * category. The one place that is decided: each app takes its
+ * `loadCategories` from {@link categoriesLoadedBy}, and a process that
+ * doesn't load a plugin asks this which process role's load records to read.
  */
 export function roleLoading(category: PluginCategory): string {
   return category === PluginCategory.DataGateway ? 'coordinator' : 'api';
+}
+
+/**
+ * The plugin categories a process of `processRole` loads: those
+ * {@link roleLoading} gives it (#1083). Each category goes to exactly one
+ * process role, so a category added later loads in the process role
+ * `roleLoading` names, and nowhere else.
+ */
+export function categoriesLoadedBy(processRole: string): PluginCategory[] {
+  return Object.values(PluginCategory).filter((category) => roleLoading(category) === processRole);
 }
 
 /**

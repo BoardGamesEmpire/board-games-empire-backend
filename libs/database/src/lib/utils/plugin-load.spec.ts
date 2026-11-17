@@ -1,5 +1,5 @@
 import { PluginCategory } from '../client';
-import { hasLivePluginLoad, PLUGIN_LOAD_STALE_MS, roleLoading } from './plugin-load';
+import { categoriesLoadedBy, hasLivePluginLoad, PLUGIN_LOAD_STALE_MS, roleLoading } from './plugin-load';
 import type { PluginLoadRecordRow } from './plugin-load.fixtures';
 import { fakePluginLoadRecords } from './plugin-load.fixtures';
 
@@ -104,6 +104,30 @@ describe('roleLoading', () => {
       expect(roleLoading(category)).toBe('api');
     },
   );
+});
+
+// Each app takes the categories it loads from here, so between them every
+// category loads in exactly one process role (#1083).
+describe('categoriesLoadedBy', () => {
+  it('gives the coordinator the data-gateway plugins alone (#1083)', () => {
+    expect(categoriesLoadedBy('coordinator')).toEqual([PluginCategory.DataGateway]);
+  });
+
+  it('gives the api every other category (#1083)', () => {
+    expect(categoriesLoadedBy('api')).toEqual(
+      Object.values(PluginCategory).filter((category) => category !== PluginCategory.DataGateway),
+    );
+  });
+
+  it.each(Object.values(PluginCategory))('gives %s to exactly one process role (#1083)', (category) => {
+    const loadedBy = ['api', 'coordinator'].filter((role) => categoriesLoadedBy(role).includes(category));
+
+    expect(loadedBy).toEqual([roleLoading(category)]);
+  });
+
+  it('gives a process role no category roleLoading never names (#1083)', () => {
+    expect(categoriesLoadedBy('gateway-worker')).toEqual([]);
+  });
 });
 
 describe('PLUGIN_LOAD_STALE_MS', () => {

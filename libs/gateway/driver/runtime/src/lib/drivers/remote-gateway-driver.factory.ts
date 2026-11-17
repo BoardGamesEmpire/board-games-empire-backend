@@ -79,10 +79,17 @@ export class RemoteGatewayDriverFactory {
     const client = proxy.getService<GatewayServiceClient>('GatewayService');
 
     try {
-      // The attempts and delay are left at their defaults.
-      const response = channel?.shouldRetryPing
-        ? await pingWithRetry(client, options.gatewayId, this.logger, undefined, undefined, channel.shouldRetryPing)
-        : await pingWithRetry(client, options.gatewayId, this.logger);
+      // The attempts and delay are left at their defaults, and so is the
+      // retry rule when the channel gives none: an undefined argument takes
+      // the default, which tries again on every error.
+      const response = await pingWithRetry(
+        client,
+        options.gatewayId,
+        this.logger,
+        undefined,
+        undefined,
+        channel?.shouldRetryPing,
+      );
 
       this.logger.log(
         `Successfully connected to gateway ${options.gatewayId} at ${url}. Response: ${JSON.stringify(response)}`,

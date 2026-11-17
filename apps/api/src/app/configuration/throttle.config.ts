@@ -24,7 +24,7 @@ import Joi from 'joi';
  * worth of calls came out of one bucket over-provisions every endpoint at once.
  *
  * Defaults live here rather than on the Joi schema, matching the convention
- * `plugins.config.spec.ts` states: defaulting is `@bge/env`'s job, validation
+ * `@bge/plugin`'s `plugins-root.config.spec.ts` states: defaulting is `@bge/env`'s job, validation
  * is Joi's. Two defaults for one key is how they drift — and Joi's would win
  * silently, since `ConfigModule` writes validated values into `process.env`
  * before these factories ever run.
