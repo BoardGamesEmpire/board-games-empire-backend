@@ -662,13 +662,7 @@ export class PluginUpdateService {
 
     const plugin = await this.loadUpdatablePlugin(input.slug);
 
-    if (plugin.pendingVersion === null) {
-      throw new PluginUpdateNoPendingError(plugin.slug);
-    }
-
-    if (plugin.pendingStagingId !== input.stagingId) {
-      throw new PluginUpdateStagingReplacedError(plugin.slug, input.stagingId);
-    }
+    this.assertAnswersCurrentStaging(plugin, input.stagingId);
 
     const stagedVersion = plugin.pendingVersion;
     const activeUnitRequests = this.activeUnitRequests(plugin);
@@ -868,8 +862,8 @@ export class PluginUpdateService {
 
     // Before the staged manifest is validated or compared: a staging the
     // approver never saw is refused for that, whatever else is wrong with it.
-    if (approval !== undefined && plugin.pendingStagingId !== approval.stagingId) {
-      throw new PluginUpdateStagingReplacedError(plugin.slug, approval.stagingId);
+    if (approval !== undefined) {
+      this.assertAnswersCurrentStaging(plugin, approval.stagingId);
     }
 
     // Activation makes the staged checksum a path segment and
@@ -893,6 +887,25 @@ export class PluginUpdateService {
     const comparison = await this.compare(plugin, active, next, corePermissions);
 
     return { plugin, active, next, corePermissions, comparison, pendingSha256 };
+  }
+
+  /**
+   * Refuses a decision that does not answer the staging currently in the row:
+   * no staged version is `PluginUpdateNoPendingError`, a staging id the
+   * decider never saw is `PluginUpdateStagingReplacedError`. One home for the
+   * check, so approve and reject cannot drift apart (#357, #1116).
+   */
+  private assertAnswersCurrentStaging(
+    plugin: Plugin,
+    stagingId: string,
+  ): asserts plugin is Plugin & { pendingVersion: string } {
+    if (plugin.pendingVersion === null) {
+      throw new PluginUpdateNoPendingError(plugin.slug);
+    }
+
+    if (plugin.pendingStagingId !== stagingId) {
+      throw new PluginUpdateStagingReplacedError(plugin.slug, stagingId);
+    }
   }
 
   /** A tombstoned row is not an update target, and the distinction deserves its own error (#59). */
