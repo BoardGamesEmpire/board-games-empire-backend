@@ -67,8 +67,9 @@ export interface PluginActiveManifestReader {
 /**
  * The manifest bound (#577): whether the active manifest, as `requested`
  * lists it, requests a decision's permission at that decision's scope. Shared
- * by the plugin ability read and the permission catalog's count of the
- * consent decisions an edit affects (#772), so the two cannot disagree.
+ * by the plugin ability read, the permission catalog's count of the consent
+ * decisions an edit affects (#772) and the update comparator's risk check
+ * (#1152), so none of them can disagree.
  */
 export function requestedByManifest(
   requested: readonly PluginRequestedPermission[],
