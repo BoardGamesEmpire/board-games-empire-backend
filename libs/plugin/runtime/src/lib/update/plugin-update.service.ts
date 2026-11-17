@@ -319,6 +319,30 @@ interface ReconsentCandidate<TUnit> {
   readonly outstanding: readonly string[];
 }
 
+interface ActivationInput {
+  readonly plugin: Plugin;
+  readonly active: PluginManifestValidationResult;
+  readonly next: PluginManifestValidationResult;
+
+  /** The checksum of the plugin artifact being activated, which becomes `installedSha256` (#224). */
+  readonly artifactSha256: PluginArtifactSha256;
+  readonly comparison: UpdateEscalationComparison;
+  readonly checksToSeed: readonly NormalizedPermissionRequest[];
+  readonly corePermissions: ReadonlyMap<string, Permission>;
+  readonly actorId: string;
+  readonly initiatedAt: Date;
+
+  /**
+   * `approve()`'s second-factor inputs, re-verified inside the transaction
+   * against the tx-local seed set. Absent on the immediate `stage()` path,
+   * which never seeds through an approval: nothing escalated to confirm.
+   */
+  readonly reentry?: {
+    readonly confirmCriticalSlugs: readonly string[];
+    readonly riskEscalatedChecks: readonly NormalizedPermissionRequest[];
+  };
+}
+
 interface ActivationOutcome {
   readonly plugin: Plugin;
   /** The checks actually seeded — the caller's set re-filtered against the tx-local decisions (see `activate()`). */
@@ -442,17 +466,17 @@ export class PluginUpdateService {
     // their consent is the units', and activation announces the re-consent
     // they owe (#1149).
     if (!comparison.serverGating && comparison.blockedByDenial.length === 0) {
-      const outcome = await this.activate(
+      const outcome = await this.activate({
         plugin,
         active,
         next,
-        directory.sha256,
+        artifactSha256: directory.sha256,
         comparison,
-        [],
+        checksToSeed: [],
         corePermissions,
-        input.initiatorId,
+        actorId: input.initiatorId,
         initiatedAt,
-      );
+      });
       this.emitActivation(plugin, outcome, next, initiatedAt);
       this.logger.log(
         `Plugin '${plugin.slug}' updated ${plugin.version} → ${next.manifest.version} without staged consent ` +
@@ -575,18 +599,18 @@ export class PluginUpdateService {
       throw new PluginUpdateCriticalConfirmationError(plugin.slug, reentry.expected, reentry.received);
     }
 
-    const outcome = await this.activate(
+    const outcome = await this.activate({
       plugin,
       active,
       next,
-      pendingSha256,
+      artifactSha256: pendingSha256,
       comparison,
       checksToSeed,
       corePermissions,
-      input.approverId,
+      actorId: input.approverId,
       initiatedAt,
-      { confirmCriticalSlugs: input.confirmCriticalSlugs ?? [], riskEscalatedChecks },
-    );
+      reentry: { confirmCriticalSlugs: input.confirmCriticalSlugs ?? [], riskEscalatedChecks },
+    });
 
     // The tx-local seeded set, not the pre-transaction one: a concurrent
     // decision may have shrunk it, and the event must describe what was
@@ -1185,22 +1209,9 @@ export class PluginUpdateService {
    * The activation entry point: one bounded retry around the transaction,
    * for the one race the transaction's own reads cannot close.
    */
-  private async activate(
-    plugin: Plugin,
-    active: PluginManifestValidationResult,
-    next: PluginManifestValidationResult,
-    /** The checksum of the plugin artifact being activated, which becomes `installedSha256` (#224). */
-    artifactSha256: PluginArtifactSha256,
-    comparison: UpdateEscalationComparison,
-    checksToSeed: readonly NormalizedPermissionRequest[],
-    corePermissions: ReadonlyMap<string, Permission>,
-    actorId: string,
-    initiatedAt: Date,
-    reentry?: {
-      readonly confirmCriticalSlugs: readonly string[];
-      readonly riskEscalatedChecks: readonly NormalizedPermissionRequest[];
-    },
-  ): Promise<ActivationOutcome> {
+  private async activate(input: ActivationInput): Promise<ActivationOutcome> {
+    const { next } = input;
+
     // Compiled here rather than inside the transaction: the retained server
     // config validation below runs holding the claimed row, and ajv's codegen
     // has no business inside that window (mirrors `install()`'s own warm
@@ -1211,19 +1222,7 @@ export class PluginUpdateService {
       schema: next.manifest.config.schema,
     });
 
-    const attempt = (): Promise<ActivationOutcome> =>
-      this.activateInTransaction(
-        plugin,
-        active,
-        next,
-        artifactSha256,
-        comparison,
-        checksToSeed,
-        corePermissions,
-        actorId,
-        initiatedAt,
-        reentry,
-      );
+    const attempt = (): Promise<ActivationOutcome> => this.activateInTransaction(input);
 
     try {
       return await attempt();
@@ -1270,27 +1269,20 @@ export class PluginUpdateService {
    * the re-consent announcements among them, are collected inside and
    * emitted by the caller AFTER commit.
    */
-  private async activateInTransaction(
-    plugin: Plugin,
-    active: PluginManifestValidationResult,
-    next: PluginManifestValidationResult,
-    artifactSha256: PluginArtifactSha256,
-    comparison: UpdateEscalationComparison,
-    checksToSeed: readonly NormalizedPermissionRequest[],
-    corePermissions: ReadonlyMap<string, Permission>,
-    actorId: string,
-    initiatedAt: Date,
-    /**
-     * `approve()`'s second-factor inputs, re-verified inside the
-     * transaction against the tx-local seed set. Absent on the immediate
-     * `stage()` path, which never seeds through an approval — nothing
-     * escalated to confirm.
-     */
-    reentry?: {
-      readonly confirmCriticalSlugs: readonly string[];
-      readonly riskEscalatedChecks: readonly NormalizedPermissionRequest[];
-    },
-  ): Promise<ActivationOutcome> {
+  private async activateInTransaction(input: ActivationInput): Promise<ActivationOutcome> {
+    const {
+      plugin,
+      active,
+      next,
+      artifactSha256,
+      comparison,
+      checksToSeed,
+      corePermissions,
+      actorId,
+      initiatedAt,
+      reentry,
+    } = input;
+
     return this.db.$transaction(async (tx) => {
       // Row-LOCKED, not a plain read (D-CN). `PluginLifecycleService.updateConfig`
       // is a plain UPDATE with no version precondition ("last-writer-wins by
