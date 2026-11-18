@@ -1,8 +1,8 @@
 # Code style
 
-Each rule here is enforced by a tool, which the rule's section names, and a
-project's lint fails on a break. Prose in this guide covers only what no tool
-can check. Line width and layout belong to Prettier.
+Each rule's section names what enforces it. Nearly every rule is enforced by
+a tool, and a project's lint fails on a break; prose in this guide covers only
+what no tool can check. Line width and layout belong to Prettier.
 
 The root files outside every Nx project (`eslint.config.mjs`, `scripts/`,
 `utils/` and the root Jest and Prisma configs) have no lint target. Lint them
@@ -167,3 +167,43 @@ when the parser is told that `emitDecoratorMetadata` and
 `bge/top-level-type-imports`, which moves inline `type` specifiers out; both
 with autofix (#1317). `prettier-plugin-organize-imports` keeps an
 `import type` statement and a value import of the same module apart.
+
+## Data from outside the process
+
+Data that comes from outside the process is parsed through a zod schema, and
+its type comes from the schema (`z.infer<typeof schema>`), not from a cast.
+Outside the process covers a Redis message, an HTTP response body, a file on
+disk, a gRPC field carrying JSON, and anything a plugin returns.
+
+```ts
+// no
+const event = JSON.parse(message) as PluginConfigReloadEvent;
+
+// yes
+export const pluginConfigReloadEventSchema = z.object({ slug: z.string().min(1) }).readonly();
+export type PluginConfigReloadEvent = z.infer<typeof pluginConfigReloadEventSchema>;
+
+const parsed = pluginConfigReloadEventSchema.safeParse(JSON.parse(message));
+```
+
+The schema replaces the interface, in the same file, and each field's doc
+comment moves onto the schema property. Parse with `safeParse`.
+
+A hand-written type guard (`x is T`, `asserts x is T`) is for small shapes only,
+and it checks every field the type claims. TypeScript doesn't check a guard's
+body against its type, so a guard that skips a field is a cast with extra
+steps, and it drifts when the type changes. A schema can't drift from the type
+it produces.
+
+What a failed parse does:
+
+- **A pub/sub message:** log one line naming the channel and the problem, and
+  drop the message. It never throws into the subscriber, and the next message
+  is still handled.
+- **An HTTP body or a plugin result:** an error with a stable code, so callers
+  and clients can tell malformed data from a failed request.
+- **A file on disk:** an error naming the file.
+
+**Enforced by:** review (#1322): no lint rule can tell a cast of outside data
+from any other cast. The no-casts rule (#1321) catches the cast that a missing
+schema usually leaves behind.
