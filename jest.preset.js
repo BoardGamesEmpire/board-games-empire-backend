@@ -25,6 +25,8 @@ const ESM_PACKAGES = [
   'axios',
   'better-auth',
   'better-call',
+  // Imported by the root eslint.config.mjs, which the bge rule specs load (#1374).
+  'eslint-plugin-perfectionist',
   'iso-639-3',
   'jose',
   'kysely',

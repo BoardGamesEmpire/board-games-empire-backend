@@ -1,5 +1,6 @@
 import nx from '@nx/eslint-plugin';
 import stylistic from '@stylistic/eslint-plugin';
+import perfectionist from 'eslint-plugin-perfectionist';
 
 // Repo-wide `no-restricted-imports` paths, keyed so individual libs can compose
 // their own narrowly-scoped exceptions (see actor-context-transport) instead of
@@ -310,6 +311,20 @@ const noUncodedExceptionBody = {
   },
 };
 
+// Interface and type-literal members sort alphabetically (#1374): natural
+// order (field2 before field10), case-insensitive, one list per body. Blank
+// lines neither partition the sort nor get touched by it; bge/member-blank-lines
+// sets them from the sorted order (#1318). The sort is stable, so overloads of
+// one name keep their order, and call and construct signatures stay put; the
+// rule spec in libs/scripts pins both. Class properties, enums and object
+// literals are out of scope: their order reaches runtime or the API's output.
+export const sortedMemberOptions = {
+  type: 'natural',
+  ignoreCase: true,
+  partitionByNewLine: false,
+  newlinesBetween: 'ignore',
+};
+
 export const bgePlugin = {
   meta: { name: 'bge' },
   rules: { 'no-nested-ceiling': noNestedCeiling, 'no-uncoded-exception-body': noUncodedExceptionBody },
@@ -409,7 +424,7 @@ export default [
   },
   {
     files: ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts', '**/*.js', '**/*.jsx', '**/*.cjs', '**/*.mjs'],
-    plugins: { bge: bgePlugin, '@stylistic': stylistic },
+    plugins: { bge: bgePlugin, '@stylistic': stylistic, perfectionist },
     rules: {
       // Every if/else/for/while/do body takes braces (#1320). This block comes
       // after the Nx spreads, which pull in eslint-config-prettier's `curly: 0`,
@@ -418,6 +433,8 @@ export default [
       // A blank line after every block-like statement, so the end of a block
       // reads as the end of a step (#1319).
       '@stylistic/padding-line-between-statements': ['error', { blankLine: 'always', prev: 'block-like', next: '*' }],
+      'perfectionist/sort-interfaces': ['error', sortedMemberOptions],
+      'perfectionist/sort-object-types': ['error', sortedMemberOptions],
       'bge/no-nested-ceiling': 'error',
       'bge/no-uncoded-exception-body': 'error',
     },
