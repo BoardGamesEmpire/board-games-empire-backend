@@ -61,7 +61,8 @@ export function classifyMailError(error: unknown): MailFailureCode {
     return MailFailureCode.SendFailed;
   }
 
-  const { code, originalCode } = error as { code?: unknown; originalCode?: unknown };
+  const code = 'code' in error ? error.code : undefined;
+  const originalCode = 'originalCode' in error ? error.originalCode : undefined;
 
   if (typeof code !== 'string') {
     return MailFailureCode.SendFailed;
