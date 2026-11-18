@@ -260,6 +260,7 @@ describe('the shipped catalogs', () => {
           'manage:household_member:administer',
           'delete:household:administer',
           'update:household:restore:administer',
+          'manage:privacy_policy',
         ]),
       );
     });

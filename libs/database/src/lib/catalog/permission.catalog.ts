@@ -2713,6 +2713,18 @@ export const PERMISSION_CATALOG = [
     reason: 'Change server-wide settings, such as sign-ups, password resets and feedback redaction',
   }),
 
+  // ─── PrivacyPolicy ──────────────────────────────────────
+  // Unconditioned because the policy is server-owned, with no scope to bind
+  // to. No read slug: the route that serves the policy is anonymous. High
+  // because everyone, signed in or not, reads the text this replaces (#934).
+  permission({
+    action: Action.manage,
+    subject: ResourceType.PrivacyPolicy,
+    slug: 'manage:privacy_policy',
+    riskLevel: RiskLevel.High,
+    reason: "Replace the server's privacy policy, in any language",
+  }),
+
   // ─── Plugin administration (#59 Phase C4) ───────────────────────────────
   // Server-scope pair: Owner/Admin only, per the locked role assignment on
   // #59. Owner holds it via `manage:all`; Admin names both slugs outright in

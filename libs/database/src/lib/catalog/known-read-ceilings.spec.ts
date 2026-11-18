@@ -68,6 +68,9 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
     Admin: { 'read:safe_http_policy': 'every row', 'manage:safe_http_policy': 'every row' },
     Moderator: { 'read:safe_http_policy': 'every row' },
   },
+  PrivacyPolicy: {
+    Admin: { 'manage:privacy_policy': 'every row' },
+  },
   Media: {},
   MediaObject: {
     User: { 'read:media_object:own': 'binds user.id', 'read:media_object:public': 'fixed filter' },

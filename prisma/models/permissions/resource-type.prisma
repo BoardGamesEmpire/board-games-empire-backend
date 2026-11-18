@@ -4,6 +4,7 @@ enum ResourceType {
   AuditLog
   Notification
   SafeHttpPolicy
+  PrivacyPolicy
   Media
   MediaObject
   MediaContribution

@@ -164,8 +164,9 @@ const DECLARED_GLOBAL_STAFF_GRANTS: readonly DeclaredGrant[] = [
   ['delete:game', SystemRole.Admin, Action.delete, ResourceType.Game],
 
   // Operations surfaces, install-wide for the same reason: the audit log,
-  // operator-set quota caps, the outbound-request policy, the plugin registry
-  // and the server's settings are all server-owned rows.
+  // operator-set quota caps, the outbound-request policy, the plugin registry,
+  // the server's settings and the operator's privacy policy are all
+  // server-owned rows.
   ['read:audit_log', SystemRole.Admin, Action.read, ResourceType.AuditLog],
   ['read:audit_log', SystemRole.Moderator, Action.read, ResourceType.AuditLog],
   ['read:quota', SystemRole.Admin, Action.read, ResourceType.Quota],
@@ -176,6 +177,7 @@ const DECLARED_GLOBAL_STAFF_GRANTS: readonly DeclaredGrant[] = [
   ['read:plugin', SystemRole.Admin, Action.read, ResourceType.Plugin],
   ['manage:plugin', SystemRole.Admin, Action.manage, ResourceType.Plugin],
   ['update:system_setting', SystemRole.Admin, Action.update, ResourceType.SystemSetting],
+  ['manage:privacy_policy', SystemRole.Admin, Action.manage, ResourceType.PrivacyPolicy],
 
   // The moderation queue. Reaching every row is the point of a queue — a
   // moderator who could only see their own household's reports could not
