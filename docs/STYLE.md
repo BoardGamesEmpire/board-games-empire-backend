@@ -129,3 +129,41 @@ Prettier.
 
 **Enforced by:** `bge/member-blank-lines`, with autofix, defined in the root
 `eslint.config.mjs` (#1318).
+
+## Type-only imports
+
+A name imported only as a type goes in an `import type { … }` statement of its
+own. No inline `type` specifiers inside a value import.
+
+```ts
+// no
+import { DatabaseService, type EventOccurrence } from '@bge/database';
+
+// yes
+import type { EventOccurrence } from '@bge/database';
+import { DatabaseService } from '@bge/database';
+```
+
+**The decorated-file limit.** In a file that contains a decorator, a class
+named in a decorated signature, such as a constructor-injected service, has to
+stay a value import: TypeScript emits it into the decorator metadata Nest reads
+for dependency injection, and as a type import it would become `Object`. Only
+type information can tell which imports that applies to, so the rule skips
+files with a decorator entirely. There, a plain import used only as a type
+stays as written. Inline `type` specifiers still move to their own statement in
+those files, since they are erased either way.
+
+**Why the parser flags are set.** The rule knows to skip decorated files only
+when the parser is told that `emitDecoratorMetadata` and
+`experimentalDecorators` are on. No ESLint config here uses type information
+(`parserOptions.project`), so the root config passes both flags as
+`decoratorParserOptions`. Without them, the autofix would break Nest DI.
+
+`typeof import('x')` type annotations stay allowed, as in
+`jest.requireActual<typeof import('x')>('x')`.
+
+**Enforced by:** `@typescript-eslint/consistent-type-imports` with
+`prefer: 'type-imports'` and `fixStyle: 'separate-type-imports'`, and
+`bge/top-level-type-imports`, which moves inline `type` specifiers out; both
+with autofix (#1317). `prettier-plugin-organize-imports` keeps an
+`import type` statement and a value import of the same module apart.
