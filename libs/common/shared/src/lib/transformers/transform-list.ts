@@ -21,7 +21,9 @@ export const TransformList = () =>
       return value;
     }
 
-    return ([] as unknown[])
+    const items: unknown[] = [];
+
+    return items
       .concat(value)
       .flatMap((item) => (typeof item === 'string' ? item.split(',').map((part) => part.trim()) : [item]))
       .filter((item) => item !== '');

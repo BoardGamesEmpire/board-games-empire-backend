@@ -12,14 +12,17 @@ import { registerDecorator, ValidatorConstraint } from 'class-validator';
 @ValidatorConstraint({ name: 'notLessThanProperty', async: false })
 export class NotLessThanPropertyConstraint implements ValidatorConstraintInterface {
   validate(value: unknown, args: ValidationArguments): boolean {
-    const [property] = args.constraints as [string];
+    const [property]: string[] = args.constraints;
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- class-validator types the object under validation as `object`, and TypeScript has no narrowing from `object` to an indexable record (#1321)
     const other: unknown = (args.object as Record<string, unknown>)[property];
 
-    if (!Number.isFinite(value) || !Number.isFinite(other)) {
+    // `typeof` adds nothing at runtime, since `Number.isFinite` is false for
+    // anything but a number, but unlike it, it narrows.
+    if (typeof value !== 'number' || typeof other !== 'number' || !Number.isFinite(value) || !Number.isFinite(other)) {
       return true;
     }
 
-    return (value as number) >= (other as number);
+    return value >= other;
   }
 }
 
